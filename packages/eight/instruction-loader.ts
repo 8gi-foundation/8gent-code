@@ -5,7 +5,8 @@
  * AGENTS.md is the vendor-neutral open standard and is canonical: 8gent is not
  * married to any vendor, so the open file wins. CLAUDE.md is a last-resort
  * fallback only - it loads when no vendor-neutral file is present.
- * Merge order: global (~/.8gent) < project root < cwd (later overrides earlier)
+ * Merge order: standing rules (~/.claude) < global (~/.8gent) < project root < cwd
+ * (later overrides earlier)
  *
  * @see https://github.com/8gi-foundation/8gent-code/issues/941
  */
@@ -16,6 +17,43 @@ import { dirname, join, resolve } from "node:path";
 
 /** File names to search for, in priority order (first match per directory wins) */
 const INSTRUCTION_FILES = ["AGENTS.md", "8GENT.md", "CLAUDE.md"] as const;
+
+/**
+ * The operator's personal standing rules.
+ *
+ * These are the always-on behavioural overrides - the ones that are supposed to
+ * hold on every turn, in every repo, whether or not anyone invokes them. They
+ * live in `~/.claude/` because that is where the operator already maintains
+ * them, and until now `loadInstructions` never looked there: the global layer
+ * only checked `~/.8gent/`, so an agent answering from a surface with no repo
+ * context (Telegram, a cron job, a bare daemon session) ran with none of them.
+ *
+ * Loaded FIRST, so it is the lowest-priority layer and any repo that
+ * contradicts it still wins inside that repo. Standing rules are the floor,
+ * not the ceiling.
+ */
+const STANDING_RULES_FILE = ".claude/CLAUDE.md";
+
+/**
+ * Home directory, preferring `$HOME` so the resolution is overridable.
+ * `homedir()` is a frozen binding under Bun, which makes any code that calls
+ * it directly untestable without touching the real user's home.
+ */
+function home(): string {
+	return process.env.HOME || homedir();
+}
+
+/** Read the operator's standing rules, or null when the file is absent. */
+function findStandingRules(): string | null {
+	const path = join(home(), STANDING_RULES_FILE);
+	if (!existsSync(path)) return null;
+	try {
+		const content = readFileSync(path, "utf-8").trim();
+		return content.length > 0 ? content : null;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Find the first instruction file in a given directory.
@@ -63,8 +101,9 @@ function walkUp(startDir: string): string[] {
  * Load and merge instruction files for the given working directory.
  *
  * Merge order (later overrides earlier):
- *   1. Global: ~/.8gent/AGENTS.md (or 8GENT.md / CLAUDE.md fallback)
- *   2. Directories from project root down to cwd
+ *   1. Standing rules: ~/.claude/CLAUDE.md - always on, every surface
+ *   2. Global: ~/.8gent/AGENTS.md (or 8GENT.md / CLAUDE.md fallback)
+ *   3. Directories from project root down to cwd
  *
  * Returns concatenated content separated by horizontal rules, or empty string
  * if no instruction files found.
@@ -72,14 +111,20 @@ function walkUp(startDir: string): string[] {
 export function loadInstructions(cwd: string): string {
 	const parts: string[] = [];
 
-	// 1. Global instructions
-	const globalDir = join(homedir(), ".8gent");
+	// 1. Operator standing rules (always on, lowest priority)
+	const standing = findStandingRules();
+	if (standing) {
+		parts.push(`# STANDING RULES (always on, every surface)\n\n${standing}`);
+	}
+
+	// 2. Global instructions
+	const globalDir = join(home(), ".8gent");
 	const globalContent = findInstructionFile(globalDir);
 	if (globalContent) {
 		parts.push(globalContent.trim());
 	}
 
-	// 2. Walk up from cwd, collecting project instructions
+	// 3. Walk up from cwd, collecting project instructions
 	const projectDirs = walkUp(cwd);
 	for (const dir of projectDirs) {
 		const content = findInstructionFile(dir);

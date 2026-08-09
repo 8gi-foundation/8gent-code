@@ -13,8 +13,20 @@
  * - Startup notification: "I'm online. What do we work on next?"
  */
 
+import { spawnSync } from "node:child_process";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
+import {
+	BOARD_ROSTER,
+	VOICE_BY_OFFICER,
+	askOfficerViaClaude,
+	askVerdictViaClaude,
+	runBoardroom,
+} from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { decideVoice, readVoiceState, sendVoiceNote, writeVoiceState } from "../telegram-bot/voice-mode";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_MSG_LENGTH = 4000;
@@ -99,9 +111,42 @@ async function tgSend(
 	}
 }
 
-/** Download a Telegram voice/audio file and transcribe it via OpenRouter Whisper */
+/**
+ * Local whisper.cpp model, largest first. `base.en` transcribes a short voice
+ * note in well under a second on Apple Silicon, which is faster than the round
+ * trip to any hosted Whisper would be.
+ */
+const WHISPER_MODELS = [
+	`${process.env.HOME}/.8gent/models/whisper/ggml-base.en.bin`,
+	`${process.env.HOME}/.8gent/models/whisper/ggml-tiny.bin`,
+	`${process.env.HOME}/models/ggml-base.en.bin`,
+];
+
+function localWhisperModel(): string | null {
+	for (const m of WHISPER_MODELS) {
+		if (existsSync(m)) return m;
+	}
+	return null;
+}
+
+/**
+ * Download a Telegram voice note and transcribe it LOCALLY with whisper.cpp.
+ *
+ * This used to POST the audio to Groq or OpenAI and, with no key set, refuse
+ * outright with "[set GROQ_API_KEY or OPENAI_API_KEY]" - on a machine that has
+ * had whisper.cpp and its models installed the whole time. Two things were
+ * wrong with that. It broke voice input for the one user, and it shipped his
+ * voice to a third party to do work the laptop does in 0.6s.
+ *
+ * Local only, deliberately: there is no cloud fallback. A missing model is a
+ * setup error worth surfacing, not a reason to start sending audio off-box.
+ */
 async function transcribeVoice(token: string, fileId: string): Promise<string> {
-	// 1. Get file path from Telegram
+	const model = localWhisperModel();
+	if (!model) {
+		return "[no local whisper model found - expected ~/.8gent/models/whisper/ggml-base.en.bin]";
+	}
+
 	const fileRes = await fetch(`${TELEGRAM_API}${token}/getFile`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -112,46 +157,46 @@ async function transcribeVoice(token: string, fileId: string): Promise<string> {
 		return "[could not download voice message]";
 	}
 
-	// 2. Download the audio file
 	const audioUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
 	const audioRes = await fetch(audioUrl);
 	const audioBuffer = await audioRes.arrayBuffer();
 
-	// 3. Transcribe via Groq Whisper (free, fast) or OpenAI Whisper
-	const groqKey = process.env.GROQ_API_KEY;
-	const openaiKey = process.env.OPENAI_API_KEY;
-	const transcriptionKey = groqKey || openaiKey;
-	const transcriptionUrl = groqKey
-		? "https://api.groq.com/openai/v1/audio/transcriptions"
-		: "https://api.openai.com/v1/audio/transcriptions";
-
-	if (!transcriptionKey) {
-		return "[set GROQ_API_KEY or OPENAI_API_KEY for voice transcription]";
-	}
-
+	const stem = join(tmpdir(), `tg-voice-${Date.now()}-${Math.floor(performance.now())}`);
+	const ogg = `${stem}.ogg`;
+	const wav = `${stem}.wav`;
 	try {
-		const formData = new FormData();
-		const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
-		formData.append("file", audioBlob, "voice.ogg");
-		formData.append("model", groqKey ? "whisper-large-v3" : "whisper-1");
-
-		const whisperRes = await fetch(transcriptionUrl, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${transcriptionKey}` },
-			body: formData,
+		writeFileSync(ogg, Buffer.from(audioBuffer));
+		// whisper.cpp wants 16 kHz mono PCM; Telegram sends OPUS in an OGG container.
+		const conv = spawnSync("ffmpeg", ["-y", "-i", ogg, "-ar", "16000", "-ac", "1", wav], {
+			encoding: "utf8",
+			timeout: 30_000,
 		});
-
-		if (whisperRes.ok) {
-			const result = await whisperRes.json();
-			return result.text || "[empty transcription]";
+		if (conv.status !== 0 || !existsSync(wav)) {
+			console.error("[telegram-bridge] ffmpeg failed:", conv.stderr?.slice(-400));
+			return "[voice message received - could not decode the audio]";
 		}
-		const errText = await whisperRes.text();
-		console.error("[telegram-bridge] transcription error:", errText);
+		// -nt drops timestamps, -np drops the progress banner, so stdout is the
+		// transcript and nothing else.
+		const out = spawnSync("whisper-cli", ["-m", model, "-f", wav, "-nt", "-np"], {
+			encoding: "utf8",
+			timeout: 120_000,
+		});
+		const text = (out.stdout || "").trim();
+		if (out.status !== 0 || !text) {
+			console.error("[telegram-bridge] whisper failed:", out.stderr?.slice(-400));
+			return "[voice message received - transcription failed, please send as text]";
+		}
+		return text;
 	} catch (err) {
 		console.error("[telegram-bridge] transcription failed:", err);
+		return "[voice message received - transcription failed, please send as text]";
+	} finally {
+		for (const f of [ogg, wav]) {
+			try {
+				if (existsSync(f)) unlinkSync(f);
+			} catch {}
+		}
 	}
-
-	return "[voice message received - transcription failed, please send as text]";
 }
 
 async function tgTyping(token: string, chatId: string): Promise<void> {
@@ -182,6 +227,11 @@ class TelegramDaemonBridge {
 	private adapter: TelegramBridgeAdapter | null = null;
 	private sessionStore: SessionStore | null = null;
 
+	/** Voice mode toggle, restored from disk at construction so it survives a restart. */
+	private voiceEnabled: boolean = readVoiceState().enabled;
+	/** One boardroom run at a time. */
+	private boardroomRunning = false;
+
 	constructor(config: BridgeConfig) {
 		this.config = config;
 	}
@@ -209,6 +259,7 @@ class TelegramDaemonBridge {
 					chatId: this.config.chatId,
 					daemon: this.daemonClient,
 					sessionStore: this.sessionStore,
+					onFinalReply: (text) => this.maybeSpeak(text),
 				});
 				console.log("[telegram-bridge] multi-step task adapter attached");
 			} catch (err) {
@@ -337,6 +388,7 @@ class TelegramDaemonBridge {
 						this._retryTimer = null;
 					}
 					tgSend(this.config.telegramToken, this.config.chatId, payload.chunk);
+					this.maybeSpeak(payload.chunk).catch(() => {});
 				}
 				break;
 
@@ -530,11 +582,37 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		if (text.startsWith("/voice")) {
+			await this.handleVoiceCommand(text.slice("/voice".length).trim().toLowerCase());
+			return;
+		}
+
+		if (text.startsWith("/boardroom")) {
+			await this.handleBoardroom(text.slice("/boardroom".length).trim());
+			return;
+		}
+
 		if (text === "/help") {
 			await tgSend(
 				this.config.telegramToken,
 				this.config.chatId,
-				"*Eight - Telegram Bridge*\n\nSend any message to start a multi-step task.\n\n/status - Daemon health\n/cancel - Stop the current task\n/unstick - Reset busy state\n/logs - Tail daemon logs\n/help - This message\n\nEight has full tool access: shell, git, file system, web browsing. Watch tasks stream live; use the inline buttons to cancel or retry.",
+				[
+					"*Eight - Telegram Bridge*",
+					"",
+					"Send any message, or a voice note, to start a multi-step task.",
+					"",
+					"/boardroom <topic> - all 8 officers deliberate, one message, one verdict",
+					"/voice on|off - replies also arrive as a voice note (quiet 21:00-08:30)",
+					"/voice - show the current voice setting",
+					"/status - Daemon health",
+					"/cancel - Stop the current task",
+					"/unstick - Reset busy state",
+					"/delegate, /plan, /review, /goals, /kill - chief-of-staff commands",
+					"/logs - Tail daemon logs",
+					"/help - This message",
+					"",
+					"Your standing rules from ~/.claude/CLAUDE.md load on every turn. You do not have to ask for them.",
+				].join("\n"),
 			);
 			return;
 		}
@@ -577,6 +655,134 @@ class TelegramDaemonBridge {
 
 		this.agentBusy = true;
 		this.retryPrompt(text, 1);
+	}
+
+	// ── Voice mode ───────────────────────────────────────────────────
+
+	/** `/voice`, `/voice on`, `/voice off`. Anything else prints the usage. */
+	private async handleVoiceCommand(arg: string): Promise<void> {
+		const send = (msg: string) => tgSend(this.config.telegramToken, this.config.chatId, msg);
+		if (arg === "on" || arg === "off") {
+			const state = writeVoiceState(arg === "on");
+			this.voiceEnabled = state.enabled;
+			await send(
+				state.enabled
+					? "Voice mode on. Replies come back as a voice note too, unless it is quiet hours or the answer is too long to be worth hearing."
+					: "Voice mode off. Text only.",
+			);
+			return;
+		}
+		if (arg.length === 0) {
+			const state = readVoiceState();
+			this.voiceEnabled = state.enabled;
+			await send(`Voice mode is ${state.enabled ? "on" : "off"}. Use /voice on or /voice off.`);
+			return;
+		}
+		await send("Usage: /voice on, /voice off, or /voice to see the current setting.");
+	}
+
+	/**
+	 * Speak a reply if voice mode says so. The text has already been sent, so
+	 * every path here is best-effort and silent on failure: a broken audio
+	 * stack must never cost him the answer.
+	 */
+	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
+		const decision = decideVoice(text, { enabled: this.voiceEnabled });
+		if (!decision.speak) {
+			if (decision.reason !== "voice-mode-off") {
+				console.log(`[telegram-bridge] not speaking (${decision.reason})`);
+			}
+			return;
+		}
+		const result = await sendVoiceNote({
+			text: decision.text,
+			voice,
+			expectedChatId: this.config.chatId,
+		});
+		if (!result.sent) console.error(`[telegram-bridge] voice note failed: ${result.reason}`);
+	}
+
+	// ── Boardroom ────────────────────────────────────────────────────
+
+	/**
+	 * `/boardroom <topic>` - the full eight-officer fan-out.
+	 *
+	 * One message for the whole run, edited in place. He can lock the phone.
+	 * Only one run at a time: eight concurrent officer processes is already the
+	 * machine's ceiling, and two overlapping runs would fight over the same
+	 * message shape with no way to tell them apart in the chat.
+	 */
+	private async handleBoardroom(topic: string): Promise<void> {
+		const send = (msg: string) => tgSend(this.config.telegramToken, this.config.chatId, msg);
+		if (!topic) {
+			await send("Usage: /boardroom <topic>. All 8 officers report, then one verdict.");
+			return;
+		}
+		if (this.boardroomRunning) {
+			await send("A boardroom run is already in flight. Wait for the verdict.");
+			return;
+		}
+		this.boardroomRunning = true;
+		const cwd = process.cwd();
+		let messageId: number | null = null;
+
+		try {
+			const result = await runBoardroom(topic, {
+				askOfficer: askOfficerViaClaude(cwd),
+				askVerdict: askVerdictViaClaude(cwd),
+				sendMessage: async (body) => {
+					messageId = await this.sendTracked(body);
+				},
+				editMessage: async (body) => {
+					if (messageId !== null) await this.editTracked(messageId, body);
+				},
+			});
+			console.log(
+				`[telegram-bridge] boardroom done: ${result.rows.filter((r) => r.status === "done").length}/${BOARD_ROSTER.length} in ${Math.round(result.elapsedMs / 1000)}s, ${result.edits} edits`,
+			);
+			if (result.verdict) await this.maybeSpeak(`Boardroom verdict. ${result.verdict}`);
+		} catch (err) {
+			console.error("[telegram-bridge] boardroom failed:", err);
+			await send(`Boardroom failed: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			this.boardroomRunning = false;
+		}
+	}
+
+	/** Send one message and return its id, so it can be edited in place. */
+	private async sendTracked(text: string): Promise<number | null> {
+		try {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					chat_id: this.config.chatId,
+					text,
+					parse_mode: "Markdown",
+					disable_web_page_preview: true,
+				}),
+			});
+			const data = await res.json();
+			return data?.result?.message_id ?? null;
+		} catch (err) {
+			console.error("[telegram-bridge] sendTracked failed:", err);
+			return null;
+		}
+	}
+
+	/** Edit that one message. "not modified" is expected and not an error. */
+	private async editTracked(messageId: number, text: string): Promise<void> {
+		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				chat_id: this.config.chatId,
+				message_id: messageId,
+				text,
+				parse_mode: "Markdown",
+				disable_web_page_preview: true,
+			}),
+		}).catch(() => {});
 	}
 
 	/**
@@ -672,6 +878,24 @@ class TelegramDaemonBridge {
 		}
 	}
 
+	/**
+	 * Strip the inline keyboard off a message once its choice has been made.
+	 * Without this a resolved choice point keeps its buttons, which reads as
+	 * "nothing happened" and invites the same tap again.
+	 */
+	private async clearKeyboard(messageId?: number): Promise<void> {
+		if (!messageId) return;
+		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageReplyMarkup`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				chat_id: this.config.chatId,
+				message_id: messageId,
+				reply_markup: { inline_keyboard: [] },
+			}),
+		}).catch(() => {});
+	}
+
 	private async handleCallbackQuery(
 		query: NonNullable<TelegramUpdate["callback_query"]>,
 	): Promise<void> {
@@ -697,11 +921,27 @@ class TelegramDaemonBridge {
 				return;
 			}
 			if (prefix === CB_PREFIX.taskContinue || prefix === CB_PREFIX.taskNew) {
-				await tgSend(
-					this.config.telegramToken,
-					this.config.chatId,
-					"Send your next message to continue.",
-				);
+				// Both buttons used to do the same nothing: reply with a line of
+				// text and leave the keyboard on screen. Tapping changed no state,
+				// so the choice point never resolved and there was no way past it.
+				// Now the keyboard is cleared on tap, and the two buttons actually
+				// differ - "New task" drops the conversation context.
+				await this.clearKeyboard(query.message?.message_id);
+				if (prefix === CB_PREFIX.taskNew) {
+					this.sessionId = null;
+					this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+					await tgSend(
+						this.config.telegramToken,
+						this.config.chatId,
+						"Fresh start. Previous context dropped. What do you need?",
+					);
+				} else {
+					await tgSend(
+						this.config.telegramToken,
+						this.config.chatId,
+						"Still here, context kept. Go on.",
+					);
+				}
 				return;
 			}
 		}
