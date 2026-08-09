@@ -28,26 +28,74 @@
  *   1. Ring ordering is roster order with the chair removed - NOT the
  *      substrate-alternating permutation of spec section 9.4 (SPILL/scheduling
  *      is Phase 1b). It is still a pure function of (roster, chair).
- *   2. A SPEAKING phase has no real "audio ended" signal in Phase 0 (there is
- *      no stage yet). The daemon uses a deterministic reading-time estimate
- *      (words / 2.6 wps, spec section 5.4) as the turn's spoken duration and
- *      releases when that elapses. That release is reported as reason
- *      "yielded" (the expected, designed completion path for THIS phase), not
- *      "deadline" - "deadline" is reserved for a genuine overrun (PREPARE
- *      budget exceeded, or the absolute MAX_TURN_MS ceiling). Phase 1 replaces
- *      the estimate with a real stage_ready/audio-ended round trip and at that
- *      point "deadline" on a SPEAKING release will correctly mean "hung".
+ *   2. A SPEAKING phase had no real audio signal in Phase 0 (there was no stage
+ *      yet), so the daemon used a deterministic reading-time estimate (words /
+ *      2.6 wps, spec section 5.4) as the turn's spoken duration. That release
+ *      is reported as reason "yielded" (the expected, designed completion path),
+ *      not "deadline" - "deadline" is reserved for a genuine overrun (PREPARE
+ *      budget exceeded, or the absolute max-turn ceiling).
+ *
+ * THINKING TIME AND SPEAKING TIME ARE DIFFERENT THINGS (fixed here, after James
+ * watched a live huddle where "the 8gents get cut off after only a few seconds
+ * speaking"). Three facts had to be separated:
+ *
+ *   - prepareBudgetMs bounds the MODEL producing text. It is not, and never
+ *     was, a speaking budget.
+ *   - speakBudgetMs bounds the NARRATION. Phase 1 does have a real audio
+ *     signal: the pipeline synthesises the wav and measures it with ffprobe.
+ *     noteTurnAudio feeds that measurement back, so the floor is held for as
+ *     long as the officer is actually talking instead of for a guess that was
+ *     capped at 20 seconds.
+ *   - audioStartGraceMs covers the gap BETWEEN them - slide render, the
+ *     stage_ready sync gate, TTS synthesis - which used to be spent out of the
+ *     officer's speaking time, because the speaking clock started when the
+ *     WORDS arrived rather than when the VOICE did.
+ *
+ * A hung turn is still cut, by the same mechanisms as before: no audio is ever
+ * reported, so the reading estimate stands and the floor releases.
  */
 
 // ── Constants (spec section 3.2 + section 10.5) ────────────────────────────
 
-/** Local model 15-90s worst case, plus render/probe. Per-huddle overridable
+/** THINKING time only: how long the model may take to produce the turn's text.
+ *  Local model 15-90s worst case, plus render/probe. Per-huddle overridable
  *  via huddle:open.budgetMs (also what lets tests run in milliseconds). */
 export const PREPARE_BUDGET_MS = 120_000;
 /** Covers audio start jitter; reused here as the tail on the reading-time
  *  estimate that stands in for a real SPEAKING duration in Phase 0. */
 export const SPEAK_GRACE_MS = 500;
-/** Absolute ceiling on any single turn regardless of phase. */
+/**
+ * SPEAKING time, which is NOT the same thing as thinking time and must not
+ * share its ceiling.
+ *
+ * An officer presenting a slide speaks for as long as their narration actually
+ * runs, and that length is MEASURED (ffprobe on the synthesised wav) rather
+ * than guessed. This is the cap on trusting that measurement - a wav is a
+ * finite, measured artifact, so the cap only ever catches an absurd one.
+ *
+ * It is deliberately generous. Cutting a healthy officer off mid-sentence is a
+ * far worse failure than holding the floor a few extra seconds for one that is
+ * genuinely long: the whole point of the huddle is that they get to make the
+ * point. A HUNG turn is caught by a different mechanism entirely - no audio is
+ * ever reported, so the floor falls back to the reading estimate and releases
+ * (see onPrepareResolved + noteTurnAudio).
+ */
+export const SPEAK_BUDGET_MS = 120_000;
+/**
+ * How long the floor waits, after the text is known, for narration to actually
+ * START, before giving up and falling back to the reading-time estimate.
+ *
+ * Defaults to 0 (no wait) so a floor with no media pipeline behaves exactly as
+ * before. The daemon opts in, because the daemon is the side that runs a
+ * pipeline: slide render, then the stage_ready sync gate (up to
+ * STAGE_READY_CAP_MS), then a Supertonic subprocess. All of that happens
+ * between "we have the words" and "the first word is audible", and none of it
+ * should be billed to the officer's speaking time.
+ */
+export const AUDIO_START_GRACE_MS = 30_000;
+/** Absolute ceiling on any single turn regardless of phase. The armed value is
+ *  raised when the phase budgets sum higher, so this backstop can never fire
+ *  before a healthy turn has been given the time it was promised. */
 export const MAX_TURN_MS = 180_000;
 export const DEFAULT_MAX_ROUNDS = 3;
 export const DEFAULT_MAX_DURATION_MS = 1_200_000;
@@ -100,8 +148,16 @@ export interface HuddleOpenConfig {
 	maxRounds: number;
 	maxDurationMs: number;
 	/** Per-huddle override of PREPARE_BUDGET_MS (also the chair's human-wait
-	 *  budget before falling through to the agent). Lets tests run fast. */
+	 *  budget before falling through to the agent). Lets tests run fast.
+	 *  THINKING time only - it has never bounded, and must never bound, how long
+	 *  an officer is allowed to speak. */
 	prepareBudgetMs: number;
+	/** Ceiling on the SPEAKING phase, separate from the thinking budget above.
+	 *  Defaults to SPEAK_BUDGET_MS. */
+	speakBudgetMs?: number;
+	/** How long to wait for narration to start before falling back to the
+	 *  reading estimate. Defaults to 0 - see AUDIO_START_GRACE_MS. */
+	audioStartGraceMs?: number;
 	/**
 	 * Test-only override of the SPEAKING phase duration (normally
 	 * estimateReadingMs(text) + SPEAK_GRACE_MS). Real huddles never set this;
@@ -314,6 +370,10 @@ export class FloorMachine {
 	readonly config: HuddleOpenConfig;
 	private readonly ring: string[];
 	private readonly callbacks: FloorCallbacks;
+	/** Resolved once at construction so every timer reads the same numbers. */
+	private readonly speakBudgetMs: number;
+	private readonly audioStartGraceMs: number;
+	private readonly maxTurnMs: number;
 
 	private phase: FloorPhase = "idle";
 	private round = 0; // 0-based internally; TurnRecord.round is 1-based
@@ -343,6 +403,19 @@ export class FloorMachine {
 			throw new Error(`chair must be "${CHAIR_HUMAN_ID}" or "${CHAIR_AGENT_ID}", got "${config.chair}"`);
 		}
 		this.config = config;
+		this.speakBudgetMs = config.speakBudgetMs ?? SPEAK_BUDGET_MS;
+		this.audioStartGraceMs = config.audioStartGraceMs ?? 0;
+		// The absolute ceiling must sit ABOVE the two phase budgets it backstops,
+		// or it stops being a backstop and becomes the thing that cuts a healthy
+		// turn off. With the defaults, prepare (120s) plus speak (120s) already
+		// exceeds MAX_TURN_MS's 180s, so a long, legitimate, fully-narrated turn
+		// would have been killed by the ceiling even after the speak budget was
+		// fixed. Taking the max keeps MAX_TURN_MS as the floor for small budgets
+		// (every test) while letting a real huddle's promised time actually exist.
+		this.maxTurnMs = Math.max(
+			MAX_TURN_MS,
+			config.prepareBudgetMs + Math.max(this.speakBudgetMs, this.audioStartGraceMs) + SPEAK_GRACE_MS,
+		);
 		// The declared chair is a SEAT ("the human seat" / "the agent seat"), and
 		// CHAIR_HUMAN_ID is its canonical name. The human actually sitting in it
 		// may have a different id: the Table pins its human as "human:local"
@@ -661,7 +734,7 @@ export class FloorMachine {
 		});
 
 		// Absolute ceiling, independent of phase (spec 3.2/3.4.2).
-		this.maxTurnTimer = setTimeout(() => this.onMaxTurnExpired(turnId), MAX_TURN_MS);
+		this.maxTurnTimer = setTimeout(() => this.onMaxTurnExpired(turnId), this.maxTurnMs);
 
 		if (isHumanHolder) {
 			this.current.phase = "speaking"; // no model call for a human turn
@@ -714,8 +787,45 @@ export class FloorMachine {
 			// A posting failure must not stall the floor; the release timer below
 			// still fires and the turn is still recorded (with its text) either way.
 		}
-		const speakMs = this.config.speakMsOverride ?? estimateReadingMs(clean) + SPEAK_GRACE_MS;
+		// The PROVISIONAL speaking window. It is provisional because at this instant
+		// nobody knows how long this turn actually takes to say: the words exist,
+		// the audio does not. noteTurnAudio replaces it with the measured duration
+		// the moment narration starts.
+		//
+		// audioStartGraceMs is the wait for that replacement to arrive. Without it
+		// the reading estimate (capped at READING_MS_CEILING = 20s) was the entire
+		// speaking window AND it started here - so the slide render, the
+		// stage_ready gate and the whole Supertonic synthesis were all spent out of
+		// the officer's speaking time before a single word was audible. That is
+		// what "cut off after a few seconds" was.
+		const estimated = estimateReadingMs(clean) + SPEAK_GRACE_MS;
+		const speakMs = this.config.speakMsOverride ?? Math.max(estimated, this.audioStartGraceMs);
 		this.speakTimer = setTimeout(() => this.onSpeakElapsed(turnId), speakMs);
+	}
+
+	/**
+	 * Narration for `turnId` has STARTED, and it is `durationMs` long.
+	 *
+	 * This is the one fact the floor could not know on its own and was therefore
+	 * guessing at. The pipeline already measures it with ffprobe on the real wav
+	 * and already broadcasts it in huddle:speak; it just never told the state
+	 * machine, so the floor and the audio ran on two unreconciled clocks and the
+	 * floor's always finished first.
+	 *
+	 * Called by the glue, not by an officer: this is not a floor verb and it
+	 * cannot grant, release, reorder or extend anything beyond speakBudgetMs. A
+	 * stale turnId is dropped silently, exactly like every other late arrival
+	 * here.
+	 */
+	noteTurnAudio(turnId: string, durationMs: number): void {
+		if (!this.current || this.current.turnId !== turnId) return; // stale
+		if (this.current.phase !== "speaking") return;
+		// An explicit test override owns the clock; never second-guess it.
+		if (this.config.speakMsOverride !== undefined) return;
+		if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+		const ms = Math.min(Math.round(durationMs) + SPEAK_GRACE_MS, this.speakBudgetMs);
+		this.clearTimer("speakTimer");
+		this.speakTimer = setTimeout(() => this.onSpeakElapsed(turnId), ms);
 	}
 
 	private onPrepareDeadline(turnId: string): void {
