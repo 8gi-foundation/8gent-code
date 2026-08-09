@@ -267,7 +267,17 @@ export function stagePage(opts: StagePageOptions): string {
         case "huddle:floor_released":
           said.classList.remove("show");
           setHud(hud.who.textContent, "released", false);
-          try { audio.pause(); } catch(e){}
+          // Stopping the audio here USED to be unconditional, which turned any
+          // early release into an audible cut mid-sentence - James watching a
+          // live huddle: "the 8gents get cut off after only a few seconds". The
+          // floor now holds the turn for the narration's MEASURED length, so a
+          // normal release already lands after the last word; pausing on it only
+          // ever truncates. A human CUT is the one case where silence is the
+          // whole point, so that one still stops immediately. Any other case is
+          // superseded naturally when the next turn sets audio.src.
+          if (m.reason === "cut" || m.reason === "skipped") {
+            try { audio.pause(); } catch(e){}
+          }
           break;
         case "huddle:closed":
           setHud("", "closed", false);

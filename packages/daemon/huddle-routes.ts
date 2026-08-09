@@ -20,11 +20,13 @@
  */
 
 import {
+	AUDIO_START_GRACE_MS,
 	CHAIR_AGENT_ID,
 	CHAIR_HUMAN_ID,
 	type ChairMode,
 	DEFAULT_MAX_DURATION_MS,
 	DEFAULT_MAX_ROUNDS,
+	SPEAK_BUDGET_MS,
 	FloorMachine,
 	type HuddleOpenConfig,
 	type HuddleOutFrame,
@@ -77,7 +79,14 @@ class HuddleInstance {
 				// Phase 1: slide + narration for this turn. Deliberately not awaited
 				// - the FloorMachine's own timers own the turn's lifetime, and a slow
 				// TTS must never extend or stall the floor.
-				void runTurnPipeline(ctx.huddleId, ctx.turnId, ctx.holder, text, deps.broadcast);
+				//
+				// onAudio is how the turn's REAL spoken length gets back to those
+				// timers. The pipeline measures it; without this the floor was still
+				// guessing with a reading estimate capped at 20 seconds, started at
+				// the wrong moment, and officers were cut off mid-sentence.
+				void runTurnPipeline(ctx.huddleId, ctx.turnId, ctx.holder, text, deps.broadcast, {
+					onAudio: (turnId, durationMs) => this.machine.noteTurnAudio(turnId, durationMs),
+				});
 			},
 		});
 	}
@@ -365,8 +374,22 @@ export function handleHuddleFrame(deps: TableRouteDeps, msg: Record<string, unkn
 				Number.isFinite(msg.maxDurationMs) && Number(msg.maxDurationMs) > 0
 					? Number(msg.maxDurationMs)
 					: DEFAULT_MAX_DURATION_MS;
+			// THINKING budget. Distinct from the speaking budget below - conflating
+			// the two is exactly what cut officers off mid-presentation.
 			const prepareBudgetMs =
 				Number.isFinite(msg.budgetMs) && Number(msg.budgetMs) > 0 ? Number(msg.budgetMs) : PREPARE_BUDGET_MS;
+			// SPEAKING budget, and the wait for narration to start. This daemon runs
+			// the Phase 1 pipeline (render -> stage_ready gate -> Supertonic), so it
+			// opts into the grace; a bare FloorMachine with no pipeline still
+			// defaults to 0 and behaves exactly as before.
+			const speakBudgetMs =
+				Number.isFinite(msg.speakBudgetMs) && Number(msg.speakBudgetMs) > 0
+					? Number(msg.speakBudgetMs)
+					: SPEAK_BUDGET_MS;
+			const audioStartGraceMs =
+				Number.isFinite(msg.audioStartGraceMs) && Number(msg.audioStartGraceMs) >= 0
+					? Number(msg.audioStartGraceMs)
+					: AUDIO_START_GRACE_MS;
 			const topic = typeof msg.topic === "string" ? msg.topic : "";
 			const huddleId = newHuddleId();
 
@@ -381,6 +404,8 @@ export function handleHuddleFrame(deps: TableRouteDeps, msg: Record<string, unkn
 				maxRounds,
 				maxDurationMs,
 				prepareBudgetMs,
+				speakBudgetMs,
+				audioStartGraceMs,
 			};
 			const instance = new HuddleInstance(config, deps);
 			openByChannel.set(channelId, instance);
