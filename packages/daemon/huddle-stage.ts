@@ -167,7 +167,20 @@ export async function runTurnPipeline(
 	holder: string,
 	replyText: string,
 	broadcast: Broadcast,
-	opts: { interactive?: boolean } = {},
+	opts: {
+		interactive?: boolean;
+		/**
+		 * Report the turn's MEASURED narration length back to the floor, at the
+		 * instant narration starts.
+		 *
+		 * Everything above this line is latency the officer did not ask for -
+		 * rendering, the stage_ready gate, a Supertonic subprocess - and the floor
+		 * was counting all of it as speaking time. It now starts the clock here,
+		 * for the length ffprobe actually measured, which is the only place both
+		 * facts are known.
+		 */
+		onAudio?: (turnId: string, durationMs: number) => void;
+	} = {},
 ): Promise<TurnPipelineResult | null> {
 	const state = stages.get(huddleId);
 	if (!state) return null;
@@ -224,6 +237,17 @@ export async function runTurnPipeline(
 				// from the reading estimate, so the manifest and the deck timings are
 				// identical to a narrated run.
 				{ audioPath: null, durationMs: estimateReadingMs(speech), skipped: "no_tts" as const };
+
+		// Tell the floor how long this actually takes to say, BEFORE the frame
+		// that starts playback goes out - so the floor's speaking window and the
+		// stage's audio element start from the same instant and run the same
+		// length. Never allowed to throw: a reporting failure must degrade to the
+		// old estimate, not stall the turn.
+		try {
+			opts.onAudio?.(turnId, narration.durationMs);
+		} catch (err) {
+			console.warn(`[huddle] audio report failed for turn ${turnId}: ${(err as Error).message}`);
+		}
 
 		broadcast(state.channelId, {
 			type: "huddle:speak",
