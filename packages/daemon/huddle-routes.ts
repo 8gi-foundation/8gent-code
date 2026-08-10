@@ -50,6 +50,7 @@ import {
 	runTurnPipeline,
 	snapshotManifest,
 } from "./huddle-stage";
+import { scheduleMinutes } from "./huddle-minutes";
 
 /** One live huddle: its FloorMachine plus the daemon deps it needs for IO. */
 class HuddleInstance {
@@ -63,6 +64,11 @@ class HuddleInstance {
 				deps.broadcast(config.channelId, frame);
 				if (frame.type === "huddle:closed") {
 					openByChannel.delete(config.channelId);
+					// Minutes read the real turns, and closeStage drops the stage state
+					// - so snapshot FIRST. An in-memory object copy: no IO, no model,
+					// microseconds. The minutes PASS itself is scheduled below, after
+					// the bake, and runs strictly off this emit path.
+					const manifest = snapshotManifest(config.huddleId);
 					// Phase 1: the huddle bakes down to something James can watch.
 					// Wrapped because a failed bake must still close the huddle.
 					try {
@@ -71,6 +77,11 @@ class HuddleInstance {
 					} catch (err) {
 						console.warn(`[huddle] bake failed: ${(err as Error).message}`);
 					}
+					// Minutes: parked on the event loop (setTimeout 0 inside), so this
+					// adds one timer registration to the emit path and nothing else -
+					// huddle:closed was broadcast at the top of this callback, and the
+					// synchronous bake above already ran (#2867: never widen that lag).
+					scheduleMinutes(deps, manifest);
 				}
 			},
 			prepareAgentTurn: (ctx) => runAgentTurn(deps, ctx),
