@@ -66,6 +66,7 @@ import { artifactDirFor, humanBytes } from "../table/artifacts";
 import { appendExchange, loadMemory } from "../table/memory";
 import { resolveOfficer, setOfficerField } from "../table/officer-config";
 import type { AgentPool } from "./agent-pool";
+import { announceActivity, presenceOf } from "./table-presence";
 import { handleHuddleFrame, notifyHuddleMessagePosted } from "./huddle-routes";
 
 /** Broadcast a frame to every connection subscribed to a channel. */
@@ -341,6 +342,27 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 				return true;
 			}
 
+			case "channel:presence": {
+				// Who is generating in this channel RIGHT NOW - the queryable twin of
+				// the agent:activity broadcast, for point-in-time callers (the phone
+				// via the relay) that are never subscribed when the broadcast fires.
+				// Entries exist only between a "thinking" announcement and its paired
+				// "idle" (see table-presence.ts) - never a timer, never fabricated.
+				const channelId = String(msg.channelId ?? "");
+				// Same read authority as a message read: requireChannel (TABLE_NOT_FOUND
+				// on a dead channel) + assertCanRead (TABLE_AUTH on a private channel
+				// the actor is not a member of). Result discarded - this is the auth
+				// check message:subscribe{seed>0} exercises, applied to presence.
+				store.listMessages(channelId, { limit: 1, viewerId: actor });
+				sendRaw({
+					type: "channel:presenceState",
+					id,
+					channelId,
+					entries: presenceOf(channelId),
+				});
+				return true;
+			}
+
 			default:
 				// A channel:* / message:* we do not implement.
 				sendRaw({
@@ -474,14 +496,14 @@ async function runWorkerReply(
 	if (!waiting) { await say("That reply token is unknown or expired."); return; }
 	if (waiting.channelId !== channelId) return;
 
-	broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "thinking" });
+	announceActivity(broadcast, channelId, speaker, "thinking");
 	try {
 		const result = await answerWorker(waiting.workerId, text);
 		await postExecutionResult(deps, channelId, speaker, result);
 	} catch (err) {
 		await say(`Could not pass that on: ${String(err).slice(0, 200)}`);
 	} finally {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "idle" });
+		announceActivity(broadcast, channelId, speaker, "idle");
 	}
 }
 
@@ -578,7 +600,7 @@ async function runApprovedProposal(
 	}
 	if (pending.channelId !== channelId) return; // token is channel-scoped
 
-	broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "thinking" });
+	announceActivity(broadcast, channelId, pending.agentId, "thinking");
 	await say(
 		pending.agentId,
 		`Approved by ${approvedBy}. Running via my ${pending.kind} harness in ${pending.cwd}:\n\`${pending.command}\``,
@@ -596,7 +618,7 @@ async function runApprovedProposal(
 	} catch (err) {
 		await say(pending.agentId, `Execution errored: ${String(err).slice(0, 200)}. Nothing is claimed as done.`);
 	} finally {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "idle" });
+		announceActivity(broadcast, channelId, pending.agentId, "idle");
 	}
 }
 
@@ -882,7 +904,7 @@ async function runMentionFlow(
 	const roundSoFar: string[] = [];
 
 	for (const agentId of agentIds) {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId, state: "thinking" });
+		announceActivity(broadcast, channelId, agentId, "thinking");
 		try {
 			const sid = tableSessionId(channelId, agentId);
 			const officerCode = agentId.replace(/^agent:/, "").toUpperCase();
@@ -1023,7 +1045,7 @@ async function runMentionFlow(
 		} catch (err) {
 			console.warn(`[table] mention flow error for ${agentId}:`, err);
 		} finally {
-			broadcast(channelId, { type: "agent:activity", channelId, agentId, state: "idle" });
+			announceActivity(broadcast, channelId, agentId, "idle");
 		}
 	}
 }
