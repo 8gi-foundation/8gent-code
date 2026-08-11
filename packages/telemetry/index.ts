@@ -42,6 +42,10 @@ export {
 	resetSinkToStdout,
 } from "./emitter";
 export { estimateCostUsd } from "./cost";
+// Flow telemetry (Resonant Flow Wave 1) - local-only stream, never shipped
+// off-box, never in a cloud model prompt. See docs/specs/FLOW-TELEMETRY-SCHEMA.md.
+export * from "./flow-stream";
+export * from "./flow-metrics";
 
 /**
  * Convenience namespace for callers that prefer
