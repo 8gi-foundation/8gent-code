@@ -131,6 +131,8 @@ interface MessageRow {
 	edited_at: number | null;
 	deleted_at: number | null;
 	created_at: number;
+	audio_url: string | null;
+	audio_duration_ms: number | null;
 }
 
 function rowToChannel(r: ChannelRow): Channel {
@@ -165,6 +167,8 @@ function rowToMessage(r: MessageRow): Message {
 		editedAt: r.edited_at ?? undefined,
 		deletedAt: r.deleted_at ?? undefined,
 		createdAt: r.created_at,
+		audioUrl: r.audio_url ?? undefined,
+		audioDurationMs: r.audio_duration_ms ?? undefined,
 	};
 }
 
@@ -190,6 +194,7 @@ export class TableStore {
 
 		const schema = fs.readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
 		this.db.exec(schema);
+		this.migrate();
 
 		if (opts.ledger) {
 			this.ledger = opts.ledger;
@@ -217,6 +222,30 @@ export class TableStore {
 	getMessage(messageId: string): Message | null {
 		const row = this.getMessageRow(messageId);
 		return row ? rowToMessage(row) : null;
+	}
+
+	/**
+	 * Additive, idempotent migrations for columns added after a database was
+	 * first created. CREATE TABLE IF NOT EXISTS (schema.sql) never alters an
+	 * EXISTING table, so a ~/.8gent/table/table.db from before 2026-08-21 needs
+	 * these ALTER TABLEs to pick up audio_url/audio_duration_ms. Both columns
+	 * are nullable, so every pre-existing row reads back with audioUrl/
+	 * audioDurationMs simply absent - no behavior change for a message that
+	 * never had narration. Safe to run on every open: "duplicate column name"
+	 * is swallowed (already migrated), any other error is real and rethrown.
+	 */
+	private migrate(): void {
+		const alters = [
+			"ALTER TABLE messages ADD COLUMN audio_url TEXT",
+			"ALTER TABLE messages ADD COLUMN audio_duration_ms INTEGER",
+		];
+		for (const sql of alters) {
+			try {
+				this.db.exec(sql);
+			} catch (err) {
+				if (!/duplicate column name/i.test((err as Error).message ?? "")) throw err;
+			}
+		}
 	}
 
 	// ── channels ────────────────────────────────────────────────────────
@@ -440,6 +469,10 @@ export class TableStore {
 		replyTo?: string;
 		/** optional precomputed ed25519 signature (base64) over canonicalMessage(). */
 		sig?: string;
+		/** Narration already synthesised at post time; nullable/additive - most
+		 *  posts carry neither field. See attachAudio() for adding it later. */
+		audioUrl?: string;
+		audioDurationMs?: number;
 	}): Message {
 		this.requireChannel(input.channelId);
 		if (input.content.length === 0) {
@@ -471,11 +504,13 @@ export class TableStore {
 			replyTo: input.replyTo,
 			sig: input.sig,
 			createdAt: Date.now(),
+			audioUrl: input.audioUrl,
+			audioDurationMs: input.audioDurationMs,
 		};
 
 		this.db
 			.prepare(
-				"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+				"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at, audio_url, audio_duration_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)",
 			)
 			.run(
 				message.id,
@@ -485,6 +520,8 @@ export class TableStore {
 				message.replyTo ?? null,
 				message.sig ?? null,
 				message.createdAt,
+				message.audioUrl ?? null,
+				message.audioDurationMs ?? null,
 			);
 
 		this.ledger.append({
@@ -532,6 +569,52 @@ export class TableStore {
 				editorId: input.editorId,
 				contentHash: contentHash(input.content),
 				editedAt,
+			},
+		});
+
+		return rowToMessage(this.getMessageRow(input.messageId) as MessageRow);
+	}
+
+	/**
+	 * Attach (or replace) narration on an already-posted message. Same author-
+	 * only authority as editMessage - narration is content, just spoken rather
+	 * than written, so the same person who could edit the text is the one who
+	 * can attach what speaks it. Shape validation of audioUrl (the daemon-local
+	 * /table/audio/<messageId>/<file> form) is the caller's job (table-routes.ts),
+	 * same split as editMessage's content non-empty check living one layer up
+	 * from here for messageId/actor resolution.
+	 */
+	attachAudio(input: {
+		messageId: string;
+		actorId: ParticipantId;
+		audioUrl: string;
+		audioDurationMs: number;
+	}): Message {
+		const row = this.getMessageRow(input.messageId);
+		if (!row || row.deleted_at !== null) {
+			throw new TableNotFoundError(`message ${input.messageId} not found`);
+		}
+		if (row.author_id !== input.actorId) {
+			throw new TableAuthError(
+				`${input.actorId} is not the author of ${input.messageId} and cannot attach audio to it`,
+			);
+		}
+		if (input.audioUrl.length === 0) {
+			throw new TableValidationError("audioUrl must be non-empty");
+		}
+
+		this.db
+			.prepare("UPDATE messages SET audio_url = ?, audio_duration_ms = ? WHERE id = ?")
+			.run(input.audioUrl, input.audioDurationMs, input.messageId);
+
+		this.ledger.append({
+			kind: "table.message.attachAudio",
+			payload: {
+				messageId: input.messageId,
+				actorId: input.actorId,
+				audioUrl: input.audioUrl,
+				audioDurationMs: input.audioDurationMs,
+				at: Date.now(),
 			},
 		});
 

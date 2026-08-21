@@ -30,6 +30,7 @@
  */
 
 import {
+	MESSAGE_AUDIO_URL_RE,
 	OFFICERS,
 	TABLE_AGENT_SCOPE,
 	TableError,
@@ -275,12 +276,32 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 						);
 					}
 				}
+				// Narration at post time is optional and additive; a caller that
+				// supplies audioUrl must present the daemon's own served-path shape
+				// (never an arbitrary URL/path), same defense-in-depth spirit as the
+				// signature check above. audioDurationMs rides along only when
+				// audioUrl is present and valid - a bare duration with no audio is
+				// dropped rather than stored half-formed.
+				const rawAudioUrl = typeof msg.audioUrl === "string" ? (msg.audioUrl as string) : undefined;
+				if (rawAudioUrl !== undefined && !MESSAGE_AUDIO_URL_RE.test(rawAudioUrl)) {
+					throw new TableError(
+						"TABLE_VALIDATION",
+						`audioUrl must match the daemon's own /table/audio/<messageId>/<file> form: got "${rawAudioUrl}"`,
+					);
+				}
+				const audioUrl = rawAudioUrl;
+				const audioDurationMs =
+					audioUrl !== undefined && typeof msg.audioDurationMs === "number"
+						? (msg.audioDurationMs as number)
+						: undefined;
 				const message = store.postMessage({
 					channelId,
 					authorId: actor,
 					content,
 					replyTo,
 					sig,
+					audioUrl,
+					audioDurationMs,
 				});
 				// (1) ack to sender.
 				sendRaw({ type: "message:posted", id, message });
@@ -301,6 +322,32 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 					content: String(msg.content ?? ""),
 				});
 				sendRaw({ type: "message:edited", id, message });
+				broadcast(message.channelId, { type: "message:updated", message });
+				return true;
+			}
+
+			case "message:attachAudio": {
+				// Attach (or replace) narration on an already-posted message. Unlike
+				// message:post's optional audioUrl (set at creation), this is the path
+				// for narrating a message after the fact - exactly the phase4-
+				// negotiation use case: text posted first, TTS generated and attached
+				// moments later. Same shape validation as message:post, same
+				// author-only authority as message:edit (enforced in store.attachAudio).
+				const audioUrl = String(msg.audioUrl ?? "");
+				if (!MESSAGE_AUDIO_URL_RE.test(audioUrl)) {
+					throw new TableError(
+						"TABLE_VALIDATION",
+						`audioUrl must match the daemon's own /table/audio/<messageId>/<file> form: got "${audioUrl}"`,
+					);
+				}
+				const audioDurationMs = typeof msg.audioDurationMs === "number" ? (msg.audioDurationMs as number) : 0;
+				const message = store.attachAudio({
+					messageId: String(msg.messageId ?? ""),
+					actorId: actor,
+					audioUrl,
+					audioDurationMs,
+				});
+				sendRaw({ type: "message:audioAttached", id, message });
 				broadcast(message.channelId, { type: "message:updated", message });
 				return true;
 			}
