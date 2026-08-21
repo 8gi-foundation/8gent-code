@@ -7,7 +7,7 @@
 
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
-import { TableStore, installTablePolicies } from "../table/index";
+import { SPEAK_URL_RE, TableStore, handleTableSpeakHttp, installTablePolicies } from "../table/index";
 import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
@@ -600,6 +600,25 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			// Access audit log endpoint (DPIA G7). POST-only, metadata only.
 			if (url.pathname === "/audit/access" && req.method === "POST") {
 				return handleAuditAccess(req, config);
+			}
+
+			// On-demand Table message narration (2026-08-21 correction: real-time
+			// synthesis + immediate playback only, NEVER persisted - see
+			// message-speak.ts's header for why this replaced the earlier
+			// per-message audio_url-for-everything direction). POST-only, matches
+			// its own messageId inside the handler; falls through (null) for
+			// everything else, same optional-handler contract as the huddle stage
+			// and table-audio handlers above.
+			if (req.method === "POST" && SPEAK_URL_RE.test(url.pathname)) {
+				// handleTableSpeakHttp's null case (path/method mismatch) cannot occur
+				// past this guard - both check the same SPEAK_URL_RE/"POST" - but its
+				// signature stays Promise<Response | null> so it composes with the
+				// other optional handlers above; map that impossible null to a 404
+				// here so this branch's return type is the plain Promise<Response>
+				// Bun.serve's fetch signature requires.
+				return handleTableSpeakHttp(req, url, getTableStore()).then(
+					(r) => r ?? Response.json({ error: "message not found" }, { status: 404 }),
+				);
 			}
 
 			return new Response(`Eight Daemon - ws://localhost:${config.port}`, {
