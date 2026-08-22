@@ -7,7 +7,7 @@
 
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
-import { SPEAK_URL_RE, TableStore, handleTableSpeakHttp, installTablePolicies } from "../table/index";
+import { SPEAK_URL_RE, TableStore, handleTableAudioHttp, handleTableSpeakHttp, installTablePolicies } from "../table/index";
 import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
@@ -574,6 +574,16 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			{
 				const staged = handleStageHttp(url, `ws://127.0.0.1:${server.port}`);
 				if (staged) return staged;
+			}
+
+			// A persisted Table message's narration wav, e.g. one attached after
+			// the fact via message:attachAudio (table-routes.ts). Anchored to
+			// /table/audio/<messageId>/<file>, the exact string both the DB's
+			// audio_url column and the relay's proxy route use - never shadows a
+			// control endpoint, falls straight through for anything else.
+			{
+				const tableAudio = handleTableAudioHttp(url);
+				if (tableAudio) return tableAudio;
 			}
 
 			// Health check endpoint

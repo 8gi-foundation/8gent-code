@@ -12,9 +12,16 @@ CREATE TABLE IF NOT EXISTS members (
   FOREIGN KEY (channel_id) REFERENCES channels(id)
 );
 
+-- audio_url / audio_duration_ms are nullable and additive (2026-08-21, Table
+-- message narration): a message with no narration has both NULL, and every
+-- pre-existing row and reader is unaffected. New databases get the columns
+-- from this CREATE TABLE; an already-initialized ~/.8gent/table/table.db gets
+-- them from the idempotent ALTER TABLE migration in TableStore's constructor
+-- (store.ts), since CREATE TABLE IF NOT EXISTS never alters an existing table.
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL,
   content TEXT NOT NULL, reply_to TEXT, sig TEXT, edited_at INTEGER, deleted_at INTEGER, created_at INTEGER NOT NULL,
+  audio_url TEXT, audio_duration_ms INTEGER,
   FOREIGN KEY (channel_id) REFERENCES channels(id)
 );
 

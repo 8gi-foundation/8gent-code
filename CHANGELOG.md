@@ -36,6 +36,37 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never failed, when it is not installed) proving genuine non-silent WAV
   bytes come back and no temp file survives.
 
+### Added - Table message narration: nullable audio_url/audio_duration_ms (#2875)
+
+- `packages/table/schema.sql`: `messages` gains nullable `audio_url TEXT` and
+  `audio_duration_ms INTEGER`. Additive only - a message without narration is
+  unaffected, and `TableStore`'s constructor now runs an idempotent
+  `ALTER TABLE` migration so an existing `~/.8gent/table/table.db` (from
+  before `CREATE TABLE IF NOT EXISTS` could pick up the new columns) gets
+  them too, on every open, safely re-run.
+- `packages/table/types.ts`: `Message.audioUrl` / `Message.audioDurationMs`.
+- `packages/table/message-audio.ts` (new): the daemon-local narration path
+  shape `/table/audio/<messageId>/<file>` and its loopback-only HTTP handler,
+  mirroring `huddle-stage.ts`'s `handleStageHttp` for a single persisted
+  message instead of a live huddle turn.
+- `packages/table/store.ts`: `postMessage` accepts optional
+  `audioUrl`/`audioDurationMs` at creation; new `attachAudio()` narrates an
+  already-posted message after the fact (author-only, same authority as
+  `editMessage`).
+- `packages/daemon/table-routes.ts`: `message:post` validates an optional
+  `audioUrl` against the daemon's own served-path shape; new
+  `message:attachAudio` frame for the after-the-fact case, broadcasting the
+  existing `message:updated` event.
+- `packages/daemon/gateway.ts`: wires `handleTableAudioHttp` in alongside the
+  huddle stage's HTTP handler.
+- 2 new tests in `packages/table/__tests__/store.test.ts` covering
+  `postMessage` with/without audio and `attachAudio`'s author-only authority
+  and round-trip through a re-read.
+
+This is the daemon half of Table message narration; the relay proxy
+(8gent-glasses#pending) and Flow playback UI (8gent-flow#pending) land as
+their own repos' changes.
+
 ### Added - Per-model benchmark attribution, step 4 (#2758)
 
 - `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second

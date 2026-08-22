@@ -173,6 +173,61 @@ describe("messages: post, thread, edit, soft-delete", () => {
 		expect(edited.editedAt).toBeGreaterThan(0);
 	});
 
+	it("postMessage carries audioUrl/audioDurationMs when supplied, and omits them when not", () => {
+		const c = makeChannel();
+		const withAudio = store.postMessage({
+			channelId: c.id,
+			authorId: JAMES,
+			content: "narrated",
+			audioUrl: "/table/audio/msg_x/narration.wav",
+			audioDurationMs: 4200,
+		});
+		expect(withAudio.audioUrl).toBe("/table/audio/msg_x/narration.wav");
+		expect(withAudio.audioDurationMs).toBe(4200);
+
+		const silent = store.postMessage({ channelId: c.id, authorId: JAMES, content: "plain text" });
+		expect(silent.audioUrl).toBeUndefined();
+		expect(silent.audioDurationMs).toBeUndefined();
+
+		// round-trips through a fresh read, not just the constructed return value.
+		const reread = store.listMessages(c.id, { limit: 10 });
+		const rereadWithAudio = reread.find((m) => m.id === withAudio.id);
+		const rereadSilent = reread.find((m) => m.id === silent.id);
+		expect(rereadWithAudio?.audioUrl).toBe("/table/audio/msg_x/narration.wav");
+		expect(rereadWithAudio?.audioDurationMs).toBe(4200);
+		expect(rereadSilent?.audioUrl).toBeUndefined();
+	});
+
+	it("attachAudio adds narration to an already-posted message, author-only", () => {
+		const c = makeChannel();
+		store.addMember({ channelId: c.id, participantId: NESSA, role: "member", addedBy: JAMES });
+		const m = store.postMessage({ channelId: c.id, authorId: JAMES, content: "the brief" });
+		expect(m.audioUrl).toBeUndefined();
+
+		expect(() =>
+			store.attachAudio({
+				messageId: m.id,
+				actorId: NESSA,
+				audioUrl: `/table/audio/${m.id}/narration.wav`,
+				audioDurationMs: 96419,
+			}),
+		).toThrow(TableAuthError);
+
+		const attached = store.attachAudio({
+			messageId: m.id,
+			actorId: JAMES,
+			audioUrl: `/table/audio/${m.id}/narration.wav`,
+			audioDurationMs: 96419,
+		});
+		expect(attached.audioUrl).toBe(`/table/audio/${m.id}/narration.wav`);
+		expect(attached.audioDurationMs).toBe(96419);
+		expect(attached.content).toBe("the brief"); // attaching audio never touches content
+
+		// re-fetched thread view carries it too, not just the mutation's own return.
+		const refetched = store.listMessages(c.id, { limit: 10 }).find((x) => x.id === m.id);
+		expect(refetched?.audioUrl).toBe(`/table/audio/${m.id}/narration.wav`);
+	});
+
 	it("author or admin may delete; delete blanks content and tombstones", () => {
 		const c = makeChannel();
 		store.addMember({ channelId: c.id, participantId: NESSA, role: "member", addedBy: JAMES });
