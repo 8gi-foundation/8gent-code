@@ -205,6 +205,20 @@ export class TableStore {
 		return this.ledger;
 	}
 
+	/**
+	 * Read a single message by id, or null when it does not exist. Public,
+	 * unlike getMessageRow (the private row-level accessor) - this is the seam
+	 * a caller outside the store uses (e.g. the on-demand narration HTTP route,
+	 * message-speak.ts) to fetch a message's content without reaching into row
+	 * internals. Does NOT check delete/authority - callers that care (like
+	 * message-speak.ts) check deletedAt and read-authority themselves, same
+	 * split editMessage/attachAudio already use.
+	 */
+	getMessage(messageId: string): Message | null {
+		const row = this.getMessageRow(messageId);
+		return row ? rowToMessage(row) : null;
+	}
+
 	// ── channels ────────────────────────────────────────────────────────
 
 	createChannel(input: {

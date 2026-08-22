@@ -9,6 +9,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - Table: on-demand real-time message narration, never persisted (#2877)
+
+- `packages/table/message-speak.ts` (new): a "play this message aloud"
+  affordance for ANY Table message - synthesizes from the message's live
+  `content` in real time via `narrateTurn`/`voiceFor`/`HUMAN_VOICE`, reused
+  verbatim from `huddle-voice.ts` (no second TTS engine, no reimplementation
+  of the Supertonic call). `voiceForAuthor` picks an agent author's own
+  officer voice or `HUMAN_VOICE` for a human author - declared identity,
+  never inferred, same rule huddle-voice.ts already documents.
+  `synthesizeMessageSpeech` writes to a fresh temp directory removed in a
+  `finally` regardless of outcome - nothing survives past the call, by
+  design (this deliberately replaces the earlier persisted `audio_url`
+  direction from #2875/#2876 as the general pattern; that stays as-is for
+  the one message that already has a curated narration).
+- `packages/table/store.ts`: new public `TableStore.getMessage(id)`.
+- `packages/daemon/gateway.ts`: wires `POST /table/messages/<id>/speak` in,
+  mirroring the existing `handleAuditAccess` route idiom. Read authority
+  reuses the exact `listMessages({viewerId})` check `channel:presence`
+  already exercises - a private channel `human:local` isn't a member of
+  403s, never leaks content.
+- 13 new tests in `packages/table/__tests__/message-speak.test.ts`: voice
+  selection, ephemeral cleanup on success AND failure (injected fake
+  narrator, fast), full HTTP status mapping (404/403/422/503/200), and one
+  test that shells out to the REAL `supertonic` binary end to end (skipped,
+  never failed, when it is not installed) proving genuine non-silent WAV
+  bytes come back and no temp file survives.
+
 ### Added - Per-model benchmark attribution, step 4 (#2758)
 
 - `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second
