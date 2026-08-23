@@ -92,6 +92,7 @@ export function normalizeDeclaredProvider(
 export function parseDeclaredProviders(
 	raw: Record<string, Partial<ProviderConfig>> | undefined,
 	builtinNames: ReadonlySet<string>,
+	warn: (message: string) => void = (m) => console.warn(m),
 ): Record<string, ProviderConfig> {
 	const declared: Record<string, ProviderConfig> = {};
 	if (!raw || typeof raw !== "object") return declared;
@@ -99,7 +100,17 @@ export function parseDeclaredProviders(
 		if (builtinNames.has(name)) continue; // an override of a built-in, not a declaration
 		if (!entry || typeof entry !== "object") continue;
 		const config = normalizeDeclaredProvider(name, entry);
-		if (config) declared[name] = config;
+		if (config) {
+			declared[name] = config;
+			continue;
+		}
+		// Say so. A typo'd `baseurl` key used to make the whole declaration
+		// vanish in silence, and the user's next symptom was "Unknown provider"
+		// for something they can see in their own file.
+		warn(
+			`providers.json: ignoring "${name}" - a declared provider needs a valid ` +
+				`http(s) "baseUrl". Got: ${JSON.stringify(entry.baseUrl ?? null)}`,
+		);
 	}
 	return declared;
 }
@@ -110,16 +121,28 @@ export function modelsUrlFor(baseUrl: string, compat: ProviderCompat): string {
 	return compat === "ollama" ? `${base}/api/tags` : `${base}/models`;
 }
 
+/** How long to wait on a declared endpoint before giving up on discovery. */
+export const DISCOVERY_TIMEOUT_MS = 5000;
+
+/** Longest error body echoed back into a thrown message. */
+const MAX_ERROR_BODY = 500;
+
 /**
  * Ask an endpoint what it can serve. OpenAI-compatible and Anthropic both
  * answer `{ data: [{ id }] }`; Ollama answers `{ models: [{ name }] }`. Throws
  * on a non-2xx so a misconfigured base URL surfaces as itself rather than as an
  * empty model picker.
+ *
+ * Always bounded by a timeout. This feature exists to let users point at a box
+ * on their LAN, and a sleeping laptop or a stale IP black-holes the connection
+ * rather than refusing it - Bun's fetch has no default timeout, so without this
+ * the caller waits forever.
  */
 export async function discoverModelsAt(
 	baseUrl: string,
 	compat: ProviderCompat = "openai",
 	apiKey?: string,
+	timeoutMs: number = DISCOVERY_TIMEOUT_MS,
 ): Promise<string[]> {
 	const url = modelsUrlFor(baseUrl, compat);
 	// Anthropic authenticates with x-api-key, not a bearer token. Sending the
@@ -129,11 +152,22 @@ export async function discoverModelsAt(
 		: compat === "anthropic"
 			? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
 			: { Authorization: `Bearer ${apiKey}` };
-	const response = await fetch(url, { headers });
+
+	let response: Response;
+	try {
+		response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+	} catch (err) {
+		if ((err as { name?: string })?.name === "TimeoutError") {
+			throw new Error(`Model discovery timed out after ${timeoutMs}ms for ${url}`);
+		}
+		throw err;
+	}
+
 	if (!response.ok) {
-		throw new Error(
-			`Model discovery failed for ${url}: ${response.status} ${await response.text()}`,
-		);
+		// Capped: this endpoint is user-supplied and can return an arbitrarily
+		// large body, which ends up in an error message that gets logged.
+		const body = (await response.text()).slice(0, MAX_ERROR_BODY);
+		throw new Error(`Model discovery failed for ${url}: ${response.status} ${body}`);
 	}
 	const data = (await response.json()) as {
 		data?: { id?: string }[];

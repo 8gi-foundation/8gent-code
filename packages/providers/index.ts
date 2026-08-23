@@ -18,13 +18,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "../types/index.js";
-import {
-	anonymizeMessages,
-	deanonymize,
-	verifyClean,
-} from "../permissions/pii-anonymizer";
+import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { AuthRotator } from "./auth-rotation";
-import { type ProviderCompat, discoverModelsAt, parseDeclaredProviders } from "./declared";
+import {
+	type ProviderCompat,
+	discoverModelsAt,
+	normalizeDeclaredProvider,
+	parseDeclaredProviders,
+} from "./declared";
 import { ModelFailover } from "./failover";
 import {
 	type ThinkingResolution,
@@ -535,20 +536,23 @@ export class ProviderManager {
 	readonly failover: ModelFailover;
 
 	constructor(settingsPath?: string) {
+		// `EIGHT_DATA_DIR` relocates the whole ~/.8gent directory and is already
+		// honoured by permissions, memory and the rest of the data layer. This
+		// file holds API keys, so it must move with them rather than become the
+		// one file that keeps reading and writing the real $HOME when someone
+		// sandboxes a run. `EIGHT_PROVIDERS_SETTINGS_PATH` overrides just this
+		// file, for tests and for pointing one process at an alternate profile.
 		this.settingsPath =
 			settingsPath ||
-			process.env.PROVIDERS_SETTINGS_PATH ||
-			path.join(os.homedir(), ".8gent", "providers.json");
+			process.env.EIGHT_PROVIDERS_SETTINGS_PATH ||
+			path.join(process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"), "providers.json");
 		this.settings = this.loadSettings();
+		// Declarations are parsed into a SEPARATE map and never written back over
+		// the user's entry. `settings.providers[name]` stays exactly as the user
+		// typed it, so a field we do not model (a note, a comment, a key a later
+		// version adds) survives every save. Validation happens on read instead,
+		// in getProvider().
 		this.declared = parseDeclaredProviders(this.settings.providers, BUILTIN_PROVIDER_NAMES);
-		// Fold each validated declaration back over its raw entry. The rest of the
-		// manager - getProvider's merge, enableProvider, setApiKey, discoverModels
-		// - then works on one object per provider, an invalid field cannot survive
-		// the merge to override its own sanitized value, and a save writes the
-		// declaration back complete.
-		for (const [name, config] of Object.entries(this.declared)) {
-			this.settings.providers[name] = config;
-		}
 		this.authRotator = new AuthRotator();
 		this.failover = new ModelFailover();
 	}
@@ -582,6 +586,16 @@ export class ProviderManager {
 		return providers;
 	}
 
+	/**
+	 * Where this manager reads and writes provider settings, including API keys.
+	 * Redirectable via `EIGHT_DATA_DIR` / `EIGHT_PROVIDERS_SETTINGS_PATH`, so no
+	 * caller should hardcode "~/.8gent/providers.json" when telling a user where
+	 * their key landed.
+	 */
+	getSettingsPath(): string {
+		return this.settingsPath;
+	}
+
 	saveSettings(): void {
 		const dir = path.dirname(this.settingsPath);
 		if (!fs.existsSync(dir)) {
@@ -603,12 +617,22 @@ export class ProviderManager {
 	}
 
 	getProvider(name: ProviderName): ProviderConfig {
-		// A declared provider's normalized config takes the place the compiled
-		// defaults hold for a built-in; the raw providers.json entry is still
-		// layered on top, so both kinds merge by the same rule.
-		const defaults = builtinDefaults(name) ?? this.declared[name];
 		const overrides = this.settings.providers[name] || {};
-		return { ...defaults, ...overrides } as ProviderConfig;
+		// A built-in merges its compiled defaults with the user's overrides, as
+		// it always has.
+		const builtin = builtinDefaults(name);
+		if (builtin) return { ...builtin, ...overrides } as ProviderConfig;
+
+		const base = this.declared[name];
+		// Not a built-in and not a valid declaration: preserve the old behaviour
+		// of handing back whatever was there rather than throwing.
+		if (!base) return { ...overrides } as ProviderConfig;
+
+		// Re-normalize on READ. The user's raw entry is never rewritten, so an
+		// invalid field still cannot override its own sanitized value, but a
+		// field we do not model is left alone in the file instead of being
+		// silently deleted on the next save.
+		return normalizeDeclaredProvider(name, { ...base, ...overrides }) ?? base;
 	}
 
 	/**
@@ -819,7 +843,11 @@ export class ProviderManager {
 				break;
 			default:
 				// OpenAI-compatible providers
-				response = await this.chatOpenAICompatible(dispatchProvider, resolvedRequest, dispatchModel);
+				response = await this.chatOpenAICompatible(
+					dispatchProvider,
+					resolvedRequest,
+					dispatchModel,
+				);
 		}
 
 		// De-anonymize the cloud response so the caller (officer/user) sees real

@@ -22,6 +22,7 @@ import {
 	discoverModelsAt,
 	modelsUrlFor,
 	normalizeDeclaredProvider,
+	parseDeclaredProviders,
 } from "../index";
 
 /**
@@ -111,6 +112,22 @@ describe("declaring a provider in providers.json", () => {
 		expect(() => pm.setActiveProvider("halfDeclared")).toThrow(/Unknown provider/);
 	});
 
+	it("says so when it ignores a declaration, rather than dropping it in silence", () => {
+		// A typo'd `baseurl` key made the declaration vanish with no output, and
+		// the user's next symptom was "Unknown provider" for a name sitting in
+		// their own file.
+		const warnings: string[] = [];
+		const declared = parseDeclaredProviders(
+			{ typo: { displayName: "oops" } as never, good: { baseUrl: "http://127.0.0.1:1234/v1" } },
+			new Set(["ollama"]),
+			(m) => warnings.push(m),
+		);
+		expect(Object.keys(declared)).toEqual(["good"]);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("typo");
+		expect(warnings[0]).toContain("baseUrl");
+	});
+
 	it("rejects a declaration whose baseUrl is not an http(s) URL", () => {
 		expect(normalizeDeclaredProvider("bad", { baseUrl: "not a url" })).toBeNull();
 		expect(normalizeDeclaredProvider("bad", { baseUrl: "   " })).toBeNull();
@@ -150,14 +167,61 @@ describe("declaring a provider in providers.json", () => {
 	});
 
 	it("cannot be re-opened by a bogus field surviving the settings merge", () => {
-		// getProvider() merges the raw providers.json entry over the config. The
-		// declaration is folded back into that entry at load, so the sanitized
-		// value is what gets merged - a bad compat cannot come back through it.
+		// getProvider() re-normalizes on READ, so a bad value in the user's entry
+		// is neutralized every time it is read and can never reach a dispatch.
 		const pm = managerWith({
 			providers: { messy: { baseUrl: "http://127.0.0.1:9999/v1", compat: "sideways" } },
 		});
 		expect(pm.getProvider("messy").compat).toBe("openai");
 		expect(pm.compatFor(pm.getProvider("messy"))).toBe("openai");
+	});
+
+	it("never destroys a field the user typed", () => {
+		// Normalization happens on READ; the declaration is never folded back over
+		// the user's entry at load. Folding meant an unrelated command - /model,
+		// /provider key - rewrote a hand-written 3-key entry into a full config
+		// and silently dropped anything we do not model. That is user-created
+		// content and destroying it is not ours to do.
+		const file = path.join(tmpDir, `roundtrip-${Math.random().toString(36).slice(2)}.json`);
+		const entry = {
+			baseUrl: LOCAL_OLLAMA,
+			compat: "ollama",
+			note: "my home box",
+			"x-future-key": { nested: true },
+		};
+		fs.writeFileSync(file, JSON.stringify({ providers: { myrig: entry } }, null, 2));
+
+		const pm = new ProviderManager(file);
+		pm.setActiveModel("llama3.2:3b");
+		pm.setActiveProvider("myrig");
+
+		const saved = JSON.parse(fs.readFileSync(file, "utf-8")).providers.myrig;
+		expect(saved.note).toBe("my home box");
+		expect(saved["x-future-key"]).toEqual({ nested: true });
+		// Nothing we were not asked to add was added.
+		expect(Object.keys(saved).sort()).toEqual(["baseUrl", "compat", "note", "x-future-key"]);
+		// And the provider is still fully usable.
+		expect(pm.getProvider("myrig").displayName).toBe("myrig");
+		expect(pm.compatFor(pm.getProvider("myrig"))).toBe("ollama");
+	});
+
+	it("keeps an unknown key while still neutralizing a bogus one", () => {
+		const file = path.join(tmpDir, `mixed-${Math.random().toString(36).slice(2)}.json`);
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				providers: {
+					messy: { baseUrl: "http://127.0.0.1:9999/v1", compat: "sideways", note: "keep me" },
+				},
+			}),
+		);
+		const pm = new ProviderManager(file);
+		expect(pm.getProvider("messy").compat).toBe("openai");
+		pm.setActiveModel("x");
+		const saved = JSON.parse(fs.readFileSync(file, "utf-8")).providers.messy;
+		// Neutralized on read, not "corrected" in the user's file behind their back.
+		expect(saved.note).toBe("keep me");
+		expect(saved.compat).toBe("sideways");
 	});
 });
 

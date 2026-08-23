@@ -20,14 +20,30 @@ import { resetProviderManager } from "../../providers";
 import { handleProviderCommands } from "../repl";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-repl-"));
-const originalPath = process.env.PROVIDERS_SETTINGS_PATH;
+const originalPath = process.env.EIGHT_PROVIDERS_SETTINGS_PATH;
 const repoRoot = path.resolve(import.meta.dir, "../../..");
+
+/** Ollama for the discovery test. Skipped-with-a-reason when it is not up. */
+const LIVE_OLLAMA = process.env.DECLARED_TEST_BASE_URL || "http://127.0.0.1:11434";
+
+/** Probe at module scope: skipIf is evaluated before any hook runs. */
+const [live, liveModel] = await (async (): Promise<[boolean, string]> => {
+	try {
+		const res = await fetch(`${LIVE_OLLAMA}/api/tags`, { signal: AbortSignal.timeout(3000) });
+		if (!res.ok) return [false, ""];
+		const tags = (await res.json()) as { models?: { name?: string }[] };
+		const names = (tags.models ?? []).map((m) => m.name ?? "").filter(Boolean);
+		return [names.length > 0, names[0] ?? ""];
+	} catch {
+		return [false, ""];
+	}
+})();
 
 /** Point the provider singleton at a throwaway providers.json. */
 function declareProviders(providers: Record<string, unknown>): void {
 	const file = path.join(tmpDir, `providers-${Math.random().toString(36).slice(2)}.json`);
 	fs.writeFileSync(file, JSON.stringify({ providers }, null, 2));
-	process.env.PROVIDERS_SETTINGS_PATH = file;
+	process.env.EIGHT_PROVIDERS_SETTINGS_PATH = file;
 	resetProviderManager();
 }
 
@@ -52,8 +68,9 @@ async function runCommand(command: string): Promise<string> {
 }
 
 afterEach(() => {
-	if (originalPath === undefined) Reflect.deleteProperty(process.env, "PROVIDERS_SETTINGS_PATH");
-	else process.env.PROVIDERS_SETTINGS_PATH = originalPath;
+	if (originalPath === undefined)
+		Reflect.deleteProperty(process.env, "EIGHT_PROVIDERS_SETTINGS_PATH");
+	else process.env.EIGHT_PROVIDERS_SETTINGS_PATH = originalPath;
 	resetProviderManager();
 });
 
@@ -111,6 +128,71 @@ describe("/provider <name>", () => {
 	});
 });
 
+describe("/provider models", () => {
+	test("discovers models for a declaration that lists none", async () => {
+		// The documented workflow: declare a baseUrl and nothing else. Before this
+		// was wired, /provider models printed an empty list forever and no shipped
+		// surface would ever populate it.
+		declareProviders({
+			myrig: { baseUrl: LIVE_OLLAMA, compat: "ollama" },
+		});
+		await runCommand("/provider myrig");
+		const output = await runCommand("/provider models");
+		if (!live) {
+			// No endpoint on this host: it must fail loudly and not hang or throw.
+			expect(output).toContain("discovery failed");
+			return;
+		}
+		expect(output).toContain("discovering...");
+		expect(output).toContain(liveModel);
+	}, 30_000);
+
+	test("a declared endpoint that never answers does not hang the REPL", async () => {
+		// 203.0.113.0/24 is TEST-NET-3: reserved, routable-looking, black-holes.
+		// This is the stale-LAN-IP case the feature invites.
+		declareProviders({
+			ghost: { baseUrl: "http://203.0.113.1:11434", compat: "ollama" },
+		});
+		await runCommand("/provider ghost");
+		const started = Date.now();
+		const output = await runCommand("/provider models");
+		const elapsed = Date.now() - started;
+		expect(output).toContain("discovery failed");
+		// Bounded by DISCOVERY_TIMEOUT_MS, not left to hang forever.
+		expect(elapsed).toBeLessThan(15_000);
+	}, 30_000);
+
+	test("a provider with a static model list does not call out", async () => {
+		declareProviders({});
+		await runCommand("/provider ollama");
+		const output = await runCommand("/provider models");
+		expect(output).not.toContain("discovering...");
+		expect(output).not.toContain("discovery failed");
+	});
+});
+
+describe("/provider key", () => {
+	test("refuses to store a key for a keyless declared provider", async () => {
+		declareProviders({
+			myrig: { displayName: "My Rig", baseUrl: "http://127.0.0.1:11434", compat: "ollama" },
+		});
+		await runCommand("/provider myrig");
+		const output = await runCommand("/provider key sk-should-not-be-stored");
+		expect(output).toContain("doesn't need an API key");
+		expect(output).not.toContain("API key saved");
+	});
+
+	test("reports the real settings path, not a hardcoded one", async () => {
+		declareProviders({});
+		await runCommand("/provider mistral");
+		const output = await runCommand("/provider key sk-test-value");
+		expect(output).toContain("API key saved");
+		// The path is redirectable; printing "~/.8gent/providers.json" would be a
+		// lie whenever EIGHT_DATA_DIR is set.
+		expect(output).toContain(process.env.EIGHT_PROVIDERS_SETTINGS_PATH as string);
+	});
+});
+
 describe("/providers", () => {
 	test("lists declared providers alongside the built-ins", async () => {
 		declareProviders({
@@ -159,12 +241,24 @@ describe("PROVIDER_NAMES is the compiled list, never the validity check", () => 
 
 				for (const [i, line] of fs.readFileSync(full, "utf-8").split("\n").entries()) {
 					if (!line.includes("PROVIDER_NAMES")) continue;
-					// An import is fine. Using it in a condition or a loop is not.
-					if (/^\s*(import|export)\b/.test(line)) continue;
-					if (/PROVIDER_NAMES\s*\.\s*(includes|indexOf|some|find)\b/.test(line)) {
+					// Skip an import/re-export STATEMENT only. A bare `^\s*export\b`
+					// also skipped every exported one-line declaration, which is
+					// exactly how a gate gets written:
+					//   export const isValid = (n) => PROVIDER_NAMES.includes(n);
+					// Requiring a binding form after the keyword keeps imports
+					// exempt without opening that hole.
+					if (/^\s*(import|export)\s*(\{|\*|type\b|default\b)/.test(line)) continue;
+					// The lookbehind stops a future BUILTIN_PROVIDER_NAMES (or any
+					// other *_PROVIDER_NAMES) from false-positiving on this rule.
+					if (/(?<![A-Z_])PROVIDER_NAMES\s*\.\s*(includes|indexOf|some|find|filter)\b/.test(line)) {
 						offenders.push(`${rel}:${i + 1} gates on PROVIDER_NAMES`);
 					}
-					if (/\bfor\b.*\bof\s+PROVIDER_NAMES\b/.test(line)) {
+					// .map is how a picker gets rendered in this codebase, which is
+					// the enumeration regression this rule exists to catch.
+					if (
+						/(?<![A-Z_])PROVIDER_NAMES\s*\.\s*(map|forEach)\b/.test(line) ||
+						/\bof\s+PROVIDER_NAMES\b/.test(line)
+					) {
 						offenders.push(`${rel}:${i + 1} enumerates PROVIDER_NAMES`);
 					}
 				}

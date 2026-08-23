@@ -557,8 +557,10 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 		const hasKey = pm.getApiKey(p.name);
 		console.log(`\n\x1b[36mCurrent Provider:\x1b[0m ${p.displayName}`);
 		console.log(`  Model: ${pm.getActiveModel()}`);
+		// An empty apiKeyEnv is the registry's declaration that no key exists,
+		// which covers every keyless local provider rather than only ollama.
 		console.log(
-			`  API Key: ${p.name === "ollama" ? "not needed (local)" : hasKey ? "✓ set" : "✗ not set"}`,
+			`  API Key: ${!p.apiKeyEnv ? "not needed (local)" : hasKey ? "✓ set" : "✗ not set"}`,
 		);
 		console.log(
 			`  Tools: ${p.supportsTools ? "✓" : "✗"}  Streaming: ${p.supportsStreaming ? "✓" : "✗"}  Vision: ${p.supportsVision ? "✓" : "✗"}`,
@@ -571,7 +573,27 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 		const pm = getProviderManager();
 		const p = pm.getActiveProvider();
 		console.log(`\x1b[36mModels for ${p.displayName}:\x1b[0m`);
-		for (const model of p.models) {
+
+		// A provider declared with only a baseUrl has no static model list - that
+		// is the documented workflow, and asking the endpoint is the only way to
+		// fill it. Discovery is bounded by a timeout and never fatal: a declared
+		// endpoint that is asleep must not take the REPL down with it.
+		let models = p.models;
+		if (models.length === 0 && p.baseUrl) {
+			console.log("\x1b[90m  discovering...\x1b[0m");
+			try {
+				models = await pm.discoverModels(p.name);
+			} catch (err) {
+				console.log(
+					`\x1b[31m  discovery failed: ${err instanceof Error ? err.message : err}\x1b[0m`,
+				);
+			}
+		}
+
+		if (models.length === 0) {
+			console.log("\x1b[33m  none known - set `models` in providers.json\x1b[0m");
+		}
+		for (const model of models) {
 			const current = model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
 			console.log(`  - ${model}${current}`);
 		}
@@ -586,12 +608,17 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			const { getProviderManager } = await import("../providers/index.js");
 			const pm = getProviderManager();
 			const p = pm.getActiveProvider();
-			if (p.name === "ollama") {
-				console.log("\x1b[33mOllama doesn't need an API key (it's local)\x1b[0m");
+			// Same rule as everywhere else: a provider that declares no key env
+			// var takes no key. Storing one for a keyless declared provider wrote
+			// a credential that is never sent and told the user it was saved.
+			if (!p.apiKeyEnv) {
+				console.log(`\x1b[33m${p.displayName} doesn't need an API key (it's local)\x1b[0m`);
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				console.log("  Stored in ~/.8gent/providers.json");
+				// Report where it actually went - the path is redirectable via
+				// EIGHT_DATA_DIR / EIGHT_PROVIDERS_SETTINGS_PATH.
+				console.log(`  Stored in ${pm.getSettingsPath()}`);
 			}
 		}
 		return true;

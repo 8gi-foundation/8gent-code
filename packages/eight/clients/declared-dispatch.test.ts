@@ -25,7 +25,7 @@ import { OllamaClient, OpenRouterClient, createClient, runtimeForProvider } from
  */
 const LOCAL_OLLAMA = process.env.DECLARED_TEST_BASE_URL || "http://127.0.0.1:11434";
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-dispatch-"));
-const originalPath = process.env.PROVIDERS_SETTINGS_PATH;
+const originalPath = process.env.EIGHT_PROVIDERS_SETTINGS_PATH;
 
 /**
  * Point the provider singleton at a throwaway providers.json. `runtimeForProvider`
@@ -35,7 +35,7 @@ const originalPath = process.env.PROVIDERS_SETTINGS_PATH;
 function declareProviders(providers: Record<string, unknown>): void {
 	const file = path.join(tmpDir, `providers-${Math.random().toString(36).slice(2)}.json`);
 	fs.writeFileSync(file, JSON.stringify({ providers }, null, 2));
-	process.env.PROVIDERS_SETTINGS_PATH = file;
+	process.env.EIGHT_PROVIDERS_SETTINGS_PATH = file;
 	resetProviderManager();
 }
 
@@ -54,8 +54,9 @@ const [live, liveModel] = await (async (): Promise<[boolean, string]> => {
 })();
 
 afterEach(() => {
-	if (originalPath === undefined) Reflect.deleteProperty(process.env, "PROVIDERS_SETTINGS_PATH");
-	else process.env.PROVIDERS_SETTINGS_PATH = originalPath;
+	if (originalPath === undefined)
+		Reflect.deleteProperty(process.env, "EIGHT_PROVIDERS_SETTINGS_PATH");
+	else process.env.EIGHT_PROVIDERS_SETTINGS_PATH = originalPath;
 	resetProviderManager();
 });
 
@@ -109,6 +110,49 @@ describe("runtimeForProvider with declared providers", () => {
 		// a declared OpenAI-compatible endpoint unreachable through this stack.
 		expect((client as unknown as { baseUrl: string }).baseUrl).toBe("http://127.0.0.1:31337/v1");
 	});
+});
+
+describe("PII gate applies to egress, not to on-device endpoints", () => {
+	/** Stand up a one-shot OpenAI-compatible server and capture what it receives. */
+	async function captureRequest(
+		baseUrlFor: (port: number) => string,
+	): Promise<Record<string, unknown>> {
+		let received: Record<string, unknown> = {};
+		const server = Bun.serve({
+			port: 0,
+			fetch: async (req) => {
+				received = (await req.json()) as Record<string, unknown>;
+				return Response.json({
+					choices: [{ message: { role: "assistant", content: "ok" } }],
+				});
+			},
+		});
+		try {
+			const port = server.port ?? 0;
+			const client = new OpenRouterClient("test-model", "", baseUrlFor(port));
+			await client.chat([
+				{ role: "user", content: "My name is James Spalding, email james@example.com" },
+			]);
+		} finally {
+			server.stop(true);
+		}
+		return received;
+	}
+
+	test("a loopback baseUrl sends the real message, unpseudonymized", async () => {
+		// A declared provider can point this client at a server on this machine.
+		// Nothing leaves the device, so there is no egress boundary - and handing
+		// a coding agent pseudonymized paths and identifiers corrupts its input.
+		const sent = JSON.stringify(await captureRequest((port) => `http://127.0.0.1:${port}/v1`));
+		expect(sent).toContain("james@example.com");
+	}, 15_000);
+
+	test("a non-loopback baseUrl still goes through the anonymizer", async () => {
+		// Same server, reached by a name that is not loopback. isCloudProvider is
+		// deliberately strict, and that fail-safe direction must not regress.
+		const sent = JSON.stringify(await captureRequest((port) => `http://localtest.me:${port}/v1`));
+		expect(sent).not.toContain("james@example.com");
+	}, 15_000);
 });
 
 describe("a declared provider reaches a real endpoint through createClient", () => {
