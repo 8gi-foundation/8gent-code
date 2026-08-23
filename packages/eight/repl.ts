@@ -524,18 +524,25 @@ async function handleModelCommands(trimmed: string, agent: Agent): Promise<boole
 	return false;
 }
 
-async function handleProviderCommands(trimmed: string): Promise<boolean> {
+export async function handleProviderCommands(trimmed: string): Promise<boolean> {
 	if (trimmed === "/providers") {
-		const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
+		const { getProviderManager } = await import("../providers/index.js");
 		const pm = getProviderManager();
 		const active = pm.getActiveProvider();
 
 		console.log("\n\x1b[36mLLM Providers:\x1b[0m\n");
-		for (const name of PROVIDER_NAMES) {
-			const p = pm.getProvider(name);
-			const hasKey = pm.getApiKey(name) ? "\x1b[32m✓ key\x1b[0m" : "\x1b[33m○ no key\x1b[0m";
+		// listProviders(), not PROVIDER_NAMES: the compiled list omits every
+		// provider declared in ~/.8gent/providers.json, which made a declared
+		// provider invisible on the surface meant to show them.
+		for (const p of pm.listProviders()) {
+			const hasKey = pm.getApiKey(p.name) ? "\x1b[32m✓ key\x1b[0m" : "\x1b[33m○ no key\x1b[0m";
 			const isActive = p.name === active.name ? " \x1b[36m← active\x1b[0m" : "";
-			const keyInfo = p.name === "ollama" ? "\x1b[32m✓ local\x1b[0m" : hasKey;
+			// An empty apiKeyEnv is the registry's DECLARATION that a provider
+			// needs no key (see providers/__tests__/keyless-local.test.ts), which
+			// is the same rule the OpenAI-compatible auth gate reads. The old
+			// hardcoded `name === "ollama"` said "○ no key" for every other
+			// keyless local provider, declared ones included.
+			const keyInfo = p.apiKeyEnv ? hasKey : "\x1b[32m✓ local\x1b[0m";
 			console.log(`  ${p.displayName.padEnd(20)} ${keyInfo}${isActive}`);
 		}
 		console.log("\n  Use \x1b[36m/provider <name>\x1b[0m to switch");
@@ -595,20 +602,32 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 		!trimmed.startsWith("/provider key") &&
 		!trimmed.startsWith("/provider models")
 	) {
-		const providerName = trimmed.slice(10).trim().toLowerCase();
-		const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
+		const requested = trimmed.slice(10).trim();
+		const { getProviderManager } = await import("../providers/index.js");
+		const pm = getProviderManager();
 
-		if (!PROVIDER_NAMES.includes(providerName as any)) {
+		// Built-in names are all lowercase and this command has always lowercased
+		// its argument, so keep that. A declared name comes from a hand-written
+		// JSON key and may carry capitals, so try it verbatim first.
+		const providerName = pm.isKnownProvider(requested) ? requested : requested.toLowerCase();
+
+		// Gate on the LOADED set. PROVIDER_NAMES is the compiled list only - using
+		// it here rejected any provider declared in ~/.8gent/providers.json even
+		// though the registry accepts it.
+		if (!pm.isKnownProvider(providerName)) {
+			const available = pm.listProviders().map((p) => p.name);
 			console.log(`\x1b[31mUnknown provider: ${providerName}\x1b[0m`);
-			console.log(`Available: ${PROVIDER_NAMES.join(", ")}`);
+			console.log(`Available: ${available.join(", ")}`);
 		} else {
-			const pm = getProviderManager();
-			pm.setActiveProvider(providerName as any);
+			pm.setActiveProvider(providerName);
 			const p = pm.getActiveProvider();
 			console.log(`\x1b[32mSwitched to ${p.displayName}\x1b[0m`);
 			console.log(`  Model: ${pm.getActiveModel()}`);
 
-			if (p.name !== "ollama" && !pm.getApiKey(p.name)) {
+			// Only warn about a key the provider actually declares - the same rule
+			// the registry's auth gates use. The old `name !== "ollama"` test fired
+			// a spurious warning at every other keyless local provider.
+			if (p.apiKeyEnv && !pm.getApiKey(p.name)) {
 				console.log("\n  \x1b[33m⚠ No API key set.\x1b[0m");
 				console.log(`  Set with: /provider key <your-${p.name}-api-key>`);
 				console.log(`  Or set env: export ${p.apiKeyEnv}=<key>`);
