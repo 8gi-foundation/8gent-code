@@ -109,7 +109,7 @@ function logDecision(finding: Finding, decision: GateDecision, deps: GateDeps): 
 		surface: decision.surface,
 		rule: decision.rule,
 		reason: decision.reason,
-		preview: finding.text.slice(0, 160),
+		preview: (finding.text ?? "").slice(0, 160),
 	};
 	try {
 		mkdirSync(dirname(logPath), { recursive: true });
@@ -248,12 +248,28 @@ export async function processFinding(finding: Finding, deps: GateDeps = {}): Pro
 		logPath: deps.logPath ?? defaultLogPath(),
 		recall: deps.recall ?? memoryRecall(join(dataDir(), "memory.db")),
 	};
+
+	// #2883: a finding with no text cannot inform anyone, and an empty body
+	// reaches macOS as the literal word "Notification" - the alert the Chair
+	// received. Refuse it ahead of the rules so a missing text is a logged
+	// decision rather than a throw, and bind the body once.
+	const body = (finding.text ?? "").trim().slice(0, 300);
+	if (!body) {
+		const skipped: GateDecision = {
+			surface: false,
+			rule: "empty",
+			reason: "empty finding text; nothing to surface",
+		};
+		logDecision(finding, skipped, effectiveDeps);
+		return skipped;
+	}
+
 	const decision = await evaluate(finding, effectiveDeps);
 	if (!decision.surface) return decision;
 
 	try {
 		const notify = deps.notify ?? defaultNotify;
-		await notify(`8gent - ${finding.source} finding`, finding.text.slice(0, 300), decision);
+		await notify(`8gent - ${finding.source} finding`, body, decision);
 	} catch {
 		/* notification path unavailable; the decision log is the durable record */
 	}
