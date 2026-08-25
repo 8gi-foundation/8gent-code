@@ -31,8 +31,10 @@ function spySpawn() {
 
 /** Replaces global fetch so no Telegram or Resend request can leave the box. */
 function spyFetch() {
+	// Bun's fetch type carries a `preconnect` member; a bare async function does
+	// not, so the cast is what lets tsc accept a stub that only ever answers 200.
 	const spy = spyOn(globalThis, "fetch").mockImplementation(
-		async () => new Response("{}", { status: 200 }),
+		(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
 	);
 	spies.push(spy as unknown as Spy);
 	return spy;
