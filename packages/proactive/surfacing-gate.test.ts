@@ -260,4 +260,51 @@ describe("processFinding - flag and routing", () => {
 		expect(d.surface).toBe(true);
 		expect(d.rule).toBe("severity");
 	});
+
+	// #2883: the Chair received "8gent - reflection finding" / "Notification".
+	// An empty body reaches macOS as that literal word, so nothing empty may
+	// leave this call site - including a text the producer never set.
+	it("never notifies for an empty finding text, and says why in the log", async () => {
+		let notified = 0;
+		const d = await processFinding(finding("   "), {
+			logPath,
+			recall: noRecall,
+			notify: async () => {
+				notified++;
+			},
+		});
+		expect(d.surface).toBe(false);
+		expect(d.rule).toBe("empty");
+		expect(notified).toBe(0);
+		expect(readLog().at(-1)?.reason).toContain("empty");
+	});
+
+	it("treats a missing finding text as empty rather than throwing", async () => {
+		let notified = 0;
+		const d = await processFinding(
+			{ text: undefined as unknown as string, source: "reflection", sessionId: "s-1" },
+			{
+				logPath,
+				recall: noRecall,
+				notify: async () => {
+					notified++;
+				},
+			},
+		);
+		expect(d.surface).toBe(false);
+		expect(d.rule).toBe("empty");
+		expect(notified).toBe(0);
+	});
+
+	it("passes a trimmed body to notify", async () => {
+		const bodies: string[] = [];
+		await processFinding(finding("  Blocked: needs a key rotation decision  "), {
+			logPath,
+			recall: noRecall,
+			notify: async (_title, body) => {
+				bodies.push(body);
+			},
+		});
+		expect(bodies).toEqual(["Blocked: needs a key rotation decision"]);
+	});
 });
