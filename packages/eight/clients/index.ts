@@ -7,7 +7,7 @@ import {
 	type RoleName,
 	loadRoleConfig,
 } from "../../orchestration/role-config";
-import { type ProviderName, getProviderManager } from "../../providers";
+import { type ProviderCompat, type ProviderName, getProviderManager } from "../../providers";
 import type { AgentConfig, LLMClient } from "../types";
 import { AnthropicClient } from "./anthropic";
 import { ApfelClient } from "./apfel";
@@ -37,6 +37,22 @@ export class RoleProviderUnavailableError extends Error {
 	) {
 		super(`Provider "${provider}" required for role "${role}" is not available on this host`);
 		this.name = "RoleProviderUnavailableError";
+	}
+}
+
+/**
+ * Map a declared provider's wire shape to the client that speaks it. The
+ * "openrouter" runtime is the generic OpenAI Chat-Completions client; the name
+ * is historical, the shape is what matters here.
+ */
+export function runtimeForCompat(compat: ProviderCompat): AgentConfig["runtime"] {
+	switch (compat) {
+		case "ollama":
+			return "ollama";
+		case "anthropic":
+			return "anthropic";
+		default:
+			return "openrouter";
 	}
 }
 
@@ -73,9 +89,12 @@ export function runtimeForProvider(provider: ProviderName): AgentConfig["runtime
 		case "fireworks":
 		case "replicate":
 			return "openrouter";
-		default:
-			return "ollama";
 	}
+	// Not a compiled name. Either a provider declared in ~/.8gent/providers.json,
+	// whose `compat` picks the wire shape, or a name we know nothing about -
+	// which keeps the old fall-through to the local ollama runtime.
+	const compat = getProviderManager().getProvider(provider).compat;
+	return compat ? runtimeForCompat(compat) : "ollama";
 }
 
 /**
@@ -86,7 +105,10 @@ export function createClient(config: AgentConfig): LLMClient {
 	// `undefined` is a no-op: each client falls back to its env/default base URL.
 	if (config.runtime === "openrouter") {
 		const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
-		return new OpenRouterClient(config.model, apiKey);
+		// OpenRouterClient is the generic OpenAI Chat-Completions client and
+		// appends "/chat/completions", so a declared base URL SHOULD carry its
+		// own "/v1" suffix. Undefined keeps the OpenRouter default.
+		return new OpenRouterClient(config.model, apiKey, config.baseUrl);
 	}
 	if (config.runtime === "anthropic") {
 		const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || "";
@@ -143,5 +165,11 @@ export function createClientForRole(
 		runtime,
 		model: assignment.model,
 		apiKey,
+		// Only a DECLARED provider's base URL is threaded. The built-ins keep
+		// their client-side defaults on purpose: those do not all agree with
+		// `ProviderConfig.baseUrl` (lmstudio's registry entry carries a "/v1"
+		// suffix the client appends itself), so passing theirs through would
+		// double the suffix and break a provider that works today.
+		baseUrl: providerCfg.declared ? providerCfg.baseUrl : undefined,
 	});
 }

@@ -18,12 +18,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "../types/index.js";
-import {
-	anonymizeMessages,
-	deanonymize,
-	verifyClean,
-} from "../permissions/pii-anonymizer";
+import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { AuthRotator } from "./auth-rotation";
+import {
+	type ProviderCompat,
+	discoverModelsAt,
+	normalizeDeclaredProvider,
+	parseDeclaredProviders,
+} from "./declared";
 import { ModelFailover } from "./failover";
 import {
 	type ThinkingResolution,
@@ -35,7 +37,8 @@ import {
 // Types
 // ============================================
 
-export type ProviderName =
+/** Providers compiled into the registry, with defaults in `PROVIDER_DEFAULTS`. */
+export type BuiltinProviderName =
 	| "8gent"
 	| "ollama"
 	| "lmstudio"
@@ -53,6 +56,15 @@ export type ProviderName =
 	| "replicate"
 	| "host-cli-primary"
 	| "host-cli-secondary";
+
+/**
+ * Any provider the manager can route to. The built-in names keep their
+ * autocomplete; `(string & {})` admits a provider declared only in
+ * `~/.8gent/providers.json` (see `./declared`). This union is deliberately NOT
+ * the validity check - `ProviderManager.isKnownProvider()` is, because validity
+ * depends on what is loaded at runtime, not on what was compiled.
+ */
+export type ProviderName = BuiltinProviderName | (string & {});
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -73,6 +85,15 @@ export interface ProviderConfig {
 	 * dispatching. See `packages/providers/thinking-level.ts`.
 	 */
 	supportedThinkingLevels: readonly ThinkingLevel[];
+	/**
+	 * Wire shape this provider's endpoint speaks. Absent on built-ins, whose
+	 * shape is fixed by name (`compatFor()`); set on every declared provider so
+	 * one user-supplied base URL can be an OpenAI-compatible server, an Ollama,
+	 * or an Anthropic-shaped proxy.
+	 */
+	compat?: ProviderCompat;
+	/** True when this config came from `providers.json`, not the compiled table. */
+	declared?: boolean;
 }
 
 export interface ChatMessage {
@@ -132,7 +153,12 @@ export interface ChatResponse {
 export interface ProviderSettings {
 	activeProvider: ProviderName;
 	activeModel: string;
-	providers: Record<ProviderName, Partial<ProviderConfig>>;
+	/**
+	 * Keyed by provider name. A key that matches a built-in is a partial
+	 * override of it; any other key is a declaration of a new provider and must
+	 * carry a `baseUrl` (see `./declared`).
+	 */
+	providers: Record<string, Partial<ProviderConfig>>;
 }
 
 // ============================================
@@ -211,7 +237,7 @@ const ANTHROPIC_THINKING_BUDGET: Record<ThinkingLevel, number> = {
 	high: 32768,
 };
 
-const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
+const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 	"8gent": {
 		name: "8gent",
 		displayName: "8gent (The Infinite Gentleman)",
@@ -489,6 +515,14 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 	},
 };
 
+/** Names compiled into the registry. The declaration parser excludes these. */
+const BUILTIN_PROVIDER_NAMES: ReadonlySet<string> = new Set(Object.keys(PROVIDER_DEFAULTS));
+
+/** Compiled defaults for a name, or undefined when it is not a built-in. */
+function builtinDefaults(name: ProviderName): ProviderConfig | undefined {
+	return PROVIDER_DEFAULTS[name as BuiltinProviderName];
+}
+
 // ============================================
 // Provider Manager
 // ============================================
@@ -496,12 +530,29 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 export class ProviderManager {
 	private settings: ProviderSettings;
 	private settingsPath: string;
+	/** Providers declared in providers.json under a name we did not compile in. */
+	private declared: Record<string, ProviderConfig>;
 	readonly authRotator: AuthRotator;
 	readonly failover: ModelFailover;
 
 	constructor(settingsPath?: string) {
-		this.settingsPath = settingsPath || path.join(os.homedir(), ".8gent", "providers.json");
+		// `EIGHT_DATA_DIR` relocates the whole ~/.8gent directory and is already
+		// honoured by permissions, memory and the rest of the data layer. This
+		// file holds API keys, so it must move with them rather than become the
+		// one file that keeps reading and writing the real $HOME when someone
+		// sandboxes a run. `EIGHT_PROVIDERS_SETTINGS_PATH` overrides just this
+		// file, for tests and for pointing one process at an alternate profile.
+		this.settingsPath =
+			settingsPath ||
+			process.env.EIGHT_PROVIDERS_SETTINGS_PATH ||
+			path.join(process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"), "providers.json");
 		this.settings = this.loadSettings();
+		// Declarations are parsed into a SEPARATE map and never written back over
+		// the user's entry. `settings.providers[name]` stays exactly as the user
+		// typed it, so a field we do not model (a note, a comment, a key a later
+		// version adds) survives every save. Validation happens on read instead,
+		// in getProvider().
+		this.declared = parseDeclaredProviders(this.settings.providers, BUILTIN_PROVIDER_NAMES);
 		this.authRotator = new AuthRotator();
 		this.failover = new ModelFailover();
 	}
@@ -527,12 +578,22 @@ export class ProviderManager {
 		};
 	}
 
-	private getDefaultProviders(): Record<ProviderName, Partial<ProviderConfig>> {
+	private getDefaultProviders(): Record<string, Partial<ProviderConfig>> {
 		const providers: Record<string, Partial<ProviderConfig>> = {};
 		for (const [name, config] of Object.entries(PROVIDER_DEFAULTS)) {
 			providers[name] = { enabled: config.enabled };
 		}
-		return providers as Record<ProviderName, Partial<ProviderConfig>>;
+		return providers;
+	}
+
+	/**
+	 * Where this manager reads and writes provider settings, including API keys.
+	 * Redirectable via `EIGHT_DATA_DIR` / `EIGHT_PROVIDERS_SETTINGS_PATH`, so no
+	 * caller should hardcode "~/.8gent/providers.json" when telling a user where
+	 * their key landed.
+	 */
+	getSettingsPath(): string {
+		return this.settingsPath;
 	}
 
 	saveSettings(): void {
@@ -556,13 +617,36 @@ export class ProviderManager {
 	}
 
 	getProvider(name: ProviderName): ProviderConfig {
-		const defaults = PROVIDER_DEFAULTS[name];
 		const overrides = this.settings.providers[name] || {};
-		return { ...defaults, ...overrides };
+		// A built-in merges its compiled defaults with the user's overrides, as
+		// it always has.
+		const builtin = builtinDefaults(name);
+		if (builtin) return { ...builtin, ...overrides } as ProviderConfig;
+
+		const base = this.declared[name];
+		// Not a built-in and not a valid declaration: preserve the old behaviour
+		// of handing back whatever was there rather than throwing.
+		if (!base) return { ...overrides } as ProviderConfig;
+
+		// Re-normalize on READ. The user's raw entry is never rewritten, so an
+		// invalid field still cannot override its own sanitized value, but a
+		// field we do not model is left alone in the file instead of being
+		// silently deleted on the next save.
+		return normalizeDeclaredProvider(name, { ...base, ...overrides }) ?? base;
+	}
+
+	/**
+	 * Whether this name resolves to a provider we can route to. Validates
+	 * against the LOADED set - compiled built-ins plus anything declared in
+	 * providers.json - rather than a compiled union, which is the whole point of
+	 * issue #2882. A genuinely unknown name is still rejected.
+	 */
+	isKnownProvider(name: string): boolean {
+		return BUILTIN_PROVIDER_NAMES.has(name) || name in this.declared;
 	}
 
 	setActiveProvider(name: ProviderName): void {
-		if (!PROVIDER_DEFAULTS[name]) {
+		if (!this.isKnownProvider(name)) {
 			throw new Error(`Unknown provider: ${name}`);
 		}
 		this.settings.activeProvider = name;
@@ -617,11 +701,66 @@ export class ProviderManager {
 	}
 
 	listProviders(): ProviderConfig[] {
-		return Object.values(PROVIDER_DEFAULTS).map((p) => this.getProvider(p.name));
+		// Built-ins first, then declarations. Enumeration ADDS to the compiled
+		// table rather than replacing it, so every picker that reads this keeps
+		// showing the providers it always showed.
+		return [
+			...Object.values(PROVIDER_DEFAULTS).map((p) => this.getProvider(p.name)),
+			...Object.keys(this.declared).map((name) => this.getProvider(name)),
+		];
+	}
+
+	/**
+	 * Wire shape to speak to a provider. Declared providers carry it explicitly;
+	 * built-ins keep the shape their name has always implied, so this is a pure
+	 * restatement of the old dispatch switch and changes no existing route.
+	 */
+	compatFor(provider: ProviderConfig): ProviderCompat {
+		if (provider.compat) return provider.compat;
+		// Exactly the old `switch (dispatchProvider.name)`: only `ollama` and
+		// `anthropic` had native branches, everything else fell through to the
+		// OpenAI-compatible path. `8gent` is deliberately NOT native-Ollama here
+		// even though `runtimeForProvider()` maps it to the ollama runtime - the
+		// two stacks disagree today, and reconciling them is a separate defect,
+		// not something to smuggle into this change.
+		if (provider.name === "ollama") return "ollama";
+		if (provider.name === "anthropic") return "anthropic";
+		return "openai";
 	}
 
 	listEnabledProviders(): ProviderConfig[] {
 		return this.listProviders().filter((p) => p.enabled || this.getApiKey(p.name));
+	}
+
+	/**
+	 * Ask a provider's endpoint which models it serves, and record the answer.
+	 * This is how a declaration that named only a `baseUrl` becomes usable: the
+	 * discovered list is written to `providers.json`, and the first model
+	 * becomes the default when none was declared.
+	 */
+	async discoverModels(name: ProviderName): Promise<string[]> {
+		if (!this.isKnownProvider(name)) {
+			throw new Error(`Unknown provider: ${name}`);
+		}
+		const provider = this.getProvider(name);
+		if (!provider.baseUrl) {
+			throw new Error(`Provider ${name} has no baseUrl to discover models from`);
+		}
+		const models = await discoverModelsAt(
+			provider.baseUrl,
+			this.compatFor(provider),
+			this.getApiKey(name) || undefined,
+		);
+		if (models.length === 0) return models;
+
+		const entry = this.settings.providers[name] ?? {};
+		this.settings.providers[name] = entry;
+		entry.models = models;
+		if (!provider.defaultModel) {
+			entry.defaultModel = models[0];
+		}
+		this.saveSettings();
+		return models;
 	}
 
 	// ============================================
@@ -691,17 +830,24 @@ export class ProviderManager {
 			}
 		}
 
+		// Dispatch on the wire SHAPE, not the provider name. For built-ins
+		// `compatFor()` returns exactly what the old name switch did; a declared
+		// provider picks its own shape in providers.json.
 		let response: ChatResponse;
-		switch (dispatchProvider.name) {
+		switch (this.compatFor(dispatchProvider)) {
 			case "ollama":
-				response = await this.chatOllama(resolvedRequest, dispatchModel);
+				response = await this.chatOllama(dispatchProvider, resolvedRequest, dispatchModel);
 				break;
 			case "anthropic":
-				response = await this.chatAnthropic(resolvedRequest, dispatchModel);
+				response = await this.chatAnthropic(dispatchProvider, resolvedRequest, dispatchModel);
 				break;
 			default:
 				// OpenAI-compatible providers
-				response = await this.chatOpenAICompatible(dispatchProvider, resolvedRequest, dispatchModel);
+				response = await this.chatOpenAICompatible(
+					dispatchProvider,
+					resolvedRequest,
+					dispatchModel,
+				);
 		}
 
 		// De-anonymize the cloud response so the caller (officer/user) sees real
@@ -756,9 +902,11 @@ export class ProviderManager {
 		return resolveThinkingForRouting(level, provider.supportedThinkingLevels);
 	}
 
-	private async chatOllama(request: ChatRequest, model: string): Promise<ChatResponse> {
-		const provider = this.getProvider("ollama");
-
+	private async chatOllama(
+		provider: ProviderConfig,
+		request: ChatRequest,
+		model: string,
+	): Promise<ChatResponse> {
 		const body: Record<string, unknown> = {
 			model,
 			messages: request.messages.map((m) => ({
@@ -800,7 +948,7 @@ export class ProviderManager {
 			content: data.message?.content || "",
 			toolCalls,
 			model,
-			provider: "ollama",
+			provider: provider.name,
 			usage: data.eval_count
 				? {
 						promptTokens: data.prompt_eval_count || 0,
@@ -921,11 +1069,19 @@ export class ProviderManager {
 		};
 	}
 
-	private async chatAnthropic(request: ChatRequest, model: string): Promise<ChatResponse> {
-		const provider = this.getProvider("anthropic");
-		const apiKey = this.getApiKey("anthropic");
-		if (!apiKey) {
-			throw new Error("No API key for Anthropic. Set ANTHROPIC_API_KEY or use /settings");
+	private async chatAnthropic(
+		provider: ProviderConfig,
+		request: ChatRequest,
+		model: string,
+	): Promise<ChatResponse> {
+		const apiKey = this.getApiKey(provider.name);
+		// A declared Anthropic-shaped endpoint may be a keyless local proxy, so
+		// only demand a key from a provider that declares an env var for one -
+		// the same rule the OpenAI-compatible path already applies.
+		if (!apiKey && provider.apiKeyEnv) {
+			throw new Error(
+				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv} or use /settings`,
+			);
 		}
 
 		// Convert messages to Anthropic format
@@ -963,7 +1119,9 @@ export class ProviderManager {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				"x-api-key": apiKey,
+				// Omitted entirely when there is no key: a keyless local proxy can
+				// reject a malformed empty header rather than ignoring it.
+				...(apiKey ? { "x-api-key": apiKey } : {}),
 				"anthropic-version": "2023-06-01",
 			},
 			body: JSON.stringify(body),
@@ -996,7 +1154,7 @@ export class ProviderManager {
 			content,
 			toolCalls,
 			model,
-			provider: "anthropic",
+			provider: provider.name,
 			usage: data.usage
 				? {
 						promptTokens: data.usage.input_tokens || 0,
@@ -1016,7 +1174,7 @@ export class ProviderManager {
  * Providers tried, in order, when the PII gate must fail closed off a cloud
  * provider. All are on-device.
  */
-const LOCAL_FALLBACK_ORDER: ProviderName[] = ["ollama", "8gent", "lmstudio", "apfel"];
+const LOCAL_FALLBACK_ORDER: BuiltinProviderName[] = ["ollama", "8gent", "lmstudio", "apfel"];
 
 /**
  * Hostnames considered on-device. A request to any of these never leaves the
@@ -1188,8 +1346,10 @@ export function resetProviderManager(): void {
 	providerManagerInstance = null;
 }
 
-// Export provider names for reference
-export const PROVIDER_NAMES: ProviderName[] = [
+// Export provider names for reference. This is the COMPILED list only - it is
+// not the validity check. Ask `ProviderManager.isKnownProvider()` or read
+// `listProviders()` to include providers declared in providers.json.
+export const PROVIDER_NAMES: BuiltinProviderName[] = [
 	"8gent",
 	"ollama",
 	"lmstudio",
@@ -1206,6 +1366,13 @@ export const PROVIDER_NAMES: ProviderName[] = [
 	"host-cli-secondary",
 ];
 
+export {
+	discoverModelsAt,
+	modelsUrlFor,
+	normalizeDeclaredProvider,
+	parseDeclaredProviders,
+	type ProviderCompat,
+} from "./declared";
 export { AuthRotator, type AuthProfile } from "./auth-rotation";
 export {
 	ModelFailover,

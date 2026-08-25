@@ -1,13 +1,22 @@
 /**
  * OpenRouter LLM Client (OpenAI-compatible)
  *
- * CLOUD client. `chat()` is wrapped by the PII gate (`./pii-gate`): outbound
+ * The generic OpenAI Chat-Completions client. It defaults to OpenRouter, but
+ * `createClient()` also routes providers declared in `~/.8gent/providers.json`
+ * here with their own base URL, so the destination is whatever that URL says.
+ *
+ * CLOUD-BOUND requests are wrapped by the PII gate (`./pii-gate`): outbound
  * messages are anonymized + verified clean before they leave the machine, and
  * the cloud response (content + tool-call arguments) is de-anonymized on the
  * way back. On any anonymizer failure or surviving PII we FAIL CLOSED - reroute
- * to a local Ollama model, or refuse - and never send raw to OpenRouter.
+ * to a local Ollama model, or refuse - and never send raw to the cloud.
+ *
+ * An ON-DEVICE base URL bypasses the gate entirely, exactly as the registry
+ * stack does: the data never leaves the machine, so there is nothing to
+ * anonymize, and pseudonymizing a coding agent's file paths would corrupt them.
  */
 
+import { isCloudProvider } from "../../providers";
 import type { LLMClient, LLMResponse, Message } from "../types";
 import { anonymizeOutbound, deanonymizeResponse, resolveLocalFallback } from "./pii-gate";
 
@@ -23,6 +32,16 @@ export class OpenRouterClient implements LLMClient {
 	}
 
 	async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
+		// A declared provider can point this client at an on-device endpoint. The
+		// data then never leaves the machine, so there is no egress boundary to
+		// gate - and anonymizing would hand the model pseudonymized file paths
+		// and identifiers, which for a coding agent is a correctness hazard, not
+		// a safety win. Same base-URL test the registry stack applies, so the two
+		// stacks agree on what counts as local.
+		if (!isCloudProvider({ baseUrl: this.baseUrl })) {
+			return this.chatRaw(messages, tools);
+		}
+
 		// ── PII gate (cloud-egress boundary) ────────────────────────────────
 		// HARD RULE: no PII may reach OpenRouter. Anonymize + verify before send;
 		// de-anonymize the reply. Fail closed to a local model on any failure.
