@@ -428,11 +428,18 @@ describe("ledger file I/O", () => {
 		}
 	});
 
-	test("a real committed scores/ledger.json (empty bootstrap) parses cleanly", () => {
+	test("the real committed scores/ledger.json parses cleanly and has a real baseline", () => {
 		const path = join(import.meta.dir, "..", "scores", "ledger.json");
 		const ledger = loadLedger(path);
-		expect(ledger.categories).toEqual({});
-		expect(ledger.models).toEqual({});
+		// scores/ledger.json is no longer an empty bootstrap stub: it carries a
+		// real bug-fixing baseline from an actual multi-model-harness run
+		// against a local Ollama endpoint (see benchmarks/results-multi.tsv).
+		expect(Object.keys(ledger.categories).length).toBeGreaterThan(0);
+		for (const entry of Object.values(ledger.categories)) {
+			expect(entry.avgScore).toBeGreaterThanOrEqual(0);
+			expect(entry.avgScore).toBeLessThanOrEqual(100);
+			expect(entry.benchmarkCount).toBeGreaterThan(0);
+		}
 	});
 
 	test("loadLedger defaults models to {} for a pre-step-4 ledger file missing that key", () => {
