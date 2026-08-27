@@ -112,6 +112,7 @@ interface ChannelRow {
 	topic: string | null;
 	created_by: string;
 	created_at: number;
+	archived_at: number | null;
 }
 
 interface MemberRow {
@@ -144,6 +145,7 @@ function rowToChannel(r: ChannelRow): Channel {
 		topic: r.topic ?? undefined,
 		createdBy: r.created_by,
 		createdAt: r.created_at,
+		archivedAt: r.archived_at ?? undefined,
 	};
 }
 
@@ -233,11 +235,18 @@ export class TableStore {
 	 * audioDurationMs simply absent - no behavior change for a message that
 	 * never had narration. Safe to run on every open: "duplicate column name"
 	 * is swallowed (already migrated), any other error is real and rethrown.
+	 *
+	 * channels.archived_at (2026-08-27) follows the identical shape and is
+	 * non-lossy by construction: ADD COLUMN on a nullable column with no
+	 * DEFAULT rewrites no rows and backfills NULL, so every channel that
+	 * existed before the migration reads back as active. No channel row and no
+	 * message is touched.
 	 */
 	private migrate(): void {
 		const alters = [
 			"ALTER TABLE messages ADD COLUMN audio_url TEXT",
 			"ALTER TABLE messages ADD COLUMN audio_duration_ms INTEGER",
+			"ALTER TABLE channels ADD COLUMN archived_at INTEGER",
 		];
 		for (const sql of alters) {
 			try {
@@ -323,14 +332,87 @@ export class TableStore {
 		return channel;
 	}
 
-	listChannels(opts: { visibleTo?: ParticipantId } = {}): Channel[] {
+	/**
+	 * Active channels, oldest first. Archived channels are omitted by default -
+	 * the default listing is the WORKING SET, which is the entire point of
+	 * archiving. Pass includeArchived to get everything; the archive is always
+	 * one flag away, never gone.
+	 */
+	listChannels(opts: { visibleTo?: ParticipantId; includeArchived?: boolean } = {}): Channel[] {
 		const rows = this.db
-			.prepare("SELECT * FROM channels ORDER BY created_at ASC")
+			.prepare(
+				opts.includeArchived
+					? "SELECT * FROM channels ORDER BY created_at ASC"
+					: "SELECT * FROM channels WHERE archived_at IS NULL ORDER BY created_at ASC",
+			)
 			.all() as ChannelRow[];
 		const channels = rows.map(rowToChannel);
 		if (!opts.visibleTo) return channels;
 		const viewer = opts.visibleTo;
 		return channels.filter((c) => c.visibility === "open" || this.isMember(c.id, viewer));
+	}
+
+	/**
+	 * Flag a channel archived. NON-DESTRUCTIVE and REVERSIBLE: this writes one
+	 * nullable timestamp and touches nothing else. The channel row survives,
+	 * every message survives, and reads (thread / subscribe / search) keep
+	 * working exactly as before - hiding the channel from a default
+	 * listChannels() is the only behavior that changes. Idempotent: archiving
+	 * an already-archived channel returns it unchanged rather than moving the
+	 * timestamp, so a retry cannot rewrite when it was archived.
+	 *
+	 * Authority: owner/admin of the channel, matching removeMember. Archiving
+	 * is a state change on the shared record, so it takes more than mere
+	 * membership.
+	 */
+	archiveChannel(channelId: string, archivedBy: ParticipantId): Channel {
+		const channel = this.requireChannel(channelId);
+		if (!this.hasRole(channelId, archivedBy, ADMIN_ROLES)) {
+			throw new TableAuthError(
+				`${archivedBy} is not owner/admin of ${channelId} and cannot archive it`,
+			);
+		}
+		if (channel.archivedAt !== undefined) return channel;
+
+		const archivedAt = Date.now();
+		this.db.prepare("UPDATE channels SET archived_at = ? WHERE id = ?").run(archivedAt, channelId);
+
+		this.ledger.append({
+			kind: "table.channel.archive",
+			payload: { channelId, name: channel.name, archivedBy, archivedAt },
+		});
+
+		return { ...channel, archivedAt };
+	}
+
+	/**
+	 * Clear the archive flag, returning the channel to the default listing. The
+	 * counterpart that keeps archive from being a delete in disguise. Idempotent
+	 * on an already-active channel.
+	 */
+	unarchiveChannel(channelId: string, unarchivedBy: ParticipantId): Channel {
+		const channel = this.requireChannel(channelId);
+		if (!this.hasRole(channelId, unarchivedBy, ADMIN_ROLES)) {
+			throw new TableAuthError(
+				`${unarchivedBy} is not owner/admin of ${channelId} and cannot unarchive it`,
+			);
+		}
+		if (channel.archivedAt === undefined) return channel;
+
+		this.db.prepare("UPDATE channels SET archived_at = NULL WHERE id = ?").run(channelId);
+
+		this.ledger.append({
+			kind: "table.channel.unarchive",
+			payload: {
+				channelId,
+				name: channel.name,
+				unarchivedBy,
+				wasArchivedAt: channel.archivedAt,
+				ts: Date.now(),
+			},
+		});
+
+		return { ...channel, archivedAt: undefined };
 	}
 
 	getChannel(channelId: string): Channel | null {

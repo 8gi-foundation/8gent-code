@@ -28,6 +28,14 @@ export interface Channel {
 	createdBy: ParticipantId;
 	/** epoch ms */
 	createdAt: number;
+	/**
+	 * Archive tombstone, epoch ms; undefined = active. Archiving is a flag, not
+	 * a delete: the channel row and every message it holds survive untouched,
+	 * and an archived channel still reads back in full. It is hidden from a
+	 * default listChannels() and returned again with includeArchived. Reversible
+	 * via unarchiveChannel.
+	 */
+	archivedAt?: number;
 }
 
 export interface Member {
