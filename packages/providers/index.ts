@@ -54,6 +54,13 @@ export type BuiltinProviderName =
 	| "together"
 	| "fireworks"
 	| "replicate"
+	| "gemini"
+	| "cohere"
+	| "perplexity"
+	| "cerebras"
+	| "sambanova"
+	| "novita"
+	| "nebius"
 	| "host-cli-primary"
 	| "host-cli-secondary";
 
@@ -481,6 +488,107 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		supportsTools: false,
 		supportsStreaming: true,
 		supportsVision: true,
+		supportedThinkingLevels: [],
+	},
+	gemini: {
+		name: "gemini",
+		displayName: "Google Gemini",
+		// Google's OpenAI-compatibility shim. Verified live 2026-08-29.
+		baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+		apiKeyEnv: "GEMINI_API_KEY",
+		defaultModel: "gemini-2.5-flash",
+		models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		supportedThinkingLevels: [],
+	},
+	cohere: {
+		name: "cohere",
+		displayName: "Cohere",
+		// Verified live 2026-08-29 (docs.cohere.com/docs/compatibility-api).
+		baseUrl: "https://api.cohere.ai/compatibility/v1",
+		apiKeyEnv: "COHERE_API_KEY",
+		defaultModel: "command-r-plus",
+		models: ["command-r-plus", "command-r"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	perplexity: {
+		name: "perplexity",
+		displayName: "Perplexity",
+		// Router API, OpenAI- and Anthropic-compatible. Verified live 2026-08-29.
+		baseUrl: "https://api.perplexity.ai/router/v1",
+		apiKeyEnv: "PERPLEXITY_API_KEY",
+		defaultModel: "sonar",
+		models: ["sonar", "sonar-pro"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	cerebras: {
+		name: "cerebras",
+		displayName: "Cerebras",
+		// Verified live 2026-08-29 (inference-docs.cerebras.ai).
+		baseUrl: "https://api.cerebras.ai/v1",
+		apiKeyEnv: "CEREBRAS_API_KEY",
+		defaultModel: "llama-3.3-70b",
+		models: ["llama-3.3-70b", "llama3.1-8b"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	sambanova: {
+		name: "sambanova",
+		displayName: "SambaNova",
+		// Not re-verified live this session (docs.sambanova.ai returned 404 on
+		// the path tried); this is the long-documented, stable base URL.
+		baseUrl: "https://api.sambanova.ai/v1",
+		apiKeyEnv: "SAMBANOVA_API_KEY",
+		defaultModel: "Meta-Llama-3.1-70B-Instruct",
+		models: ["Meta-Llama-3.1-70B-Instruct", "Meta-Llama-3.1-8B-Instruct"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	novita: {
+		name: "novita",
+		displayName: "Novita AI",
+		// Verified live 2026-08-29 (novita.ai/docs/guides/llm-api).
+		baseUrl: "https://api.novita.ai/openai",
+		apiKeyEnv: "NOVITA_API_KEY",
+		defaultModel: "meta-llama/llama-3.1-70b-instruct",
+		models: ["meta-llama/llama-3.1-70b-instruct"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	nebius: {
+		name: "nebius",
+		displayName: "Nebius Token Factory",
+		// Nebius AI Studio rebranded to "Token Factory"; host changed to
+		// api.tokenfactory.nebius.com. Verified live 2026-08-29 - do not
+		// revert to the old api.studio.nebius.ai host without re-checking.
+		baseUrl: "https://api.tokenfactory.nebius.com/v1",
+		apiKeyEnv: "NEBIUS_API_KEY",
+		defaultModel: "meta-llama/Meta-Llama-3.1-70B-Instruct",
+		models: ["meta-llama/Meta-Llama-3.1-70B-Instruct"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
 		supportedThinkingLevels: [],
 	},
 	"host-cli-primary": {

@@ -71,9 +71,24 @@ export class WhisperModelManager extends EventEmitter<ModelManagerEvents> {
 
 	/**
 	 * Get the local file path for a model (whether or not it's downloaded).
+	 *
+	 * Checks the multilingual filename first (e.g. "ggml-base.bin"). If that is
+	 * not on disk, falls back to the English-only variant (e.g.
+	 * "ggml-base.en.bin") when present, so a model a user already has from
+	 * whisper.cpp/brew/another tool is used instead of triggering a redundant
+	 * download of a file that is functionally equivalent for English speech.
 	 */
 	getModelPath(name: WhisperModelName): string {
-		return join(this.modelsDir, WHISPER_MODELS[name].filename);
+		const defaultPath = join(this.modelsDir, WHISPER_MODELS[name].filename);
+		if (existsSync(defaultPath)) {
+			return defaultPath;
+		}
+		const enVariant = WHISPER_MODELS[name].filename.replace(/\.bin$/, ".en.bin");
+		const enPath = join(this.modelsDir, enVariant);
+		if (existsSync(enPath)) {
+			return enPath;
+		}
+		return defaultPath;
 	}
 
 	/**

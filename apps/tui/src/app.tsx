@@ -4071,14 +4071,139 @@ export function App({
 								}`,
 							);
 						});
+					} else if (args[0] === "test") {
+						// /voice test - real round-trip smoke test: synthesize a known
+						// phrase with the configured TTS engine, resample it to the
+						// 16kHz mono format whisper.cpp requires (via sox, the same
+						// tool the mic recorder already depends on), then transcribe
+						// it back and diff against what was said. Proves both
+						// directions actually work end to end, not just that the
+						// binaries exist.
+						addSystemMessage(
+							"Voice round-trip test: synthesizing speech, then transcribing it back...",
+						);
+						(async () => {
+							const os = await import("node:os");
+							const testPhrase = "Voice pipeline round trip test";
+							const stamp = Date.now();
+							const rawWav = pathMod.join(os.tmpdir(), `voice-test-${stamp}-raw.wav`);
+							const resampledWav = pathMod.join(
+								os.tmpdir(),
+								`voice-test-${stamp}-16k.wav`,
+							);
+							try {
+								const [{ findWhisperBinary, transcribeLocal }, { getTTSEngine }] =
+									await Promise.all([
+										import("../../../packages/voice/transcriber.js"),
+										import("../../../packages/voice/tts-engine.js"),
+									]);
+
+								// Direction 1: text -> speech
+								const escaped = testPhrase.replace(/"/g, '\\"');
+								const synthScript = [
+									"from kittentts import KittenTTS",
+									'm = KittenTTS("KittenML/kitten-tts-nano-0.8")',
+									`m.generate_to_file("${escaped}", "${rawWav}", voice="Hugo")`,
+								].join("; ");
+								const synth = Bun.spawn(["python3", "-c", synthScript], {
+									stdout: "ignore",
+									stderr: "pipe",
+								});
+								const synthErr = await new Response(synth.stderr).text();
+								const synthExit = await synth.exited;
+								if (synthExit !== 0 || !fs.existsSync(rawWav)) {
+									addSystemMessage(
+										`Voice test FAILED at TTS step: ${
+											synthErr.trim() || "kittentts did not produce output"
+										}`,
+									);
+									return;
+								}
+
+								// Resample to whisper.cpp's required 16kHz mono format.
+								const resample = Bun.spawn(
+									["sox", rawWav, "-r", "16000", "-c", "1", resampledWav],
+									{ stdout: "ignore", stderr: "pipe" },
+								);
+								const resampleErr = await new Response(resample.stderr).text();
+								const resampleExit = await resample.exited;
+								if (resampleExit !== 0 || !fs.existsSync(resampledWav)) {
+									addSystemMessage(
+										`Voice test FAILED at resample step (sox): ${
+											resampleErr.trim() || "no output produced"
+										}`,
+									);
+									return;
+								}
+
+								// Play it so a human at the terminal hears it too.
+								try {
+									await (await getTTSEngine().speak(testPhrase, { voice: "Hugo" }))
+										.exited;
+								} catch {
+									// Playback failure doesn't invalidate the pipeline result below.
+								}
+
+								// Direction 2: speech -> text
+								const binaryPath = await findWhisperBinary();
+								if (!binaryPath) {
+									addSystemMessage(
+										"Voice test FAILED at STT step: no whisper.cpp binary found.",
+									);
+									return;
+								}
+								const modelManager = voice.engine.getModelManager();
+								const modelName = voice.engine.getConfig().model || "base";
+								const modelPath = modelManager.getModelPath(modelName);
+								if (!fs.existsSync(modelPath)) {
+									addSystemMessage(
+										`Voice test FAILED at STT step: no whisper model at ${modelPath}.`,
+									);
+									return;
+								}
+								const result = await transcribeLocal(resampledWav, {
+									binaryPath,
+									modelPath,
+								});
+								const heard = result.text.trim();
+								const spokenWords = testPhrase.toLowerCase().split(/\s+/);
+								const heardWords = heard.toLowerCase().split(/\s+/);
+								const overlap = spokenWords.filter((w) =>
+									heardWords.includes(w),
+								).length;
+								const pass = overlap >= Math.ceil(spokenWords.length * 0.6);
+								addSystemMessage(
+									`Voice round-trip test ${pass ? "PASSED" : "FAILED"}\n` +
+										`  Said:   "${testPhrase}"\n` +
+										`  Heard:  "${heard}"\n` +
+										`  Model:  ${modelPath}\n` +
+										`  Binary: ${binaryPath}`,
+								);
+							} catch (err) {
+								addSystemMessage(
+									`Voice test error: ${
+										err instanceof Error ? err.message : String(err)
+									}`,
+								);
+							} finally {
+								for (const f of [rawWav, resampledWav]) {
+									try {
+										fs.unlinkSync(f);
+									} catch {
+										// already gone
+									}
+								}
+							}
+						})();
 					} else {
 						addSystemMessage(
 							"Voice commands:\n" +
-								"  /voice chat    — Start/stop voice conversation mode\n" +
-								"  /voice record  — Toggle STT recording (or press Ctrl+R)\n" +
-								"  /voice status  — Check voice system status\n" +
-								"  /voice stop    — Stop voice chat mode\n" +
-								"  /voice on|off  — Toggle TTS output",
+								"  /voice chat    - Start/stop voice conversation mode\n" +
+								"  /voice record  - Toggle STT recording (or press Ctrl+R)\n" +
+								"  /voice status  - Check voice system status\n" +
+								"  /voice stop    - Stop voice chat mode\n" +
+								"  /voice on|off  - Toggle TTS output\n" +
+								"  /voice test    - Round-trip smoke test (TTS -> STT)",
 						);
 					}
 					break;
