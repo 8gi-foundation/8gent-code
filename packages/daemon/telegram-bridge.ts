@@ -14,8 +14,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
 import {
@@ -27,6 +27,70 @@ import {
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
 import { decideVoice, readVoiceState, sendVoiceNote, writeVoiceState } from "../telegram-bot/voice-mode";
+
+/**
+ * Where messages from chats the bridge does not answer are recorded.
+ * One JSON object per line, appended.
+ */
+export const OBSERVED_LOG = join(homedir(), ".8gent", "telegram-observed.jsonl");
+
+/** Stop the log growing without bound; ~5MB is weeks of a busy group. */
+const OBSERVED_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Record an update from a chat the bridge is not authorized to answer.
+ *
+ * Deliberately total: every failure path is swallowed. This runs inside the
+ * poll loop, and an unhandled throw here would kill polling while leaving the
+ * process alive - a bridge that looks healthy in `launchctl` and answers
+ * nothing, which is a failure mode this project has already paid for once.
+ * Losing an observation is acceptable; losing the poll loop is not.
+ *
+ * Stores only what a reader needs to follow a conversation. No raw update
+ * dump, so nothing incidental in the payload is persisted by accident.
+ */
+export function observeUnauthorized(update: unknown): void {
+	try {
+		const u = update as {
+			update_id?: number;
+			message?: {
+				date?: number;
+				text?: string;
+				caption?: string;
+				message_id?: number;
+				chat?: { id?: number; title?: string; type?: string };
+				from?: { username?: string; first_name?: string; is_bot?: boolean };
+			};
+		};
+		const m = u.message;
+		if (!m) return;
+		const text = m.text ?? m.caption;
+		if (!text) return; // nothing readable (sticker, service message)
+
+		try {
+			if (statSync(OBSERVED_LOG).size > OBSERVED_MAX_BYTES) return;
+		} catch {
+			mkdirSync(join(homedir(), ".8gent"), { recursive: true });
+		}
+
+		appendFileSync(
+			OBSERVED_LOG,
+			`${JSON.stringify({
+				at: new Date((m.date ?? 0) * 1000).toISOString(),
+				update_id: u.update_id,
+				message_id: m.message_id,
+				chat_id: m.chat?.id,
+				chat_title: m.chat?.title,
+				from: m.from?.username ?? m.from?.first_name,
+				is_bot: m.from?.is_bot === true,
+				text,
+			})}\n`,
+			"utf8",
+		);
+	} catch {
+		// Never let observation break the bridge.
+	}
+}
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_MSG_LENGTH = 4000;
@@ -471,8 +535,20 @@ class TelegramDaemonBridge {
 							typeof incomingChatId === "number" &&
 							!this.isAuthorizedChat(incomingChatId)
 						) {
+							// Record before dropping. The bot is an administrator of
+							// groups it does not answer in, so it already receives every
+							// message there, and Telegram gives bots no history API - once
+							// this update is discarded that content cannot be recovered.
+							// The bridge also holds the only getUpdates lease on the token,
+							// so a second poller would conflict with it rather than read
+							// alongside it. Appending here is the one place another process
+							// can learn what was said without contending for the lease.
+							//
+							// Capture only. The allowlist keeps its exact meaning: this chat
+							// still gets no reply, no agent dispatch and no side effect.
+							observeUnauthorized(update);
 							console.warn(
-								`[telegram-bridge] dropped update from unauthorized chat ${incomingChatId}`,
+								`[telegram-bridge] observed and dropped update from unauthorized chat ${incomingChatId}`,
 							);
 							continue;
 						}
