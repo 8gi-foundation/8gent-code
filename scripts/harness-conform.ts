@@ -321,6 +321,85 @@ async function run(o: Opts): Promise<Check[]> {
 		}
 	}
 
+	// ---- Stage 5: constrained decoding, and where its output lands ---------
+	// Schema constraints are the cheapest way to make a small model more
+	// capable without touching inference speed: malformed tool calls stop being
+	// a bug you catch and become a state the model cannot enter.
+	//
+	// Two things go wrong in practice, both observed on ornith-1.0-9b:
+	//
+	//   1. On a reasoning model the schema-conforming JSON is emitted into
+	//      `reasoning_content` while `content` stays empty. The constraint
+	//      worked perfectly and a client reading `content` sees nothing.
+	//   2. A schema with no legal way to say "unknown" makes fabrication the
+	//      only permitted move. Asked for Dublin's weather, which it cannot
+	//      know, the integer field came back -6048294175318603. Asked how many
+	//      days are in a week, the same schema returned 7. The grammar
+	//      guarantees shape and never truth.
+	//
+	// This check reports where the output landed. The second failure is a
+	// schema-design rule, not something a probe can measure, so it is stated
+	// rather than tested: every constrained schema needs an unknown branch.
+	{
+		try {
+			const { res, json, ms } = await post(o, "/v1/chat/completions", {
+				model: modelId,
+				messages: [{ role: "user", content: "How many days in a week? Use the schema." }],
+				response_format: {
+					type: "json_schema",
+					json_schema: {
+						name: "n",
+						strict: true,
+						schema: {
+							type: "object",
+							properties: { answer: { type: "integer" }, unit: { type: "string" } },
+							required: ["answer", "unit"],
+							additionalProperties: false,
+						},
+					},
+				},
+				max_tokens: 3000,
+			});
+			const msg = json?.choices?.[0]?.message ?? {};
+			const content = typeof msg.content === "string" ? msg.content : "";
+			const reasoning =
+				typeof msg.reasoning_content === "string" ? msg.reasoning_content : "";
+			const parses = (s: string) => {
+				try {
+					const v = JSON.parse(s.trim());
+					return v && typeof v === "object" && "answer" in v;
+				} catch {
+					return false;
+				}
+			};
+			const inContent = parses(content);
+			const inReasoning = !inContent && parses(reasoning);
+			add({
+				stage: 5,
+				id: "constrained-output-placement",
+				proves: "schema-constrained output arrives in content, where clients read it",
+				status: !res.ok ? "fail" : inContent ? "pass" : inReasoning ? "fail" : "skip",
+				detail: !res.ok
+					? `http ${res.status}`
+					: inContent
+						? `schema honoured in content: ${content.trim().replace(/\s+/g, " ").slice(0, 60)}`
+						: inReasoning
+							? "schema honoured but emitted into reasoning_content while content was empty: a client reading content sees nothing"
+							: "no schema-shaped object in either field; endpoint may not support response_format",
+				ms,
+			});
+		} catch (e) {
+			add({
+				stage: 5,
+				id: "constrained-output-placement",
+				proves: "schema-constrained output arrives in content, where clients read it",
+				status: "skip",
+				detail: e instanceof Error ? e.message : String(e),
+				ms: 0,
+			});
+		}
+	}
+
 	// ---- Stage 9: does a failure say what went wrong? ----------------------
 	{
 		try {
