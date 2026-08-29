@@ -41,10 +41,25 @@ import { join } from "node:path";
 interface Item {
 	id: string;
 	ask: string;
-	scorer: "contains_any" | "must_refuse";
+	/**
+	 * contains_any        - any accepted value appears
+	 * contains_all        - every accepted value appears; used for multi-hop
+	 *                       items where hitting one fact and guessing the other
+	 *                       would otherwise score as a pass
+	 * must_refuse         - no correct answer exists; declining is the pass
+	 * must_refuse_absence - the material IS supplied and the thing is not in it.
+	 *                       Declining for lack of access is a FAIL: the model has
+	 *                       to check what it was given and report the absence.
+	 *                       Split out because ornith-1.0-9b passed the easy
+	 *                       refusal by claiming no codebase access rather than
+	 *                       by looking and finding nothing, and those are
+	 *                       different capabilities.
+	 */
+	scorer: "contains_any" | "contains_all" | "must_refuse" | "must_refuse_absence";
 	truth: string[];
 	provenance: string;
-	source: string;
+	/** Files handed to the model. Empty means the item tests answering with no material. */
+	sources: string[];
 }
 
 const arg = (f: string, d: string) => {
@@ -63,13 +78,13 @@ const items: Item[] = readFileSync(join(ROOT, "bench/harness-bench.jsonl"), "utf
 	.map((l) => JSON.parse(l));
 
 async function answer(item: Item): Promise<string> {
-	// Items that name a source file get it; the rest get nothing. An item whose
-	// source is "none" is testing whether the model invents an answer it has no
-	// material for, so handing it material would defeat the item.
-	const material =
-		item.source && item.source !== "none"
-			? `--- ${item.source} ---\n${readFileSync(join(ROOT, item.source), "utf8")}\n\n`
-			: "";
+	// Items list the files they get. An item with no sources tests whether the
+	// model invents an answer it has no material for, so handing it material
+	// would defeat the item. Multi-hop items get several files and the answer
+	// lives in none of them alone.
+	const material = item.sources
+		.map((p) => `--- ${p} ---\n${readFileSync(join(ROOT, p), "utf8")}\n`)
+		.join("\n");
 	const res = await fetch(`${BASE}/v1/chat/completions`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -116,14 +131,51 @@ const REFUSAL = [
 	"no function", "i don't have", "i do not have", "not aware of",
 ];
 
+/**
+ * Excuses that are refusals but NOT absence-detection. Saying "I have no access
+ * to the codebase" when the file is sitting in the prompt is not noticing an
+ * absence, it is declining to look. Scored as a failure on must_refuse_absence
+ * items so the two capabilities stay distinguishable.
+ */
+const NO_ACCESS = [
+	"no access", "do not have access", "don't have access", "not have access",
+	"cannot access", "can't access", "unable to access", "no codebase",
+	"do not have the file", "don't have the file", "was not provided",
+];
+
 function score(item: Item, out: string): { pass: boolean; why: string } {
 	const hay = normalise(out);
+
 	if (item.scorer === "contains_any") {
 		const hit = item.truth.find((t) => hay.includes(normalise(t)));
 		return hit
 			? { pass: true, why: `found ${JSON.stringify(hit)}` }
 			: { pass: false, why: "none of the accepted values appeared" };
 	}
+
+	if (item.scorer === "contains_all") {
+		const missing = item.truth.filter((t) => !hay.includes(normalise(t)));
+		return missing.length === 0
+			? { pass: true, why: `found all of ${JSON.stringify(item.truth)}` }
+			: { pass: false, why: `missing ${JSON.stringify(missing)}` };
+	}
+
+	if (item.scorer === "must_refuse_absence") {
+		const excuse = NO_ACCESS.find((t) => hay.includes(t));
+		if (excuse) {
+			return {
+				pass: false,
+				why: `declined for lack of access (${JSON.stringify(excuse)}) though the file was supplied`,
+			};
+		}
+		const hit =
+			item.truth.find((t) => hay.includes(normalise(t))) ??
+			REFUSAL.filter((t) => !NO_ACCESS.includes(t)).find((t) => hay.includes(t));
+		return hit
+			? { pass: true, why: `reported the absence: ${JSON.stringify(hit)}` }
+			: { pass: false, why: "described a function that is not in the supplied file - fabrication" };
+	}
+
 	// must_refuse: the item's own phrasings plus the shared vocabulary above.
 	const hit =
 		item.truth.find((t) => hay.includes(normalise(t))) ??
@@ -151,8 +203,8 @@ for (const item of items) {
 
 const total = results.length;
 const passed = results.filter((r) => r.pass).length;
-const factual = results.filter((r) => r.scorer === "contains_any");
-const refusal = results.filter((r) => r.scorer === "must_refuse");
+const factual = results.filter((r) => r.scorer === "contains_any" || r.scorer === "contains_all");
+const refusal = results.filter((r) => r.scorer.startsWith("must_refuse"));
 const summary = {
 	base: BASE,
 	model: MODEL,
