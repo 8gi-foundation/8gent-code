@@ -280,6 +280,47 @@ async function run(o: Opts): Promise<Check[]> {
 		}
 	}
 
+	// ---- Stage 4: does the server serve the model you asked for? -----------
+	// Found the hard way against LM Studio: a model id that does not exist is
+	// answered by whatever happens to be loaded, with HTTP 200 and no warning.
+	// The consequence is worse than a bad error message - an eval can score a
+	// model it never selected, and every number it produces is about something
+	// else. Checked separately from error quality because this one silently
+	// corrupts results rather than merely being unhelpful.
+	{
+		const bogus = "conformance-probe-model-that-does-not-exist";
+		try {
+			const { res, json, ms } = await post(o, "/v1/chat/completions", {
+				model: bogus,
+				messages: [{ role: "user", content: "hi" }],
+				max_tokens: 8,
+			});
+			const served: string = typeof json?.model === "string" ? json.model : "";
+			const substituted = res.ok && served !== "" && served !== bogus;
+			add({
+				stage: 4,
+				id: "model-substitution",
+				proves: "the server answers as the model you asked for, or refuses",
+				status: !res.ok ? "pass" : substituted ? "fail" : "fail",
+				detail: !res.ok
+					? `refused an unknown model with http ${res.status}, which is correct`
+					: substituted
+						? `asked for "${bogus}", answered by "${served}" with http 200: a typo silently routes to the wrong model`
+						: `accepted an unknown model with http 200 and named no model in the response`,
+				ms,
+			});
+		} catch (e) {
+			add({
+				stage: 4,
+				id: "model-substitution",
+				proves: "the server answers as the model you asked for, or refuses",
+				status: "skip",
+				detail: e instanceof Error ? e.message : String(e),
+				ms: 0,
+			});
+		}
+	}
+
 	// ---- Stage 9: does a failure say what went wrong? ----------------------
 	{
 		try {
@@ -342,13 +383,203 @@ function renderText(o: Opts, checks: Check[]): string {
 	return lines.join("\n");
 }
 
+const esc = (s: string) =>
+	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * Render the run as a bench readout.
+ *
+ * Every value on the page comes from the run that just happened. There is no
+ * sample data and no placeholder: a report that can render without a run is a
+ * report that can lie about one.
+ */
+function renderHtml(o: Opts, checks: Check[], ranAt: string): string {
+	const pass = checks.filter((c) => c.status === "pass").length;
+	const fail = checks.filter((c) => c.status === "fail").length;
+	const skip = checks.filter((c) => c.status === "skip").length;
+	const slowest = Math.max(1, ...checks.map((c) => c.ms));
+
+	const stages = [...new Set(checks.map((c) => c.stage))].sort((a, b) => a - b);
+
+	const rows = stages
+		.map((stage) => {
+			const inStage = checks.filter((c) => c.stage === stage);
+			const items = inStage
+				.map((c) => {
+					const width = Math.max(1.5, (c.ms / slowest) * 100);
+					return `
+        <li class="check ${c.status}">
+          <span class="chip" aria-label="${c.status}">${c.status === "pass" ? "PASS" : c.status === "fail" ? "FAIL" : "INCONCLUSIVE"}</span>
+          <div class="body">
+            <p class="id">${esc(c.id)}</p>
+            <p class="proves">proves &mdash; ${esc(c.proves)}</p>
+            <p class="detail">${esc(c.detail)}</p>
+          </div>
+          <div class="timing">
+            <span class="ms">${c.ms.toLocaleString()}<abbr>ms</abbr></span>
+            <span class="bar"><i style="width:${width.toFixed(1)}%"></i></span>
+          </div>
+        </li>`;
+				})
+				.join("");
+			return `
+      <section class="stage">
+        <h2><span class="num">${stage}</span>${esc(STAGES[stage] ?? `Stage ${stage}`)}</h2>
+        <ol class="checks">${items}</ol>
+      </section>`;
+		})
+		.join("");
+
+	return `<title>Harness Conformance Readout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;1,400&display=swap">
+<style>
+  :root {
+    --ground:#ECEEF1; --surface:#FFFFFF; --sunk:#E3E7EC;
+    --ink:#12161B; --dim:#5A646F; --rule:#D3D9E0;
+    --accent:#B26A00;
+    --pass:#1F7A4D; --fail:#B3261E; --skip:#6B6257;
+    --display:'Archivo',system-ui,sans-serif;
+    --prose:'IBM Plex Sans',system-ui,sans-serif;
+    --data:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0D1117; --surface:#151A21; --sunk:#10151B;
+      --ink:#E4E8ED; --dim:#8792A0; --rule:#232A33;
+      --accent:#E9A13B; --pass:#4FBF85; --fail:#F0736A; --skip:#9A9086;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1117; --surface:#151A21; --sunk:#10151B;
+    --ink:#E4E8ED; --dim:#8792A0; --rule:#232A33;
+    --accent:#E9A13B; --pass:#4FBF85; --fail:#F0736A; --skip:#9A9086;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--prose); line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:70rem; margin:0 auto; padding:clamp(1.5rem,4vw,3.5rem) clamp(1rem,4vw,2.5rem) 5rem}
+
+  header{border-bottom:2px solid var(--ink); padding-bottom:1.25rem; margin-bottom:2rem}
+  .eyebrow{
+    font-family:var(--data); font-size:.7rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 .5rem;
+  }
+  h1{
+    font-family:var(--display); font-weight:700; font-size:clamp(1.9rem,5vw,3rem);
+    letter-spacing:-.02em; line-height:1.05; margin:0; text-wrap:balance;
+  }
+  .target{
+    font-family:var(--data); font-size:.85rem; color:var(--dim);
+    margin:.65rem 0 0; word-break:break-all;
+  }
+
+  .verdict{
+    display:flex; flex-wrap:wrap; gap:0; margin:0 0 2.5rem;
+    border:1px solid var(--rule); background:var(--surface);
+  }
+  .verdict div{
+    flex:1 1 7rem; padding:.9rem 1.1rem; border-right:1px solid var(--rule);
+  }
+  .verdict div:last-child{border-right:0}
+  .verdict dt{
+    font-family:var(--data); font-size:.65rem; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--dim); margin:0 0 .25rem;
+  }
+  .verdict dd{
+    margin:0; font-family:var(--display); font-weight:700; font-size:1.75rem;
+    font-variant-numeric:tabular-nums; line-height:1;
+  }
+  .v-pass dd{color:var(--pass)} .v-fail dd{color:var(--fail)} .v-skip dd{color:var(--skip)}
+
+  .stage{margin:0 0 2.25rem}
+  .stage h2{
+    font-family:var(--display); font-weight:500; font-size:.95rem;
+    letter-spacing:.02em; margin:0 0 .6rem; display:flex; align-items:center; gap:.6rem;
+    color:var(--dim); text-transform:uppercase;
+  }
+  .num{
+    font-family:var(--data); font-size:.75rem; color:var(--ground);
+    background:var(--ink); width:1.5rem; height:1.5rem;
+    display:grid; place-items:center; flex:none;
+  }
+  .checks{list-style:none; margin:0; padding:0; border:1px solid var(--rule); background:var(--surface)}
+  .check{
+    display:grid; grid-template-columns:7.5rem 1fr 8rem; gap:1rem;
+    padding:.9rem 1.1rem; border-bottom:1px solid var(--rule); align-items:start;
+  }
+  .check:last-child{border-bottom:0}
+  @media (max-width:44rem){
+    .check{grid-template-columns:1fr; gap:.5rem}
+    .timing{justify-self:start}
+  }
+  .chip{
+    font-family:var(--data); font-size:.62rem; letter-spacing:.1em;
+    padding:.3rem .5rem; border:1px solid currentColor; white-space:nowrap;
+    align-self:start; display:inline-block;
+  }
+  .pass .chip{color:var(--pass)} .fail .chip{color:var(--fail)} .skip .chip{color:var(--skip)}
+  .fail{background:color-mix(in srgb, var(--fail) 5%, transparent)}
+  .body p{margin:0}
+  .id{font-family:var(--data); font-size:.92rem; font-weight:500}
+  .proves{font-family:var(--prose); font-style:italic; color:var(--dim); font-size:.85rem; margin-top:.15rem}
+  .detail{
+    font-family:var(--data); font-size:.8rem; margin-top:.45rem;
+    background:var(--sunk); padding:.45rem .6rem; overflow-x:auto; white-space:pre-wrap;
+  }
+  .timing{display:flex; flex-direction:column; gap:.35rem; align-items:flex-end}
+  @media (max-width:44rem){.timing{align-items:flex-start}}
+  .ms{font-family:var(--data); font-size:.85rem; font-variant-numeric:tabular-nums}
+  .ms abbr{color:var(--dim); font-size:.7em; margin-left:.1em; text-decoration:none}
+  .bar{display:block; width:100%; min-width:5rem; height:3px; background:var(--sunk)}
+  .bar i{display:block; height:100%; background:var(--accent)}
+
+  footer{
+    margin-top:2.5rem; padding-top:1.25rem; border-top:1px solid var(--rule);
+    color:var(--dim); font-size:.85rem; max-width:62ch;
+  }
+  footer strong{color:var(--ink); font-weight:500}
+</style>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Harness conformance &middot; live run</p>
+    <h1>What this endpoint can actually do</h1>
+    <p class="target">${esc(o.base)} &nbsp;&middot;&nbsp; ${esc(o.model || "auto-detected")} &nbsp;&middot;&nbsp; ${esc(ranAt)}</p>
+  </header>
+
+  <dl class="verdict">
+    <div class="v-pass"><dt>Passed</dt><dd>${pass}</dd></div>
+    <div class="v-fail"><dt>Failed</dt><dd>${fail}</dd></div>
+    <div class="v-skip"><dt>Inconclusive</dt><dd>${skip}</dd></div>
+    <div><dt>Slowest</dt><dd>${slowest.toLocaleString()}<abbr style="font-size:.55em;color:var(--dim)">ms</abbr></dd></div>
+  </dl>
+
+  ${rows}
+
+  <footer>
+    <p><strong>Inconclusive is not a pass.</strong> A check that could not run says so. A tool that reports green when it did not look manufactures confidence, which is the same defect as a liveness probe standing in for a readiness one.</p>
+    <p>Every figure on this page came from the run named above. Nothing here is sample data.</p>
+  </footer>
+</div>`;
+}
+
 const opts = parseArgs(process.argv.slice(2));
+const ranAt = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
 const checks = await run(opts);
 
 if (opts.json) {
-	console.log(JSON.stringify({ base: opts.base, model: opts.model, checks }, null, 2));
+	console.log(JSON.stringify({ base: opts.base, model: opts.model, ranAt, checks }, null, 2));
 } else {
 	console.log(renderText(opts, checks));
+}
+
+if (opts.html) {
+	await Bun.write(opts.html, renderHtml(opts, checks, ranAt));
+	console.log(`html report -> ${opts.html}`);
 }
 
 process.exit(checks.some((c) => c.status === "fail") ? 1 : 0);
