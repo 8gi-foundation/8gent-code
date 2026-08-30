@@ -100,6 +100,41 @@
  * hard qualifier discovered rather than assumed: the harness only adds
  * capability while it is SIMPLER than the task it is helping with. Structure
  * that a frontier model absorbs for free is a tax a 9B pays in accuracy.
+ *
+ * ## CORRECTION: it is not the amount of instruction
+ *
+ * The paragraph above was written after TRAJECTORY scored 0/6, and its
+ * mechanism was wrong. The falsification test was MINIMAL - identical protocol
+ * to ACCUMULATE but with the tool menu stated once instead of a "Reply with ONE
+ * tool line" reminder appended after every observation. Strictly less
+ * instruction. Prediction was committed before the run: MINIMAL >= ACCUMULATE
+ * if the least-instruction reading holds.
+ *
+ *   ACCUMULATE  5/6
+ *   MINIMAL     5/6      delta +0
+ *
+ * Removing the repeated instruction changed nothing. So instruction VOLUME is
+ * not the variable. Sort the four arms by what actually predicts the score:
+ *
+ *   CONTINUES A CONVERSATION           accumulate 5/6, minimal 5/6
+ *   RECONSTRUCTS STATE EACH STEP       selfbrief 1-2/6, trajectory 0/6
+ *
+ * Instruction volume varies widely WITHIN each group and does not move the
+ * result. What separates the groups is whether the model is continuing one
+ * coherent exchange or rebuilding its situation from a summary every step.
+ *
+ * The corrected rule:
+ *
+ *   A small model performs when the interaction stays a continuous
+ *   conversation, and degrades when each step is a fresh reconstruction -
+ *   however much or little instruction accompanies that reconstruction.
+ *
+ * This matters for design because it points somewhere different. "Use less
+ * scaffolding" would have had us trimming prompts. The real constraint is that
+ * compaction must never break continuity: compact by DROPPING OLD TURNS from a
+ * conversation that continues, never by rebuilding a fresh prompt from notes.
+ * Same token saving, opposite outcome, and the difference is invisible in a
+ * context-size metric.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -512,22 +547,31 @@ if (import.meta.main) {
 		mChars += mi.chars;
 
 		console.log(`\n${t.id}`);
-		console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
-		console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		if (ARMS.has("accumulate")) console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		if (ARMS.has("selfbrief")) console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		if (ARMS.has("trajectory")) console.log(`  TRAJECTORY ${tOk ? "PASS" : "FAIL"}  ${tr.steps} steps  ${tr.chars} chars peak  -> ${JSON.stringify(tr.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		if (ARMS.has("minimal")) console.log(`  MINIMAL    ${mOk ? "PASS" : "FAIL"}  ${mi.steps} steps  ${mi.chars} chars peak  -> ${JSON.stringify(mi.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 	}
 
 	const n = TASKS.length;
 	console.log(`\n${"=".repeat(76)}`);
-	console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
-	console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
+	if (ARMS.has("accumulate")) console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
+	if (ARMS.has("selfbrief")) console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
 	if (ARMS.has("trajectory")) console.log(`TRAJECTORY  ${tPass}/${n}   ${Math.round(tChars / n)} chars peak context per task`);
 	if (ARMS.has("minimal")) console.log(`MINIMAL     ${mPass}/${n}   ${Math.round(mChars / n)} chars peak context per task`);
-	console.log(`\nselfbrief vs accumulate  ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
-	console.log(`trajectory vs accumulate ${tPass - aPass >= 0 ? "+" : ""}${tPass - aPass} of ${n}`);
-	console.log(`trajectory vs selfbrief  ${tPass - sPass >= 0 ? "+" : ""}${tPass - sPass} of ${n}`);
-	console.log(`minimal vs accumulate    ${mPass - aPass >= 0 ? "+" : ""}${mPass - aPass} of ${n}   <- is LESS instruction actually better, or just smaller?`);
+	// Only compare arms that actually ran. A skipped arm scores 0 and printing a
+	// delta against it reads as a catastrophic loss rather than as "not run" -
+	// the same class of false reporting this whole suite exists to catch, and it
+	// shipped here for one run before being noticed.
+	const delta = (label: string, x: number, y: number, a: string, b: string, note = "") => {
+		if (!ARMS.has(a) || !ARMS.has(b)) return;
+		console.log(`${label} ${x - y >= 0 ? "+" : ""}${x - y} of ${n}${note}`);
+	};
+	console.log("");
+	delta("selfbrief vs accumulate ", sPass, aPass, "selfbrief", "accumulate");
+	delta("trajectory vs accumulate", tPass, aPass, "trajectory", "accumulate");
+	delta("trajectory vs selfbrief  ", tPass, sPass, "trajectory", "selfbrief");
+	delta("minimal vs accumulate   ", mPass, aPass, "minimal", "accumulate", "   <- less instruction, same protocol");
 	console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
 
 }
