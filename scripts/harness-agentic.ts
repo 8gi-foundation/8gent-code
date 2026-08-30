@@ -412,6 +412,64 @@ async function selfbrief(task: Task) {
 }
 
 /**
+ * SLIDING: the clean test of the corrected rule.
+ *
+ * MINIMAL showed instruction volume is not the variable; the split was between
+ * arms that CONTINUE a conversation (5/6) and arms that RECONSTRUCT state each
+ * step (0-2/6). But those two groups also differed wildly in context size, so
+ * continuity and size were confounded and either could be doing the work.
+ *
+ * SLIDING separates them. It is a continuing conversation - every turn is a
+ * real prior turn, nothing is summarised or rebuilt - but the oldest middle
+ * turns are dropped to hold a context budget matched to SELFBRIEF's ~1.2k
+ * characters. Same footprint as the losing arms, same mechanism as the winning
+ * ones.
+ *
+ * Prediction, committed before the run:
+ *   - if CONTINUITY is the variable, SLIDING scores near ACCUMULATE (5/6)
+ *     while using a fraction of the context
+ *   - if TOTAL INFORMATION is the variable, SLIDING collapses toward SELFBRIEF
+ *     and the real constraint is simply that a 9B needs the whole trail
+ *
+ * The first message is always kept: it carries the task and the tool menu, and
+ * dropping it would change what the model was asked, not merely how much it
+ * remembers.
+ */
+async function sliding(task: Task) {
+	const budget = Number(arg("--budget", "1400"));
+	const head = { role: "user", content: `${MENU}\nTask: ${task.ask}\n\nReply with ONE tool line.` };
+	let tail: { role: string; content: string }[] = [];
+	let peak = 0;
+
+	const window = () => {
+		// Drop from the OLDEST end until the budget holds, always keeping head.
+		const kept = [...tail];
+		while (kept.length && head.content.length + kept.reduce((n, m) => n + m.content.length, 0) > budget) {
+			kept.shift();
+		}
+		return [head, ...kept];
+	};
+
+	for (let step = 0; step < MAX_STEPS; step++) {
+		const msgs = window();
+		peak = Math.max(peak, msgs.reduce((n, m) => n + m.content.length, 0));
+		const out = await llm(msgs);
+		const fin = finalOf(out);
+		if (fin) return { answer: fin, steps: step + 1, chars: peak };
+		const obs = exec(out);
+		tail.push({ role: "assistant", content: out });
+		tail.push({
+			role: "user",
+			content: obs === null ? "Not a tool line. Reply with ONE tool line." : `${obs}\n\nReply with ONE tool line.`,
+		});
+	}
+	const msgs = [...window(), { role: "user", content: "Now use >answer to give your final answer." }];
+	peak = Math.max(peak, msgs.reduce((n, m) => n + m.content.length, 0));
+	const last = await llm(msgs);
+	return { answer: finalOf(last) ?? last, steps: MAX_STEPS, chars: peak };
+}
+
+/**
  * MINIMAL: the inverse test.
  *
  * If ACCUMULATE wins because it carries the LEAST instruction per step, then
@@ -514,15 +572,17 @@ if (import.meta.main) {
 
 	// Which arms to run. Three arms over six tasks on a CPU 9B is ~25 minutes, so
 	// a focused comparison is the difference between measuring and waiting.
-	const ARMS = new Set(arg("--arms", "accumulate,selfbrief,trajectory,minimal").split(","));
+	const ARMS = new Set(arg("--arms", "accumulate,selfbrief,trajectory,minimal,sliding").split(","));
 	let aPass = 0;
 	let sPass = 0;
 	let tPass = 0;
 	let mPass = 0;
+	let slPass = 0;
 	let aChars = 0;
 	let sChars = 0;
 	let tChars = 0;
 	let mChars = 0;
+	let slChars = 0;
 	const blank = { answer: "", steps: 0, chars: 0 };
 
 	for (const t of TASKS) {
@@ -546,10 +606,16 @@ if (import.meta.main) {
 		if (mOk) mPass++;
 		mChars += mi.chars;
 
+		const sl = ARMS.has("sliding") ? await sliding(t) : blank;
+		const slOk = scores(sl.answer, t);
+		if (slOk) slPass++;
+		slChars += sl.chars;
+
 		console.log(`\n${t.id}`);
 		if (ARMS.has("accumulate")) console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		if (ARMS.has("selfbrief")) console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		if (ARMS.has("trajectory")) console.log(`  TRAJECTORY ${tOk ? "PASS" : "FAIL"}  ${tr.steps} steps  ${tr.chars} chars peak  -> ${JSON.stringify(tr.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		if (ARMS.has("sliding")) console.log(`  SLIDING    ${slOk ? "PASS" : "FAIL"}  ${sl.steps} steps  ${sl.chars} chars peak  -> ${JSON.stringify(sl.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		if (ARMS.has("minimal")) console.log(`  MINIMAL    ${mOk ? "PASS" : "FAIL"}  ${mi.steps} steps  ${mi.chars} chars peak  -> ${JSON.stringify(mi.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 	}
 
@@ -558,6 +624,7 @@ if (import.meta.main) {
 	if (ARMS.has("accumulate")) console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
 	if (ARMS.has("selfbrief")) console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
 	if (ARMS.has("trajectory")) console.log(`TRAJECTORY  ${tPass}/${n}   ${Math.round(tChars / n)} chars peak context per task`);
+	if (ARMS.has("sliding")) console.log(`SLIDING     ${slPass}/${n}   ${Math.round(slChars / n)} chars peak context per task`);
 	if (ARMS.has("minimal")) console.log(`MINIMAL     ${mPass}/${n}   ${Math.round(mChars / n)} chars peak context per task`);
 	// Only compare arms that actually ran. A skipped arm scores 0 and printing a
 	// delta against it reads as a catastrophic loss rather than as "not run" -
@@ -572,6 +639,8 @@ if (import.meta.main) {
 	delta("trajectory vs accumulate", tPass, aPass, "trajectory", "accumulate");
 	delta("trajectory vs selfbrief  ", tPass, sPass, "trajectory", "selfbrief");
 	delta("minimal vs accumulate   ", mPass, aPass, "minimal", "accumulate", "   <- less instruction, same protocol");
+	delta("sliding vs accumulate   ", slPass, aPass, "sliding", "accumulate", "   <- continuity kept, context cut to selfbrief size");
+	delta("sliding vs selfbrief    ", slPass, sPass, "sliding", "selfbrief", "   <- same footprint, opposite mechanism");
 	console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
 
 }
