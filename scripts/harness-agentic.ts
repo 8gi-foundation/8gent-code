@@ -40,7 +40,12 @@ const MAX_STEPS = Number(arg("--steps", "5"));
 const ROOT = join(import.meta.dir, "..");
 
 /** The searchable surface. Bounded so a run is affordable on CPU. */
-const SEARCH_DIRS = ["packages/eight", "packages/eight/clients", "packages/providers"];
+const SEARCH_DIRS = [
+	"packages/eight",
+	"packages/eight/clients",
+	"packages/eight/prompts",
+	"packages/providers",
+];
 
 interface Task {
 	id: string;
@@ -68,6 +73,37 @@ const TASKS: Task[] = [
 		truth: ["1234", "11434"],
 		provenance: "lmstudio.ts:24 localhost:1234; ollama.ts:27 localhost:11434. Requires finding two files unaided.",
 	},
+
+	// ---- CANARIES ---------------------------------------------------------
+	// Values that exist only in this repository. No pretrained model can guess
+	// them, so a pass here is evidence of retrieval rather than recall.
+	//
+	// This distinction was forced by the first run: on compare-local-ports the
+	// model scored a PASS while answering "based on common local AI model
+	// serving clients found in typical project directories" - it produced 1234
+	// and 11434 from pretraining without reading anything. Ground truth a model
+	// might already know cannot measure retrieval, only plausibility.
+	{
+		id: "canary-board-context-cap",
+		ask: "There is a constant that caps how much context the board is given. Find its exact name and its numeric value.",
+		truth: ["BOARD_CONTEXT_CAP", "4500"],
+		provenance:
+			"canary: packages/eight/prompts/system-prompt.ts:48 exports BOARD_CONTEXT_CAP = 4500. Arbitrary project-specific value, unguessable from pretraining.",
+	},
+	{
+		id: "canary-clamp-floor",
+		ask: "The voice silence learner clamps a duration between a minimum and a maximum. Find both numbers.",
+		truth: ["800", "5000"],
+		provenance:
+			"canary: packages/eight/voice-silence-learner.ts:24 CLAMP_MIN_MS = 800 and CLAMP_MAX_MS = 5000. Two arbitrary values in one file.",
+	},
+	{
+		id: "canary-pii-function",
+		ask: "Find the function named anonymizeOutbound. Which file defines it, and what does it take as its argument?",
+		truth: ["pii-gate", "messages"],
+		provenance:
+			"canary: packages/eight/clients/pii-gate.ts:80 export function anonymizeOutbound(messages: Message[]). Name exists nowhere outside this repo.",
+	},
 ];
 
 // ---- the tools, in shorthand. Terse on purpose: fewer tokens to emit and
@@ -89,6 +125,37 @@ const listing = () => {
 };
 
 const FILES = listing();
+
+/**
+ * Accept what a model actually writes, not what the toy parser wishes it wrote.
+ *
+ * The first run failed a task because the model emitted
+ *   >grep -r "localhost\|127\.0\.0\.1" packages/eight/clients/*.ts | head -30
+ * which is correct grep by every convention it has ever seen, and the parser
+ * swallowed the flags, the glob and the pipe as part of one regex. The model
+ * used the tool properly; the harness was the thing that did not understand.
+ *
+ * A tool surface narrower than the model's habits does not measure the model,
+ * it measures the surface. So: strip leading flags, drop a trailing path or
+ * glob argument, drop anything piped, and unquote.
+ */
+export function normalisePattern(raw: string): string {
+	let s = raw.trim();
+	s = s.split("|").length > 1 && /\|\s*(head|tail|wc|sort|uniq|less)\b/.test(s)
+		? s.slice(0, s.search(/\|\s*(head|tail|wc|sort|uniq|less)\b/))
+		: s;
+	// Flags, including the --flag=value form. Caught by the unit check in
+	// scripts/harness-agentic.test.ts, which had --include=*.ts sail straight
+	// through into the regex.
+	s = s.replace(/^(-{1,2}[a-zA-Z-]+(=\S+)?\s+)+/, "").trim();
+	const quoted = s.match(/^(["'])([\s\S]*?)\1/);
+	if (quoted) return quoted[2];
+	// Unquoted: a trailing token that looks like a path or glob is an argument,
+	// not part of the pattern.
+	const parts = s.split(/\s+/);
+	while (parts.length > 1 && /[/*]|\.ts$|\.js$/.test(parts[parts.length - 1])) parts.pop();
+	return parts.join(" ");
+}
 
 function grep(pattern: string): string {
 	const hits: string[] = [];
@@ -125,7 +192,7 @@ function exec(line: string): string | null {
 	let m = t.match(/^>?\s*ls\b/i);
 	if (m) return FILES.join("\n");
 	m = t.match(/^>?\s*grep\s+(.+)$/i);
-	if (m) return grep(m[1].trim().replace(/^["']|["']$/g, ""));
+	if (m) return grep(normalisePattern(m[1]));
 	m = t.match(/^>?\s*read\s+(\S+)/i);
 	if (m) return readFile(m[1]);
 	return null;
@@ -202,17 +269,28 @@ async function selfbrief(task: Task) {
 		}
 		// The model compresses the observation itself. This is the lever: the raw
 		// output is thrown away and only the model's own note survives.
+		//
+		// The note MUST carry values verbatim. Asking for "one sentence on what this
+		// establishes" scored 2/6, and canary-clamp-floor showed why: the note said
+		// the file defines clamp constants and dropped 800 and 5000, so the fresh
+		// window had nothing left to answer with. The single-turn version of this
+		// lever asked the model to QUOTE the lines and scored 4/4. Summarising is
+		// lossy exactly where the answer lives, and a compression step that
+		// paraphrases the fact it was compressing is how a retrieval loop quietly
+		// becomes a recall loop.
 		const note = await llm(
 			[
 				{
 					role: "user",
 					content:
 						`Task: ${task.ask}\n\nYou ran: ${out.trim().slice(0, 80)}\nResult:\n${obs.slice(0, 6000)}\n\n` +
-						`In ONE short sentence, state only what this establishes for the task. ` +
-						`If it establishes nothing, say "nothing useful".`,
+						`Write a note to yourself. Copy VERBATIM every file path, identifier, ` +
+						`number or literal in the result that bears on the task - exact ` +
+						`characters, no rounding, no paraphrasing, do not summarise them away. ` +
+						`If the result contains nothing relevant, say "nothing useful".`,
 				},
 			],
-			400,
+			600,
 		);
 		findings.push(note.replace(/\s+/g, " ").slice(0, 200));
 	}
@@ -225,34 +303,39 @@ async function selfbrief(task: Task) {
 const norm = (s: string) => s.toLowerCase().replace(/[,_](?=\d)/g, "").replace(/\s+/g, " ");
 const scores = (ans: string, t: Task) => t.truth.every((v) => norm(ans).includes(norm(v)));
 
-console.log(`harness-agentic  ${BASE}  ${MODEL}  ${FILES.length} files in scope, max ${MAX_STEPS} steps`);
-console.log("the answer is never in the window; the model must find it");
-console.log("=".repeat(76));
+// Only run the benchmark when invoked directly. Without this an import
+// for testing would fire the whole suite at the model.
+if (import.meta.main) {
+	console.log(`harness-agentic  ${BASE}  ${MODEL}  ${FILES.length} files in scope, max ${MAX_STEPS} steps`);
+	console.log("the answer is never in the window; the model must find it");
+	console.log("=".repeat(76));
 
-let aPass = 0;
-let sPass = 0;
-let aChars = 0;
-let sChars = 0;
+	let aPass = 0;
+	let sPass = 0;
+	let aChars = 0;
+	let sChars = 0;
 
-for (const t of TASKS) {
-	const a = await accumulate(t);
-	const aOk = scores(a.answer, t);
-	if (aOk) aPass++;
-	aChars += a.chars;
+	for (const t of TASKS) {
+		const a = await accumulate(t);
+		const aOk = scores(a.answer, t);
+		if (aOk) aPass++;
+		aChars += a.chars;
 
-	const s = await selfbrief(t);
-	const sOk = scores(s.answer, t);
-	if (sOk) sPass++;
-	sChars += s.chars;
+		const s = await selfbrief(t);
+		const sOk = scores(s.answer, t);
+		if (sOk) sPass++;
+		sChars += s.chars;
 
-	console.log(`\n${t.id}`);
-	console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
-	console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		console.log(`\n${t.id}`);
+		console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+	}
+
+	const n = TASKS.length;
+	console.log(`\n${"=".repeat(76)}`);
+	console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
+	console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
+	console.log(`\ndelta ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
+	console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
+
 }
-
-const n = TASKS.length;
-console.log(`\n${"=".repeat(76)}`);
-console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
-console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
-console.log(`\ndelta ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
-console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
