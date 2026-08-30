@@ -352,6 +352,33 @@ function readFile(p: string): string {
  * canary-board-context-cap passes. If it still fails, the defect is that the
  * model does not RECOGNISE which tool fits, and the tool surface is not the
  * binding constraint after all.
+ *
+ * RESULT: the prediction was wrong, in the more useful direction.
+ *
+ *   terse, without >consts   5/6   4,523 chars
+ *   terse, with    >consts   4/6   3,911 chars
+ *
+ * canary-board-context-cap still failed, and the run output contains ZERO
+ * occurrences of "consts" - the model never invoked it once. Its last action on
+ * that task was another concept grep:
+ *   >grep "context.*limit\|limit.*context\|max.*turn\|turn.*max"
+ *
+ * A tool that answers the question exactly, sitting in the menu, unused.
+ *
+ * Worse: adding it COST a point elsewhere. compare-local-ports had passed
+ * without it and failed with it, also by grepping instead of reading. The only
+ * change was one extra line in the tool menu.
+ *
+ * So tool SURFACE is not the binding constraint. Tool SELECTION is, and every
+ * option added taxes it. That is the same scaffolding tax that sank TRAJECTORY,
+ * now showing up one level down: it applies to the tool menu, not just to
+ * prompt instructions.
+ *
+ * The design consequence for a small model is uncomfortable and worth stating
+ * plainly: do not ship a rich toolbox. Ship the fewest tools that cover the
+ * work, because an unused tool is not free - it is a permanent tax on every
+ * selection the model makes for the rest of the session.
+ */
  */
 function consts(filter = ""): string {
 	// An unbounded listing is the same mistake as an unbounded read. The first cut
