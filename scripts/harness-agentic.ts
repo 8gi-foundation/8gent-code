@@ -238,6 +238,21 @@ const listing = () => {
 const FILES = listing();
 
 /**
+ * The largest single tool result this environment can return. Used to reject a
+ * sliding-window budget that could never hold one observation - see sliding().
+ */
+const LARGEST_OBSERVATION = Math.max(
+	FILES.join("\n").length,
+	...FILES.map((f) => {
+		try {
+			return readFileSync(join(ROOT, f), "utf8").split("\n").slice(0, 120).join("\n").length;
+		} catch {
+			return 0;
+		}
+	}),
+);
+
+/**
  * Accept what a model actually writes, not what the toy parser wishes it wrote.
  *
  * The first run failed a task because the model emitted
@@ -436,7 +451,25 @@ async function selfbrief(task: Task) {
  * remembers.
  */
 async function sliding(task: Task) {
-	const budget = Number(arg("--budget", "1400"));
+	const budget = Number(arg("--budget", "5000"));
+	// A window smaller than one observation cannot hold one observation, so every
+	// tool result is dropped the moment it arrives and the model re-issues the
+	// same command forever. The first run of this arm did exactly that: budget
+	// 1400, a >ls listing of 2079 chars, peak context 404, and ">ls" emitted five
+	// times in a row. It scored 1/6 and measured nothing except the budget.
+	//
+	// The floor is not a detail, it is the finding: you cannot compress an agentic
+	// conversation below the size of a single observation. Context economy here is
+	// bounded by TOOL OUTPUT SIZE, not by clever windowing - which points the real
+	// lever at paginated reads and grep-over-read, not at history management.
+	const floor = MENU.length + 400 + LARGEST_OBSERVATION;
+	if (budget < floor) {
+		throw new Error(
+			`--budget ${budget} is below the floor of ${floor} (menu + task + the largest single ` +
+			`observation, ${LARGEST_OBSERVATION} chars). Below this the window cannot hold one ` +
+			`tool result and the arm measures the budget rather than the hypothesis.`,
+		);
+	}
 	const head = { role: "user", content: `${MENU}\nTask: ${task.ask}\n\nReply with ONE tool line.` };
 	let tail: { role: string; content: string }[] = [];
 	let peak = 0;
