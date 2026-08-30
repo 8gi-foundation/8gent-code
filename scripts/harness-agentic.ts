@@ -24,6 +24,39 @@
  *
  * Scoring stays deterministic: every task's ground truth was grepped out of the
  * repo, so a pass means the model reproduced something that exists on disk.
+ *
+ * ## RESULT: the self-brief lever loses here, and the reason is not the data
+ *
+ * Two runs against ornith-1.0-9b, 6 tasks, 5 steps:
+ *
+ *   run 1 (summarised notes)   ACCUMULATE 5/6   SELFBRIEF 2/6
+ *   run 2 (verbatim notes)     ACCUMULATE 4/6   SELFBRIEF 2/6
+ *
+ * The verbatim-notes fix was the obvious repair and it changed nothing, so the
+ * lever is not failing for want of tuning. Run 2's failures name the real
+ * cause: it answered "I cannot complete this task because you haven't provided
+ * the actual grep search" one step after running that grep, and elsewhere
+ * emitted a fenced `cat` command that is not in the tool menu at all.
+ *
+ * Resetting the window does not only discard the raw observation. It discards
+ * the model's memory of WHAT IT JUST DID. A findings list carries facts; it
+ * does not carry trajectory, and without trajectory the model cannot tell a
+ * fresh task from one already three steps in.
+ *
+ * Which reconciles the two measurements that looked contradictory:
+ *
+ *   single-turn, material already in the window  ->  98% context shrink, 4/4
+ *   agentic, model must navigate to the material ->  -2 of 6
+ *
+ * Compaction is free when the work is READING and expensive when the work is
+ * NAVIGATING. The design that follows is compact the observations, keep the
+ * trajectory - a short ordered log of actions taken alongside the compacted
+ * findings. Untested, so it is written here as the next hypothesis and not as
+ * a conclusion.
+ *
+ * The lever stays in the tree as a losing arm. Deleting it would leave the next
+ * person to re-derive the same negative result, and an arm that lost is the
+ * only thing that makes the arm that won mean anything.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
