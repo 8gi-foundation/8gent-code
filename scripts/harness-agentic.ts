@@ -57,6 +57,49 @@
  * The lever stays in the tree as a losing arm. Deleting it would leave the next
  * person to re-derive the same negative result, and an arm that lost is the
  * only thing that makes the arm that won mean anything.
+ *
+ * ## THE TRAJECTORY ARM, AND THE RESULT THAT CHANGES THE THESIS
+ *
+ * The prediction was written into the commit before the run: if
+ * facts-without-trajectory was the defect, TRAJECTORY should recover most of
+ * the gap; if it landed at SELFBRIEF's score instead, the compact-and-reset
+ * direction is wrong for navigation work rather than mis-implemented.
+ *
+ *   ACCUMULATE  5/6   7,460 chars peak
+ *   SELFBRIEF   1/6   1,051 chars peak
+ *   TRAJECTORY  0/6   1,197 chars peak
+ *
+ * It landed BELOW selfbrief. Adding the missing information made it worse.
+ *
+ * The failure text is the explanation: the model replied "(not yet used, should
+ * use when I have enough info) Since I don't see clear grep..." - echoing the
+ * scaffold back instead of acting on it. TRAJECTORY's prompt carries a menu, an
+ * ordered action log, a findings list and an instruction not to repeat steps.
+ * Every one of those is reasonable and together they are more instruction than
+ * the task itself.
+ *
+ * So the conclusion is not about trajectory at all:
+ *
+ *   FOR A SMALL MODEL, HARNESS SCAFFOLDING IS NOT FREE. Every structure added
+ *   to the prompt competes with the task for the same limited capacity, and
+ *   past some point the model spends itself parsing the harness instead of
+ *   doing the work.
+ *
+ * Which is why ACCUMULATE keeps winning. It is not a clever design; it is the
+ * least instruction per step. The model continues a conversation, which is the
+ * thing it is best at, and nothing asks it to also maintain a state machine.
+ *
+ * It reconciles every measurement taken:
+ *
+ *   single-turn, material in window   compaction free   4/4, 98% shrink
+ *   agentic + selfbrief               scaffold competes 1-2/6
+ *   agentic + trajectory              more scaffold     0/6
+ *   agentic + accumulate              least scaffold    4-5/6
+ *
+ * The thesis "make the model smarter through the harness" survives, but with a
+ * hard qualifier discovered rather than assumed: the harness only adds
+ * capability while it is SIMPLER than the task it is helping with. Structure
+ * that a frontier model absorbs for free is a tax a 9B pays in accuracy.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
