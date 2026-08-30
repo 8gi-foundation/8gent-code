@@ -334,11 +334,63 @@ function readFile(p: string): string {
 	return `--- ${clean} (first ${READ_LINES} lines) ---\n${body}`;
 }
 
+/**
+ * >consts - list declared constants across the searchable files.
+ *
+ * The one failure that survived every context change was canary-board-context-cap:
+ * asked to find "a constant that caps how much context the board is given",
+ * ornith-1.0-9b greps for the CONCEPT - context.*window, knownContextWindow -
+ * and never finds BOARD_CONTEXT_CAP. It is reasoning about what the thing might
+ * be called instead of enumerating what exists.
+ *
+ * Tonight's result says the lever lives in the tool layer, so this tests that
+ * claim on a failure it did not come from: give the model a tool shaped like the
+ * question. "Find a constant" is answerable by listing constants, and no amount
+ * of cleverer grepping substitutes for a tool that matches the task shape.
+ *
+ * Prediction, committed before the run: with >consts available,
+ * canary-board-context-cap passes. If it still fails, the defect is that the
+ * model does not RECOGNISE which tool fits, and the tool surface is not the
+ * binding constraint after all.
+ */
+function consts(filter = ""): string {
+	// An unbounded listing is the same mistake as an unbounded read. The first cut
+	// of this tool returned 120 constants over 9,223 chars - larger than the
+	// largest observation in the whole environment, so adding it would have raised
+	// the floor and undone the terse result it was built to complement. A tool
+	// shaped like the question still has to be bounded, so it takes a filter and
+	// caps its output.
+	const cap = TERSE ? 25 : 60;
+	const needle = filter.trim().toLowerCase();
+	const out: string[] = [];
+	let total = 0;
+	for (const f of FILES) {
+		let body = "";
+		try {
+			body = readFileSync(join(ROOT, f), "utf8");
+		} catch {
+			continue;
+		}
+		body.split("\n").forEach((line, i) => {
+			const m = line.match(/^\s*(?:export\s+)?const\s+([A-Z][A-Z0-9_]{2,})\s*(?::[^=]+)?=\s*(.+?);?\s*$/);
+			if (!m) return;
+			if (needle && !m[1].toLowerCase().includes(needle)) return;
+			total++;
+			if (out.length < cap) out.push(`${f}:${i + 1}: ${m[1]} = ${m[2].slice(0, 40)}`);
+		});
+	}
+	if (!out.length) return needle ? `no constants matching "${filter}"` : "no constants found";
+	const more = total > out.length ? `\n... ${total - out.length} more; narrow with >consts <substring>` : "";
+	return out.join("\n") + more;
+}
+
 /** Execute one shorthand op. Returns null when the line is not an op. */
 function exec(line: string): string | null {
 	const t = line.trim();
 	let m = t.match(/^>?\s*ls\b/i);
 	if (m) return FILES.join("\n");
+	m = t.match(/^>?\s*consts?\b\s*(.*)$/i);
+	if (m) return consts(normalisePattern(m[1] ?? ""));
 	m = t.match(/^>?\s*grep\s+(.+)$/i);
 	if (m) return grep(normalisePattern(m[1]));
 	m = t.match(/^>?\s*read\s+(\S+)/i);
@@ -349,6 +401,7 @@ function exec(line: string): string | null {
 const MENU =
 	`Tools, one per reply, nothing else on the line:\n` +
 	`  >ls              list files you may read\n` +
+	`  >consts [text]   list declared CONSTANTS, optionally filtered by name\n` +
 	`  >grep <regex>    search all files, returns path:line: text\n` +
 	`  >read <path>     read a file\n` +
 	`  >answer <text>   give the final answer and stop\n`;
