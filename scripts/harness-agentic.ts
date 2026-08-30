@@ -333,6 +333,63 @@ async function selfbrief(task: Task) {
 	return { answer: await llm([{ role: "user", content: ctx }]), steps: MAX_STEPS, chars: peak };
 }
 
+/**
+ * TRAJECTORY: the hypothesis the other two arms point at.
+ *
+ * Identical to SELFBRIEF - fresh window every step, observations compacted -
+ * except that a short ordered log of what was already DONE travels with the
+ * findings. SELFBRIEF failed by answering "you haven't provided the actual grep
+ * search" one step after running that grep: it had the facts and no idea it was
+ * mid-task. Facts are not trajectory.
+ *
+ * If this lands between the two, the lesson is that compaction must preserve
+ * the shape of the work, not only its results.
+ */
+async function trajectory(task: Task) {
+	const actions: string[] = [];
+	const findings: string[] = [];
+	let peak = 0;
+	for (let step = 0; step < MAX_STEPS; step++) {
+		const ctx =
+			`${MENU}\nTask: ${task.ask}\n\n` +
+			(actions.length
+				? `Steps you have already taken (${actions.length} of ${MAX_STEPS}):\n${actions.map((a, i) => `  ${i + 1}. ${a}`).join("\n")}\n\n`
+				: `This is step 1. You have not run anything yet.\n\n`) +
+			(findings.length ? `What you established:\n${findings.map((f) => `- ${f}`).join("\n")}\n\n` : "") +
+			`Reply with ONE tool line. Do not repeat a step you already took. ` +
+			`Use >answer only when the findings above are enough.`;
+		peak = Math.max(peak, ctx.length);
+		const out = await llm([{ role: "user", content: ctx }]);
+		const fin = finalOf(out);
+		if (fin) return { answer: fin, steps: step + 1, chars: peak };
+		const obs = exec(out);
+		if (obs === null) {
+			actions.push(`${out.trim().slice(0, 60)} -> not a valid tool line`);
+			continue;
+		}
+		const note = await llm(
+			[
+				{
+					role: "user",
+					content:
+						`Task: ${task.ask}\n\nYou ran: ${out.trim().slice(0, 80)}\nResult:\n${obs.slice(0, 6000)}\n\n` +
+						`Write a note to yourself. Copy VERBATIM every file path, identifier, ` +
+						`number or literal in the result that bears on the task - exact ` +
+						`characters, no rounding, no paraphrasing. If nothing is relevant, say "nothing useful".`,
+				},
+			],
+			600,
+		);
+		actions.push(out.trim().replace(/\s+/g, " ").slice(0, 70));
+		findings.push(note.replace(/\s+/g, " ").slice(0, 200));
+	}
+	const ctx =
+		`Task: ${task.ask}\n\nSteps taken:\n${actions.map((a, i) => `  ${i + 1}. ${a}`).join("\n")}\n\n` +
+		`Established:\n${findings.map((f) => `- ${f}`).join("\n")}\n\nGive the final answer.`;
+	peak = Math.max(peak, ctx.length);
+	return { answer: await llm([{ role: "user", content: ctx }]), steps: MAX_STEPS, chars: peak };
+}
+
 const norm = (s: string) => s.toLowerCase().replace(/[,_](?=\d)/g, "").replace(/\s+/g, " ");
 const scores = (ans: string, t: Task) => t.truth.every((v) => norm(ans).includes(norm(v)));
 
@@ -345,8 +402,10 @@ if (import.meta.main) {
 
 	let aPass = 0;
 	let sPass = 0;
+	let tPass = 0;
 	let aChars = 0;
 	let sChars = 0;
+	let tChars = 0;
 
 	for (const t of TASKS) {
 		const a = await accumulate(t);
@@ -359,16 +418,25 @@ if (import.meta.main) {
 		if (sOk) sPass++;
 		sChars += s.chars;
 
+		const tr = await trajectory(t);
+		const tOk = scores(tr.answer, t);
+		if (tOk) tPass++;
+		tChars += tr.chars;
+
 		console.log(`\n${t.id}`);
 		console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		console.log(`  TRAJECTORY ${tOk ? "PASS" : "FAIL"}  ${tr.steps} steps  ${tr.chars} chars peak  -> ${JSON.stringify(tr.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 	}
 
 	const n = TASKS.length;
 	console.log(`\n${"=".repeat(76)}`);
 	console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
 	console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
-	console.log(`\ndelta ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
+	console.log(`TRAJECTORY  ${tPass}/${n}   ${Math.round(tChars / n)} chars peak context per task`);
+	console.log(`\nselfbrief vs accumulate  ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
+	console.log(`trajectory vs accumulate ${tPass - aPass >= 0 ? "+" : ""}${tPass - aPass} of ${n}`);
+	console.log(`trajectory vs selfbrief  ${tPass - sPass >= 0 ? "+" : ""}${tPass - sPass} of ${n}   <- does keeping the trajectory recover the loss?`);
 	console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
 
 }
