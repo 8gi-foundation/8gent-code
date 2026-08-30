@@ -299,17 +299,39 @@ function grep(pattern: string): string {
 			continue;
 		}
 		body.split("\n").forEach((line, i) => {
-			if (hits.length < 25 && re.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
+			if (hits.length < GREP_HITS && re.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
 		});
 	}
 	return hits.length ? hits.join("\n") : "no matches";
 }
 
+/**
+ * TERSE mode: shrink the OBSERVATIONS instead of the history.
+ *
+ * The sliding-window arm proved history management is a dead end here. The
+ * floor - one observation - is 5,297 chars against ACCUMULATE's natural peak of
+ * 6,653, so the entire range available to any windowing scheme is about 11%.
+ * You cannot compress a conversation below one observation, and one observation
+ * is nearly the whole conversation.
+ *
+ * So this is the lever that is actually left: return less per call. Paginated
+ * reads, capped grep results, line ranges instead of whole files. If accuracy
+ * holds while observations shrink, agentic context economy is real - it just
+ * lives in the tool layer, which is kiln's side of the boundary rather than the
+ * agent loop's.
+ */
+const TERSE = process.argv.includes("--terse");
+const READ_LINES = TERSE ? 40 : 120;
+const GREP_HITS = TERSE ? 8 : 25;
+
 function readFile(p: string): string {
 	const clean = p.replace(/^[./]+/, "").replace(/[`'"]/g, "");
-	if (!FILES.includes(clean)) return `not in scope. available files:\n${FILES.join("\n")}`;
-	const body = readFileSync(join(ROOT, clean), "utf8").split("\n").slice(0, 120).join("\n");
-	return `--- ${clean} (first 120 lines) ---\n${body}`;
+	if (!FILES.includes(clean))
+		return TERSE
+			? `not in scope. ${FILES.length} files available; use >grep to find one.`
+			: `not in scope. available files:\n${FILES.join("\n")}`;
+	const body = readFileSync(join(ROOT, clean), "utf8").split("\n").slice(0, READ_LINES).join("\n");
+	return `--- ${clean} (first ${READ_LINES} lines) ---\n${body}`;
 }
 
 /** Execute one shorthand op. Returns null when the line is not an op. */
