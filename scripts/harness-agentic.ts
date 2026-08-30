@@ -377,6 +377,40 @@ async function selfbrief(task: Task) {
 }
 
 /**
+ * MINIMAL: the inverse test.
+ *
+ * If ACCUMULATE wins because it carries the LEAST instruction per step, then
+ * carrying even less should win by more. That is a falsifiable claim and it is
+ * the honest way to check the conclusion rather than admire it.
+ *
+ * ACCUMULATE still re-appends "Reply with ONE tool line." after every single
+ * observation. MINIMAL states the menu once and then appends observations as
+ * plain conversation, with nothing repeated. Same tools, same tasks, strictly
+ * less instruction.
+ *
+ * Prediction, written before the run: if the least-instruction reading is
+ * right, MINIMAL >= ACCUMULATE. If MINIMAL loses, then the repeated nudge is
+ * doing real work and "less scaffolding" is too crude a rule - the honest
+ * version would be that scaffolding must be cheap to PARSE, not merely small.
+ */
+async function minimal(task: Task) {
+	const msgs = [{ role: "user", content: `${MENU}\nTask: ${task.ask}` }];
+	let chars = 0;
+	for (let step = 0; step < MAX_STEPS; step++) {
+		const out = await llm(msgs);
+		const fin = finalOf(out);
+		if (fin) return { answer: fin, steps: step + 1, chars };
+		const obs = exec(out);
+		msgs.push({ role: "assistant", content: out });
+		// No reminder, no re-instruction. Just what happened.
+		msgs.push({ role: "user", content: obs === null ? "That is not one of the tools." : obs });
+		chars = msgs.reduce((n, m) => n + m.content.length, 0);
+	}
+	const last = await llm([...msgs, { role: "user", content: ">answer" }]);
+	return { answer: finalOf(last) ?? last, steps: MAX_STEPS, chars };
+}
+
+/**
  * TRAJECTORY: the hypothesis the other two arms point at.
  *
  * Identical to SELFBRIEF - fresh window every step, observations compacted -
@@ -443,43 +477,57 @@ if (import.meta.main) {
 	console.log("the answer is never in the window; the model must find it");
 	console.log("=".repeat(76));
 
+	// Which arms to run. Three arms over six tasks on a CPU 9B is ~25 minutes, so
+	// a focused comparison is the difference between measuring and waiting.
+	const ARMS = new Set(arg("--arms", "accumulate,selfbrief,trajectory,minimal").split(","));
 	let aPass = 0;
 	let sPass = 0;
 	let tPass = 0;
+	let mPass = 0;
 	let aChars = 0;
 	let sChars = 0;
 	let tChars = 0;
+	let mChars = 0;
+	const blank = { answer: "", steps: 0, chars: 0 };
 
 	for (const t of TASKS) {
-		const a = await accumulate(t);
+		const a = ARMS.has("accumulate") ? await accumulate(t) : blank;
 		const aOk = scores(a.answer, t);
 		if (aOk) aPass++;
 		aChars += a.chars;
 
-		const s = await selfbrief(t);
+		const s = ARMS.has("selfbrief") ? await selfbrief(t) : blank;
 		const sOk = scores(s.answer, t);
 		if (sOk) sPass++;
 		sChars += s.chars;
 
-		const tr = await trajectory(t);
+		const tr = ARMS.has("trajectory") ? await trajectory(t) : blank;
 		const tOk = scores(tr.answer, t);
 		if (tOk) tPass++;
 		tChars += tr.chars;
 
+		const mi = ARMS.has("minimal") ? await minimal(t) : blank;
+		const mOk = scores(mi.answer, t);
+		if (mOk) mPass++;
+		mChars += mi.chars;
+
 		console.log(`\n${t.id}`);
 		console.log(`  ACCUMULATE ${aOk ? "PASS" : "FAIL"}  ${a.steps} steps  ${a.chars} chars peak  -> ${JSON.stringify(a.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 		console.log(`  SELFBRIEF  ${sOk ? "PASS" : "FAIL"}  ${s.steps} steps  ${s.chars} chars peak  -> ${JSON.stringify(s.answer.replace(/\s+/g, " ").slice(0, 80))}`);
-		console.log(`  TRAJECTORY ${tOk ? "PASS" : "FAIL"}  ${tr.steps} steps  ${tr.chars} chars peak  -> ${JSON.stringify(tr.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		if (ARMS.has("trajectory")) console.log(`  TRAJECTORY ${tOk ? "PASS" : "FAIL"}  ${tr.steps} steps  ${tr.chars} chars peak  -> ${JSON.stringify(tr.answer.replace(/\s+/g, " ").slice(0, 80))}`);
+		if (ARMS.has("minimal")) console.log(`  MINIMAL    ${mOk ? "PASS" : "FAIL"}  ${mi.steps} steps  ${mi.chars} chars peak  -> ${JSON.stringify(mi.answer.replace(/\s+/g, " ").slice(0, 80))}`);
 	}
 
 	const n = TASKS.length;
 	console.log(`\n${"=".repeat(76)}`);
 	console.log(`ACCUMULATE  ${aPass}/${n}   ${Math.round(aChars / n)} chars peak context per task`);
 	console.log(`SELFBRIEF   ${sPass}/${n}   ${Math.round(sChars / n)} chars peak context per task`);
-	console.log(`TRAJECTORY  ${tPass}/${n}   ${Math.round(tChars / n)} chars peak context per task`);
+	if (ARMS.has("trajectory")) console.log(`TRAJECTORY  ${tPass}/${n}   ${Math.round(tChars / n)} chars peak context per task`);
+	if (ARMS.has("minimal")) console.log(`MINIMAL     ${mPass}/${n}   ${Math.round(mChars / n)} chars peak context per task`);
 	console.log(`\nselfbrief vs accumulate  ${sPass - aPass >= 0 ? "+" : ""}${sPass - aPass} of ${n}`);
 	console.log(`trajectory vs accumulate ${tPass - aPass >= 0 ? "+" : ""}${tPass - aPass} of ${n}`);
-	console.log(`trajectory vs selfbrief  ${tPass - sPass >= 0 ? "+" : ""}${tPass - sPass} of ${n}   <- does keeping the trajectory recover the loss?`);
+	console.log(`trajectory vs selfbrief  ${tPass - sPass >= 0 ? "+" : ""}${tPass - sPass} of ${n}`);
+	console.log(`minimal vs accumulate    ${mPass - aPass >= 0 ? "+" : ""}${mPass - aPass} of ${n}   <- is LESS instruction actually better, or just smaller?`);
 	console.log(`${n} tasks is a signal, not a proof. Ground truth is grepped from real files.`);
 
 }
