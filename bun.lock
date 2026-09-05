@@ -50,14 +50,14 @@
     },
     "apps/8gent-bot": {
       "name": "@8gi-foundation/8gent-bot",
-      "version": "2.0.0",
+      "version": "0.17.3",
       "devDependencies": {
         "@types/bun": "latest",
       },
     },
     "apps/8gent-eyes": {
       "name": "@8gi-foundation/8gent-eyes",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "bin": {
         "8gent-eyes": "src/index.ts",
       },
@@ -69,9 +69,23 @@
         "typescript": "^5.3.0",
       },
     },
+    "apps/8gent-flow": {
+      "name": "@8gi-foundation/8gent-flow",
+      "version": "0.17.3",
+      "bin": {
+        "8gent-flow": "src/index.ts",
+      },
+      "dependencies": {
+        "@8gent/eyes": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.3.0",
+      },
+    },
     "apps/debugger": {
       "name": "debugger",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "next": "16.1.6",
         "react": "19.2.4",
@@ -90,14 +104,14 @@
     },
     "apps/linkedin-vessel": {
       "name": "@8gi/linkedin-vessel",
-      "version": "1.0.0",
+      "version": "0.17.3",
       "devDependencies": {
         "@types/bun": "latest",
       },
     },
     "apps/tui": {
       "name": "@8gent/tui",
-      "version": "0.0.1",
+      "version": "0.17.3",
       "dependencies": {
         "better-sqlite3": "^9.4.0",
         "ink": "^6.8.0",
@@ -114,7 +128,7 @@
     },
     "apps/video": {
       "name": "@8gent/video",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "@remotion/cli": "4.0.250",
         "@turf/turf": "^7.1.0",
@@ -131,7 +145,7 @@
     },
     "packages/audit": {
       "name": "@8gent/audit",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.0.0",
@@ -139,7 +153,7 @@
     },
     "packages/auth": {
       "name": "@8gent/auth",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "jose": "^6.0.0",
       },
@@ -149,11 +163,11 @@
     },
     "packages/channels": {
       "name": "@8gent/channels",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/control-plane": {
       "name": "@8gent/control-plane",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "@8gent/db": "workspace:*",
         "stripe": "^17.7.0",
@@ -161,11 +175,11 @@
     },
     "packages/daemon": {
       "name": "@8gent/daemon",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/db": {
       "name": "@8gent/db",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "convex": "^1.17.0",
       },
@@ -175,14 +189,14 @@
     },
     "packages/design-agent": {
       "name": "@8gent/design-agent",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/design-systems": {
       "name": "@8gent/design-systems",
-      "version": "1.0.0",
+      "version": "0.17.3",
       "dependencies": {
         "better-sqlite3": "^11.0.0",
       },
@@ -200,7 +214,7 @@
     },
     "packages/eyes": {
       "name": "@8gent/eyes",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "@8gent/audit": "workspace:*",
         "@8gent/memory": "workspace:*",
@@ -211,7 +225,7 @@
     },
     "packages/g8way": {
       "name": "@8gent/g8way",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "bin": {
         "g8way": "./bin/g8way.ts",
       },
@@ -225,16 +239,29 @@
         "typescript": "^5.3.0",
       },
     },
+    "packages/gamedev": {
+      "name": "@8gi-foundation/8gent-gamedev",
+      "version": "0.1.0",
+      "dependencies": {
+        "sharp": "^0.34.5",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "sharp": "^0.34.5",
+      },
+    },
     "packages/goal": {
       "name": "@8gent/goal",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/handeyes": {
       "name": "@8gent/handeyes",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "dependencies": {
         "@8gent/eyes": "workspace:*",
         "@8gent/hands": "workspace:*",
@@ -245,25 +272,25 @@
     },
     "packages/hands": {
       "name": "@8gent/hands",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/harness-cli": {
       "name": "@8gent/harness-cli",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "bin": {
         "8gent-harness": "./index.ts",
       },
     },
     "packages/kernel": {
       "name": "@8gent/kernel",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/memory": {
       "name": "@8gent/memory",
-      "version": "0.2.0",
+      "version": "0.17.3",
       "dependencies": {
         "@8gent/eyes": "workspace:*",
         "sqlite-vec": "^0.1.9",
@@ -274,14 +301,14 @@
     },
     "packages/personality": {
       "name": "@8gent/personality",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
     },
     "packages/pet": {
       "name": "@8gent/pet",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "peerDependencies": {
         "ink": "^5.0.0",
         "react": "^18.0.0",
@@ -289,54 +316,54 @@
     },
     "packages/planning": {
       "name": "@8gent/planning",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/qdrant-client": {
       "name": "@8gent/qdrant-client",
-      "version": "0.0.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/reporting": {
       "name": "@8gent/reporting",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
     },
     "packages/secrets": {
       "name": "@8gent/secrets",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/settings": {
       "name": "@8gent/settings",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/specifications": {
       "name": "@8gent/specifications",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/telegram-bot": {
       "name": "@8gent/telegram-bot",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "bun-types": "latest",
       },
     },
     "packages/telemetry": {
       "name": "@8gent/telemetry",
-      "version": "0.1.0",
+      "version": "0.17.3",
     },
     "packages/voice": {
       "name": "@8gent/voice",
-      "version": "0.1.0",
+      "version": "0.17.3",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
@@ -404,6 +431,10 @@
     "@8gi-foundation/8gent-bot": ["@8gi-foundation/8gent-bot@workspace:apps/8gent-bot"],
 
     "@8gi-foundation/8gent-eyes": ["@8gi-foundation/8gent-eyes@workspace:apps/8gent-eyes"],
+
+    "@8gi-foundation/8gent-flow": ["@8gi-foundation/8gent-flow@workspace:apps/8gent-flow"],
+
+    "@8gi-foundation/8gent-gamedev": ["@8gi-foundation/8gent-gamedev@workspace:packages/gamedev"],
 
     "@8gi/linkedin-vessel": ["@8gi/linkedin-vessel@workspace:apps/linkedin-vessel"],
 
@@ -2857,7 +2888,7 @@
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
 
-    "@8gent/audit/@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
+    "@8gent/audit/@types/bun": ["@types/bun@1.4.1", "", { "dependencies": { "bun-types": "1.4.1" } }, "sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA=="],
 
     "@8gent/design-systems/better-sqlite3": ["better-sqlite3@11.10.0", "", { "dependencies": { "bindings": "^1.5.0", "prebuild-install": "^7.1.1" } }, "sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ=="],
 
@@ -2868,6 +2899,10 @@
     "@8gi-foundation/8gent-bot/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
 
     "@8gi-foundation/8gent-eyes/@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
+
+    "@8gi-foundation/8gent-flow/@types/bun": ["@types/bun@1.4.1", "", { "dependencies": { "bun-types": "1.4.1" } }, "sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA=="],
+
+    "@8gi-foundation/8gent-gamedev/@types/bun": ["@types/bun@1.4.1", "", { "dependencies": { "bun-types": "1.4.1" } }, "sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA=="],
 
     "@8gi/linkedin-vessel/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
 
@@ -3183,13 +3218,17 @@
 
     "wrap-ansi/string-width": ["string-width@7.2.0", "", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
 
-    "@8gent/audit/@types/bun/bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
+    "@8gent/audit/@types/bun/bun-types": ["bun-types@1.4.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA=="],
 
     "@8gent/g8way/@types/bun/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
     "@8gi-foundation/8gent-bot/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
     "@8gi-foundation/8gent-eyes/@types/bun/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
+
+    "@8gi-foundation/8gent-flow/@types/bun/bun-types": ["bun-types@1.4.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA=="],
+
+    "@8gi-foundation/8gent-gamedev/@types/bun/bun-types": ["bun-types@1.4.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA=="],
 
     "@8gi/linkedin-vessel/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
@@ -3523,6 +3562,10 @@
 
     "@8gi-foundation/8gent-eyes/@types/bun/bun-types/@types/node": ["@types/node@25.4.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw=="],
 
+    "@8gi-foundation/8gent-flow/@types/bun/bun-types/@types/node": ["@types/node@25.4.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw=="],
+
+    "@8gi-foundation/8gent-gamedev/@types/bun/bun-types/@types/node": ["@types/node@25.4.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw=="],
+
     "@8gi/linkedin-vessel/@types/bun/bun-types/@types/node": ["@types/node@25.4.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw=="],
 
     "@eslint/config-array/minimatch/brace-expansion/balanced-match": ["balanced-match@1.0.2", "", {}, "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="],
@@ -3562,6 +3605,10 @@
     "@8gi-foundation/8gent-bot/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
     "@8gi-foundation/8gent-eyes/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
+
+    "@8gi-foundation/8gent-flow/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
+
+    "@8gi-foundation/8gent-gamedev/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
     "@8gi/linkedin-vessel/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
