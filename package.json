@@ -52,6 +52,7 @@
     "smoke": "bun scripts/smoke.ts",
     "smoke:fast": "bun scripts/smoke.ts --skip-network",
     "smoke:strict": "bun scripts/smoke.ts --strict",
+    "music:smoke": "bun scripts/music-smoke.ts",
     "verify:presets": "bun scripts/verify-presets.ts",
     "verify:presets:strict": "bun scripts/verify-presets.ts --strict",
     "lint": "biome lint .",
