@@ -934,9 +934,9 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [expandedView, setExpandedView] = useState(false);
 
-	// Git state (would be populated from actual git commands)
-	const [isGitRepo] = useState(true);
-	const [currentBranch] = useState<string | null>("main");
+	// Git state is derived from useGitSync below (isGitRepo / currentBranch
+	// are never hardcoded - the header used to read "main" whatever branch
+	// was checked out, #2921).
 
 	// Session branching tree
 	const sessionTreeRef = useRef(new SessionTree());
@@ -1488,6 +1488,8 @@ export function App({
 
 	// V2 chrome data sources powering HeaderBar + LilEightBadge.
 	const gitSync = useGitSync(process.cwd(), 30_000);
+	const isGitRepo = gitSync.status !== "no-repo";
+	const currentBranch = gitSync.branch || null;
 	const lilEightStateValue = useLilEightState({
 		messages,
 		isProcessing,
@@ -5766,6 +5768,7 @@ export function App({
 						localFirst={true}
 						sessionTime={sessionTime}
 						lilEightState={lilEightState}
+						width={cols}
 					/>
 				</Box>
 
