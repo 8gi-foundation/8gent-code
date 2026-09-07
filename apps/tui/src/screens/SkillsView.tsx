@@ -18,9 +18,11 @@ import React, { useEffect, useMemo, useState } from "react";
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
-import { getSkillManager, type SkillManager } from "../../../../packages/skills/index.js";
+import { type SkillManager, getSkillManager } from "../../../../packages/skills/index.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
+import { useViewport } from "../hooks/useViewport.js";
+import { truncate } from "../lib/text.js";
 import { text as textColor } from "../theme/semantic.js";
 
 export interface SkillRow {
@@ -36,7 +38,12 @@ export const EMPTY_STATE_TEXT =
 	"No skills loaded. Add .md under ~/.8gent/skills/ or run from a repo with .claude/skills/*/SKILL.md.";
 
 /** Replace the home prefix with ~ so long paths fit a terminal row. */
-export function shortenPath(filePath: string, home: string = os.homedir()): string {
+export function shortenPath(
+	filePath: string,
+	home: string = os.homedir(),
+	cwd: string = process.cwd(),
+): string {
+	if (cwd && filePath.startsWith(`${cwd}${path.sep}`)) return `.${filePath.slice(cwd.length)}`;
 	if (home && filePath.startsWith(home)) return `~${filePath.slice(home.length)}`;
 	return filePath;
 }
@@ -53,7 +60,9 @@ export function describeOrigin(filePath: string, home: string = os.homedir()): s
 }
 
 /** Load every skill the slash path can run, sorted by name. */
-export async function loadSkillRows(manager: SkillManager = getSkillManager()): Promise<SkillRow[]> {
+export async function loadSkillRows(
+	manager: SkillManager = getSkillManager(),
+): Promise<SkillRow[]> {
 	await manager.loadSkills();
 	return manager
 		.getAllSkills()
@@ -90,6 +99,8 @@ export interface SkillsBodyProps {
 	filtering: boolean;
 	showHelp: boolean;
 	windowSize: number;
+	/** Terminal width; the detail column truncates paths to fit it. Defaults to 120. */
+	columns?: number;
 }
 
 export function SkillsHelp() {
@@ -116,6 +127,10 @@ export function SkillsHelp() {
 /** Hook-free body so tests can walk the element tree. */
 export function SkillsBody(props: SkillsBodyProps) {
 	const { rows, filtered, loaded, selectedIndex, query, filtering, showHelp, windowSize } = props;
+	const columns = props.columns ?? 120;
+	// Detail column = terminal width minus the list column, its margin, the
+	// row label and the frame padding. Paths never wrap; they truncate.
+	const detailWidth = Math.max(20, columns - 30 - 2 - 8 - 6);
 	if (showHelp) return <SkillsHelp />;
 
 	const selected = filtered[selectedIndex];
@@ -135,8 +150,8 @@ export function SkillsBody(props: SkillsBodyProps) {
 			<Box marginBottom={1}>
 				<Heading>Skills</Heading>
 				<MutedText>
-					{"  "}~/.8gent/skills and .claude/skills - {rows.length} loaded
-					{query ? `, ${filtered.length} match "${query}"` : ""}
+					{"  "}
+					{rows.length} loaded{query ? `, ${filtered.length} match "${query}"` : ""}
 				</MutedText>
 			</Box>
 			<Divider />
@@ -170,14 +185,16 @@ export function SkillsBody(props: SkillsBodyProps) {
 						<Box marginTop={1} flexDirection="column">
 							<Box>
 								<MutedText>From{"    "}</MutedText>
-								<Text color={textColor.accent}>{selected.origin}</Text>
+								<Text color={textColor.accent}>{truncate(selected.origin, detailWidth)}</Text>
 							</Box>
 							<Box>
 								<MutedText>File{"    "}</MutedText>
-								<AppText>{shortenPath(selected.filePath)}</AppText>
+								<AppText>{truncate(shortenPath(selected.filePath), detailWidth)}</AppText>
 							</Box>
 							<Box marginTop={1}>
-								<AppText wrap="wrap">{selected.description || "No description in the file."}</AppText>
+								<AppText wrap="wrap">
+									{selected.description || "No description in the file."}
+								</AppText>
 							</Box>
 						</Box>
 					) : null}
@@ -185,7 +202,9 @@ export function SkillsBody(props: SkillsBodyProps) {
 			</Box>
 			<Divider />
 			{filtering ? (
-				<MutedText>Filtering - type to narrow, Backspace to erase, Enter to keep</MutedText>
+				<MutedText>
+					Filtering - type to narrow, Backspace to erase, Enter to keep, Esc to clear
+				</MutedText>
 			) : (
 				<MutedText>
 					arrows=navigate enter=run /=filter ?=help q=close
@@ -205,6 +224,7 @@ interface SkillsViewProps {
 }
 
 export function SkillsView({ visible, onClose, onRun, windowSize = 14 }: SkillsViewProps) {
+	const viewport = useViewport();
 	const [rows, setRows] = useState<SkillRow[]>([]);
 	const [loaded, setLoaded] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -246,10 +266,16 @@ export function SkillsView({ visible, onClose, onRun, windowSize = 14 }: SkillsV
 				if (input === "?" || key.escape || input === "q") setShowHelp(false);
 				return;
 			}
-			// Esc always closes: the app-level handler switches any non-chat tab
-			// back to chat on Esc, so the view must not overload it.
+			// Esc leaves filter mode first (clearing the query); a second Esc
+			// closes the view. The app-level Escape handler leaves this tab alone
+			// (TABS_OWNING_ESCAPE in app.tsx), so the view owns both steps.
 			if (key.escape) {
-				onClose();
+				if (filtering || query) {
+					setFiltering(false);
+					setQuery("");
+				} else {
+					onClose();
+				}
 				return;
 			}
 			if (filtering) {
@@ -286,6 +312,7 @@ export function SkillsView({ visible, onClose, onRun, windowSize = 14 }: SkillsV
 			filtering={filtering}
 			showHelp={showHelp}
 			windowSize={windowSize}
+			columns={viewport.width}
 		/>
 	);
 }
