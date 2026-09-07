@@ -630,6 +630,9 @@ applySettingsToEnv();
 
 // Splitting this component changes prop surface and file structure; tracked separately from the lint sweep.
 // react-doctor-disable-next-line react-doctor/no-giant-component
+/** Utility tabs whose view handles Escape itself (cancel edit, close help, then onClose). */
+const TABS_OWNING_ESCAPE: ReadonlySet<string> = new Set(["settings", "notes"]);
+
 export function App({
 	initialCommand,
 	args,
@@ -1856,8 +1859,16 @@ export function App({
 				addSystemMessage("Generation interrupted.");
 			} else if (imageInput.currentImage && (viewMode === "chat" || viewMode === "onboarding")) {
 				imageInput.removeImage();
-			} else if (activeTabType !== "chat" && viewMode === "chat") {
-				// In a non-chat tab, escape switches back to first chat tab
+			} else if (
+				activeTabType !== "chat" &&
+				viewMode === "chat" &&
+				!TABS_OWNING_ESCAPE.has(activeTabType)
+			) {
+				// In a non-chat tab whose view does not handle Escape itself,
+				// escape switches back to the first chat tab. Views that own
+				// Escape (Settings, Notes) call onClose when they are done with
+				// it, so this handler must not also fire, or Esc during a field
+				// edit or the help overlay would drop the tab (#2912).
 				const chatTab = workspaceTabs.tabs.find((t) => t.type === "chat");
 				if (chatTab) workspaceTabs.switchTab(chatTab.id);
 			} else if (viewMode !== "chat") {
@@ -5218,7 +5229,10 @@ export function App({
 		if (chatTab) workspaceTabs.switchTab(chatTab.id);
 	};
 
-	// Render main content based on view mode + active tab type
+	// Render main content based on view mode + active tab type.
+	// Mounted in the V2 centre column whenever the active tab is not a chat
+	// tab (#2912), so utility tabs replace the message list instead of
+	// leaving the chat shell on screen.
 	const renderMainContent = () => {
 		// Utility tabs (settings, notes, music, kanban, terminal, etc.) render
 		// their dedicated view regardless of viewMode. They are workspace-scoped,
@@ -5706,8 +5720,12 @@ export function App({
 
 	// V2 three-zone shell - the only render path.
 	const cols = viewport.width;
-	const showContextRail = cols >= 120;
-	const showActivityRail = cols >= 90;
+	// A utility tab (Settings, Notes, ...) takes the whole content area: the
+	// rails and the chat input step aside so the view is not squeezed into a
+	// 26-column slot where every label wraps mid-word (#2912).
+	const utilityTabActive = activeTabType !== "chat";
+	const showContextRail = cols >= 120 && !utilityTabActive;
+	const showActivityRail = cols >= 90 && !utilityTabActive;
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5723,7 +5741,6 @@ export function App({
 	const lilEightState = lilEightStateValue;
 	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
 	void sessionTick;
-	void renderMainContent;
 	void tokenMeterColWidth;
 
 	// Derived ActivityRail data. Memory store doesn't expose counters yet
@@ -5823,14 +5840,21 @@ export function App({
 						/>
 
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-							<MessageList
-								messages={messages}
-								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
-								contentWidth={Math.max(
-									24,
-									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
-								)}
-							/>
+							{activeTabType !== "chat" ? (
+								renderMainContent()
+							) : (
+								<MessageList
+									messages={messages}
+									rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
+									contentWidth={Math.max(
+										24,
+										viewport.width -
+											(showContextRail ? 55 : 0) -
+											(showActivityRail ? 36 : 0) -
+											8,
+									)}
+								/>
+							)}
 						</Box>
 
 						{paletteOpen && (
@@ -5853,12 +5877,13 @@ export function App({
 							<InlineApprovalPrompt target={approvalPending.target} />
 						)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
+						<Box flexShrink={0} display={paletteOpen || utilityTabActive ? "none" : "flex"}>
 							<CommandInput
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								focused={
-									((viewMode === "chat" && activeTabType === "chat") ||
+									activeTabType === "chat" &&
+									(viewMode === "chat" ||
 										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
 									!isBubbleNavMode &&
 									!paletteOpen

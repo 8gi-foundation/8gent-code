@@ -9,6 +9,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - TUI: utility tabs render their view in the V2 centre column (#2912)
+
+- `apps/tui/src/app.tsx`: `renderMainContent()` is mounted again. Since the
+  V2 layout became the only render path (3f200278, 2026-05-07) it was never
+  called, so `/settings`, Notes (Ctrl+N / Shift+Tab), Ideas, Kanban and every
+  other non-chat tab added a tab but left the chat shell on screen. The centre
+  column now renders the active utility view whenever the active tab is not a
+  chat tab, and falls back to `MessageList` otherwise. The `void
+  renderMainContent` suppression is gone so an unused function fails
+  typecheck again.
+- `apps/tui/src/__tests__/utility-tab-render.test.tsx` (new): renders the real
+  `App` into fake streams under an isolated HOME, opens `/settings`, asserts
+  the Settings categories render, presses Escape and asserts the chat tab is
+  back, then Ctrl+N and asserts the Notes scratchpad renders. Fails on main.
+
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"

@@ -361,6 +361,10 @@ export function CommandInput({
 				{/* Text input with ghost overlay */}
 				<Box>
 					<TextInput
+						// ink-text-input listens for keys on its own (focus defaults to
+						// true), so it must follow the same gate as our useInput above or
+						// keys meant for a utility tab (Settings q/e/?/space) land here too.
+						focus={focused && !isProcessing}
 						value={value}
 						onChange={(v) => {
 							// Any manual edit exits history navigation and updates the draft
