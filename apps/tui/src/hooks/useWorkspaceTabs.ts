@@ -73,7 +73,8 @@ export const TAB_ICONS: TabIcon[] = [
 	{ type: "projects", icon: "P:", label: "Projects" },
 	{ type: "terminal", icon: "$:", label: "Terminal" },
 	{ type: "settings", icon: "=:", label: "Settings" },
-	{ type: "skills", icon: "S:", label: "Skills" },
+	// Skills run as slash commands; the glyph says that instead of implying a Ctrl key.
+	{ type: "skills", icon: "/:", label: "Skills" },
 ];
 
 /** Singleton tab types (only one instance allowed) */

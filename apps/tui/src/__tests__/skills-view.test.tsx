@@ -171,7 +171,7 @@ describe("SkillsBody", () => {
 
 	test("help overlay lists every key", () => {
 		const text = renderToText(React.createElement(SkillsBody, bodyProps([], { showHelp: true })));
-		for (const key of ["Up/Down", "/ Filter", "Enter Run", "Backspace", "Esc / q Close", "? Show"]) {
+		for (const key of ["Up/Down", "/ Filter", "Enter Run", "Backspace", "Esc Clear the filter", "q Close the view", "? Show"]) {
 			expect(text).toContain(key);
 		}
 	});

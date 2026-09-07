@@ -115,7 +115,8 @@ export function SkillsHelp() {
 				<AppText>/ Filter by name, description or origin as you type</AppText>
 				<AppText>Enter Run the selected skill, the same as typing /name in chat</AppText>
 				<AppText>Backspace Erase the filter (clears it entirely when not typing)</AppText>
-				<AppText>Esc / q Close the view and return to chat</AppText>
+				<AppText>Esc Clear the filter if one is set, otherwise close the view</AppText>
+				<AppText>q Close the view and return to chat</AppText>
 				<AppText>? Show this help</AppText>
 			</Box>
 			<Divider />
