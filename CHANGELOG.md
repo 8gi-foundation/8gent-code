@@ -9,6 +9,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - TUI: /help is a map of the product (#2935, part of #2922)
+
+- `apps/tui/src/lib/help-map.ts` (new): pure functions from the slash
+  registry plus a column width to lines of text. `/help` prints one screen
+  grouped by what a person is trying to do (Start here, See what is going
+  on, Work, Notes and ideas, Voice and music, Session). Every command shown
+  is read from the registry at runtime; a command that this build does not
+  register drops its line and a heading with nothing left drops entirely,
+  so the map never advertises a command that does not exist. Long items
+  carry a short form for narrow columns.
+- `/help all` lists every registered command, one per line, truncated to
+  the column so nothing wraps. `/help <name>` prints one command's name,
+  description, usage and aliases, wrapped rather than truncated; an alias
+  resolves to its command.
+- `apps/tui/src/app.tsx`: the `help` case now calls the registry instead of
+  a hand-written list that named commands not registered in the build.
+- Tests: `apps/tui/src/lib/help-map.test.ts` (23 tests).
+
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"
