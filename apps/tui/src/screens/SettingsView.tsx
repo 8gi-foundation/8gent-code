@@ -1003,12 +1003,11 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 										</Box>
 										{selected ? (
 											<Box marginLeft={2}>
-												<MutedText>{f.description}</MutedText>
-											</Box>
-										) : null}
-										{editing && edit.error ? (
-											<Box marginLeft={2}>
-												<ErrorText>{edit.error}</ErrorText>
+												{editing && edit.error ? (
+													<ErrorText>{edit.error}</ErrorText>
+												) : (
+													<MutedText>{f.description}</MutedText>
+												)}
 											</Box>
 										) : null}
 									</Box>
