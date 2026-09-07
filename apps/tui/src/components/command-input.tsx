@@ -31,6 +31,7 @@ import {
 	type GoalClient,
 	parseGoCommand,
 } from "../lib/goal-client.js";
+import { padRight, truncate } from "../lib/text.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
@@ -76,7 +77,20 @@ interface CommandInputProps {
 	transformInputValue?: (value: string) => string;
 	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
 	allowEmptySubmit?: boolean;
+	/**
+	 * Width of the column this input lives in, border included. The slash
+	 * autocomplete box sizes itself to this so it never paints outside the
+	 * column. See lib/layout popupLayout.
+	 */
+	popupWidth?: number;
+	/** Maximum entries the slash autocomplete box lists at once. */
+	popupRows?: number;
 }
+
+/** Fallback column width when the caller does not measure one. */
+const DEFAULT_POPUP_WIDTH = 60;
+/** Fallback slash autocomplete row budget. */
+const DEFAULT_POPUP_ROWS = 14;
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -118,10 +132,22 @@ export function CommandInput({
 	focused = true,
 	transformInputValue,
 	allowEmptySubmit = false,
+	popupWidth = DEFAULT_POPUP_WIDTH,
+	popupRows = DEFAULT_POPUP_ROWS,
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
 	const [value, setValue] = useState("");
+	// Value as of the last render, so a Ctrl chord can restore it. The
+	// underlying TextInput inserts the chord's letter as text (Ctrl+P types
+	// "p", Ctrl+U types "u") because it only filters Ctrl+C; we undo that
+	// here, and Ctrl+U additionally clears the line.
+	const valueRef = useRef("");
+	valueRef.current = value;
+	// Non-null while a Ctrl chord is being swallowed. TextInput's onChange
+	// for the same keystroke sees this and restores instead of inserting.
+	// Cleared on a microtask, after every listener for the keystroke ran.
+	const restoreRef = useRef<string | null>(null);
 	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
 	const [historyIndex, setHistoryIndex] = useState(-1);
 	const draftRef = useRef("");
@@ -202,6 +228,25 @@ export function CommandInput({
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
+			// Ctrl chords are never text. Ctrl+U clears the line; any other
+			// chord (Ctrl+P palette, Ctrl+N notes, ...) leaves the line as it
+			// was. The app-level handler still receives the chord.
+			if (key.ctrl && !key.meta && input.length === 1) {
+				const restored = input === "u" ? "" : valueRef.current;
+				restoreRef.current = restored;
+				queueMicrotask(() => {
+					restoreRef.current = null;
+				});
+				setValue(restored);
+				if (input === "u") {
+					setHistoryIndex(-1);
+					draftRef.current = "";
+				}
+				return;
+			}
+
+			if (isProcessing) return;
+
 			// Tab to accept ghost suggestion
 			if (key.tab && isVisible && suggestion) {
 				const newValue = accept();
@@ -234,8 +279,10 @@ export function CommandInput({
 				return;
 			}
 		},
-		{ isActive: !isProcessing && focused },
+		{ isActive: focused },
 	);
+
+	const ghostVisible = !isProcessing && isVisible && Boolean(suggestion);
 
 	const handleSubmit = useCallback(
 		(input: string) => {
@@ -362,7 +409,19 @@ export function CommandInput({
 				<Box>
 					<TextInput
 						value={value}
+						// TextInput owns its own key listener. Without this it keeps
+						// typing into the chat line while the Ctrl+P palette (or any
+						// other view) has focus, even when this box is display:none.
+						focus={focused}
+						// While a ghost suggestion shows, the cursor sits on the first
+						// ghost character instead of a blank cell before it, so the
+						// line reads "/settings" rather than "/sett ings".
+						showCursor={!ghostVisible}
 						onChange={(v) => {
+							if (restoreRef.current !== null) {
+								setValue(restoreRef.current);
+								return;
+							}
 							// Any manual edit exits history navigation and updates the draft
 							if (historyIndex !== -1) {
 								setHistoryIndex(-1);
@@ -380,24 +439,37 @@ export function CommandInput({
 						}
 					/>
 
-					{/* Ghost suggestion text */}
-					{!isProcessing && isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
+					{/* Ghost suggestion text; first char carries the cursor */}
+					{ghostVisible && suggestion && (
+						<>
+							<AppText inverse>{suggestion.text.slice(0, 1)}</AppText>
+							<MutedText>{suggestion.text.slice(1)}</MutedText>
+						</>
+					)}
 				</Box>
 			</Box>
 
 			{/* Ghost suggestion hint */}
-			{!isProcessing && isVisible && suggestion && (
-				<Box paddingLeft={2}>
+			{ghostVisible && suggestion && (
+				<Box paddingLeft={2} overflow="hidden">
 					<ShortcutHint
 						keys="[Tab]"
-						description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`}
+						description={truncate(
+							`to accept (${getSuggestionSourceLabel(suggestion.source)})`,
+							Math.max(0, popupWidth - 10),
+						)}
 					/>
 				</Box>
 			)}
 
 			{/* Slash command help */}
 			{!isProcessing && showSlashHelp && (
-				<SlashCommandHelp filter={value.trimStart().slice(1)} entries={slashRegistryEntries} />
+				<SlashCommandHelp
+					filter={value.trimStart().slice(1)}
+					entries={slashRegistryEntries}
+					width={popupWidth - 2}
+					maxRows={popupRows}
+				/>
 			)}
 		</Box>
 	);
@@ -561,31 +633,80 @@ function getProcessingLabel(stage: string): string {
 }
 
 // Slash command help dropdown (built-ins + loaded skills)
+
+/** Border (2) + paddingX (2) of the slash help box. */
+const SLASH_BOX_CHROME_COLS = 4;
+/** Widest the `/name` column grows; longer names are truncated. */
+const SLASH_NAME_COL_MAX = 16;
+/** Below this many columns the description is dropped rather than mangled. */
+const SLASH_MIN_DESCRIPTION_COLS = 6;
+
+/**
+ * Column plan for a slash help box of `width` columns (border included).
+ * Pure, so the row geometry is unit-testable without rendering.
+ */
+export function slashHelpColumns(
+	width: number,
+	names: string[],
+): { inner: number; name: number; description: number } {
+	const inner = Math.max(4, width - SLASH_BOX_CHROME_COLS);
+	const longestName = names.reduce((max, n) => Math.max(max, n.length + 1), 0);
+	const name = Math.min(SLASH_NAME_COL_MAX, longestName, inner);
+	// One space between the name column and the description.
+	const description = Math.max(0, inner - name - 1);
+	return {
+		inner,
+		name,
+		description: description < SLASH_MIN_DESCRIPTION_COLS ? 0 : description,
+	};
+}
+
 function SlashCommandHelp({
 	filter,
 	entries,
+	width,
+	maxRows,
 }: {
 	filter: string;
 	entries: SlashRegistryEntry[];
+	/** Total box width, border included. */
+	width: number;
+	/** Maximum entries listed. */
+	maxRows: number;
 }) {
 	const f = filter.toLowerCase();
 	const filtered = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
+	if (filtered.length === 0) return null;
 
-	const combined = filtered.map((entry) => ({
-		key: `${entry.kind}:${entry.token}`,
-		label: entry.name,
-		description: entry.description,
-	}));
-
-	if (combined.length === 0) return null;
+	const shown = filtered.slice(0, Math.max(1, maxRows));
+	const cols = slashHelpColumns(
+		width,
+		shown.map((entry) => entry.name),
+	);
+	const header =
+		shown.length < filtered.length
+			? `Commands (${shown.length} of ${filtered.length}):`
+			: "Commands:";
 
 	return (
-		<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} marginTop={1}>
-			<MutedText>Commands:</MutedText>
-			{combined.slice(0, 14).map((row) => (
-				<Box key={row.key}>
-					<AppText color="cyan">/{row.label}</AppText>
-					<MutedText> - {row.description}</MutedText>
+		<Box
+			flexDirection="column"
+			borderStyle="round"
+			borderColor={t.teal}
+			paddingX={1}
+			width={width}
+			flexShrink={0}
+			overflow="hidden"
+		>
+			<MutedText>{truncate(header, cols.inner)}</MutedText>
+			{shown.map((entry) => (
+				<Box key={`${entry.kind}:${entry.token}`}>
+					<AppText color={t.teal}>
+						{padRight(truncate(`/${entry.name}`, cols.name), cols.name)}
+					</AppText>
+					{cols.description > 0 ? (
+						<MutedText>{` ${truncate(entry.description, cols.description)}`}</MutedText>
+					) : null}
 				</Box>
 			))}
 		</Box>

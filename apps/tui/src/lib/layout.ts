@@ -74,3 +74,90 @@ export function distributeWidths(totalWidth: number, weights: number[]): number[
 
 	return rawWidths;
 }
+
+/**
+ * Fixed chrome of the V2 three-zone shell (app.tsx). Kept here so the
+ * popups (slash autocomplete, Ctrl+P palette) can size themselves from
+ * the same numbers the shell lays out with, instead of guessing.
+ */
+export const SHELL_CHROME = {
+	/** Outer main-box border (2) + paddingX (2). */
+	frameCols: 4,
+	/** ContextRail is a fixed 28-column bordered box. */
+	contextRailCols: 28,
+	/** LivePlanRail is a fixed 24-column box. */
+	planRailCols: 24,
+	/** ActivityRail is a fixed 34-column bordered box. */
+	activityRailCols: 34,
+	/** `gap={1}` between the rail children of the main box. */
+	gapCols: 1,
+	/**
+	 * Rows outside the centre column: header (3) + tab bar (2) + main box
+	 * border (2) + FM bar (3) + instrument tiles (3) + mode tiles (3) +
+	 * focal strip (3).
+	 */
+	fixedRows: 19,
+	/**
+	 * HeaderBar wraps its right-hand cluster onto a second row below about
+	 * 110 columns, which costs the centre column one more row. Reserved at
+	 * every size so a popup never lands on the main frame's bottom border.
+	 */
+	safetyRows: 1,
+} as const;
+
+export interface PopupLayoutOptions {
+	/** ContextRail + LivePlanRail are shown (cols >= 120). */
+	contextRail: boolean;
+	/** ActivityRail is shown (cols >= 90). */
+	activityRail: boolean;
+}
+
+export interface PopupLayout {
+	/** Usable width of the centre column, in columns. */
+	width: number;
+	/** How many command entries the slash autocomplete box may list. */
+	slashRows: number;
+	/** How many command entries the Ctrl+P palette may list. */
+	paletteRows: number;
+}
+
+/** Width of the centre column between the rails. Never below `minWidth`. */
+export function centerColumnWidth(
+	viewportWidth: number,
+	opts: PopupLayoutOptions,
+	minWidth = 20,
+): number {
+	let width = viewportWidth - SHELL_CHROME.frameCols;
+	if (opts.contextRail) {
+		width -=
+			SHELL_CHROME.contextRailCols +
+			SHELL_CHROME.planRailCols +
+			2 * SHELL_CHROME.gapCols;
+	}
+	if (opts.activityRail) {
+		width -= SHELL_CHROME.activityRailCols + SHELL_CHROME.gapCols;
+	}
+	return Math.max(minWidth, width);
+}
+
+/**
+ * Size budget for the two command popups. Both must fit inside the centre
+ * column at any terminal size, so rows are derived from the viewport height
+ * minus the shell chrome, and width from the column between the rails.
+ *
+ * Slash box chrome: border (2) + "Commands:" header (1), sitting under the
+ * input row (1) and the ghost hint row (1). Palette chrome: border (2) +
+ * query (1) + divider (1) + up/down markers (2) + footer (1).
+ */
+export function popupLayout(
+	viewport: { width: number; height: number },
+	opts: PopupLayoutOptions,
+): PopupLayout {
+	const width = centerColumnWidth(viewport.width, opts);
+	const freeRows = viewport.height - SHELL_CHROME.fixedRows - SHELL_CHROME.safetyRows;
+	return {
+		width,
+		slashRows: clamp(freeRows - 5, 3, 14),
+		paletteRows: clamp(freeRows - 7, 3, 10),
+	};
+}

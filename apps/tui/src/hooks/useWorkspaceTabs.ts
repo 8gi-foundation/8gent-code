@@ -71,7 +71,7 @@ export const TAB_ICONS: TabIcon[] = [
 	{ type: "music", icon: "~:", label: "Music" },
 	{ type: "projects", icon: "P:", label: "Projects" },
 	{ type: "terminal", icon: "$:", label: "Terminal" },
-	{ type: "settings", icon: "=:", label: "Settings" },
+	{ type: "settings", icon: "\u00A7", label: "Settings" },
 ];
 
 /** Singleton tab types (only one instance allowed) */
