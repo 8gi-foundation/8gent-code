@@ -31,6 +31,7 @@ import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
+import { type AbortReason, settleFailedLocalTurn, USER_ABORT } from "./turn-abort";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
 import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
@@ -690,7 +691,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
-					this.abort();
+					this.abort("circuit-breaker");
 				}
 
 				if (success) {
@@ -878,21 +879,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			agentResult = outcome.value;
 		} catch (err) {
 			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
-			// timeout, or an abort. Return a friendly turn in the normal chat()
-			// shape so the TUI/Pill render it cleanly instead of throwing a raw
-			// fetch error up through the surface.
+			// timeout, or an abort. A user abort (ESC) is not an error: the
+			// surface already said "Generation interrupted.", so the turn ends
+			// quietly with nothing recorded. Anything else returns a friendly
+			// turn in the normal chat() shape so the TUI/Pill render it cleanly
+			// instead of throwing a raw fetch error up through the surface.
 			this.abortController = null;
-			const raw = err instanceof Error ? err.message : String(err);
-			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
-			const isReachability =
-				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
-					raw,
-				);
-			const friendly = isReachability
-				? `The local model endpoint (${endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`
-				: `The local model turn could not complete: ${raw}`;
-			this.messageHistory.push({ role: "assistant", content: friendly });
-			return friendly;
+			return settleFailedLocalTurn({
+				err,
+				signal,
+				endpoint: resolveTextToolEndpoint(providerName, this.config.baseUrl),
+				history: this.messageHistory,
+			});
 		}
 		this.abortController = null;
 
@@ -1127,7 +1125,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			console.log(
 				`\n[8gent] Session watchdog: turn exceeded ${SESSION_MAX_MS / 60000} min — aborting`,
 			);
-			this.abort();
+			this.abort("session-watchdog");
 		}, SESSION_MAX_MS);
 
 		// Build provider config — main agent always uses its own model.
@@ -1440,7 +1438,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
-					this.abort();
+					this.abort("circuit-breaker");
 				}
 
 				if (event.success) {
@@ -2343,13 +2341,23 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 	}
 
 	/**
-	 * Abort the current generation. Called when user presses ESC during processing.
+	 * Abort the current generation.
+	 *
+	 * Defaults to a user abort (ESC in the TUI, /stop over RPC, a tab closing),
+	 * which the turn treats as a quiet end rather than a failure. Internal
+	 * callers pass their own reason so the failure text stays honest. The
+	 * reason rides on the signal so the turn can read it after this method
+	 * has dropped the controller.
 	 */
-	abort(): void {
+	abort(reason: AbortReason = USER_ABORT): void {
 		if (this.abortController) {
-			this.abortController.abort();
+			this.abortController.abort(reason);
 			this.abortController = null;
-			console.log("[8gent] Generation aborted by user");
+			console.log(
+				reason === USER_ABORT
+					? "[8gent] Generation aborted by user"
+					: `[8gent] Generation aborted (${reason})`,
+			);
 		}
 	}
 
