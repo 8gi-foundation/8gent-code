@@ -162,7 +162,10 @@ import {
 import {
 	loadSettings as loadAppSettings,
 	getVoiceForRole,
+	getVoiceEngine,
+	resolveVoiceForEngine,
 } from "../../../packages/settings/index.js";
+import { getTTSEngine } from "../../../packages/voice/tts-engine.js";
 import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
@@ -390,10 +393,12 @@ function computeCliOverrides(
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 
 // ----------------------------------------------------------------------------
-// TTS helper — speak agent replies via macOS `say` when voice.outputEnabled.
-// Picks the per-agent voice from settings (Daniel / Karen / Moira by default)
-// and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
-// on audio. macOS-only; silently no-ops on other platforms.
+// TTS helper: speak agent replies through the shared TTSEngine when
+// voice.outputEnabled. The engine comes from settings (`voice.engine`,
+// KittenTTS by default) and falls back to macOS `say` when the neural engine
+// is not installed. Picks the per-agent voice from settings (Jasper / Bruno /
+// Luna by default) and falls back to voice.ttsVoice. Fully fire-and-forget so
+// the TUI never blocks on audio. macOS-only; silently no-ops elsewhere.
 // ----------------------------------------------------------------------------
 function speakAgentReply(role: string | undefined, text: string): void {
 	if (process.platform !== "darwin") return;
@@ -406,24 +411,55 @@ function speakAgentReply(role: string | undefined, text: string): void {
 		return;
 	}
 	if (!s.voice?.outputEnabled) return;
-	const voice = getVoiceForRole(role || "engineer", s);
-	// Cap utterance length so we don't tie up `say` on long answers.
-	// macOS `say` handles long text fine, but anything past ~600 chars is
-	// just noise for the user.
-	const safe = trimmed.replace(/"/g, '\\"').slice(0, 600);
+	const safeRole = role || "engineer";
+	const voice = getVoiceForRole(safeRole, s);
+	// Cap utterance length so long answers do not tie up the speaker;
+	// anything past ~600 chars is just noise for the user.
+	const safe = trimmed.slice(0, 600);
 	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-v", voice, safe], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {
-			// Voice unavailable on this machine. Stay silent.
-		});
-		proc.unref();
+		getTTSEngine()
+			.speak(safe, { voice, role: safeRole })
+			.catch(() => {
+				// No engine can speak on this machine. Stay silent.
+			});
 	} catch {
-		// Spawn failed (no shell, restricted env). Fail silently.
+		// Engine construction failed (restricted env). Fail silently.
 	}
+}
+
+// ----------------------------------------------------------------------------
+// One line for `/voice` and `/voice status`: the engine settings ask for, the
+// engine actually speaking (resolved by probing the Python package), and the
+// per-role voices that engine will use.
+// ----------------------------------------------------------------------------
+async function describeTTSEngine(): Promise<string> {
+	let s: ReturnType<typeof loadAppSettings>;
+	try {
+		s = loadAppSettings();
+	} catch {
+		return "TTS engine: settings unreadable";
+	}
+	const preferred = getVoiceEngine(s);
+	let active = preferred as string;
+	let note: string | null = null;
+	try {
+		const engine = getTTSEngine();
+		active = await engine.getProviderName();
+		note = engine.getStatus().note;
+	} catch {
+		// Engine unavailable in this environment; report the setting only.
+	}
+	const voices = [
+		`orchestrator ${getVoiceForRole("orchestrator", s)}`,
+		`engineer ${getVoiceForRole("engineer", s)}`,
+		`qa ${getVoiceForRole("qa", s)}`,
+	].join(", ");
+	const output = s.voice?.outputEnabled ? "on" : "off";
+	const head =
+		active === preferred
+			? `TTS engine: ${active} (${voices}); output ${output}`
+			: `TTS engine: ${active} (settings ask for ${preferred}); output ${output}`;
+	return note ? `${head}\n${note}` : head;
 }
 
 // ----------------------------------------------------------------------------
@@ -431,20 +467,18 @@ function speakAgentReply(role: string | undefined, text: string): void {
 // prompt so the auto-detect block + tagline body don't get read aloud. Gated
 // by voice.outputEnabled so users who turn TTS off don't hear startup banter.
 //
-// Soft modulation:
-// - rate 150 wpm via `-r 150` (macOS `say` default ~180 wpm). Calmer pace
-//   than chat replies, less corporate cadence.
-// - `[[pbas 35]]` speech-command tag drops the pitch base from default 50 to
-//   35, giving the line a gentler, more inviting feel. The `[[rset 0]]` tag
-//   resets any prior modulation state on the same `say` voice so this stays
-//   consistent across calls.
-// - Both modulations apply ONLY to onboarding. Normal chat replies use the
-//   speakLine helper (above) at default rate/pitch.
+// Goes through the same shared TTSEngine as chat replies. The onboarding
+// voice pick (`voiceOverride`) is honoured when it is a voice of the active
+// engine; otherwise the engine's fallback voice speaks.
+//
+// Soft modulation (macOS `say` only; the neural engines ignore both):
+// - rate 150 wpm (`say` default ~180 wpm). Calmer pace than chat replies.
+// - pitch base 35 (default 50) for a gentler, more inviting delivery.
 // ----------------------------------------------------------------------------
 function speakOnboardingLine(rawText: string, voiceOverride?: string | null): void {
 	if (process.platform !== "darwin") return;
 	// Skip TTS entirely in non-TTY/CI so the smoke harness and piped
-	// invocations don't fork off background `say` processes.
+	// invocations don't fork off background speech processes.
 	if (!process.stdout.isTTY) return;
 	if (process.env.CI) return;
 	const trimmed = (rawText ?? "").trim();
@@ -464,25 +498,14 @@ function speakOnboardingLine(rawText: string, voiceOverride?: string | null): vo
 			.split("\n")
 			.map((l) => l.trim())
 			.find((l) => l.length > 0) ?? trimmed;
-	// Strip quotes (would terminate the shell argument) and inline `[[ ]]`
-	// tags from raw text so users can't accidentally inject speech commands.
-	const safe = firstLine
-		.replace(/"/g, "")
-		.replace(/\[\[[^\]]*\]\]/g, "")
-		.slice(0, 120);
-	const voice = (voiceOverride && voiceOverride.trim()) || "Moira";
-	// `[[rset 0]]` resets the voice state, then `[[pbas 35]]` lowers the
-	// pitch base for a softer delivery. Tags are inline speech commands; see
-	// `man say` (Speech Synthesis Manager).
-	const softText = `[[rset 0]] [[pbas 35]] ${safe}`;
+	// Strip inline `[[ ]]` tags from raw text so users can't accidentally
+	// inject speech commands.
+	const safe = firstLine.replace(/\[\[[^\]]*\]\]/g, "").slice(0, 120);
+	const voice = resolveVoiceForEngine(getVoiceEngine(s), voiceOverride, s);
 	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-r", "150", "-v", voice, softText], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {});
-		proc.unref();
+		getTTSEngine()
+			.speak(safe, { voice, rate: 150, pitchBase: 35 })
+			.catch(() => {});
 	} catch {
 		// Fail silently
 	}
@@ -4040,6 +4063,47 @@ export function App({
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
 							: `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
 						addSystemMessage(status);
+						void describeTTSEngine().then(addSystemMessage);
+					} else if (args[0] === "test") {
+						// /voice test - speak one line through the active TTS engine
+						// and report which engine and voice actually spoke.
+						void (async () => {
+							const s = loadAppSettings();
+							if (!s.voice?.outputEnabled) {
+								addSystemMessage("TTS output is off. Run /voice on first.");
+								return;
+							}
+							const role = "engineer";
+							const voice = getVoiceForRole(role, s);
+							const started = Date.now();
+							try {
+								const proc = await getTTSEngine().speak(
+									"Voice test. This is 8gent, speaking with the local voice engine.",
+									{ voice, role },
+								);
+								const status = getTTSEngine().getStatus();
+								const active = status.active ?? status.preferred;
+								addSystemMessage(
+									`Speaking via ${active} (${voice}).` +
+										(status.note ? `\n${status.note}` : ""),
+								);
+								const code = await proc.exited;
+								const after = getTTSEngine().getStatus();
+								const synth =
+									after.lastSynthesisMs === null
+										? ""
+										: `, synthesis ${after.lastSynthesisMs} ms`;
+								addSystemMessage(
+									code === 0
+										? `Voice test done: ${voice} on ${active}${synth}, ${Date.now() - started} ms total.`
+										: `Voice test ended with exit code ${code} on ${active}.`,
+								);
+							} catch (err) {
+								addSystemMessage(
+									`Voice test failed: ${err instanceof Error ? err.message : String(err)}`,
+								);
+							}
+						})();
 					} else if (args[0] === "stop") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
@@ -4072,14 +4136,18 @@ export function App({
 							);
 						});
 					} else {
-						addSystemMessage(
-							"Voice commands:\n" +
-								"  /voice chat    — Start/stop voice conversation mode\n" +
-								"  /voice record  — Toggle STT recording (or press Ctrl+R)\n" +
-								"  /voice status  — Check voice system status\n" +
-								"  /voice stop    — Stop voice chat mode\n" +
-								"  /voice on|off  — Toggle TTS output",
-						);
+						void describeTTSEngine().then((engineLine) => {
+							addSystemMessage(
+								`${engineLine}\n\n` +
+									"Voice commands:\n" +
+									"  /voice chat    Start/stop voice conversation mode\n" +
+									"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
+									"  /voice status  Check voice system status\n" +
+									"  /voice test    Speak a test line through the TTS engine\n" +
+									"  /voice stop    Stop voice chat mode\n" +
+									"  /voice on|off  Toggle TTS output",
+							);
+						});
 					}
 					break;
 

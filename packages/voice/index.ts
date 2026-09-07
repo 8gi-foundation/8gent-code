@@ -55,12 +55,17 @@ export {
 	TTSEngine,
 	MacOSTTSProvider,
 	KittenTTSProvider,
+	SupertonicTTSProvider,
+	PythonWorkerTTSProvider,
 	getTTSEngine,
 	setTTSEngine,
 	type TTSProvider,
 	type TTSSpeakOptions,
 	type TTSProcess,
 	type TTSProviderName,
+	type TTSEngineStatus,
+	type TTSEngineOptions,
+	type PythonWorkerOptions,
 } from "./tts-engine.js";
 export {
 	type VoiceBackend,

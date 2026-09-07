@@ -9,12 +9,22 @@
  * bumping `version` and adding a migration path.
  */
 
+/**
+ * Which local TTS engine speaks agent replies.
+ *
+ * - "kitten": KittenTTS (local neural, Python). The default.
+ * - "supertonic": Supertonic (local neural, Python). Optional; used only when importable.
+ * - "macos": the built-in `say` command. Always available on macOS; the fallback
+ *   for the other two when their Python package is missing.
+ */
+export type TTSEngineName = "kitten" | "supertonic" | "macos";
+
 export interface PerAgentVoices {
-	/** macOS TTS voice for the Orchestrator tab. */
+	/** TTS voice for the Orchestrator tab. Must be a voice of the active engine. */
 	orchestrator: string;
-	/** macOS TTS voice for the Engineer tab. */
+	/** TTS voice for the Engineer tab. Must be a voice of the active engine. */
 	engineer: string;
-	/** macOS TTS voice for the QA tab. */
+	/** TTS voice for the QA tab. Must be a voice of the active engine. */
 	qa: string;
 }
 
@@ -23,11 +33,17 @@ export interface VoiceSettings {
 	silenceThresholdMs: number;
 	/** Whether the user can interrupt TTS by speaking. */
 	bargeIn: boolean;
-	/** macOS TTS voice name (e.g. "Ava", "Samantha"). Used as fallback when no per-agent voice is set. */
+	/** Local TTS engine used for spoken replies. See TTSEngineName. */
+	engine: TTSEngineName;
+	/**
+	 * TTS voice name used as fallback when no per-agent voice is set.
+	 * Must be a voice of the active engine (e.g. "Bella" for kitten,
+	 * "F1" for supertonic, "Ava" for macos).
+	 */
 	ttsVoice: string;
 	/** Whether the agent's text replies are spoken via TTS by default. */
 	outputEnabled: boolean;
-	/** Per-agent macOS voice overrides. Each tab role gets its own voice. */
+	/** Per-agent voice overrides. Each tab role gets its own voice. */
 	perAgent: PerAgentVoices;
 }
 
