@@ -20,12 +20,8 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import {
-	TAB_ICONS,
-	type TabType,
-	type WorkspaceTab,
-} from "../hooks/useWorkspaceTabs.js";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
+import { TAB_ICONS, type TabType, type WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
 import { padRight, truncate } from "../lib/text.js";
 import { t } from "../theme.js";
 
@@ -63,6 +59,9 @@ interface TabBarProps {
 /** Fallback width when the caller does not pass the viewport. */
 const DEFAULT_WIDTH = 80;
 export const GRAB_HINT = "[G] drop on another tab to group | [Esc] cancel";
+/** How to move between tabs. Shown at rest when the bar is wide enough for it. */
+export const SWITCH_HINT = "Ctrl+1-9 jump | Shift+Tab cycle | Esc back to chat";
+const SWITCH_HINT_MIN_WIDTH = 100;
 
 function getTabIcon(type: TabType): string {
 	const found = TAB_ICONS.find((i) => i.type === type);
@@ -138,7 +137,7 @@ export function TabBar({
 		};
 	});
 
-	const hint = dragging ? ` ${GRAB_HINT}` : "";
+	const hint = dragging ? ` ${GRAB_HINT}` : width >= SWITCH_HINT_MIN_WIDTH ? ` ${SWITCH_HINT}` : "";
 	const { top, bottom } = buildTabRows(cells, width, hint);
 	const topTabs = hint ? top.slice(0, top.length - hint.length) : top;
 
@@ -146,7 +145,13 @@ export function TabBar({
 		<Box flexDirection="column" width={width} overflow="hidden">
 			<Box>
 				<Text color={t.teal}>{topTabs}</Text>
-				{hint ? <Text color={t.orangeAlt}>{hint}</Text> : null}
+				{hint ? (
+					dragging ? (
+						<Text color={t.orangeAlt}>{hint}</Text>
+					) : (
+						<Text dimColor>{hint}</Text>
+					)
+				) : null}
 			</Box>
 			<Box>
 				<Text color={t.teal}>{bottom}</Text>
