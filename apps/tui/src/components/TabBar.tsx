@@ -60,8 +60,9 @@ interface TabBarProps {
 const DEFAULT_WIDTH = 80;
 export const GRAB_HINT = "[G] drop on another tab to group | [Esc] cancel";
 /** How to move between tabs. Shown at rest when the bar is wide enough for it. */
-export const SWITCH_HINT = "Ctrl+1-9 jump | Shift+Tab cycle | Esc back to chat";
-const SWITCH_HINT_MIN_WIDTH = 100;
+// Ctrl+digit is deliberately not advertised: most terminals do not send a
+// distinct code for it, so the binding in app.tsx cannot be relied on.
+export const SWITCH_HINT = "Shift+Tab cycle tabs | Esc back to chat";
 
 function getTabIcon(type: TabType): string {
 	const found = TAB_ICONS.find((i) => i.type === type);
@@ -137,7 +138,16 @@ export function TabBar({
 		};
 	});
 
-	const hint = dragging ? ` ${GRAB_HINT}` : width >= SWITCH_HINT_MIN_WIDTH ? ` ${SWITCH_HINT}` : "";
+	// The legend is only shown when every tab still fits beside it; a tab that
+	// gets cut off to make room for a hint about tabs is worse than no hint.
+	const tabsWidth =
+		cells.reduce((n, c) => n + c.label.length + (c.active ? 4 : 2), 0) +
+		Math.max(0, cells.length - 1);
+	const hint = dragging
+		? ` ${GRAB_HINT}`
+		: width - tabsWidth >= SWITCH_HINT.length + 3
+			? ` ${SWITCH_HINT}`
+			: "";
 	const { top, bottom } = buildTabRows(cells, width, hint);
 	const topTabs = hint ? top.slice(0, top.length - hint.length) : top;
 
