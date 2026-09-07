@@ -41,7 +41,8 @@ export type TabType =
 	| "music"
 	| "projects"
 	| "terminal"
-	| "settings";
+	| "settings"
+	| "skills";
 
 export interface WorkspaceTab {
 	id: string;
@@ -72,10 +73,11 @@ export const TAB_ICONS: TabIcon[] = [
 	{ type: "projects", icon: "P:", label: "Projects" },
 	{ type: "terminal", icon: "$:", label: "Terminal" },
 	{ type: "settings", icon: "=:", label: "Settings" },
+	{ type: "skills", icon: "S:", label: "Skills" },
 ];
 
 /** Singleton tab types (only one instance allowed) */
-const SINGLETON_TYPES: TabType[] = [
+export const SINGLETON_TYPES: TabType[] = [
 	"notes",
 	"ideas",
 	"btw",
@@ -86,6 +88,7 @@ const SINGLETON_TYPES: TabType[] = [
 	// "terminal" is intentionally NOT singleton — each /term spawn opens a
 	// new tab so users can run claude + openclaw side by side.
 	"settings", // one settings tab max
+	"skills", // one skills menu max
 ];
 
 const MAX_TABS = 20;

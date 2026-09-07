@@ -248,8 +248,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "skills",
 		aliases: ["sk"],
-		description: "List and manage skills",
-		usage: "/skills [list|search|info] [name]",
+		description: "Open the skills menu (browse, filter and run loaded skills)",
+		usage: "/skills",
 	},
 	{
 		name: "design",

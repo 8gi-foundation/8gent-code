@@ -361,6 +361,7 @@ export function CommandInput({
 				{/* Text input with ghost overlay */}
 				<Box>
 					<TextInput
+						focus={focused && !isProcessing}
 						value={value}
 						onChange={(v) => {
 							// Any manual edit exits history navigation and updates the draft
