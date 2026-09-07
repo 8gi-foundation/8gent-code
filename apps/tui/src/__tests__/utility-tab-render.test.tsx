@@ -16,6 +16,7 @@ setDefaultTimeout(30000);
 
 const ESC = "\u001b";
 const CTRL_N = "\u000e";
+const SHIFT_TAB = "\u001b[Z";
 const ENTER = "\r";
 // Every chat tab boots with a welcome system message that starts with this
 // prefix (the greeting after it is random). Utility views replace the message
@@ -153,6 +154,20 @@ describe("utility tabs render in the V2 centre column (#2912)", () => {
 		const frame = await waitFor(stdout, (f) => f.includes(CHAT_WELCOME));
 		expect(frame).not.toContain("Categories");
 		expect(frame).toContain(CHAT_WELCOME);
+	});
+
+	test("Shift+Tab into Settings and q back keeps the conversation", async () => {
+		// Regression: reaching a utility tab by cycling (Shift+Tab) and leaving
+		// with q used to replace the chat with a fresh "New thread" welcome.
+		stdin.write(ESC); // leave Notes, back to chat
+		await waitFor(stdout, (f) => f.includes(CHAT_WELCOME));
+		stdin.write(SHIFT_TAB);
+		const settings = await waitFor(stdout, (f) => f.includes("Categories"));
+		expect(settings).toContain("Categories");
+		stdin.write("q");
+		const back = await waitFor(stdout, (f) => !f.includes("Categories"));
+		expect(back).toContain(CHAT_WELCOME);
+		expect(back).not.toContain("New thread");
 	});
 
 	test("Ctrl+N opens the Notes view", async () => {

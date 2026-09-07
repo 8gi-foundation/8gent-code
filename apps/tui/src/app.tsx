@@ -1012,6 +1012,16 @@ export function App({
 
 	// Per-tab message sync: save current tab's messages, load new tab's messages on switch
 	const prevTabIdRef = useRef(activeTabId);
+	// Mirror of `messages` for the switch effect below. Saving the outgoing tab
+	// inside a setMessagesRaw updater was not reliable: React does not always
+	// run that updater before the load that follows, and the outgoing tab's
+	// conversation was lost (the tab came back as "New thread"). A ref read is
+	// synchronous and always current.
+	const messagesRef = useRef<Message[]>([]);
+	messagesRef.current = messages;
+	// The chat tab a utility tab was opened from, so closing it returns there
+	// rather than to whichever chat tab happens to be first.
+	const lastChatTabIdRef = useRef<string | null>(null);
 	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
@@ -1019,11 +1029,12 @@ export function App({
 			// Log tab switch for session debugger
 			logTabSwitch(prevTabIdRef.current, activeTabId, workspaceTabs.activeTab?.title || "Chat");
 
-			// Save outgoing tab's messages
-			setMessagesRaw((currentMsgs) => {
-				tabMessagesRef.current.set(prevTabIdRef.current, currentMsgs);
-				return currentMsgs;
-			});
+			// Save outgoing tab's messages (synchronously, from the mirror ref)
+			tabMessagesRef.current.set(prevTabIdRef.current, messagesRef.current);
+			const prevType = workspaceTabs.tabs.find((t) => t.id === prevTabIdRef.current)?.type;
+			if (prevType === "chat" && workspaceTabs.activeTab?.type !== "chat") {
+				lastChatTabIdRef.current = prevTabIdRef.current;
+			}
 			// Load incoming tab's messages (or create fresh welcome)
 			const incoming = tabMessagesRef.current.get(activeTabId);
 			if (incoming) {
@@ -5225,7 +5236,10 @@ export function App({
 
 	// Helper to close tab-based views (switch back to first chat tab)
 	const closeTabView = () => {
-		const chatTab = workspaceTabs.tabs.find((t) => t.type === "chat");
+		const origin = lastChatTabIdRef.current;
+		const chatTab =
+			(origin && workspaceTabs.tabs.find((t) => t.id === origin && t.type === "chat")) ||
+			workspaceTabs.tabs.find((t) => t.type === "chat");
 		if (chatTab) workspaceTabs.switchTab(chatTab.id);
 	};
 
