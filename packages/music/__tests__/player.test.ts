@@ -20,7 +20,16 @@ afterAll(() => tools.restore());
 
 beforeEach(() => tools.reset());
 
-const settle = () => new Promise((r) => setTimeout(r, 150));
+// The fake afplay exits instantly and appends to the log asynchronously. A fixed
+// sleep raced under a heavier test run (one test saw nothing, the next saw the
+// previous test's call), so wait for the log to hold the calls we expect.
+const waitForCalls = async (tool: "afplay" | "osascript", count: number, timeoutMs = 3000) => {
+	const start = Date.now();
+	while (tools.callsFor(tool).length < count) {
+		if (Date.now() - start > timeoutMs) break;
+		await new Promise((r) => setTimeout(r, 20));
+	}
+};
 
 describe("Player status and playback", () => {
 	test("starts idle", () => {
@@ -38,7 +47,7 @@ describe("Player status and playback", () => {
 		player.play(`${tools.scratch}/does-not-exist.wav`);
 		expect(player.status.playing).toBe(false);
 		expect(player.status.track).toBeNull();
-		await settle();
+		await waitForCalls("afplay", 1);
 		expect(tools.callsFor("afplay")).toEqual([]);
 	});
 
@@ -49,8 +58,7 @@ describe("Player status and playback", () => {
 		expect(player.status.playing).toBe(true);
 		expect(player.status.track).toBe(track);
 		expect(player.status.looping).toBe(false);
-		// Let the (instantly exiting) fake afplay record its argv before stopping.
-		await settle();
+		await waitForCalls("afplay", 1);
 		expect(tools.callsFor("afplay").map((c) => c.args)).toEqual([[track]]);
 		player.stop();
 		expect(player.status).toEqual({
@@ -97,7 +105,7 @@ describe("Player queue", () => {
 		player.enqueue(first, second);
 		await player.playQueue();
 		expect(player.status.queueLength).toBe(0);
-		await settle();
+		await waitForCalls("afplay", 2);
 		expect(tools.callsFor("afplay").map((c) => c.args[0])).toEqual([first, second]);
 	});
 });
