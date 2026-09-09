@@ -9,6 +9,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - TUI: /model, /history and the onboarding screen render again in the V2 layout (#2919)
+
+- `apps/tui/src/app.tsx`: the centre column now mounts `renderMainContent()`
+  when `viewMode` is not `"chat"` on a chat tab, not only when a utility tab
+  is active. The trailing `switch (viewMode)` (OnboardingScreen,
+  ModelSelector, ProviderSelector, HistoryScreen, MessageViewer, kanban,
+  animations, design, music) was dead in V2 since 3f200278, so `/model`,
+  `/history`, `/onboarding` and the first-run onboarding set `viewMode` and
+  nothing appeared. These screens take the content area the same way utility
+  tabs do (rails hidden, chat input hidden); onboarding keeps the chat input
+  because free-text answers are typed there.
+- New `VIEWS_OWNING_ESCAPE` set, the `viewMode` twin of
+  `TABS_OWNING_ESCAPE`: screens that handle Escape themselves (model and
+  provider pickers, history, message viewer, kanban, animations, design,
+  music) close through their own callbacks and the app-level Escape handler
+  no longer fires for them as well. Onboarding, avenues and predict have no
+  Escape handler of their own, so the app-level handler still closes them.
+- `apps/tui/src/__tests__/utility-tab-render.test.tsx`: four new cases:
+  `/model` shows the model selector, Escape returns to chat, `/history`
+  shows the history screen, Escape returns to chat.
+
 ### Fixed - TUI: utility tabs render their view in the V2 centre column (#2912)
 
 - `apps/tui/src/app.tsx`: `renderMainContent()` is mounted again. Since the
