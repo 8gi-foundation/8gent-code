@@ -9,11 +9,14 @@ import type { Settings } from "./schema.js";
 import {
 	ENGINE_DEFAULT_VOICES,
 	ENGINE_VOICES,
+	TTS_ENGINE_NAMES,
 	getVoiceEngine,
 	getVoiceForRole,
 	isTTSEngineName,
 	isVoiceForEngine,
 	resolveVoiceForEngine,
+	voiceForExtraTab,
+	voiceRotation,
 } from "./voice.js";
 
 function withVoice(patch: Partial<Settings["voice"]>): Settings {
@@ -24,11 +27,12 @@ describe("voice settings defaults", () => {
 	test("KittenTTS is the default engine with Kitten voices per role", () => {
 		expect(DEFAULT_SETTINGS.voice.engine).toBe("kitten");
 		expect(DEFAULT_SETTINGS.voice.perAgent).toEqual({
-			orchestrator: "Jasper",
-			engineer: "Bruno",
-			qa: "Luna",
+			orchestrator: "Bruno",
+			engineer: "Jasper",
+			qa: "Hugo",
 		});
-		expect(DEFAULT_SETTINGS.voice.ttsVoice).toBe("Bella");
+		// The deep male voice is what a new user hears until they pick another.
+		expect(DEFAULT_SETTINGS.voice.ttsVoice).toBe("Bruno");
 		expect(DEFAULT_SETTINGS.voice.outputEnabled).toBe(true);
 	});
 
@@ -43,13 +47,13 @@ describe("voice settings defaults", () => {
 			orchestrator: "M1",
 			engineer: "M2",
 			qa: "F1",
-			fallback: "F2",
+			fallback: "M1",
 		});
 		expect(ENGINE_DEFAULT_VOICES.macos).toEqual({
 			orchestrator: "Daniel",
 			engineer: "Karen",
 			qa: "Moira",
-			fallback: "Ava",
+			fallback: "Daniel",
 		});
 	});
 });
@@ -84,10 +88,12 @@ describe("engine and voice validation", () => {
 
 describe("getVoiceForRole", () => {
 	test("returns the per-role Kitten voice by default", () => {
-		expect(getVoiceForRole("orchestrator", DEFAULT_SETTINGS)).toBe("Jasper");
-		expect(getVoiceForRole("engineer", DEFAULT_SETTINGS)).toBe("Bruno");
-		expect(getVoiceForRole("qa", DEFAULT_SETTINGS)).toBe("Luna");
-		expect(getVoiceForRole("unknown-role", DEFAULT_SETTINGS)).toBe("Bruno");
+		expect(getVoiceForRole("orchestrator", DEFAULT_SETTINGS)).toBe("Bruno");
+		expect(getVoiceForRole("engineer", DEFAULT_SETTINGS)).toBe("Jasper");
+		expect(getVoiceForRole("qa", DEFAULT_SETTINGS)).toBe("Hugo");
+		// An unnamed tab gets a voice of its own, not one of the three above.
+		const extra = getVoiceForRole("unknown-role", DEFAULT_SETTINGS);
+		expect(["Bruno", "Jasper", "Hugo"]).not.toContain(extra);
 	});
 
 	test("an older file with macOS names under the kitten engine gets Kitten defaults", () => {
@@ -95,9 +101,9 @@ describe("getVoiceForRole", () => {
 			ttsVoice: "Ava",
 			perAgent: { orchestrator: "Daniel", engineer: "Karen", qa: "Moira" },
 		});
-		expect(getVoiceForRole("orchestrator", s)).toBe("Jasper");
-		expect(getVoiceForRole("engineer", s)).toBe("Bruno");
-		expect(getVoiceForRole("qa", s)).toBe("Luna");
+		expect(getVoiceForRole("orchestrator", s)).toBe("Bruno");
+		expect(getVoiceForRole("engineer", s)).toBe("Jasper");
+		expect(getVoiceForRole("qa", s)).toBe("Hugo");
 	});
 
 	test("the macOS engine keeps macOS names", () => {
@@ -134,10 +140,60 @@ describe("getVoiceForRole", () => {
 describe("resolveVoiceForEngine", () => {
 	test("keeps a valid override and replaces an invalid one", () => {
 		expect(resolveVoiceForEngine("kitten", "Luna", DEFAULT_SETTINGS)).toBe("Luna");
-		expect(resolveVoiceForEngine("kitten", "Moira", DEFAULT_SETTINGS)).toBe("Bella");
-		expect(resolveVoiceForEngine("kitten", null, DEFAULT_SETTINGS)).toBe("Bella");
+		expect(resolveVoiceForEngine("kitten", "Moira", DEFAULT_SETTINGS)).toBe("Bruno");
+		expect(resolveVoiceForEngine("kitten", null, DEFAULT_SETTINGS)).toBe("Bruno");
 		expect(resolveVoiceForEngine("macos", "Moira", DEFAULT_SETTINGS)).toBe("Moira");
-		expect(resolveVoiceForEngine("macos", undefined, DEFAULT_SETTINGS)).toBe("Ava");
-		expect(resolveVoiceForEngine("supertonic", "Moira", DEFAULT_SETTINGS)).toBe("F2");
+		expect(resolveVoiceForEngine("macos", undefined, DEFAULT_SETTINGS)).toBe("Daniel");
+		expect(resolveVoiceForEngine("supertonic", "Moira", DEFAULT_SETTINGS)).toBe("M1");
+	});
+});
+
+describe("a deep male default and a voice per agent (#2942)", () => {
+	test("the single-voice fallback is the deep male voice on every engine", () => {
+		// Bruno measured about 108 Hz against Jasper 137, Hugo 159, Leo 166.
+		expect(ENGINE_DEFAULT_VOICES.kitten.fallback).toBe("Bruno");
+		expect(ENGINE_DEFAULT_VOICES.supertonic.fallback).toBe("M1");
+		expect(ENGINE_DEFAULT_VOICES.macos.fallback).toBe("Daniel");
+	});
+
+	test("the shipped defaults give the three agents three different voices", () => {
+		for (const engine of TTS_ENGINE_NAMES) {
+			const d = ENGINE_DEFAULT_VOICES[engine];
+			const roles = [d.orchestrator, d.engineer, d.qa];
+			expect(new Set(roles).size).toBe(3);
+			// Every default is a voice the engine can actually speak.
+			for (const v of roles) expect(isVoiceForEngine(engine, v)).toBe(true);
+		}
+	});
+
+	test("the orchestrator, the one you hear first, uses the deep voice", () => {
+		expect(ENGINE_DEFAULT_VOICES.kitten.orchestrator).toBe("Bruno");
+	});
+
+	test("the rotation starts with the three role voices and adds the rest", () => {
+		const rot = voiceRotation("kitten");
+		expect(rot.slice(0, 3)).toEqual(["Bruno", "Jasper", "Hugo"]);
+		expect(new Set(rot).size).toBe(rot.length);
+		expect(rot.length).toBe(ENGINE_VOICES.kitten.length);
+	});
+
+	test("an extra tab never borrows a voice one of the agents already owns", () => {
+		const roles = new Set(["Bruno", "Jasper", "Hugo"]);
+		for (const key of ["tab-2", "tab-3", "chat-abc", "9f2a", ""]) {
+			if (!key) continue;
+			expect(roles.has(voiceForExtraTab("kitten", key))).toBe(false);
+		}
+	});
+
+	test("the same tab keeps its voice, so it does not change between restarts", () => {
+		expect(voiceForExtraTab("kitten", "tab-7")).toBe(voiceForExtraTab("kitten", "tab-7"));
+	});
+
+	test("an unnamed tab gets its own voice instead of the engineer's", () => {
+		const settings = withVoice({ engine: "kitten" });
+		const engineer = getVoiceForRole("engineer", settings);
+		expect(getVoiceForRole("tab-2", settings)).not.toBe(engineer);
+		// The three named roles still resolve to their own defaults.
+		expect(getVoiceForRole("orchestrator", settings)).toBe("Bruno");
 	});
 });

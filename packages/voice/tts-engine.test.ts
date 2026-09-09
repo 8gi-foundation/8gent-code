@@ -92,7 +92,7 @@ describe("PythonWorkerTTSProvider worker protocol", () => {
 		expect(await c.exited).toBe(0);
 
 		const worker = readLines(path.join(dir, "worker.log"));
-		expect(worker.map((l) => l.split(" ")[1])).toEqual(["Alpha", "Beta", "Bella"]);
+		expect(worker.map((l) => l.split(" ")[1])).toEqual(["Alpha", "Beta", "Bruno"]);
 		expect(worker.map((l) => l.split(" ").slice(2).join(" "))).toEqual([
 			"first line",
 			"second line",
@@ -278,7 +278,7 @@ describe("TTSEngine fallback", () => {
 		await engine.speak("a", { voice: "Daniel", role: "qa" });
 		await engine.speak("b", { voice: "Daniel" });
 		await engine.speak("c", { voice: "Luna", role: "qa" });
-		expect(kitten.spoken.map((s) => s.options?.voice)).toEqual(["Luna", "Bella", "Luna"]);
+		expect(kitten.spoken.map((s) => s.options?.voice)).toEqual(["Hugo", "Bruno", "Luna"]);
 	});
 
 	test("setPreferred re-resolves the provider", async () => {

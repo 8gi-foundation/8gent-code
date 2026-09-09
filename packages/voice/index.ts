@@ -68,6 +68,22 @@ export {
 	type PythonWorkerOptions,
 } from "./tts-engine.js";
 export {
+	getVoiceCatalog,
+	buildVoiceCatalog,
+	resetVoiceCatalog,
+	parseSayVoices,
+	isNoveltyVoice,
+	previewVoice,
+	stopPreview,
+	GROUP_LABELS,
+	PREVIEW_SENTENCE,
+	type VoiceCatalog,
+	type VoiceCatalogOptions,
+	type VoiceEntry,
+	type VoiceGroup,
+	type VoiceGroupId,
+} from "./voice-catalog.js";
+export {
 	type VoiceBackend,
 	type FullDuplexProvider,
 	type BackendCapabilities,

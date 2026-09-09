@@ -20,6 +20,12 @@ import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
 import { useTypewriter } from "../hooks/useTypewriter.js";
+import { VoicePicker } from "../components/VoicePicker.js";
+import type {
+	VoiceCatalog,
+	VoiceEntry,
+} from "../../../../packages/voice/voice-catalog.js";
+import type { VoiceRef } from "../lib/voice-picker-model.js";
 
 interface OnboardingStep {
 	question: string;

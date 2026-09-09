@@ -111,7 +111,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "voice",
 		aliases: ["v"],
 		description: "Voice TTS settings",
-		usage: "/voice [on|off|test]",
+		usage: "/voice [on|off|test|pick [orchestrator|engineer|qa|all]]",
 	},
 	{
 		name: "theme",

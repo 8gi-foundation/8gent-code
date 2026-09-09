@@ -156,6 +156,13 @@ import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
+import { VoicePicker } from "./components/VoicePicker.js";
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import {
+	getVoiceCatalog,
+	type VoiceCatalog,
+	type VoiceEntry,
+} from "../../../packages/voice/voice-catalog.js";
 import { SkillsView } from "./screens/SkillsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
 import { WindowTerminalView } from "./screens/WindowTerminalView.js";
@@ -1638,7 +1645,7 @@ export function App({
 	const applyOnboardingQuestion = useCallback(
 		(q: {
 			question: string;
-			kind?: "text" | "select" | "providerCheck" | "agentName";
+			kind?: "text" | "select" | "providerCheck" | "agentName" | "voicePicker";
 			choices?: Array<{ label: string; value: string; description?: string }>;
 			provider?: "ollama" | "lmstudio" | "apfel";
 			installHint?: string;
@@ -1675,6 +1682,36 @@ export function App({
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	// Slash line chosen in the Skills tab, submitted once the chat tab is active.
 	const [pendingSkillRun, setPendingSkillRun] = useState<string | null>(null);
+	// Voice picker overlay (#2942). `scope` is who the pick is for: "all" or a
+	// single agent role. The catalog is loaded on open so the list always
+	// describes this machine rather than a compiled-in guess.
+	const [voicePicker, setVoicePicker] = useState<{
+		scope: "all" | "orchestrator" | "engineer" | "qa";
+		catalog: VoiceCatalog | null;
+		error: string | null;
+		/** The voice in use for this scope, so the list opens on it. */
+		current: { engine: string; id: string } | null;
+	} | null>(null);
+
+	const openVoicePicker = useCallback((scope: "all" | "orchestrator" | "engineer" | "qa") => {
+		let current: { engine: string; id: string } | null = null;
+		try {
+			const s = loadAppSettings();
+			const engine = getVoiceEngine(s);
+			current = {
+				engine,
+				id: scope === "all" ? resolveVoiceForEngine(engine, null, s) : getVoiceForRole(scope, s),
+			};
+		} catch {
+			// No settings file yet: the picker opens on the recommended voice.
+		}
+		setVoicePicker({ scope, catalog: null, error: null, current });
+		getVoiceCatalog()
+			.then((catalog) => setVoicePicker((cur) => (cur ? { ...cur, catalog } : cur)))
+			.catch((err: Error) =>
+				setVoicePicker((cur) => (cur ? { ...cur, error: err.message } : cur)),
+			);
+	}, []);
 
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
@@ -4139,8 +4176,26 @@ export function App({
 				}
 
 				case "voice":
-					// Enhanced voice command — toggle STT recording or voice chat
-					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
+					// Enhanced voice command - toggle STT recording or voice chat
+					if (args[0] === "pick") {
+						// /voice pick [orchestrator|engineer|qa|all]
+						// With no argument the pick is for the tab you are on, so
+						// setting one agent's voice never flattens the others. Say
+						// `all` to give every agent the same voice.
+						const raw = (args[1] || "").toLowerCase();
+						const activeRole = (
+							workspaceTabs.activeTab?.data as { role?: string } | undefined
+						)?.role;
+						const scope =
+							raw === "orchestrator" || raw === "engineer" || raw === "qa" || raw === "all"
+								? raw
+								: activeRole === "orchestrator" ||
+										activeRole === "engineer" ||
+										activeRole === "qa"
+									? activeRole
+									: "all";
+						openVoicePicker(scope);
+					} else if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
 							// Tell the agent voice chat is OFF so it stops adding the
@@ -5760,9 +5815,13 @@ export function App({
 	// ...) takes the content area the same way (#2919). Onboarding keeps the
 	// chat input because free-text answers are typed there.
 	const viewScreenActive = viewMode !== "chat";
-	const fullWidthView = utilityTabActive || viewScreenActive;
+	// The voice picker is a full-width overlay too (#2942).
+	const fullWidthView = utilityTabActive || viewScreenActive || !!voicePicker;
 	const hideCommandInput =
-		paletteOpen || utilityTabActive || (viewScreenActive && viewMode !== "onboarding");
+		paletteOpen ||
+		!!voicePicker ||
+		utilityTabActive ||
+		(viewScreenActive && viewMode !== "onboarding");
 	const showContextRail = budget.showContextRail && !fullWidthView;
 	const showActivityRail = budget.showActivityRail && !fullWidthView;
 	const chatWidth = fullWidthView ? cols : budget.chatWidth;
@@ -5898,6 +5957,48 @@ export function App({
 								/>
 							)}
 						</Box>
+
+						{voicePicker && (
+							<Box justifyContent="center" flexShrink={0}>
+								<VoicePicker
+									catalog={voicePicker.catalog}
+									loadError={voicePicker.error}
+									title={
+										voicePicker.scope === "all"
+											? "Pick a voice"
+											: `Pick a voice for ${voicePicker.scope}`
+									}
+									current={voicePicker.current}
+									isActive={true}
+									onCancel={() => setVoicePicker(null)}
+									onChoose={(entry: VoiceEntry) => {
+										const scope = voicePicker.scope;
+										setVoicePicker(null);
+										void (async () => {
+											const mod = await import("../../../packages/settings/index.js");
+											const before = mod.loadSettings();
+											const engineChanged = mod.getVoiceEngine(before) !== entry.engine;
+											mod.saveSettings(
+												mod.applyVoiceChoice(before, {
+													engine: entry.engine,
+													voice: entry.id,
+													scope,
+												}),
+											);
+											const who = scope === "all" ? "every agent" : scope;
+											addSystemMessage(
+												`Voice set: ${entry.name} on ${entry.engine} for ${who}.` +
+													(engineChanged && scope !== "all"
+														? " The engine changed, so the other agents reset to that engine's defaults."
+														: ""),
+											);
+										})().catch((err: Error) =>
+											addSystemMessage(`Could not save the voice: ${err.message}`),
+										);
+									}}
+								/>
+							</Box>
+						)}
 
 						{paletteOpen && (
 							<Box justifyContent="center" flexShrink={0}>

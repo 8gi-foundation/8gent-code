@@ -14,9 +14,13 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import { getVault } from "../secrets";
 import {
+	applyVoiceChoice,
+	isTTSEngineName,
 	loadSettings,
 	saveSettings,
 	DEFAULT_SETTINGS,
+	type AgentRole,
+	type TTSEngineName,
 } from "../settings/index.js";
 
 const execAsync = promisify(exec);
@@ -48,7 +52,7 @@ export interface UserConfig {
 	preferences: {
 		voice: {
 			enabled: boolean;
-			engine: "system" | "kitten" | "elevenlabs" | null;
+			engine: "system" | "kitten" | "supertonic" | "macos" | "elevenlabs" | null;
 			voiceId: string | null;
 		};
 		model: {
@@ -102,6 +106,10 @@ export type OnboardingStep =
 	| "voice"
 	| "voice-services"
 	| "voice-picker"
+	| "voice-scope"
+	| "voice-agent-orchestrator"
+	| "voice-agent-engineer"
+	| "voice-agent-qa"
 	| "telegram"
 	| "github"
 	| "mcps"
@@ -152,8 +160,11 @@ export interface OnboardingQuestion {
 	 *                            status row. Carries `provider` + `installHint`.
 	 *   "agentName"            — renames an agent role. Carries `roleKey` so
 	 *                            the renderer can show the current default.
+	 *   "voicePicker"          - the grouped voice picker with previews. The
+	 *                            answer is "<engine>:<voice>". `roleKey` set
+	 *                            means the pick is for that agent only.
 	 */
-	kind?: "text" | "select" | "providerCheck" | "agentName";
+	kind?: "text" | "select" | "providerCheck" | "agentName" | "voicePicker";
 	/**
 	 * Structured choices for kind: "select". When present, the renderer uses
 	 * these to build the list. The free-text {options} array stays around for
@@ -174,6 +185,8 @@ export interface OnboardingQuestion {
 	/**
 	 * For kind === "agentName": which role's display name we are setting.
 	 * Maps onto `settings.agents.names[roleKey]`.
+	 * For kind === "voicePicker": which role the voice is for; absent means
+	 * all three agents.
 	 */
 	roleKey?: "orchestrator" | "engineer" | "qa";
 	/**
@@ -225,6 +238,56 @@ function persistAgentName(
 	} catch {
 		// Best-effort - settings layer is forgiving by design.
 	}
+}
+
+/**
+ * Parse a voice picker answer of the form "<engine>:<voice>" (the voice may
+ * itself contain ":" or spaces, e.g. "macos:Eddy (English (UK))"). Returns
+ * null for anything else, including "skip".
+ */
+export function parseVoiceAnswer(
+	answer: string,
+): { engine: TTSEngineName; voice: string } | null {
+	const colon = answer.indexOf(":");
+	if (colon <= 0) return null;
+	const engine = answer.slice(0, colon).trim();
+	const voice = answer.slice(colon + 1).trim();
+	if (!isTTSEngineName(engine) || !voice) return null;
+	return { engine, voice };
+}
+
+/**
+ * Persist a voice pick to ~/.8gent/settings.json through applyVoiceChoice
+ * (the same helper /voice pick uses) and mirror it on the user config so the
+ * confirmation recap and the onboarding voice-over see it. An unparseable
+ * answer completes the step without changing anything, so Esc in the picker
+ * behaves like /skip.
+ */
+function applyVoicePickAnswer(
+	answer: string,
+	user: UserConfig,
+	scope: "all" | AgentRole,
+	step: OnboardingStep,
+): UserConfig {
+	const parsed = parseVoiceAnswer(answer);
+	if (!parsed) return { ...user, completedSteps: [...user.completedSteps, step] };
+	try {
+		saveSettings(applyVoiceChoice(loadSettings(), { ...parsed, scope }));
+	} catch {
+		// Best-effort - settings layer is forgiving by design.
+	}
+	const mirror =
+		scope === "all" || scope === "orchestrator"
+			? { engine: parsed.engine, voiceId: parsed.voice }
+			: {};
+	return {
+		...user,
+		preferences: {
+			...user.preferences,
+			voice: { ...user.preferences.voice, enabled: true, ...mirror },
+		},
+		completedSteps: [...user.completedSteps, step],
+	};
 }
 
 // ============================================
@@ -549,64 +612,60 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			};
 		},
 	},
+	// ── Voice pick ───────────────────────────────────────────
+	// The renderer shows the grouped VoicePicker (every voice the machine can
+	// speak with, previews on `p`). The answer comes back as "<engine>:<voice>".
+	// The first pick sets all three agents; the scope question then lets the
+	// user refine per agent, reusing the picker once per role.
 	{
 		step: "voice-picker",
-		question: "Pick a voice for your agent.",
+		question:
+			"Pick a voice for your agent.\n\n" +
+			"Press p to hear a voice before choosing. Enter chooses, Esc skips.",
+		kind: "voicePicker",
+		processor: (answer, user) =>
+			applyVoicePickAnswer(answer, user, "all", "voice-picker"),
+	},
+	{
+		step: "voice-scope",
+		question: "Use this voice for all three agents, or pick per agent?",
 		kind: "select",
 		choices: [
-			{ label: "Bruno", value: "1", description: "AI - male, warm & authoritative (recommended)" },
-			{ label: "Bella", value: "2", description: "AI - female, warm & clear" },
-			{ label: "Jasper", value: "3", description: "AI - male, crisp & technical" },
-			{ label: "Luna", value: "4", description: "AI - female, soft & creative" },
-			{ label: "Rosie", value: "5", description: "AI - female, bright & energetic" },
-			{ label: "Hugo", value: "6", description: "AI - male, neutral & steady" },
-			{ label: "Kiki", value: "7", description: "AI - female, light & friendly" },
-			{ label: "Leo", value: "8", description: "AI - male, rich & expressive" },
-			{ label: "Moira", value: "9", description: "System - Irish (macOS)" },
-			{ label: "Daniel", value: "10", description: "System - British (macOS)" },
-			{ label: "Samantha", value: "11", description: "System - American (macOS)" },
-			{ label: "Karen", value: "12", description: "System - Australian (macOS)" },
-			{ label: "Rishi", value: "13", description: "System - Indian (macOS)" },
+			{ label: "All three agents", value: "1", description: "One voice for Orchestrator, Engineer and QA." },
+			{ label: "Pick per agent", value: "2", description: "Choose a voice for each agent in turn." },
 		],
-		options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
+		options: ["1", "2", "all", "per", "per agent"],
 		processor: (answer, user) => {
-			const kittenVoices: Record<string, string> = {
-				"1": "Bruno",
-				"2": "Bella",
-				"3": "Jasper",
-				"4": "Luna",
-				"5": "Rosie",
-				"6": "Hugo",
-				"7": "Kiki",
-				"8": "Leo",
-			};
-			const systemVoices: Record<string, string> = {
-				"9": "Moira",
-				"10": "Daniel",
-				"11": "Samantha",
-				"12": "Karen",
-				"13": "Rishi",
-			};
-
-			const choice = answer.trim() || "1";
-			const isKitten = choice in kittenVoices;
-			const voice = kittenVoices[choice] || systemVoices[choice] || "Bruno";
-			const engine = isKitten ? "kitten" : "system";
-
-			return {
-				...user,
-				preferences: {
-					...user.preferences,
-					voice: {
-						...user.preferences.voice,
-						enabled: true,
-						engine: engine as any,
-						voiceId: voice,
-					},
-				},
-				completedSteps: [...user.completedSteps, "voice-picker"],
-			};
+			const perAgent = ["2", "per", "per agent"].includes(answer.trim().toLowerCase());
+			const done: OnboardingStep[] = perAgent
+				? ["voice-scope"]
+				: ["voice-scope", "voice-agent-orchestrator", "voice-agent-engineer", "voice-agent-qa"];
+			return { ...user, completedSteps: [...user.completedSteps, ...done] };
 		},
+	},
+	{
+		step: "voice-agent-orchestrator",
+		question: "Pick a voice for {agent_orchestrator} (Orchestrator).",
+		kind: "voicePicker",
+		roleKey: "orchestrator",
+		processor: (answer, user) =>
+			applyVoicePickAnswer(answer, user, "orchestrator", "voice-agent-orchestrator"),
+	},
+	{
+		step: "voice-agent-engineer",
+		question: "Pick a voice for {agent_engineer} (Engineer).",
+		kind: "voicePicker",
+		roleKey: "engineer",
+		processor: (answer, user) =>
+			applyVoicePickAnswer(answer, user, "engineer", "voice-agent-engineer"),
+	},
+	{
+		step: "voice-agent-qa",
+		question: "Pick a voice for {agent_qa} (QA).",
+		kind: "voicePicker",
+		roleKey: "qa",
+		processor: (answer, user) =>
+			applyVoicePickAnswer(answer, user, "qa", "voice-agent-qa"),
 	},
 	{
 		step: "confirmation",
