@@ -81,9 +81,9 @@ export class Player {
 
 	/** Set system volume (0-100) */
 	setVolume(percent: number): void {
-		const vol = Math.round((Math.max(0, Math.min(100, percent)) * 7) / 100);
+		const clamped = Math.max(0, Math.min(100, percent));
 		try {
-			execSync(`osascript -e "set volume output volume ${percent}"`);
+			execSync(`osascript -e "set volume output volume ${clamped}"`);
 		} catch {}
 	}
 
