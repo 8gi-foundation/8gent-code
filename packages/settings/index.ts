@@ -42,3 +42,12 @@ export {
 	setSetting,
 	getSettingsFilePath,
 } from "./store.js";
+
+export {
+	clampNumber,
+	numberRuleMessage,
+	textRuleMessage,
+	validateNumber,
+	validateText,
+} from "./validate.js";
+export type { NumberRule, TextRule, TextRuleKind, ValidationResult } from "./validate.js";
