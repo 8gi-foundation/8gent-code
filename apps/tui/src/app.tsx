@@ -143,7 +143,7 @@ import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { BottomBar } from "./components/BottomBar.js";
-import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
+import { djDeckActionFor, setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -3639,12 +3639,18 @@ export function App({
 					const djSub = args[0] || "";
 					const djArgs = args.slice(1);
 
-					// Deck visibility toggle, handled before delegating to the backend.
-					if (djSub === "close" || djSub === "hide") {
+					// Deck visibility, handled before delegating to the backend.
+					// Bare /dj toggles, the same as Ctrl+D; open and close stay explicit.
+					const deckAction = djDeckActionFor(djSub);
+					if (deckAction === "toggle") {
+						toggleDjDeckOpen();
+						break;
+					}
+					if (deckAction === "close") {
 						setDjDeckOpen(false);
 						break;
 					}
-					if (djSub === "open" || djSub === "show") {
+					if (deckAction === "open") {
 						setDjDeckOpen(true);
 						break;
 					}
@@ -3733,7 +3739,7 @@ export function App({
 								}
 								default:
 									result =
-										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools\n  /dj close|open - Toggle deck";
+										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools\n  /dj - Toggle deck (same as Ctrl+D)\n  /dj open|close - Show or hide deck";
 							}
 							// Transient playback feedback now lives in the DjDeck.
 							const playbackSubs = new Set(["play","radio","pause","stop","skip","np","vol","volume","loop","repeat","queue","resume","produce","gen"]);
