@@ -17,6 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";
+import { stripAnsi } from "../../lib/text";
 import {
 	CommandPalette,
 	CommandPaletteView,
@@ -24,7 +25,9 @@ import {
 	type CommandPaletteViewProps,
 	computeWindow,
 	filterAndSortCommands,
+	paletteColumns,
 } from "../CommandPalette";
+import { ctrl, renderInk } from "./ink-harness";
 
 const COMMANDS: CommandPaletteCommand[] = [
 	{ name: "voice", description: "Voice TTS settings" },
@@ -104,11 +107,20 @@ describe("CommandPaletteView", () => {
 				activeIndex: 1,
 				commands: COMMANDS,
 			},
+			{
+				// The 120-column shell leaves a 27-column centre column (#2913).
+				label: "narrow column (27 cols): one truncated entry per row",
+				query: "",
+				activeIndex: 0,
+				commands: COMMANDS,
+				width: 27,
+			},
 		].map((row) => {
 			const rendered = invokeView({
 				query: row.query,
 				activeIndex: row.activeIndex,
 				commands: row.commands,
+				width: row.width,
 			});
 			const props = rendered.props as {
 				borderStyle: string;
@@ -121,10 +133,162 @@ describe("CommandPaletteView", () => {
 				commandNames: row.commands.map((c) => c.name),
 				borderStyle: props.borderStyle,
 				width: props.width,
+				...(row.width ? { rows: renderedRows(rendered) } : {}),
 			};
 		});
 
 		expect(matrix).toMatchSnapshot();
+	});
+});
+
+/** Text of each direct child row of the palette box. */
+function renderedRows(node: React.ReactElement): string[] {
+	const children = React.Children.toArray(
+		(node.props as { children?: React.ReactNode }).children,
+	);
+	return children.map((child) => flattenText(child));
+}
+
+function flattenText(node: unknown): string {
+	if (node == null || typeof node === "boolean") return "";
+	if (typeof node === "string" || typeof node === "number") return String(node);
+	if (Array.isArray(node)) return node.map(flattenText).join("");
+	if (typeof node === "object" && "props" in (node as { props?: unknown })) {
+		const el = node as { props: { children?: unknown } };
+		return flattenText(el.props.children);
+	}
+	return "";
+}
+
+describe("palette sizing (issue #2913)", () => {
+	const LONG: CommandPaletteCommand[] = [
+		{
+			name: "knowledge",
+			description:
+				"Personal knowledge base with RAG: ingest articles, tweets, videos, PDFs, then query with natural language using vector similarity.",
+		},
+		{ name: "settings", description: "Open settings view (toggle voice, performance, providers, models)" },
+	];
+
+	test("paletteColumns keeps name + description inside the inner width", () => {
+		for (const width of [27, 40, 50, 61, 76]) {
+			const cols = paletteColumns(width, LONG);
+			expect(cols.inner).toBe(width - 4);
+			// marker (2) + name + space + description never exceeds inner
+			if (cols.description > 0) {
+				expect(2 + cols.name + 1 + cols.description).toBeLessThanOrEqual(cols.inner);
+			}
+		}
+	});
+
+	test("paletteColumns drops the description rather than mangling it when tight", () => {
+		const cols = paletteColumns(20, LONG);
+		expect(cols.description).toBe(0);
+		expect(cols.name).toBeGreaterThan(0);
+	});
+
+	test("every rendered row fits the inner width at 27 and 61 columns", () => {
+		for (const width of [27, 61]) {
+			const view = invokeView({ query: "", activeIndex: 0, commands: LONG, width });
+			const rows = renderedRows(view);
+			expect(rows.length).toBeGreaterThan(0);
+			for (const row of rows) {
+				expect(row.length).toBeLessThanOrEqual(width - 4);
+			}
+			// One entry per row: both names present, each on its own row.
+			expect(rows.filter((r) => r.includes("/knowledge")).length).toBe(1);
+			expect(rows.filter((r) => r.includes("/settings")).length).toBe(1);
+		}
+	});
+
+	test("maxVisibleRows caps the listed entries", () => {
+		const many = Array.from({ length: 30 }, (_, i) => ({
+			name: `cmd${i}`,
+			description: `command number ${i}`,
+		}));
+		const view = invokeView({ query: "", activeIndex: 0, commands: many, width: 61, maxVisibleRows: 4 });
+		const rows = renderedRows(view);
+		expect(rows.filter((r) => r.startsWith("◆") || r.startsWith("○")).length).toBe(4);
+		expect(rows.some((r) => r.includes("↓ 26 more"))).toBe(true);
+	});
+
+	test("the box does not overflow its own width once laid out by Ink", async () => {
+		const width = 27;
+		const h = renderInk(
+			<CommandPalette
+				isOpen
+				onClose={() => {}}
+				onExecute={() => {}}
+				commands={LONG}
+				width={width}
+			/>,
+			{ columns: 120, rows: 40 },
+		);
+		await h.settle();
+		const lines = h.frame().split("\n").filter((l) => l.length > 0);
+		expect(lines.length).toBeGreaterThan(3);
+		for (const line of lines) {
+			expect(stripAnsi(line).trimEnd().length).toBeLessThanOrEqual(width);
+		}
+		h.unmount();
+	});
+});
+
+describe("palette owns the keystrokes while open (issue #2913)", () => {
+	const ALL: CommandPaletteCommand[] = [
+		{ name: "help", description: "Show available commands" },
+		{ name: "kanban", description: "Toggle kanban board view" },
+		{ name: "settings", description: "Open settings view" },
+		{ name: "status", description: "Show session status" },
+	];
+
+	test("typed characters filter the list; Ctrl+U clears the filter", async () => {
+		const h = renderInk(
+			<CommandPalette
+				isOpen
+				onClose={() => {}}
+				onExecute={() => {}}
+				commands={ALL}
+				width={60}
+			/>,
+			{ columns: 100, rows: 30 },
+		);
+		await h.settle();
+		expect(h.frame()).toContain("/kanban");
+
+		await h.type("s");
+		await h.type("e");
+		await h.type("t");
+		await h.type("t");
+		const filtered = h.frame();
+		expect(filtered).toContain("» sett");
+		expect(filtered).toContain("/settings");
+		expect(filtered).not.toContain("/kanban");
+		expect(filtered).not.toContain("/status");
+
+		await h.type(ctrl("u"));
+		const cleared = h.frame();
+		expect(cleared).toContain("type to filter");
+		expect(cleared).toContain("/kanban");
+		h.unmount();
+	});
+
+	test("Enter closes first, then executes the highlighted command", async () => {
+		const calls: string[] = [];
+		const h = renderInk(
+			<CommandPalette
+				isOpen
+				onClose={() => calls.push("close")}
+				onExecute={(name) => calls.push(`exec:${name}`)}
+				commands={ALL}
+				width={60}
+			/>,
+		);
+		await h.settle();
+		await h.type("kan");
+		await h.type("\r");
+		expect(calls).toEqual(["close", "exec:kanban"]);
+		h.unmount();
 	});
 });
 

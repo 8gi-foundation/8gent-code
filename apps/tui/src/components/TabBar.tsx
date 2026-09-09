@@ -6,16 +6,23 @@
  *
  * Pane grouping support: tabs in the same group share a visual container
  * and can be dragged between groups using Ctrl+G.
+ *
+ * Geometry (every cell is the same width on both rows, so the frame
+ * always lines up):
+ *
+ *    >> Orchestrator   ┌ >> QA ┐  N: Notes
+ *   ─────────────────  ┘       └  ──────────────────────────
+ *
+ * Inactive cell: " label " over "─" x (label + 2).
+ * Active cell:   "┌ label ┐" over "┘" + spaces + "└".
+ * A grabbed tab (drag mode) swaps its padding spaces for "[" and "]".
  */
 
 import { Box, Text } from "ink";
 import React from "react";
-import {
-	TAB_ICONS,
-	type TabType,
-	type WorkspaceTab,
-} from "../hooks/useWorkspaceTabs.js";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
+import { TAB_ICONS, type TabType, type WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
+import { padRight, truncate } from "../lib/text.js";
 import { t } from "../theme.js";
 
 // Strip external-AI-vendor names from existing-session tab titles at render
@@ -39,17 +46,65 @@ interface TabBarProps {
 	isTabProcessing?: (tabId: string) => boolean;
 	/** Pane groups for showing tab groupings */
 	groups?: PaneGroup[];
-	/** Currently grabbed tab (in drag mode) */
+	/** Currently grabbed tab (in drag mode). Omitted or null = not dragging. */
 	grabbedTabId?: string | null;
 	/** Called when user presses Ctrl+G on a tab */
 	onGrabTab?: (tabId: string) => void;
 	/** Called when user presses Ctrl+G on a tab (drop) */
 	onDropOntoTab?: (targetTabId: string) => void;
+	/** Terminal width in columns. The bar never draws wider than this. */
+	width?: number;
 }
+
+/** Fallback width when the caller does not pass the viewport. */
+const DEFAULT_WIDTH = 80;
+export const GRAB_HINT = "[G] drop on another tab to group | [Esc] cancel";
+/** How to move between tabs. Shown at rest when the bar is wide enough for it. */
+// Ctrl+digit is deliberately not advertised: most terminals do not send a
+// distinct code for it, so the binding in app.tsx cannot be relied on.
+export const SWITCH_HINT = "Shift+Tab cycle tabs | Esc back to chat";
 
 function getTabIcon(type: TabType): string {
 	const found = TAB_ICONS.find((i) => i.type === type);
 	return found?.icon || ">>";
+}
+
+export interface TabCell {
+	label: string;
+	active: boolean;
+	grabbed?: boolean;
+}
+
+/**
+ * Build the two rows of the tab bar as plain strings. Pure, so the frame
+ * geometry can be unit-tested. Both rows are exactly `width` columns.
+ */
+export function buildTabRows(
+	cells: TabCell[],
+	width: number,
+	hint = "",
+): { top: string; bottom: string } {
+	const tops: string[] = [];
+	const bottoms: string[] = [];
+	for (const cell of cells) {
+		const open = cell.grabbed ? "[" : " ";
+		const close = cell.grabbed ? "]" : " ";
+		if (cell.active) {
+			tops.push(`┌${open}${cell.label}${close}┐`);
+			bottoms.push(`┘${" ".repeat(cell.label.length + 2)}└`);
+		} else {
+			tops.push(`${open}${cell.label}${close}`);
+			bottoms.push("─".repeat(cell.label.length + 2));
+		}
+	}
+	const topCols = Math.max(0, width - hint.length);
+	const top = padRight(truncate(tops.join(" "), topCols), topCols) + hint;
+	const bottomRaw = bottoms.join("─");
+	const bottom =
+		bottomRaw.length >= width
+			? bottomRaw.slice(0, width)
+			: bottomRaw + "─".repeat(width - bottomRaw.length);
+	return { top, bottom };
 }
 
 export function TabBar({
@@ -57,19 +112,17 @@ export function TabBar({
 	onSwitch,
 	isTabProcessing,
 	groups = [],
-	grabbedTabId,
+	grabbedTabId = null,
 	onGrabTab,
 	onDropOntoTab,
+	width = DEFAULT_WIDTH,
 }: TabBarProps) {
 	if (tabs.length <= 1) return null;
 
-	const visibleTabs = tabs.filter((t) => t.type !== "kanban" || t.active);
+	const visibleTabs = tabs.filter((tab) => tab.type !== "kanban" || tab.active);
+	const dragging = grabbedTabId !== null && grabbedTabId !== undefined;
 
-	// Build the two rows as single strings for perfect alignment
-	let topRow = "";
-	let botRow = "";
-
-	for (const tab of visibleTabs) {
+	const cells: TabCell[] = visibleTabs.map((tab) => {
 		const icon = getTabIcon(tab.type);
 		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
 		// Inline processing indicator: a single `*` next to the tab title when
@@ -77,47 +130,41 @@ export function TabBar({
 		// is already used elsewhere in the app for the Ideas tab and renders
 		// reliably in any TTY without color cues.
 		const busy = isTabProcessing?.(tab.id) ? " *" : "";
+		const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
+		return {
+			label: `${icon} ${sanitizeTabTitle(tab.title)}${badge}${busy}${grouped}`,
+			active: tab.active,
+			grabbed: dragging && grabbedTabId === tab.id,
+		};
+	});
 
-		// Grab mode indicator: `[` prefix when tab is grabbed, `]` when target can receive drop
-		const isGrabbed = grabbedTabId === tab.id;
-		const canDrop = grabbedTabId !== null && !isGrabbed;
-		const grabIndicator = isGrabbed ? "[" : canDrop ? "]" : "";
-
-		const label = `${icon} ${sanitizeTabTitle(tab.title)}${badge}${busy}`;
-
-		// Check if tab is in a group
-		const group = groups.find((g) => g.tabIds.includes(tab.id));
-		const groupMarker = group ? "+" : "";
-
-		if (tab.active) {
-			topRow += `${grabIndicator}┌ ${label} ${groupMarker}┐${grabIndicator === "[" ? "" : ""}`;
-			botRow += `${canDrop ? "]" : " "}┘${" ".repeat(label.length + 4 + (group ? 1 : 0))}└${canDrop ? "[" : " "}`;
-		} else {
-			const grabPrefix = grabIndicator || " ";
-			const grabSuffix = canDrop ? "]" : " ";
-			topRow += `${grabPrefix} ${label} ${groupMarker} ${grabSuffix}`;
-			botRow += `${"─".repeat(label.length + 6 + (group ? 1 : 0))}`;
-		}
-	}
-
-	// Grab mode hint
-	const grabHint =
-		grabbedTabId !== null
-			? ` [G] drop on another tab to group | [Esc] cancel`
+	// The legend is only shown when every tab still fits beside it; a tab that
+	// gets cut off to make room for a hint about tabs is worse than no hint.
+	const tabsWidth =
+		cells.reduce((n, c) => n + c.label.length + (c.active ? 4 : 2), 0) +
+		Math.max(0, cells.length - 1);
+	const hint = dragging
+		? ` ${GRAB_HINT}`
+		: width - tabsWidth >= SWITCH_HINT.length + 3
+			? ` ${SWITCH_HINT}`
 			: "";
+	const { top, bottom } = buildTabRows(cells, width, hint);
+	const topTabs = hint ? top.slice(0, top.length - hint.length) : top;
 
 	return (
-		<Box flexDirection="column" marginBottom={0}>
+		<Box flexDirection="column" width={width} overflow="hidden">
 			<Box>
-				<Text color={t.teal}>{topRow}</Text>
-				<Box flexGrow={1} />
-				{grabHint && <Text color={t.orangeAlt}>{grabHint}</Text>}
+				<Text color={t.teal}>{topTabs}</Text>
+				{hint ? (
+					dragging ? (
+						<Text color={t.orangeAlt}>{hint}</Text>
+					) : (
+						<Text dimColor>{hint}</Text>
+					)
+				) : null}
 			</Box>
 			<Box>
-				<Text color={t.teal}>
-					{botRow}
-					{"─".repeat(Math.max(0, 80 - grabHint.length))}
-				</Text>
+				<Text color={t.teal}>{bottom}</Text>
 			</Box>
 		</Box>
 	);

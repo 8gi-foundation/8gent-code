@@ -49,5 +49,29 @@ exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match 
     "query": "",
     "width": 50,
   },
+  {
+    "activeIndex": 0,
+    "borderStyle": "round",
+    "commandNames": [
+      "voice",
+      "kanban",
+      "predict",
+      "voiceprint",
+      "model",
+    ],
+    "label": "narrow column (27 cols): one truncated entry per row",
+    "query": "",
+    "rows": [
+      "» type to filter…",
+      "───────────────────────",
+      "◆ /voice      Voice TT…",
+      "○ /kanban     Toggle k…",
+      "○ /predict    Show pre…",
+      "○ /voiceprint Speaker …",
+      "○ /model      Select L…",
+      "↑↓ move · Enter run · …",
+    ],
+    "width": 27,
+  },
 ]
 `;

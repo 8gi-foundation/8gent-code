@@ -8,17 +8,24 @@
  *
  * Theme tokens only, no inline hex.
  *
+ * Sizing: the palette never draws outside its own box. The caller passes
+ * the usable column width and a row budget (see lib/layout popupLayout);
+ * every line is truncated to the inner width with an ellipsis, so an entry
+ * is always exactly one row.
+ *
  * Layout:
- *   ┌─ COMMANDS ─────────────────────┐
+ *   ╭────────────────────────────────╮
  *   │ » {query}                      │
- *   │ ──────────────                  │
+ *   │ ──────────────────────────────  │
  *   │ ◆ /voice    voice settings...  │
- *   │   /kanban   kanban toggle...   │
- *   └────────────────────────────────┘
+ *   │ ○ /kanban   kanban toggle...   │
+ *   │ ↑↓ move · Enter run · Esc close│
+ *   ╰────────────────────────────────╯
  */
 
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
+import { padRight, truncate } from "../lib/text.js";
 import { t } from "../theme.js";
 
 export interface CommandPaletteCommand {
@@ -31,17 +38,40 @@ export interface CommandPaletteProps {
 	onClose: () => void;
 	onExecute: (commandName: string) => void;
 	commands: CommandPaletteCommand[];
+	/** Total box width in columns, border included. Defaults to 50. */
+	width?: number;
+	/** Maximum command rows listed at once. Defaults to 10. */
+	maxVisibleRows?: number;
 }
 
 export interface CommandPaletteViewProps {
 	query: string;
 	activeIndex: number;
 	commands: CommandPaletteCommand[];
+	/** Total box width in columns, border included. Defaults to 50. */
+	width?: number;
+	/** Maximum command rows listed at once. Defaults to 10. */
+	maxVisibleRows?: number;
 }
 
-const PALETTE_WIDTH = 50;
-const MAX_VISIBLE_ROWS = 10;
-const NAME_COL_WIDTH = 12;
+export const DEFAULT_PALETTE_WIDTH = 50;
+export const DEFAULT_MAX_VISIBLE_ROWS = 10;
+/** Widest the `/name` column will grow; longer names are truncated. */
+const NAME_COL_MAX = 12;
+/** Border (2) + paddingX (2). */
+const BOX_CHROME_COLS = 4;
+/** Marker glyph + space in front of every row. */
+const MARKER_COLS = 2;
+/** Below this many columns the description is dropped rather than mangled. */
+const MIN_DESCRIPTION_COLS = 6;
+const FOOTER = "↑↓ move · Enter run · Esc close";
+const FILTER_PLACEHOLDER = "type to filter…";
+
+/** True when `input` carries only printable characters (no control bytes). */
+function isPrintable(input: string): boolean {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: filtering control bytes is the point
+	return !/[\x00-\x1f\x7f]/.test(input);
+}
 
 /**
  * Compute a sliding window over the filtered command list that always
@@ -51,7 +81,7 @@ const NAME_COL_WIDTH = 12;
 export function computeWindow(
 	total: number,
 	activeIndex: number,
-	visible: number = MAX_VISIBLE_ROWS,
+	visible: number = DEFAULT_MAX_VISIBLE_ROWS,
 ): { start: number; end: number } {
 	if (total <= visible) {
 		return { start: 0, end: total };
@@ -63,11 +93,36 @@ export function computeWindow(
 	return { start, end };
 }
 
+/**
+ * Column plan for a palette of `width` columns. Pure, so the row geometry
+ * can be unit-tested without rendering.
+ */
+export function paletteColumns(
+	width: number,
+	commands: CommandPaletteCommand[],
+): { inner: number; name: number; description: number } {
+	const inner = Math.max(MARKER_COLS + 3, width - BOX_CHROME_COLS);
+	const longestName = commands.reduce(
+		(max, c) => Math.max(max, c.name.length + 1),
+		0,
+	);
+	const name = Math.min(NAME_COL_MAX, longestName, inner - MARKER_COLS);
+	// One space between the name column and the description.
+	const description = Math.max(0, inner - MARKER_COLS - name - 1);
+	return {
+		inner,
+		name,
+		description: description < MIN_DESCRIPTION_COLS ? 0 : description,
+	};
+}
+
 export function CommandPalette({
 	isOpen,
 	onClose,
 	onExecute,
 	commands,
+	width = DEFAULT_PALETTE_WIDTH,
+	maxVisibleRows = DEFAULT_MAX_VISIBLE_ROWS,
 }: CommandPaletteProps): React.ReactElement | null {
 	const [query, setQuery] = useState("");
 	const [activeIndex, setActiveIndex] = useState(0);
@@ -126,8 +181,15 @@ export function CommandPalette({
 				setQuery((q) => q.slice(0, -1));
 				return;
 			}
-			// Plain printable char (no ctrl/meta) appends to query.
-			if (input && !key.ctrl && !key.meta && input.length === 1) {
+			// Ctrl+U clears the filter, mirroring the chat input.
+			if (key.ctrl && input === "u") {
+				setQuery("");
+				return;
+			}
+			// Printable text (no ctrl/meta, no control bytes) appends to the
+			// query. Fast typing and pastes arrive as multi-character chunks,
+			// so the length is not restricted to one.
+			if (input && !key.ctrl && !key.meta && isPrintable(input)) {
 				setQuery((q) => q + input);
 			}
 		},
@@ -143,6 +205,8 @@ export function CommandPalette({
 			query={query}
 			activeIndex={activeIndex}
 			commands={filtered}
+			width={width}
+			maxVisibleRows={maxVisibleRows}
 		/>
 	);
 }
@@ -154,12 +218,16 @@ export function CommandPaletteView({
 	query,
 	activeIndex,
 	commands,
+	width = DEFAULT_PALETTE_WIDTH,
+	maxVisibleRows = DEFAULT_MAX_VISIBLE_ROWS,
 }: CommandPaletteViewProps): React.ReactElement {
 	const total = commands.length;
-	const { start, end } = computeWindow(total, activeIndex, MAX_VISIBLE_ROWS);
+	const { start, end } = computeWindow(total, activeIndex, maxVisibleRows);
 	const visible = commands.slice(start, end);
 	const hiddenAbove = start;
 	const hiddenBelow = total - end;
+	const cols = paletteColumns(width, commands);
+	const queryCols = Math.max(0, cols.inner - MARKER_COLS);
 
 	return (
 		<Box
@@ -167,20 +235,24 @@ export function CommandPaletteView({
 			borderStyle="round"
 			borderColor={t.orange}
 			paddingX={1}
-			width={PALETTE_WIDTH}
+			width={width}
 			flexShrink={0}
+			overflow="hidden"
 		>
 			<Box>
 				<Text color={t.orange}>» </Text>
-				<Text color={t.cream}>{query || ""}</Text>
-				<Text color={t.dim}>{query ? "" : "type to filter…"}</Text>
+				{query ? (
+					<Text color={t.cream}>{truncate(query, queryCols)}</Text>
+				) : (
+					<Text color={t.dim}>{truncate(FILTER_PLACEHOLDER, queryCols)}</Text>
+				)}
 			</Box>
 			<Box>
-				<Text color={t.border}>──────────────────────────────────────────</Text>
+				<Text color={t.border}>{"─".repeat(cols.inner)}</Text>
 			</Box>
 			{hiddenAbove > 0 ? (
 				<Box>
-					<Text color={t.dim}>  ↑ {hiddenAbove} more</Text>
+					<Text color={t.dim}>{truncate(`  ↑ ${hiddenAbove} more`, cols.inner)}</Text>
 				</Box>
 			) : null}
 			{visible.length === 0 ? (
@@ -197,23 +269,24 @@ export function CommandPaletteView({
 								{active ? "◆ " : "○ "}
 							</Text>
 							<Text color={active ? t.orange : t.textPrimary} bold={active}>
-								{padRight(`/${cmd.name}`, NAME_COL_WIDTH)}
+								{padRight(truncate(`/${cmd.name}`, cols.name), cols.name)}
 							</Text>
-							<Text color={t.muted}> </Text>
-							<Text color={active ? t.textPrimary : t.textSecondary} wrap="truncate-end">
-								{cmd.description}
-							</Text>
+							{cols.description > 0 ? (
+								<Text color={active ? t.textPrimary : t.textSecondary}>
+									{` ${truncate(cmd.description, cols.description)}`}
+								</Text>
+							) : null}
 						</Box>
 					);
 				})
 			)}
 			{hiddenBelow > 0 ? (
 				<Box>
-					<Text color={t.dim}>  ↓ {hiddenBelow} more</Text>
+					<Text color={t.dim}>{truncate(`  ↓ ${hiddenBelow} more`, cols.inner)}</Text>
 				</Box>
 			) : null}
 			<Box>
-				<Text color={t.dim}>↑↓ move · Enter run · Esc close</Text>
+				<Text color={t.dim}>{truncate(FOOTER, cols.inner)}</Text>
 			</Box>
 		</Box>
 	);
@@ -243,9 +316,4 @@ export function filterAndSortCommands(
 		}
 	}
 	return [...prefix, ...rest];
-}
-
-function padRight(s: string, width: number): string {
-	if (s.length >= width) return s;
-	return s + " ".repeat(width - s.length);
 }

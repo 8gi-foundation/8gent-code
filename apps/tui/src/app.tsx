@@ -117,6 +117,7 @@ import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
+import { popupLayout } from "./lib/layout.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -5740,6 +5741,12 @@ export function App({
 	const utilityTabActive = activeTabType !== "chat";
 	const showContextRail = cols >= 120 && !utilityTabActive;
 	const showActivityRail = cols >= 90 && !utilityTabActive;
+	// Command popups (slash autocomplete, Ctrl+P palette) size themselves to
+	// the centre column so they never paint over the rails or the tiles (#2913).
+	const popup = popupLayout(viewport, {
+		contextRail: showContextRail,
+		activityRail: showActivityRail,
+	});
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5805,6 +5812,7 @@ export function App({
 						tabs={workspaceTabs.tabs}
 						onSwitch={workspaceTabs.switchTab}
 						isTabProcessing={perTabAgents.isTabProcessing}
+						width={viewport.width}
 					/>
 				</Box>
 
@@ -5875,6 +5883,8 @@ export function App({
 							<Box justifyContent="center" flexShrink={0}>
 								<CommandPalette
 									isOpen={paletteOpen}
+									width={popup.width}
+									maxVisibleRows={popup.paletteRows}
 									onClose={() => setPaletteOpen(false)}
 									onExecute={(name) => {
 										void handleSlashCommand(name as SlashCommand, []);
@@ -5916,6 +5926,8 @@ export function App({
 								injectedText={voiceTranscript}
 								transformInputValue={transformChatInput}
 								allowEmptySubmit={!!imageInput.currentImage}
+								popupWidth={popup.width}
+								popupRows={popup.slashRows}
 								goalClient={goalClient}
 								sessionId="tui"
 								onSystemMessage={(line) => {
