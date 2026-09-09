@@ -632,6 +632,24 @@ applySettingsToEnv();
 // react-doctor-disable-next-line react-doctor/no-giant-component
 /** Utility tabs whose view handles Escape itself (cancel edit, close help, then onClose). */
 const TABS_OWNING_ESCAPE: ReadonlySet<string> = new Set(["settings", "notes"]);
+/**
+ * viewMode screens whose component handles Escape itself and calls its own
+ * close callback (onCancel / onBack / onClose), which sets viewMode back to
+ * "chat". The app-level Escape handler must not also fire for these, or a
+ * screen with Escape side effects would be closed twice (#2919). Screens not
+ * listed here (onboarding, avenues, predict) have no Escape handler of their
+ * own, so the app-level handler is the one that closes them.
+ */
+const VIEWS_OWNING_ESCAPE: ReadonlySet<ViewMode> = new Set<ViewMode>([
+	"model-select",
+	"provider-select",
+	"history",
+	"message-viewer",
+	"animations",
+	"design",
+	"music",
+	"kanban",
+]);
 
 export function App({
 	initialCommand,
@@ -1882,7 +1900,10 @@ export function App({
 				// edit or the help overlay would drop the tab (#2912).
 				const chatTab = workspaceTabs.tabs.find((t) => t.type === "chat");
 				if (chatTab) workspaceTabs.switchTab(chatTab.id);
-			} else if (viewMode !== "chat") {
+			} else if (viewMode !== "chat" && !VIEWS_OWNING_ESCAPE.has(viewMode)) {
+				// Screens that own Escape (model picker, history, ...) close
+				// themselves through their callbacks; only the rest are closed
+				// here (#2919).
 				// If escaping from onboarding, also clear onboarding state
 				if (viewMode === "onboarding") {
 					setShowOnboarding(false);
@@ -5245,8 +5266,9 @@ export function App({
 
 	// Render main content based on view mode + active tab type.
 	// Mounted in the V2 centre column whenever the active tab is not a chat
-	// tab (#2912), so utility tabs replace the message list instead of
-	// leaving the chat shell on screen.
+	// tab (#2912) or viewMode is not "chat" (#2919), so utility tabs and the
+	// viewMode screens (/model, /history, Ctrl+M, onboarding, ...) replace the
+	// message list instead of leaving the chat shell on screen.
 	const renderMainContent = () => {
 		// Utility tabs (settings, notes, music, kanban, terminal, etc.) render
 		// their dedicated view regardless of viewMode. They are workspace-scoped,
@@ -5738,8 +5760,15 @@ export function App({
 	// rails and the chat input step aside so the view is not squeezed into a
 	// 26-column slot where every label wraps mid-word (#2912).
 	const utilityTabActive = activeTabType !== "chat";
-	const showContextRail = cols >= 120 && !utilityTabActive;
-	const showActivityRail = cols >= 90 && !utilityTabActive;
+	// A viewMode screen on a chat tab (/model, /history, Ctrl+M, onboarding,
+	// ...) takes the content area the same way (#2919). Onboarding keeps the
+	// chat input because free-text answers are typed there.
+	const viewScreenActive = viewMode !== "chat";
+	const fullWidthView = utilityTabActive || viewScreenActive;
+	const hideCommandInput =
+		paletteOpen || utilityTabActive || (viewScreenActive && viewMode !== "onboarding");
+	const showContextRail = cols >= 120 && !fullWidthView;
+	const showActivityRail = cols >= 90 && !fullWidthView;
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5854,7 +5883,7 @@ export function App({
 						/>
 
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-							{activeTabType !== "chat" ? (
+							{fullWidthView ? (
 								renderMainContent()
 							) : (
 								<MessageList
@@ -5891,7 +5920,7 @@ export function App({
 							<InlineApprovalPrompt target={approvalPending.target} />
 						)}
 
-						<Box flexShrink={0} display={paletteOpen || utilityTabActive ? "none" : "flex"}>
+						<Box flexShrink={0} display={hideCommandInput ? "none" : "flex"}>
 							<CommandInput
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}

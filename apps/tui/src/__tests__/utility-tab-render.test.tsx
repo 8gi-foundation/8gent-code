@@ -18,6 +18,7 @@ const ESC = "\u001b";
 const CTRL_N = "\u000e";
 const SHIFT_TAB = "\u001b[Z";
 const ENTER = "\r";
+const BACKSPACE = "\u007f";
 // Every chat tab boots with a welcome system message that starts with this
 // prefix (the greeting after it is random). Utility views replace the message
 // list, so its presence or absence tells us which view owns the centre column.
@@ -175,5 +176,48 @@ describe("utility tabs render in the V2 centre column (#2912)", () => {
 		const frame = await waitFor(stdout, (f) => f.includes("Scratchpad:"));
 		expect(frame).toContain("Scratchpad:");
 		expect(frame).not.toContain(CHAT_WELCOME);
+	});
+});
+
+describe("viewMode screens render in the V2 centre column (#2919)", () => {
+	test("/model opens the model selector", async () => {
+		stdin.write(ESC); // leave Notes, back to chat
+		await waitFor(stdout, (f) => f.includes(CHAT_WELCOME));
+		// Ctrl+N above also dropped its letter into the chat input (the text
+		// field does not filter ctrl chords). Clear it so the slash command is
+		// submitted as typed rather than as "n/model".
+		stdin.write(BACKSPACE);
+		await sleep(100);
+		stdin.write("/model");
+		await sleep(150);
+		stdin.write(ENTER);
+		// While the provider is still being queried the column shows a
+		// "Fetching models" line; the selector replaces it once the list lands.
+		const frame = await waitFor(stdout, (f) => f.includes("Select Model"));
+		expect(frame).toContain("Select Model");
+		expect(frame).not.toContain(CHAT_WELCOME);
+	});
+
+	test("Escape closes the model selector back to chat", async () => {
+		stdin.write(ESC);
+		const frame = await waitFor(stdout, (f) => f.includes(CHAT_WELCOME));
+		expect(frame).not.toContain("Select Model");
+		expect(frame).toContain(CHAT_WELCOME);
+	});
+
+	test("/history opens the history screen", async () => {
+		stdin.write("/history");
+		await sleep(150);
+		stdin.write(ENTER);
+		const frame = await waitFor(stdout, (f) => f.includes("Session History"));
+		expect(frame).toContain("Session History");
+		expect(frame).not.toContain(CHAT_WELCOME);
+	});
+
+	test("Escape closes the history screen back to chat", async () => {
+		stdin.write(ESC);
+		const frame = await waitFor(stdout, (f) => f.includes(CHAT_WELCOME));
+		expect(frame).not.toContain("Session History");
+		expect(frame).toContain(CHAT_WELCOME);
 	});
 });
