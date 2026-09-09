@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
-import { CollapsedDjDeckStrip, StereoDisplay } from "../DjDeck";
+import { CollapsedDjDeckStrip, IdleDjDeckBox, StereoDisplay, djDeckActionFor } from "../DjDeck";
 
 function shallow<T>(node: React.ReactElement): T {
 	return node.props as T;
@@ -335,5 +335,54 @@ describe("DjDeck expanded stereo renders (headless)", () => {
 		expect(frame).toContain("0:00 / 0:00");
 		expect(frame).toContain("50%");
 		expect(frame).not.toContain("Instrumental");
+	});
+});
+
+describe("DjDeck - idle box (expanded, nothing playing)", () => {
+	function hintTexts(el: React.ReactElement): string[] {
+		const props = shallow<{ children: React.ReactNode }>(el);
+		return React.Children.toArray(props.children).map((child) => {
+			const c = child as React.ReactElement<{ children: React.ReactNode }>;
+			return String(c.props.children);
+		});
+	}
+
+	test("the deck is open here, so the hint says /dj close, never /dj open", () => {
+		const texts = hintTexts(IdleDjDeckBox({ idleLabel: "idle", active: false }));
+		expect(texts).toContain("/dj close");
+		expect(texts.some((x) => x.includes("/dj open"))).toBeFalse();
+		expect(texts).toContain("● 8GENT FM");
+		expect(texts).toContain("idle");
+	});
+
+	test("keeps the same one-line bordered shell whether idle or mid-turn", () => {
+		for (const active of [false, true]) {
+			const el = IdleDjDeckBox({ idleLabel: active ? "agent pulse" : "idle", active });
+			const props = shallow<{ width: string; borderStyle: string; flexShrink: number }>(el);
+			expect(props.width).toBe("100%");
+			expect(props.borderStyle).toBe("round");
+			expect(props.flexShrink).toBe(0);
+		}
+	});
+});
+
+describe("DjDeck - /dj subcommand to deck action", () => {
+	test("bare /dj toggles, same as Ctrl+D", () => {
+		expect(djDeckActionFor("")).toBe("toggle");
+		expect(djDeckActionFor("   ")).toBe("toggle");
+	});
+
+	test("open and close stay explicit, with their show/hide spellings", () => {
+		expect(djDeckActionFor("open")).toBe("open");
+		expect(djDeckActionFor("show")).toBe("open");
+		expect(djDeckActionFor("OPEN")).toBe("open");
+		expect(djDeckActionFor("close")).toBe("close");
+		expect(djDeckActionFor("hide")).toBe("close");
+	});
+
+	test("anything else is not a deck action and falls through to the DJ backend", () => {
+		expect(djDeckActionFor("play")).toBeNull();
+		expect(djDeckActionFor("toggle")).toBeNull();
+		expect(djDeckActionFor("nonsense")).toBeNull();
 	});
 });

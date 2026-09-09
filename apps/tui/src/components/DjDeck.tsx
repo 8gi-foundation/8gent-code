@@ -70,6 +70,21 @@ export function toggleDjDeckOpen(): void {
 	toggleOpenExternal?.();
 }
 
+export type DjDeckAction = "open" | "close" | "toggle";
+
+/**
+ * Deck visibility verb for a `/dj` subcommand. Bare `/dj` toggles (same as
+ * Ctrl+D); `open`/`show` and `close`/`hide` are explicit; anything else is
+ * not a deck action and falls through to the DJ backend.
+ */
+export function djDeckActionFor(sub: string): DjDeckAction | null {
+	const s = sub.trim().toLowerCase();
+	if (s === "") return "toggle";
+	if (s === "open" || s === "show") return "open";
+	if (s === "close" || s === "hide") return "close";
+	return null;
+}
+
 function fmt(s: number | null): string {
 	if (s == null || !Number.isFinite(s) || s < 0) return "0:00";
 	const m = Math.floor(s / 60);
@@ -192,6 +207,27 @@ export function CollapsedDjDeckStrip(props: {
 			</Box>
 			<Text color={props.playing ? t.orangeAlt : t.textDim}>{wave}</Text>
 			<Text color={t.orange}> {props.playing ? "◷" : "○"}</Text>
+		</Box>
+	);
+}
+
+/**
+ * Expanded deck while nothing is playing: one bordered line. The deck is
+ * open here, so the hint names the command that changes something: /dj close.
+ */
+export function IdleDjDeckBox({ idleLabel, active }: { idleLabel: string; active: boolean }) {
+	return (
+		<Box
+			width="100%"
+			borderStyle="round"
+			borderColor={t.orangeDim}
+			paddingX={1}
+			justifyContent="space-between"
+			flexShrink={0}
+		>
+			<Text color={t.orange}>● 8GENT FM</Text>
+			<Text color={active ? t.teal : t.dim}>{idleLabel}</Text>
+			<Text color={t.muted}>/dj close</Text>
 		</Box>
 	);
 }
@@ -402,21 +438,7 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 			: isProcessing
 				? "agent pulse"
 				: "idle";
-		const idleColor = isProcessing ? t.teal : t.dim;
-		return (
-			<Box
-				width="100%"
-				borderStyle="round"
-				borderColor={t.orangeDim}
-				paddingX={1}
-				justifyContent="space-between"
-				flexShrink={0}
-			>
-				<Text color={t.orange}>● 8GENT FM</Text>
-				<Text color={idleColor}>{idleLabel}</Text>
-				<Text color={t.muted}>/dj open</Text>
-			</Box>
-		);
+		return <IdleDjDeckBox idleLabel={idleLabel} active={isProcessing} />;
 	}
 
 	return (
