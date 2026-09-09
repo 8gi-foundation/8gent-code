@@ -22,9 +22,29 @@ export interface SlashRegistryEntry {
 	skillName?: string;
 }
 
+/**
+ * A skill trigger that matched a builtin token. Builtins always win (#2932);
+ * the skill stays reachable under the namespaced token so nothing is lost.
+ */
+export interface SlashCollision {
+	token: string;
+	builtInName: SlashCommand;
+	skillName: string;
+	namespacedToken: string;
+}
+
 export interface SlashRegistry {
 	entries: SlashRegistryEntry[];
 	byToken: Map<string, SlashRegistryEntry>;
+	collisions: SlashCollision[];
+}
+
+/** Prefix that namespaces a skill whose trigger collides with a builtin: `/skill:<name>`. */
+export const SKILL_NAMESPACE_PREFIX = "skill:";
+
+export function namespacedSkillToken(token: string): string {
+	const bare = token.startsWith("/") ? token.slice(1) : token;
+	return `/${SKILL_NAMESPACE_PREFIX}${bare}`;
 }
 
 export interface ResolvedSlashInput {
@@ -37,16 +57,58 @@ export function mergeSlashEntries(
 	skillEntries: SlashRegistryEntry[],
 ): SlashRegistry {
 	const byToken = new Map<string, SlashRegistryEntry>();
+	const collisions: SlashCollision[] = [];
+	const collidedTokens = new Set<string>();
 	for (const entry of builtInEntries) {
 		byToken.set(entry.token, entry);
 	}
 	for (const entry of skillEntries) {
+		const existing = byToken.get(entry.token);
+		if (existing?.kind === "builtin" && existing.builtInName) {
+			// Builtins always win. The skill is re-keyed under /skill:<name>
+			// so it can still be invoked, and the collision is recorded for
+			// the startup line and for /help.
+			const namespacedToken = namespacedSkillToken(entry.token);
+			// A skill's canonical name and its alias key can normalize to the
+			// same token; record that collision once.
+			if (!collidedTokens.has(entry.token)) {
+				collidedTokens.add(entry.token);
+				collisions.push({
+					token: entry.token,
+					builtInName: existing.builtInName,
+					skillName: entry.skillName ?? entry.canonicalName,
+					namespacedToken,
+				});
+			}
+			if (!byToken.has(namespacedToken)) {
+				byToken.set(namespacedToken, {
+					...entry,
+					token: namespacedToken,
+					name: namespacedToken.slice(1),
+				});
+			}
+			continue;
+		}
 		byToken.set(entry.token, entry);
 	}
 	return {
 		entries: Array.from(byToken.values()).toSorted((a, b) => b.token.length - a.token.length),
 		byToken,
+		collisions,
 	};
+}
+
+/**
+ * One line naming every skill trigger that lost to a builtin, or null when
+ * there is nothing to say. Shown once at startup so the user learns why
+ * `/voice` runs the builtin and not their skill.
+ */
+export function formatSlashCollisionLine(collisions: SlashCollision[]): string | null {
+	if (collisions.length === 0) return null;
+	const parts = collisions.map(
+		(c) => `${c.token} is the builtin; skill ${c.skillName} is ${c.namespacedToken}`,
+	);
+	return `Slash command collision: ${parts.join("; ")}.`;
 }
 
 function normalizeToken(raw: string): string {

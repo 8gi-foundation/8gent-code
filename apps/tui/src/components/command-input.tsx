@@ -22,6 +22,7 @@ import type { SlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
 	getBuiltInSlashCommands,
+	formatSlashCollisionLine,
 	getSlashRegistry,
 	resolveSlashInput,
 	toGhostSuggestions,
@@ -97,6 +98,9 @@ function buildBuiltInSlashGhostSuggestions(): ContextSuggestion[] {
 // Main Command Input
 // ============================================
 
+// Module-level so remounts of the input (tab switches) do not repeat the line.
+let collisionLineShown = false;
+
 export function CommandInput({
 	onSubmit,
 	isProcessing,
@@ -137,6 +141,7 @@ export function CommandInput({
 			...toGhostSuggestions({
 				entries: slashRegistryEntries,
 				byToken: slashByToken,
+				collisions: [],
 			}),
 		],
 		[builtInSlashGhosts, slashRegistryEntries, slashByToken],
@@ -161,6 +166,13 @@ export function CommandInput({
 				if (cancelled) return;
 				setSlashRegistryEntries(registry.entries);
 				setSlashByToken(registry.byToken);
+				// Once per process: name any skill trigger that lost to a
+				// builtin so the user learns why /voice is not their skill (#2932).
+				const collisionLine = formatSlashCollisionLine(registry.collisions);
+				if (collisionLine && !collisionLineShown) {
+					collisionLineShown = true;
+					onSystemMessage?.(collisionLine);
+				}
 			} catch {
 				if (!cancelled) {
 					setSlashRegistryEntries([]);
@@ -251,6 +263,7 @@ export function CommandInput({
 				const resolved = resolveSlashInput(input, {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
+					collisions: [],
 				});
 
 				// /goal and /subgoal: handled in-component when a GoalClient is
