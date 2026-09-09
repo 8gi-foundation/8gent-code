@@ -116,6 +116,11 @@ import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js"
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
+import {
+	deriveApprovalMode,
+	formatStatusReport,
+	type StatusReportState,
+} from "./lib/status-report.js";
 import { truncate } from "./lib/text.js";
 import { popupLayout } from "./lib/layout.js";
 import {
@@ -1429,6 +1434,13 @@ export function App({
 		target: string;
 		resolve: (decision: TuiApprovalDecision) => void;
 	} | null>(null);
+	// One approval mode for every surface that names it (ContextRail line,
+	// bottom APPROVAL tile, /status) so they can never disagree.
+	const approvalMode = deriveApprovalMode({
+		approvalPending: approvalPending !== null,
+		infiniteModeActive,
+		cliAutoApprove: Boolean(cliAutoApprove),
+	});
 
 	// V2 approval handler registration. Headless callers see no handler and
 	// PermissionManager falls back to its existing stdin flow.
@@ -2555,12 +2567,58 @@ export function App({
 				}
 
 				case "status": {
-					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
-					const mins = Math.floor(elapsed / 60);
-					const secs = elapsed % 60;
-					addSystemMessage(
-						`Session Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}`,
-					);
+					// A project manager's answer: what is running, what waits on
+					// the user, what is blocked, then the plan and the session.
+					// Every field below is read from live state; nothing is seeded.
+					const now = Date.now();
+					const chatTabs = workspaceTabs.tabs.filter((t) => t.type === "chat");
+					const titleOf = (tabId: string) =>
+						workspaceTabs.tabs.find((t) => t.id === tabId)?.title ?? tabId;
+					const running: StatusReportState["running"] = chatTabs
+						.filter((t) => perTabAgents.isTabProcessing(t.id))
+						.map((t) => {
+							const startedAt = perTabAgents.getTabStartedAt(t.id) ?? now;
+							return {
+								title: t.title,
+								elapsedMs: now - startedAt,
+								tool: t.id === activeTabId ? activeTool : null,
+							};
+						});
+					const queued: StatusReportState["waiting"]["queued"] = [];
+					for (const [tabId, q] of messageQueuesRef.current) {
+						if (q.length > 0) queued.push({ title: titleOf(tabId), count: q.length });
+					}
+					const state: StatusReportState = {
+						running,
+						waiting: {
+							approvalTarget: approvalPending?.target ?? null,
+							onboardingQuestion: showOnboarding ? currentOnboardingQuestion : null,
+							queued,
+						},
+						blocked: {
+							provider: currentProvider,
+							providerReachable: modelsLoading || availableModels.length > 0,
+							localEngines: providerHealth,
+						},
+						plan: {
+							ready: kanbanBoard.ready.length,
+							inProgress: kanbanBoard.inProgress.length,
+							done: kanbanBoard.done.length,
+							next: planNextStep,
+						},
+						session: {
+							provider: currentProvider,
+							model: currentModel || null,
+							branch: currentBranch || null,
+							durationMs: now - startTime.getTime(),
+							tokens: totalTokens,
+						},
+					};
+					if (args[0]?.toLowerCase() === "--json") {
+						addSystemMessage(JSON.stringify(state, null, 2));
+					} else {
+						addSystemMessage(formatStatusReport(state).join("\n"));
+					}
 					break;
 				}
 
@@ -4638,13 +4696,18 @@ export function App({
 		[
 			addSystemMessage,
 			kanbanBoard,
+			planNextStep,
 			startTime,
 			totalTokens,
-			recentCommands,
 			currentBranch,
-			showAnimations,
-			soundEnabled,
 			exit,
+			approvalPending,
+			perTabAgents,
+			activeTabId,
+			activeTool,
+			currentOnboardingQuestion,
+			modelsLoading,
+			providerHealth,
 			availableModels,
 			availableProviders,
 			infiniteModeActive,
@@ -5713,7 +5776,7 @@ export function App({
 							<ContextRail
 								branch={currentBranch || "-"}
 								risk={infiniteModeActive ? "high" : "low"}
-								permissions={infiniteModeActive ? "infinite" : "ask"}
+								permissions={approvalMode}
 								contextPct={contextPct}
 								adhdMode={adhdMode}
 							/>
@@ -5853,7 +5916,7 @@ export function App({
 					tokens={tokenStr}
 					branch={currentBranch || "—"}
 					user={authUser?.displayName}
-					permissions={infiniteModeActive ? "infinite" : "ask"}
+					permissions={approvalMode}
 					sessionTime={sessionTime}
 					mode={agentMode}
 					isProcessing={isProcessing}

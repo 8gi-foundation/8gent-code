@@ -11,10 +11,16 @@
  *   AGENTS — value is a row of LED dots + "n/n" so the indicator reads
  *            at a glance. TOKENS — total count, optionally suffixed with
  *            live tokens-per-second from the last streamed step.
+ *   APPROVAL - states the real mode: ASK when tool calls need a yes,
+ *            AUTO when the session runs autonomously, WAITING when a
+ *            prompt is parked on the user. The value is the shared
+ *            `ApprovalMode` from lib/status-report so the ContextRail's
+ *            "approval" line and this tile can never disagree.
  */
 
 import { Box, Text } from "ink";
 import React from "react";
+import type { ApprovalMode } from "../lib/status-report.js";
 import { theme } from "../theme.js";
 
 function truncateMiddle(value: string, max: number): string {
@@ -45,7 +51,8 @@ export interface AgentInstrumentStripProps {
 	/** Optional user override. When omitted, the card reads
 	 *  `process.env.USER` / `process.env.LOGNAME` / "Guest". (#2366) */
 	user?: string;
-	permissions: string;
+	/** Approval mode derived once in the app (see lib/status-report). */
+	permissions: ApprovalMode;
 	sessionTime: string;
 	/** Smoothed output tokens-per-second from the most recent agent step.
 	 *  Rendered as compact shorthand in the Tokens card (e.g. "61t/s"). */
@@ -69,6 +76,14 @@ function resolveUser(override?: string): string {
 	if (override && override.trim().length > 0) return override;
 	const fromEnv = process.env.USER || process.env.LOGNAME;
 	return fromEnv && fromEnv.trim().length > 0 ? fromEnv : "Guest";
+}
+
+/** WAITING is the one state that needs the user right now, so it reads
+ *  red; ASK is the attentive default in orange; AUTO is calm cream. */
+function approvalColor(mode: ApprovalMode): string {
+	if (mode === "waiting") return ui.red;
+	if (mode === "ask") return ui.orange;
+	return ui.cream;
 }
 
 export function AgentInstrumentStrip({
@@ -121,8 +136,8 @@ export function AgentInstrumentStrip({
 			<StatusCard label="User" value={resolveUser(user)} color={ui.cream} />
 			<StatusCard
 				label="Approval"
-				value={permissions === "ask" ? "?" : permissions}
-				color={permissions === "ask" ? ui.red : ui.cream}
+				value={permissions.toUpperCase()}
+				color={approvalColor(permissions)}
 			/>
 			<StatusCard label="Session" value={sessionTime} color={ui.muted} />
 		</Box>

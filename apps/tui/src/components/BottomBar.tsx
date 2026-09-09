@@ -12,6 +12,7 @@
 import { Box } from "ink";
 import React from "react";
 import { AgentInstrumentStrip } from "./AgentInstrumentStrip.js";
+import type { ApprovalMode } from "../lib/status-report.js";
 import { DjDeck } from "./DjDeck.js";
 import { ModeFooter, type FooterMode } from "./ModeFooter.js";
 
@@ -24,7 +25,7 @@ interface BottomBarProps {
 	/** Optional auth display-name override; falls back to env-driven
 	 *  resolution inside AgentInstrumentStrip. (#2366) */
 	user?: string;
-	permissions: string;
+	permissions: ApprovalMode;
 	sessionTime: string;
 	mode: FooterMode;
 	/** When true, the DjDeck idle line shows "agent pulse" instead of

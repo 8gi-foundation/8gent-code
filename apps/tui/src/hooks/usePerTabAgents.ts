@@ -112,8 +112,16 @@ export function usePerTabAgents() {
 
 	// Reactive map driving UI - one boolean per tab id.
 	const [processingMap, setProcessingMap] = useState<Record<string, boolean>>({});
+	// Wall-clock start of each tab's in-flight turn, so /status can report
+	// elapsed time per tab from the same bookkeeping that drives the tab bar.
+	const startedAtRef = useRef<Map<string, number>>(new Map());
 
 	const setTabProcessing = useCallback((tabId: string, value: boolean) => {
+		if (value) {
+			if (!startedAtRef.current.has(tabId)) startedAtRef.current.set(tabId, Date.now());
+		} else {
+			startedAtRef.current.delete(tabId);
+		}
 		setProcessingMap((prev) => {
 			if (Boolean(prev[tabId]) === value) return prev;
 			const next = { ...prev };
@@ -127,6 +135,11 @@ export function usePerTabAgents() {
 		(tabId: string) => Boolean(processingMap[tabId]),
 		[processingMap],
 	);
+
+	/** Epoch ms when this tab's current turn started, or null when idle. */
+	const getTabStartedAt = useCallback((tabId: string): number | null => {
+		return startedAtRef.current.get(tabId) ?? null;
+	}, []);
 
 	const getAgent = useCallback((tabId: string): Agent | null => {
 		return agentsRef.current.get(tabId) ?? null;
@@ -185,6 +198,7 @@ export function usePerTabAgents() {
 			agentsRef.current.delete(tabId);
 			promisesRef.current.delete(tabId);
 			labelsRef.current.delete(tabId);
+			startedAtRef.current.delete(tabId);
 			setProcessingMap((prev) => {
 				if (!(tabId in prev)) return prev;
 				const next = { ...prev };
@@ -225,6 +239,7 @@ export function usePerTabAgents() {
 		// state
 		processingMap,
 		isTabProcessing,
+		getTabStartedAt,
 		setTabProcessing,
 		// agent registry
 		getAgent,
