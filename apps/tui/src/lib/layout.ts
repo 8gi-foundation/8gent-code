@@ -74,3 +74,49 @@ export function distributeWidths(totalWidth: number, weights: number[]): number[
 
 	return rawWidths;
 }
+
+/**
+ * V2 shell width budget. Chat first: the chat column keeps at least
+ * CHAT_MIN_COLS text columns, and the side rails only appear while that
+ * budget still holds. Rails drop in a fixed order as the terminal narrows:
+ * the context rail plus plan column goes first, then the activity rail.
+ * Everything the rails show is also in /status, so nothing is lost.
+ */
+
+/** Minimum text columns the chat column keeps while any rail is shown. */
+export const CHAT_MIN_COLS = 60;
+/** Columns taken by the context rail plus the plan column and their gaps. */
+export const CONTEXT_RAIL_COLS = 55;
+/** Columns taken by the activity rail and its gap. */
+export const ACTIVITY_RAIL_COLS = 36;
+/** Outer border, padding, gutter and slack around the chat column. */
+export const SHELL_CHROME_COLS = 8;
+/** Floor for the chat column when no rail is showing and the terminal is tiny. */
+const CHAT_FLOOR_COLS = 24;
+
+export interface ShellWidthBudget {
+	/** Show the context rail and the plan column beside it. */
+	showContextRail: boolean;
+	/** Show the activity rail on the right. */
+	showActivityRail: boolean;
+	/** Text columns available to the chat column (MessageList, /help, and friends). */
+	chatWidth: number;
+}
+
+/**
+ * Decide which rails fit at a given terminal width and how wide the chat
+ * column is once they are placed. Single source of truth for every consumer.
+ *
+ * Activity rail from 104 columns, both rails from 159 columns.
+ */
+export function shellWidthBudget(cols: number): ShellWidthBudget {
+	const base = cols - SHELL_CHROME_COLS;
+	const showActivityRail = base - ACTIVITY_RAIL_COLS >= CHAT_MIN_COLS;
+	const showContextRail =
+		showActivityRail && base - ACTIVITY_RAIL_COLS - CONTEXT_RAIL_COLS >= CHAT_MIN_COLS;
+	const chatWidth = Math.max(
+		CHAT_FLOOR_COLS,
+		base - (showContextRail ? CONTEXT_RAIL_COLS : 0) - (showActivityRail ? ACTIVITY_RAIL_COLS : 0),
+	);
+	return { showContextRail, showActivityRail, chatWidth };
+}

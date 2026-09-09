@@ -117,6 +117,7 @@ import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
+import { shellWidthBudget } from "./lib/layout.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -5705,9 +5706,8 @@ export function App({
 	}
 
 	// V2 three-zone shell - the only render path.
-	const cols = viewport.width;
-	const showContextRail = cols >= 120;
-	const showActivityRail = cols >= 90;
+	// Chat first (#2938): rails only show while the chat keeps CHAT_MIN_COLS.
+	const { showContextRail, showActivityRail, chatWidth } = shellWidthBudget(viewport.width);
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5826,10 +5826,7 @@ export function App({
 							<MessageList
 								messages={messages}
 								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
-								contentWidth={Math.max(
-									24,
-									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
-								)}
+								contentWidth={chatWidth}
 							/>
 						</Box>
 
