@@ -25,6 +25,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   back, then Ctrl+N and asserts the Notes scratchpad renders. Fails on main.
 
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
+### Fixed - Chat manners: divider owns its row, Esc interrupts once (#2927, #2925, part of #2922)
+
+- `apps/tui/src/components/message-list.tsx`: the "───" rule above and
+  below a system block landed on the same row as the next line of text and
+  ate its first three characters ("───itHub: not detected",
+  "───eration interrupted."). The list was asked for `viewport.height - 10`
+  rows while the centre pane really had about 16, and every Ink Box and Text
+  has `flexShrink: 1`, so Yoga squashed the overflow onto itself. The list
+  now measures its pane (`measureElement`) and lets the smaller of the pane
+  and the caller's budget bound the slice; row counts use the same
+  `wrap-ansi` call Ink's `<Text wrap="wrap">` uses (exported `wrappedRows`,
+  `estimateMessageRows`) and include the system block's two rules; each
+  message is `flexShrink: 0` so any overflow clips instead of squashing; a
+  single message taller than the pane anchors to the bottom so its newest
+  rows stay visible. `wrap-ansi` added as a direct dependency of
+  `@8gent/tui`. Headless render test: `MessageList.test.tsx`.
+- `packages/eight/agent.ts` + `packages/eight/turn-abort.ts` (new): Esc
+  during a local text-tool reply produced "Generation interrupted." and then
+  a second bubble, "The local model turn could not complete: The operation
+  was aborted". `Agent.abort(reason = "user")` now carries the reason on
+  the signal (the circuit breaker and session watchdog pass their own), and
+  the turn's catch (`settleFailedLocalTurn`) returns an empty turn and
+  records nothing for a user abort. Real failures keep their friendly text
+  unchanged. Tests: `turn-abort.test.ts`.
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"
   affordance for ANY Table message - synthesizes from the message's live

@@ -23,9 +23,10 @@
  * its column.
  */
 
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, type DOMElement, measureElement, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import wrapAnsi from "wrap-ansi";
 import type { Message } from "../app.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { t } from "../theme.js";
@@ -127,34 +128,98 @@ interface MessageListProps {
 }
 
 /**
- * Estimate how many terminal rows a message renders into.
- * Used to slice the visible window so the rendered tree's total height never
- * exceeds the container — Ink's diff renderer leaves stale chars when content
- * shrinks, so we MUST clip in our own code, not rely on overflow:hidden.
+ * Width math shared by the row counter and MessageItem. Both sides read the
+ * same numbers so the count of rows a message will take and the rows it
+ * actually paints can never drift apart.
  *
- * Overhead per message: 1 header row + 1 marginBottom; assistant footer adds 1.
- * Body: count wrapped lines for each line of content.
+ * The bubble's outer Box reserves 2 cols for borderLeft (1) + paddingLeft (1),
+ * so the content column is contentWidth-2. Messages occupy up to 78% of that
+ * column; text wraps 2 chars inside the bubble to stay clear of character
+ * width quirks.
  */
-function estimateMessageRows(message: Message, wrapWidth: number): number {
-	if (message.role === "tool") return 0;
-	const w = Math.max(1, wrapWidth);
-	const safe = breakLongTokens(message.content, w);
+function bubbleWidths(contentWidth: number) {
+	const innerContentWidth = Math.max(16, contentWidth - 2);
+	const maxBubbleWidth = Math.max(16, Math.floor(innerContentWidth * 0.78));
+	const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
+	return { innerContentWidth, maxBubbleWidth, textWrapWidth };
+}
+
+/** Single-line system hints render centred on one row up to this length. */
+function systemHintBudget(contentWidth: number): number {
+	return Math.max(20, contentWidth - 10);
+}
+
+/** Width the boxed system block wraps its text at (it sits inside paddingLeft 1). */
+function systemBlockWidth(contentWidth: number): number {
+	return Math.max(8, contentWidth - 2);
+}
+
+/**
+ * Rows a piece of text occupies once Ink's <Text wrap="wrap"> has wrapped it
+ * at `width`. Same wrap-ansi call, same options, so the answer is exact.
+ * Empty text paints nothing (Ink measures "" as height 0).
+ */
+export function wrappedRows(text: string, width: number): number {
+	if (text.length === 0) return 0;
+	return wrapAnsi(text, Math.max(1, width), { trim: false, hard: true }).split("\n").length;
+}
+
+/**
+ * Rows FormattedContent paints for content with code fences: each fence is a
+ * bordered box (2) with paddingY (2) and marginY (2), an optional language
+ * row, and the code wrapped at the fence's inner width; prose segments wrap
+ * at the bubble width.
+ */
+function formattedContentRows(content: string, wrapWidth: number): number {
 	let rows = 0;
-	for (const line of safe.split("\n")) {
-		rows += Math.max(1, Math.ceil(line.length / w));
+	for (const part of content.split(/(```[\s\S]*?```)/)) {
+		if (part.startsWith("```")) {
+			const match = part.match(/```(\w+)?\n?([\s\S]*?)```/);
+			if (match) {
+				const [, language, code] = match;
+				const fenceInner = Math.max(8, wrapWidth - 8);
+				rows += 6 + (language ? 1 : 0) + wrappedRows(code.trim(), fenceInner);
+				continue;
+			}
+		}
+		rows += wrappedRows(part, wrapWidth);
 	}
+	return rows;
+}
+
+/**
+ * Count how many terminal rows a message renders into.
+ * Used to slice the visible window so the rendered tree's total height never
+ * exceeds the container. If it did, Yoga would shrink every Box and Text in
+ * the column (Ink's default flexShrink is 1) while the text still paints its
+ * full lines, and later siblings would overprint earlier ones: that is how a
+ * system block's bottom "───" ate the first three characters of the line
+ * beneath it ("───itHub: not detected").
+ *
+ * System hint (single line that fits): 1 row + 1 marginBottom.
+ * System block: "───" + wrapped text + "───" + 1 marginBottom.
+ * Bubble: 1 header + body + (assistant footer when metadata exists) + 1 marginBottom.
+ */
+export function estimateMessageRows(message: Message, contentWidth: number): number {
+	if (message.role === "tool") return 0;
 	if (message.role === "system") {
-		// Multi-line system messages get top/bottom ─── separators (2 extra rows).
-		return rows + (message.content.includes("\n") ? 2 : 0) + 1;
+		const fitsHint =
+			!message.content.includes("\n") && message.content.length <= systemHintBudget(contentWidth);
+		if (fitsHint) return 1 + 1;
+		return 1 + wrappedRows(message.content, systemBlockWidth(contentWidth)) + 1 + 1;
 	}
-	// 1 header + 1 marginBottom; assistant with metadata = 1 footer too.
-	const overhead =
+	const { textWrapWidth } = bubbleWidths(contentWidth);
+	const safe = breakLongTokens(message.content, textWrapWidth);
+	const body = safe.includes("```")
+		? formattedContentRows(safe, textWrapWidth)
+		: wrappedRows(safe, textWrapWidth);
+	const footer =
 		message.role === "assistant" &&
 		typeof message.latencyMs === "number" &&
 		typeof message.tokens === "number"
-			? 3
-			: 2;
-	return rows + overhead;
+			? 1
+			: 0;
+	return 1 + body + footer + 1;
 }
 
 export function MessageList({
@@ -169,12 +234,28 @@ export function MessageList({
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
-	// Width used to estimate wrapped line count — matches MessageItem's body
-	// width math (contentWidth - 2 outer chrome, * 0.78 bubble, - 2 slack).
-	const wrapBudget = Math.max(8, Math.floor((resolvedContentWidth - 2) * 0.78) - 2);
 	// Default rowBudget: tall enough that small chats render fully, low enough
 	// that long sessions still clip on a typical terminal (80x24).
-	const resolvedRowBudget = Math.max(4, rowBudget ?? Math.max(8, (stdout?.rows ?? 24) - 10));
+	const requestedRowBudget = Math.max(4, rowBudget ?? Math.max(8, (stdout?.rows ?? 24) - 10));
+
+	// The caller's rowBudget is a guess about the pane; the pane's real height
+	// is what Yoga gave our container. Measure it after every commit and let
+	// the smaller of the two win, so the slice never asks for more rows than
+	// the pane can show. (app.tsx passed viewport.height - 10 = 30 rows for a
+	// centre pane that had 16, and Yoga squashed the overflow onto itself.)
+	const containerRef = useRef<DOMElement>(null);
+	// State value is read in render or feeds a derived value used in render - useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
+	const [measuredRows, setMeasuredRows] = useState<number | null>(null);
+	useEffect(() => {
+		if (!containerRef.current) return;
+		const { height } = measureElement(containerRef.current);
+		if (height > 0 && height !== measuredRows) setMeasuredRows(height);
+	});
+	const resolvedRowBudget = Math.max(
+		1,
+		measuredRows === null ? requestedRowBudget : Math.min(requestedRowBudget, measuredRows),
+	);
 
 	const prevCountRef = useRef(messages.length);
 	const [newMessageId, setNewMessageId] = useState<string | null>(null);
@@ -187,7 +268,7 @@ export function MessageList({
 	const chatMessages = messages.filter((m) => m.role !== "tool");
 
 	// Per-message estimated row counts. Cheap to compute; no memo needed.
-	const rowEstimates = chatMessages.map((m) => estimateMessageRows(m, wrapBudget));
+	const rowEstimates = chatMessages.map((m) => estimateMessageRows(m, resolvedContentWidth));
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
 	// scrollOffset = messages held back from the bottom. autoScrollRef tracks
@@ -289,6 +370,11 @@ export function MessageList({
 
 	const { startIdx: sliceStart, sliceEnd } = computeWindow(clampedOffset);
 	const visibleMessages = chatMessages.slice(sliceStart, sliceEnd);
+	// A single message taller than the pane cannot be sliced down. Anchor the
+	// column to the bottom so its newest rows stay visible and the overflow
+	// leaves off the top, instead of clipping the end of what was just said.
+	const visibleRows = rowEstimates.slice(sliceStart, sliceEnd).reduce((n, r) => n + r, 0);
+	const overflowsPane = visibleRows > resolvedRowBudget;
 	const _maxVisibleCap = maxVisible; // legacy prop retained for callers; not used in slicing.
 
 	// Find the most recent assistant message — that's the only one that gets
@@ -302,7 +388,13 @@ export function MessageList({
 	})();
 
 	return (
-		<Box flexDirection="column" flexGrow={1} minHeight={0}>
+		<Box
+			ref={containerRef}
+			flexDirection="column"
+			flexGrow={1}
+			minHeight={0}
+			justifyContent={overflowsPane ? "flex-end" : "flex-start"}
+		>
 			{visibleMessages.length === 0 ? (
 				<Box flexGrow={1} alignItems="center" justifyContent="center">
 					<Text color={t.dim}>
@@ -318,21 +410,26 @@ export function MessageList({
 				// treat it as static so TypingText doesn't replay.
 				const isFirstShow =
 					message.id === newMessageId && !animatedIdsRef.current.has(message.id);
+				// flexShrink 0: a message keeps every row it painted. Should the
+				// slice ever exceed the pane (a resize between commits), the
+				// overflow is clipped by the pane's overflow:hidden instead of
+				// Yoga squashing the block and overprinting its neighbour.
 				return (
-					<MessageItem
-						key={message.id}
-						message={message}
-						isNew={isFirstShow}
-						animate={animateTyping}
-						soundEnabled={soundEnabled}
-						index={index}
-						contentWidth={resolvedContentWidth}
-						showAnimations={showAnimations}
-						isLatestAssistant={message.id === lastAssistantId}
-						onAnimationStart={(id) => {
-							animatedIdsRef.current.add(id);
-						}}
-					/>
+					<Box key={message.id} flexShrink={0} flexDirection="column">
+						<MessageItem
+							message={message}
+							isNew={isFirstShow}
+							animate={animateTyping}
+							soundEnabled={soundEnabled}
+							index={index}
+							contentWidth={resolvedContentWidth}
+							showAnimations={showAnimations}
+							isLatestAssistant={message.id === lastAssistantId}
+							onAnimationStart={(id) => {
+								animatedIdsRef.current.add(id);
+							}}
+						/>
+					</Box>
 				);
 			})}
 			{clampedOffset > 0 && (
@@ -380,15 +477,9 @@ function MessageItem({
 	const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
 	// Messages occupy up to 78% of the content column, leaving a margin of
-	// empty space on the opposite side so alignment reads clearly.
-	// The outer Box reserves 2 cols for borderLeft (1) + paddingLeft (1),
-	// so the actual content column is contentWidth-2. The bubble width and
-	// wrap width each subtract 2 to preserve the existing overflow guarantees.
-	const innerContentWidth = Math.max(16, contentWidth - 2);
-	const maxBubbleWidth = Math.max(16, Math.floor(innerContentWidth * 0.78));
-	// Text wraps strictly within that width. 2 chars slack keeps us safe from
-	// edge-case character-width quirks.
-	const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
+	// empty space on the opposite side so alignment reads clearly. The same
+	// numbers drive estimateMessageRows (see bubbleWidths).
+	const { maxBubbleWidth, textWrapWidth } = bubbleWidths(contentWidth);
 
 	// Play sound on completion for assistant messages
 	useCompletionSound(typingComplete && message.role === "assistant" && isNew, soundEnabled);
@@ -409,7 +500,6 @@ function MessageItem({
 	// System messages render as subtle centered cards
 	if (message.role === "system") {
 		if (!showContent) return null;
-		const isMultiLine = message.content.includes("\n");
 		const fadeWrap = (node: React.ReactNode) =>
 			showAnimations ? (
 				<FadeIn duration={200} delay={isNew ? index * 20 : 0}>
@@ -419,21 +509,13 @@ function MessageItem({
 				<Box>{node}</Box>
 			);
 
-		if (isMultiLine) {
-			return fadeWrap(
-				<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
-					<Text dimColor>{"─".repeat(3)}</Text>
-					<SystemMessageText content={message.content} />
-					<Text dimColor>{"─".repeat(3)}</Text>
-				</Box>,
-			);
-		}
 		// Single-line system message: keep the centered hint look when it fits
-		// the column, otherwise fall back to the multi-line block so the full
-		// text can soft-wrap. Onboarding clarification questions are too
-		// important to truncate — show them in full even if they span 2 rows.
-		const hintBudget = Math.max(20, contentWidth - 10);
-		if (message.content.length <= hintBudget) {
+		// the column. Onboarding clarification questions are too important to
+		// truncate, so anything longer (or multi-line) gets the boxed block
+		// below, where the full text can soft-wrap.
+		const fitsHint =
+			!message.content.includes("\n") && message.content.length <= systemHintBudget(contentWidth);
+		if (fitsHint) {
 			return fadeWrap(
 				<Box justifyContent="center" marginBottom={1}>
 					<Text dimColor>{"─".repeat(3)} </Text>
@@ -442,10 +524,13 @@ function MessageItem({
 				</Box>,
 			);
 		}
+		// Boxed block: a "───" rule above and below, each on its own row. The
+		// text wraps at systemBlockWidth so estimateMessageRows counts exactly
+		// the rows painted here.
 		return fadeWrap(
 			<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
 				<Text dimColor>{"─".repeat(3)}</Text>
-				<Box width={contentWidth - 2}>
+				<Box width={systemBlockWidth(contentWidth)}>
 					<SystemMessageText content={message.content} />
 				</Box>
 				<Text dimColor>{"─".repeat(3)}</Text>
