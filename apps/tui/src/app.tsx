@@ -14,8 +14,8 @@
  */
 
 import { Box, useApp, useInput } from "ink";
-import { t } from "./theme.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import pkgInfo from "../../../package.json" with { type: "json" };
 import {
 	type TaskCategory,
 	getRouterStats,
@@ -23,27 +23,56 @@ import {
 } from "../../../packages/ai/task-router.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
+import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
+import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
+import {
+	type TuiApprovalDecision,
+	type TuiApprovalRequest,
+	registerTuiApprovalHandler,
+} from "../../../packages/permissions/tui-approval-channel.js";
+import {
+	getVoiceEngine,
+	getVoiceForRole,
+	loadSettings as loadAppSettings,
+	resolveVoiceForEngine,
+} from "../../../packages/settings/index.js";
+import { getTaskManager } from "../../../packages/tasks/index.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import { resolveTermCommand, spawnInWindow } from "../../../packages/terminal-tab/index.js";
+import { getTTSEngine } from "../../../packages/voice/tts-engine.js";
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import {
+	type VoiceCatalog,
+	type VoiceEntry,
+	getVoiceCatalog,
+} from "../../../packages/voice/voice-catalog.js";
 import {
 	ActivityMonitor,
 	clearActivity,
 	completeActivity,
 	pushActivity,
 } from "./components/ActivityMonitor.js";
-import { TabBar } from "./components/TabBar.js";
+import { ActivityRail } from "./components/ActivityRail.js";
+import { BottomBar } from "./components/BottomBar.js";
+import { CommandPalette } from "./components/CommandPalette.js";
+import { ContextRail } from "./components/ContextRail.js";
+import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
+import { HeaderBar } from "./components/HeaderBar.js";
+import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
-import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
-import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
-import {
-	composePrompt,
-	ensureInstalled,
-	getPreset,
-	isInstalled,
-	listPresetIds,
-	runExternalAgent,
-} from "./lib/external-agent-runner.js";
+import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
+import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import { MessageViewer } from "./components/MessageViewer.js";
+import { LivePlanRail } from "./components/PlanRail.js";
+import { TabBar } from "./components/TabBar.js";
 import { ThinkingView } from "./components/ThinkingView.js";
+import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
+import { VoicePicker } from "./components/VoicePicker.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
 import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
 import { SpawnRequestCard } from "./components/agent-panel/SpawnRequestCard.js";
@@ -61,12 +90,7 @@ import {
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
-import { GoalClient } from "./lib/goal-client.js";
-import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
-import pkgInfo from "../../../package.json" with { type: "json" };
-import { CommandPalette } from "./components/CommandPalette.js";
 import { FixedFrame } from "./components/fixed-frame/FixedFrame.js";
-import { HeaderBar } from "./components/HeaderBar.js";
 import {
 	ImageBadge,
 	consumeIfWholeValueIsImagePath,
@@ -102,6 +126,10 @@ import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
+import { useBodyParts } from "./hooks/useBodyParts.js";
+import { useGitSync } from "./hooks/useGitSync.js";
+import { useLilEightState } from "./hooks/useLilEightState.js";
+import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
 import { writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -109,19 +137,31 @@ import { useViewport } from "./hooks/useViewport.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
-import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
-import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
-import { probeProviders } from "./lib/provider-health.js";
-import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
-import * as bgPool from "./lib/background-pool.js";
-import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatSessionTime, formatTokens } from "./lib/format.js";
-import { truncate } from "./lib/text.js";
 import {
-	computeProcessSidebarWidth,
-	tuiChatContentWidth,
-} from "./lib/layout-breakpoints.js";
+	type OrchestrationAgentSnapshot,
+	deriveActiveTasks,
+	deriveAgents,
+	deriveProviders,
+	deriveTools,
+} from "./lib/activity-rail-derivation.js";
+import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
+import * as bgPool from "./lib/background-pool.js";
+import { detectBuildIntent } from "./lib/build-intent.js";
+import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import {
+	composePrompt,
+	ensureInstalled,
+	getPreset,
+	isInstalled,
+	listPresetIds,
+	runExternalAgent,
+} from "./lib/external-agent-runner.js";
+import { formatSessionTime, formatTokens } from "./lib/format.js";
+import { GoalClient } from "./lib/goal-client.js";
+import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
+import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
 import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
+import { probeProviders } from "./lib/provider-health.js";
 import {
 	flushSession,
 	initSessionLogger,
@@ -133,17 +173,14 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
-import { detectBuildIntent } from "./lib/build-intent.js";
-import {
-	BUILT_IN_SLASH_COMMANDS,
-	type SlashCommand,
-} from "./lib/slash-commands.js";
+import { BUILT_IN_SLASH_COMMANDS, type SlashCommand } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { truncate } from "./lib/text.js";
 import { BTWView } from "./screens/BTWView.js";
+import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
-import { BottomBar } from "./components/BottomBar.js";
-import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
+import { NarratorView } from "./screens/NarratorView.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -151,46 +188,7 @@ import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
 import { WindowTerminalView } from "./screens/WindowTerminalView.js";
-// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
-// These are the canonical surface for inter-package use; deep imports would
-// bypass each package's documented API. Suppressed by design.
-// react-doctor-disable-next-line react-doctor/no-barrel-import
-import {
-	resolveTermCommand,
-	spawnInWindow,
-} from "../../../packages/terminal-tab/index.js";
-import {
-	loadSettings as loadAppSettings,
-	getVoiceForRole,
-	getVoiceEngine,
-	resolveVoiceForEngine,
-} from "../../../packages/settings/index.js";
-import { getTTSEngine } from "../../../packages/voice/tts-engine.js";
-import { NarratorView } from "./screens/NarratorView.js";
-import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
-import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
-import { MessageViewer } from "./components/MessageViewer.js";
-import { ContextRail } from "./components/ContextRail.js";
-import { LivePlanRail } from "./components/PlanRail.js";
-import { getTaskManager } from "../../../packages/tasks/index.js";
-import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
-import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
-import { ActivityRail } from "./components/ActivityRail.js";
-import { useLilEightState } from "./hooks/useLilEightState.js";
-import { useGitSync } from "./hooks/useGitSync.js";
-import { useBodyParts } from "./hooks/useBodyParts.js";
-import {
-	deriveTools,
-	deriveProviders,
-	deriveAgents,
-	deriveActiveTasks,
-	type OrchestrationAgentSnapshot,
-} from "./lib/activity-rail-derivation.js";
-import {
-	registerTuiApprovalHandler,
-	type TuiApprovalDecision,
-	type TuiApprovalRequest,
-} from "../../../packages/permissions/tui-approval-channel.js";
+import { t } from "./theme.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -661,8 +659,8 @@ export function App({
 	cliProvider,
 	cliModel,
 	cliAutoApprove,
-// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
-// react-doctor-disable-next-line react-doctor/prefer-useReducer
+	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+	// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
 
@@ -1205,11 +1203,10 @@ export function App({
 					const res = await fetch("http://localhost:11434/api/tags");
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.models || [])
-							.flatMap((m: any) => {
-					const id = String(m.name ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.models || []).flatMap((m: any) => {
+							const id = String(m.name ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
@@ -1219,11 +1216,10 @@ export function App({
 					const res = await fetch("http://localhost:1234/v1/models");
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.data || [])
-							.flatMap((m: any) => {
-					const id = String(m.id ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.data || []).flatMap((m: any) => {
+							const id = String(m.id ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
@@ -1263,11 +1259,10 @@ export function App({
 					const res = await fetch(`${baseUrl}/models`);
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.data || [])
-							.flatMap((m: any) => {
-					const id = String(m.id ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.data || []).flatMap((m: any) => {
+							const id = String(m.id ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					} else if (!cancelled) {
@@ -1462,9 +1457,7 @@ export function App({
 			// or an agent error message. Anything else counts as a clean turn.
 			const tail = messages.slice(-5);
 			const hadError = tail.some(
-				(m) =>
-					m.toolSuccess === false ||
-					(m.role === "system" && /error|failed/i.test(m.content)),
+				(m) => m.toolSuccess === false || (m.role === "system" && /error|failed/i.test(m.content)),
 			);
 			setLastTurnSuccess(!hadError);
 			setLastActivityAt(Date.now());
@@ -1485,7 +1478,6 @@ export function App({
 				}).unref();
 			} catch {}
 		}
-
 	}, [isProcessing, soundEnabled]);
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
@@ -1539,22 +1531,23 @@ export function App({
 	const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
 	// Choices for the active onboarding question when kind === "select".
 	// null = current question is free-text (CommandInput owns input).
-	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<
-		Array<{ label: string; value: string; description?: string }> | null
-	>(null);
+	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<Array<{
+		label: string;
+		value: string;
+		description?: string;
+	}> | null>(null);
 	// kind === "providerCheck" payload: which engine to probe + install hint.
 	// The OnboardingScreen probes once on entry, shows status, and emits
 	// "live" or "skip" via onProviderResolve which we route into processAnswer.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
-	const [onboardingProviderCheck, setOnboardingProviderCheck] = useState<
-		{ provider: "ollama" | "lmstudio" | "apfel"; installHint: string } | null
-	>(null);
+	const [onboardingProviderCheck, setOnboardingProviderCheck] = useState<{
+		provider: "ollama" | "lmstudio" | "apfel";
+		installHint: string;
+	} | null>(null);
 	// kind === "agentName" payload: default value to show as a hint and accept
 	// on empty Enter. The actual input still goes through CommandInput.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
-	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<
-		string | null
-	>(null);
+	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<string | null>(null);
 	// Live total step count - set on first onboarding render so the
 	// "Step X of N" indicator reflects whatever the question list is.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1570,16 +1563,14 @@ export function App({
 	const applyOnboardingQuestion = useCallback(
 		(q: {
 			question: string;
-			kind?: "text" | "select" | "providerCheck" | "agentName";
+			kind?: "text" | "select" | "providerCheck" | "agentName" | "voicePicker";
 			choices?: Array<{ label: string; value: string; description?: string }>;
 			provider?: "ollama" | "lmstudio" | "apfel";
 			installHint?: string;
 			default?: string;
 		}) => {
 			setCurrentOnboardingQuestion(q.question);
-			setOnboardingSelectChoices(
-				q.kind === "select" && q.choices ? q.choices : null,
-			);
+			setOnboardingSelectChoices(q.kind === "select" && q.choices ? q.choices : null);
 			setOnboardingProviderCheck(
 				q.kind === "providerCheck" && q.provider
 					? { provider: q.provider, installHint: q.installHint ?? "" }
@@ -1605,6 +1596,34 @@ export function App({
 
 	// Command palette overlay (Ctrl+P).
 	const [paletteOpen, setPaletteOpen] = useState(false);
+	// Voice picker overlay (#2942). `scope` is who the pick is for: "all" or a
+	// single agent role. The catalog is loaded on open so the list always
+	// describes this machine rather than a compiled-in guess.
+	const [voicePicker, setVoicePicker] = useState<{
+		scope: "all" | "orchestrator" | "engineer" | "qa";
+		catalog: VoiceCatalog | null;
+		error: string | null;
+		/** The voice in use for this scope, so the list opens on it. */
+		current: { engine: string; id: string } | null;
+	} | null>(null);
+
+	const openVoicePicker = useCallback((scope: "all" | "orchestrator" | "engineer" | "qa") => {
+		let current: { engine: string; id: string } | null = null;
+		try {
+			const s = loadAppSettings();
+			const engine = getVoiceEngine(s);
+			current = {
+				engine,
+				id: scope === "all" ? resolveVoiceForEngine(engine, null, s) : getVoiceForRole(scope, s),
+			};
+		} catch {
+			// No settings file yet: the picker opens on the recommended voice.
+		}
+		setVoicePicker({ scope, catalog: null, error: null, current });
+		getVoiceCatalog()
+			.then((catalog) => setVoicePicker((cur) => (cur ? { ...cur, catalog } : cur)))
+			.catch((err: Error) => setVoicePicker((cur) => (cur ? { ...cur, error: err.message } : cur)));
+	}, []);
 
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
@@ -1831,7 +1850,13 @@ export function App({
 		// Ctrl+Y: cycle agent modes. Y because Ctrl+M = Enter, Ctrl+I = Tab,
 		// Ctrl+S = XOFF — most single letters collide with TTY control codes.
 		if (key.ctrl && input === "y") {
-			const order: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
+			const order: AgentMode[] = [
+				"Planning",
+				"Researching",
+				"Implementing",
+				"Testing",
+				"Debugging",
+			];
 			setAgentMode((prev) => order[(order.indexOf(prev) + 1) % order.length] ?? "Planning");
 		}
 
@@ -2005,11 +2030,7 @@ export function App({
 					event.resultPreview,
 				);
 
-				autoKanban.onTaskComplete(
-					event.toolCallId,
-					event.success !== false,
-					event.durationMs || 0,
-				);
+				autoKanban.onTaskComplete(event.toolCallId, event.success !== false, event.durationMs || 0);
 
 				const isFailure =
 					!event.success ||
@@ -2059,8 +2080,7 @@ export function App({
 					!event.success ||
 					(event.resultPreview?.startsWith("Exit code ") &&
 						!event.resultPreview.startsWith("Exit code 0"));
-				const duration =
-					event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+				const duration = event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
 				let content: string;
 				if (isRealFailure && event.resultPreview) {
 					const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
@@ -2108,11 +2128,7 @@ export function App({
 				// as the assistant bubble at the chat boundary, so pushing it
 				// here would double-render the same content (greyish system bubble
 				// followed by the cyan assistant bubble).
-				if (
-					event.text?.trim() &&
-					event.stepNumber === 0 &&
-					(event.toolCalls?.length ?? 0) > 0
-				) {
+				if (event.text?.trim() && event.stepNumber === 0 && (event.toolCalls?.length ?? 0) > 0) {
 					const t = event.text.trim();
 					appendToTab(tabId, {
 						id: `system-step0-${Date.now()}`,
@@ -2234,9 +2250,11 @@ export function App({
 				const _wantRuntime = providerToRuntime(currentProvider);
 				const _existing = perTabAgents.getAgent(_initTabId);
 				if (_existing) {
-					const _cfg = (_existing as unknown as {
-						config?: { model?: string; runtime?: string };
-					}).config;
+					const _cfg = (
+						_existing as unknown as {
+							config?: { model?: string; runtime?: string };
+						}
+					).config;
 					if (_cfg?.model === currentModel && _cfg?.runtime === _wantRuntime) {
 						setAgent(_existing);
 						setAgentReady(true);
@@ -2309,7 +2327,6 @@ export function App({
 			setAgentReady(true);
 		}
 	}, [activeTabId]);
-
 
 	// Check onboarding status on mount
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
@@ -2949,7 +2966,9 @@ export function App({
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
+						addSystemMessage(
+							"No saved sessions found. Start chatting, sessions save automatically.",
+						);
 						break;
 					}
 					const convEntries: ConversationEntry[] = localSessions.map((s) => ({
@@ -2977,7 +2996,9 @@ export function App({
 					}
 					const resumedLast = sessionMgr.resume(lastSession.id);
 					if (!resumedLast || resumedLast.messages.length === 0) {
-						addSystemMessage(`Last session "${lastSession.name || lastSession.id}" has no messages to restore.`);
+						addSystemMessage(
+							`Last session "${lastSession.name || lastSession.id}" has no messages to restore.`,
+						);
 						break;
 					}
 					setActiveSessionId(resumedLast.id);
@@ -2998,7 +3019,9 @@ export function App({
 					// Show interactive session picker from local sessions
 					const resumeSessions = sessionMgr.list(50);
 					if (resumeSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
+						addSystemMessage(
+							"No saved sessions found. Start chatting, sessions save automatically.",
+						);
 						break;
 					}
 					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
@@ -3398,9 +3421,7 @@ export function App({
 					const needsInstall = force || !isInstalled(preset);
 					if (needsInstall) {
 						if (!preset.install) {
-							const homepageHint = preset.homepage
-								? `\nProject homepage: ${preset.homepage}`
-								: "";
+							const homepageHint = preset.homepage ? `\nProject homepage: ${preset.homepage}` : "";
 							addSystemMessage(
 								`${preset.command} is not on $PATH and no auto-install recipe is configured. Install it manually then run /spawn ${preset.id} again.${homepageHint}`,
 							);
@@ -3759,7 +3780,22 @@ export function App({
 										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools\n  /dj close|open - Toggle deck";
 							}
 							// Transient playback feedback now lives in the DjDeck.
-							const playbackSubs = new Set(["play","radio","pause","stop","skip","np","vol","volume","loop","repeat","queue","resume","produce","gen"]);
+							const playbackSubs = new Set([
+								"play",
+								"radio",
+								"pause",
+								"stop",
+								"skip",
+								"np",
+								"vol",
+								"volume",
+								"loop",
+								"repeat",
+								"queue",
+								"resume",
+								"produce",
+								"gen",
+							]);
 							const looksLikeFailure =
 								/^(mpv|yt-dlp|ffmpeg|sox)\b.*(not installed|missing)/i.test(result) ||
 								/^No (results|radio stations) found/i.test(result) ||
@@ -3996,37 +4032,43 @@ export function App({
 						break;
 					}
 					if (choice !== "light" && choice !== "dark" && choice !== "auto") {
-						addSystemMessage(
-							"Theme must be light, dark, or auto. Example: /theme light",
-						);
+						addSystemMessage("Theme must be light, dark, or auto. Example: /theme light");
 						break;
 					}
 					try {
 						let raw: Record<string, unknown> = {};
 						if (fs.existsSync(cfgPath)) {
-							raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as Record<
-								string,
-								unknown
-							>;
+							raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as Record<string, unknown>;
 						} else {
 							fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
 						}
 						raw.theme = choice;
 						fs.writeFileSync(cfgPath, `${JSON.stringify(raw, null, 2)}\n`);
-						addSystemMessage(
-							`Theme set to ${choice}. Restart the TUI to apply.`,
-						);
+						addSystemMessage(`Theme set to ${choice}. Restart the TUI to apply.`);
 					} catch (err) {
-						addSystemMessage(
-							`Could not write ${cfgPath}: ${(err as Error).message}`,
-						);
+						addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
 					}
 					break;
 				}
 
 				case "voice":
-					// Enhanced voice command — toggle STT recording or voice chat
-					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
+					// Enhanced voice command - toggle STT recording or voice chat
+					if (args[0] === "pick") {
+						// /voice pick [orchestrator|engineer|qa|all]
+						// With no argument the pick is for the tab you are on, so
+						// setting one agent's voice never flattens the others. Say
+						// `all` to give every agent the same voice.
+						const raw = (args[1] || "").toLowerCase();
+						const activeRole = (workspaceTabs.activeTab?.data as { role?: string } | undefined)
+							?.role;
+						const scope =
+							raw === "orchestrator" || raw === "engineer" || raw === "qa" || raw === "all"
+								? raw
+								: activeRole === "orchestrator" || activeRole === "engineer" || activeRole === "qa"
+									? activeRole
+									: "all";
+						openVoicePicker(scope);
+					} else if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
 							// Tell the agent voice chat is OFF so it stops adding the
@@ -4084,15 +4126,12 @@ export function App({
 								const status = getTTSEngine().getStatus();
 								const active = status.active ?? status.preferred;
 								addSystemMessage(
-									`Speaking via ${active} (${voice}).` +
-										(status.note ? `\n${status.note}` : ""),
+									`Speaking via ${active} (${voice}).` + (status.note ? `\n${status.note}` : ""),
 								);
 								const code = await proc.exited;
 								const after = getTTSEngine().getStatus();
 								const synth =
-									after.lastSynthesisMs === null
-										? ""
-										: `, synthesis ${after.lastSynthesisMs} ms`;
+									after.lastSynthesisMs === null ? "" : `, synthesis ${after.lastSynthesisMs} ms`;
 								addSystemMessage(
 									code === 0
 										? `Voice test done: ${voice} on ${active}${synth}, ${Date.now() - started} ms total.`
@@ -4114,9 +4153,7 @@ export function App({
 						// /voice on|off - toggle TTS output for agent replies.
 						// Persists to ~/.8gent/settings.json so the choice survives restarts.
 						(async () => {
-							const mod = await import(
-								"../../../packages/settings/index.js"
-							);
+							const mod = await import("../../../packages/settings/index.js");
 							const next = args[0] === "on";
 							const cur = mod.loadSettings();
 							mod.saveSettings({
@@ -4941,10 +4978,7 @@ export function App({
 					// Speak the welcome (gated by voice.outputEnabled)
 					{
 						const voice = user.preferences?.voice?.voiceId;
-						speakOnboardingLine(
-							`Welcome ${name}. Let's build something magnificent.`,
-							voice,
-						);
+						speakOnboardingLine(`Welcome ${name}. Let's build something magnificent.`, voice);
 					}
 
 					// Apply user preferences to current session
@@ -5037,9 +5071,7 @@ export function App({
 			// instead of our own agent loop. Conversation history is replayed
 			// each turn since v1 is one-shot.
 			const targetTab = workspaceTabs.tabs.find((t) => t.id === tabId);
-			const targetTabData = targetTab?.data as
-				| { externalAgent?: { presetId: string } }
-				| undefined;
+			const targetTabData = targetTab?.data as { externalAgent?: { presetId: string } } | undefined;
 			if (targetTabData?.externalAgent) {
 				const preset = getPreset(targetTabData.externalAgent.presetId);
 				if (!preset) {
@@ -5054,11 +5086,9 @@ export function App({
 				// Pull this tab's messages from the per-tab buffer (or the
 				// foreground state if it's the active tab).
 				const tabMessages =
-					tabId === activeTabId ? messages : tabMessagesRef.current.get(tabId) ?? [];
+					tabId === activeTabId ? messages : (tabMessagesRef.current.get(tabId) ?? []);
 				const history = tabMessages.flatMap((m) =>
-					m.role === "user" || m.role === "assistant"
-						? [{ role: m.role, content: m.content }]
-						: [],
+					m.role === "user" || m.role === "assistant" ? [{ role: m.role, content: m.content }] : [],
 				);
 				const composed = composePrompt(history, messageForAgent);
 				const result = await runExternalAgent(preset, composed);
@@ -5072,11 +5102,11 @@ export function App({
 					});
 					{
 						const targetTabRole = (
-							workspaceTabs.tabs.find((t) => t.id === tabId)?.data as
-								| { role?: string }
-								| undefined
+							workspaceTabs.tabs.find((t) => t.id === tabId)?.data as { role?: string } | undefined
 						)?.role;
-						speakAgentReply(targetTabRole, result.text);
+						// No role on the tab means an extra chat tab; its id keys a
+						// voice of its own so two tabs never sound the same (#2942).
+						speakAgentReply(targetTabRole ?? tabId, result.text);
 					}
 				} else {
 					appendToTab(tabId, {
@@ -5129,8 +5159,7 @@ export function App({
 			// Look up this tab's Agent. For the active tab the cached `agent`
 			// state already mirrors it; for any other tab, fetch from the
 			// per-tab map.
-			const targetAgent =
-				tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
+			const targetAgent = tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
 			const targetReady = tabId === activeTabId ? agentReady : Boolean(targetAgent);
 
 			if (targetAgent && targetReady) {
@@ -5197,7 +5226,7 @@ export function App({
 									| { role?: string }
 									| undefined
 							)?.role;
-							speakAgentReply(targetTabRole, trimmed);
+							speakAgentReply(targetTabRole ?? tabId, trimmed);
 						}
 					}
 					// appendClosingQuestionIfNeeded reads the just-appended buffer
@@ -5550,18 +5579,14 @@ export function App({
 						// totalSteps reads from the manager so the indicator stays accurate
 						// when questions are added/removed without code churn.
 						totalSteps={
-							onboardingTotalSteps > 0
-								? onboardingTotalSteps
-								: onboardingManager.getTotalSteps()
+							onboardingTotalSteps > 0 ? onboardingTotalSteps : onboardingManager.getTotalSteps()
 						}
 						userName={onboardingManager.getUser()?.identity?.name || undefined}
 						agentName={
 							(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined
 						}
 						selectChoices={onboardingSelectChoices ?? undefined}
-						onSelect={
-							onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined
-						}
+						onSelect={onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined}
 						providerCheck={onboardingProviderCheck ?? undefined}
 						onProviderResolve={
 							onboardingProviderCheck
@@ -5774,8 +5799,10 @@ export function App({
 
 	// V2 three-zone shell - the only render path.
 	const cols = viewport.width;
-	const showContextRail = cols >= 120;
-	const showActivityRail = cols >= 90;
+	// The voice picker is a full-width overlay: the rails step aside while it
+	// is open so the list is not squeezed into a 25-column slot (#2942).
+	const showContextRail = cols >= 120 && !voicePicker;
+	const showActivityRail = cols >= 90 && !voicePicker;
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5785,8 +5812,7 @@ export function App({
 			? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
 			: `${totalTokens} tok`;
 	const micOn =
-		Boolean(voice?.isAvailable) &&
-		(voice?.state === "recording" || voiceChat?.isActive);
+		Boolean(voice?.isAvailable) && (voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
 	const lilEightState = lilEightStateValue;
 	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
@@ -5862,105 +5888,144 @@ export function App({
 								adhdMode={adhdMode}
 							/>
 						)}
-						{showContextRail && (
-							<LivePlanRail manager={taskManagerRef.current} limit={8} />
-						)}
+						{showContextRail && <LivePlanRail manager={taskManagerRef.current} limit={8} />}
 
-					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={currentModel || "-"}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-						/>
-
-						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-							<MessageList
-								messages={messages}
-								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
-								contentWidth={Math.max(
-									24,
-									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
-								)}
+						<Box flexGrow={1} flexDirection="column" minWidth={0}>
+							<LiveFocalStripWithGoal
+								goalClient={goalClient}
+								adhdMode={adhdMode}
+								mode={
+									agentMode === "Planning"
+										? "Planning"
+										: agentMode === "Implementing"
+											? "Implementing"
+											: agentMode === "Testing"
+												? "Testing"
+												: agentMode === "Debugging"
+													? "Debugging"
+													: "Researching"
+								}
+								activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+								route={currentModel || "-"}
+								tokens={tokenStr}
+								contextPct={contextPct}
+								approvalPending={isApprovalPending}
+								autonomous={infiniteModeActive}
+								isProcessing={isProcessing}
 							/>
-						</Box>
 
-						{paletteOpen && (
-							<Box justifyContent="center" flexShrink={0}>
-								<CommandPalette
-									isOpen={paletteOpen}
-									onClose={() => setPaletteOpen(false)}
-									onExecute={(name) => {
-										void handleSlashCommand(name as SlashCommand, []);
-									}}
-									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
-										name: c.name,
-										description: c.description,
-									}))}
+							<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+								<MessageList
+									messages={messages}
+									rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
+									contentWidth={Math.max(
+										24,
+										viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
+									)}
 								/>
 							</Box>
-						)}
 
-						{approvalPending && (
-							<InlineApprovalPrompt target={approvalPending.target} />
-						)}
+							{voicePicker && (
+								<Box justifyContent="center" flexShrink={0}>
+									<VoicePicker
+										catalog={voicePicker.catalog}
+										loadError={voicePicker.error}
+										title={
+											voicePicker.scope === "all"
+												? "Pick a voice"
+												: `Pick a voice for ${voicePicker.scope}`
+										}
+										current={voicePicker.current}
+										isActive={true}
+										onCancel={() => setVoicePicker(null)}
+										onChoose={(entry: VoiceEntry) => {
+											const scope = voicePicker.scope;
+											setVoicePicker(null);
+											void (async () => {
+												const mod = await import("../../../packages/settings/index.js");
+												const before = mod.loadSettings();
+												const engineChanged = mod.getVoiceEngine(before) !== entry.engine;
+												mod.saveSettings(
+													mod.applyVoiceChoice(before, {
+														engine: entry.engine,
+														voice: entry.id,
+														scope,
+													}),
+												);
+												const who = scope === "all" ? "every agent" : scope;
+												addSystemMessage(
+													`Voice set: ${entry.name} on ${entry.engine} for ${who}.` +
+														(engineChanged && scope !== "all"
+															? " The engine changed, so the other agents reset to that engine's defaults."
+															: ""),
+												);
+											})().catch((err: Error) =>
+												addSystemMessage(`Could not save the voice: ${err.message}`),
+											);
+										}}
+									/>
+								</Box>
+							)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
-							<CommandInput
-								onSubmit={handleSubmit}
-								isProcessing={isProcessing}
-								focused={
-									((viewMode === "chat" && activeTabType === "chat") ||
-										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
-									!isBubbleNavMode &&
-									!paletteOpen
-								}
-								processingStage={processingStage}
-								showAnimations={showAnimations}
-								activeTool={activeTool}
-								stepCount={stepCount}
-								toolCount={toolCount}
-								totalTokens={totalTokens}
-								isGitRepo={isGitRepo}
-								currentBranch={currentBranch}
-								planNextStep={planNextStep}
-								recentCommands={recentCommands}
-								onSlashCommand={handleSlashCommand}
-								injectedText={voiceTranscript}
-								transformInputValue={transformChatInput}
-								allowEmptySubmit={!!imageInput.currentImage}
-								goalClient={goalClient}
-								sessionId="tui"
-								onSystemMessage={(line) => {
-									setMessages((prev) => [
-										...prev,
-										{
-											id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-											role: "system",
-											content: line,
-											timestamp: new Date(),
-										},
-									]);
-								}}
-							/>
+							{paletteOpen && (
+								<Box justifyContent="center" flexShrink={0}>
+									<CommandPalette
+										isOpen={paletteOpen}
+										onClose={() => setPaletteOpen(false)}
+										onExecute={(name) => {
+											void handleSlashCommand(name as SlashCommand, []);
+										}}
+										commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+											name: c.name,
+											description: c.description,
+										}))}
+									/>
+								</Box>
+							)}
+
+							{approvalPending && <InlineApprovalPrompt target={approvalPending.target} />}
+
+							<Box flexShrink={0} display={paletteOpen || voicePicker ? "none" : "flex"}>
+								<CommandInput
+									onSubmit={handleSubmit}
+									isProcessing={isProcessing}
+									focused={
+										((viewMode === "chat" && activeTabType === "chat") ||
+											(viewMode === "onboarding" && !onboardingSelectChoices)) &&
+										!isBubbleNavMode &&
+										!paletteOpen &&
+										!voicePicker
+									}
+									processingStage={processingStage}
+									showAnimations={showAnimations}
+									activeTool={activeTool}
+									stepCount={stepCount}
+									toolCount={toolCount}
+									totalTokens={totalTokens}
+									isGitRepo={isGitRepo}
+									currentBranch={currentBranch}
+									planNextStep={planNextStep}
+									recentCommands={recentCommands}
+									onSlashCommand={handleSlashCommand}
+									injectedText={voiceTranscript}
+									transformInputValue={transformChatInput}
+									allowEmptySubmit={!!imageInput.currentImage}
+									goalClient={goalClient}
+									sessionId="tui"
+									onSystemMessage={(line) => {
+										setMessages((prev) => [
+											...prev,
+											{
+												id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+												role: "system",
+												content: line,
+												timestamp: new Date(),
+											},
+										]);
+									}}
+								/>
+							</Box>
 						</Box>
-					</Box>
 
 						{showActivityRail && (
 							<ActivityRail

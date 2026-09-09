@@ -16,20 +16,26 @@ export const DEFAULT_SETTINGS: Settings = {
 		// macOS `say` robot. Falls back to `say` when the Python package is
 		// missing. Per-engine voice names and defaults live in ./voice.ts.
 		engine: "kitten",
-		ttsVoice: "Bella",
+		// The default voice is the deepest male voice the engine has: Bruno,
+		// measured at about 108 Hz mean pitch against Jasper 137, Hugo 159 and
+		// Leo 166. It is what the intro and every reply use until the user
+		// picks another in onboarding or with `/voice pick`.
+		ttsVoice: "Bruno",
 		// TTS plays agent responses out of the box. Toggle with `/voice off`.
 		outputEnabled: true,
 		// Each tab role speaks in its own voice so multi-agent flows are
 		// audibly distinct. These are KittenTTS voices (see ENGINE_VOICES):
-		//   - Jasper  crisp and technical, fits an orchestrator
-		//   - Bruno   warm and authoritative, fits an engineer
-		//   - Luna    soft and measured, fits QA
+		//   - Bruno   warm and authoritative, the deep default, orchestrator
+		//   - Jasper  crisp and technical, engineer
+		//   - Hugo    neutral and steady, QA
+		// Tabs beyond these three roles get their own voice from the rotation
+		// in ./voice.ts, so no two agents on screen sound the same.
 		// Fallback to `voice.ttsVoice` if a role is missing or the name is not
 		// a voice of the active engine.
 		perAgent: {
-			orchestrator: "Jasper",
-			engineer: "Bruno",
-			qa: "Luna",
+			orchestrator: "Bruno",
+			engineer: "Jasper",
+			qa: "Hugo",
 		},
 	},
 	performance: {

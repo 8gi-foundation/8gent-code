@@ -36,11 +36,14 @@ export {
 	resolveVoiceForEngine,
 	isVoiceForEngine,
 	isTTSEngineName,
+	applyVoiceChoice,
 	ENGINE_VOICES,
 	ENGINE_DEFAULT_VOICES,
 	TTS_ENGINE_NAMES,
+	voiceRotation,
+	voiceForExtraTab,
 } from "./voice.js";
-export type { AgentRole } from "./voice.js";
+export type { AgentRole, VoiceChoice } from "./voice.js";
 export { resolveRoleName } from "./agents.js";
 export type { AgentRoleKey } from "./agents.js";
 
