@@ -15,6 +15,7 @@ export type {
 	SettingsKey,
 	VoiceSettings,
 	PerAgentVoices,
+	TTSEngineName,
 	PerformanceSettings,
 	PerformanceMode,
 	IntroBannerMode,
@@ -29,7 +30,17 @@ export type {
 	AgentNames,
 } from "./schema.js";
 
-export { getVoiceForRole } from "./voice.js";
+export {
+	getVoiceForRole,
+	getVoiceEngine,
+	resolveVoiceForEngine,
+	isVoiceForEngine,
+	isTTSEngineName,
+	ENGINE_VOICES,
+	ENGINE_DEFAULT_VOICES,
+	TTS_ENGINE_NAMES,
+} from "./voice.js";
+export type { AgentRole } from "./voice.js";
 export { resolveRoleName } from "./agents.js";
 export type { AgentRoleKey } from "./agents.js";
 

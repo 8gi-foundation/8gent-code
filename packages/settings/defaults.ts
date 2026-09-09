@@ -12,20 +12,24 @@ export const DEFAULT_SETTINGS: Settings = {
 	voice: {
 		silenceThresholdMs: 2000,
 		bargeIn: true,
-		ttsVoice: "Ava",
+		// KittenTTS is the default engine: a local neural voice instead of the
+		// macOS `say` robot. Falls back to `say` when the Python package is
+		// missing. Per-engine voice names and defaults live in ./voice.ts.
+		engine: "kitten",
+		ttsVoice: "Bella",
 		// TTS plays agent responses out of the box. Toggle with `/voice off`.
 		outputEnabled: true,
-		// Each tab role speaks in its own macOS voice so multi-agent flows are
-		// audibly distinct. Defaults pick standard high-quality voices that
-		// ship on macOS:
-		//   - Daniel  (en-GB) — measured, fits an orchestrator
-		//   - Karen   (en-AU) — clear and technical, fits an engineer
-		//   - Moira   (en-IE) — auditor cadence, fits QA
-		// Fallback to `voice.ttsVoice` if a role is missing.
+		// Each tab role speaks in its own voice so multi-agent flows are
+		// audibly distinct. These are KittenTTS voices (see ENGINE_VOICES):
+		//   - Jasper  crisp and technical, fits an orchestrator
+		//   - Bruno   warm and authoritative, fits an engineer
+		//   - Luna    soft and measured, fits QA
+		// Fallback to `voice.ttsVoice` if a role is missing or the name is not
+		// a voice of the active engine.
 		perAgent: {
-			orchestrator: "Daniel",
-			engineer: "Karen",
-			qa: "Moira",
+			orchestrator: "Jasper",
+			engineer: "Bruno",
+			qa: "Luna",
 		},
 	},
 	performance: {
