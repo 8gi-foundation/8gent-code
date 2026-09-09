@@ -139,7 +139,6 @@ import {
 	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
 } from "./lib/slash-commands.js";
-import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
@@ -150,6 +149,7 @@ import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
+import { SkillsView } from "./screens/SkillsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
 import { WindowTerminalView } from "./screens/WindowTerminalView.js";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
@@ -1597,6 +1597,8 @@ export function App({
 
 	// Command palette overlay (Ctrl+P).
 	const [paletteOpen, setPaletteOpen] = useState(false);
+	// Slash line chosen in the Skills tab, submitted once the chat tab is active.
+	const [pendingSkillRun, setPendingSkillRun] = useState<string | null>(null);
 
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
@@ -2484,7 +2486,7 @@ export function App({
 							"  /export - Export session as HTML\n" +
 							"  /clear - Clear messages\n" +
 							"  /quit - Exit 8gent Code\n" +
-							"  /skills - List loaded skills (optional)\n" +
+							"  /skills - Open the skills menu (browse, filter, run)\n" +
 							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
 							"Keyboard shortcuts:\n" +
 							"  Tab - Accept ghost suggestion\n" +
@@ -3353,6 +3355,12 @@ export function App({
 					break;
 				}
 
+				case "skills": {
+					// Open the skills menu tab (singleton - switches if it already exists).
+					workspaceTabs.addTab("skills", "Skills");
+					break;
+				}
+
 				case "hands":
 				case "eyes":
 				case "handeyes": {
@@ -4104,37 +4112,6 @@ export function App({
 								"  /voice on|off  — Toggle TTS output",
 						);
 					}
-					break;
-
-				case "skills":
-					void (async () => {
-						try {
-							const registry = await getSlashRegistry();
-							const skills = getSkillSummary(registry);
-							if (skills.length < 1) {
-								addSystemMessage(
-									"No skills loaded. Add .md under ~/.8gent/skills/ or run from a repo with .claude/skills/*/SKILL.md.",
-								);
-								return;
-							}
-							const lines = [
-								`${skills.length} skills — type the slash command to run (same as injecting that skill prompt):`,
-							];
-							for (const skill of skills.slice(0, 45)) {
-								const d =
-									skill.description.length > 85
-										? `${skill.description.slice(0, 82)}…`
-										: skill.description;
-								lines.push(`  /${skill.name} — ${d}`);
-							}
-							if (skills.length > 45) {
-								lines.push(`  … and ${skills.length - 45} more`);
-							}
-							addSystemMessage(lines.join("\n"));
-						} catch (e) {
-							addSystemMessage(`Skills: ${e instanceof Error ? e.message : String(e)}`);
-						}
-					})();
 					break;
 
 				// Model selection - check if args provided
@@ -5244,6 +5221,16 @@ export function App({
 		if (chatTab) workspaceTabs.switchTab(chatTab.id);
 	};
 
+	// A skill chosen from the Skills tab is submitted exactly as if the user had
+	// typed `/<name>` in chat, but only after the chat tab is active so the
+	// submit path sees the chat tab as the target.
+	useEffect(() => {
+		if (!pendingSkillRun || activeTabType !== "chat") return;
+		const line = pendingSkillRun;
+		setPendingSkillRun(null);
+		void handleSubmit(line, activeTabId);
+	}, [pendingSkillRun, activeTabType, activeTabId]);
+
 	// Render main content based on view mode + active tab type.
 	// Mounted in the V2 centre column whenever the active tab is not a chat
 	// tab (#2912), so utility tabs replace the message list instead of
@@ -5415,6 +5402,21 @@ export function App({
 				}
 				case "settings":
 					return <SettingsView visible={true} onClose={closeTabView} />;
+				case "skills":
+					return (
+						<SkillsView
+							visible={true}
+							onClose={closeTabView}
+							onRun={(slashLine) => {
+								// Submit on the chat tab once it is active. handleSubmit's
+								// closures are captured per render, so submitting while the
+								// skills tab is still active would append the reply to the
+								// wrong tab's message list. The effect below picks it up.
+								setPendingSkillRun(slashLine);
+								closeTabView();
+							}}
+						/>
+					);
 			}
 		}
 
