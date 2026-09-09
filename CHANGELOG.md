@@ -61,6 +61,37 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `apps/tui/src/app.tsx`: the `help` case now calls the registry instead of
   a hand-written list that named commands not registered in the build.
 - Tests: `apps/tui/src/lib/help-map.test.ts` (23 tests).
+### Fixed - TUI: first launch is two lines, and never eats the user's first question (#2947)
+
+- `packages/self-autonomy/onboarding.ts`: new `buildFirstRunGreeting` plus
+  `needsFirstRunGreeting` / `getFirstRunGreeting` / `markFirstRunGreeted` on
+  `OnboardingManager`, backed by a new optional `firstRunGreeted` field on
+  `UserConfig` (absent reads as false, so configs written before this parse
+  unchanged). A brand new user now reads two lines - what this is, and that
+  `/onboard` sets it up properly - instead of three system blocks. The
+  auto-detect summary is no longer printed unprompted; four rows reading
+  "not detected" taught nothing. When auto-detect found something real, one
+  of the two lines states it.
+- `packages/self-autonomy/onboarding.ts`: `reset()` now clears the user's
+  ANSWERS only. The git name, gh account, local models and provider survive,
+  so `/onboard` no longer opens on a summary claiming "not detected" about an
+  environment already read correctly. `firstRunGreeted` survives too.
+- `apps/tui/src/lib/onboarding-input.ts` (new): `shouldOnboardingConsumeInput`
+  decides who owns a submission by what is on screen rather than by a modal
+  flag. Onboarding consumes input only while its own question is displayed and
+  awaiting an answer; anything else reaches the agent and onboarding waits.
+  This is the fix for a real question being answered with "Got it, your name
+  is saved, James" while the question itself was dropped.
+- `apps/tui/src/lib/onboarding-input.ts`: `formatOnboardingQuestion` renders a
+  choice step's options into the message text, and the command input is now
+  focused for every onboarding step. `OnboardingScreen` is not mounted
+  (`renderMainContent` is voided in `app.tsx`), so choice steps previously had
+  neither a select list nor a focused input and the flow could not advance
+  past its first question.
+- `apps/tui/src/app.tsx`: the next question now reaches the message list after
+  each answer, `/onboard` seeds the step tracker and states that `/skip` and
+  `/skip all` exist, and every path that leaves onboarding clears the pending
+  question so ownership stays honest.
 
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 ### Fixed - Chat manners: divider owns its row, Esc interrupts once (#2927, #2925, part of #2922)

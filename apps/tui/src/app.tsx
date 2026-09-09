@@ -115,6 +115,10 @@ import { probeProviders } from "./lib/provider-health.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import {
+	formatOnboardingQuestion,
+	shouldOnboardingConsumeInput,
+} from "./lib/onboarding-input.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
 import {
 	deriveApprovalMode,
@@ -2005,6 +2009,7 @@ export function App({
 				// If escaping from onboarding, also clear onboarding state
 				if (viewMode === "onboarding") {
 					setShowOnboarding(false);
+					setCurrentOnboardingQuestion(null);
 					setOnboardingSelectChoices(null);
 					setOnboardingProviderCheck(null);
 					setOnboardingAgentDefault(null);
@@ -2444,26 +2449,32 @@ export function App({
 			}
 
 			if (onboardingManager.needsOnboarding()) {
-				setShowOnboarding(true);
-				setViewMode("onboarding");
-				setOnboardingTotalSteps(onboardingManager.getTotalSteps());
-				const question = onboardingManager.getNextQuestion();
-				if (question) {
-					applyOnboardingQuestion(question);
-					setOnboardingSteps([{ question: question.question, status: "active" }]);
-					setOnboardingStepIndex(0);
-					// Speak the first question (first line only, gated by voice.outputEnabled)
-					speakOnboardingLine(question.question);
+				// First launch is quiet. Two lines, one block, and the prompt is
+				// immediately usable - no modal flow, no auto-detect table full of
+				// "not detected". The full flow is one /onboard away, and the
+				// greeting says so. See buildFirstRunGreeting for the reasoning.
+				if (onboardingManager.needsFirstRunGreeting()) {
+					const greeting = onboardingManager.getFirstRunGreeting();
+					onboardingManager.markFirstRunGreeted();
+					// Replace the standing welcome rather than stack a second block
+					// on top of it, so a brand new user reads two lines in total.
+					// Returning users keep the usual welcome untouched.
 					// Use setMessages directly to avoid stale closure issue
-					setMessages((prev) => [
-						...prev,
-						{
+					setMessages((prev) => {
+						const block = {
 							id: `onboard-${Date.now()}`,
 							role: "system" as const,
-							content: `∞ Welcome to 8gent, The Infinite Gentleman.\n\nBefore we begin, I'd like to learn about you.\n(Type /skip to skip any question, /skip all to skip onboarding)\n\n${question.question}`,
+							content: greeting,
 							timestamp: new Date(),
-						},
-					]);
+						};
+						const idx = prev.findIndex((m) => m.id === "welcome");
+						if (idx === -1) return [...prev, block];
+						const next = [...prev];
+						next[idx] = block;
+						return next;
+					});
+					// Speak the first line only, gated by voice.outputEnabled.
+					speakOnboardingLine(greeting);
 				}
 			} else if (onboardingManager.shouldAskClarification()) {
 				const clarification = onboardingManager.getClarificationQuestion();
@@ -2980,7 +2991,9 @@ export function App({
 					break;
 
 				case "onboarding": {
-					// Start or restart onboarding
+					// Start or restart onboarding. This is the only path that opens
+					// the flow now - first launch no longer does it unprompted - so
+					// it also seeds the step tracker the mount effect used to seed.
 					onboardingManager.reset();
 					setShowOnboarding(true);
 					setViewMode("onboarding");
@@ -2989,7 +3002,13 @@ export function App({
 					const onboardQuestion = onboardingManager.getNextQuestion();
 					if (onboardQuestion) {
 						applyOnboardingQuestion(onboardQuestion);
-						addSystemMessage(`∞ Let's get to know each other.\n\n${onboardQuestion.question}`);
+						setOnboardingSteps([{ question: onboardQuestion.question, status: "active" }]);
+						speakOnboardingLine(onboardQuestion.question);
+						addSystemMessage(
+							"∞ Let's get to know each other.\n" +
+								"(/skip skips a question, /skip all skips the rest)\n\n" +
+								formatOnboardingQuestion(onboardQuestion),
+						);
 					}
 					break;
 				}
@@ -3009,6 +3028,10 @@ export function App({
 						if (args[0] === "all") {
 							onboardingManager.skipAll();
 							setShowOnboarding(false);
+							setCurrentOnboardingQuestion(null);
+							setOnboardingSelectChoices(null);
+							setOnboardingProviderCheck(null);
+							setOnboardingAgentDefault(null);
 							setViewMode("chat");
 							addSystemMessage(
 								"Understood. I'll ask again later.\n" + "(The more I know, the better I serve.)",
@@ -3017,9 +3040,10 @@ export function App({
 							const nextQ = onboardingManager.skipQuestion();
 							if (nextQ) {
 								applyOnboardingQuestion(nextQ);
-								addSystemMessage(nextQ.question);
+								addSystemMessage(formatOnboardingQuestion(nextQ));
 							} else {
 								setShowOnboarding(false);
+								setCurrentOnboardingQuestion(null);
 								setOnboardingSelectChoices(null);
 								setOnboardingProviderCheck(null);
 								setOnboardingAgentDefault(null);
@@ -4874,7 +4898,18 @@ export function App({
 
 		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
-		if (showOnboarding && !input && attached) {
+		// Onboarding owns this submission only while its own question is on
+		// screen waiting to be answered. Everything else is a prompt for the
+		// agent, so a real question typed while onboarding is merely pending is
+		// answered instead of being eaten.
+		const onboardingOwnsInput = shouldOnboardingConsumeInput({
+			showOnboarding,
+			viewMode,
+			currentQuestion: currentOnboardingQuestion,
+			input: afterPaths,
+		});
+
+		if (onboardingOwnsInput && !input && attached) {
 			addSystemMessage(
 				"Answer onboarding in text first. Your image is still in the input bar if you need it after setup.",
 			);
@@ -4890,7 +4925,7 @@ export function App({
 		const bubbleContent = input || (attached ? `[Image: ${attached.filename}]` : "");
 
 		// Handle onboarding answers first
-		if (showOnboarding && !afterPaths.trim().startsWith("/")) {
+		if (onboardingOwnsInput) {
 			// Track the answer for display
 			setOnboardingSteps((prev) => {
 				const updated = [...prev];
@@ -4924,6 +4959,9 @@ export function App({
 							status: "active" as const,
 						},
 					]);
+					// The next question has to reach the message list, since that is
+					// the surface the user is actually looking at.
+					addSystemMessage(formatOnboardingQuestion(result.nextQuestion));
 					// Speak each question aloud during onboarding (gated by voice.outputEnabled)
 					{
 						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId;
@@ -4932,6 +4970,7 @@ export function App({
 				} else {
 					// Onboarding complete
 					setShowOnboarding(false);
+					setCurrentOnboardingQuestion(null);
 					setOnboardingSelectChoices(null);
 					setOnboardingProviderCheck(null);
 					setOnboardingAgentDefault(null);
@@ -6027,6 +6066,11 @@ export function App({
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								focused={
+									// With the viewMode screens mounted (#2919/#2912), a choice
+									// step renders its select list in OnboardingScreen, so the
+									// text input stays unfocused there and only free-text steps
+									// take typing. On main alone the screen is dead and #2947
+									// had to focus the input for every step.
 									activeTabType === "chat" &&
 									(viewMode === "chat" ||
 										(viewMode === "onboarding" && !onboardingSelectChoices)) &&

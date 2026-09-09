@@ -653,6 +653,7 @@ export function createSelfAutonomy(workingDirectory?: string): SelfAutonomy {
 // Re-export onboarding
 export {
 	OnboardingManager,
+	buildFirstRunGreeting,
 	type UserConfig,
 	type OnboardingStep,
 } from "./onboarding.js";
