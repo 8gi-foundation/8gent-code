@@ -31,6 +31,12 @@ export interface UserConfig {
 	completedSteps: OnboardingStep[];
 	lastPrompted: string | null;
 	promptCount: number;
+	/**
+	 * True once the quiet first-run greeting has been shown. Optional so
+	 * configs written before this field existed still parse; absent is read
+	 * as false.
+	 */
+	firstRunGreeted?: boolean;
 
 	identity: {
 		name: string | null;
@@ -649,6 +655,43 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 ];
 
 // ============================================
+// First-run greeting
+// ============================================
+
+/**
+ * The quiet first launch.
+ *
+ * A new user used to be met with three system blocks before they could type:
+ * a welcome, a "before we begin" preamble, and an auto-detect table whose rows
+ * mostly read "not detected". Four rows of "not detected" teach nothing, so the
+ * table is gone from first launch entirely - it now only appears inside
+ * `/onboard`, where the user asked for it.
+ *
+ * What is left is two lines: what this is, and how to set it up properly. If
+ * auto-detect actually found something (a name, a GitHub account, a local
+ * provider) one of those two lines states it; if it found nothing, nothing is
+ * claimed.
+ *
+ * Pure so it can be asserted on directly in tests.
+ */
+export function buildFirstRunGreeting(user: UserConfig): string {
+	const facts: string[] = [];
+	const name = user.identity.name?.trim();
+	if (name) facts.push(name);
+	const github = user.integrations?.github?.username?.trim();
+	if (github && github !== name) facts.push(`github ${github}`);
+	const provider = user.preferences.model.provider?.trim();
+	if (provider) facts.push(`running on ${provider}`);
+
+	const detected = facts.length > 0 ? `Set up for ${facts.join(", ")}. ` : "";
+
+	return [
+		"∞ 8gent Code. Ask me anything, or type / for commands.",
+		`${detected}Run /onboard whenever you want to set me up properly.`,
+	].join("\n");
+}
+
+// ============================================
 // Onboarding Manager
 // ============================================
 
@@ -772,6 +815,31 @@ export class OnboardingManager {
 	 */
 	needsOnboarding(): boolean {
 		return !this.user.onboardingComplete;
+	}
+
+	/**
+	 * Whether this launch should show the quiet two-line first-run greeting.
+	 * True exactly once per machine: after that the user has been told about
+	 * /onboard and repeating it every launch is just noise.
+	 */
+	needsFirstRunGreeting(): boolean {
+		return !this.user.firstRunGreeted && !this.user.onboardingComplete;
+	}
+
+	/**
+	 * The two-line greeting for this user, given whatever auto-detect found.
+	 */
+	getFirstRunGreeting(): string {
+		return buildFirstRunGreeting(this.user);
+	}
+
+	/**
+	 * Record that the greeting has been shown. Onboarding itself stays pending
+	 * - the user can still run /onboard at any time.
+	 */
+	markFirstRunGreeted(): void {
+		this.user.firstRunGreeted = true;
+		this.saveUserConfig();
 	}
 
 	/**
@@ -983,7 +1051,31 @@ export class OnboardingManager {
 	 * Reset onboarding completely
 	 */
 	reset(): void {
+		// A reset clears the user's ANSWERS. It must not clear what the machine
+		// itself told us - the git name, the gh account, the local models - or
+		// /onboard opens on a summary reading "not detected" five times over,
+		// about an environment we had already read correctly.
+		const greeted = this.user.firstRunGreeted === true;
+		const detected = {
+			name: this.user.identity.name,
+			github: this.user.integrations.github,
+			ollama: this.user.integrations.ollama,
+			lmstudio: this.user.integrations.lmstudio,
+			model: this.user.preferences.model,
+		};
+
 		this.user = getDefaultUserConfig();
+
+		// The greeting is a once-per-machine thing, not part of the answers, so
+		// it survives too. Otherwise running /onboard and quitting halfway would
+		// greet the user all over again on the next launch.
+		this.user.firstRunGreeted = greeted;
+		this.user.identity.name = detected.name;
+		this.user.integrations.github = detected.github;
+		this.user.integrations.ollama = detected.ollama;
+		this.user.integrations.lmstudio = detected.lmstudio;
+		this.user.preferences.model = detected.model;
+
 		this.saveUserConfig();
 	}
 
@@ -1115,6 +1207,7 @@ function getDefaultUserConfig(): UserConfig {
 		completedSteps: [],
 		lastPrompted: null,
 		promptCount: 0,
+		firstRunGreeted: false,
 		identity: {
 			name: null,
 			role: null,
