@@ -59,7 +59,13 @@ export type SlashCommand =
 	| "handeyes"
 	| "goal"
 	| "subgoal"
-	| "build";
+	| "build"
+	| "notes"
+	| "ideas"
+	| "btw"
+	| "questions"
+	| "projects"
+	| "terminal";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -410,6 +416,46 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Inject a sub-goal into the running /goal loop.",
 		usage: "/subgoal <text>",
+	},
+	// Workspace tab commands. Each opens (or focuses) a utility tab; the
+	// handlers live in app.tsx. They must be registered here or the slash
+	// popup, the palette and /help never see them and the typed text is
+	// sent to the model as chat.
+	{
+		name: "notes",
+		aliases: [],
+		description: "Open the Notes tab (scratchpad, Ctrl+N)",
+		usage: "/notes",
+	},
+	{
+		name: "ideas",
+		aliases: [],
+		description: "Open the Ideas tab (capture ideas as they come)",
+		usage: "/ideas",
+	},
+	{
+		name: "btw",
+		aliases: [],
+		description: "Open the BTW tab (park a side quest for later)",
+		usage: "/btw",
+	},
+	{
+		name: "questions",
+		aliases: [],
+		description: "Open the Questions tab (research questions to answer)",
+		usage: "/questions",
+	},
+	{
+		name: "projects",
+		aliases: [],
+		description: "Open the Projects tab (overview, switch working directory)",
+		usage: "/projects",
+	},
+	{
+		name: "terminal",
+		aliases: [],
+		description: "Open a terminal tab in the current project (optional tab label)",
+		usage: "/terminal [label]",
 	},
 ];
 

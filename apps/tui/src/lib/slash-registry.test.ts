@@ -48,6 +48,37 @@ describe("slash registry", () => {
 		expect(resolved?.args).toEqual(["pricing", "audit"]);
 	});
 
+	// The workspace tab commands are handled in app.tsx but were never in
+	// BUILT_IN_SLASH_COMMANDS, so typed /notes fell through to chat (#2939).
+	const TAB_COMMANDS = ["notes", "ideas", "btw", "questions", "projects", "terminal"] as const;
+
+	test("workspace tab commands are registered as builtins", () => {
+		const builtIns = getBuiltInSlashCommands();
+		for (const name of TAB_COMMANDS) {
+			const def = builtIns.find((cmd) => cmd.name === name);
+			expect(def).toBeDefined();
+			expect(def?.description.length).toBeGreaterThan(0);
+			expect(def?.usage?.startsWith(`/${name}`)).toBeTrue();
+		}
+	});
+
+	test("workspace tab commands resolve as builtins from typed input", async () => {
+		const registry = await getSlashRegistry();
+		for (const name of TAB_COMMANDS) {
+			const resolved = resolveSlashInput(`/${name}`, registry);
+			expect(resolved?.entry.kind).toBe("builtin");
+			expect(resolved?.entry.builtInName).toBe(name);
+			expect(resolved?.args).toEqual([]);
+		}
+	});
+
+	test("/terminal passes its label through as an argument", async () => {
+		const registry = await getSlashRegistry();
+		const resolved = resolveSlashInput("/terminal build-watch", registry);
+		expect(resolved?.entry.builtInName).toBe("terminal");
+		expect(resolved?.args).toEqual(["build-watch"]);
+	});
+
 	test("unknown slash token does not resolve", async () => {
 		const registry = await getSlashRegistry();
 		const resolved = resolveSlashInput("/definitely-not-real", registry);
