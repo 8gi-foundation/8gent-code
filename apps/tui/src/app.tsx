@@ -144,6 +144,8 @@ import {
 	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
 } from "./lib/slash-commands.js";
+import { renderHelp } from "./lib/help-map.js";
+import { getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
@@ -1505,6 +1507,14 @@ export function App({
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
+	// Text columns a multi-line system message gets in the chat column: the
+	// viewport minus the context rail (55) and activity rail (36) at the same
+	// breakpoints the shell uses, minus the column's border and padding.
+	// Measured at 120 cols: 25 columns of text.
+	const helpColumnWidth = Math.max(
+		16,
+		viewport.width - (viewport.width >= 120 ? 55 : 0) - (viewport.width >= 90 ? 36 : 0) - 4,
+	);
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
 
 	// Per-tab message queue — each tab has its own pending-submission queue so
@@ -2477,53 +2487,14 @@ export function App({
 		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
 				case "help":
-					addSystemMessage(
-						"Available commands:\n" +
-							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+E) - Show predicted next steps\n" +
-							"  /avenues - Show planned avenues\n" +
-							"  /design [task] - Get design system suggestions\n" +
-							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
-							"  /evidence - Show full evidence breakdown\n" +
-							"  /notes - Open scratchpad notes tab\n" +
-							"  /ideas - Open idea capture tab\n" +
-							"  /btw - Open sidequest queue tab\n" +
-							"  /questions - Open research questions tab\n" +
-							"  /projects - Open project overview tab\n" +
-							"  /terminal - Open a live terminal tab (PTY shell)\n" +
-							"  /auth [login|logout|status] - Authentication\n" +
-							"  /github [issues|pr|repos] - GitHub integration\n" +
-							"  /deploy - Trigger Vercel deploy\n" +
-							"  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
-							"  /pet [start|stop|deck|card] - Lil Eight companion\n" +
-							"  /voice record - Toggle voice input (Ctrl+R)\n" +
-							"  /vision - Vision & OCR model settings\n" +
-							"  /telegram - Connect a Telegram bot\n" +
-							"  /router - Task router settings\n" +
-							"  /plan - Show current plan status\n" +
-							"  /session [name|list|resume] - Named session management\n" +
-							"  /fork [label] - Fork conversation at current message\n" +
-							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
-							"  /branch [list|switch <id>] - List or switch branches\n" +
-							"  /status - Show session status\n" +
-							"  /export - Export session as HTML\n" +
-							"  /clear - Clear messages\n" +
-							"  /quit - Exit 8gent Code\n" +
-							"  /skills - Open the skills menu (browse, filter, run)\n" +
-							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
-							"Keyboard shortcuts:\n" +
-							"  Tab - Accept ghost suggestion\n" +
-							"  Ctrl+T - New chat tab\n" +
-							"  Ctrl+W - Close current tab\n" +
-							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Cycle through tabs\n" +
-							"  Ctrl+A - Toggle animations\n" +
-							"  Ctrl+S - Toggle sound\n" +
-							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header\n" +
-							"  Ctrl+M - Model picker\n" +
-							"  Ctrl+Shift+M - Provider picker",
-					);
+					void (async () => {
+						try {
+							const registry = await getSlashRegistry();
+							addSystemMessage(renderHelp(registry.entries, args, helpColumnWidth).join("\n"));
+						} catch (e) {
+							addSystemMessage(`Help: ${e instanceof Error ? e.message : String(e)}`);
+						}
+					})();
 					break;
 
 				case "kanban":
@@ -4721,6 +4692,7 @@ export function App({
 			orchestration,
 			workspaceTabs,
 			toggleBodyPart,
+			helpColumnWidth,
 		],
 	);
 
