@@ -17,25 +17,22 @@ import {
 	getSuggestionSourceLabel,
 	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
+import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
+import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-client.js";
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
+	formatSlashCollisionLine,
 	getBuiltInSlashCommands,
 	getSlashRegistry,
 	resolveSlashInput,
 	toGhostSuggestions,
 } from "../lib/slash-registry.js";
-import {
-	GO_HELP_LINES,
-	type GoalClient,
-	parseGoCommand,
-} from "../lib/goal-client.js";
 import { t } from "../theme.js";
-import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
-import { FigureEight } from "./figure-eight-spinner.js";
-import { Blink } from "./fade-transition.js";
 import { BufferedTextInput } from "./buffered-text-input.js";
+import { Blink } from "./fade-transition.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Inline } from "./primitives/Inline.js";
 import { ShortcutHint } from "./primitives/ShortcutHint.js";
@@ -134,6 +131,9 @@ export function splitTrailingEnter(value: string): { text: string; submit: boole
 // Main Command Input
 // ============================================
 
+// Module-level so remounts of the input (tab switches) do not repeat the line.
+let collisionLineShown = false;
+
 export function CommandInput({
 	onSubmit,
 	isProcessing,
@@ -160,8 +160,8 @@ export function CommandInput({
 	approvalPending = false,
 	cwd = process.cwd(),
 	onSlashMenuChange,
-// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
-// react-doctor-disable-next-line react-doctor/prefer-useReducer
+	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+	// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
 	const [value, setValue] = useState("");
 	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
@@ -178,6 +178,7 @@ export function CommandInput({
 			...toGhostSuggestions({
 				entries: slashRegistryEntries,
 				byToken: slashByToken,
+				collisions: [],
 			}),
 		],
 		[builtInSlashGhosts, slashRegistryEntries, slashByToken],
@@ -202,6 +203,13 @@ export function CommandInput({
 				if (cancelled) return;
 				setSlashRegistryEntries(registry.entries);
 				setSlashByToken(registry.byToken);
+				// Once per process: name any skill trigger that lost to a
+				// builtin so the user learns why /voice is not their skill (#2932).
+				const collisionLine = formatSlashCollisionLine(registry.collisions);
+				if (collisionLine && !collisionLineShown) {
+					collisionLineShown = true;
+					onSystemMessage?.(collisionLine);
+				}
 			} catch {
 				if (!cancelled) {
 					setSlashRegistryEntries([]);
@@ -233,14 +241,20 @@ export function CommandInput({
 		};
 	}, [mentionActive, cwd]);
 	const mentionMatches = useMemo(
-		() => (mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : []),
+		() =>
+			mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : [],
 		[mention, projectFiles],
 	);
 	useEffect(() => setMentionIndex(0), [mention?.query]);
 	const mentionOpen = mention !== null && mentionMatches.length > 0;
 
 	// Ghost suggestion hook
-	const { suggestion, accept, dismiss, isVisible: ghostShown } = useGhostSuggestion(value, {
+	const {
+		suggestion,
+		accept,
+		dismiss,
+		isVisible: ghostShown,
+	} = useGhostSuggestion(value, {
 		isGitRepo,
 		currentBranch,
 		planNextStep,
@@ -325,7 +339,8 @@ export function CommandInput({
 
 			// Up arrow: navigate to older history entry
 			if (key.upArrow && recentCommands.length > 0) {
-				const nextIndex = historyIndex < recentCommands.length - 1 ? historyIndex + 1 : historyIndex;
+				const nextIndex =
+					historyIndex < recentCommands.length - 1 ? historyIndex + 1 : historyIndex;
 				if (nextIndex !== historyIndex) {
 					if (historyIndex === -1) draftRef.current = value;
 					setHistoryIndex(nextIndex);
@@ -359,6 +374,7 @@ export function CommandInput({
 				const resolved = resolveSlashInput(input, {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
+					collisions: [],
 				});
 
 				// /goal and /subgoal: handled in-component when a GoalClient is
@@ -366,8 +382,7 @@ export function CommandInput({
 				// app can render a clean "goal loop not connected" message.
 				if (
 					resolved?.entry.kind === "builtin" &&
-					(resolved.entry.builtInName === "goal" ||
-						resolved.entry.builtInName === "subgoal") &&
+					(resolved.entry.builtInName === "goal" || resolved.entry.builtInName === "subgoal") &&
 					goalClient
 				) {
 					handleGoCommand(
@@ -450,18 +465,20 @@ export function CommandInput({
 				<Box marginBottom={0}>
 					<Text color={t.orange}>{WAITING_LINE}</Text>
 				</Box>
-			) : processingStatusLine && (
-				<Box marginBottom={0}>
-					<AnimatedSpinner
-						color={t.teal}
-						label={processingStatusLine.label}
-						showDots={showAnimations}
-						animate={showAnimations}
-					/>
-					{processingStatusLine.stats.length > 0 && (
-						<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
-					)}
-				</Box>
+			) : (
+				processingStatusLine && (
+					<Box marginBottom={0}>
+						<AnimatedSpinner
+							color={t.teal}
+							label={processingStatusLine.label}
+							showDots={showAnimations}
+							animate={showAnimations}
+						/>
+						{processingStatusLine.stats.length > 0 && (
+							<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
+						)}
+					</Box>
+				)
 			)}
 
 			{/* Main input row — ALWAYS visible */}
@@ -495,8 +512,8 @@ export function CommandInput({
 								: isProcessing
 									? "Queue a follow-up message..."
 									: isVisible
-									? ""
-									: (placeholder ?? "Type a command or ask a question...")
+										? ""
+										: (placeholder ?? "Type a command or ask a question...")
 						}
 					/>
 
@@ -543,10 +560,7 @@ export function CommandInput({
 // messages (verdicts, help) are 8DO-owned copy imported through the
 // goal-client barrel and the verdicts module.
 
-function emitSystem(
-	onSystemMessage: ((line: string) => void) | undefined,
-	line: string,
-): void {
+function emitSystem(onSystemMessage: ((line: string) => void) | undefined, line: string): void {
 	if (onSystemMessage) {
 		onSystemMessage(line);
 	}
@@ -569,10 +583,7 @@ export function handleGoCommand(
 			client.subgoal(text);
 			emitSystem(onSystemMessage, "Subgoal sent.");
 		} catch (err) {
-			emitSystem(
-				onSystemMessage,
-				`/subgoal: ${err instanceof Error ? err.message : String(err)}`,
-			);
+			emitSystem(onSystemMessage, `/subgoal: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		return;
 	}
@@ -594,10 +605,7 @@ export function handleGoCommand(
 				// stream from LiveFocalStrip is the real surface.
 				emitSystem(onSystemMessage, `Going. ${parsed.goal}`);
 			} catch (err) {
-				emitSystem(
-					onSystemMessage,
-					`/goal: ${err instanceof Error ? err.message : String(err)}`,
-				);
+				emitSystem(onSystemMessage, `/goal: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return;
 		}
@@ -718,12 +726,18 @@ export function slashMenuCompact(terminalRows: number): boolean {
 
 /** Menu rows that fit a terminal `terminalRows` tall: min(14, rows - chrome), at least 1. */
 export function slashMenuVisibleRows(terminalRows: number): number {
-	const chrome = slashMenuCompact(terminalRows) ? SLASH_MENU_CHROME.compact : SLASH_MENU_CHROME.framed;
+	const chrome = slashMenuCompact(terminalRows)
+		? SLASH_MENU_CHROME.compact
+		: SLASH_MENU_CHROME.framed;
 	return Math.max(1, Math.min(SLASH_MENU_ROWS, terminalRows - chrome));
 }
 
 /** The window of `total` rows, `visible` tall, that keeps `selected` in view. */
-export function slashMenuWindow(total: number, selected: number, visible: number): { start: number; end: number } {
+export function slashMenuWindow(
+	total: number,
+	selected: number,
+	visible: number,
+): { start: number; end: number } {
 	if (total <= visible) return { start: 0, end: total };
 	const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), total - visible));
 	return { start, end: start + visible };
@@ -788,7 +802,13 @@ const MENTION_ROWS = 8;
 // The @ file list: matching files, the picked one marked, Tab to insert.
 function FileMentionList({ files, selected }: { files: string[]; selected: number }) {
 	return (
-		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
+		<Box
+			flexDirection="column"
+			borderStyle="round"
+			borderColor={t.frame}
+			paddingX={1}
+			marginTop={1}
+		>
 			<Text color={t.heading} bold>
 				FILES <Text color={t.textTertiary}>Up/Down to pick, Tab to insert</Text>
 			</Text>
