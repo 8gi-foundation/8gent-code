@@ -30,6 +30,8 @@ export interface GitSyncResult {
 	ahead: number;
 	behind: number;
 	label: string;
+	/** Checked-out branch name; "HEAD" when detached, "" outside a repo or before the first check. */
+	branch: string;
 }
 
 export type GitRunner = (
@@ -78,7 +80,7 @@ export async function computeGitSync(
 	// Verify repo
 	const repoCheck = await runner([...cwdArgs, "rev-parse", "--is-inside-work-tree"]);
 	if (repoCheck.code !== 0 || repoCheck.stdout.trim() !== "true") {
-		return { status: "no-repo", ahead: 0, behind: 0, label: buildLabel("", "no-repo", 0, 0) };
+		return { status: "no-repo", ahead: 0, behind: 0, label: buildLabel("", "no-repo", 0, 0), branch: "" };
 	}
 
 	// Branch name
@@ -86,7 +88,7 @@ export async function computeGitSync(
 	const branch = branchOut.stdout.trim();
 
 	if (branch === "HEAD") {
-		return { status: "detached", ahead: 0, behind: 0, label: buildLabel(branch, "detached", 0, 0) };
+		return { status: "detached", ahead: 0, behind: 0, label: buildLabel(branch, "detached", 0, 0), branch };
 	}
 
 	// Counts. `git rev-list --left-right --count @{u}...HEAD` returns "behind\tahead".
@@ -98,6 +100,7 @@ export async function computeGitSync(
 			ahead: 0,
 			behind: 0,
 			label: buildLabel(branch, "no-upstream", 0, 0),
+			branch,
 		};
 	}
 	const behindOut = await runner([...cwdArgs, "rev-list", "--count", "HEAD..@{u}"]);
@@ -107,6 +110,7 @@ export async function computeGitSync(
 			ahead: 0,
 			behind: 0,
 			label: buildLabel(branch, "no-upstream", 0, 0),
+			branch,
 		};
 	}
 
@@ -119,7 +123,7 @@ export async function computeGitSync(
 	else if (ahead === 0 && behind > 0) status = "behind";
 	else status = "diverged";
 
-	return { status, ahead, behind, label: buildLabel(branch, status, ahead, behind) };
+	return { status, ahead, behind, label: buildLabel(branch, status, ahead, behind), branch };
 }
 
 export function useGitSync(
@@ -132,6 +136,7 @@ export function useGitSync(
 		ahead: 0,
 		behind: 0,
 		label: "checking",
+		branch: "",
 	});
 
 	useEffect(() => {

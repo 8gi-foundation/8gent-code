@@ -6,7 +6,11 @@
  * when Ink tried to truncate from both sides at narrow widths.
  *
  * Rules:
- *   - Label box: width={10}, flexShrink=0, truncate-end. Stable column.
+ *   - Row box: flexShrink=0 so a height-starved rail clips rows at the
+ *     bottom instead of collapsing them onto each other (`idleS`). No
+ *     overflow="hidden" here: Ink honours only the innermost clip, so a
+ *     row clip would override the rail's and let the row paint outside it.
+ *   - Label box: width={9}, flexShrink=0, truncate-end. Stable column.
  *   - Value box: flexGrow=1, minWidth=0, truncate-end. Takes remaining space.
  *   - Use TruncatedValue (truncate-middle) inside the value column for long
  *     identifier strings like provider/model names where both ends matter.
@@ -28,7 +32,7 @@ export function MetricRow({
 	color?: string;
 }) {
 	return (
-		<Box width="100%" overflow="hidden">
+		<Box width="100%" flexShrink={0}>
 			<Box width={9} flexShrink={0}>
 				<Text color={t.dim} wrap="truncate-end">{label}</Text>
 			</Box>
