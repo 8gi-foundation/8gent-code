@@ -82,10 +82,12 @@ describe("renderHelpMap", () => {
 		expect(text).toContain("/settings");
 	});
 
+	// The tab commands are registered builtins since #2940, so these two tests
+	// name the commands they remove instead of assuming the table lacks them.
+	const NOTES_FAMILY = ["notes", "ideas", "btw", "questions"];
+
 	test("a section with no registered commands drops its heading", () => {
-		const entries = builtinEntries();
-		// The builtin table registers no /notes, /ideas, /btw or /questions.
-		expect(entries.some((e) => e.name === "notes")).toBeFalse();
+		const entries = builtinEntries().filter((e) => !NOTES_FAMILY.includes(e.canonicalName));
 		const text = renderHelpMap(entries, 100).join("\n");
 		expect(text).not.toContain("Notes and ideas");
 		expect(text).not.toContain("/notes");
@@ -93,7 +95,7 @@ describe("renderHelpMap", () => {
 
 	test("a section appears once its commands are registered", () => {
 		const entries = [
-			...builtinEntries(),
+			...builtinEntries().filter((e) => !NOTES_FAMILY.includes(e.canonicalName)),
 			skill("notes", "Open notes"),
 			skill("ideas", "Open ideas"),
 		];
@@ -101,6 +103,7 @@ describe("renderHelpMap", () => {
 		expect(text).toContain("Notes and ideas");
 		expect(text).toContain("/notes (Ctrl+N)");
 		expect(text).toContain("/ideas");
+		// Still absent: the section lists only what is registered.
 		expect(text).not.toContain("/btw");
 	});
 

@@ -104,7 +104,7 @@ const rows = (frame: string) => frame.replace(/\s+$/, "").split("\n");
 
 /** Expanded, nothing playing: a bordered box with the station name and a hint. */
 const isExpandedIdle = (f: string) =>
-	f.includes("● 8GENT FM") && f.includes("/dj open") && rows(f).length === 3;
+	f.includes("● 8GENT FM") && f.includes("/dj close") && rows(f).length === 3;
 /** Collapsed: the one-line strip. */
 const isCollapsed = (f: string) => f.includes("■ 8GENT FM idle") && rows(f).length === 1;
 

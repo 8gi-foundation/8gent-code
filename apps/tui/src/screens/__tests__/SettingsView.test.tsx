@@ -176,9 +176,9 @@ describe("alignment", () => {
 			const f = fieldById(id);
 			return padLabel(f.label, LABEL_COLUMN_WIDTH) + formatValue(f, f.get(DEFAULT_SETTINGS));
 		});
-		expect(rows[0]).toBe("TTS voice (fallback)    Ava");
+		expect(rows[0]).toBe("TTS voice (fallback)    Bruno");
 		expect(rows[1]).toBe("Barge-in                [x]");
-		expect(rows[2]).toBe("Orchestrator voice      Daniel");
+		expect(rows[2]).toBe("Orchestrator voice      Bruno");
 	});
 });
 
