@@ -413,10 +413,6 @@ export function CommandInput({
 						// keys meant for a utility tab (Settings q/e/?/space) land here too.
 						focus={focused && !isProcessing}
 						value={value}
-						// TextInput owns its own key listener. Without this it keeps
-						// typing into the chat line while the Ctrl+P palette (or any
-						// other view) has focus, even when this box is display:none.
-						focus={focused}
 						// While a ghost suggestion shows, the cursor sits on the first
 						// ghost character instead of a blank cell before it, so the
 						// line reads "/settings" rather than "/sett ings".

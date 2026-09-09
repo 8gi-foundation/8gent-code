@@ -122,7 +122,7 @@ import {
 	type StatusReportState,
 } from "./lib/status-report.js";
 import { truncate } from "./lib/text.js";
-import { popupLayout } from "./lib/layout.js";
+import { popupLayout, shellWidthBudget } from "./lib/layout.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -5682,12 +5682,15 @@ export function App({
 
 	// V2 three-zone shell - the only render path.
 	const cols = viewport.width;
+	// Chat first (#2938): rails only show while the chat keeps CHAT_MIN_COLS.
+	const budget = shellWidthBudget(cols);
 	// A utility tab (Settings, Notes, ...) takes the whole content area: the
 	// rails and the chat input step aside so the view is not squeezed into a
 	// 26-column slot where every label wraps mid-word (#2912).
 	const utilityTabActive = activeTabType !== "chat";
-	const showContextRail = cols >= 120 && !utilityTabActive;
-	const showActivityRail = cols >= 90 && !utilityTabActive;
+	const showContextRail = budget.showContextRail && !utilityTabActive;
+	const showActivityRail = budget.showActivityRail && !utilityTabActive;
+	const chatWidth = utilityTabActive ? cols : budget.chatWidth;
 	// Command popups (slash autocomplete, Ctrl+P palette) size themselves to
 	// the centre column so they never paint over the rails or the tiles (#2913).
 	const popup = popupLayout(viewport, {
@@ -5816,13 +5819,7 @@ export function App({
 								<MessageList
 									messages={messages}
 									rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
-									contentWidth={Math.max(
-										24,
-										viewport.width -
-											(showContextRail ? 55 : 0) -
-											(showActivityRail ? 36 : 0) -
-											8,
-									)}
+									contentWidth={chatWidth}
 								/>
 							)}
 						</Box>
