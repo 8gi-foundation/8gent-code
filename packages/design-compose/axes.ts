@@ -37,6 +37,7 @@ export const TYPE_RATIOS = [
 	{ name: "minor-third", value: 1.2 },
 	{ name: "major-third", value: 1.25 },
 	{ name: "perfect-fourth", value: 1.333 },
+	// biome-ignore lint/suspicious/noApproximativeNumericConstant: a named type-scale ratio, rounded on purpose; Math.SQRT2 would change the published value
 	{ name: "augmented-fourth", value: 1.414 },
 	{ name: "perfect-fifth", value: 1.5 },
 	{ name: "golden", value: 1.618 },

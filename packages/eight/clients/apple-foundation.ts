@@ -132,19 +132,19 @@ export class AppleFoundationClient implements LLMClient {
 	private send(request: BridgeRequest): Promise<BridgeResponse> {
 		const proc = this.ensureProcess();
 		return new Promise((resolve, reject) => {
-			let timer: ReturnType<typeof setTimeout>;
+			const timer: { id?: ReturnType<typeof setTimeout> } = {};
 			// Wrap so a normal response / exit-failure also clears the watchdog.
 			const entry = {
 				resolve: (v: BridgeResponse) => {
-					clearTimeout(timer);
+					clearTimeout(timer.id);
 					resolve(v);
 				},
 				reject: (e: unknown) => {
-					clearTimeout(timer);
+					clearTimeout(timer.id);
 					reject(e);
 				},
 			};
-			timer = setTimeout(() => {
+			timer.id = setTimeout(() => {
 				// Bridge stalled (Apple Intelligence off, model asset not ready).
 				// Drop this request, kill the wedged process so the next turn spawns
 				// clean, and reject with a message model-reroute treats as a provider

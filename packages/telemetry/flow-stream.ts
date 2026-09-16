@@ -136,7 +136,8 @@ export function validateFlowRecord(raw: unknown): ValidationResult {
 			if (spec.optional) continue;
 			return { ok: false, reason: `${kind}: missing required field ${name}` };
 		}
-		if (typeof value !== spec.type)
+		const actualType: string = typeof value;
+		if (actualType !== spec.type)
 			return { ok: false, reason: `${kind}.${name}: expected ${spec.type}, got ${typeof value}` };
 		if (spec.type === "number" && !Number.isFinite(value))
 			return { ok: false, reason: `${kind}.${name}: not a finite number` };

@@ -3,6 +3,28 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SessionInfo } from "../api/sessions/route";
 
+/**
+ * A session entry's error is whatever the runtime threw: a string, an Error,
+ * or a plain object from a tool. Narrow it instead of asserting `any`, so a
+ * shape we did not expect reads as "no message" rather than crashing on
+ * property access.
+ */
+function errorMessage(error: unknown): string | undefined {
+	if (typeof error === "string") return error;
+	if (error && typeof error === "object") {
+		const message = (error as { message?: unknown }).message;
+		if (typeof message === "string") return message;
+	}
+	return undefined;
+}
+
+function errorIsRecoverable(error: unknown): boolean {
+	return (
+		!!error && typeof error === "object" && (error as { recoverable?: unknown }).recoverable === true
+	);
+}
+
+
 interface SessionEntry {
 	type: string;
 	timestamp?: string;
@@ -247,7 +269,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 			case "tool_result":
 				return `${entry.success ? "✓" : "✗"} ${entry.toolName || entry.toolCallId} ${entry.durationMs ? `(${entry.durationMs}ms)` : ""}`;
 			case "tool_error":
-				return `✗ ${entry.toolName} — ${typeof entry.error === "string" ? entry.error : (entry.error as any)?.message}`;
+				return `✗ ${entry.toolName} — ${errorMessage(entry.error)}`;
 			case "turn_start":
 				return `Turn ${entry.turnIndex}`;
 			case "turn_end":
@@ -262,8 +284,8 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				return `${entry.hook?.hookType}: ${entry.hook?.hookName} ${entry.hook?.success ? "✓" : "✗"}`;
 			case "error": {
 				const errMsg =
-					typeof entry.error === "string" ? entry.error : (entry.error as any)?.message;
-				const recoverable = typeof entry.error === "object" && (entry.error as any)?.recoverable;
+					errorMessage(entry.error);
+				const recoverable = errorIsRecoverable(entry.error);
 				return `${recoverable ? "[recoverable]" : "[fatal]"} ${errMsg}`;
 			}
 			case "session_end": {

@@ -413,17 +413,13 @@ const KNOWN_CONTEXT: Partial<Record<ProviderName, number>> = {
  * payload (HTTP 200), false when it rejects it (HTTP 400 / any error). Injected
  * so tests never touch the network.
  */
-export interface NativeToolsProbe {
-	(args: { baseUrl: string; model: string; apiKey?: string }): Promise<boolean>;
-}
+export type NativeToolsProbe = (args: { baseUrl: string; model: string; apiKey?: string }) => Promise<boolean>
 
 /**
  * Context-window lookup against a provider's models endpoint. Returns the
  * advertised window in tokens, or null when unknown. Injected for tests.
  */
-export interface ContextWindowLookup {
-	(args: { baseUrl: string; model: string; apiKey?: string }): Promise<number | null>;
-}
+export type ContextWindowLookup = (args: { baseUrl: string; model: string; apiKey?: string }) => Promise<number | null>
 
 export interface ResolveCapabilitiesOptions {
 	probe?: NativeToolsProbe;

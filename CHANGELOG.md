@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Lint gate passes again: cleared the 10 error-level Biome diagnostics that made `bun run lint` exit 1 on every branch, which failed Validate at its Lint step and skipped Test, Build and every check after it.
+
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"
