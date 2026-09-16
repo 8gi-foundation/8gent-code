@@ -5,19 +5,18 @@
  */
 
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
 import React, { useState, useEffect } from "react";
+import { FigureEight } from "./figure-eight-spinner.js";
 import { Label, MutedText } from "./primitives/AppText.js";
 import { Inline } from "./primitives/Inline.js";
 import { StatusDot } from "./primitives/StatusDot.js";
 
-type SpinnerStyle = "dots" | "line" | "arc" | "bouncingBar" | "moon" | "runner";
-
 interface AnimatedSpinnerProps {
-	type?: SpinnerStyle;
 	color?: string;
 	label?: string;
 	showDots?: boolean;
+	/** False holds the spinner on one frame, for reduced motion. */
+	animate?: boolean;
 }
 
 // Animated "thinking" dots that cycle
@@ -40,15 +39,15 @@ function ThinkingDots() {
 }
 
 export function AnimatedSpinner({
-	type = "dots",
 	color = "cyan",
 	label = "Processing",
 	showDots = true,
+	animate = true,
 }: AnimatedSpinnerProps) {
 	return (
 		<Inline>
 			<Text color={color}>
-				<Spinner type={type} />
+				<FigureEight animate={animate} />
 			</Text>
 			<MutedText> {label}</MutedText>
 			{showDots && <ThinkingDots />}
@@ -119,7 +118,7 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
 						{isComplete && <StatusDot status="success" />}
 						{isCurrent && (
 							<Text color="cyan">
-								<Spinner type="dots" />
+								<FigureEight />
 							</Text>
 						)}
 						{isPending && <MutedText>○</MutedText>}

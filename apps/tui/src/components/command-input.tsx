@@ -10,7 +10,6 @@
  */
 
 import { Box, Text, useInput } from "ink";
-import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -33,6 +32,7 @@ import {
 } from "../lib/goal-client.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 import { Blink } from "./fade-transition.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Inline } from "./primitives/Inline.js";
@@ -341,10 +341,10 @@ export function CommandInput({
 			{processingStatusLine && (
 				<Box marginBottom={0}>
 					<AnimatedSpinner
-						type="dots"
 						color={t.teal}
 						label={processingStatusLine.label}
-						showDots={true}
+						showDots={showAnimations}
+						animate={showAnimations}
 					/>
 					{processingStatusLine.stats.length > 0 && (
 						<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
@@ -610,7 +610,7 @@ export function MinimalCommandInput({ onSubmit, isProcessing }: CommandInputProp
 			{isProcessing ? (
 				<Box>
 					<AppText color="cyan">
-						<Spinner type="dots" />
+						<FigureEight />
 					</AppText>
 					<MutedText> Working…</MutedText>
 				</Box>
