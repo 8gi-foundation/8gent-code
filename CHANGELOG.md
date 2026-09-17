@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
+
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"
