@@ -65,7 +65,10 @@ function scanSessions(): SessionFinding[] {
 			let lines: string[]; try { lines = fs.readFileSync(fp, "utf8").split("\n").filter(Boolean); } catch { continue; }
 			// Walk from the end for the last REAL turn (user/assistant), grabbing the
 			// session's cwd + branch along the way. Attachments/summaries are skipped.
-			let cwd = "", branch = "", lastRole = "", preview = "";
+			let cwd = "";
+			let branch = "";
+			let lastRole = "";
+			let preview = "";
 			for (let i = lines.length - 1; i >= 0; i--) {
 				let j: any; try { j = JSON.parse(lines[i]); } catch { continue; }
 				if (!cwd && j.cwd) cwd = String(j.cwd);

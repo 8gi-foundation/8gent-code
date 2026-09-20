@@ -120,7 +120,6 @@ export function segmentBeats(segments: readonly Segment[]): Beat[] {
 		}
 		if (next && next.t0 - seg.t1 >= BEAT_PAUSE_GAP_MS && accumulated >= BEAT_PAUSE_MIN_MS) {
 			flush();
-			continue;
 		}
 	}
 	flush();
