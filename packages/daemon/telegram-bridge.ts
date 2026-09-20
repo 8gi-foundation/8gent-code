@@ -14,7 +14,14 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
@@ -26,7 +33,12 @@ import {
 	runBoardroom,
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
-import { decideVoice, readVoiceState, sendVoiceNote, writeVoiceState } from "../telegram-bot/voice-mode";
+import {
+	decideVoice,
+	readVoiceState,
+	sendVoiceNote,
+	writeVoiceState,
+} from "../telegram-bot/voice-mode";
 
 /**
  * Where messages from chats the bridge does not answer are recorded.
@@ -105,7 +117,7 @@ interface TelegramUpdate {
 	message?: {
 		message_id: number;
 		from: { id: number; first_name: string; username?: string };
-		chat: { id: number };
+		chat: { id: number; type?: string };
 		text?: string;
 		voice?: { file_id: string; duration: number };
 		audio?: { file_id: string; duration: number };
@@ -114,7 +126,7 @@ interface TelegramUpdate {
 		id: string;
 		from: { id: number };
 		data?: string;
-		message?: { message_id: number; chat: { id: number } };
+		message?: { message_id: number; chat: { id: number; type?: string } };
 	};
 }
 
@@ -131,6 +143,13 @@ interface BridgeConfig {
 	 * before reaching the agent loop.
 	 */
 	authorizedChatIds?: string[];
+	/**
+	 * Optional sender allowlist (Telegram user ids). The chat allowlist names
+	 * WHERE the bridge listens; this names WHO may drive it. Required in
+	 * practice for any group chat: without it a group fails closed, because a
+	 * group is many people and the chat id no longer identifies the operator.
+	 */
+	authorizedUserIds?: string[];
 }
 
 async function tgSend(
@@ -161,7 +180,7 @@ async function tgSend(
 				body: JSON.stringify({
 					chat_id: chatId,
 					text: chunk,
-					parse_mode: parseMode,
+					...(parseMode ? { parse_mode: parseMode } : {}),
 				}),
 			});
 		} catch {
@@ -293,6 +312,32 @@ export function isChatAuthorized(
 		return allowlist.includes(incoming);
 	}
 	return incoming === config.chatId;
+}
+
+/**
+ * The sender allowlist. Companion to `isChatAuthorized`, same contract: pure,
+ * fails closed, no "empty means allow all" branch for groups.
+ *
+ * - With an allowlist, only listed user ids may drive the bridge, anywhere.
+ * - Without one, a private chat keeps today's behaviour: one chat is one
+ *   person, so the chat allowlist already names the sender.
+ * - Without one, a group or supergroup rejects every sender. Putting a bot
+ *   with full dispatch capability in a group and letting anyone in it press
+ *   Approve is exactly the hole the dispatch policy assumes cannot exist.
+ *
+ * `chatType` undefined is treated as private for callers that predate
+ * Telegram's `chat.type` being read; Telegram itself always sends it.
+ */
+export function isSenderAuthorized(
+	input: { chatType?: string; fromId?: number },
+	config: { authorizedUserIds?: string[] },
+): boolean {
+	const allowlist = config.authorizedUserIds;
+	if (allowlist && allowlist.length > 0) {
+		return typeof input.fromId === "number" && allowlist.includes(String(input.fromId));
+	}
+	const type = input.chatType ?? "private";
+	return type === "private";
 }
 
 // Import CoS router lazily to avoid circular deps
@@ -531,10 +576,7 @@ class TelegramDaemonBridge {
 						// Note this only covers `update.message`. Callback queries carry
 						// no message and are checked in handleCallbackQuery instead.
 						const incomingChatId = update.message?.chat?.id;
-						if (
-							typeof incomingChatId === "number" &&
-							!this.isAuthorizedChat(incomingChatId)
-						) {
+						if (typeof incomingChatId === "number" && !this.isAuthorizedChat(incomingChatId)) {
 							// Record before dropping. The bot is an administrator of
 							// groups it does not answer in, so it already receives every
 							// message there, and Telegram gives bots no history API - once
@@ -550,6 +592,16 @@ class TelegramDaemonBridge {
 							console.warn(
 								`[telegram-bridge] observed and dropped update from unauthorized chat ${incomingChatId}`,
 							);
+							continue;
+						}
+						// Second gate, same shape as the first: WHO sent it. Callback
+						// queries carry no update.message and are checked inside
+						// handleCallbackQuery, like the chat check.
+						if (
+							update.message &&
+							!this.isAuthorizedSender(update.message.chat?.type, update.message.from?.id)
+						) {
+							await this.refuseSender(update.message.chat.id, update.message.from?.id);
 							continue;
 						}
 						if (update.callback_query) {
@@ -584,6 +636,31 @@ class TelegramDaemonBridge {
 				await new Promise((r) => setTimeout(r, 2000));
 			}
 		}
+	}
+
+	private isAuthorizedSender(chatType: string | undefined, fromId: number | undefined): boolean {
+		return isSenderAuthorized(
+			{ chatType, fromId },
+			{ authorizedUserIds: this.config.authorizedUserIds },
+		);
+	}
+
+	/** One refusal per sender per hour, so a group cannot use the bot as an echo. */
+	private refusedSenders = new Map<number, number>();
+	private async refuseSender(chatId: number, fromId: number | undefined): Promise<void> {
+		console.warn(
+			`[telegram-bridge] rejected message from unauthorized sender ${fromId ?? "unknown"} in chat ${chatId}`,
+		);
+		if (typeof fromId !== "number") return;
+		const last = this.refusedSenders.get(fromId) ?? 0;
+		if (Date.now() - last < 60 * 60 * 1000) return;
+		this.refusedSenders.set(fromId, Date.now());
+		await tgSend(
+			this.config.telegramToken,
+			String(chatId),
+			"This 8gent instance answers only its operator.",
+			"",
+		).catch(() => {});
 	}
 
 	private isAuthorizedChat(chatId: number): boolean {
@@ -1022,6 +1099,13 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		if (!this.isAuthorizedSender(query.message?.chat?.type, query.from?.id)) {
+			console.warn(
+				`[telegram-bridge] rejected callback query from unauthorized sender ${query.from?.id ?? "unknown"} in chat ${originChatId}`,
+			);
+			return;
+		}
+
 		const data = query.data || "";
 		const { prefix, payload } = parseCallbackData(data);
 		const requestId = payload || data.split(":")[1] || "";
@@ -1120,6 +1204,14 @@ class TelegramDaemonBridge {
 	}
 }
 
+/** Comma-separated env list to trimmed, non-empty strings. */
+function splitIds(raw: string | undefined): string[] {
+	return (raw || "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+}
+
 // ── Local-mode programmatic launcher ─────────────────────────────────
 
 /**
@@ -1149,9 +1241,7 @@ export async function startLocalTelegramBridge(opts: {
 		.map((s) => s.trim())
 		.filter((s) => s.length > 0);
 	if (authorizedChatIds.length === 0) {
-		throw new Error(
-			"TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode",
-		);
+		throw new Error("TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode");
 	}
 	// The first allowlisted chat is the default destination for outbound
 	// messages. Inbound messages from any chat in the allowlist are
@@ -1165,6 +1255,7 @@ export async function startLocalTelegramBridge(opts: {
 		authToken: process.env.DAEMON_AUTH_TOKEN,
 		devGroupId: process.env.TELEGRAM_DEV_GROUP_ID,
 		authorizedChatIds,
+		authorizedUserIds: splitIds(process.env.TELEGRAM_AUTHORIZED_USER_IDS),
 	});
 	await bridge.start();
 	return bridge;
@@ -1192,12 +1283,22 @@ if (import.meta.main) {
 	}
 	console.log(`[telegram-bridge] BOT_NAME=${botName || "aijames"} (reading ${tokenVar})`);
 
+	const authorizedChatIds = splitIds(process.env.TELEGRAM_AUTHORIZED_CHAT_IDS);
+	const authorizedUserIds = splitIds(process.env.TELEGRAM_AUTHORIZED_USER_IDS);
+	const chatsToWatch = authorizedChatIds.length > 0 ? authorizedChatIds : [chatId];
+	if (authorizedUserIds.length === 0 && chatsToWatch.some((id) => id.startsWith("-"))) {
+		console.warn(
+			"[telegram-bridge] a group chat is allowlisted but TELEGRAM_AUTHORIZED_USER_IDS is empty: every sender in that group will be refused",
+		);
+	}
 	const bridge = new TelegramDaemonBridge({
 		telegramToken: token,
 		chatId,
 		daemonUrl: process.env.DAEMON_URL || "ws://localhost:18789",
 		authToken: process.env.DAEMON_AUTH_TOKEN,
 		devGroupId: process.env.TELEGRAM_DEV_GROUP_ID,
+		authorizedChatIds: authorizedChatIds.length > 0 ? authorizedChatIds : undefined,
+		authorizedUserIds: authorizedUserIds.length > 0 ? authorizedUserIds : undefined,
 	});
 
 	bridge.start().catch((err) => {
