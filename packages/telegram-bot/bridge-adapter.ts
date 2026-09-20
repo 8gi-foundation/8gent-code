@@ -35,7 +35,16 @@ const TELEGRAM_API = "https://api.telegram.org/bot";
 
 export interface BridgeAdapterConfig {
 	telegramToken: string;
-	chatId: string;
+	/** Fixed destination. Omit when the destination varies per turn. */
+	chatId?: string;
+	/**
+	 * Destination resolver, evaluated at send time. A bridge serving more
+	 * than one allowlisted chat passes this so a reply lands in the chat the
+	 * message came from; a fixed `chatId` cannot express that, because the
+	 * adapter is constructed once at boot and the daemon's reply carries no
+	 * chat of its own.
+	 */
+	resolveChatId?: () => string;
 	daemon: DaemonClient;
 	sessionStore?: SessionStore;
 	fileSender?: FileSender;
@@ -60,7 +69,11 @@ interface RunningTask {
 
 export class TelegramBridgeAdapter {
 	private telegramToken: string;
-	private chatId: string;
+	private resolveChat: () => string;
+	/** Read-through, so every existing `this.chatId` use resolves per send. */
+	private get chatId(): string {
+		return this.resolveChat();
+	}
 	private daemon: DaemonClient;
 	private sessions: SessionStore;
 	private files: FileSender;
@@ -72,11 +85,20 @@ export class TelegramBridgeAdapter {
 
 	constructor(config: BridgeAdapterConfig) {
 		this.telegramToken = config.telegramToken;
-		this.chatId = config.chatId;
+		if (!config.resolveChatId && config.chatId === undefined) {
+			throw new Error("BridgeAdapterConfig needs chatId or resolveChatId");
+		}
+		const fixed = config.chatId;
+		this.resolveChat = config.resolveChatId ?? (() => fixed as string);
 		this.daemon = config.daemon;
 		this.sessions = config.sessionStore ?? new SessionStore();
 		this.files =
-			config.fileSender ?? new FileSender({ token: config.telegramToken, chatId: config.chatId });
+			config.fileSender ??
+			new FileSender({
+				token: config.telegramToken,
+				chatId: config.chatId,
+				resolveChatId: config.resolveChatId,
+			});
 		this.autoAttachFiles = config.autoAttachFiles ?? true;
 		this.editThrottleMs = config.editThrottleMs ?? 1100;
 		this.onFinalReply = config.onFinalReply;
