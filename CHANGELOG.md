@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - the repo lint passes, so the CI gate can gate (#2961)
+
+- `bun run lint` had exited 1 on `main` since at least 2026-08-25, so the
+  `Validate` job failed on every pull request whatever it contained. Ten
+  errors across nine files are fixed: seven mechanical and
+  behaviour-preserving, three where the rule mis-reads correct code and now
+  carries a suppression with its reason. The 1417 warnings are untouched;
+  this makes the gate work, it does not clean the repo.
+
 ### Added
 - `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
 

@@ -132,6 +132,7 @@ export class AppleFoundationClient implements LLMClient {
 	private send(request: BridgeRequest): Promise<BridgeResponse> {
 		const proc = this.ensureProcess();
 		return new Promise((resolve, reject) => {
+			// biome-ignore lint/style/useConst: assigned below, after `entry`, because the watchdog closes over `entry` and `entry` clears this timer.
 			let timer: ReturnType<typeof setTimeout>;
 			// Wrap so a normal response / exit-failure also clears the watchdog.
 			const entry = {

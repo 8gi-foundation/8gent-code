@@ -176,7 +176,7 @@ describe("#2807 abandonment at any yield point kills the spawned process", () =>
 describe("#2808 needsInputPattern is guarded against catastrophic backtracking", () => {
 	it("survives a pathological pattern against adversarial output without stalling the run", async () => {
 		const harness = fixtureHarness("redos", {
-			needsInputPattern: new RegExp("(a+)+$", "i"),
+			needsInputPattern: /(a+)+$/i,
 			timeoutMs: 30_000,
 		});
 		const startedAt = Date.now();
