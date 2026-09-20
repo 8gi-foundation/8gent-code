@@ -20,16 +20,26 @@ const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
 export interface FileSenderConfig {
 	token: string;
-	chatId: string;
+	/** Fixed destination. Omit when the destination varies per turn. */
+	chatId?: string;
+	/** Destination resolver, evaluated at send time. See BridgeAdapterConfig. */
+	resolveChatId?: () => string;
 }
 
 export class FileSender {
 	private token: string;
-	private chatId: string;
+	private resolveChat: () => string;
+	private get chatId(): string {
+		return this.resolveChat();
+	}
 
 	constructor(config: FileSenderConfig) {
 		this.token = config.token;
-		this.chatId = config.chatId;
+		if (!config.resolveChatId && config.chatId === undefined) {
+			throw new Error("FileSenderConfig needs chatId or resolveChatId");
+		}
+		const fixed = config.chatId;
+		this.resolveChat = config.resolveChatId ?? (() => fixed as string);
 	}
 
 	/** Send a queued attachment (used by TaskRunner). */
