@@ -1,13 +1,13 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { NextResponse } from "next/server";
+import { resolveHome } from "../../../../../packages/core/home";
 
 export const dynamic = "force-dynamic";
 
-const PROJECT_ROOT = resolve(join(homedir(), "8gent-code"));
+const PROJECT_ROOT = resolve(join(resolveHome(), "8gent-code"));
 
 // Lazy-load the real parser at runtime to avoid Turbopack static analysis
 type ParseResult = {
@@ -178,7 +178,7 @@ function getASTStats(): ASTStats {
 
 // Read session stats from disk
 async function getSessionStats(): Promise<SessionStats> {
-	const sessionsDir = join(homedir(), ".8gent", "sessions");
+	const sessionsDir = join(resolveHome(), ".8gent", "sessions");
 	const stats: SessionStats = {
 		totalSessions: 0,
 		liveSessions: 0,

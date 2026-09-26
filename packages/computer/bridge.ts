@@ -10,6 +10,7 @@
 
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { resolveHome } from "../core/home";
 import * as path from "node:path";
 import { getDriver } from "../hands";
 import type {
@@ -136,7 +137,7 @@ export function click(opts: ClickOptions): CommandResult {
 function emitOverlay(ev: { kind: "click" | "focus"; x: number; y: number; w?: number; h?: number }): void {
 	if (process.env.EIGHT_OVERLAY === "0") return;
 	try {
-		const dir = path.join(os.homedir(), ".8gent");
+		const dir = path.join(resolveHome(), ".8gent");
 		fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(
 			path.join(dir, "overlay.json"),
