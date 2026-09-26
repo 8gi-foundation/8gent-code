@@ -7,7 +7,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import sharp from "sharp";
+import type SharpFn from "sharp";
+
+// Loaded on first use, not at import: sharp's native addon is not embedded by
+// `bun build --compile`, and a top-level import crashed every compiled command
+// (rpc, mcp-server) that merely imports the tool registry.
+let sharpFn: typeof SharpFn | null = null;
+async function loadSharp(): Promise<typeof SharpFn> {
+	if (!sharpFn) sharpFn = (await import("sharp")).default;
+	return sharpFn;
+}
 
 // ============================================
 // Types
@@ -57,7 +66,7 @@ export async function readImage(imagePath: string): Promise<ImageInfo> {
 	}
 
 	// Read the image with sharp
-	const image = sharp(absolutePath);
+	const image = (await loadSharp())(absolutePath);
 	const metadata = await image.metadata();
 	const buffer = await fs.promises.readFile(absolutePath);
 	const base64 = buffer.toString("base64");
@@ -88,7 +97,7 @@ export async function resizeImage(
 		throw new Error(`Image not found: ${absolutePath}`);
 	}
 
-	const image = sharp(absolutePath);
+	const image = (await loadSharp())(absolutePath);
 	const metadata = await image.metadata();
 
 	// Resize if needed, maintaining aspect ratio
@@ -99,7 +108,7 @@ export async function resizeImage(
 		})
 		.toBuffer();
 
-	const resizedMetadata = await sharp(resized).metadata();
+	const resizedMetadata = await (await loadSharp())(resized).metadata();
 	const base64 = resized.toString("base64");
 
 	return {
@@ -229,7 +238,7 @@ export async function getImageMetadata(imagePath: string): Promise<{
 	}
 
 	const stats = fs.statSync(absolutePath);
-	const image = sharp(absolutePath);
+	const image = (await loadSharp())(absolutePath);
 	const metadata = await image.metadata();
 
 	return {
@@ -256,7 +265,7 @@ export async function convertImage(
 		throw new Error(`Image not found: ${absolutePath}`);
 	}
 
-	const image = sharp(absolutePath);
+	const image = (await loadSharp())(absolutePath);
 
 	switch (outputFormat) {
 		case "png":
