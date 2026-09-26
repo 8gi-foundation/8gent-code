@@ -56,6 +56,12 @@ jobs:
         env:
           EIGHT_MAC_SIGN_IDENTITY: ${{ secrets.EIGHT_MAC_SIGN_IDENTITY }}
 
+      # Runs the real commands against the compiled binary (script from #2966).
+      # Source-mode tests cannot see import-time failures that only exist inside
+      # bun build --compile output; v0.17.3 shipped with four of them.
+      - name: Smoke-test the compiled binary
+        run: bash scripts/smoke-compiled.sh dist/bin/8gent-darwin-arm64
+
       - name: Notarize macOS binaries (opt-in)
         if: env.AC_API_KEY_ID != ''
         env:
