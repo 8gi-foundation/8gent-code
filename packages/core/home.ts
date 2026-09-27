@@ -27,8 +27,25 @@ import { homedir as osHomedir } from "node:os";
  * falls back to the registry, so preferring USERPROFILE here matches the
  * current behaviour exactly for every unmodified call site.
  */
+
+/**
+ * The environment variables `resolveHome` consults, declared explicitly so a
+ * caller (and a test) can pass a partial environment without having to fake
+ * the whole of `process.env`. `process.env` satisfies this structurally.
+ */
+export type HomeEnv = {
+  EIGHT_HOME?: string | undefined;
+  USERPROFILE?: string | undefined;
+  HOME?: string | undefined;
+  // The index signature is what makes `process.env` assignable here: it is the
+  // only property TypeScript can match against ProcessEnv's own index
+  // signature. Without it the assignment fails under weak-type detection
+  // (TS2559) even though every declared key is optional.
+  [key: string]: string | undefined;
+};
+
 export function resolveHome(
-  env: NodeJS.ProcessEnv = process.env,
+  env: HomeEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (env.EIGHT_HOME) return env.EIGHT_HOME;
