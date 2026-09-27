@@ -204,14 +204,21 @@ function miniWaveFrame(tick: number): string {
 	}).join("");
 }
 
+/** The DJ command for a Ctrl+Shift+letter, or null for anything else. */
+export function djKey(input: string | undefined): "p" | "n" | "b" | "m" | null {
+	return input === "P" || input === "N" || input === "B" || input === "M"
+		? (input.toLowerCase() as "p" | "n" | "b" | "m")
+		: null;
+}
+
 function ShortcutHintRow({ playing }: { playing: boolean }) {
 	return (
 		<Box justifyContent="space-between" width="100%" overflow="hidden">
-			<Text color={t.muted}>^B prev</Text>
-			<Text color={t.muted}>^P {playing ? "pause" : "play"}</Text>
-			<Text color={t.muted}>^N next</Text>
+			<Text color={t.muted}>^⇧B prev</Text>
+			<Text color={t.muted}>^⇧P {playing ? "pause" : "play"}</Text>
+			<Text color={t.muted}>^⇧N next</Text>
 			<Text color={t.muted}>^⇧↑↓ vol</Text>
-			<Text color={t.muted}>^M mute</Text>
+			<Text color={t.muted}>^⇧M mute</Text>
 		</Box>
 	);
 }
@@ -339,7 +346,13 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 			if (!key.ctrl) return;
 			const dj = djRef.current.instance;
 			if (!dj) return;
-			const k = (input || "").toLowerCase();
+			// Ctrl+P, Ctrl+N, Ctrl+B and Ctrl+M already belong to the app (palette,
+			// Notes, process panel, model picker), and Ink hands every key to every
+			// active useInput, so a plain Ctrl+letter here fired both. The DJ takes
+			// Ctrl+Shift instead. Match the upper-case letter, not key.shift: some
+			// macOS terminals drop the shift flag on ctrl combos but still deliver
+			// the upper-case character.
+			const k = djKey(input);
 			try {
 				if (k === "p") {
 					await dj.pause();
