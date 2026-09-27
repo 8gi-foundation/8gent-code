@@ -19,7 +19,7 @@ import { type ChildProcess, execFileSync, execSync, spawn } from "node:child_pro
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, posix, win32 } from "node:path";
 
 // ---- Platform ----
 const PLATFORM = platform();
@@ -36,7 +36,11 @@ export function mpvIpcPath(
 	pid: number = process.pid,
 ): string {
 	const name = `mpv-8gent-dj-${pid}`;
-	return plat === "win32" ? `\\\\.\\pipe\\${name}` : join(tmp, `${name}.sock`);
+	// Join with the separator of the platform named by `plat`, not the host's:
+	// node:path's join() is host-relative, so on Windows it would emit
+	// backslashes into a unix socket path.
+	const pathOf = plat === "win32" ? win32 : posix;
+	return plat === "win32" ? `\\\\.\\pipe\\${name}` : pathOf.join(tmp, `${name}.sock`);
 }
 
 /** The one-line install hint for the DJ's tools on this platform. */
