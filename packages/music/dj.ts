@@ -15,29 +15,71 @@
  * - Resume across sessions
  */
 
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 // ---- Platform ----
-const IS_MAC = platform() === "darwin";
+const PLATFORM = platform();
 const HOME = homedir();
 const TMP = tmpdir();
-const IPC_PATH = join(TMP, "mpv-8gent-dj.sock");
+
+/**
+ * mpv's IPC endpoint: a named pipe on Windows, a unix socket elsewhere. Keyed by
+ * pid so two 8gent sessions never take over each other's player.
+ */
+export function mpvIpcPath(
+	plat: NodeJS.Platform = PLATFORM,
+	tmp: string = TMP,
+	pid: number = process.pid,
+): string {
+	const name = `mpv-8gent-dj-${pid}`;
+	return plat === "win32" ? `\\\\.\\pipe\\${name}` : join(tmp, `${name}.sock`);
+}
+
+/** The one-line install hint for the DJ's tools on this platform. */
+export function installHint(plat: NodeJS.Platform = PLATFORM): string {
+	if (plat === "win32") return "scoop bucket add extras; scoop install mpv yt-dlp ffmpeg sox";
+	if (plat === "linux") return "sudo apt install mpv yt-dlp ffmpeg sox";
+	return "brew install mpv yt-dlp ffmpeg sox";
+}
+
+/** How to look up a command on PATH without a POSIX shell: where.exe on Windows. */
+export function whichCommand(cmd: string, plat: NodeJS.Platform = PLATFORM): [string, string[]] {
+	return plat === "win32"
+		? ["where.exe", [cmd]]
+		: ["/bin/sh", ["-c", 'command -v "$1"', "sh", cmd]];
+}
+
+/**
+ * The first usable path from a PATH lookup. where.exe lists every match, and a
+ * .cmd or .bat shim cannot be spawned without a shell, so prefer .exe or .com.
+ */
+export function pickResolved(out: string): string | null {
+	const lines = out
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter(Boolean);
+	return lines.find((l) => /\.(exe|com)$/i.test(l)) ?? lines[0] ?? null;
+}
+
+const IPC_PATH = mpvIpcPath();
 const MUSIC_DIR = join(HOME, "Music", "8gent");
 const RESUME_PATH = join(HOME, ".8gent", "dj-resume.json");
 
 // ---- Tool Detection ----
 function which(cmd: string): string | null {
 	try {
-		return (
-			execSync(`command -v "${cmd}" 2>/dev/null`, {
-				encoding: "utf-8",
-				timeout: 3000,
-			}).trim() || null
-		);
+		const [bin, args] = whichCommand(cmd);
+		const out = execFileSync(bin, args, {
+			encoding: "utf-8",
+			timeout: 3000,
+			stdio: ["ignore", "pipe", "ignore"],
+			windowsHide: true,
+		});
+		return pickResolved(out);
 	} catch {
 		return null;
 	}
@@ -67,33 +109,99 @@ function detectTools(): Tools {
 let ipcReady = false;
 
 function mpvIpc(cmd: Record<string, any>): Promise<any> {
+	if (!ipcReady) return Promise.resolve(null);
+	const line = `${JSON.stringify(cmd)}\n`;
+	return typeof Bun !== "undefined" ? mpvIpcBun(line) : mpvIpcNode(line);
+}
+
+/**
+ * Bun's node:net client stops delivering mpv's replies once a stream is
+ * playing (seen on Bun 1.3.14: every query timed out, so the HUD sat at
+ * 0:00 / 0:00). Bun.connect keeps receiving them, so use it under Bun.
+ */
+function mpvIpcBun(line: string): Promise<any> {
 	return new Promise((resolve) => {
-		if (!ipcReady) {
-			resolve(null);
-			return;
-		}
+		let buf = "";
+		let done = false;
+		let sock: { end(): void } | null = null;
+		const finish = (v: any) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			try {
+				sock?.end();
+			} catch {}
+			resolve(v);
+		};
+		const timer = setTimeout(() => finish(null), 1500);
+		Bun.connect({
+			unix: IPC_PATH,
+			socket: {
+				data(_s, d) {
+					buf += d.toString();
+					const reply = parseMpvReply(buf);
+					if (reply.complete) finish(reply.data);
+				},
+				error() {
+					finish(null);
+				},
+				close() {
+					finish(parseMpvReply(buf).data);
+				},
+			},
+		})
+			.then((s) => {
+				sock = s;
+				if (done) s.end();
+				else s.write(line);
+			})
+			.catch(() => finish(null));
+	});
+}
+
+function mpvIpcNode(line: string): Promise<any> {
+	return new Promise((resolve) => {
 		const client = net.createConnection(IPC_PATH);
 		let buf = "";
+		let done = false;
+		const finish = (v: any) => {
+			if (done) return;
+			done = true;
+			client.destroy();
+			resolve(v);
+		};
 		client.setTimeout(1500);
-		client.on("connect", () => client.write(`${JSON.stringify(cmd)}\n`));
+		client.on("connect", () => client.write(line));
+		// mpv keeps the connection open, so answer as soon as the reply line arrives
+		// instead of waiting for a close that never comes.
 		client.on("data", (d) => {
 			buf += d;
+			const reply = parseMpvReply(buf);
+			if (reply.complete) finish(reply.data);
 		});
-		client.on("timeout", () => {
-			client.destroy();
-			resolve(null);
-		});
-		client.on("error", () => resolve(null));
-		client.on("close", () => {
-			try {
-				const lines = buf.trim().split("\n").filter(Boolean);
-				const parsed = JSON.parse(lines[lines.length - 1] || "{}");
-				resolve(parsed.data ?? null);
-			} catch {
-				resolve(null);
-			}
-		});
+		client.on("timeout", () => finish(null));
+		client.on("error", () => finish(null));
+		client.on("close", () => finish(parseMpvReply(buf).data));
 	});
+}
+
+/**
+ * Find mpv's reply in the IPC stream. mpv interleaves event lines
+ * ({"event": ...}) with the reply, which is the line carrying an "error" field.
+ */
+export function parseMpvReply(buf: string): { complete: boolean; data: any } {
+	for (const line of buf.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			const msg = JSON.parse(line);
+			if (msg && typeof msg === "object" && "error" in msg) {
+				return { complete: true, data: msg.error === "success" ? (msg.data ?? null) : null };
+			}
+		} catch {
+			// partial line; wait for more data
+		}
+	}
+	return { complete: false, data: null };
 }
 
 const mpvGet = (p: string) =>
@@ -179,16 +287,16 @@ export class DJ {
 			ytdlp: !!t.ytdlp,
 			ffmpeg: !!t.ffmpeg,
 			sox: !!t.sox,
-			installCmd: "brew install mpv yt-dlp ffmpeg sox",
+			installCmd: installHint(),
 		};
 	}
 
 	/** Play a YouTube video/song by query or URL */
 	async play(queryOrUrl: string): Promise<string> {
 		const t = detectTools();
-		if (!t.mpv) return "mpv not installed. Run: brew install mpv";
+		if (!t.mpv) return `mpv not installed. Run: ${installHint()}`;
 		if (!t.ytdlp && !queryOrUrl.startsWith("http"))
-			return "yt-dlp not installed. Run: brew install yt-dlp";
+			return `yt-dlp not installed. Run: ${installHint()}`;
 
 		let url = queryOrUrl;
 		let title = queryOrUrl;
@@ -196,9 +304,15 @@ export class DJ {
 		// If not a URL, search YouTube
 		if (!queryOrUrl.startsWith("http")) {
 			try {
-				const result = execSync(
-					`${t.ytdlp} --print "%(title)s\t%(webpage_url)s" "ytsearch1:${queryOrUrl.replace(/"/g, '\\"')}" 2>/dev/null`,
-					{ encoding: "utf-8", timeout: 15000 },
+				const result = execFileSync(
+					t.ytdlp!,
+					["--print", "%(title)s\t%(webpage_url)s", `ytsearch1:${queryOrUrl}`],
+					{
+						encoding: "utf-8",
+						timeout: 15000,
+						stdio: ["ignore", "pipe", "ignore"],
+						windowsHide: true,
+					},
 				).trim();
 				const [t2, u] = result.split("\t");
 				if (u) {
@@ -215,7 +329,7 @@ export class DJ {
 		mpvProcess = spawn(
 			t.mpv,
 			["--no-video", "--idle=yes", `--input-ipc-server=${IPC_PATH}`, `--title=${title}`, url],
-			{ stdio: "ignore" },
+			{ stdio: "ignore", windowsHide: true },
 		);
 		mpvProcess.unref();
 
@@ -234,13 +348,14 @@ export class DJ {
 	/** Play internet radio by genre or station name */
 	async radio(query: string): Promise<string> {
 		const t = detectTools();
-		if (!t.mpv) return "mpv not installed. Run: brew install mpv";
+		if (!t.mpv) return `mpv not installed. Run: ${installHint()}`;
 
 		// Direct URL
 		if (query.startsWith("http")) {
 			this.killMpv();
 			mpvProcess = spawn(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query], {
 				stdio: "ignore",
+				windowsHide: true,
 			});
 			mpvProcess.unref();
 			await new Promise((r) => setTimeout(r, 1500));
@@ -268,7 +383,7 @@ export class DJ {
 			mpvProcess = spawn(
 				t.mpv,
 				["--no-video", `--input-ipc-server=${IPC_PATH}`, `--title=${station.name}`, streamUrl],
-				{ stdio: "ignore" },
+				{ stdio: "ignore", windowsHide: true },
 			);
 			mpvProcess.unref();
 			await new Promise((r) => setTimeout(r, 1500));
@@ -356,8 +471,10 @@ export class DJ {
 
 		try {
 			const outPath = join(MUSIC_DIR, "%(title)s.%(ext)s");
-			execSync(`${t.ytdlp} -x --audio-format mp3 -o "${outPath}" "${url}" 2>&1`, {
+			execFileSync(t.ytdlp, ["-x", "--audio-format", "mp3", "-o", outPath, url], {
 				timeout: 60000,
+				stdio: "ignore",
+				windowsHide: true,
 			});
 			return `Downloaded to ${MUSIC_DIR}`;
 		} catch (err) {
@@ -370,6 +487,8 @@ export class DJ {
 		const t = detectTools();
 		if (!t.sox) return "sox not installed.";
 		if (!existsSync(filePath)) return `File not found: ${filePath}`;
+		if (PLATFORM === "win32")
+			return "BPM detection needs a POSIX shell and is not available on Windows yet.";
 
 		try {
 			// Use sox + ffmpeg to estimate BPM via onset detection
@@ -401,11 +520,21 @@ export class DJ {
 
 		const outPath = join(MUSIC_DIR, `mix-${Date.now()}.mp3`);
 		try {
-			execSync(
-				`${t.ffmpeg} -y -i "${fileA}" -i "${fileB}" -filter_complex ` +
-					`"[0:a]afade=t=out:st=0:d=${crossfadeSec}[a0];[1:a]afade=t=in:st=0:d=${crossfadeSec}[a1];[a0][a1]acrossfade=d=${crossfadeSec}[out]" ` +
-					`-map "[out]" "${outPath}" 2>/dev/null`,
-				{ timeout: 60000 },
+			execFileSync(
+				t.ffmpeg,
+				[
+					"-y",
+					"-i",
+					fileA,
+					"-i",
+					fileB,
+					"-filter_complex",
+					`[0:a]afade=t=out:st=0:d=${crossfadeSec}[a0];[1:a]afade=t=in:st=0:d=${crossfadeSec}[a1];[a0][a1]acrossfade=d=${crossfadeSec}[out]`,
+					"-map",
+					"[out]",
+					outPath,
+				],
+				{ timeout: 60000, stdio: "ignore", windowsHide: true },
 			);
 			return `Mixed: ${outPath}`;
 		} catch {
