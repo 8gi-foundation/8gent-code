@@ -40,7 +40,7 @@ const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
 
 // Walk up from MODULE_DIR to find the source tree root. When installed via
 // npm we only ship `dist/cli.js` + `dist/tui.js`, so packages/apps/
-// scripts don't exist alongside the bundle — `repoRoot()` returns null in
+// scripts don't exist alongside the bundle, so `repoRoot()` returns null in
 // that case, and always in a compiled binary, where there is no source tree
 // to find relative to a virtual module path. Dev-only commands then print a
 // clear error instead of trying to spawn a missing file with a Windows path
@@ -1197,12 +1197,12 @@ async function tuiCommand(args: string[]) {
 /**
  * Find the TUI entry, trying each layout the tool can be installed in:
  *
- *   1. `tui.js` next to this module — the npm/bundled layout, where it ships
+ *   1. `tui.js` next to this module: the npm/bundled layout, where it ships
  *      as `dist/tui.js` beside `dist/cli.js`.
- *   2. `tui.js` next to the executable — the `bun build --compile` layout. The
+ *   2. `tui.js` next to the executable: the `bun build --compile` layout. The
  *      module path is virtual there (see MODULE_IS_EMBEDDED), so the copy the
  *      installer placed next to the binary is the one that must be picked up.
- *   3. `apps/tui/src/index.tsx` — running from a git checkout.
+ *   3. `apps/tui/src/index.tsx`: running from a git checkout.
  *
  * Returns null when none exists so the caller can print a clear error instead
  * of spawning bun against a phantom path.
