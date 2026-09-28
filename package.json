@@ -45,6 +45,7 @@
     "postinstall": "node scripts/postinstall.js",
     "test": "bun test packages/ apps/",
     "test:benchmarks": "bun test benchmarks/",
+    "test:security": "bun test tests/security",
     "test:models": "bun scripts/test-models.ts",
     "test:models:providers": "bun scripts/test-models.ts --providers",
     "cua:setup": "bun run packages/eight/scripts/cua-setup.ts",
