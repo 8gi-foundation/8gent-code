@@ -45,7 +45,16 @@ export {
 	scoreLabels,
 } from "./backends/ollama";
 export { detectBackend, pickModel, MODEL_PREFERENCE, type ProbeResult } from "./probe";
-export { bashGuard, BASH_GUARD_QUESTION, type BashGuardOptions, type BashGuardResult } from "./guard";
+export {
+	bashGuard,
+	guardState,
+	promptControlText,
+	stripShellComments,
+	PROMPT_CONTROL_PATTERNS,
+	BASH_GUARD_QUESTION,
+	type BashGuardOptions,
+	type BashGuardResult,
+} from "./guard";
 
 export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock";
 

@@ -968,6 +968,9 @@ const backgroundStart = tool({
 		timeout: z.number().optional().describe("Timeout in milliseconds"),
 	}),
 	execute: async ({ command, timeout }) => {
+		const { systemOneGate } = await import("../permissions/system-one-gate");
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
 			const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
@@ -1045,6 +1048,12 @@ async function runShellCommand(command: string): Promise<string> {
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
+
+	// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after the
+	// permission check. It can only stop a command, never allow one.
+	const { systemOneGate } = await import("../permissions/system-one-gate");
+	const systemOne = await systemOneGate(command);
+	if (!systemOne.run) return systemOne.message as string;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
@@ -1208,6 +1217,12 @@ const spawnAgent = tool({
 			const effectiveRuntime = runtime || "8gent";
 
 			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+				// runtime "shell" runs the task through sh -c, so it is a shell command.
+				if (effectiveRuntime === "shell") {
+					const { systemOneGate } = await import("../permissions/system-one-gate");
+					const systemOne = await systemOneGate(task);
+					if (!systemOne.run) return systemOne.message as string;
+				}
 				const { spawnCLIAgent } = await import("../orchestration");
 				const agent = spawnCLIAgent(effectiveRuntime, task, {
 					workingDirectory: _ctx.workingDirectory,
