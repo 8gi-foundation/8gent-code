@@ -5,7 +5,7 @@
 	"main": "index.ts",
 	"scripts": {
 		"start": "bun run index.ts",
-		"install-service": "bun run service.ts install",
-		"uninstall-service": "bun run service.ts uninstall"
+		"install-service": "bun run ../../bin/8gent.ts daemon install",
+		"uninstall-service": "bun run ../../bin/8gent.ts daemon uninstall"
 	}
 }
