@@ -5172,24 +5172,21 @@ export function App({
 					}
 				}
 			} else {
-				// Mock mode (per tab)
-				setTimeout(
-					() => {
-						appendToTab(tabId, {
-							id: `assistant-${Date.now()}`,
-							role: "assistant" as const,
-							content: generateResponse(messageForAgent),
-							timestamp: new Date(),
-						});
-						if (tabId === activeTabId) {
-							setLastResponseTime(Date.now() - cmdStartTime);
-							setStatus("success");
-							if (soundEnabled) playSound("success");
-							setTimeout(() => setStatus("idle"), 1500);
-						}
-					},
-					800 + Math.random() * 400,
-				);
+				// No agent is ready for this tab. Say so plainly: nothing ran. This
+				// branch used to print a random canned "Task complete" with invented
+				// numbers (files analyzed, tokens saved), which reads as real work.
+				appendToTab(tabId, {
+					id: `system-agent-not-ready-${Date.now()}`,
+					role: "system" as const,
+					content:
+						`[Agent not ready] Nothing was run. The agent for this tab has not finished starting (model: ${currentModel}).\n` +
+						"Wait a moment and send again, or check the provider with /provider.",
+					timestamp: new Date(),
+				});
+				if (tabId === activeTabId) {
+					setStatus("error");
+					setTimeout(() => setStatus("idle"), 3000);
+				}
 			}
 
 			perTabAgents.setTabProcessing(tabId, false);
@@ -5934,32 +5931,3 @@ export function App({
 	);
 }
 
-// Personality completion phrases
-const COMPLETION_PHRASES = [
-	"Splendid. Task complete.",
-	"Another victory for elegant code.",
-	"Infinity achieved, as always.",
-	"The gentleman delivers.",
-	"Perfection, if I do say so myself.",
-	"Consider it done. Magnificently.",
-	"Executed with characteristic grace.",
-	"As expected, excellence prevails.",
-];
-
-// Generate a mock response with personality flavor (replace with actual agent logic)
-function generateResponse(input: string): string {
-	const completionPhrase =
-		COMPLETION_PHRASES[Math.floor(Math.random() * COMPLETION_PHRASES.length)];
-
-	const responses = [
-		`[\u221E 8gent] Processing: "${input}"\n\n\u2713 Toolshed query complete\n\u2713 AST retrieval: 3 files analyzed\n\u2713 Context compression: 42% tokens saved\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Analyzing request...\n\n\u25B8 Planner: Identified 2 subtasks\n\u25B8 Toolshed: Found 5 relevant symbols\n\u25B8 Execution: Preparing changes\n\nAST-first approach saved 1,247 tokens.\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Query understood.\n\n\`\`\`typescript\n// Extracted context\nfunction processRequest(input: string) {\n  return analyze(input);\n}\n\`\`\`\n\nToken efficiency: 38% improvement over raw context.\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Task complete.\n\n\u2022 Files analyzed: 7\n\u2022 Symbols extracted: 23\n\u2022 Context size: 2.1k tokens (vs 5.8k raw)\n\u2022 Savings: 64%\n\nStructured agentic development in action.\n\n${completionPhrase}`,
-	];
-
-	return responses[Math.floor(Math.random() * responses.length)];
-}
