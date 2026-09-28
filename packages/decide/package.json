@@ -1,0 +1,23 @@
+{
+	"name": "@8gent/decide",
+	"version": "0.17.3",
+	"private": true,
+	"type": "module",
+	"description": "Eight System One: local decision engine. Typed questions in, calibrated probabilities out; code owns thresholds.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"eval": "bun eval/run.ts"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}
