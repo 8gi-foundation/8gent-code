@@ -189,6 +189,7 @@ import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
 } from "../../../packages/permissions/tui-approval-channel.js";
+import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -1893,6 +1894,22 @@ export function App({
 			},
 		]);
 	}, []);
+
+	// System One (EIGHT_SYSTEM_ONE=1): load the judge in the background at
+	// startup so the user's first shell command is not the one that waits for
+	// the model load. Flag off: startSystemOneWarmup returns null, nothing loads.
+	useEffect(() => {
+		const warmup = startSystemOneWarmup();
+		if (!warmup) return;
+		addSystemMessage("System One judge loading...");
+		warmup.then(
+			() => addSystemMessage("System One judge ready."),
+			(err: Error) =>
+				addSystemMessage(
+					`System One judge failed to load (${err?.message ?? err}). Shell commands fail closed until it loads.`,
+				),
+		);
+	}, [addSystemMessage]);
 
 	/**
 	 * Append a message to a specific tab's history. Always updates

@@ -21,7 +21,15 @@
  *   timeout  -> block (fail closed): no verdict within the time budget
  *               (30 s until the first answer, then 10 s; env
  *               EIGHT_SYSTEM_ONE_TIMEOUT_MS overrides). The escalate prompt
- *               to a human is outside the budget.
+ *               to a human is outside the budget. If the judge is still
+ *               loading (warm-up in flight) when the budget runs out, the
+ *               message says so and asks to retry in a few seconds.
+ *
+ * Warm-up: `startSystemOneWarmup` (called at TUI and Agent startup) builds the
+ * decider and asks the judge one throwaway question in the background, so the
+ * model load does not land on the user's first command. A gate call that
+ * arrives during warm-up waits for it inside its own budget. Flag off: it
+ * returns null and imports nothing.
  *
  * Escalate deliberately does NOT go through PermissionManager.requestPermission:
  * that method auto-approves in infinite mode, with autoApprove, for allow-listed
@@ -118,6 +126,12 @@ let overrides: Overrides = {};
 let deciderPromise: Promise<Decider> | null = null;
 /** True once the decider has returned a verdict in this process (switches to the warm timeout). */
 let warmed = false;
+/** The in-flight or finished background warm-up, null when none was started (or it failed). */
+let warmupPromise: Promise<void> | null = null;
+/** True while the warm-up is running (the judge is still loading). */
+let warmupLoading = false;
+/** Bumped on test reset so a stale warm-up from an earlier test cannot touch the new state. */
+let generation = 0;
 const thresholdCache = new Map<string, { opts: BashGuardOptions; label: SystemOneThresholds }>();
 
 /** Test-only: inject a decider factory / human prompt and drop the process decider. */
@@ -125,6 +139,9 @@ export function _setSystemOneOverridesForTests(next: Overrides): void {
 	overrides = next;
 	deciderPromise = null;
 	warmed = false;
+	warmupPromise = null;
+	warmupLoading = false;
+	generation++;
 	thresholdCache.clear();
 }
 
@@ -169,6 +186,49 @@ async function thresholdsFor(
 	return entry;
 }
 
+function isModelVerdict(g: BashGuardResult): boolean {
+	return g.backend !== "unavailable" && g.backend !== "rule" && g.backend !== "rules";
+}
+
+/** The command the warm-up asks about. Harmless and never run. */
+export const SYSTEM_ONE_WARMUP_COMMAND = "echo warmup";
+
+/**
+ * Start loading the judge in the background: build the decider, look up its
+ * thresholds and ask one throwaway question, so the model load happens before
+ * the user's first command instead of inside it. Idempotent: returns the same
+ * promise while it runs or after it succeeded. Flag off: returns null without
+ * importing @8gent/decide. The promise rejects if the load fails; a failed
+ * warm-up does not stick (the next gate call retries construction).
+ */
+export function startSystemOneWarmup(
+	env: Record<string, string | undefined> = process.env,
+): Promise<void> | null {
+	if (!systemOneEnabled(env)) return null;
+	if (warmupPromise) return warmupPromise;
+	const gen = generation;
+	warmupLoading = true;
+	const p = (async () => {
+		const decider = await getDecider();
+		const t = await thresholdsFor(decider);
+		const { bashGuard } = await import("../decide/guard");
+		const g = await bashGuard(SYSTEM_ONE_WARMUP_COMMAND, decider, t.opts);
+		if (gen === generation && isModelVerdict(g)) warmed = true;
+	})();
+	warmupPromise = p;
+	p.then(
+		() => {
+			if (gen === generation) warmupLoading = false;
+		},
+		() => {
+			if (gen !== generation) return;
+			warmupLoading = false;
+			warmupPromise = null;
+		},
+	);
+	return p;
+}
+
 function fmtP(p: number): string {
 	return Number.isFinite(p) ? p.toFixed(4) : "NaN";
 }
@@ -211,9 +271,12 @@ export async function systemOneGate(
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";
 	const ms = systemOneTimeoutMs(env);
+	// A warm-up in flight owns the model load; wait for it inside this budget.
+	const warmup = warmupLoading ? warmupPromise : null;
 	try {
 		guard = await withTimeout(
 			(async () => {
+				if (warmup) await warmup.catch(() => {});
 				const decider = await getDecider();
 				const t = await thresholdsFor(decider);
 				thresholds = t.label;
@@ -227,11 +290,13 @@ export async function systemOneGate(
 		const detail = (err as Error)?.message ?? String(err);
 		const why =
 			err instanceof SystemOneTimeoutError
-				? `System One ${detail}`
+				? warmupLoading
+					? `the System One judge is still loading (warm-up in progress, not ready within ${ms} ms), failing closed; retry in a few seconds`
+					: `System One ${detail}`
 				: `System One unavailable, failing closed: ${detail}`;
 		return { run: false, guard, message: blockMessage(guard, thresholds, why, command) };
 	}
-	if (guard.backend !== "unavailable" && guard.backend !== "rule" && guard.backend !== "rules") warmed = true;
+	if (isModelVerdict(guard)) warmed = true;
 	const t = thresholds as SystemOneThresholds;
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
