@@ -44,7 +44,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-	clearIndex(path.basename(root));
+	clearIndex(root);
 	fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -97,6 +97,30 @@ describe("get_outline / get_symbol", () => {
 		expect((await search("afterEdit"))[0]?.name).toBe("afterEdit");
 	});
 
+	test("search sees a symbol added to a file that was never a hit, with no get_outline first", async () => {
+		write("z/quiet.ts", "export function quietOne() {}\n");
+		expect((await search("quietOne"))[0]?.name).toBe("quietOne");
+		write("z/quiet.ts", "export function quietOne() {}\nexport function loudTwo() {}\n");
+		const future = new Date(Date.now() + 120_000);
+		fs.utimesSync(path.join(root, "z/quiet.ts"), future, future);
+		expect(await search("loudTwo")).toEqual([
+			{ name: "loudTwo", kind: "function", file: path.join("z", "quiet.ts"), line: 2 },
+		]);
+	});
+
+	test("search finds a file created after the build, and forgets a deleted one", async () => {
+		write("made/new.ts", "export function delta() {}\n");
+		expect(await search("delta")).toEqual([
+			{ name: "delta", kind: "function", file: path.join("made", "new.ts"), line: 1 },
+		]);
+		fs.rmSync(path.join(root, "made/new.ts"));
+		expect(await search("delta")).toEqual([]);
+	});
+
+	test("a blank query returns no matches", async () => {
+		expect(await search(" ")).toEqual([]);
+	});
+
 	test("a file created after the build falls back to parsing", async () => {
 		write("late.ts", "export class LateComer {}\n");
 		const out = JSON.parse(await executor.execute("get_outline", { filePath: "late.ts" }));
@@ -109,5 +133,54 @@ describe("get_outline / get_symbol", () => {
 		expect(await executor.execute("get_outline", { filePath: "nope.ts" })).toContain(
 			"File not found",
 		);
+	});
+});
+
+describe("isolation and non-TS repos", () => {
+	test("executors on two folders with the same basename each read their own repo", async () => {
+		const base = fs.mkdtempSync(path.join(os.tmpdir(), "tools-ast-twins-"));
+		const a = path.join(base, "a", "app");
+		const b = path.join(base, "b", "app");
+		fs.mkdirSync(a, { recursive: true });
+		fs.mkdirSync(b, { recursive: true });
+		fs.writeFileSync(path.join(a, "x.ts"), "export function alpha() {}\n");
+		fs.writeFileSync(
+			path.join(b, "x.ts"),
+			"\n\nexport function beta() {}\nexport function gamma() {}\n",
+		);
+		try {
+			const ea = new ToolExecutor(a);
+			const eb = new ToolExecutor(b);
+			await Promise.all([ensureIndexed(a), ensureIndexed(b)]);
+			const outA = JSON.parse(await ea.execute("get_outline", { filePath: "x.ts" }));
+			expect(outA.symbols.map((s: { name: string }) => s.name)).toEqual(["alpha"]);
+			const symA = await ea.execute("get_symbol", { symbolId: "x.ts::alpha" });
+			expect(symA).toContain("// Lines 1-1");
+			expect(symA).toContain("export function alpha()");
+			const find = async (e: ToolExecutor, q: string) =>
+				(JSON.parse(await e.execute("search_symbols", { query: q })) as { matches: Match[] })
+					.matches;
+			expect((await find(ea, "alpha")).map((m) => m.file)).toEqual(["x.ts"]);
+			expect(await find(ea, "beta")).toEqual([]);
+			expect((await find(eb, "beta")).map((m) => m.file)).toEqual(["x.ts"]);
+			clearIndex(a);
+			clearIndex(b);
+		} finally {
+			fs.rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	test("a repo with no TS/JS files answers search with no matches, not an error", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tools-ast-py-"));
+		fs.writeFileSync(path.join(dir, "main.py"), "def py_only():\n    pass\n");
+		try {
+			const e = new ToolExecutor(dir);
+			await ensureIndexed(dir);
+			const out = JSON.parse(await e.execute("search_symbols", { query: "py_only" }));
+			expect(out).toEqual({ query: "py_only", matches: [] });
+			clearIndex(dir);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

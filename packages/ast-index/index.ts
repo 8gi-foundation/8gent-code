@@ -55,8 +55,38 @@ const sharedBuilds: Map<string, { promise: Promise<RepoIndex>; index: RepoIndex 
 // Core API
 // ============================================
 
+const DEFAULT_IGNORE = ["node_modules", "dist", ".git", ".next", "coverage"];
+const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx)$/;
+/** Files parsed between yields to the event loop during a build. */
+const YIELD_EVERY = 50;
+/** Ignore patterns each repo was built with, so a refresh walks the same tree. */
+const repoIgnores: Map<string, string[]> = new Map();
+
+/** Every indexable source file under `root`, skipping ignored and dot entries. */
+function listSourceFiles(root: string, ignorePatterns: string[]): string[] {
+	const files: string[] = [];
+	function walkDirectory(dir: string): void {
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (ignorePatterns.some((p) => entry.name === p || entry.name.startsWith("."))) continue;
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				walkDirectory(fullPath);
+			} else if (SOURCE_FILE_RE.test(entry.name)) {
+				files.push(fullPath);
+			}
+		}
+	}
+	walkDirectory(root);
+	return files;
+}
+
 /**
- * Index a local folder
+ * Index a local folder.
+ *
+ * The repo id is the folder's resolved absolute path, so two folders that
+ * share a basename never overwrite each other. The build yields to the event
+ * loop every few files, so a caller that fires it and moves on is not blocked.
  */
 export async function indexFolder(
 	folderPath: string,
@@ -66,36 +96,19 @@ export async function indexFolder(
 	},
 ): Promise<RepoIndex> {
 	const absolutePath = path.resolve(folderPath);
-	const repoId = path.basename(absolutePath);
-	const ignorePatterns = options?.ignorePatterns ?? [
-		"node_modules",
-		"dist",
-		".git",
-		".next",
-		"coverage",
-	];
+	const repoId = absolutePath;
+	const ignorePatterns = options?.ignorePatterns ?? DEFAULT_IGNORE;
 
-	const files: string[] = [];
-	function walkDirectory(dir: string): void {
-		const entries = fs.readdirSync(dir, { withFileTypes: true });
-		for (const entry of entries) {
-			if (ignorePatterns.some((p) => entry.name === p || entry.name.startsWith("."))) continue;
-			const fullPath = path.join(dir, entry.name);
-			if (entry.isDirectory()) {
-				walkDirectory(fullPath);
-			} else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-				files.push(fullPath);
-			}
-		}
-	}
-	walkDirectory(absolutePath);
+	const files = listSourceFiles(absolutePath, ignorePatterns);
 
 	const repoSymbolMap = new Map<string, Symbol>();
 	const repoFileOutlines = new Map<string, FileOutline>();
 	const repoFileMtimes = new Map<string, number>();
 	const languages: Record<string, number> = {};
 
-	for (const file of files) {
+	for (let i = 0; i < files.length; i++) {
+		if (i > 0 && i % YIELD_EVERY === 0) await new Promise((r) => setImmediate(r));
+		const file = files[i];
 		try {
 			const mtimeMs = fs.statSync(file).mtimeMs;
 			const outline = parseTypeScriptFile(file);
@@ -127,8 +140,71 @@ export async function indexFolder(
 	symbolMaps.set(repoId, repoSymbolMap);
 	fileOutlines.set(repoId, repoFileOutlines);
 	fileMtimes.set(repoId, repoFileMtimes);
+	repoIgnores.set(repoId, ignorePatterns);
 
 	return repoIndex;
+}
+
+/**
+ * Bring a built index up to date with disk: parse files created or modified
+ * since they were indexed, and drop files that were deleted. One readdir and
+ * one stat per file, so it is cheap enough to run before every search.
+ * Returns what changed, or null when the repo is not indexed.
+ */
+export function refreshIndex(
+	repoId: string,
+): { added: number; changed: number; removed: number } | null {
+	const repo = repoIndices.get(repoId);
+	const outlines = fileOutlines.get(repoId);
+	const mtimes = fileMtimes.get(repoId);
+	const symbols = symbolMaps.get(repoId);
+	if (!repo || !outlines || !mtimes || !symbols) return null;
+
+	const counts = { added: 0, changed: 0, removed: 0 };
+	let files: string[];
+	try {
+		files = listSourceFiles(repo.sourceRoot, repoIgnores.get(repoId) ?? DEFAULT_IGNORE);
+	} catch {
+		return counts;
+	}
+
+	const seen = new Set<string>();
+	for (const file of files) {
+		const rel = path.relative(repo.sourceRoot, file);
+		seen.add(rel);
+		let mtimeMs: number;
+		try {
+			mtimeMs = fs.statSync(file).mtimeMs;
+		} catch {
+			continue;
+		}
+		if (mtimes.get(rel) === mtimeMs) continue;
+		const current = outlines.get(rel);
+		let next: FileOutline;
+		try {
+			next = parseTypeScriptFile(file);
+		} catch {
+			if (current) {
+				dropFile(repo, outlines, mtimes, symbols, rel, current);
+				counts.removed++;
+			}
+			continue;
+		}
+		if (current) for (const s of current.symbols) symbols.delete(s.id);
+		for (const s of next.symbols) symbols.set(s.id, s);
+		outlines.set(rel, next);
+		mtimes.set(rel, mtimeMs);
+		if (current) counts.changed++;
+		else counts.added++;
+	}
+	for (const [rel, current] of outlines) {
+		if (seen.has(rel)) continue;
+		dropFile(repo, outlines, mtimes, symbols, rel, current);
+		counts.removed++;
+	}
+	repo.fileCount = outlines.size;
+	repo.symbolCount = symbols.size;
+	return counts;
 }
 
 /**
@@ -243,7 +319,9 @@ export function searchSymbols(
 	options?: SearchSymbolsOptions,
 ): Symbol[] {
 	const repo = symbolMaps.get(repoId);
-	if (!repo || !query) return [];
+	query = query?.trim() ?? "";
+	// A query with no identifier character (blank, punctuation) names no symbol.
+	if (!repo || !/[\p{L}\p{N}_$]/u.test(query)) return [];
 
 	const limit = options?.limit || 20;
 	const kinds = options?.kinds;
@@ -256,7 +334,7 @@ export function searchSymbols(
 		if (kinds && !kinds.includes(symbol.kind)) continue;
 		if (pattern && !pattern.test(symbol.filePath)) continue;
 
-		let tier: number | null = matchTier(symbol.name, query);
+		let tier: number | null = matchTier(symbol.name, query, queryLower);
 		if (tier === null && matchSignature) {
 			const sigMatch = symbol.signature?.toLowerCase().includes(queryLower);
 			const sumMatch = symbol.summary?.toLowerCase().includes(queryLower);
@@ -380,6 +458,7 @@ export function clearIndex(repoId: string): boolean {
 	symbolMaps.delete(repoId);
 	fileOutlines.delete(repoId);
 	fileMtimes.delete(repoId);
+	repoIgnores.delete(repoId);
 	return had;
 }
 

@@ -13,6 +13,7 @@ import {
 	ensureIndexed,
 	getFreshFileOutline,
 	indexFolder,
+	refreshIndex,
 	searchSymbols,
 } from "./index";
 import { camelTokens, matchTier } from "./rank";
@@ -197,5 +198,121 @@ describe("getFreshFileOutline", () => {
 		fs.rmSync(path.join(root, rel));
 		expect(getFreshFileOutline(repoId, rel)).toBeNull();
 		expect(searchSymbols(repoId, "holder")).toEqual([]);
+	});
+});
+
+describe("query hygiene", () => {
+	test("a blank or punctuation-only query matches nothing", () => {
+		expect(searchSymbols(repoId, " ")).toEqual([]);
+		expect(searchSymbols(repoId, "\t\n")).toEqual([]);
+		expect(searchSymbols(repoId, "(")).toEqual([]);
+		expect(searchSymbols(repoId, ": ")).toEqual([]);
+	});
+
+	test("surrounding whitespace is ignored", () => {
+		expect(searchSymbols(repoId, "  parse  ")[0]?.name).toBe("parse");
+	});
+});
+
+describe("repo identity", () => {
+	test("two folders with the same basename are separate indexes", async () => {
+		const base = fs.mkdtempSync(path.join(os.tmpdir(), "ast-index-twins-"));
+		const a = path.join(base, "a", "app");
+		const b = path.join(base, "b", "app");
+		fs.mkdirSync(a, { recursive: true });
+		fs.mkdirSync(b, { recursive: true });
+		fs.writeFileSync(path.join(a, "x.ts"), "export function alpha() {}\n");
+		fs.writeFileSync(
+			path.join(b, "x.ts"),
+			"\nexport function beta() {}\nexport function gamma() {}\n",
+		);
+		try {
+			const ia = await ensureIndexed(a);
+			const ib = await ensureIndexed(b);
+			expect(ia.id).not.toBe(ib.id);
+			expect(ia.sourceRoot).toBe(a);
+			expect(searchSymbols(ia.id, "alpha").map((s) => s.filePath)).toEqual([path.join(a, "x.ts")]);
+			expect(searchSymbols(ia.id, "beta")).toEqual([]);
+			expect(searchSymbols(ib.id, "beta").map((s) => s.filePath)).toEqual([path.join(b, "x.ts")]);
+			expect(getFreshFileOutline(ia.id, "x.ts")?.symbols.map((s) => s.name)).toEqual(["alpha"]);
+			// Building B did not evict A, so A is not rebuilt.
+			expect(await ensureIndexed(a)).toBe(ia);
+			clearIndex(ia.id);
+			clearIndex(ib.id);
+		} finally {
+			fs.rmSync(base, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("refreshIndex", () => {
+	test("picks up created, changed and deleted files", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ast-index-refresh-"));
+		fs.writeFileSync(path.join(dir, "keep.ts"), "export function keepMe() {}\n");
+		fs.writeFileSync(path.join(dir, "gone.ts"), "export function goneSoon() {}\n");
+		fs.mkdirSync(path.join(dir, "node_modules"));
+		try {
+			const index = await indexFolder(dir);
+			fs.writeFileSync(
+				path.join(dir, "keep.ts"),
+				"export function keepMe() {}\nexport function grewHere() {}\n",
+			);
+			const future = new Date(Date.now() + 60_000);
+			fs.utimesSync(path.join(dir, "keep.ts"), future, future);
+			fs.writeFileSync(path.join(dir, "fresh.ts"), "export function brandNew() {}\n");
+			fs.writeFileSync(
+				path.join(dir, "node_modules", "dep.ts"),
+				"export function ignoredDep() {}\n",
+			);
+			fs.rmSync(path.join(dir, "gone.ts"));
+
+			expect(refreshIndex(index.id)).toEqual({ added: 1, changed: 1, removed: 1 });
+			expect(searchSymbols(index.id, "brandNew")).toHaveLength(1);
+			expect(searchSymbols(index.id, "grewHere")).toHaveLength(1);
+			expect(searchSymbols(index.id, "goneSoon")).toEqual([]);
+			expect(searchSymbols(index.id, "ignoredDep")).toEqual([]);
+			expect(index.fileCount).toBe(2);
+			expect(index.symbolCount).toBe(3);
+			// Nothing changed since: a second pass is a no-op.
+			expect(refreshIndex(index.id)).toEqual({ added: 0, changed: 0, removed: 0 });
+			expect(refreshIndex("no-such-repo")).toBeNull();
+			clearIndex(index.id);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("indexFolder", () => {
+	test("yields to the event loop while building", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ast-index-yield-"));
+		for (let i = 0; i < 120; i++) {
+			fs.writeFileSync(path.join(dir, `f${i}.ts`), `export function f${i}() {}\n`);
+		}
+		try {
+			let ticked = false;
+			setImmediate(() => {
+				ticked = true;
+			});
+			const index = await indexFolder(dir);
+			expect(ticked).toBe(true);
+			expect(index.symbolCount).toBe(120);
+			clearIndex(index.id);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a folder with no TypeScript or JavaScript indexes to zero symbols", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ast-index-py-"));
+		fs.writeFileSync(path.join(dir, "main.py"), "def py_only():\n    pass\n");
+		try {
+			const index = await indexFolder(dir);
+			expect(index.symbolCount).toBe(0);
+			expect(searchSymbols(index.id, "py_only")).toEqual([]);
+			clearIndex(index.id);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

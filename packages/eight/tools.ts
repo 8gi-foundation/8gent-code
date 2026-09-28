@@ -17,6 +17,7 @@ import {
 	getFileTree as astGetFileTree,
 	getFreshFileOutline as astGetFreshFileOutline,
 	listRepos as astListRepos,
+	refreshIndex as astRefreshIndex,
 	searchSymbols as astSearchSymbols,
 } from "../ast-index";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
@@ -299,9 +300,11 @@ export class ToolExecutor {
 		// sessionId to thread it through to disk for later inspection.
 		this.artifactStore = new ArtifactStore(sessionId ?? `${agentId}-${process.pid}`);
 
-		// Fire-and-forget AST indexing of the working directory. ensureIndexed
-		// shares one build per folder per process, so the agent and every
-		// executor on the same directory reuse it instead of re-indexing.
+		// Background AST indexing of the working directory. The build yields to
+		// the event loop between batches of files, so the constructor returns
+		// at once. ensureIndexed shares one build per folder per process, keyed
+		// by absolute path, so the agent and every executor on the same
+		// directory reuse it instead of re-indexing.
 		this.astIndexPromise = astEnsureIndexed(this.workingDirectory)
 			.then((index) => {
 				this.astIndexReady = true;
@@ -1666,23 +1669,14 @@ export class ToolExecutor {
 		}
 
 		const repoId = this.astRepoId;
-		const opts = { kinds: kinds?.length ? kinds : undefined, limit: 20 };
-		let hits = astSearchSymbols(repoId, query, opts);
-		// Files edited since the build: refresh the hit files, and if any of
-		// them changed, rank again so line numbers and names are current.
-		const before = new Map(
-			hits.map((h) => [
-				h.filePath,
-				astGetFileOutline(repoId, path.relative(this.workingDirectory, h.filePath)),
-			]),
-		);
-		let changed = false;
-		for (const [file, outline] of before) {
-			if (astGetFreshFileOutline(repoId, path.relative(this.workingDirectory, file)) !== outline) {
-				changed = true;
-			}
-		}
-		if (changed) hits = astSearchSymbols(repoId, query, opts);
+		// Pick up files created, edited or deleted since the build (by any
+		// tool, shell or editor) before ranking: one stat per file, no re-parse
+		// unless the mtime moved.
+		astRefreshIndex(repoId);
+		const hits = astSearchSymbols(repoId, query, {
+			kinds: kinds?.length ? kinds : undefined,
+			limit: 20,
+		});
 
 		const matches = hits.map((symbol) => ({
 			name: symbol.name,

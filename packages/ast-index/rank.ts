@@ -27,11 +27,18 @@ function tokenStarts(name: string): number[] {
 	return starts;
 }
 
-/** Tier of `query` against `name`, or null when the name does not contain it. */
-export function matchTier(name: string, query: string): MatchTier | null {
+/**
+ * Tier of `query` against `name`, or null when the name does not contain it.
+ * Callers ranking many names pass `queryLower` so the query is lowered once.
+ */
+export function matchTier(
+	name: string,
+	query: string,
+	queryLower = query.toLowerCase(),
+): MatchTier | null {
 	if (!query) return null;
 	const n = name.toLowerCase();
-	const q = query.toLowerCase();
+	const q = queryLower;
 	if (n === q) return 0;
 	if (n.startsWith(q)) return 1;
 	if (!n.includes(q)) return null;
