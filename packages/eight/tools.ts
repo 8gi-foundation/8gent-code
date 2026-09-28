@@ -10,11 +10,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import {
+	type FileOutline,
 	type RepoIndex,
+	ensureIndexed as astEnsureIndexed,
 	getFileOutline as astGetFileOutline,
 	getFileTree as astGetFileTree,
-	indexFolder as astIndexFolder,
+	getFreshFileOutline as astGetFreshFileOutline,
 	listRepos as astListRepos,
+	searchSymbols as astSearchSymbols,
 } from "../ast-index";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
@@ -296,8 +299,10 @@ export class ToolExecutor {
 		// sessionId to thread it through to disk for later inspection.
 		this.artifactStore = new ArtifactStore(sessionId ?? `${agentId}-${process.pid}`);
 
-		// Fire-and-forget AST indexing of the working directory
-		this.astIndexPromise = astIndexFolder(this.workingDirectory)
+		// Fire-and-forget AST indexing of the working directory. ensureIndexed
+		// shares one build per folder per process, so the agent and every
+		// executor on the same directory reuse it instead of re-indexing.
+		this.astIndexPromise = astEnsureIndexed(this.workingDirectory)
 			.then((index) => {
 				this.astIndexReady = true;
 				this.astRepoId = index.id;
@@ -1578,7 +1583,7 @@ export class ToolExecutor {
 		}
 
 		try {
-			const outline = parseTypeScriptFile(absolutePath);
+			const outline = this.readOutline(absolutePath);
 			const symbols = outline.symbols.map((s) => ({
 				name: s.name,
 				kind: s.kind,
@@ -1619,7 +1624,7 @@ export class ToolExecutor {
 		}
 
 		try {
-			const outline = parseTypeScriptFile(absolutePath);
+			const outline = this.readOutline(absolutePath);
 			const symbol = outline.symbols.find((s) => s.name === symbolName);
 
 			if (!symbol) {
@@ -1633,44 +1638,58 @@ export class ToolExecutor {
 		}
 	}
 
-	private async searchSymbols(query: string, kinds?: string[]): Promise<string> {
-		const { glob } = await import("glob");
-
-		const files = await glob("**/*.{ts,tsx,js,jsx}", {
-			cwd: this.workingDirectory,
-			absolute: true,
-			ignore: ["**/node_modules/**", "**/dist/**"],
-		});
-
-		const queryLower = query.toLowerCase();
-		const matches: {
-			name: string;
-			kind: string;
-			file: string;
-			line: number;
-		}[] = [];
-
-		for (const file of files.slice(0, 50)) {
-			try {
-				const outline = parseTypeScriptFile(file);
-				for (const symbol of outline.symbols) {
-					if (kinds && !kinds.includes(symbol.kind)) continue;
-					if (symbol.name.toLowerCase().includes(queryLower)) {
-						matches.push({
-							name: symbol.name,
-							kind: symbol.kind,
-							file: path.relative(this.workingDirectory, file),
-							line: symbol.startLine,
-						});
-					}
-					if (matches.length >= 20) break;
-				}
-			} catch {
-				// Skip unparseable files
+	/**
+	 * Outline for one file: the shared index when it holds the file (re-parsed
+	 * in place if the file changed on disk), otherwise a direct parse.
+	 */
+	private readOutline(absolutePath: string): FileOutline {
+		if (this.astIndexReady && this.astRepoId) {
+			const rel = path.relative(this.workingDirectory, absolutePath);
+			if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+				const indexed = astGetFreshFileOutline(this.astRepoId, rel);
+				if (indexed) return indexed;
 			}
-			if (matches.length >= 20) break;
+		}
+		return parseTypeScriptFile(absolutePath);
+	}
+
+	private async searchSymbols(query: string, kinds?: string[]): Promise<string> {
+		if (!this.astIndexReady && this.astIndexPromise) {
+			await this.astIndexPromise;
+		}
+		if (!this.astRepoId) {
+			return JSON.stringify(
+				{ query, matches: [], error: "AST index not available. Use run_command with rg instead." },
+				null,
+				2,
+			);
 		}
 
+		const repoId = this.astRepoId;
+		const opts = { kinds: kinds?.length ? kinds : undefined, limit: 20 };
+		let hits = astSearchSymbols(repoId, query, opts);
+		// Files edited since the build: refresh the hit files, and if any of
+		// them changed, rank again so line numbers and names are current.
+		const before = new Map(
+			hits.map((h) => [
+				h.filePath,
+				astGetFileOutline(repoId, path.relative(this.workingDirectory, h.filePath)),
+			]),
+		);
+		let changed = false;
+		for (const [file, outline] of before) {
+			if (astGetFreshFileOutline(repoId, path.relative(this.workingDirectory, file)) !== outline) {
+				changed = true;
+			}
+		}
+		if (changed) hits = astSearchSymbols(repoId, query, opts);
+
+		const matches = hits.map((symbol) => ({
+			name: symbol.name,
+			kind: symbol.kind,
+			file: path.relative(this.workingDirectory, symbol.filePath),
+			line: symbol.startLine,
+		}));
 		return JSON.stringify({ query, matches }, null, 2);
 	}
 

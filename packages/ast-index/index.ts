@@ -11,6 +11,7 @@ import type { FileOutline, RepoIndex, Symbol, SymbolKind } from "../types";
 export type { RepoIndex, FileOutline, Symbol, SymbolKind };
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { matchTier } from "./rank";
 import { parseTypeScriptFile } from "./typescript-parser";
 
 // Parser interface - will be implemented with tree-sitter or native TS parser
@@ -44,6 +45,11 @@ export interface ParsedSymbol {
 const repoIndices: Map<string, RepoIndex> = new Map();
 const symbolMaps: Map<string, Map<string, Symbol>> = new Map();
 const fileOutlines: Map<string, Map<string, FileOutline>> = new Map();
+/** mtimeMs of each indexed file when it was last parsed, keyed by repo then relative path. */
+const fileMtimes: Map<string, Map<string, number>> = new Map();
+/** One build per absolute folder per process, shared by every caller. */
+const sharedBuilds: Map<string, { promise: Promise<RepoIndex>; index: RepoIndex | null }> =
+	new Map();
 
 // ============================================
 // Core API
@@ -86,13 +92,16 @@ export async function indexFolder(
 
 	const repoSymbolMap = new Map<string, Symbol>();
 	const repoFileOutlines = new Map<string, FileOutline>();
+	const repoFileMtimes = new Map<string, number>();
 	const languages: Record<string, number> = {};
 
 	for (const file of files) {
 		try {
+			const mtimeMs = fs.statSync(file).mtimeMs;
 			const outline = parseTypeScriptFile(file);
 			const relativePath = path.relative(absolutePath, file);
 			repoFileOutlines.set(relativePath, outline);
+			repoFileMtimes.set(relativePath, mtimeMs);
 
 			const lang = outline.language;
 			languages[lang] = (languages[lang] || 0) + 1;
@@ -117,8 +126,40 @@ export async function indexFolder(
 	repoIndices.set(repoId, repoIndex);
 	symbolMaps.set(repoId, repoSymbolMap);
 	fileOutlines.set(repoId, repoFileOutlines);
+	fileMtimes.set(repoId, repoFileMtimes);
 
 	return repoIndex;
+}
+
+/**
+ * Index a folder once per process and share the result.
+ *
+ * Concurrent and repeat calls for the same folder get the same promise, so the
+ * agent and every ToolExecutor pay for one build. A folder whose index was
+ * cleared, or whose build failed, is rebuilt on the next call.
+ */
+export function ensureIndexed(
+	folderPath: string,
+	options?: { ignorePatterns?: string[] },
+): Promise<RepoIndex> {
+	const key = path.resolve(folderPath);
+	const cached = sharedBuilds.get(key);
+	if (cached && (cached.index === null || repoIndices.get(cached.index.id) === cached.index)) {
+		return cached.promise;
+	}
+	const entry = { index: null } as { promise: Promise<RepoIndex>; index: RepoIndex | null };
+	entry.promise = indexFolder(key, options).then(
+		(index) => {
+			entry.index = index;
+			return index;
+		},
+		(err) => {
+			if (sharedBuilds.get(key) === entry) sharedBuilds.delete(key);
+			throw err;
+		},
+	);
+	sharedBuilds.set(key, entry);
+	return entry.promise;
 }
 
 /**
@@ -174,44 +215,130 @@ export async function getSymbolSource(
 	}
 }
 
+export interface SearchSymbolsOptions {
+	/** Keep only these kinds. */
+	kinds?: string[];
+	/** Regex tested against the symbol's file path. */
+	filePattern?: string;
+	/** Maximum results, applied after ranking. Default 20. */
+	limit?: number;
+	/** Also match signature and summary text, ranked after every name match. Default true. */
+	matchSignature?: boolean;
+}
+
+/** Tier for a signature or summary match: below every name tier in rank.ts. */
+const SIGNATURE_TIER = 4;
+
 /**
- * Search symbols across a repo
+ * Search symbols across a repo, ranked.
+ *
+ * Order: name tier (exact, prefix, camel token, substring; see rank.ts), then
+ * signature/summary matches. Within a tier a case-sensitive exact name comes
+ * first, then the shorter file path, then path order, then line. The order
+ * never depends on insertion order, so the same query gives the same answer.
  */
 export function searchSymbols(
 	repoId: string,
 	query: string,
-	options?: {
-		kind?: SymbolKind;
-		filePattern?: string;
-		limit?: number;
-	},
+	options?: SearchSymbolsOptions,
 ): Symbol[] {
 	const repo = symbolMaps.get(repoId);
-	if (!repo) return [];
+	if (!repo || !query) return [];
 
 	const limit = options?.limit || 20;
-	const results: Symbol[] = [];
+	const kinds = options?.kinds;
+	const pattern = options?.filePattern ? new RegExp(options.filePattern) : null;
+	const matchSignature = options?.matchSignature ?? true;
 	const queryLower = query.toLowerCase();
 
+	const hits: { symbol: Symbol; tier: number; caseMiss: number }[] = [];
 	for (const symbol of repo.values()) {
-		if (options?.kind && symbol.kind !== options.kind) continue;
-		if (options?.filePattern) {
-			const pattern = new RegExp(options.filePattern);
-			if (!pattern.test(symbol.filePath)) continue;
-		}
+		if (kinds && !kinds.includes(symbol.kind)) continue;
+		if (pattern && !pattern.test(symbol.filePath)) continue;
 
-		// Match name, signature, or summary
-		const nameMatch = symbol.name.toLowerCase().includes(queryLower);
-		const sigMatch = symbol.signature?.toLowerCase().includes(queryLower);
-		const sumMatch = symbol.summary?.toLowerCase().includes(queryLower);
-
-		if (nameMatch || sigMatch || sumMatch) {
-			results.push(symbol);
-			if (results.length >= limit) break;
+		let tier: number | null = matchTier(symbol.name, query);
+		if (tier === null && matchSignature) {
+			const sigMatch = symbol.signature?.toLowerCase().includes(queryLower);
+			const sumMatch = symbol.summary?.toLowerCase().includes(queryLower);
+			if (sigMatch || sumMatch) tier = SIGNATURE_TIER;
 		}
+		if (tier === null) continue;
+		hits.push({ symbol, tier, caseMiss: symbol.name === query ? 0 : 1 });
 	}
 
-	return results;
+	hits.sort(
+		(a, b) =>
+			a.tier - b.tier ||
+			a.caseMiss - b.caseMiss ||
+			a.symbol.filePath.length - b.symbol.filePath.length ||
+			compareStrings(a.symbol.filePath, b.symbol.filePath) ||
+			a.symbol.startLine - b.symbol.startLine ||
+			compareStrings(a.symbol.id, b.symbol.id),
+	);
+
+	return hits.slice(0, limit).map((h) => h.symbol);
+}
+
+function compareStrings(a: string, b: string): number {
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Re-check one indexed file against disk and bring the index up to date.
+ * Returns the current outline, or null when the file is not indexed (or was
+ * deleted, in which case its symbols are dropped). `filePath` may be relative
+ * to the repo root or absolute.
+ */
+export function getFreshFileOutline(repoId: string, filePath: string): FileOutline | null {
+	const repo = repoIndices.get(repoId);
+	const outlines = fileOutlines.get(repoId);
+	const mtimes = fileMtimes.get(repoId);
+	const symbols = symbolMaps.get(repoId);
+	if (!repo || !outlines || !mtimes || !symbols) return null;
+
+	const rel = path.isAbsolute(filePath)
+		? path.relative(repo.sourceRoot, filePath)
+		: path.normalize(filePath);
+	const current = outlines.get(rel);
+	if (!current) return null;
+
+	let mtimeMs: number;
+	try {
+		mtimeMs = fs.statSync(path.join(repo.sourceRoot, rel)).mtimeMs;
+	} catch {
+		dropFile(repo, outlines, mtimes, symbols, rel, current);
+		return null;
+	}
+	if (mtimes.get(rel) === mtimeMs) return current;
+
+	let next: FileOutline;
+	try {
+		next = parseTypeScriptFile(path.join(repo.sourceRoot, rel));
+	} catch {
+		dropFile(repo, outlines, mtimes, symbols, rel, current);
+		return null;
+	}
+	for (const s of current.symbols) symbols.delete(s.id);
+	for (const s of next.symbols) symbols.set(s.id, s);
+	outlines.set(rel, next);
+	mtimes.set(rel, mtimeMs);
+	repo.symbolCount = symbols.size;
+	return next;
+}
+
+function dropFile(
+	repo: RepoIndex,
+	outlines: Map<string, FileOutline>,
+	mtimes: Map<string, number>,
+	symbols: Map<string, Symbol>,
+	rel: string,
+	current: FileOutline,
+): void {
+	for (const s of current.symbols) symbols.delete(s.id);
+	outlines.delete(rel);
+	mtimes.delete(rel);
+	repo.fileCount = outlines.size;
+	repo.symbolCount = symbols.size;
 }
 
 /**
@@ -252,6 +379,7 @@ export function clearIndex(repoId: string): boolean {
 	repoIndices.delete(repoId);
 	symbolMaps.delete(repoId);
 	fileOutlines.delete(repoId);
+	fileMtimes.delete(repoId);
 	return had;
 }
 
