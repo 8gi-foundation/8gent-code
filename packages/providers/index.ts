@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { modelFetch } from "../ai/model-fetch";
 import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { AuthRotator } from "./auth-rotation";
@@ -920,7 +921,8 @@ export class ProviderManager {
 			body.tools = request.tools;
 		}
 
-		const response = await fetch(`${provider.baseUrl}/api/chat`, {
+		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
+		const response = await modelFetch(`${provider.baseUrl}/api/chat`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
@@ -1016,7 +1018,7 @@ export class ProviderManager {
 			body.reasoning_effort = request.thinking;
 		}
 
-		const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+		const response = await modelFetch(`${provider.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers,
 			body: JSON.stringify(body),

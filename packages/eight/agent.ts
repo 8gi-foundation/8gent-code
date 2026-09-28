@@ -72,6 +72,7 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
+import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
 	type CheckpointEntry,
@@ -774,6 +775,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				baseUrl: this.config.baseUrl,
 				temperature: getRuntimeParams().temperature ?? 0.2,
 				signal,
+				// Same limit as withTurnTimeout below, so EIGHT_TURN_TIMEOUT_MS is the
+				// only thing that bounds a model step (never Bun's hidden 300 s cap).
+				timeoutMs: attemptTimeoutMs,
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;
@@ -853,6 +857,31 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			}
 		}
 
+		// A turn that ends in an error is still a run: record it in runs.jsonl
+		// with status "error" and the reason, like a successful turn records "ok".
+		const recordFailedRun = (reason: string) => {
+			if (!this.enableReporting) return;
+			try {
+				appendRun(
+					failedTurnRunEntry({
+						model: this.config.model,
+						startedAt: chatStartTime,
+						tokens: usageTotals.totalTokens,
+						cost: this.totalCost,
+						tools: this.turnToolLedger.length,
+						created: Array.from(this.sessionWriter.getFilesCreated()),
+						modified: Array.from(this.sessionWriter.getFilesModified()),
+						session: this.sessionId,
+						cwd: this.config.workingDirectory || process.cwd(),
+						prompt: textForAgent,
+						reason,
+					}),
+				);
+			} catch {
+				// The run log is best-effort; it must never mask the turn's reply.
+			}
+		};
+
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
 			// A missing/unavailable local model must never surface a raw provider
@@ -873,6 +902,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			if (!outcome.ok) {
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
+				recordFailedRun(`no local model: ${outcome.message}`);
 				return outcome.message;
 			}
 			if (outcome.rerouted) {
@@ -882,22 +912,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			}
 			agentResult = outcome.value;
 		} catch (err) {
-			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
-			// timeout, or an abort. Return a friendly turn in the normal chat()
-			// shape so the TUI/Pill render it cleanly instead of throwing a raw
-			// fetch error up through the surface.
+			// Provider down (ECONNREFUSED -> raw "fetch failed"), a model step
+			// that ran past EIGHT_TURN_TIMEOUT_MS, or an abort. Return a friendly
+			// turn in the normal chat() shape so the TUI/Pill render it cleanly
+			// instead of throwing a raw fetch error up through the surface. A slow
+			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
-			const raw = err instanceof Error ? err.message : String(err);
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
-			const isReachability =
-				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
-					raw,
-				);
-			const friendly = isReachability
-				? `The local model endpoint (${endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`
-				: `The local model turn could not complete: ${raw}`;
-			this.messageHistory.push({ role: "assistant", content: friendly });
-			return friendly;
+			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
+			this.messageHistory.push({ role: "assistant", content: failure.message });
+			recordFailedRun(failure.reason);
+			return failure.message;
 		}
 		this.abortController = null;
 
