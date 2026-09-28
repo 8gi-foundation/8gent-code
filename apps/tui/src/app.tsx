@@ -112,6 +112,7 @@ import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import { probeProviders } from "./lib/provider-health.js";
+import { PROBE_TIMEOUT_MS, createReadinessCache, withTimeout } from "./lib/provider-readiness.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
@@ -2182,6 +2183,12 @@ export function App({
 		[activeTabId, appendToTab, autoKanban, markBodyPartStart, markBodyPartEnd],
 	);
 
+	// One shared readiness probe per provider/model (see createReadinessCache)
+	// and the last readiness notice shown, so a re-running effect neither
+	// starves the probe nor repeats the same line.
+	const readinessCacheRef = useRef(createReadinessCache());
+	const lastReadinessNoticeRef = useRef("");
+
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
 	// instance; the active-tab agent is mirrored into local `agent`/`agentReady`
 	// state so voice-chat / status-bar reads stay tab-correct without
@@ -2189,8 +2196,41 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
+		let cancelled = false;
+		const notify = (tabId: string, content: string) => {
+			if (lastReadinessNoticeRef.current === content) return;
+			lastReadinessNoticeRef.current = content;
+			appendToTab(tabId, {
+				id: `provider-readiness-${Date.now()}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+		};
 		const initAgent = async () => {
 			try {
+				// Bounded readiness gate. A local provider whose port accepts TCP
+				// but never answers used to leave this init awaiting forever, so
+				// the tab never became ready and nothing said why. Probe first;
+				// if it is down, fall back to the next healthy local provider.
+				const _gateTabId = workspaceTabs.activeTab?.id || "default";
+				const decision = await readinessCacheRef.current({
+					provider: currentProvider,
+					model: currentModel,
+				});
+				if (cancelled) return;
+				if (decision.kind === "fallback") {
+					notify(_gateTabId, decision.notice);
+					setCurrentProvider(decision.provider);
+					setCurrentModel(decision.model);
+					return; // Re-triggers this effect on the healthy provider.
+				}
+				if (decision.kind === "none") {
+					setAgentReady(false);
+					notify(_gateTabId, decision.notice);
+					return;
+				}
+
 				// Auto-assign router slots from actually available models
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
@@ -2241,7 +2281,9 @@ export function App({
 					apiKey: process.env.OPENROUTER_API_KEY,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 				});
-				const _readyOuter = await newAgent.isReady();
+				// Belt and braces: the client's own check has no bound, so cap it.
+				const _readyOuter = await withTimeout(newAgent.isReady(), PROBE_TIMEOUT_MS * 2, false);
+				if (cancelled) return;
 				if (_readyOuter) {
 					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
@@ -2272,6 +2314,10 @@ export function App({
 					} catch {}
 				} else {
 					setAgentReady(false);
+					notify(
+						_initTabId,
+						`Provider ${currentProvider} (${currentModel}) did not report ready within ${(PROBE_TIMEOUT_MS * 2) / 1000}s. Nothing will run until it does. Check it, or pick another with /provider.`,
+					);
 				}
 			} catch (err) {
 				setAgentReady(false);
@@ -2279,6 +2325,9 @@ export function App({
 			}
 		};
 		initAgent();
+		return () => {
+			cancelled = true;
+		};
 	}, [currentModel, currentProvider, activeTabId, buildEventsForTab]);
 
 	// When the active tab changes, surface its existing Agent (if any) into
