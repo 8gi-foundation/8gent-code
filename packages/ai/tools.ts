@@ -228,15 +228,21 @@ const locate = tool({
 	}),
 	execute: async ({ query }) => {
 		const { ensureIndexed } = await import("../ast-index");
-		const { formatLocate, locate: runLocate } = await import("../ast-index/locate");
+		const {
+			awaitIndex,
+			formatLocate,
+			LOCATE_INDEX_WAIT_MS,
+			locate: runLocate,
+		} = await import("../ast-index/locate");
 		const root = _ctx.workingDirectory;
-		// The same shared build the ToolExecutor uses; without it, path and
-		// text search still answer.
-		const repoId = await ensureIndexed(root).then(
-			(index) => index.id,
-			() => null,
+		// The same shared build the ToolExecutor uses, waited on only briefly:
+		// while it is still running, path and text search answer now and the
+		// answer says symbol search was skipped.
+		const { repoId, pending } = await awaitIndex(
+			ensureIndexed(root).then((index) => index.id),
+			LOCATE_INDEX_WAIT_MS,
 		);
-		return formatLocate(await runLocate(query, { root, repoId }));
+		return formatLocate(await runLocate(query, { root, repoId, indexPending: pending }));
 	},
 });
 

@@ -14,6 +14,7 @@ import {
 	getFreshFileOutline,
 	indexFolder,
 	refreshIndex,
+	refreshIndexAsync,
 	searchSymbols,
 } from "./index";
 import { camelTokens, matchTier } from "./rank";
@@ -276,6 +277,42 @@ describe("refreshIndex", () => {
 			// Nothing changed since: a second pass is a no-op.
 			expect(refreshIndex(index.id)).toEqual({ added: 0, changed: 0, removed: 0 });
 			expect(refreshIndex("no-such-repo")).toBeNull();
+			clearIndex(index.id);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("refreshIndexAsync", () => {
+	test("gives the same result as refreshIndex and yields to the event loop", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ast-index-refresh-async-"));
+		for (let i = 0; i < 120; i++) {
+			fs.writeFileSync(path.join(dir, `f${i}.ts`), `export function f${i}() {}\n`);
+		}
+		try {
+			const index = await indexFolder(dir);
+			const future = new Date(Date.now() + 60_000);
+			for (let i = 0; i < 120; i++) {
+				fs.writeFileSync(path.join(dir, `f${i}.ts`), `export function g${i}() {}\n`);
+				fs.utimesSync(path.join(dir, `f${i}.ts`), future, future);
+			}
+			fs.writeFileSync(path.join(dir, "fresh.ts"), "export function brandNew() {}\n");
+			let ticked = false;
+			setImmediate(() => {
+				ticked = true;
+			});
+			const pending = refreshIndexAsync(index.id);
+			expect(ticked).toBe(false);
+			expect(await pending).toEqual({ added: 1, changed: 120, removed: 0 });
+			expect(ticked).toBe(true);
+			expect(searchSymbols(index.id, "g7")[0]?.name).toBe("g7");
+			expect(searchSymbols(index.id, "brandNew")).toHaveLength(1);
+			// Two callers at once share one pass.
+			const [a, b] = [refreshIndexAsync(index.id), refreshIndexAsync(index.id)];
+			expect(a).toBe(b);
+			expect(await a).toEqual({ added: 0, changed: 0, removed: 0 });
+			expect(await refreshIndexAsync("no-such-repo")).toBeNull();
 			clearIndex(index.id);
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });

@@ -1,0 +1,485 @@
+{
+	"anchor": "a5cb2fdd48359b04ef4183a0fdd825fd4cf5cad0",
+	"repo": "https://github.com/geekan/metagpt",
+	"lang": "py",
+	"minedBy": "packages/decide/eval/locate-mine.ts",
+	"counts": {
+		"identifier": 29,
+		"path": 21,
+		"string": 9
+	},
+	"queries": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "startup",
+			"file": "startup.py",
+			"line": 11,
+			"commit": "ab470e56554740be96cdf36a571cb133bf90d283"
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "parse_recipient",
+			"file": "metagpt/utils/common.py",
+			"line": 234,
+			"commit": "8abdca30577451b39cece110c962dff46112953e"
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "Player",
+			"file": "tests/metagpt/actions/test_debug_error.py",
+			"line": 22,
+			"commit": "6bf527d31ee33705bba35ee2c78464264104f7e5"
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestPlayer",
+			"file": "tests/metagpt/actions/test_debug_error.py",
+			"line": 72,
+			"commit": "6bf527d31ee33705bba35ee2c78464264104f7e5"
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "test_ltm_search",
+			"file": "tests/metagpt/memory/test_longterm_memory.py",
+			"line": 12,
+			"commit": "cddb3aa0722cb601e6223455d23740b4d36be0c2"
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "test_write_code_review",
+			"file": "tests/metagpt/actions/test_write_code_review.py",
+			"line": 16,
+			"commit": "b187f80f30fa49a3ea10e7526414b2ddcab85c9e"
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "LONG_TERM_MEMORY is True",
+			"file": "metagpt/config.py",
+			"line": 77,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "LongTermMemory",
+			"file": "metagpt/memory/longterm_memory.py",
+			"line": 13,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"It may the first time to run Agent {role_id}, the long-term memory is empty\"",
+			"file": "metagpt/memory/longterm_memory.py",
+			"line": 30,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "MemoryStorage",
+			"file": "metagpt/memory/memory_storage.py",
+			"line": 17,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "google_official_search",
+			"file": "metagpt/tools/search_engine.py",
+			"line": 56,
+			"commit": "3e13a00003afebaf1fb6c1c38f4b3e490c873c97"
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "proxy",
+			"file": "tests/conftest.py",
+			"line": 46,
+			"commit": "e657f298f23d9a3d25162ecda8fb39f7e1e5e9e2"
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "WebBrowserEngineType",
+			"file": "metagpt/tools/__init__.py",
+			"line": 20,
+			"commit": "ef279fdeb7b4f8f6573bf2081feee9650682e8f7"
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "WebBrowserEngine",
+			"file": "metagpt/tools/web_browser_engine.py",
+			"line": 14,
+			"commit": "ef279fdeb7b4f8f6573bf2081feee9650682e8f7"
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "Fail to install browser for playwright.",
+			"file": "metagpt/tools/web_browser_engine_playwright.py",
+			"line": 106,
+			"commit": "ef279fdeb7b4f8f6573bf2081feee9650682e8f7"
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "test_llm_acompletion",
+			"file": "tests/metagpt/test_llm.py",
+			"line": 30,
+			"commit": "d74215c5025a164af24cf418ca3e0f8394c69e8c"
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "Claude2",
+			"file": "metagpt/provider/anthropic_api.py",
+			"line": 15,
+			"commit": "8c07be0e564c497e64d86f96b1f4d05e7f533971"
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "SDEngine",
+			"file": "metagpt/tools/sd_engine.py",
+			"line": 59,
+			"commit": "3aaecce7e79e13b2588bcd02df0a43204d64fdf5"
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "decode_base64_to_image",
+			"file": "metagpt/tools/sd_engine.py",
+			"line": 112,
+			"commit": "3aaecce7e79e13b2588bcd02df0a43204d64fdf5"
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"Configure one of SERPAPI_API_KEY, SERPER_API_KEY, GOOGLE_API_KEY to unlock full feature\"",
+			"file": "metagpt/actions/search_and_summarize.py",
+			"line": 115,
+			"commit": "6a4b980c40391ca28887f9ef57ded38d7178b633"
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "SerperWrapper",
+			"file": "metagpt/tools/search_engine_serper.py",
+			"line": 17,
+			"commit": "6a4b980c40391ca28887f9ef57ded38d7178b633"
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "count_message_tokens",
+			"file": "metagpt/utils/token_counter.py",
+			"line": 28,
+			"commit": "07b400187c7d8daea367c7f3d915cc477ec2849e"
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "Environment",
+			"file": "metagpt/environment.py",
+			"line": 18,
+			"commit": "0c6d4ae53a0d58d6aacc888411253fbc2272807b"
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "RoleSetting",
+			"file": "metagpt/roles/role.py",
+			"line": 50,
+			"commit": "0c6d4ae53a0d58d6aacc888411253fbc2272807b"
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "ActionOutput",
+			"file": "metagpt/actions/action_output.py",
+			"line": 14,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "Unrecognized block: {field.name}",
+			"file": "metagpt/actions/action_output.py",
+			"line": 29,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"Missing fields: {missing_fields}\"",
+			"file": "metagpt/actions/action_output.py",
+			"line": 37,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "test_create_model_class",
+			"file": "tests/metagpt/actions/test_action_output.py",
+			"line": 36,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "OutputParser",
+			"file": "metagpt/utils/common.py",
+			"line": 27,
+			"commit": "d3d249e8440bdc026d66a3394952243f4a0d3df1"
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "SoftwareCompany",
+			"file": "metagpt/software_company.py",
+			"line": 19,
+			"commit": "4719bbeb7f0ad9c28107e2e1683768bdecd5c75c"
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "Insufficient funds: {CONFIG.max_budget}",
+			"file": "metagpt/software_company.py",
+			"line": 43,
+			"commit": "4719bbeb7f0ad9c28107e2e1683768bdecd5c75c"
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "mermaid_to_file",
+			"file": "metagpt/utils/mermaid.py",
+			"line": 17,
+			"commit": "748ef5535ac8c1c27f6c8ce8fb40ed610786a897"
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "check_cmd_exists",
+			"file": "metagpt/utils/common.py",
+			"line": 17,
+			"commit": "22fd9fd49ac4f3329d3076eb34ebeb968cd18d90"
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "test_azure_tts",
+			"file": "tests/metagpt/actions/test_azure_tts.py",
+			"line": 11,
+			"commit": "fcfbcf166f329d22f83e2fb8c8f3209093e367d9"
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "search",
+			"file": "examples/search_kb.py",
+			"line": 14,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "ActionType",
+			"file": "metagpt/actions/__init__.py",
+			"line": 27,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"Set OPENAI_API_KEY first\"",
+			"file": "metagpt/config.py",
+			"line": 48,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "No available role can handle message: {message}.",
+			"file": "metagpt/manager.py",
+			"line": 60,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+			"file": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+			"line": 1,
+			"commit": "569b2a99fb6cffb666f04f890f1160c93efc0c6c"
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/special_tokens.py",
+			"file": "metagpt/utils/special_tokens.py",
+			"line": 1,
+			"commit": "84b6c2bf8ac95def9afd961e09cfa8bb1c376a42"
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "test_longterm_memory.py",
+			"file": "tests/metagpt/memory/test_longterm_memory.py",
+			"line": 1,
+			"commit": "cddb3aa0722cb601e6223455d23740b4d36be0c2"
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "metagpt/memory/longterm_memory.py",
+			"file": "metagpt/memory/longterm_memory.py",
+			"line": 1,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "memory/memory_storage.py",
+			"file": "metagpt/memory/memory_storage.py",
+			"line": 1,
+			"commit": "f6b55c8b3b46ad0b333d8758b0cbdef54f6f47da"
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "test_web_browser_engine.py",
+			"file": "tests/metagpt/tools/test_web_browser_engine.py",
+			"line": 1,
+			"commit": "e657f298f23d9a3d25162ecda8fb39f7e1e5e9e2"
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+			"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+			"line": 1,
+			"commit": "e657f298f23d9a3d25162ecda8fb39f7e1e5e9e2"
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/web_browser_engine.py",
+			"file": "metagpt/tools/web_browser_engine.py",
+			"line": 1,
+			"commit": "ef279fdeb7b4f8f6573bf2081feee9650682e8f7"
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "web_browser_engine_playwright.py",
+			"file": "metagpt/tools/web_browser_engine_playwright.py",
+			"line": 1,
+			"commit": "ef279fdeb7b4f8f6573bf2081feee9650682e8f7"
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "metagpt/provider/anthropic_api.py",
+			"file": "metagpt/provider/anthropic_api.py",
+			"line": 1,
+			"commit": "8c07be0e564c497e64d86f96b1f4d05e7f533971"
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "tools/sd_engine.py",
+			"file": "metagpt/tools/sd_engine.py",
+			"line": 1,
+			"commit": "3aaecce7e79e13b2588bcd02df0a43204d64fdf5"
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "search_engine_serper.py",
+			"file": "metagpt/tools/search_engine_serper.py",
+			"line": 1,
+			"commit": "6a4b980c40391ca28887f9ef57ded38d7178b633"
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "metagpt/actions/action_output.py",
+			"file": "metagpt/actions/action_output.py",
+			"line": 1,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "actions/test_action_output.py",
+			"file": "tests/metagpt/actions/test_action_output.py",
+			"line": 1,
+			"commit": "f45b7176b511a13c22bc60027de329a0438c7b83"
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "README_JA.md",
+			"file": "docs/README_JA.md",
+			"line": 1,
+			"commit": "bc8e4457beb9b52aa27b35de0508d9729ba5022f"
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "docs/ROADMAP.md",
+			"file": "docs/ROADMAP.md",
+			"line": 1,
+			"commit": "16c7884ba99cbdd69daa5d860806a14b3d85b337"
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "utils/mermaid.py",
+			"file": "metagpt/utils/mermaid.py",
+			"line": 1,
+			"commit": "22fd9fd49ac4f3329d3076eb34ebeb968cd18d90"
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "README_CN.md",
+			"file": "docs/README_CN.md",
+			"line": 1,
+			"commit": "0205b7ee5e0954c17ca64c2e9e0466e0efc85a33"
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "tests/metagpt/actions/test_azure_tts.py",
+			"file": "tests/metagpt/actions/test_azure_tts.py",
+			"line": 1,
+			"commit": "fcfbcf166f329d22f83e2fb8c8f3209093e367d9"
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "config/config.yaml",
+			"file": "config/config.yaml",
+			"line": 1,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "llm_hello_world.py",
+			"file": "examples/llm_hello_world.py",
+			"line": 1,
+			"commit": "c871144507cca39888a4614bb8ac1190ecc410b2"
+		}
+	]
+}

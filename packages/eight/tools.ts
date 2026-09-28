@@ -20,7 +20,12 @@ import {
 	refreshIndex as astRefreshIndex,
 	searchSymbols as astSearchSymbols,
 } from "../ast-index";
-import { formatLocate, locate as astLocate } from "../ast-index/locate";
+import {
+	awaitIndex,
+	formatLocate,
+	LOCATE_INDEX_WAIT_MS,
+	locate as astLocate,
+} from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -1715,12 +1720,23 @@ export class ToolExecutor {
 	 * directory (see ast-index/locate.ts). No model is called.
 	 */
 	private async locate(query: string): Promise<string> {
+		// Wait for the index build only briefly: path and text search do not
+		// need it, and a first call on a large repo would otherwise stall for
+		// the whole build. The answer says when symbol search was skipped.
+		let repoId = this.astRepoId;
+		let indexPending = false;
 		if (!this.astIndexReady && this.astIndexPromise) {
-			await this.astIndexPromise;
+			const waited = await awaitIndex(
+				this.astIndexPromise.then((index) => index?.id ?? null),
+				LOCATE_INDEX_WAIT_MS,
+			);
+			repoId = waited.repoId;
+			indexPending = waited.pending;
 		}
 		const result = await astLocate(typeof query === "string" ? query : "", {
 			root: this.workingDirectory,
-			repoId: this.astRepoId,
+			repoId,
+			indexPending,
 		});
 		return formatLocate(result);
 	}

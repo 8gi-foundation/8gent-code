@@ -26,6 +26,15 @@
  *
  * Labels come from git (git grep at ANCHOR), never from the locator under
  * test. Writes packages/decide/eval/locate-queries.json.
+ *
+ * Outside repo (a language the TS index cannot read, so locate falls through
+ * to grep and path):
+ *
+ *   bun packages/decide/eval/locate-mine.ts <repoRoot> --lang go|py --anchor <sha> --name <slug>
+ *
+ * uses the same classes with that language's declarations (Go: exported
+ * func/type; Python: top-level def/class) and error lines, and writes
+ * locate-queries-<slug>.json with the repo's origin URL and anchor.
  */
 
 import { spawnSync } from "node:child_process";
@@ -53,9 +62,41 @@ export interface LocateQuery {
 	commit: string;
 }
 
-const DEF_RE =
-	/^\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;
-const STRING_LINE_RE = /\bthrow\b|\bError\(|console\.(error|warn)\(|\b(reason|message|error)\s*:/;
+export type Lang = "ts" | "go" | "py";
+
+/** What a declaration and an error line look like in one language. */
+interface LangProfile {
+	globs: string[];
+	/** git grep -E pattern that finds every candidate declaration line. */
+	defGrep: string;
+	/** Captures the declared name from one line. */
+	def: RegExp;
+	/** A line whose string literal reads as a message. */
+	stringLine: RegExp;
+}
+
+const PROFILES: Record<Lang, LangProfile> = {
+	ts: {
+		globs: CODE_GLOBS,
+		defGrep: "^[[:space:]]*export[[:space:]]",
+		def: /^\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/,
+		stringLine: /\bthrow\b|\bError\(|console\.(error|warn)\(|\b(reason|message|error)\s*:/,
+	},
+	go: {
+		globs: ["*.go"],
+		defGrep: "^(func|type)[[:space:]]",
+		// Exported (capitalised) funcs, methods and types, the Go analogue of export.
+		def: /^(?:func\s+(?:\([^)]*\)\s*)?|type\s+)([A-Z]\w*)/,
+		stringLine: /\berrors\.New\(|\bfmt\.Errorf\(|\blog\w*\.(Error|Warn|Fatal)\w*\(|\bpanic\(/,
+	},
+	py: {
+		globs: ["*.py"],
+		defGrep: "^(async[[:space:]]+)?(def|class)[[:space:]]",
+		// Top-level only: an indented def is a method or a nested helper.
+		def: /^(?:async\s+)?(?:def|class)\s+([A-Za-z]\w*)/,
+		stringLine: /\braise\b|\blog\w*\.(error|warning|exception|critical)\(|\bwarnings\.warn\(/,
+	},
+};
 /** A quoted run with no quote, backslash or ${ inside, so it never spans two literals. */
 const STRING_RE = /(["'`])([^"'`\\$\n]{20,90})\1/g;
 
@@ -102,9 +143,10 @@ function parseLog(out: string): DiffFile[] {
 	return files;
 }
 
-export function mine(root: string): LocateQuery[] {
+export function mine(root: string, lang: Lang = "ts", anchor: string = ANCHOR): LocateQuery[] {
+	const { globs, defGrep, def: DEF_RE, stringLine: STRING_LINE_RE } = PROFILES[lang];
 	const tracked = new Set(
-		git(root, ["ls-tree", "-r", "--name-only", ANCHOR]).split("\n").filter(Boolean),
+		git(root, ["ls-tree", "-r", "--name-only", anchor]).split("\n").filter(Boolean),
 	);
 	const baseCount = new Map<string, number>();
 	for (const f of tracked) {
@@ -114,15 +156,7 @@ export function mine(root: string): LocateQuery[] {
 
 	// Every exported declaration at ANCHOR: name -> sites.
 	const defs = new Map<string, { file: string; line: number }[]>();
-	const grep = git(root, [
-		"grep",
-		"-n",
-		"-E",
-		"^[[:space:]]*export[[:space:]]",
-		ANCHOR,
-		"--",
-		...CODE_GLOBS,
-	]);
+	const grep = git(root, ["grep", "-n", "-E", defGrep, anchor, "--", ...globs]);
 	for (const raw of grep.split("\n")) {
 		const m = /^[0-9a-f]+:(.+?):(\d+):(.*)$/.exec(raw);
 		if (!m) continue;
@@ -135,7 +169,7 @@ export function mine(root: string): LocateQuery[] {
 
 	const log = git(root, [
 		"log",
-		ANCHOR,
+		anchor,
 		"--no-merges",
 		"-n",
 		LOG_COMMITS,
@@ -146,7 +180,7 @@ export function mine(root: string): LocateQuery[] {
 		"--no-ext-diff",
 		"--diff-filter=AM",
 		"--",
-		...CODE_GLOBS,
+		...globs,
 	]);
 	const diffs = parseLog(log);
 
@@ -187,7 +221,7 @@ export function mine(root: string): LocateQuery[] {
 					.map((m) => m[2].trim())
 					.find((t) => t.length >= 20 && /^[\w[]/.test(t) && t.split(/\s+/).length >= 3);
 				if (!text || seen.has(`string:${text}`)) continue;
-				const hits = git(root, ["grep", "-n", "-F", "-e", text, ANCHOR])
+				const hits = git(root, ["grep", "-n", "-F", "-e", text, anchor])
 					.split("\n")
 					.filter(Boolean)
 					.map((h) => /^[0-9a-f]+:(.+?):(\d+):/.exec(h))
@@ -209,7 +243,7 @@ export function mine(root: string): LocateQuery[] {
 	// path, from files added by a commit (any file type).
 	const added = git(root, [
 		"log",
-		ANCHOR,
+		anchor,
 		"--no-merges",
 		"-n",
 		LOG_COMMITS,
@@ -238,18 +272,35 @@ export function mine(root: string): LocateQuery[] {
 	return out;
 }
 
+/** The value after `--name` in argv, if any. */
+function flag(argv: string[], name: string): string | undefined {
+	const i = argv.indexOf(`--${name}`);
+	return i >= 0 ? argv[i + 1] : undefined;
+}
+
 if (import.meta.main) {
-	const root = path.resolve(process.argv[2] ?? path.join(import.meta.dir, "..", "..", ".."));
-	const queries = mine(root);
+	const argv = process.argv.slice(2);
+	const positional = argv.filter((a, i) => !a.startsWith("--") && !argv[i - 1]?.startsWith("--"));
+	const root = path.resolve(positional[0] ?? path.join(import.meta.dir, "..", "..", ".."));
+	const lang = (flag(argv, "lang") ?? "ts") as Lang;
+	if (!PROFILES[lang]) throw new Error(`--lang must be one of ${Object.keys(PROFILES).join(", ")}`);
+	const name = flag(argv, "name");
+	const anchor = flag(argv, "anchor") ?? (name ? undefined : ANCHOR);
+	if (!anchor) throw new Error("an outside repo needs --anchor <sha>, so the set is reproducible");
+	const queries = mine(root, lang, anchor);
 	const counts = { identifier: 0, path: 0, string: 0 } as Record<QueryClass, number>;
 	for (const q of queries) counts[q.class]++;
-	const file = path.join(import.meta.dir, "locate-queries.json");
+	const file = path.join(
+		import.meta.dir,
+		name ? `locate-queries-${name}.json` : "locate-queries.json",
+	);
+	const origin = name ? git(root, ["remote", "get-url", "origin"]).trim() : undefined;
 	fs.writeFileSync(
 		file,
-		`${JSON.stringify({ anchor: ANCHOR, minedBy: "packages/decide/eval/locate-mine.ts", counts, queries }, null, "\t")}\n`,
+		`${JSON.stringify({ anchor, ...(name ? { repo: origin, lang } : {}), minedBy: "packages/decide/eval/locate-mine.ts", counts, queries }, null, "\t")}\n`,
 	);
 	console.log(
-		`mined ${queries.length} queries at ${ANCHOR.slice(0, 8)}: ${JSON.stringify(counts)}`,
+		`mined ${queries.length} queries at ${anchor.slice(0, 8)}: ${JSON.stringify(counts)}`,
 	);
 	console.log(`wrote ${path.relative(process.cwd(), file)}`);
 }

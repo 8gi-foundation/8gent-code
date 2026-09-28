@@ -2,6 +2,11 @@
  * locate eval runner.
  *
  *   bun packages/decide/eval/locate-run.ts [repoRoot]
+ *   bun packages/decide/eval/locate-run.ts <outsideRepoRoot> --set locate-queries-<slug>.json
+ *
+ * An outside set (see locate-mine.ts --lang) is in a language the TS index
+ * cannot read, so it measures locate's grep and path fallthrough: its
+ * identifiers are expected to route to grep, not symbol.
  *
  * Extracts the tree at the set's ANCHOR commit (git archive) into a temp dir,
  * so labels and corpus match exactly whatever branch is checked out, builds
@@ -44,6 +49,8 @@ const EXPECT_MODE: Record<QueryClass, LocateMode> = {
 	path: "path",
 	string: "grep",
 };
+/** Outside a TS repo there is no symbol map, so an identifier is found by grep. */
+const EXPECT_MODE_NON_TS: Record<QueryClass, LocateMode> = { ...EXPECT_MODE, identifier: "grep" };
 /** A fresh ToolExecutor every N baseline calls keeps under its 100-per-minute rate limit. */
 const EXECUTOR_CALLS = 50;
 
@@ -128,7 +135,20 @@ async function baselineA(
 	const text = q.query.replace(/^"(.*)"$/, "$1");
 	const out = run(
 		"rg",
-		["--no-config", "-F", "-n", "--no-heading", "--color", "never", "--sort", "path", "-e", text],
+		// --null only so the output parses unambiguously; it is the same length.
+		[
+			"--no-config",
+			"-F",
+			"-n",
+			"--no-heading",
+			"--null",
+			"--color",
+			"never",
+			"--sort",
+			"path",
+			"-e",
+			text,
+		],
 		tree,
 	);
 	return { top: parseRgLines(out).map((h) => ({ file: h.file, line: h.line })), out };
@@ -154,13 +174,20 @@ function summarise(rows: Row[]) {
 }
 
 async function main(): Promise<void> {
-	const repo = path.resolve(process.argv[2] ?? path.join(import.meta.dir, "..", "..", ".."));
-	const set = JSON.parse(
-		fs.readFileSync(path.join(import.meta.dir, "locate-queries.json"), "utf8"),
-	) as {
+	const argv = process.argv.slice(2);
+	const setIdx = argv.indexOf("--set");
+	const setName = setIdx >= 0 ? argv[setIdx + 1] : "locate-queries.json";
+	const positional = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--set");
+	const repo = path.resolve(positional[0] ?? path.join(import.meta.dir, "..", "..", ".."));
+	const set = JSON.parse(fs.readFileSync(path.resolve(import.meta.dir, setName), "utf8")) as {
 		anchor: string;
+		repo?: string;
+		lang?: string;
 		queries: LocateQuery[];
 	};
+	const lang = set.lang ?? "ts";
+	const expect = lang === "ts" ? EXPECT_MODE : EXPECT_MODE_NON_TS;
+	const slug = /^locate-queries-(.+)\.json$/.exec(path.basename(setName))?.[1];
 
 	const { dir, tree } = extractAnchor(repo, set.anchor);
 	try {
@@ -224,12 +251,15 @@ async function main(): Promise<void> {
 		const summary = {
 			date: new Date().toISOString(),
 			anchor: set.anchor,
+			set: path.basename(setName),
+			...(set.repo ? { repo: set.repo } : {}),
+			lang,
 			machine: { os: process.platform, arch: process.arch, cpus: os.cpus()[0]?.model },
 			index: { files: index.fileCount, symbols: index.symbolCount, buildMs },
 			lineTolerance: LINE_TOLERANCE,
 			locate: {
 				...summarise(loc),
-				routeAccuracy: loc.filter((r) => r.mode === EXPECT_MODE[r.class]).length / loc.length,
+				routeAccuracy: loc.filter((r) => r.mode === expect[r.class]).length / loc.length,
 				byClass: Object.fromEntries(
 					classes.map((c) => [c, summarise(loc.filter((r) => r.class === c))]),
 				),
@@ -244,7 +274,10 @@ async function main(): Promise<void> {
 		};
 
 		fs.mkdirSync(RESULTS_DIR, { recursive: true });
-		const file = path.join(RESULTS_DIR, `${summary.date.slice(0, 10)}-locate.json`);
+		const file = path.join(
+			RESULTS_DIR,
+			`${summary.date.slice(0, 10)}-locate${slug ? `-${slug}` : ""}.json`,
+		);
 		fs.writeFileSync(file, `${JSON.stringify({ summary, rows }, null, "\t")}\n`);
 
 		const pc = (x: number) => (Number.isNaN(x) ? "  n/a" : `${(x * 100).toFixed(1).padStart(5)}%`);

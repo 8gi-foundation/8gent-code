@@ -413,6 +413,12 @@ prose (M2) will reuse this package; it is not built yet.
 ```bash
 bun packages/decide/eval/locate-mine.ts   # rewrite eval/locate-queries.json (deterministic)
 bun packages/decide/eval/locate-run.ts    # run it, write eval/results/<date>-locate.json
+
+# Outside repos, in languages the TS index cannot read (grep and path fallthrough):
+bun packages/decide/eval/locate-mine.ts ~/picoclaw --lang go --anchor 3584c0c7be63f8bd297dd1920a79c3833d76d95e --name picoclaw-go
+bun packages/decide/eval/locate-run.ts ~/picoclaw --set locate-queries-picoclaw-go.json
+bun packages/decide/eval/locate-mine.ts ~/metagpt --lang py --anchor a5cb2fdd48359b04ef4183a0fdd825fd4cf5cad0 --name metagpt-py
+bun packages/decide/eval/locate-run.ts ~/metagpt --set locate-queries-metagpt-py.json
 ```
 
 `locate-mine.ts` reads git history at one fixed commit (`551ef336`) and mines
@@ -428,29 +434,56 @@ through baseline A: today's tools with the right one picked per class
 (`search_symbols` for identifiers, `rg --files` filtered for paths, `rg -F`
 for strings).
 
-Run 2026-09-28, Apple M2 Max, macOS 26.5, Bun 1.3.14, load average 8 to 19,
-three runs back to back. Line hit means a top-5 row in the label file within
-2 lines of the label line.
+Run 2026-09-28, Apple M2 Max, macOS 26.5, Bun 1.3.14, load average about
+20. Line hit means a top-5 row in the label file within 2 lines of the label
+line. Each set's queries were mined by the same rules; only the 8gent-code set
+was used to tune routing.
 
-| System | Top-1 file | Top-5 file | Line hit | p50 / p95 ms (3 runs) | Tokens mean / p95 / max |
-| --- | --- | --- | --- | --- | --- |
-| locate | 99.3% | 100.0% | 100.0% | 32.9-37.1 / 70.1-79.9 | 44 / 74 / 117 |
-| baseline A | 99.3% | 100.0% | 100.0% | 27.4-35.4 / 75.9-93.8 | 44 / 108 / 492 |
+| Set (anchor) | n | System | Top-1 file | Top-5 file | Line hit | p50 / p95 ms | Tokens mean / p95 / max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8gent-code, TS (`551ef336`) | 140 | locate | 99.3% | 100.0% | 100.0% | 40.7 / 95.9 | 44 / 74 / 117 |
+| | | baseline A | 99.3% | 100.0% | 100.0% | 37.9 / 109.7 | 44 / 108 / 492 |
+| picoclaw, Go (`3584c0c7`) | 140 | locate | 97.1% | 99.3% | 100.0% | 22.2 / 24.7 | 60 / 132 / 173 |
+| | | baseline A | 50.0% | 50.0% | 33.3% | 5.3 / 24.6 | 16 / 31 / 36 |
+| metagpt, Python (`a5cb2fdd`) | 59 | locate | 100.0% | 100.0% | 100.0% | 19.6 / 21.4 | 64 / 128 / 138 |
+| | | baseline A | 50.8% | 50.8% | 23.7% | 11.0 / 20.1 | 14 / 33 / 41 |
+
+M1 target (top-5 >= 90%, p95 < 250 ms), per class, locate:
+
+| Set | identifier | path | string |
+| --- | --- | --- | --- |
+| 8gent-code (TS) | 100.0%, 41.8 ms | 100.0%, 79.6 ms | 100.0%, 173.7 ms |
+| picoclaw (Go) | 100.0%, 24.7 ms | 97.1%, 47.3 ms | 100.0%, 24.4 ms |
+| metagpt (Python) | 100.0%, 21.4 ms | 100.0%, 16.6 ms | 100.0%, 20.9 ms |
 
 Reading it:
 
 - The mined classes are easy once `search_symbols` reads the ranked index
-  (M0): baseline A also hits 100% top-5 when it is handed the right tool.
-  What locate adds is that the agent does not have to pick the tool, and it
-  never answers with an unbounded list: identifier answers average 39 tokens
-  against 69 for `search_symbols` (max 99 against 492). For paths and strings
-  locate prints more than bare rg (50 and 47 tokens against 9 and 30 mean)
-  because each row carries a symbol summary or the matching line.
-- The one top-1 miss is `PROBE_TIMEOUT_MS`: a module-level constant of the
+  (M0): on the TS set baseline A also hits 100% top-5 when it is handed the
+  right tool. What locate adds is that the agent does not have to pick the
+  tool, and it never answers with an unbounded list: identifier answers
+  average 39 tokens against 69 for `search_symbols` (max 99 against 492).
+  For paths and strings locate prints more than bare rg (50 and 47 tokens
+  against 9 and 30 mean) because each row carries a symbol summary or the
+  matching line.
+- Outside TS the index is empty, so `search_symbols` finds no identifier
+  (0% in both outside sets) while locate routes the name to grep and ranks
+  the declaration line first (100% top-5 on 99 Go and Python identifiers).
+  The outside sets were not used for tuning.
+- The one outside miss is `termux.jpg` (picoclaw): `.jpg` is not in the path
+  extension list, so the name is read as an identifier and grep finds its
+  mention in README.md. Left as measured, not tuned.
+- The one TS top-1 miss is `PROBE_TIMEOUT_MS`: a module-level constant of the
   same name in `packages/decide/probe.ts` ranks above the exported one. The
   index does not record whether a symbol is exported.
-- Two routing rules were changed after the first run, which had 98.6% top-5
-  (misses: a message containing `eval/run.ts` was routed to path, and one
-  containing `modelPath` to symbol). Pasted text is now looked up literally
-  first. The set was not changed, so these numbers are after tuning on it.
-- There is no prose class yet: hand-labelled prose queries belong to M2.
+- Two routing rules were changed after the first TS run, which had 98.6%
+  top-5 (misses: a message containing `eval/run.ts` was routed to path, and
+  one containing `modelPath` to symbol). Pasted text is now looked up
+  literally first. The TS set was not changed, so its numbers are after
+  tuning on it.
+- Against the spec (200 queries, 80 of them hand-labelled prose, one outside
+  repo), this covers 339 mined queries over three repos but no prose class.
+  Prose needs human labels and is M2 work; until then prose goes to the
+  hybrid route, which needs two query words on one row. When nothing
+  qualifies, the answer names one word to retry with (for "where is the rule
+  prefilter" it suggests `locate("prefilter")`).

@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Symbol } from "../types";
-import { getFileOutline, getFileTree, refreshIndex, searchSymbols } from "./index";
+import { getFileOutline, getFileTree, refreshIndexAsync, searchSymbols } from "./index";
 
 export type LocateMode = "path" | "symbol" | "grep" | "hybrid";
 
@@ -65,6 +65,10 @@ export interface LocateResult {
 	rows: LocateRow[];
 	/** ripgrep could not be started, so grep and file listing had nothing to search. */
 	rgMissing?: boolean;
+	/** ripgrep hit its time limit, so text and file search saw only part of the tree. */
+	incomplete?: boolean;
+	/** The symbol index was still building, so symbol search did not run. */
+	indexPending?: boolean;
 }
 
 export const LOCATE_MAX_ROWS = 5;
@@ -351,11 +355,15 @@ export interface GrepHit {
 	text: string;
 }
 
-/** Parse "path:line:text" lines from rg --no-heading -n. Leading "./" is dropped. */
+/**
+ * Parse "path NUL line:text" lines from rg --no-heading -n --null. The NUL
+ * ends the path, so a file name holding ":12:" is not split inside it.
+ * Leading "./" is dropped.
+ */
 export function parseRgLines(out: string): GrepHit[] {
 	const hits: GrepHit[] = [];
 	for (const raw of out.split("\n")) {
-		const m = /^(.+?):(\d+):(.*)$/.exec(raw);
+		const m = /^([^\0]+)\0(\d+):(.*)$/.exec(raw);
 		if (!m) continue;
 		hits.push({ file: m[1].replace(/^\.\//, ""), line: Number(m[2]), text: m[3] });
 	}
@@ -424,6 +432,7 @@ export function rankGrepHits(
  * shorten the normal answer. File listings have no line cap.
  */
 const RG_MAX_LINES = 100_000;
+/** Default time limit for one rg run. */
 const RG_TIMEOUT_MS = 3000;
 const RG_EXCLUDES = ["!node_modules", "!dist", "!.git", "!*.lock", "!*.min.js", "!*.map"];
 
@@ -431,18 +440,21 @@ export interface RgOutput {
 	text: string;
 	/** Stopped at the line cap or the timeout, so `text` is a prefix of the full output. */
 	truncated: boolean;
+	/** The stop was the time limit, not the line cap. */
+	timedOut: boolean;
 	/** The rg binary could not be started (ENOENT or similar). */
 	missing: boolean;
 }
 
 /**
  * Run ripgrep with an argv array, confined to `root`. Output is collected up
- * to `maxLines` lines (Infinity for none), then the process is stopped.
+ * to `maxLines` lines (Infinity for none) or `timeoutMs`, then the process is
+ * stopped.
  */
 export function runRg(
 	root: string,
 	args: string[],
-	opts: { bin?: string; maxLines?: number } = {},
+	opts: { bin?: string; maxLines?: number; timeoutMs?: number } = {},
 ): Promise<RgOutput> {
 	const maxLines = opts.maxLines ?? RG_MAX_LINES;
 	return new Promise((resolve) => {
@@ -454,22 +466,22 @@ export function runRg(
 				{ cwd: root, stdio: ["ignore", "pipe", "ignore"], shell: false },
 			);
 		} catch {
-			resolve({ text: "", truncated: false, missing: true });
+			resolve({ text: "", truncated: false, timedOut: false, missing: true });
 			return;
 		}
 		const chunks: string[] = [];
 		let lines = 0;
 		let done = false;
-		const finish = (truncated: boolean, missing = false) => {
+		const finish = (truncated: boolean, missing = false, timedOut = false) => {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			resolve({ text: missing ? "" : chunks.join(""), truncated, missing });
+			resolve({ text: missing ? "" : chunks.join(""), truncated, timedOut, missing });
 		};
 		const timer = setTimeout(() => {
 			proc.kill();
-			finish(true);
-		}, RG_TIMEOUT_MS);
+			finish(true, false, true);
+		}, opts.timeoutMs ?? RG_TIMEOUT_MS);
 		proc.stdout?.setEncoding("utf8");
 		proc.stdout?.on("data", (chunk: string) => {
 			if (done) return;
@@ -485,10 +497,12 @@ export function runRg(
 	});
 }
 
-/** Per-call state: which rg to run, and whether it turned out to be missing. */
+/** Per-call state: which rg to run, and whether it turned out missing or slow. */
 interface RunState {
 	bin?: string;
+	timeoutMs?: number;
 	rgMissing: boolean;
+	rgTimedOut: boolean;
 }
 
 async function rg(
@@ -497,8 +511,9 @@ async function rg(
 	args: string[],
 	maxLines?: number,
 ): Promise<RgOutput> {
-	const out = await runRg(root, args, { bin: state.bin, maxLines });
+	const out = await runRg(root, args, { bin: state.bin, maxLines, timeoutMs: state.timeoutMs });
 	if (out.missing) state.rgMissing = true;
+	if (out.timedOut) state.rgTimedOut = true;
 	return out;
 }
 
@@ -513,6 +528,7 @@ async function grepLiteral(
 		"-F",
 		"-n",
 		"--no-heading",
+		"--null",
 		"--color",
 		"never",
 		"--max-columns",
@@ -529,21 +545,36 @@ async function grepLiteral(
 	let out = await rg(state, root, args);
 	// Hits are ranked after a complete read, so walk order does not matter.
 	// When the safety cap cut the output, re-run in path order so the cut
-	// (and so the answer) is the same on every run.
-	if (out.truncated) out = await rg(state, root, ["--sort", "path", ...args]);
+	// (and so the answer) is the same on every run. Not after a timeout:
+	// --sort path is single-threaded, so it would only be slower; the time
+	// limit is reported instead (LocateResult.incomplete).
+	if (out.truncated && !out.timedOut) out = await rg(state, root, ["--sort", "path", ...args]);
 	return parseRgLines(out.text);
 }
 
 /**
- * Every file rg would search under `root` (respects .gitignore). No line cap:
- * a partial listing would rank a random subset of the tree.
+ * Every file rg would search under `root` (respects .gitignore), NUL
+ * separated so any file name survives. No line cap: a partial listing would
+ * rank a random subset of the tree. When rg hits its time limit (or gives
+ * nothing), the files in the symbol index are added, so every indexed source
+ * file is still ranked; the answer is then marked incomplete.
  */
-async function listFiles(state: RunState, root: string): Promise<string[]> {
-	const out = await rg(state, root, ["--files", "--", "./"], Number.POSITIVE_INFINITY);
-	return out.text
-		.split("\n")
+async function listFiles(ctx: RunCtx): Promise<string[]> {
+	const out = await rg(
+		ctx.state,
+		ctx.root,
+		["--files", "--null", "--", "./"],
+		Number.POSITIVE_INFINITY,
+	);
+	const files = out.text
+		.split("\0")
 		.filter(Boolean)
 		.map((f) => f.replace(/^\.\//, ""));
+	if ((out.timedOut || files.length === 0) && ctx.repoId) {
+		const seen = new Set(files);
+		for (const f of getFileTree(ctx.repoId).map(toPosix)) if (!seen.has(f)) files.push(f);
+	}
+	return files;
 }
 
 // ------------------------------------------------------------------ symbol mode
@@ -590,6 +621,35 @@ export interface LocateContext {
 	refresh?: boolean;
 	/** ripgrep binary. Default "rg" from PATH. */
 	rg?: string;
+	/** Time limit for one rg run, in ms. Default 3000. */
+	rgTimeoutMs?: number;
+	/** The index is still building (repoId is null for that reason); the answer says so. */
+	indexPending?: boolean;
+}
+
+/** How long a locate call waits for a first index build before answering without it. */
+export const LOCATE_INDEX_WAIT_MS = 200;
+
+/**
+ * Wait for an index build at most `ms`. A build that finishes in time gives
+ * its repo id; one still running gives pending, so locate answers with path
+ * and text search now instead of stalling for the whole build. A failed
+ * build gives no id and is not pending.
+ */
+export async function awaitIndex(
+	build: Promise<string | null>,
+	ms: number,
+): Promise<{ repoId: string | null; pending: boolean }> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<"late">((resolve) => {
+		timer = setTimeout(() => resolve("late"), ms);
+	});
+	try {
+		const r = await Promise.race([build.catch(() => null), late]);
+		return r === "late" ? { repoId: null, pending: true } : { repoId: r, pending: false };
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 type RunCtx = LocateContext & { state: RunState };
@@ -662,8 +722,7 @@ function symbolHits(repoId: string | null, name: string, limit = 20): Symbol[] {
 }
 
 async function pathRows(ctx: RunCtx, term: string, line?: number): Promise<LocateRow[]> {
-	let files = await listFiles(ctx.state, ctx.root);
-	if (files.length === 0 && ctx.repoId) files = getFileTree(ctx.repoId).map(toPosix);
+	const files = await listFiles(ctx);
 	return rankPaths(term, files).map((file) => ({
 		file,
 		line: line ?? 1,
@@ -674,7 +733,7 @@ async function pathRows(ctx: RunCtx, term: string, line?: number): Promise<Locat
 
 async function grepRows(ctx: RunCtx, term: string): Promise<LocateRow[]> {
 	let hits = await grepLiteral(ctx.state, ctx.root, [term]);
-	if (hits.length === 0 && /[A-Z]/.test(term) && !ctx.state.rgMissing) {
+	if (hits.length === 0 && /[A-Z]/.test(term) && !ctx.state.rgMissing && !ctx.state.rgTimedOut) {
 		hits = await grepLiteral(ctx.state, ctx.root, [term], true);
 	}
 	return rankGrepHits(term, hits).map((h) => ({
@@ -706,7 +765,7 @@ async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 		.slice(0, 3)
 		.map((x) => symbolRow(ctx.root, x.s));
 
-	const files = (await listFiles(ctx.state, ctx.root))
+	const files = (await listFiles(ctx))
 		.map((f) => ({ f, n: count(f) }))
 		.filter((x) => x.n >= need)
 		.sort((a, b) => b.n - a.n || a.f.length - b.f.length || (a.f < b.f ? -1 : 1))
@@ -779,10 +838,15 @@ async function runRoute(
 /** Answer "where is X?" for `query` under `ctx.root`. Read-only. */
 export async function locate(query: string, context: LocateContext): Promise<LocateResult> {
 	const q = (query ?? "").trim();
-	const ctx: RunCtx = { ...context, state: { bin: context.rg, rgMissing: false } };
+	const ctx: RunCtx = {
+		...context,
+		state: { bin: context.rg, timeoutMs: context.rgTimeoutMs, rgMissing: false, rgTimedOut: false },
+	};
 	if (ctx.repoId && ctx.refresh !== false && refreshDue(lastRefresh.get(ctx.repoId), Date.now())) {
+		// Awaited, so a file written a moment ago is seen, but in batches that
+		// give the event loop a turn, so a very large tree does not stall it.
 		const t0 = performance.now();
-		refreshIndex(ctx.repoId);
+		await refreshIndexAsync(ctx.repoId);
 		lastRefresh.set(ctx.repoId, { at: Date.now(), costMs: performance.now() - t0 });
 	}
 
@@ -804,6 +868,8 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 	}
 	const result: LocateResult = { query: q, route, rows: rows.slice(0, LOCATE_MAX_ROWS) };
 	if (ctx.state.rgMissing) result.rgMissing = true;
+	if (ctx.state.rgTimedOut) result.incomplete = true;
+	if (ctx.indexPending) result.indexPending = true;
 	return result;
 }
 
@@ -811,17 +877,34 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 export function formatLocate(result: LocateResult): string {
 	const { route, rows } = result;
 	const head = `locate ${route.mode} (${route.rule}): ${clip(route.mode === "hybrid" ? (route.terms ?? []).join(" ") : route.term) || "(empty)"}`;
-	// Without rg, text and file search did not run: say so rather than
+	// When a search did not run or did not finish, say so rather than
 	// reporting that the text does not exist.
-	const note = result.rgMissing
-		? "ripgrep (rg) was not found on PATH, so text and file search did not run. Install ripgrep or use search_symbols."
-		: null;
-	if (rows.length === 0) {
-		return `${head}\n${note ?? "no matches. Try a shorter term, a symbol name, or a path fragment."}`;
+	const notes: string[] = [];
+	if (result.rgMissing) {
+		notes.push(
+			"ripgrep (rg) was not found on PATH, so text and file search did not run. Install ripgrep or use search_symbols.",
+		);
+	} else if (result.incomplete) {
+		notes.push(
+			"ripgrep stopped after its time limit on this tree, so text and file search are partial. A longer term or a path narrows it.",
+		);
 	}
-	return [
-		head,
-		...rows.map((r) => `${r.file}:${r.line} ${r.kind} ${r.text}`),
-		...(note ? [note] : []),
-	].join("\n");
+	if (result.indexPending) {
+		notes.push(
+			"The symbol index is still building, so this answer used text and file search only.",
+		);
+	}
+	if (rows.length > 0) {
+		return [head, ...rows.map((r) => `${r.file}:${r.line} ${r.kind} ${r.text}`), ...notes].join(
+			"\n",
+		);
+	}
+	if (notes.length > 0) return [head, ...notes].join("\n");
+	// Prose needs two of its words on one row; name the likeliest single word.
+	const terms = route.mode === "hybrid" ? (route.terms ?? []) : [];
+	if (terms.length >= 2) {
+		const word = [...terms].sort((a, b) => b.length - a.length)[0];
+		return `${head}\nno row holds two of: ${terms.join(", ")}. Try one word, e.g. locate("${word}").`;
+	}
+	return `${head}\nno matches. Try a shorter term, a symbol name, or a path fragment.`;
 }

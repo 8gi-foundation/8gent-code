@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { clearIndex, ensureIndexed } from "./index";
 import {
+	awaitIndex,
 	contentTerms,
 	formatLocate,
 	locate,
@@ -19,6 +20,7 @@ import {
 	rankPaths,
 	refreshDue,
 	routeQuery,
+	runRg,
 } from "./locate";
 
 const has =
@@ -218,10 +220,16 @@ describe("rankPaths", () => {
 });
 
 describe("grep ranking", () => {
-	test("parseRgLines reads path:line:text and drops ./", () => {
-		expect(parseRgLines("./a/b.ts:12:  const x = 1\nnot a hit\nc.md:3:x: y")).toEqual([
+	test("parseRgLines reads path NUL line:text (rg --null) and drops ./", () => {
+		expect(parseRgLines("./a/b.ts\u000012:  const x = 1\nnot a hit\nc.md\u00003:x: y")).toEqual([
 			{ file: "a/b.ts", line: 12, text: "  const x = 1" },
 			{ file: "c.md", line: 3, text: "x: y" },
+		]);
+	});
+
+	test("parseRgLines keeps a file name that contains :digits: whole", () => {
+		expect(parseRgLines("./a:12:b.ts\u00007:hit")).toEqual([
+			{ file: "a:12:b.ts", line: 7, text: "hit" },
 		]);
 	});
 
@@ -455,30 +463,47 @@ describe("a repo larger than one rg output chunk", () => {
 		fs.rmSync(big, { recursive: true, force: true });
 	});
 
-	test("path: a file outside the first few thousand listed is still found, every run", async () => {
-		for (let i = 0; i < 3; i++) {
-			const r = await locate("needle-target.ts", { root: big, repoId: null });
-			expect(r.rows[0]).toMatchObject({ file: "zz/needle-target.ts", kind: "file" });
-		}
-	});
+	// These check what is found, not how fast: a generous rg limit and test
+	// timeout keep a heavily loaded machine from failing them.
+	const SLOW = 60_000;
 
-	test("path: the same query gives the same rows every run", async () => {
-		const runs = await Promise.all(
-			[0, 1, 2].map(() => locate("f4999.ts", { root: big, repoId: null })),
-		);
-		expect(runs[0].rows[0]).toMatchObject({ file: "m49/f4999.ts" });
-		expect(runs[1].rows).toEqual(runs[0].rows);
-		expect(runs[2].rows).toEqual(runs[0].rows);
-	});
+	test(
+		"path: a file outside the first few thousand listed is still found, every run",
+		async () => {
+			for (let i = 0; i < 3; i++) {
+				const r = await locate("needle-target.ts", { root: big, repoId: null, rgTimeoutMs: SLOW });
+				expect(r.rows[0]).toMatchObject({ file: "zz/needle-target.ts", kind: "file" });
+			}
+		},
+		SLOW,
+	);
 
-	test("grep: the definition of a common name is not cut before ranking", async () => {
-		const runs = [];
-		for (let i = 0; i < 3; i++) runs.push(await locate("commonThing", { root: big, repoId: null }));
-		expect(runs[0].route.mode).toBe("grep");
-		expect(runs[0].rows[0]).toMatchObject({ file: "zz/def.ts", line: 1 });
-		expect(runs[1].rows).toEqual(runs[0].rows);
-		expect(runs[2].rows).toEqual(runs[0].rows);
-	});
+	test(
+		"path: the same query gives the same rows every run",
+		async () => {
+			const runs = await Promise.all(
+				[0, 1, 2].map(() => locate("f4999.ts", { root: big, repoId: null, rgTimeoutMs: SLOW })),
+			);
+			expect(runs[0].rows[0]).toMatchObject({ file: "m49/f4999.ts" });
+			expect(runs[1].rows).toEqual(runs[0].rows);
+			expect(runs[2].rows).toEqual(runs[0].rows);
+		},
+		SLOW,
+	);
+
+	test(
+		"grep: the definition of a common name is not cut before ranking",
+		async () => {
+			const runs = [];
+			for (let i = 0; i < 3; i++)
+				runs.push(await locate("commonThing", { root: big, repoId: null, rgTimeoutMs: SLOW }));
+			expect(runs[0].route.mode).toBe("grep");
+			expect(runs[0].rows[0]).toMatchObject({ file: "zz/def.ts", line: 1 });
+			expect(runs[1].rows).toEqual(runs[0].rows);
+			expect(runs[2].rows).toEqual(runs[0].rows);
+		},
+		SLOW,
+	);
 });
 
 describe("ripgrep missing", () => {
@@ -526,5 +551,109 @@ describe("refreshDue", () => {
 	test("the skip window is capped at five seconds", () => {
 		expect(refreshDue({ at: 1000, costMs: 2000 }, 5999)).toBe(false);
 		expect(refreshDue({ at: 1000, costMs: 2000 }, 6000)).toBe(true);
+	});
+});
+
+describe("ripgrep timeout", () => {
+	let slowDir: string;
+	let slowRg: string;
+	let countFile: string;
+	beforeAll(() => {
+		slowDir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-slow-rg-"));
+		countFile = path.join(slowDir, "calls");
+		slowRg = path.join(slowDir, "rg");
+		// A stand-in rg that records each start, then hangs past the time limit.
+		fs.writeFileSync(slowRg, `#!/bin/sh\necho x >> '${countFile}'\nexec sleep 5\n`);
+		fs.chmodSync(slowRg, 0o755);
+	});
+	afterAll(() => fs.rmSync(slowDir, { recursive: true, force: true }));
+	const calls = () =>
+		fs.existsSync(countFile)
+			? fs.readFileSync(countFile, "utf8").split("\n").filter(Boolean).length
+			: 0;
+
+	test("runRg reports a timeout as its own cause", async () => {
+		fs.rmSync(countFile, { force: true });
+		const out = await runRg(root, ["--files"], { bin: slowRg, timeoutMs: 100 });
+		expect(out).toMatchObject({ truncated: true, timedOut: true, missing: false });
+	});
+
+	test("grep: a timeout is reported, never 'no matches', and is not retried", async () => {
+		fs.rmSync(countFile, { force: true });
+		const t0 = performance.now();
+		const r = await locate('"Rate limit exceeded for tool"', {
+			root,
+			repoId,
+			rg: slowRg,
+			rgTimeoutMs: 400,
+		});
+		const ms = performance.now() - t0;
+		expect(r.incomplete).toBe(true);
+		// One rg start: no --sort path re-run and no case-insensitive re-run,
+		// each of which would cost another full time limit. (Under load the
+		// stand-in can be stopped before it records its start, hence <= 1.)
+		expect(calls()).toBeLessThanOrEqual(1);
+		expect(ms).toBeLessThan(2 * 400);
+		const out = formatLocate(r);
+		expect(out).toContain("stopped after");
+		expect(out).not.toContain("no matches");
+	});
+
+	test("path: after a listing timeout the indexed files are still ranked", async () => {
+		fs.rmSync(countFile, { force: true });
+		const r = await locate("decide/index.ts", { root, repoId, rg: slowRg, rgTimeoutMs: 150 });
+		expect(r.incomplete).toBe(true);
+		expect(r.rows[0]).toMatchObject({ file: "src/decide/index.ts", kind: "file" });
+		expect(formatLocate(r)).toContain("stopped after");
+	});
+
+	test("a run that finishes in time is not marked incomplete", async () => {
+		// A generous limit, so a loaded machine cannot turn this into a timeout.
+		const r = await locate('"Rate limit exceeded for tool"', { ...ctx(), rgTimeoutMs: 20_000 });
+		expect(r.incomplete).toBeUndefined();
+		expect(formatLocate(r)).not.toContain("stopped after");
+	});
+});
+
+describe("a file name that contains :digits:", () => {
+	test("grep returns the whole file name", async () => {
+		write("odd/a:12:b.ts", "export const colonNamedMarker = 1;\n");
+		const r = await locate('"colonNamedMarker"', ctx());
+		expect(r.rows[0]).toMatchObject({ file: "odd/a:12:b.ts", line: 1 });
+	});
+});
+
+describe("prose with no row carrying two words", () => {
+	test("the answer suggests one word to retry with", async () => {
+		write("src/pre.ts", "export function prefilterCommand() {}\n");
+		const r = await locate("where is the rule prefilter", ctx());
+		expect(r.route.mode).toBe("hybrid");
+		expect(r.rows).toEqual([]);
+		const out = formatLocate(r);
+		expect(out).toContain('locate("prefilter")');
+	});
+});
+
+describe("index still building", () => {
+	test("awaitIndex waits at most the given time", async () => {
+		const never = new Promise<string>(() => {});
+		const t0 = performance.now();
+		expect(await awaitIndex(never, 50)).toEqual({ repoId: null, pending: true });
+		expect(performance.now() - t0).toBeLessThan(500);
+		expect(await awaitIndex(Promise.resolve("id"), 50)).toEqual({ repoId: "id", pending: false });
+		expect(await awaitIndex(Promise.reject(new Error("x")), 50)).toEqual({
+			repoId: null,
+			pending: false,
+		});
+		expect(await awaitIndex(Promise.resolve(null), 50)).toEqual({ repoId: null, pending: false });
+	});
+
+	test("an answer given before the index is ready says so", async () => {
+		const r = await locate("createDecider", { root, repoId: null, indexPending: true });
+		expect(r.rows[0]).toMatchObject({ file: "src/decide/index.ts", line: 3 });
+		expect(formatLocate(r)).toContain("symbol index is still building");
+		expect(formatLocate(await locate("createDecider", { root, repoId: null }))).not.toContain(
+			"still building",
+		);
 	});
 });

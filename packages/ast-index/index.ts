@@ -145,15 +145,15 @@ export async function indexFolder(
 	return repoIndex;
 }
 
+type RefreshCounts = { added: number; changed: number; removed: number };
+
 /**
- * Bring a built index up to date with disk: parse files created or modified
- * since they were indexed, and drop files that were deleted. One readdir and
- * one stat per file, so it is cheap enough to run before every search.
- * Returns what changed, or null when the repo is not indexed.
+ * One refresh pass as steps: it yields after each file it stats, so a caller
+ * can run it straight through (refreshIndex) or give the event loop a turn
+ * between batches (refreshIndexAsync). Returns what changed, or null when the
+ * repo is not indexed.
  */
-export function refreshIndex(
-	repoId: string,
-): { added: number; changed: number; removed: number } | null {
+function* refreshSteps(repoId: string): Generator<void, RefreshCounts | null, void> {
 	const repo = repoIndices.get(repoId);
 	const outlines = fileOutlines.get(repoId);
 	const mtimes = fileMtimes.get(repoId);
@@ -170,6 +170,7 @@ export function refreshIndex(
 
 	const seen = new Set<string>();
 	for (const file of files) {
+		yield;
 		const rel = path.relative(repo.sourceRoot, file);
 		seen.add(rel);
 		let mtimeMs: number;
@@ -205,6 +206,40 @@ export function refreshIndex(
 	repo.fileCount = outlines.size;
 	repo.symbolCount = symbols.size;
 	return counts;
+}
+
+/**
+ * Bring a built index up to date with disk: parse files created or modified
+ * since they were indexed, and drop files that were deleted. One readdir and
+ * one stat per file, so it is cheap enough to run before every search.
+ * Returns what changed, or null when the repo is not indexed. Runs on the
+ * caller's stack; use refreshIndexAsync where a large tree must not block.
+ */
+export function refreshIndex(repoId: string): RefreshCounts | null {
+	const steps = refreshSteps(repoId);
+	for (let r = steps.next(); ; r = steps.next()) if (r.done) return r.value;
+}
+
+const refreshesInFlight = new Map<string, Promise<RefreshCounts | null>>();
+
+/**
+ * refreshIndex that gives the event loop a turn every YIELD_EVERY files, so a
+ * refresh of a very large tree does not stall other work. Concurrent calls for
+ * the same repo share one pass.
+ */
+export function refreshIndexAsync(repoId: string): Promise<RefreshCounts | null> {
+	const inFlight = refreshesInFlight.get(repoId);
+	if (inFlight) return inFlight;
+	const run = (async () => {
+		const steps = refreshSteps(repoId);
+		for (let i = 1; ; i++) {
+			const r = steps.next();
+			if (r.done) return r.value;
+			if (i % YIELD_EVERY === 0) await new Promise((res) => setImmediate(res));
+		}
+	})().finally(() => refreshesInFlight.delete(repoId));
+	refreshesInFlight.set(repoId, run);
+	return run;
 }
 
 /**
