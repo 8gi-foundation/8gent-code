@@ -21,6 +21,10 @@
  *                that query: a threshold fitted on the other 39 answers, so
  *                no query is scored by a cut it helped choose.
  *
+ *   oracle     - locate with a router that always answers the hand label
+ *                (no model): the top-5 ceiling of routing, what M2 would
+ *                score with a perfect classifier.
+ *
  * Metrics: raw mode accuracy (argmax equals label), gated held-out accuracy,
  * coverage (share where the model's mode was kept) and accuracy on those,
  * classifier p50/p95, M1 and M2 top-5 file hit and end-to-end p50/p95.
@@ -30,6 +34,7 @@
  * (threshold fitted on all 40). One model per run; nothing runs in parallel.
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -42,7 +47,7 @@ import {
 	createProseRouter,
 	locateModeState,
 } from "../../ast-index/locate-system-one";
-import { modelSlug, calibrationFileName } from "../calibrate";
+import { calibrationFileName, modelSlug } from "../calibrate";
 import { createDecider } from "../index";
 import {
 	LOCATE_CALIBRATION_DIR,
@@ -52,9 +57,28 @@ import {
 	fitLocateCalibration,
 	locateLeaveOneOut,
 } from "../locate-calibration";
-import { extractAnchor, percentile } from "./locate-run";
 
 const RESULTS_DIR = path.join(import.meta.dir, "results");
+
+function percentile(sorted: number[], p: number): number {
+	if (sorted.length === 0) return Number.NaN;
+	const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+	return sorted[idx];
+}
+
+/** The tree at `anchor` in a temp dir (git archive), so labels match whatever is checked out. */
+function extractAnchor(repo: string, anchor: string): { dir: string; tree: string } {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-prose-eval-"));
+	const tree = path.join(dir, "tree");
+	fs.mkdirSync(tree);
+	const tar = path.join(dir, "anchor.tar");
+	const a = spawnSync("git", ["archive", "--format=tar", "-o", tar, anchor], { cwd: repo });
+	if (a.status !== 0) throw new Error(`git archive failed: ${a.stderr}`);
+	const x = spawnSync("tar", ["-xf", tar, "-C", tree]);
+	if (x.status !== 0) throw new Error(`tar failed: ${x.stderr}`);
+	fs.rmSync(tar);
+	return { dir, tree };
+}
 const TARGET = { accuracy: 0.85, p95Ms: 500 };
 
 interface ProseQuery {
@@ -80,6 +104,7 @@ interface Row {
 	gated: LocateModeChoice;
 	m1: { top5: boolean; ms: number; top: string[] };
 	m2: { top5: boolean; ms: number; top: string[]; route: string; reason?: string };
+	oracle: { top5: boolean; top: string[]; route: string };
 }
 
 const pc = (x: number) => (Number.isNaN(x) ? "  n/a" : `${(x * 100).toFixed(1).padStart(5)}%`);
@@ -127,7 +152,7 @@ async function main(): Promise<void> {
 		console.log(`${backend.name} ${backend.model}: warm-up (model load) ${warmMs} ms`);
 
 		// Pass 1: the classifier alone, and M1.
-		const partial: Array<Omit<Row, "heldOutThreshold" | "gated" | "m2">> = [];
+		const partial: Array<Omit<Row, "heldOutThreshold" | "gated" | "m2" | "oracle">> = [];
 		for (const q of set.queries) {
 			let modelAns: Row["model"] = null;
 			let modelError: string | undefined;
@@ -185,6 +210,19 @@ async function main(): Promise<void> {
 			const r2 = await locate(p.query, { root: tree, repoId: index.id, systemOne: router });
 			const m2ms = performance.now() - e0;
 			const top2 = r2.rows.map((r) => r.file);
+			const label = p.label;
+			const ro = await locate(p.query, {
+				root: tree,
+				repoId: index.id,
+				systemOne: async () => ({
+					mode: label,
+					chosen: label,
+					reason: "model",
+					confidence: 1,
+					latencyMs: 0,
+				}),
+			});
+			const topO = ro.rows.map((r) => r.file);
 			rows.push({
 				...p,
 				heldOutThreshold: threshold,
@@ -195,6 +233,11 @@ async function main(): Promise<void> {
 					top: top2,
 					route: `${r2.route.mode}/${r2.route.rule}`,
 					...(r2.route.systemOne ? { reason: r2.route.systemOne.reason } : {}),
+				},
+				oracle: {
+					top5: topO.slice(0, 5).some((f) => p.files.includes(f)),
+					top: topO,
+					route: `${ro.route.mode}/${ro.route.rule}`,
 				},
 			});
 		}
@@ -213,6 +256,7 @@ async function main(): Promise<void> {
 						gated: rate(rs.map((r) => r.gated === m)),
 						m1Top5: rate(rs.map((r) => r.m1.top5)),
 						m2Top5: rate(rs.map((r) => r.m2.top5)),
+						oracleTop5: rate(rs.map((r) => r.oracle.top5)),
 					},
 				];
 			}),
@@ -253,6 +297,7 @@ async function main(): Promise<void> {
 					return acc;
 				}, {}),
 			},
+			oracle: { top5: rate(rows.map((r) => r.oracle.top5)) },
 			byMode,
 			confusion,
 			target: TARGET,
@@ -278,10 +323,11 @@ async function main(): Promise<void> {
 		console.log(
 			`  M2 (routed) top5 ${pc(summary.m2.top5)}  p50 ${summary.m2.ms.p50} ms  p95 ${summary.m2.ms.p95} ms  router reasons ${JSON.stringify(summary.m2.reasons)}`,
 		);
-		console.log("  per label mode: n  raw  gated  M1top5  M2top5");
+		console.log(`  oracle (label as mode) top5 ${pc(summary.oracle.top5)}`);
+		console.log("  per label mode: n  raw  gated  M1top5  M2top5  oracleTop5");
 		for (const [m, v] of Object.entries(byMode))
 			console.log(
-				`    ${m.padEnd(9)} ${String(v.n).padStart(2)} ${pc(v.raw)} ${pc(v.gated)} ${pc(v.m1Top5)} ${pc(v.m2Top5)}`,
+				`    ${m.padEnd(9)} ${String(v.n).padStart(2)} ${pc(v.raw)} ${pc(v.gated)} ${pc(v.m1Top5)} ${pc(v.m2Top5)} ${pc(v.oracleTop5)}`,
 			);
 		console.log(`  confusion (label -> model argmax): ${JSON.stringify(confusion)}`);
 		console.log(

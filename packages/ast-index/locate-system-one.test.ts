@@ -12,12 +12,12 @@ import type { Decider } from "../decide/index";
 import { createDecider } from "../decide/index";
 import {
 	DEFAULT_LOCATE_ROUTE_TIMEOUT_MS,
+	LOCATE_DEFAULT_THRESHOLD,
 	LOCATE_MODE_OPTIONS,
 	LOCATE_MODE_OPTION_TEXT,
 	_resetLocateSystemOne,
 	createProseRouter,
 	defaultProseRouter,
-	locateRouteTimeoutMs,
 	locateSystemOneEnabled,
 } from "./locate-system-one";
 
@@ -98,15 +98,14 @@ describe("flag and time limit", () => {
 		// The shell guard's flag does not turn locate routing on.
 		expect(locateSystemOneEnabled({ EIGHT_SYSTEM_ONE: "1" })).toBe(false);
 	});
-	test("time limit defaults to 500 ms and takes a positive env override", () => {
+	test("the time limit is 500 ms", () => {
 		expect(DEFAULT_LOCATE_ROUTE_TIMEOUT_MS).toBe(500);
-		expect(locateRouteTimeoutMs({})).toBe(500);
-		expect(locateRouteTimeoutMs({ EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS: "1200" })).toBe(1200);
-		expect(locateRouteTimeoutMs({ EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS: "-5" })).toBe(500);
-		expect(locateRouteTimeoutMs({ EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS: "soon" })).toBe(500);
 	});
 	test("defaultProseRouter is null with the flag off, and builds no decider", () => {
 		expect(defaultProseRouter({})).toBeNull();
+	});
+	test("defaultProseRouter is a router with the flag on", () => {
+		expect(typeof defaultProseRouter({ EIGHT_SYSTEM_ONE_LOCATE: "1" })).toBe("function");
 	});
 });
 
@@ -147,18 +146,33 @@ describe("createProseRouter", () => {
 		expect(r).toMatchObject({ mode: "symbol", reason: "model", threshold: 0.4 });
 	});
 
-	test("an uncalibrated model is not asked: hybrid", async () => {
-		const { decider, asked } = fakeDecider([0.99, 0, 0, 0, 0.01], { model: "other:7b" });
-		const r = await createProseRouter({ decider, calibrationDir: calDir })("where is the store");
-		expect(r).toMatchObject({ mode: "hybrid", reason: "uncalibrated", model: "other:7b" });
-		expect(asked.length).toBe(0);
+	test("an uncalibrated model is still asked, and gated at the default threshold", async () => {
+		expect(LOCATE_DEFAULT_THRESHOLD).toBe(0.9);
+		const sure = fakeDecider([0.95, 0, 0, 0, 0.05], { model: "other:7b" });
+		const r = await createProseRouter({ decider: sure.decider, calibrationDir: calDir })(
+			"where is the store",
+		);
+		expect(sure.asked.length).toBe(1);
+		expect(r).toMatchObject({
+			mode: "symbol",
+			reason: "model",
+			threshold: 0.9,
+			calibrated: false,
+			model: "other:7b",
+		});
+		const unsure = fakeDecider([0.8, 0.2, 0, 0, 0], { model: "other:7b" });
+		const r2 = await createProseRouter({ decider: unsure.decider, calibrationDir: calDir })(
+			"where is the store",
+		);
+		expect(unsure.asked.length).toBe(1);
+		expect(r2).toMatchObject({ mode: "hybrid", reason: "below_threshold", calibrated: false });
 	});
 
-	test("a model calibrated under 85% held-out accuracy is not asked: hybrid", async () => {
-		const { decider, asked } = fakeDecider([0.99, 0, 0, 0, 0.01], { model: "weak:1b" });
+	test("a calibrated model is asked whatever its held-out accuracy, and gated at its threshold", async () => {
+		const { decider, asked } = fakeDecider([0.3, 0.2, 0.2, 0.2, 0.1], { model: "weak:1b" });
 		const r = await createProseRouter({ decider, calibrationDir: calDir })("where is the store");
-		expect(r).toMatchObject({ mode: "hybrid", reason: "untrusted", model: "weak:1b" });
-		expect(asked.length).toBe(0);
+		expect(asked.length).toBe(1);
+		expect(r).toMatchObject({ mode: "symbol", reason: "model", threshold: 0.2, calibrated: true });
 	});
 
 	test("a slow model is cut off at the time limit: hybrid", async () => {

@@ -77,7 +77,7 @@ interface Row {
 	tokens: number;
 }
 
-export function percentile(sorted: number[], p: number): number {
+function percentile(sorted: number[], p: number): number {
 	if (sorted.length === 0) return Number.NaN;
 	const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
 	return sorted[idx];
@@ -103,7 +103,7 @@ function run(cmd: string, args: string[], cwd: string): string {
 	return r.stdout ?? "";
 }
 
-export function extractAnchor(repo: string, anchor: string): { dir: string; tree: string } {
+function extractAnchor(repo: string, anchor: string): { dir: string; tree: string } {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-eval-"));
 	const tree = path.join(dir, "tree");
 	fs.mkdirSync(tree);
@@ -311,5 +311,4 @@ async function main(): Promise<void> {
 	}
 }
 
-// Imported by locate-prose-run.ts for its helpers; runs only as a script.
-if (import.meta.main) await main();
+await main();

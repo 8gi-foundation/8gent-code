@@ -1,6 +1,6 @@
 {
 	"summary": {
-		"date": "2026-09-28T20:11:14.838Z",
+		"date": "2026-09-28T21:09:49.127Z",
 		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
 		"set": "locate-queries-prose.json",
 		"synthetic": true,
@@ -11,14 +11,14 @@
 			"arch": "arm64",
 			"cpus": "Apple M2 Max",
 			"loadavg": [
-				22.88,
-				26.78,
-				26.9
+				187.5,
+				137.74,
+				95.59
 			]
 		},
 		"n": 40,
 		"answered": 40,
-		"warmUpMs": 13326,
+		"warmUpMs": 16400,
 		"rawAccuracy": 0.525,
 		"thresholdAll": 0.3615,
 		"heldOut": {
@@ -28,30 +28,33 @@
 			"method": "leave-one-out"
 		},
 		"classifierMs": {
-			"p50": 1585.1,
-			"p95": 2098.5,
-			"max": 2149.1
+			"p50": 2420.9,
+			"p95": 3001,
+			"max": 3135
 		},
 		"m1": {
 			"top5": 0.5,
 			"ms": {
-				"p50": 313.6,
-				"p95": 757.5,
-				"max": 832.7
+				"p50": 1623.9,
+				"p95": 6756.4,
+				"max": 7621.8
 			}
 		},
 		"m2": {
-			"top5": 0.475,
+			"top5": 0.55,
 			"ms": {
-				"p50": 710.6,
-				"p95": 802.7,
-				"max": 836.7
+				"p50": 2904.2,
+				"p95": 5522.1,
+				"max": 7976.6
 			},
 			"reasons": {
-				"below_threshold": 17,
-				"model": 20,
-				"timeout": 3
+				"below_threshold": 16,
+				"model": 22,
+				"timeout": 2
 			}
+		},
+		"oracle": {
+			"top5": 0.575
 		},
 		"byMode": {
 			"symbol": {
@@ -59,35 +62,40 @@
 				"raw": 1,
 				"gated": 0.9,
 				"m1Top5": 0.6,
-				"m2Top5": 0.6
+				"m2Top5": 0.7,
+				"oracleTop5": 0.7
 			},
 			"grep": {
 				"n": 8,
 				"raw": 1,
 				"gated": 0.875,
 				"m1Top5": 0.375,
-				"m2Top5": 0.375
+				"m2Top5": 0.375,
+				"oracleTop5": 0.375
 			},
 			"path": {
 				"n": 8,
 				"raw": 0.375,
 				"gated": 0.375,
 				"m1Top5": 0.625,
-				"m2Top5": 0.625
+				"m2Top5": 0.75,
+				"oracleTop5": 0.875
 			},
 			"semantic": {
 				"n": 8,
 				"raw": 0,
 				"gated": 0,
 				"m1Top5": 0,
-				"m2Top5": 0
+				"m2Top5": 0,
+				"oracleTop5": 0
 			},
 			"hybrid": {
 				"n": 6,
 				"raw": 0,
 				"gated": 0.8333333333333334,
 				"m1Top5": 1,
-				"m2Top5": 0.8333333333333334
+				"m2Top5": 1,
+				"oracleTop5": 1
 			}
 		},
 		"confusion": {
@@ -137,11 +145,11 @@
 					0.226,
 					0.1992
 				],
-				"latencyMs": 593.3
+				"latencyMs": 2885.6
 			},
 			"m1": {
 				"top5": true,
-				"ms": 832.7,
+				"ms": 1490.8,
 				"top": [
 					"packages/decide/backends/ollama.ts",
 					"packages/db/convex/admin.ts",
@@ -153,7 +161,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 567.4,
+				"ms": 3186.5,
 				"top": [
 					"packages/decide/backends/ollama.ts",
 					"packages/db/convex/admin.ts",
@@ -162,6 +170,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/llamacpp.ts",
+					"packages/decide/backends/ollama.ts",
+					"scripts/run-eval-set.ts",
+					"packages/design-compose/motion.ts",
+					"scripts/run-eval-set.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -181,11 +200,11 @@
 					0.1292,
 					0.1038
 				],
-				"latencyMs": 451
+				"latencyMs": 2055.9
 			},
 			"m1": {
 				"top5": false,
-				"ms": 804.7,
+				"ms": 1927.5,
 				"top": [
 					"packages/permissions/maker-checker-enforcer.ts",
 					"docs/STRESS-TEST-1M.md",
@@ -197,17 +216,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "symbol",
 			"m2": {
-				"top5": false,
-				"ms": 551.5,
+				"top5": true,
+				"ms": 710.1,
 				"top": [
-					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/ai/tools.ts",
+					"packages/eight/pre-tool-router.ts",
+					"packages/eight/tools.ts",
 					"packages/secrets/libsecret.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts"
+					"packages/permissions/maker-checker-enforcer.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/ai/tools.ts",
+					"packages/eight/pre-tool-router.ts",
+					"packages/eight/tools.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/permissions/maker-checker-enforcer.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -227,11 +257,11 @@
 					0.0356,
 					0.039
 				],
-				"latencyMs": 514.3
+				"latencyMs": 2545.5
 			},
 			"m1": {
 				"top5": true,
-				"ms": 757.5,
+				"ms": 4092.3,
 				"top": [
 					"packages/decide/probe.ts",
 					"README.md",
@@ -244,16 +274,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": true,
-				"ms": 651.1,
+				"ms": 906.8,
 				"top": [
-					"packages/decide/probe.ts",
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.test.ts",
 					"packages/providers/model-reroute.ts",
-					"scripts/install-wizard.tsx",
-					"packages/daemon/telegram-bridge.ts",
-					"packages/decide/eval/smoke.ts"
+					"packages/providers/model-reroute.ts",
+					"packages/decide/probe.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/decide/probe.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -273,11 +314,11 @@
 					0.0905,
 					0.1794
 				],
-				"latencyMs": 368.7
+				"latencyMs": 2061.6
 			},
 			"m1": {
 				"top5": true,
-				"ms": 569.8,
+				"ms": 1632.3,
 				"top": [
 					"packages/decide/calibrate.ts",
 					"packages/decide/calibrate.ts",
@@ -288,14 +329,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": true,
-				"ms": 769.1,
+				"ms": 872.3,
 				"top": [
-					"packages/decide/calibrate.ts",
-					"packages/decide/calibrate.ts",
+					"bin/8gent.ts",
+					"packages/providers/host-placement.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/smoke.ts",
 					"packages/decide/calibrate.ts"
 				],
-				"route": "hybrid/prose",
-				"reason": "timeout"
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"bin/8gent.ts",
+					"packages/providers/host-placement.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/smoke.ts",
+					"packages/decide/calibrate.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -315,11 +369,11 @@
 					0.0202,
 					0.0287
 				],
-				"latencyMs": 500.5
+				"latencyMs": 2451.3
 			},
 			"m1": {
 				"top5": true,
-				"ms": 303.6,
+				"ms": 622,
 				"top": [
 					"packages/decide/backends/mock.ts",
 					"packages/decide/backends/mock.ts",
@@ -331,15 +385,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": true,
-				"ms": 719,
+				"ms": 522.6,
 				"top": [
 					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
 					"packages/decide/backends/mock.ts",
-					"packages/decide/backends/mock.ts",
-					"tests/security/README.md"
+					"tests/dispatch/dispatch.smoke-test.ts",
+					"packages/eight/verdict.test.ts"
 				],
-				"route": "hybrid/prose",
-				"reason": "timeout"
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/dispatch/dispatch.smoke-test.ts",
+					"packages/eight/verdict.test.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -359,11 +425,11 @@
 					0.1516,
 					0.09
 				],
-				"latencyMs": 440
+				"latencyMs": 2066.2
 			},
 			"m1": {
 				"top5": true,
-				"ms": 510.4,
+				"ms": 1985.4,
 				"top": [
 					"scripts/nightly-train.ts",
 					"packages/eight/tool-loop-detector.ts",
@@ -373,17 +439,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "symbol",
 			"m2": {
-				"top5": false,
-				"ms": 725.6,
+				"top5": true,
+				"ms": 751.5,
 				"top": [
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/memory/migrate.ts"
+					"packages/eight/loops/computer-use.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/loops/computer-use.ts",
+					"packages/handeyes/__tests__/triggers.test.ts",
+					"packages/ai/task-router.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/eight/loops/computer-use.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/loops/computer-use.ts",
+					"packages/handeyes/__tests__/triggers.test.ts",
+					"packages/ai/task-router.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -403,11 +480,11 @@
 					0.0072,
 					0.0215
 				],
-				"latencyMs": 647.5
+				"latencyMs": 2202.4
 			},
 			"m1": {
 				"top5": false,
-				"ms": 526.5,
+				"ms": 1625.4,
 				"top": [
 					"benchmarks/head-to-head.ts",
 					"docs/MODELS.md",
@@ -420,7 +497,7 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": false,
-				"ms": 797.7,
+				"ms": 657,
 				"top": [
 					"benchmarks/head-to-head.ts",
 					"packages/table/officers.ts",
@@ -430,6 +507,17 @@
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"packages/table/officers.ts",
+					"scripts/utility-factory.ts",
+					"packages/ai/edge-inference.ts",
+					"packages/eight/clui-bridge.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -449,11 +537,11 @@
 					0.0476,
 					0.0456
 				],
-				"latencyMs": 1681.7
+				"latencyMs": 2045.7
 			},
 			"m1": {
 				"top5": true,
-				"ms": 311.2,
+				"ms": 2285.5,
 				"top": [
 					"packages/memory/store.ts",
 					"packages/table/SPEC.md",
@@ -465,17 +553,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "symbol",
 			"m2": {
-				"top5": true,
-				"ms": 758.3,
+				"top5": false,
+				"ms": 602.1,
 				"top": [
-					"packages/memory/store.ts",
-					"bin/8gent.ts",
-					"packages/eight/agent.ts",
-					"packages/eight/tools.ts",
-					"packages/eight/tools.ts"
+					"packages/daemon/routes/store/kg.ts",
+					"packages/memory/scripts/traces.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/bus.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/daemon/routes/store/kg.ts",
+					"packages/memory/scripts/traces.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/bus.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -495,11 +594,11 @@
 					0.0022,
 					0.0017
 				],
-				"latencyMs": 1920.6
+				"latencyMs": 2683.8
 			},
 			"m1": {
 				"top5": false,
-				"ms": 227.1,
+				"ms": 1830.2,
 				"top": [
 					"packages/hands/index.ts",
 					"docs/guides/DEPLOYMENT.md",
@@ -510,16 +609,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": false,
-				"ms": 780.4,
+				"ms": 1364.3,
 				"top": [
+					"packages/hands/index.ts",
+					"packages/voice/tts-engine.ts",
 					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/ai/task-router.ts",
-					"packages/memory/migrate.ts"
+					"packages/eight/harness/vault.ts",
+					"packages/voice/tts-engine.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/hands/index.ts",
+					"packages/voice/tts-engine.ts",
+					"packages/ai/task-router.ts",
+					"packages/eight/harness/vault.ts",
+					"packages/voice/tts-engine.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -539,11 +649,11 @@
 					0.01,
 					0.0081
 				],
-				"latencyMs": 1872
+				"latencyMs": 2522.8
 			},
 			"m1": {
 				"top5": false,
-				"ms": 216.3,
+				"ms": 6166.9,
 				"top": [
 					"packages/providers/host-placement.ts",
 					"README.md",
@@ -554,16 +664,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": true,
-				"ms": 772.3,
+				"ms": 1735.6,
 				"top": [
-					"packages/daemon/moa-router.ts",
-					"packages/daemon/moa-verb.test.ts",
-					"packages/daemon/moa-router.test.ts",
 					"packages/providers/router-bandit.ts",
-					"packages/providers/router-bandit.ts"
+					"packages/daemon/moa-verb.test.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/learned-skills.ts",
+					"scripts/e2e-tests.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/providers/router-bandit.ts",
+					"packages/daemon/moa-verb.test.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/learned-skills.ts",
+					"scripts/e2e-tests.ts"
+				],
+				"route": "symbol/system_one"
 			}
 		},
 		{
@@ -583,11 +704,11 @@
 					0.1258,
 					0.2315
 				],
-				"latencyMs": 2081.5
+				"latencyMs": 2933.6
 			},
 			"m1": {
 				"top5": false,
-				"ms": 192.2,
+				"ms": 7621.8,
 				"top": [
 					"SOUL.md",
 					"scripts/night-tasks.ts",
@@ -598,16 +719,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 580.8,
+				"ms": 1161.4,
 				"top": [
 					"SOUL.md",
 					"scripts/night-tasks.ts",
 					"docs/HYPERAGENT-SPEC.md",
 					"apps/8gent-eyes/README.md",
-					"quarantine/color-blend.md"
+					"packages/eight/honesty.ts"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md",
+					"apps/8gent-eyes/README.md",
+					"packages/eight/honesty.ts"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -628,11 +760,11 @@
 					0.0191,
 					0.0617
 				],
-				"latencyMs": 2149.1
+				"latencyMs": 2007.3
 			},
 			"m1": {
 				"top5": false,
-				"ms": 192.5,
+				"ms": 2976.8,
 				"top": [
 					"scripts/board-vessel/daemon.ts",
 					"packages/decide/docs/ENGINE.md",
@@ -645,16 +777,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 743.4,
+				"ms": 5216.9,
 				"top": [
-					"packages/decide/docs/ENGINE.md",
-					"AGENTS.md",
 					"README.md",
-					"docs/MODELS.md",
-					"docs/MODELS.md"
+					"packages/decide/README.md",
+					"packages/decide/docs/ENGINE.md",
+					"apps/tui/src/lib/provider-readiness.ts",
+					"AGENTS.md"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"README.md",
+					"packages/decide/README.md",
+					"packages/decide/docs/ENGINE.md",
+					"apps/tui/src/lib/provider-readiness.ts",
+					"AGENTS.md"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -675,11 +818,11 @@
 					0.0133,
 					0.0659
 				],
-				"latencyMs": 2135.2
+				"latencyMs": 1887
 			},
 			"m1": {
 				"top5": true,
-				"ms": 199.6,
+				"ms": 6781.3,
 				"top": [
 					"packages/decide/index.ts",
 					"packages/decide/README.md"
@@ -689,16 +832,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": true,
-				"ms": 645.7,
+				"ms": 2194.5,
 				"top": [
 					"packages/decide/index.ts",
 					"packages/decide/README.md",
 					"SOUL.md",
-					"SOUL.md",
+					"AGENTS.md",
 					"AGENTS.md"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md",
+					"SOUL.md",
+					"AGENTS.md",
+					"AGENTS.md"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -718,11 +872,11 @@
 					0.1451,
 					0.2763
 				],
-				"latencyMs": 2098.5
+				"latencyMs": 2647.2
 			},
 			"m1": {
 				"top5": true,
-				"ms": 287.5,
+				"ms": 2468.7,
 				"top": [
 					"packages/decide/README.md",
 					"packages/personality/voice.ts",
@@ -733,16 +887,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": true,
-				"ms": 642.2,
+				"ms": 1169.1,
 				"top": [
 					"packages/decide/README.md",
-					"packages/personality/voice.ts",
-					"packages/decide/docs/ENGINE.md",
-					"packages/decide/backends/ollama.ts",
-					"packages/design-compose/pipeline.ts"
+					"README.md",
+					"README.md",
+					"apps/proxy/README.md",
+					"packages/decide/README.md"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/README.md",
+					"README.md",
+					"README.md",
+					"apps/proxy/README.md",
+					"packages/decide/README.md"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -762,11 +927,11 @@
 					0.0413,
 					0.2339
 				],
-				"latencyMs": 2074.8
+				"latencyMs": 2623.3
 			},
 			"m1": {
 				"top5": true,
-				"ms": 304.5,
+				"ms": 2100.1,
 				"top": [
 					"apps/proxy/src/server.ts",
 					"packages/decide/backends/ollama.ts",
@@ -779,7 +944,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 646,
+				"ms": 3497.7,
 				"top": [
 					"apps/proxy/src/server.ts",
 					"packages/decide/backends/ollama.ts",
@@ -789,6 +954,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"docs/MODELS.md",
+					"packages/kernel/proxy.ts",
+					"packages/settings/defaults.ts",
+					"quarantine/model-comparison.md"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -809,11 +985,11 @@
 					0.07,
 					0.147
 				],
-				"latencyMs": 1585.1
+				"latencyMs": 2426.4
 			},
 			"m1": {
 				"top5": false,
-				"ms": 344.3,
+				"ms": 6756.4,
 				"top": [
 					"apps/tui/src/components/pulse-logo.tsx",
 					"demo.tape",
@@ -824,16 +1000,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 774.4,
+				"ms": 1879.1,
 				"top": [
-					"apps/tui/src/components/pulse-logo.tsx",
-					"demo.tape",
-					"docs/frameworks.md",
-					"brand/BRAND_HEART.md",
-					"docs/HARNESS-PLAN.md"
+					"packages/daemon/index.ts",
+					"packages/permissions/index.ts",
+					"packages/ast-index/test-parser.ts",
+					"packages/ast-index/test-parser.ts",
+					"apps/tui/src/components/pulse-logo.tsx"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/daemon/index.ts",
+					"packages/permissions/index.ts",
+					"packages/ast-index/test-parser.ts",
+					"packages/ast-index/test-parser.ts",
+					"apps/tui/src/components/pulse-logo.tsx"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -853,11 +1040,11 @@
 					0.0822,
 					0.1782
 				],
-				"latencyMs": 1987.1
+				"latencyMs": 3001
 			},
 			"m1": {
 				"top5": false,
-				"ms": 249,
+				"ms": 2054.5,
 				"top": [
 					"packages/eight/honesty.test.ts",
 					"packages/decide/guard.ts",
@@ -870,16 +1057,27 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 688.8,
+				"ms": 2811.9,
 				"top": [
 					"packages/decide/guard.ts",
 					"packages/decide/guard.ts",
 					"packages/verify/index.ts",
 					"packages/decide/README.md",
-					"docs/specs/SKILL-MANIFEST.md"
+					"packages/verify/marker.ts"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/verify/index.ts",
+					"packages/decide/README.md",
+					"packages/verify/marker.ts"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -899,11 +1097,11 @@
 					0.025,
 					0.1106
 				],
-				"latencyMs": 1975.7
+				"latencyMs": 3080.9
 			},
 			"m1": {
 				"top5": false,
-				"ms": 431.2,
+				"ms": 2978.3,
 				"top": [
 					"AGENTS.md",
 					"SIGNING.md",
@@ -914,7 +1112,7 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 709.2,
+				"ms": 1696.4,
 				"top": [
 					"AGENTS.md",
 					"SIGNING.md",
@@ -924,6 +1122,17 @@
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts",
+					"packages/db/client.ts",
+					"packages/db/client.ts"
+				],
+				"route": "grep/system_one"
 			}
 		},
 		{
@@ -948,11 +1157,11 @@
 					0.1073,
 					0.1635
 				],
-				"latencyMs": 1601.3
+				"latencyMs": 2407.7
 			},
 			"m1": {
 				"top5": true,
-				"ms": 324.8,
+				"ms": 3789.2,
 				"top": [
 					"packages/decide/guard.ts",
 					"packages/decide/calibrate.ts",
@@ -964,17 +1173,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "path",
 			"m2": {
-				"top5": false,
-				"ms": 710.6,
+				"top5": true,
+				"ms": 3283.9,
 				"top": [
-					"packages/decide/guard.ts",
-					"quarantine/type-guard.md",
+					"packages/decide/calibration/ollama-llama3.2_3b.json",
 					"packages/tools/bash-tool.ts",
-					"packages/tools/type-guard.ts",
-					"packages/daemon/loop-guard.ts"
+					"packages/decide/guard.ts",
+					"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+					"packages/tools/bash-parser.ts"
 				],
 				"route": "path/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/calibration/ollama-llama3.2_3b.json",
+					"packages/tools/bash-tool.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+					"packages/tools/bash-parser.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -994,11 +1214,11 @@
 					0.0806,
 					0.2084
 				],
-				"latencyMs": 1599.1
+				"latencyMs": 2541.2
 			},
 			"m1": {
 				"top5": false,
-				"ms": 354.7,
+				"ms": 1443.4,
 				"top": [
 					"SOUL.md",
 					"packages/pet/README.md",
@@ -1010,17 +1230,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "grep",
 			"m2": {
-				"top5": false,
-				"ms": 767.3,
+				"top5": true,
+				"ms": 2904.2,
 				"top": [
-					"SOUL.md",
-					"AGENTS.md",
-					"AGENTS.md",
+					"packages/decide/README.md",
 					"README.md",
-					"SECURITY.md"
+					"packages/eyes/README.md",
+					"packages/eyes/README.md",
+					"packages/audit/README.md"
 				],
 				"route": "grep/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/voice/tts-engine.ts",
+					"packages/audit/decision-store.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/audit/decision-store.test.ts",
+					"packages/proactive/revenue-engine.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1040,11 +1271,11 @@
 					0.1111,
 					0.2265
 				],
-				"latencyMs": 921.7
+				"latencyMs": 2472.5
 			},
 			"m1": {
 				"top5": true,
-				"ms": 515.6,
+				"ms": 2066.7,
 				"top": [
 					"packages/hooks/index.ts",
 					"CONVENTIONS.md",
@@ -1056,17 +1287,28 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "grep",
 			"m2": {
-				"top5": true,
-				"ms": 831.9,
+				"top5": false,
+				"ms": 2795.4,
 				"top": [
-					"packages/hooks/index.ts",
 					"CONVENTIONS.md",
-					"packages/permissions/default-policies.yaml",
 					"docs/VESSEL-ABILITIES.md",
-					"docs/specs/MEMORY-TRUST.md"
+					"docs/specs/MEMORY-TRUST.md",
+					"docs/prd/8gent-computer/security.md",
+					"packages/permissions/policy-engine.ts"
 				],
-				"route": "hybrid/prose",
-				"reason": "timeout"
+				"route": "grep/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/permissions/default-policies.yaml",
+					"packages/hooks/defaults.ts",
+					"docs/guides/permissions.md",
+					"config/board-vessels.yaml",
+					"packages/settings/defaults.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1086,11 +1328,11 @@
 					0.0557,
 					0.1106
 				],
-				"latencyMs": 1091.4
+				"latencyMs": 2489.6
 			},
 			"m1": {
 				"top5": true,
-				"ms": 375.3,
+				"ms": 1249.1,
 				"top": [
 					"bin/8gent.ts",
 					"docs/prd/8gent-computer/ux-spec.md",
@@ -1103,16 +1345,27 @@
 			"gated": "path",
 			"m2": {
 				"top5": true,
-				"ms": 775.7,
+				"ms": 4352.9,
 				"top": [
 					"BRAND.md",
-					"brand/BRAND_HEART.md",
 					"docs/guides/hooks.md",
-					"brand/BRAND_VALUES.md",
-					"brand/USER_PERSONAS.md"
+					"packages/reporting/index.ts",
+					"apps/video/src/Root.tsx",
+					"brand/BRAND_HEART.md"
 				],
 				"route": "path/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"BRAND.md",
+					"docs/guides/hooks.md",
+					"packages/reporting/index.ts",
+					"apps/video/src/Root.tsx",
+					"brand/BRAND_HEART.md"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1132,11 +1385,11 @@
 					0.2889,
 					0.2929
 				],
-				"latencyMs": 1206
+				"latencyMs": 2435
 			},
 			"m1": {
 				"top5": true,
-				"ms": 630.6,
+				"ms": 1919.3,
 				"top": [
 					"docs/README.md",
 					"docs/specs/DAEMON-PROTOCOL.md",
@@ -1148,7 +1401,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 769.5,
+				"ms": 3222.7,
 				"top": [
 					"docs/README.md",
 					"docs/specs/DAEMON-PROTOCOL.md",
@@ -1157,6 +1410,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"packages/daemon/cron.ts",
+					"packages/table/SPEC.md",
+					"packages/daemon/index.ts",
+					"packages/eyes/marlin/tests/test_protocol.py"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1176,11 +1440,11 @@
 					0.0208,
 					0.053
 				],
-				"latencyMs": 1189.1
+				"latencyMs": 2519.4
 			},
 			"m1": {
 				"top5": false,
-				"ms": 491.7,
+				"ms": 985.8,
 				"top": [
 					"AGENTS.md",
 					"AGENTS.md",
@@ -1191,16 +1455,27 @@
 			"gated": "path",
 			"m2": {
 				"top5": true,
-				"ms": 681.6,
+				"ms": 1084.3,
 				"top": [
 					"apps/tui/src/theme.ts",
-					"apps/tui/src/theme/index.ts",
-					"apps/tui/src/theme/tokens.ts",
 					"benchmarks/TERMINAL-BENCH.md",
-					"packages/pet/terminal-pet.ts"
+					"apps/tui/src/theme/index.ts",
+					"packages/pet/terminal-pet.ts",
+					"apps/tui/src/theme/tokens.ts"
 				],
 				"route": "path/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"apps/tui/src/theme.ts",
+					"benchmarks/TERMINAL-BENCH.md",
+					"apps/tui/src/theme/index.ts",
+					"packages/pet/terminal-pet.ts",
+					"apps/tui/src/theme/tokens.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1220,11 +1495,11 @@
 					0.0964,
 					0.217
 				],
-				"latencyMs": 1126.2
+				"latencyMs": 2420.9
 			},
 			"m1": {
 				"top5": false,
-				"ms": 425.9,
+				"ms": 1026.9,
 				"top": [
 					"scripts/social-feed-research.ts",
 					"packages/kernel/local-trainer.ts",
@@ -1236,16 +1511,27 @@
 			"gated": "symbol",
 			"m2": {
 				"top5": false,
-				"ms": 662.7,
+				"ms": 1930.5,
 				"top": [
 					"scripts/social-feed-research.ts",
-					"packages/eyes/marlin/capability.ts",
-					"bin/8gent.ts",
-					"packages/hands/index.ts",
-					"packages/hands/index.ts"
+					"scripts/nightly-train.ts",
+					"packages/core/win-path.test.ts",
+					"apps/tui/src/app.tsx",
+					"packages/eyes/marlin/capability.ts"
 				],
 				"route": "symbol/system_one",
 				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"scripts/smoke.ts",
+					"packages/kernel/train_lora.py",
+					"scripts/test-bot.ts",
+					"scripts/benchmark.ts",
+					"scripts/e2e-tests.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1265,11 +1551,11 @@
 					0.3546,
 					0.2097
 				],
-				"latencyMs": 1227.9
+				"latencyMs": 2074.4
 			},
 			"m1": {
 				"top5": true,
-				"ms": 396.7,
+				"ms": 1109.9,
 				"top": [
 					"AGENTS.md",
 					"docs/HYPERAGENT-SPEC.md",
@@ -1281,7 +1567,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 800.5,
+				"ms": 4891,
 				"top": [
 					"AGENTS.md",
 					"docs/HYPERAGENT-SPEC.md",
@@ -1290,6 +1576,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"docs/HYPERAGENT-SPEC.md",
+					"packages/table/SPEC.md",
+					"benchmarks/categories/documentation/benchmarks.ts",
+					"apps/linkedin-vessel/src/hyperagent.ts",
+					"benchmarks/fixtures/documentation/DOC001-api-module.ts"
+				],
+				"route": "path/system_one"
 			}
 		},
 		{
@@ -1310,11 +1607,11 @@
 					0.1903,
 					0.1541
 				],
-				"latencyMs": 1600.5
+				"latencyMs": 2518.4
 			},
 			"m1": {
 				"top5": false,
-				"ms": 289.1,
+				"ms": 1007.7,
 				"top": [
 					"scripts/night-tasks.ts",
 					"docs/specs/EYES-SPEC.md",
@@ -1325,7 +1622,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 632.1,
+				"ms": 3662.8,
 				"top": [
 					"scripts/night-tasks.ts",
 					"docs/specs/EYES-SPEC.md",
@@ -1333,6 +1630,15 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1352,11 +1658,11 @@
 					0.1439,
 					0.1779
 				],
-				"latencyMs": 1585.1
+				"latencyMs": 2407.9
 			},
 			"m1": {
 				"top5": false,
-				"ms": 261.9,
+				"ms": 781,
 				"top": [
 					"packages/orchestration/universal-spawner.ts",
 					"docs/MODEL-SHOOTOUT.md",
@@ -1368,7 +1674,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 691.5,
+				"ms": 3316.9,
 				"top": [
 					"packages/orchestration/universal-spawner.ts",
 					"docs/MODEL-SHOOTOUT.md",
@@ -1377,6 +1683,16 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1397,11 +1713,11 @@
 					0.1371,
 					0.2211
 				],
-				"latencyMs": 1605.3
+				"latencyMs": 2452.3
 			},
 			"m1": {
 				"top5": false,
-				"ms": 317.6,
+				"ms": 1642.1,
 				"top": [
 					"AUP.md",
 					"packages/memory/ask.ts",
@@ -1412,7 +1728,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 678.2,
+				"ms": 4297.4,
 				"top": [
 					"AUP.md",
 					"packages/memory/ask.ts",
@@ -1420,6 +1736,15 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1440,11 +1765,11 @@
 					0.1036,
 					0.2737
 				],
-				"latencyMs": 1541.6
+				"latencyMs": 3135
 			},
 			"m1": {
 				"top5": false,
-				"ms": 334.5,
+				"ms": 1462.9,
 				"top": [
 					"docs/specs/MEMORY-TRUST.md",
 					"AGENTS.md",
@@ -1455,7 +1780,7 @@
 			"gated": "grep",
 			"m2": {
 				"top5": false,
-				"ms": 792.1,
+				"ms": 5968.4,
 				"top": [
 					"docs/specs/MEMORY-TRUST.md",
 					"AGENTS.md",
@@ -1463,6 +1788,15 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1482,11 +1816,11 @@
 					0.1538,
 					0.1711
 				],
-				"latencyMs": 1180.3
+				"latencyMs": 2157.9
 			},
 			"m1": {
 				"top5": false,
-				"ms": 359.5,
+				"ms": 1363.5,
 				"top": [
 					"packages/secrets/libsecret.ts",
 					"packages/table/tools/post-to-channel.ts",
@@ -1498,7 +1832,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 802.7,
+				"ms": 7976.6,
 				"top": [
 					"packages/secrets/libsecret.ts",
 					"packages/table/tools/post-to-channel.ts",
@@ -1507,6 +1841,16 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/table/tools/post-to-channel.ts",
+					"README.md",
+					"docs/HARNESS-PLAN.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1527,11 +1871,11 @@
 					0.1271,
 					0.1764
 				],
-				"latencyMs": 1689.3
+				"latencyMs": 2606
 			},
 			"m1": {
 				"top5": false,
-				"ms": 273.7,
+				"ms": 592.9,
 				"top": [
 					"packages/memory/types.ts",
 					"docs/PERSONALIZATION.md",
@@ -1544,7 +1888,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 698.8,
+				"ms": 4661.1,
 				"top": [
 					"packages/memory/types.ts",
 					"docs/PERSONALIZATION.md",
@@ -1554,6 +1898,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1573,11 +1928,11 @@
 					0.182,
 					0.1823
 				],
-				"latencyMs": 1194.5
+				"latencyMs": 1485.1
 			},
 			"m1": {
 				"top5": false,
-				"ms": 313.6,
+				"ms": 1623.9,
 				"top": [
 					"README.md",
 					"bin/8gent.ts",
@@ -1588,14 +1943,23 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 738.5,
+				"ms": 4869.7,
 				"top": [
 					"README.md",
 					"bin/8gent.ts",
 					"docs/frameworks.md"
 				],
 				"route": "hybrid/prose",
-				"reason": "below_threshold"
+				"reason": "timeout"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1615,11 +1979,11 @@
 					0.2116,
 					0.2416
 				],
-				"latencyMs": 1440
+				"latencyMs": 1398
 			},
 			"m1": {
 				"top5": false,
-				"ms": 263.9,
+				"ms": 705.3,
 				"top": [
 					"docs/STRESS-TEST-1M.md",
 					"docs/VESSEL-ABILITIES.md",
@@ -1630,7 +1994,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": false,
-				"ms": 667.2,
+				"ms": 5522.1,
 				"top": [
 					"docs/STRESS-TEST-1M.md",
 					"docs/VESSEL-ABILITIES.md",
@@ -1638,6 +2002,15 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1657,11 +2030,11 @@
 					0.1182,
 					0.2106
 				],
-				"latencyMs": 1312.3
+				"latencyMs": 1357.5
 			},
 			"m1": {
 				"top5": true,
-				"ms": 334.1,
+				"ms": 696,
 				"top": [
 					"packages/secrets/keychain.ts",
 					"packages/secrets/libsecret.ts",
@@ -1674,7 +2047,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 836.7,
+				"ms": 5216.8,
 				"top": [
 					"packages/secrets/keychain.ts",
 					"packages/secrets/libsecret.ts",
@@ -1684,6 +2057,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1703,11 +2087,11 @@
 					0.1738,
 					0.2142
 				],
-				"latencyMs": 1553.6
+				"latencyMs": 1364.7
 			},
 			"m1": {
 				"top5": true,
-				"ms": 305,
+				"ms": 1124.7,
 				"top": [
 					"packages/memory/consolidation.ts",
 					"AGENTS.md",
@@ -1720,7 +2104,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 801.4,
+				"ms": 4112.6,
 				"top": [
 					"packages/memory/consolidation.ts",
 					"AGENTS.md",
@@ -1730,6 +2114,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1749,11 +2144,11 @@
 					0.125,
 					0.1304
 				],
-				"latencyMs": 1762.8
+				"latencyMs": 1406.4
 			},
 			"m1": {
 				"top5": true,
-				"ms": 197.8,
+				"ms": 583.4,
 				"top": [
 					"bin/8gent.ts",
 					"packages/eight/session-manager.ts",
@@ -1764,17 +2159,26 @@
 			"heldOutThreshold": 0.3615,
 			"gated": "symbol",
 			"m2": {
-				"top5": false,
-				"ms": 652.1,
+				"top5": true,
+				"ms": 3802.2,
 				"top": [
-					"bin/debug.ts",
-					"bin/debug.ts",
-					"bin/debug.ts",
-					"bin/debug.ts",
-					"bin/debug.ts"
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
 				],
-				"route": "symbol/system_one",
-				"reason": "model"
+				"route": "hybrid/prose",
+				"reason": "timeout"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1794,11 +2198,11 @@
 					0.133,
 					0.164
 				],
-				"latencyMs": 1676.9
+				"latencyMs": 1337.3
 			},
 			"m1": {
 				"top5": true,
-				"ms": 189,
+				"ms": 911.2,
 				"top": [
 					"packages/eight/auto-commit.ts",
 					"docs/PERSONALIZATION.md",
@@ -1811,7 +2215,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 695.7,
+				"ms": 2848.3,
 				"top": [
 					"packages/eight/auto-commit.ts",
 					"docs/PERSONALIZATION.md",
@@ -1821,6 +2225,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1840,11 +2255,11 @@
 					0.1869,
 					0.2041
 				],
-				"latencyMs": 1650.1
+				"latencyMs": 1364.6
 			},
 			"m1": {
 				"top5": true,
-				"ms": 260.7,
+				"ms": 597.1,
 				"top": [
 					"packages/permissions/maker-checker-enforcer.ts",
 					"packages/eight/tools.ts",
@@ -1857,7 +2272,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 660.4,
+				"ms": 4016.4,
 				"top": [
 					"packages/permissions/maker-checker-enforcer.ts",
 					"packages/eight/tools.ts",
@@ -1867,6 +2282,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		},
 		{
@@ -1886,11 +2312,11 @@
 					0.1722,
 					0.2372
 				],
-				"latencyMs": 1663.9
+				"latencyMs": 1311.7
 			},
 			"m1": {
 				"top5": true,
-				"ms": 216.5,
+				"ms": 1239.2,
 				"top": [
 					"packages/daemon/loop-guard.ts",
 					"packages/daemon/table-routes.ts",
@@ -1903,7 +2329,7 @@
 			"gated": "hybrid",
 			"m2": {
 				"top5": true,
-				"ms": 777.5,
+				"ms": 5441,
 				"top": [
 					"packages/daemon/loop-guard.ts",
 					"packages/daemon/table-routes.ts",
@@ -1913,6 +2339,17 @@
 				],
 				"route": "hybrid/prose",
 				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				],
+				"route": "hybrid/prose"
 			}
 		}
 	]

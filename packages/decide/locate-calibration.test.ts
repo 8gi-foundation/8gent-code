@@ -17,7 +17,6 @@ import {
 	fitLocateThreshold,
 	gateMode,
 	loadLocateCalibration,
-	locateCalibrationTrusted,
 	locateLeaveOneOut,
 } from "./locate-calibration";
 
@@ -148,15 +147,6 @@ describe("loadLocateCalibration", () => {
 		}
 		fs.writeFileSync(path.join(dir, "ollama-junk_1b.json"), "{not json");
 		expect(loadLocateCalibration("junk:1b", "ollama", dir)).toBeNull();
-	});
-});
-
-describe("locateCalibrationTrusted", () => {
-	const cal = (accuracy: number) => ({ heldOut: { accuracy } }) as LocateCalibration;
-	it("trusts a model only at or above 85% held-out accuracy by default", () => {
-		expect(locateCalibrationTrusted(cal(0.85))).toBe(true);
-		expect(locateCalibrationTrusted(cal(0.849))).toBe(false);
-		expect(locateCalibrationTrusted(cal(0.6), 0.5)).toBe(true);
 	});
 });
 

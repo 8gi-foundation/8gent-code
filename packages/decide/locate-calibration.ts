@@ -13,9 +13,8 @@
  * (eval/locate-prose-run.ts): the cut that maximises gated accuracy (gated
  * mode equals the hand label), ties going to the higher cut so that more
  * queries stay on hybrid. Held-out numbers come from leave-one-out. A missing
- * or malformed file means the model is uncalibrated, and locate then keeps
- * hybrid for every prose query. So does a file whose held-out accuracy is
- * under LOCATE_MIN_HELD_OUT_ACCURACY.
+ * or malformed file means the model is uncalibrated, and locate then gates it
+ * at LOCATE_DEFAULT_THRESHOLD (ast-index/locate-system-one.ts).
  *
  * Kept apart from calibrate.ts (the bash guard's Platt scaling): a routing
  * choice has no fail-closed side and needs one cut, not a band. Same file
@@ -32,15 +31,6 @@ export const LOCATE_MODES = ["symbol", "grep", "path", "semantic", "hybrid"] as 
 export type LocateModeChoice = (typeof LOCATE_MODES)[number];
 /** What an unsure or failed answer becomes. */
 export const LOCATE_FALLBACK_MODE: LocateModeChoice = "hybrid";
-/**
- * A model is used for routing only when its held-out gated accuracy reaches
- * this (the M2 target). Below it the model is not asked at all: a routing
- * model that is wrong often enough makes answers worse than hybrid alone
- * (measured 2026-09-28: MiniCPM5-1B at 22.5% moved prose top-5 from 50% to
- * 35%).
- */
-export const LOCATE_MIN_HELD_OUT_ACCURACY = 0.85;
-
 export const LOCATE_CALIBRATION_DIR = path.join(CALIBRATION_DIR, "locate");
 
 export interface LocateSample {
@@ -195,17 +185,9 @@ function isLocateCalibration(x: unknown): x is LocateCalibration {
 	);
 }
 
-/** The calibration is good enough to route with (held-out accuracy at or above the bar). */
-export function locateCalibrationTrusted(
-	cal: LocateCalibration,
-	min = LOCATE_MIN_HELD_OUT_ACCURACY,
-): boolean {
-	return cal.heldOut.accuracy >= min;
-}
-
 /**
  * Read calibration/locate/<backend>-<model-slug>.json. Null when absent,
- * malformed, or fitted for another (backend, model): the caller keeps hybrid.
+ * malformed, or fitted for another (backend, model): the caller uses its default threshold.
  */
 export function loadLocateCalibration(
 	model: string,

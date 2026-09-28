@@ -498,18 +498,19 @@ of a phrase with no literal hit. Nothing else ever reaches the model.
 grep, path, semantic and hybrid, written as plain descriptions) and applies
 the gate in code (`locate-calibration.ts`):
 
-- The model's mode is kept when its choice confidence is at or above the
-  threshold in `calibration/locate/<backend>-<model>.json`, else hybrid.
-- No file for the detected (backend, model): hybrid, and the model is not asked.
-- A file whose held-out accuracy is under 85% (`LOCATE_MIN_HELD_OUT_ACCURACY`):
-  hybrid, and the model is not asked.
-- No answer within 500 ms (`EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS`), or any
+- With the flag on, every prose query asks the model. Its mode is kept when
+  its choice confidence is at or above the threshold in
+  `calibration/locate/<backend>-<model>.json`, else hybrid.
+- No file for the detected (backend, model): the model is still asked, and
+  gated at `LOCATE_DEFAULT_THRESHOLD` (0.9, not fitted, chosen to be strict).
+- No answer within 500 ms (the backend request has the same limit), or any
   error: hybrid. Routing is never a safety decision, so it fails open.
-- A kept symbol, grep or path mode leads the prose answer: that list comes
-  first, may fill all five rows, and admits rows with one query word instead
-  of two. A kept `semantic` stays hybrid until semantic search exists (M3).
-- The model is `EIGHT_SYSTEM_ONE_LOCATE_MODEL`, else the package's own pick
-  (`EIGHT_DECIDE_MODEL`, then auto-detection).
+- A kept symbol, grep or path mode runs only that mode's own search (the
+  symbol index, `rg -F`, or the path ranker) over the query words. Hits are
+  pooled and ordered by how many query words a row carries, at most two rows
+  per file. If that search finds nothing, the answer is hybrid (reason
+  `no_rows`). A kept `semantic` stays hybrid until semantic search exists (M3).
+- The model is the package's own pick (`EIGHT_DECIDE_MODEL`, then auto-detection).
 
 ```bash
 bun packages/decide/eval/locate-prose-run.ts --model llama3.2:3b [--write-calibration]
@@ -521,40 +522,45 @@ labelled by hand (synthetic; one labeller, not second-checked): 10 symbol,
 it. Every one reaches rule `prose`. The runner extracts `551ef336`, asks the
 model once per query (memo off; wall time is the latency), fits the threshold
 by leave-one-out (each query is gated by a cut fitted on the other 39), and
-runs locate with the rules only (M1) and with a real router at that held-out
-cut (M2). `--write-calibration` writes the cut fitted on all 40.
+runs locate three ways: with the rules only (M1), with a real router at that
+held-out cut (M2), and with an oracle router that always answers the hand
+label (no model: the top-5 a perfect classifier would get).
+`--write-calibration` writes the cut fitted on all 40.
 
-Run 2026-09-28, Ollama, load average 26 to 35 (other work on the machine;
-latency is inflated against the bash guard runs). The 27B model was not run:
+Run 2026-09-28 22:00 on Ollama, one model at a time, under heavy load from
+other work (load average 41 to 125). Latency is inflated against the bash
+guard runs and varies run to run by 30 to 45%. The 27B model was not run:
 another session was using it.
 
-| Model | Raw mode accuracy | Gated, held out | Kept / accuracy when kept | Classifier p50 / p95 ms | Prose top-5: M1 / M2 |
+| Model | Raw mode accuracy | Gated, held out | Kept / accuracy when kept | Classifier p50 / p95 ms | Prose top-5: M1 / M2 / oracle |
 | --- | --- | --- | --- | --- | --- |
-| MiniCPM5-1B Q8_0 | 25.0% | 22.5% | 75.0% / 30.0% | 240 / 279 | 50.0% / 35.0% |
-| llama3.2:3b | 22.5% | 25.0% | 70.0% / 21.4% | 688 / 764 | 50.0% / 37.5% |
-| Selene-1-Mini 8B Q4_K_M | 52.5% | 60.0% | 60.0% / 79.2% | 1585 / 2099 | 50.0% / 47.5% |
+| MiniCPM5-1B Q8_0 | 25.0% | 22.5% | 75.0% / 30.0% | 233 / 341 | 50.0% / 35.0% / 57.5% |
+| llama3.2:3b | 22.5% | 25.0% | 70.0% / 21.4% | 1173 / 1404 | 50.0% / 37.5% / 57.5% |
+| Selene-1-Mini 8B Q4_K_M | 52.5% | 60.0% | 60.0% / 79.2% | 2421 / 3001 | 50.0% / 55.0% / 57.5% |
 
 Targets (85% mode accuracy, p95 under 500 ms, top-5 ten points over M1) are
-**not met** by any model measured. Reading it:
+**not met** by any model measured. Only MiniCPM5-1B is under 500 ms, and it
+is the least accurate. Reading it:
 
 - The small models answer one letter whatever the query: MiniCPM5-1B and
   llama3.2:3b put their argmax on "symbol" for 40 and 39 of 40 queries.
-  With the mode names themselves as the options (the first prompt), the
-  same happened on another letter: MiniCPM5-1B 25.0% raw (all symbol),
-  llama3.2:3b 20.0% (hybrid for 35), Selene 32.5%. The descriptive options
-  shipped here were the second and last prompt tried on this set, so the
-  numbers above are after one round of tuning on it.
+  Three prompts were tried on a separate 25-query dev set (not these 40):
+  the shipped one, one with ten worked examples in the question, and one
+  with wording cues in each option. MiniCPM5-1B still answered "symbol" for
+  64 or 65 of the 65 dev and eval queries under each.
+  With the examples, Selene rose to 20/25 on the dev set and 26/40 raw here
+  (65.0%), but its p95 went to about 3.1 s. That prompt is not shipped.
 - Selene separates symbol (10/10) and grep (8/8) but never answers
   semantic (7 of 8 went to grep) and gets 3 of 8 path queries.
-- Leading with the model's mode did not raise top-5 even where the mode was
-  right: Selene's symbol queries are 60% top-5 in both M1 and M2. The rows
-  that miss are misses of retrieval, not of routing: the semantic class is
-  0% top-5 in M1 and M2 alike, which is M3's job.
-- So the checked-in calibration files all sit under the 85% bar, and with the
-  flag on no measured model is asked: every prose query stays hybrid. On
-  this machine auto-detection picks the llama.cpp backend, for which there is
-  no locate calibration, so the flag is inert there too.
-- M2 end-to-end latency in the result files comes from a second ask of the
-  same prompt and came out lower than the classifier alone (Selene p50 711
-  against 1585 ms), most likely from Ollama's prompt cache. Use the
-  classifier column for model latency.
+- The top-5 target cannot be met by routing alone on this set: with a
+  perfect classifier (oracle) top-5 is 57.5%, 7.5 points over M1. Kept path
+  and symbol beat hybrid (87.5% and 70% against 62.5% and 60%), kept grep
+  ties it (37.5%), and semantic is 0% everywhere, which is M3's job. The
+  pooling in the kept-mode search was shaped on these same 40 queries.
+- A wrong kept mode costs more than it gains: MiniCPM5-1B and llama3.2:3b
+  lower top-5 from 50% to 35% and 37.5%. Their calibration files are
+  checked in because the gate reads them, not because they help: with the
+  flag on and one of them picked, prose answers get worse. Keep the flag off.
+- M2 end-to-end latency comes from a second ask of the same prompt, often
+  answered from Ollama's prompt cache. Use the classifier column for model
+  latency.

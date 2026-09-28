@@ -15,11 +15,11 @@
  *   6. hybrid       anything else (prose)        -> symbol + path + grep, merged
  *
  * Prose (rule 6) may be routed by System One when env EIGHT_SYSTEM_ONE_LOCATE=1
- * (off by default; see locate-system-one.ts). The model's mode is kept only
- * above a calibrated threshold, and then leads the merged answer: its list
- * comes first and admits rows that carry one query word, not two. Anything
- * else (unsure, uncalibrated, slow, failed, or semantic, which M3 builds)
- * leaves the hybrid answer exactly as the rules give it.
+ * (off by default; see locate-system-one.ts). A mode the model gives at or
+ * above its threshold replaces hybrid: that mode's own search runs on each
+ * query word. Anything else (unsure, slow, failed, a kept mode that finds
+ * nothing, or semantic, which M3 builds) leaves the hybrid answer exactly as
+ * the rules give it.
  *
  * Grep is ripgrep with -F (the query is a literal, never a regex), spawned
  * with an argv array (never a shell string) and confined to the repo root.
@@ -760,19 +760,10 @@ async function grepRows(ctx: RunCtx, term: string): Promise<LocateRow[]> {
 	}));
 }
 
-/** A retrieval list System One may put first in a prose answer. */
-type Lead = "symbol" | "grep" | "path";
-
-/**
- * Prose: symbols, text lines and files that carry at least two query words,
- * interleaved. With a `lead` (System One's mode), that list comes first, may
- * fill all five rows, and admits rows that carry a single query word.
- */
-async function hybridRows(ctx: RunCtx, terms: string[], lead?: Lead): Promise<LocateRow[]> {
+/** Prose: symbols, text lines and files that carry at least two query words, interleaved. */
+async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 	if (terms.length === 0) return [];
-	const pair = Math.min(2, terms.length);
-	const need = (list: Lead) => (lead === list ? 1 : pair);
-	const cap = (list: Lead, n: number) => (lead === list ? LOCATE_MAX_ROWS : n);
+	const need = Math.min(2, terms.length);
 	const count = (s: string) => {
 		const l = s.toLowerCase();
 		return terms.filter((t) => l.includes(t)).length;
@@ -786,16 +777,16 @@ async function hybridRows(ctx: RunCtx, terms: string[], lead?: Lead): Promise<Lo
 		}
 	}
 	const symbols = [...bySymbol.values()]
-		.filter((x) => x.n >= need("symbol"))
+		.filter((x) => x.n >= need)
 		.sort((a, b) => b.n - a.n)
-		.slice(0, cap("symbol", 3))
+		.slice(0, 3)
 		.map((x) => symbolRow(ctx.root, x.s));
 
 	const files = (await listFiles(ctx))
 		.map((f) => ({ f, n: count(f) }))
-		.filter((x) => x.n >= need("path"))
+		.filter((x) => x.n >= need)
 		.sort((a, b) => b.n - a.n || a.f.length - b.f.length || (a.f < b.f ? -1 : 1))
-		.slice(0, cap("path", 2))
+		.slice(0, 2)
 		.map(({ f }) => ({
 			file: f,
 			line: 1,
@@ -805,7 +796,7 @@ async function hybridRows(ctx: RunCtx, terms: string[], lead?: Lead): Promise<Lo
 
 	const lines = (await grepLiteral(ctx.state, ctx.root, terms, true))
 		.map((h) => ({ h, n: count(h.text) }))
-		.filter((x) => x.n >= need("grep"))
+		.filter((x) => x.n >= need)
 		.sort(
 			(a, b) =>
 				b.n - a.n ||
@@ -814,13 +805,79 @@ async function hybridRows(ctx: RunCtx, terms: string[], lead?: Lead): Promise<Lo
 				(a.h.file < b.h.file ? -1 : a.h.file > b.h.file ? 1 : 0) ||
 				a.h.line - b.h.line,
 		)
-		.slice(0, cap("grep", 3))
+		.slice(0, 3)
 		.map(({ h }) => ({ file: h.file, line: h.line, kind: "match", text: clip(h.text) }));
 
-	if (!lead) return mergeRows([symbols, lines, files]);
-	const lists: Record<Lead, LocateRow[]> = { symbol: symbols, grep: lines, path: files };
-	const rest = (["symbol", "grep", "path"] as const).filter((l) => l !== lead).map((l) => lists[l]);
-	return mergeRows([[...lists[lead], ...mergeRows(rest, Number.POSITIVE_INFINITY)]]);
+	return mergeRows([symbols, lines, files]);
+}
+
+/** A mode System One may pick for prose that has its own search. */
+type KeptMode = "symbol" | "grep" | "path";
+
+/** How many hits per query word a kept mode pools before ranking by word count. */
+const KEPT_POOL_PER_WORD = 50;
+
+/**
+ * Prose routed by System One: only the chosen mode's own search (the symbol
+ * index, rg -F, or the path ranker) over the query words, pooled and ordered
+ * by how many query words a row carries (file path plus text), then by the
+ * search's own order. At most two rows from one file.
+ */
+async function keptModeRows(
+	ctx: RunCtx,
+	mode: KeptMode,
+	terms: string[],
+	lookup: (name: string) => Symbol[],
+): Promise<LocateRow[]> {
+	const lists: LocateRow[][] = [];
+	if (mode === "symbol") {
+		for (const t of terms) lists.push(lookup(t).map((s) => symbolRow(ctx.root, s)));
+	} else if (mode === "path") {
+		const files = await listFiles(ctx);
+		for (const t of terms) {
+			lists.push(
+				rankPaths(t, files, KEPT_POOL_PER_WORD).map((file) => ({
+					file,
+					line: 1,
+					kind: "file",
+					text: "",
+				})),
+			);
+		}
+	} else {
+		// One rg run for all words, as hybrid does, so a line with several of them is seen.
+		const hits = await grepLiteral(ctx.state, ctx.root, terms, true);
+		lists.push(
+			hits
+				.sort(
+					(a, b) =>
+						Number(TEST_PATH_RE.test(a.file)) - Number(TEST_PATH_RE.test(b.file)) ||
+						a.file.length - b.file.length ||
+						(a.file < b.file ? -1 : a.file > b.file ? 1 : 0) ||
+						a.line - b.line,
+				)
+				.map((h) => ({ file: h.file, line: h.line, kind: "match", text: clip(h.text) })),
+		);
+	}
+	const count = (r: LocateRow) => {
+		const l = `${r.file} ${r.text}`.toLowerCase();
+		return terms.filter((t) => l.includes(t)).length;
+	};
+	const perFile = new Map<string, number>();
+	const out: LocateRow[] = [];
+	for (const { row } of mergeRows(lists, Number.POSITIVE_INFINITY)
+		.map((row, i) => ({ row, i, n: count(row) }))
+		.sort((a, b) => b.n - a.n || a.i - b.i)) {
+		const n = perFile.get(row.file) ?? 0;
+		if (n >= 2) continue;
+		perFile.set(row.file, n + 1);
+		out.push(row);
+		if (out.length === LOCATE_MAX_ROWS) break;
+	}
+	// File rows get their summary only once chosen: reading every pooled file would be slow.
+	return out.map((r) =>
+		r.kind === "file" ? { ...r, text: clip(fileSummary(ctx.root, ctx.repoId, r.file)) } : r,
+	);
 }
 
 /** Interleave row lists (first of each, then second of each ...), drop repeats of file:line. */
@@ -848,7 +905,7 @@ async function runRoute(
 	lookup: (name: string) => Symbol[],
 ): Promise<LocateRow[]> {
 	if (route.rule === "system_one" && route.mode !== "hybrid") {
-		return hybridRows(ctx, route.terms ?? [], route.mode);
+		return keptModeRows(ctx, route.mode, route.terms ?? [], lookup);
 	}
 	switch (route.mode) {
 		case "symbol":
@@ -867,12 +924,13 @@ async function runRoute(
 	}
 }
 
-const LEADS = new Set<string>(["symbol", "grep", "path"]);
+const KEPT_MODES = new Set<string>(["symbol", "grep", "path"]);
 
 /**
  * Ask System One about a prose route. Its mode replaces hybrid only when the
- * router kept it (above threshold); the answer is recorded either way. A
- * router that throws counts as an error: hybrid.
+ * router kept it (at or above threshold) and it has its own search (semantic
+ * does not yet, M3); the answer is recorded either way. A router that throws
+ * counts as an error: hybrid.
  */
 async function consultSystemOne(
 	route: LocateRoute,
@@ -891,8 +949,8 @@ async function consultSystemOne(
 			error: err instanceof Error ? err.message : String(err),
 		};
 	}
-	if (s.reason === "model" && LEADS.has(s.mode)) {
-		return { ...route, mode: s.mode as Lead, rule: "system_one", systemOne: s };
+	if (s.reason === "model" && KEPT_MODES.has(s.mode)) {
+		return { ...route, mode: s.mode as KeptMode, rule: "system_one", systemOne: s };
 	}
 	return { ...route, systemOne: s };
 }
@@ -922,14 +980,24 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 		return hits;
 	};
 	const router = context.systemOne === undefined ? defaultProseRouter() : context.systemOne;
-	let route = routeQuery(q, (name) => lookup(name)[0]?.name.toLowerCase() === name.toLowerCase());
-	route = await consultSystemOne(route, router);
-	let rows = await runRoute(ctx, route, lookup);
+	const answer = async (r: LocateRoute) => {
+		const routed = await consultSystemOne(r, router);
+		const found = await runRoute(ctx, routed, lookup);
+		// The kept mode found nothing: fail open to the rules' hybrid answer.
+		if (found.length === 0 && routed.rule === "system_one" && routed.systemOne) {
+			const back: LocateRoute = {
+				...r,
+				systemOne: { ...routed.systemOne, mode: "hybrid", reason: "no_rows" },
+			};
+			return { route: back, rows: await runRoute(ctx, back, lookup) };
+		}
+		return { route: routed, rows: found };
+	};
+	let { route, rows } = await answer(
+		routeQuery(q, (name) => lookup(name)[0]?.name.toLowerCase() === name.toLowerCase()),
+	);
 	// Pasted text that is not in the repo: read it as a path, name or prose.
-	if (rows.length === 0 && route.fallback) {
-		route = await consultSystemOne(route.fallback, router);
-		rows = await runRoute(ctx, route, lookup);
-	}
+	if (rows.length === 0 && route.fallback) ({ route, rows } = await answer(route.fallback));
 	const result: LocateResult = { query: q, route, rows: rows.slice(0, LOCATE_MAX_ROWS) };
 	if (ctx.state.rgMissing) result.rgMissing = true;
 	if (ctx.state.rgTimedOut) result.incomplete = true;

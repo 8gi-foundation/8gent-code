@@ -677,38 +677,44 @@ describe("System One on prose (EIGHT_SYSTEM_ONE_LOCATE)", () => {
 		return { fn, calls };
 	}
 
-	test("the model's mode leads the prose answer", async () => {
+	test("a kept mode runs that mode's own search over the query words", async () => {
 		const path1 = router("path");
 		const p = await locate("where is the rate limiter", { ...ctx(), systemOne: path1.fn });
 		expect(path1.calls).toEqual(["where is the rate limiter"]);
 		expect(p.route).toMatchObject({ mode: "path", rule: "system_one" });
 		expect(p.route.systemOne).toMatchObject({ chosen: "path", reason: "model" });
 		expect(p.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "file" });
+		expect(p.rows.every((r) => r.kind === "file")).toBe(true);
 
 		const grep = await locate("where is the rate limiter", {
 			...ctx(),
 			systemOne: router("grep").fn,
 		});
-		expect(grep.route.mode).toBe("grep");
-		expect(grep.rows[0].kind).toBe("match");
+		expect(grep.route).toMatchObject({ mode: "grep", rule: "system_one" });
+		expect(grep.rows.length).toBeGreaterThan(0);
+		expect(grep.rows.every((r) => r.kind === "match")).toBe(true);
 
 		const sym = await locate("where is the rate limiter", {
 			...ctx(),
 			systemOne: router("symbol").fn,
 		});
-		expect(sym.route.mode).toBe("symbol");
+		expect(sym.route).toMatchObject({ mode: "symbol", rule: "system_one" });
 		expect(sym.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "class" });
+		expect(sym.rows.every((r) => r.kind !== "file" && r.kind !== "match")).toBe(true);
 	});
 
-	test("the led list admits a single-word match that hybrid would drop", async () => {
-		// "gadget" is nowhere, so no row holds two words: hybrid finds nothing.
-		const plain = await locate("where is the rate gadget", { ...ctx(), systemOne: null });
-		expect(plain.rows).toEqual([]);
-		const led = await locate("where is the rate gadget", {
+	test("a kept mode that finds nothing falls back to the rules' hybrid answer", async () => {
+		const plain = await locate("where is the zorblax wibble", { ...ctx(), systemOne: null });
+		const got = await locate("where is the zorblax wibble", {
 			...ctx(),
 			systemOne: router("symbol").fn,
 		});
-		expect(led.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "class" });
+		expect(got.route).toMatchObject({
+			mode: "hybrid",
+			rule: "prose",
+			systemOne: { chosen: "symbol", reason: "no_rows" },
+		});
+		expect(got.rows).toEqual(plain.rows);
 	});
 
 	test("below the threshold, semantic, or hybrid: the rules' hybrid answer, unchanged", async () => {

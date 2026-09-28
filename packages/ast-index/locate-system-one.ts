@@ -11,40 +11,33 @@
  * question whose five options stand for symbol, grep, path, semantic and
  * hybrid. Code, not the model, decides whether to use the answer: the
  * model's mode is kept only when its probability is at or above the
- * threshold in
- * packages/decide/calibration/locate/<backend>-<model>.json. Everything else
- * is hybrid, which is what locate does without a model:
+ * threshold in packages/decide/calibration/locate/<backend>-<model>.json, or
+ * LOCATE_DEFAULT_THRESHOLD when that file does not exist. Everything else is
+ * hybrid, which is what locate does without a model:
  *
  *   below threshold -> hybrid
- *   uncalibrated    -> hybrid (the model is not asked)
- *   untrusted       -> hybrid (the model is not asked): its calibration's
- *                      held-out accuracy is under 85%. On 2026-09-28 every
- *                      model measured was, so the flag changes no answer yet.
- *   timeout         -> hybrid (default 500 ms, env EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS)
+ *   timeout         -> hybrid (500 ms)
  *   any error       -> hybrid
  *
  * This is routing only. It never decides whether anything is safe, so it
  * fails open.
  *
- * Model: env EIGHT_SYSTEM_ONE_LOCATE_MODEL, else the decide package's own
- * choice (EIGHT_DECIDE_MODEL, then auto-detection). Only a model whose
- * locate calibration file clears the bar is ever asked.
+ * Model: the decide package's own choice (EIGHT_DECIDE_MODEL, then
+ * auto-detection).
  */
 
 import type { Decider } from "../decide/index";
 import type { LocateModeChoice } from "../decide/locate-calibration";
 
 export const LOCATE_SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE_LOCATE";
-export const LOCATE_SYSTEM_ONE_TIMEOUT_ENV = "EIGHT_SYSTEM_ONE_LOCATE_TIMEOUT_MS";
-export const LOCATE_SYSTEM_ONE_MODEL_ENV = "EIGHT_SYSTEM_ONE_LOCATE_MODEL";
-/** Routing budget per query. Over it, locate answers with hybrid. */
+/** Routing budget per query, and the backend request's own timeout. Over it, locate answers with hybrid. */
 export const DEFAULT_LOCATE_ROUTE_TIMEOUT_MS = 500;
 /**
- * Budget the backend request itself gets. Longer than the routing budget on
- * purpose: a first call that loads the model times out for routing, but the
- * load carries on, so the next query finds the model warm.
+ * Threshold for a (backend, model) with no locate calibration file. Not
+ * fitted: a conservative cut that keeps only answers the model gives 90% or
+ * more, so an unmeasured model rarely moves a query off hybrid.
  */
-const BACKEND_TIMEOUT_MS = 30_000;
+export const LOCATE_DEFAULT_THRESHOLD = 0.9;
 
 /** The modes, in the order they are offered. Must match LOCATE_MODES in decide/locate-calibration.ts. */
 export const LOCATE_MODE_OPTIONS: LocateModeChoice[] = [
@@ -81,10 +74,10 @@ export function locateModeState(query: string): string {
 export type ProseRoutingReason =
 	| "model"
 	| "below_threshold"
-	| "uncalibrated"
-	| "untrusted"
 	| "timeout"
-	| "error";
+	| "error"
+	/** Set by locate: the kept mode's own search found nothing, so the answer is hybrid. */
+	| "no_rows";
 
 export interface ProseRouting {
 	/** The mode locate should use. */
@@ -95,6 +88,8 @@ export interface ProseRouting {
 	confidence?: number;
 	probabilities?: number[];
 	threshold?: number;
+	/** The threshold came from a calibration file (false: LOCATE_DEFAULT_THRESHOLD). */
+	calibrated?: boolean;
 	backend?: string;
 	model?: string;
 	/** Wall time of the routing call, ms. */
@@ -121,13 +116,6 @@ export function locateSystemOneEnabled(
 	return v === "1" || v === "true";
 }
 
-export function locateRouteTimeoutMs(
-	env: Record<string, string | undefined> = process.env,
-): number {
-	const raw = Number((env[LOCATE_SYSTEM_ONE_TIMEOUT_ENV] ?? "").trim());
-	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_LOCATE_ROUTE_TIMEOUT_MS;
-}
-
 class RouteTimeout extends Error {}
 
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -143,16 +131,14 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 /** Ask System One which mode fits `query`, and gate the answer in code. Never throws. */
 export function createProseRouter(opts: ProseRouterOptions): ProseRouter {
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_LOCATE_ROUTE_TIMEOUT_MS;
-	// Per (backend, model): the calibrated threshold, or why there is none.
-	const thresholds = new Map<string, number | "uncalibrated" | "untrusted">();
+	// Per (backend, model): the calibrated threshold, or null when there is none.
+	const thresholds = new Map<string, number | null>();
 	return async (query) => {
 		const t0 = performance.now();
 		const ms = () => Math.round(performance.now() - t0);
 		const seen: Partial<ProseRouting> = {};
 		const work = (async (): Promise<ProseRouting> => {
-			const { gateMode, loadLocateCalibration, locateCalibrationTrusted } = await import(
-				"../decide/locate-calibration"
-			);
+			const { gateMode, loadLocateCalibration } = await import("../decide/locate-calibration");
 			const decider = typeof opts.decider === "function" ? await opts.decider() : opts.decider;
 			const backend = await decider.backend();
 			seen.backend = backend.name;
@@ -160,21 +146,15 @@ export function createProseRouter(opts: ProseRouterOptions): ProseRouter {
 			let threshold = opts.threshold;
 			if (threshold === undefined) {
 				const key = JSON.stringify([backend.name, backend.model]);
-				let gate = thresholds.get(key);
-				if (!gate) {
+				if (!thresholds.has(key)) {
 					const cal = opts.calibrationDir
 						? loadLocateCalibration(backend.model, backend.name, opts.calibrationDir)
 						: loadLocateCalibration(backend.model, backend.name);
-					gate = !cal
-						? "uncalibrated"
-						: locateCalibrationTrusted(cal)
-							? cal.threshold
-							: "untrusted";
-					thresholds.set(key, gate);
+					thresholds.set(key, cal ? cal.threshold : null);
 				}
-				if (typeof gate === "string")
-					return { ...seen, mode: "hybrid", reason: gate, latencyMs: ms() };
-				threshold = gate;
+				const fitted = thresholds.get(key) ?? null;
+				seen.calibrated = fitted !== null;
+				threshold = fitted ?? LOCATE_DEFAULT_THRESHOLD;
 			}
 			const answer = await decider.choice(locateModeState(query), LOCATE_MODE_QUESTION, [
 				...LOCATE_MODE_OPTION_TEXT,
@@ -222,12 +202,11 @@ export function _resetLocateSystemOne(): void {
 	processRouter = null;
 }
 
-function getDecider(env: Record<string, string | undefined>): Promise<Decider> {
+function getDecider(): Promise<Decider> {
 	if (!processDecider) {
 		processDecider = (async () => {
 			const { createDecider } = await import("../decide/index");
-			const model = env[LOCATE_SYSTEM_ONE_MODEL_ENV]?.trim() || undefined;
-			return createDecider({ model, timeoutMs: BACKEND_TIMEOUT_MS });
+			return createDecider({ timeoutMs: DEFAULT_LOCATE_ROUTE_TIMEOUT_MS });
 		})();
 		// A failed construction must not stick; the next query retries.
 		processDecider.catch(() => {
@@ -244,8 +223,7 @@ export function defaultProseRouter(
 	if (!locateSystemOneEnabled(env)) return null;
 	if (!processRouter) {
 		processRouter = createProseRouter({
-			decider: () => getDecider(env),
-			timeoutMs: locateRouteTimeoutMs(env),
+			decider: getDecider,
 		});
 	}
 	return processRouter;

@@ -2,7 +2,7 @@
 	"kind": "locate-mode",
 	"model": "hf.co/openbmb/MiniCPM5-1B-GGUF:Q8_0",
 	"backend": "ollama",
-	"threshold": 0.4279,
+	"threshold": 0.4273,
 	"fittedOn": "eval/results/2026-09-28-locate-prose-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
 	"n": 40,
 	"rawAccuracy": 0.25,
