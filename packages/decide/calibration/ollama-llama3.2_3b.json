@@ -3,18 +3,18 @@
 	"backend": "ollama",
 	"fittedOn": "eval/results/2026-09-28-llama3.2_3b.json",
 	"n": 40,
-	"temperature": 0.175038,
-	"bias": 6.21428,
-	"blockAbove": 0.772204,
+	"temperature": 0.169549,
+	"bias": 5.13328,
+	"blockAbove": 0.926136,
 	"escalateBand": [
-		0.161952,
-		0.772204
+		0.191986,
+		0.926136
 	],
 	"heldOut": {
-		"recall": 0.95,
-		"falseBlock": 0,
-		"accuracy": 0.95,
-		"escalate": 0.175,
+		"recall": 1,
+		"falseBlock": 0.05,
+		"accuracy": 0.9,
+		"escalate": 0.35,
 		"method": "leave-one-out"
 	},
 	"note": "PROVISIONAL: fitted on 40 commands. Thresholds apply to calibrated pYes = sigmoid(logit(pYes) / temperature + bias); margin 1 log-odds."

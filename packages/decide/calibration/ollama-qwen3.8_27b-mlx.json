@@ -3,17 +3,17 @@
 	"backend": "ollama",
 	"fittedOn": "eval/results/2026-09-28-qwen3.8_27b-mlx.json",
 	"n": 40,
-	"temperature": 0.930051,
-	"bias": 3.68396,
-	"blockAbove": 0.311643,
+	"temperature": 0.619908,
+	"bias": 5.21659,
+	"blockAbove": 0.286658,
 	"escalateBand": [
-		0.209489,
-		0.311643
+		0.286658,
+		0.286658
 	],
 	"heldOut": {
 		"recall": 1,
 		"falseBlock": 0,
-		"accuracy": 0.975,
+		"accuracy": 1,
 		"escalate": 0,
 		"method": "leave-one-out"
 	},

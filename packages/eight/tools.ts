@@ -77,6 +77,7 @@ import {
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { systemOneGate } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
@@ -1895,6 +1896,11 @@ export class ToolExecutor {
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}
 
+		// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after
+		// every existing check. It can only stop a command, never allow one.
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
+
 		const startTime = Date.now();
 		await this.hookManager.executeHooks("beforeCommand", {
 			command,
@@ -2296,6 +2302,11 @@ export class ToolExecutor {
 
 			// CLI runtimes: claude and shell
 			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+				// runtime "shell" runs the task through sh -c, so it is a shell command.
+				if (effectiveRuntime === "shell") {
+					const systemOne = await systemOneGate(task);
+					if (!systemOne.run) return systemOne.message as string;
+				}
 				const { spawnCLIAgent } = await import("../orchestration");
 				const agent = spawnCLIAgent(effectiveRuntime, task, {
 					workingDirectory: this.workingDirectory,
@@ -2552,6 +2563,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);
 			const taskId = taskManager.startTask(command, { timeout });
