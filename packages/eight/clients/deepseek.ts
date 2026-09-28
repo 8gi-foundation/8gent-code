@@ -16,7 +16,7 @@ import { anonymizeOutbound, deanonymizeResponse, resolveLocalFallback } from "./
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 
-export const DEEPSEEK_FLASH = "deepseek-v4-flash";
+export const DEEPSEEK_FLASH = "deepseek-flash";
 export const DEEPSEEK_PRO = "deepseek-v4-pro";
 
 function flattenContent(content: MessageContent): string {

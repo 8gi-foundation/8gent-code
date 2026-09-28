@@ -3178,7 +3178,7 @@ export class ToolExecutor {
 			const failover = new ModelFailover();
 
 			// Skip providers that lack credentials or aren't installed.
-			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
+			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-flash", "deepseek");
 			if (!process.env.OPENROUTER_API_KEY)
 				failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
 			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {
