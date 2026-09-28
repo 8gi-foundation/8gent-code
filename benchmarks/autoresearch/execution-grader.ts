@@ -150,6 +150,35 @@ export function gradeKeywords(code: string, benchmark: BenchmarkDefinition): Key
 
 // ── Execution Grading (Single-File) ─────────────────────────────────
 
+
+/**
+ * Environment handed to LLM-generated code.
+ *
+ * The grader used to pass `...process.env`, so every key 8gent holds -
+ * provider API keys, forge tokens, the 2FA seed - was readable from code the
+ * model wrote, executed unsandboxed. Measured before the change: 20
+ * secret-shaped variables visible, DEEPSEEK_API_KEY among them.
+ *
+ * A benchmark is a test, not a deployment. Nothing the suite legitimately needs
+ * lives in an API key, so none are passed. PATH, HOME, TMPDIR and the loader
+ * variables are, because `bun test` cannot start without them. Anything the
+ * code needs that is not in this list must be added deliberately, in review.
+ */
+function childEnv(extra: Record<string, string>): Record<string, string> {
+	const allow = [
+		"PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT",
+		"COMSPEC", "PATHEXT", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
+		"PROCESSOR_ARCHITECTURE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
+		"OS", "SHELL", "LANG", "TZ", "BUN_INSTALL", "CI",
+	];
+	const out: Record<string, string> = {};
+	for (const k of allow) {
+		const v = process.env[k];
+		if (v !== undefined) out[k] = v;
+	}
+	return { ...out, ...extra };
+}
+
 export async function gradeExecution(
 	code: string,
 	benchmark: BenchmarkDefinition,
@@ -169,7 +198,7 @@ export async function gradeExecution(
 		writeFileSync(fixturePath, code, "utf-8");
 
 		const proc = Bun.spawn(["bun", "test", testFile], {
-			env: { ...process.env, FIXTURE_PATH: fixturePath, WORK_DIR: tmpDir },
+			env: childEnv({ FIXTURE_PATH: fixturePath, WORK_DIR: tmpDir }),
 			cwd: BENCHMARKS_ROOT,
 			stdout: "pipe",
 			stderr: "pipe",
@@ -252,7 +281,7 @@ export async function gradeMultiFileExecution(
 		}
 
 		const proc = Bun.spawn(["bun", "test", testFile], {
-			env: { ...process.env, WORK_DIR: tmpDir },
+			env: childEnv({ WORK_DIR: tmpDir }),
 			cwd: tmpDir,
 			stdout: "pipe",
 			stderr: "pipe",
