@@ -81,6 +81,9 @@ function paths(ctx: ServiceContext) {
 		logDir,
 		log: p.join(logDir, "daemon.log"),
 		errLog: p.join(logDir, "daemon-error.log"),
+		// The daemon appends to daemon.log itself, and on Windows the host's
+		// open handle would lock it out, so console output gets its own file.
+		consoleLog: p.join(logDir, "daemon-console.log"),
 		plist: p.join(ctx.home, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`),
 		unit: p.join(ctx.home, ".config", "systemd", "user", `${SERVICE_LABEL}.service`),
 	};
@@ -163,23 +166,26 @@ const launchd: Backend = {
 
 // ----- linux -----
 
-const systemdQuote = (arg: string) =>
-	/[\s"'\\]/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg;
+// Unit files expand %specifiers in every setting, and $VARS in ExecStart too.
+const systemdEscape = (s: string) => s.replace(/%/g, "%%");
+const systemdQuote = (raw: string) => {
+	const arg = systemdEscape(raw).replace(/\$/g, "$$$$");
+	return /[\s"'\\]/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg;
+};
 
 export function systemdUnit(ctx: ServiceContext): string {
 	const { log, errLog } = paths(ctx);
 	return `[Unit]
 Description=${DESCRIPTION}
-After=network.target
 
 [Service]
 Type=simple
 ExecStart=${ctx.program.map(systemdQuote).join(" ")}
 Restart=always
 RestartSec=5
-WorkingDirectory=${ctx.home}
-StandardOutput=append:${log}
-StandardError=append:${errLog}
+WorkingDirectory=${systemdEscape(ctx.home)}
+StandardOutput=append:${systemdEscape(log)}
+StandardError=append:${systemdEscape(errLog)}
 
 [Install]
 WantedBy=default.target
@@ -239,10 +245,13 @@ const TASK = psQuote(SERVICE_LABEL);
 /**
  * The task runs a hidden PowerShell host that invokes the daemon: a console
  * program started directly by an interactive task opens a window at every
- * logon, and the host is also what appends the daemon's output to the log.
+ * logon, and the host is also what writes the daemon's console output to a log.
  */
 export function scheduledTaskScript(ctx: ServiceContext): string {
-	const invoke = `& ${ctx.program.map(psQuote).join(" ")} 2>&1 | Out-File -FilePath ${psQuote(paths(ctx).log)} -Append -Encoding utf8`;
+	const daemon = `& ${ctx.program.map(psQuote).join(" ")} 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ${psQuote(paths(ctx).consoleLog)} -Append -Encoding utf8 -Width 4096`;
+	// Task Scheduler only retries a task that fails to launch, so the host
+	// itself restarts a daemon that exits, like KeepAlive and Restart=always.
+	const invoke = `while ($true) { ${daemon}; Start-Sleep -Seconds 5 }`;
 	const argument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "${invoke}"`;
 	return `$ErrorActionPreference = 'Stop'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${psQuote(argument)} -WorkingDirectory ${psQuote(ctx.home)}
@@ -264,6 +273,7 @@ export function stopTaskScript(ctx: ServiceContext): string {
 	const tail = ctx.program.slice(-2).join(" ");
 	return `Stop-ScheduledTask -TaskName ${TASK} -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq ${psQuote(exe)} -and $_.CommandLine -like ${psQuote(`* ${tail}`)} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+exit 0
 `;
 }
 
@@ -280,7 +290,7 @@ const scheduledTask: Backend = {
 			{ kind: "powershell", script: stopTaskScript(ctx) },
 			{
 				kind: "powershell",
-				script: `Unregister-ScheduledTask -TaskName ${TASK} -Confirm:$false -ErrorAction SilentlyContinue\n`,
+				script: `Unregister-ScheduledTask -TaskName ${TASK} -Confirm:$false -ErrorAction SilentlyContinue\nexit 0\n`,
 			},
 		],
 		start: () => [{ kind: "powershell", script: `Start-ScheduledTask -TaskName ${TASK}\n` }],

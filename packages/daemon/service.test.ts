@@ -166,7 +166,6 @@ describe("Linux systemd user unit", () => {
 	test("unit quotes arguments that contain spaces", () => {
 		expect(systemdUnit(linux)).toBe(`[Unit]
 Description=Eight Agent Daemon - always-on AI agent process
-After=network.target
 
 [Service]
 Type=simple
@@ -180,6 +179,21 @@ StandardError=append:/home/ada/.8gent/daemon-error.log
 [Install]
 WantedBy=default.target
 `);
+	});
+
+	test("unit escapes systemd specifiers and variables", () => {
+		const unit = systemdUnit({
+			...linux,
+			home: "/home/100%",
+			program: ["/opt/bun", "/src/$HOME/8gent.ts", "daemon", "run"],
+		});
+		expect(
+			unit.split("\n").filter((l) => /^(ExecStart|WorkingDirectory|StandardOutput)=/.test(l)),
+		).toEqual([
+			"ExecStart=/opt/bun /src/$$HOME/8gent.ts daemon run",
+			"WorkingDirectory=/home/100%%",
+			"StandardOutput=append:/home/100%%/.8gent/daemon.log",
+		]);
 	});
 
 	test("install enables, restarts and asks for linger with a fallback hint", () => {
@@ -266,9 +280,9 @@ WantedBy=default.target
 });
 
 describe("Windows Scheduled Task", () => {
-	test("task runs at logon for the current user without elevation, output appended to the log", () => {
+	test("task runs at logon for the current user without elevation and restarts the daemon when it exits", () => {
 		expect(scheduledTaskScript(windows)).toBe(`$ErrorActionPreference = 'Stop'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& ''C:\\Users\\ada\\.bun\\bin\\bun.exe'' ''C:\\Users\\ada\\ada''''s code\\bin\\8gent.ts'' ''daemon'' ''run'' 2>&1 | Out-File -FilePath ''C:\\Users\\ada\\.8gent\\daemon.log'' -Append -Encoding utf8"' -WorkingDirectory 'C:\\Users\\ada'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "while ($true) { & ''C:\\Users\\ada\\.bun\\bin\\bun.exe'' ''C:\\Users\\ada\\ada''''s code\\bin\\8gent.ts'' ''daemon'' ''run'' 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ''C:\\Users\\ada\\.8gent\\daemon-console.log'' -Append -Encoding utf8 -Width 4096; Start-Sleep -Seconds 5 }"' -WorkingDirectory 'C:\\Users\\ada'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User 'DESKTOP-1\\ada'
 $principal = New-ScheduledTaskPrincipal -UserId 'DESKTOP-1\\ada' -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -278,6 +292,7 @@ Register-ScheduledTask -TaskName 'com.8gent.daemon' -Description 'Eight Agent Da
 
 	const stopScript = `Stop-ScheduledTask -TaskName 'com.8gent.daemon' -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq 'C:\\Users\\ada\\.bun\\bin\\bun.exe' -and $_.CommandLine -like '* daemon run' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+exit 0
 `;
 
 	test("install stops any running copy, re-registers with -Force and starts the task", () => {
@@ -295,7 +310,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq 'C:\\Users\
 			{
 				kind: "powershell",
 				script:
-					"Unregister-ScheduledTask -TaskName 'com.8gent.daemon' -Confirm:$false -ErrorAction SilentlyContinue\n",
+					"Unregister-ScheduledTask -TaskName 'com.8gent.daemon' -Confirm:$false -ErrorAction SilentlyContinue\nexit 0\n",
 			},
 		]);
 		expect(planFor("stop", windows)).toEqual([{ kind: "powershell", script: stopScript }]);

@@ -74,7 +74,7 @@ jobs:
         env:
           EIGHT_SERVICE_E2E: unavailable
         run: |
-          env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          XDG_RUNTIME_DIR=/nonexistent env -u DBUS_SESSION_BUS_ADDRESS bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
           grep -q " 1 pass" service-e2e.log
 
       - name: CLI runs from source

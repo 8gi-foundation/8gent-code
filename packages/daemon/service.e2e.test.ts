@@ -34,7 +34,7 @@ const health = () =>
 		.catch(() => null);
 
 function daemonLogs(ctx: ServiceContext): string {
-	return ["daemon.log", "daemon-error.log"]
+	return ["daemon.log", "daemon-error.log", "daemon-console.log"]
 		.map((f) => path.join(ctx.home, ".8gent", f))
 		.filter((f) => existsSync(f))
 		.map((f) => `--- ${f}\n${readFileSync(f, "utf8").slice(-4000)}`)
@@ -64,20 +64,26 @@ describe.skipIf(!enabled)("real login service on this runner", () => {
 	);
 
 	test.if(expected === "installed")(
-		"install, status, start, health, stop, uninstall",
+		"install twice, health, stop, start, stop, uninstall twice",
 		async () => {
 			await runOperation("uninstall", ctx, quiet);
 			expect(await serviceStatus(ctx)).toEqual({ state: "not-installed" });
 
 			await runOperation("install", ctx, quiet);
 			await runOperation("install", ctx, quiet);
-			expect(["running", "stopped"]).toContain((await serviceStatus(ctx)).state);
+			const afterInstall = await waitFor(health, 90_000);
+			if (!afterInstall) console.log(daemonLogs(ctx));
+			expect(afterInstall?.status).toBe("ok");
+			expect((await serviceStatus(ctx)).state).toBe("running");
+
+			await runOperation("stop", ctx, quiet);
+			expect(await waitFor(async () => ((await health()) ? null : true), 30_000)).toBe(true);
+			expect(await serviceStatus(ctx)).toEqual({ state: "stopped" });
 
 			await runOperation("start", ctx, quiet);
-			const body = await waitFor(health, 90_000);
-			if (!body) console.log(daemonLogs(ctx));
-			expect(body?.status).toBe("ok");
-			expect((await serviceStatus(ctx)).state).toBe("running");
+			const afterStart = await waitFor(health, 90_000);
+			if (!afterStart) console.log(daemonLogs(ctx));
+			expect(afterStart?.status).toBe("ok");
 
 			await runOperation("stop", ctx, quiet);
 			expect(await waitFor(async () => ((await health()) ? null : true), 30_000)).toBe(true);
@@ -87,6 +93,6 @@ describe.skipIf(!enabled)("real login service on this runner", () => {
 			await runOperation("uninstall", ctx, quiet);
 			expect(await serviceStatus(ctx)).toEqual({ state: "not-installed" });
 		},
-		240_000,
+		400_000,
 	);
 });

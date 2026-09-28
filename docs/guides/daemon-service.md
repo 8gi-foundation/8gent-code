@@ -27,4 +27,4 @@ On Linux, `install` also runs `loginctl enable-linger` so the daemon keeps runni
 
 Where systemd user services are not available (WSL1, most containers), `install`, `start`, `stop` and `status` say so and point you at `8gent daemon run`. Run it under your own supervisor there.
 
-On Windows the daemon's errors go to the same `daemon.log`, as Task Scheduler has no separate error stream.
+On Windows the daemon's console output, errors included, goes to `~/.8gent/daemon-console.log`. If the daemon exits, the task restarts it after five seconds.
