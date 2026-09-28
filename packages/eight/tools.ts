@@ -20,6 +20,7 @@ import {
 	refreshIndex as astRefreshIndex,
 	searchSymbols as astSearchSymbols,
 } from "../ast-index";
+import { formatLocate, locate as astLocate } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -377,6 +378,25 @@ export class ToolExecutor {
 								type: "array",
 								items: { type: "string" },
 								description: "Filter by kinds: function, class, method, variable",
+							},
+						},
+						required: ["query"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "locate",
+					description:
+						'[CODE] Answers "where is X?" in one call with at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
+					parameters: {
+						type: "object",
+						properties: {
+							query: {
+								type: "string",
+								description:
+									"Symbol name, path fragment, quoted text, error message or short description",
 							},
 						},
 						required: ["query"],
@@ -1245,6 +1265,8 @@ export class ToolExecutor {
 				return this.getSymbol(args.symbolId as string);
 			case "search_symbols":
 				return this.searchSymbols(args.query as string, args.kinds as string[]);
+			case "locate":
+				return this.locate(args.query as string);
 			case "get_project_outline":
 				return this.getProjectOutline();
 
@@ -1685,6 +1707,22 @@ export class ToolExecutor {
 			line: symbol.startLine,
 		}));
 		return JSON.stringify({ query, matches }, null, 2);
+	}
+
+	/**
+	 * Read-only "where is X?": rules route the query to the ranked symbol
+	 * index, a fuzzy path match or a literal rg search under the working
+	 * directory (see ast-index/locate.ts). No model is called.
+	 */
+	private async locate(query: string): Promise<string> {
+		if (!this.astIndexReady && this.astIndexPromise) {
+			await this.astIndexPromise;
+		}
+		const result = await astLocate(typeof query === "string" ? query : "", {
+			root: this.workingDirectory,
+			repoId: this.astRepoId,
+		});
+		return formatLocate(result);
 	}
 
 	private async getProjectOutline(): Promise<string> {

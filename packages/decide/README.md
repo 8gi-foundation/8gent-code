@@ -401,3 +401,56 @@ Reading it:
 - **MiniCPM5-1B** has little signal (mean pYes 0.540 destructive vs 0.484
   safe): everything lands in the escalate band, which is safe but useless.
 - 40 commands is a small set; treat these as a smoke-level comparison.
+
+## Locate eval (no model)
+
+`locate(query)` (`packages/ast-index/locate.ts`, the `locate` tool) answers
+"where is X?" with rules only: quoted or error-like text and phrases go to a
+literal `rg -F` first, then the query is read as a path, an identifier in the
+symbol map, or prose (symbol + path + grep merged). The System One route for
+prose (M2) will reuse this package; it is not built yet.
+
+```bash
+bun packages/decide/eval/locate-mine.ts   # rewrite eval/locate-queries.json (deterministic)
+bun packages/decide/eval/locate-run.ts    # run it, write eval/results/<date>-locate.json
+```
+
+`locate-mine.ts` reads git history at one fixed commit (`551ef336`) and mines
+140 labelled queries: 70 identifiers (an exported declaration added in a
+commit, kept only when it has one exported declaration in the tree), 35 paths
+(files added by a commit, as full path, last two segments or unique file
+name) and 35 strings (message-like literals from throw, error, warn or
+reason/message lines, kept only when they occur once). Labels come from
+`git grep`, never from the locator. `locate-run.ts` extracts that commit with
+`git archive` so the corpus matches the labels whatever branch is checked
+out, builds the index once, and runs every query through `locate` and
+through baseline A: today's tools with the right one picked per class
+(`search_symbols` for identifiers, `rg --files` filtered for paths, `rg -F`
+for strings).
+
+Run 2026-09-28, Apple M2 Max, macOS 26.5, Bun 1.3.14, load average 8 to 19,
+three runs back to back. Line hit means a top-5 row in the label file within
+2 lines of the label line.
+
+| System | Top-1 file | Top-5 file | Line hit | p50 / p95 ms (3 runs) | Tokens mean / p95 / max |
+| --- | --- | --- | --- | --- | --- |
+| locate | 99.3% | 100.0% | 100.0% | 32.9-37.1 / 70.1-79.9 | 44 / 74 / 117 |
+| baseline A | 99.3% | 100.0% | 100.0% | 27.4-35.4 / 75.9-93.8 | 44 / 108 / 492 |
+
+Reading it:
+
+- The mined classes are easy once `search_symbols` reads the ranked index
+  (M0): baseline A also hits 100% top-5 when it is handed the right tool.
+  What locate adds is that the agent does not have to pick the tool, and it
+  never answers with an unbounded list: identifier answers average 39 tokens
+  against 69 for `search_symbols` (max 99 against 492). For paths and strings
+  locate prints more than bare rg (50 and 47 tokens against 9 and 30 mean)
+  because each row carries a symbol summary or the matching line.
+- The one top-1 miss is `PROBE_TIMEOUT_MS`: a module-level constant of the
+  same name in `packages/decide/probe.ts` ranks above the exported one. The
+  index does not record whether a symbol is exported.
+- Two routing rules were changed after the first run, which had 98.6% top-5
+  (misses: a message containing `eval/run.ts` was routed to path, and one
+  containing `modelPath` to symbol). Pasted text is now looked up literally
+  first. The set was not changed, so these numbers are after tuning on it.
+- There is no prose class yet: hand-labelled prose queries belong to M2.

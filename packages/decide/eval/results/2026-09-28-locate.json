@@ -1,0 +1,6564 @@
+{
+	"summary": {
+		"date": "2026-09-28T19:00:58.581Z",
+		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max"
+		},
+		"index": {
+			"files": 1488,
+			"symbols": 34692,
+			"buildMs": 2369
+		},
+		"lineTolerance": 2,
+		"locate": {
+			"n": 140,
+			"top1": 0.9928571428571429,
+			"top5": 1,
+			"lineHitTop5": 1,
+			"lineN": 105,
+			"p50Ms": 32.9,
+			"p95Ms": 70.1,
+			"meanTokens": 44,
+			"p95Tokens": 74,
+			"maxTokens": 117,
+			"routeAccuracy": 1,
+			"byClass": {
+				"identifier": {
+					"n": 70,
+					"top1": 0.9857142857142858,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 70,
+					"p50Ms": 25,
+					"p95Ms": 31.7,
+					"meanTokens": 39,
+					"p95Tokens": 73,
+					"maxTokens": 99
+				},
+				"path": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 37,
+					"p95Ms": 39.5,
+					"meanTokens": 50,
+					"p95Tokens": 117,
+					"maxTokens": 117
+				},
+				"string": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 35,
+					"p50Ms": 66.6,
+					"p95Ms": 114.6,
+					"meanTokens": 47,
+					"p95Tokens": 60,
+					"maxTokens": 60
+				}
+			}
+		},
+		"baselineA": {
+			"n": 140,
+			"top1": 0.9928571428571429,
+			"top5": 1,
+			"lineHitTop5": 1,
+			"lineN": 105,
+			"p50Ms": 27.4,
+			"p95Ms": 75.9,
+			"meanTokens": 44,
+			"p95Tokens": 108,
+			"maxTokens": 492,
+			"byClass": {
+				"identifier": {
+					"n": 70,
+					"top1": 0.9857142857142858,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 70,
+					"p50Ms": 27.4,
+					"p95Ms": 35.1,
+					"meanTokens": 69,
+					"p95Tokens": 156,
+					"maxTokens": 492
+				},
+				"path": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 24.5,
+					"p95Ms": 25.8,
+					"meanTokens": 9,
+					"p95Tokens": 14,
+					"maxTokens": 16
+				},
+				"string": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 35,
+					"p50Ms": 74.6,
+					"p95Ms": 83.6,
+					"meanTokens": 30,
+					"p95Tokens": 37,
+					"maxTokens": 39
+				}
+			}
+		},
+		"target": {
+			"top5": 0.9,
+			"p95Ms": 250
+		}
+	},
+	"rows": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "SYSTEM_ONE_WARMUP_COMMAND",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 194
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 194
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 31.7,
+			"tokens": 35
+		},
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "SYSTEM_ONE_WARMUP_COMMAND",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 194
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 194
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 39.6,
+			"tokens": 55
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "startSystemOneWarmup",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 204
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 204
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 32.4,
+			"tokens": 52
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "startSystemOneWarmup",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 204
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 204
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 35.2,
+			"tokens": 52
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "BufferedTextInputProps",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 19
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 19
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 32.5,
+			"tokens": 36
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "BufferedTextInputProps",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 19
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 19
+				},
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 27
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 35.1,
+			"tokens": 94
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "BufferedTextInput",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 27
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 27
+				},
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 19
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 32.9,
+			"tokens": 79
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "BufferedTextInput",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 27
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 27
+				},
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 19
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 33.7,
+			"tokens": 93
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "PROBE_TIMEOUT_MS",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 21
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/probe.ts",
+					"line": 33
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 21
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 43
+				}
+			],
+			"top1": false,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30.3,
+			"tokens": 65
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "PROBE_TIMEOUT_MS",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 21
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/probe.ts",
+					"line": 33
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 21
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 43
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 55
+				}
+			],
+			"top1": false,
+			"top5": true,
+			"lineHit": true,
+			"ms": 35.6,
+			"tokens": 156
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "LocalProviderEndpoint",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 23
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 23
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 31
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30.1,
+			"tokens": 74
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "LocalProviderEndpoint",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 23
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 23
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 31
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 93
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.test.ts",
+					"line": 58
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 34.4,
+			"tokens": 164
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "model results have no row for an eval command; re-run eval/run.ts",
+			"label": {
+				"file": "packages/decide/eval/rules-eval.ts",
+				"line": 96
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/decide/eval/rules-eval.ts",
+					"line": 96
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 124.8,
+			"tokens": 57
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "model results have no row for an eval command; re-run eval/run.ts",
+			"label": {
+				"file": "packages/decide/eval/rules-eval.ts",
+				"line": 96
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/eval/rules-eval.ts",
+					"line": 96
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 83.6,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "stricterVerdict",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 145
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 145
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.7,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "stricterVerdict",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 145
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 145
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 29.9,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "modelGuard",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 205
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 205
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.3,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "modelGuard",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 205
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 205
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.9,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "pathFor",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 5
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 5
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.6,
+			"tokens": 40
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "pathFor",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 5
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 5
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 29.8,
+			"tokens": 43
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "isPathWithin",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 18
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 18
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "isPathWithin",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 18
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 18
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.9,
+			"tokens": 45
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "PROMPT_CONTROL_PATTERNS",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.6,
+			"tokens": 30
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "PROMPT_CONTROL_PATTERNS",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.1,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "promptControlText",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.3,
+			"tokens": 36
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "promptControlText",
+			"label": {
+				"file": "packages/decide/guard.ts",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/guard.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30,
+			"tokens": 47
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"stub backend exploded\"",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 55
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 55
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.6,
+			"tokens": 43
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"stub backend exploded\"",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 55
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 55
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 82.9,
+			"tokens": 31
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "test fixture: existing deny",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 130
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 130
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.5,
+			"tokens": 37
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "test fixture: existing deny",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 130
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 130
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 80.5,
+			"tokens": 23
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"network disabled in security tests\"",
+			"label": {
+				"file": "tests/security/decide-guard.test.ts",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "tests/security/decide-guard.test.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 67.1,
+			"tokens": 40
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"network disabled in security tests\"",
+			"label": {
+				"file": "tests/security/decide-guard.test.ts",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/security/decide-guard.test.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.2,
+			"tokens": 25
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "HOMEDIR_BASELINE",
+			"label": {
+				"file": "tests/security/fixtures/homedir-baseline.ts",
+				"line": 15
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "tests/security/fixtures/homedir-baseline.ts",
+					"line": 15
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.5,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "HOMEDIR_BASELINE",
+			"label": {
+				"file": "tests/security/fixtures/homedir-baseline.ts",
+				"line": 15
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/security/fixtures/homedir-baseline.ts",
+					"line": 15
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.1,
+			"tokens": 51
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "a healthy, empty store returns [] and does not throw",
+			"label": {
+				"file": "tests/security/recall-fail-closed.test.ts",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "tests/security/recall-fail-closed.test.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 64.8,
+			"tokens": 51
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "a healthy, empty store returns [] and does not throw",
+			"label": {
+				"file": "tests/security/recall-fail-closed.test.ts",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/security/recall-fail-closed.test.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75.1,
+			"tokens": 31
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"last input must request generateNext\"",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.test.ts",
+				"line": 102
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.test.ts",
+					"line": 102
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.8,
+			"tokens": 49
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"last input must request generateNext\"",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.test.ts",
+				"line": 102
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.test.ts",
+					"line": 102
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.2,
+			"tokens": 35
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "LlamaSequenceLike",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 52
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 52
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.5,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "LlamaSequenceLike",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 52
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 52
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "LlamaContextLike",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 59
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 59
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.8,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "LlamaContextLike",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 59
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 59
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.4,
+			"tokens": 50
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "llamacpp backend needs a modelPath",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 355
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 355
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 72.6,
+			"tokens": 47
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "llamacpp backend needs a modelPath",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 355
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 355
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.9,
+			"tokens": 32
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "DEFAULT_LAYA_URL",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 25
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 25
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "DEFAULT_LAYA_URL",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 25
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 25
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.9,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "LayaBackendOptions",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 28
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "LayaBackendOptions",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 28
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.2,
+			"tokens": 50
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"laya: response has no answers array\"",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 107
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 107
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.9,
+			"tokens": 45
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"laya: response has no answers array\"",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 107
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 107
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 76.4,
+			"tokens": 30
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "ollama backend needs a model",
+			"label": {
+				"file": "packages/decide/backends/ollama.ts",
+				"line": 170
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/decide/backends/ollama.ts",
+					"line": 170
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.4,
+			"tokens": 42
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "ollama backend needs a model",
+			"label": {
+				"file": "packages/decide/backends/ollama.ts",
+				"line": 170
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/ollama.ts",
+					"line": 170
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.6,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "MemoryRecallError",
+			"label": {
+				"file": "packages/memory/recall-error.ts",
+				"line": 12
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/memory/recall-error.ts",
+					"line": 12
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.9,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "MemoryRecallError",
+			"label": {
+				"file": "packages/memory/recall-error.ts",
+				"line": 12
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/memory/recall-error.ts",
+					"line": 12
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.7,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "DEEPSEEK_FLASH",
+			"label": {
+				"file": "packages/eight/clients/deepseek.ts",
+				"line": 19
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/eight/clients/deepseek.ts",
+					"line": 19
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "DEEPSEEK_FLASH",
+			"label": {
+				"file": "packages/eight/clients/deepseek.ts",
+				"line": 19
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/eight/clients/deepseek.ts",
+					"line": 19
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "buildFixture",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 84
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 84
+				},
+				{
+					"file": "packages/install-runner/src/app-installer.test.ts",
+					"line": 43
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.2,
+			"tokens": 66
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "buildFixture",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 84
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 84
+				},
+				{
+					"file": "packages/install-runner/src/app-installer.test.ts",
+					"line": 43
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.4,
+			"tokens": 84
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "PROBE_TOKENS",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 176
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 176
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "PROBE_TOKENS",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 176
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 176
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.1,
+			"tokens": 46
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"Q13 must declare expectedRankWithContext\"",
+			"label": {
+				"file": "benchmarks/memory/recall-eval.test.ts",
+				"line": 316
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "benchmarks/memory/recall-eval.test.ts",
+					"line": 316
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.9,
+			"tokens": 53
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"Q13 must declare expectedRankWithContext\"",
+			"label": {
+				"file": "benchmarks/memory/recall-eval.test.ts",
+				"line": 316
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "benchmarks/memory/recall-eval.test.ts",
+					"line": 316
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75.9,
+			"tokens": 37
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "djKey",
+			"label": {
+				"file": "apps/tui/src/components/DjDeck.tsx",
+				"line": 208
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "apps/tui/src/components/DjDeck.tsx",
+					"line": 208
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.5,
+			"tokens": 39
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "djKey",
+			"label": {
+				"file": "apps/tui/src/components/DjDeck.tsx",
+				"line": 208
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/components/DjDeck.tsx",
+					"line": 208
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.1,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "mpvIpcPath",
+			"label": {
+				"file": "packages/music/dj.ts",
+				"line": 33
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/music/dj.ts",
+					"line": 33
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 45
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "mpvIpcPath",
+			"label": {
+				"file": "packages/music/dj.ts",
+				"line": 33
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/music/dj.ts",
+					"line": 33
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.3,
+			"tokens": 42
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "installHint",
+			"label": {
+				"file": "packages/music/dj.ts",
+				"line": 47
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/music/dj.ts",
+					"line": 47
+				},
+				{
+					"file": "apps/tui/src/screens/OnboardingScreen.tsx",
+					"line": 152
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 73
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "installHint",
+			"label": {
+				"file": "packages/music/dj.ts",
+				"line": 47
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/music/dj.ts",
+					"line": 47
+				},
+				{
+					"file": "apps/tui/src/screens/OnboardingScreen.tsx",
+					"line": 152
+				},
+				{
+					"file": "packages/voice/recorder.ts",
+					"line": 57
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.3,
+			"tokens": 115
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "HomeEnv",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 36
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 36
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.7,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "HomeEnv",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 36
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 36
+				},
+				{
+					"file": "packages/core/home.ts",
+					"line": 47
+				},
+				{
+					"file": "packages/permissions/src/workspace-boundary.ts",
+					"line": 348
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.5,
+			"tokens": 108
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "resolveHome",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 47
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "resolveHome",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 47
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26,
+			"tokens": 43
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "toLongPath",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 64
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 64
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.6,
+			"tokens": 41
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "toLongPath",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 64
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 64
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.8,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "spawnSafe",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 100
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 100
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 40
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "spawnSafe",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 100
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 100
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.8,
+			"tokens": 43
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "BridgeAdapterConfig needs chatId or resolveChatId",
+			"label": {
+				"file": "packages/telegram-bot/bridge-adapter.ts",
+				"line": 89
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/telegram-bot/bridge-adapter.ts",
+					"line": 89
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 71.1,
+			"tokens": 48
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "BridgeAdapterConfig needs chatId or resolveChatId",
+			"label": {
+				"file": "packages/telegram-bot/bridge-adapter.ts",
+				"line": 89
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telegram-bot/bridge-adapter.ts",
+					"line": 89
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74,
+			"tokens": 29
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"FileSenderConfig needs chatId or resolveChatId\"",
+			"label": {
+				"file": "packages/telegram-bot/file-sender.ts",
+				"line": 39
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/telegram-bot/file-sender.ts",
+					"line": 39
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 67.3,
+			"tokens": 46
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"FileSenderConfig needs chatId or resolveChatId\"",
+			"label": {
+				"file": "packages/telegram-bot/file-sender.ts",
+				"line": 39
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telegram-bot/file-sender.ts",
+					"line": 39
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.4,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "isSenderAuthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 339
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 339
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.8,
+			"tokens": 55
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "isSenderAuthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 339
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 339
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.9,
+			"tokens": 50
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 1326
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 1326
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 70.1,
+			"tokens": 60
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 1326
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 1326
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.5,
+			"tokens": 35
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "NativeToolsProbe",
+			"label": {
+				"file": "packages/orchestration/local-model-detect.ts",
+				"line": 416
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 416
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 496
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.2,
+			"tokens": 62
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "NativeToolsProbe",
+			"label": {
+				"file": "packages/orchestration/local-model-detect.ts",
+				"line": 416
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 416
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 496
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.3,
+			"tokens": 91
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "ContextWindowLookup",
+			"label": {
+				"file": "packages/orchestration/local-model-detect.ts",
+				"line": 426
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 426
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 530
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.7,
+			"tokens": 64
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "ContextWindowLookup",
+			"label": {
+				"file": "packages/orchestration/local-model-detect.ts",
+				"line": 426
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 426
+				},
+				{
+					"file": "packages/orchestration/local-model-detect.ts",
+					"line": 530
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.7,
+			"tokens": 93
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "OBSERVED_LOG",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 47
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "OBSERVED_LOG",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 47
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "observeUnauthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 64
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 64
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.5,
+			"tokens": 37
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "observeUnauthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 64
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 64
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.1,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "runtimeForCompat",
+			"label": {
+				"file": "packages/eight/clients/index.ts",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/eight/clients/index.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.5,
+			"tokens": 41
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "runtimeForCompat",
+			"label": {
+				"file": "packages/eight/clients/index.ts",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/eight/clients/index.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.6,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "handleProviderCommands",
+			"label": {
+				"file": "packages/eight/repl.ts",
+				"line": 527
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/eight/repl.ts",
+					"line": 527
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 39
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "handleProviderCommands",
+			"label": {
+				"file": "packages/eight/repl.ts",
+				"line": 527
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/eight/repl.ts",
+					"line": 527
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.9,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "isPostableBody",
+			"label": {
+				"file": "packages/daemon/notifications.ts",
+				"line": 44
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/notifications.ts",
+					"line": 44
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25,
+			"tokens": 35
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "isPostableBody",
+			"label": {
+				"file": "packages/daemon/notifications.ts",
+				"line": 44
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/notifications.ts",
+					"line": 44
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.3,
+			"tokens": 47
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"empty finding text; nothing to surface\"",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 261
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 261
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.1,
+			"tokens": 40
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"empty finding text; nothing to surface\"",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 261
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 261
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.5,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "messageAudioRoot",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 27
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 27
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.3,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "messageAudioRoot",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 27
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 27
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.9,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "messageAudioDir",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 33
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 33
+				},
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 38
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.3,
+			"tokens": 61
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "messageAudioDir",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 33
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 33
+				},
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 38
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.5,
+			"tokens": 84
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "audioUrl must be non-empty",
+			"label": {
+				"file": "packages/table/store.ts",
+				"line": 603
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/table/store.ts",
+					"line": 603
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 71.7,
+			"tokens": 37
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "audioUrl must be non-empty",
+			"label": {
+				"file": "packages/table/store.ts",
+				"line": 603
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/store.ts",
+					"line": 603
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.9,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "voiceForAuthor",
+			"label": {
+				"file": "packages/table/message-speak.ts",
+				"line": 35
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/message-speak.ts",
+					"line": 35
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.8,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "voiceForAuthor",
+			"label": {
+				"file": "packages/table/message-speak.ts",
+				"line": 35
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/message-speak.ts",
+					"line": 35
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.9,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "SpeakFailureReason",
+			"label": {
+				"file": "packages/table/message-speak.ts",
+				"line": 42
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/message-speak.ts",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.2,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "SpeakFailureReason",
+			"label": {
+				"file": "packages/table/message-speak.ts",
+				"line": 42
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/message-speak.ts",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.5,
+			"tokens": 48
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"memory db unavailable\"",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.test.ts",
+				"line": 87
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.test.ts",
+					"line": 87
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.6,
+			"tokens": 34
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"memory db unavailable\"",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.test.ts",
+				"line": 87
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.test.ts",
+					"line": 87
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 95.9,
+			"tokens": 23
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "GateRule",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 38
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 38
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30.3,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "GateRule",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 38
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 38
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.5,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "GateDecision",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 40
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 31.4,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "GateDecision",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 40
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 40
+				},
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 103
+				},
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 129
+				},
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 140
+				},
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 222
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.7,
+			"tokens": 222
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "model pass judged surfacing-worthy",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 185
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 185
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 114.6,
+			"tokens": 48
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "model pass judged surfacing-worthy",
+			"label": {
+				"file": "packages/proactive/surfacing-gate.ts",
+				"line": 185
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/proactive/surfacing-gate.ts",
+					"line": 185
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75.8,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "HuddleRecording",
+			"label": {
+				"file": "packages/table/bake.ts",
+				"line": 88
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/bake.ts",
+					"line": 88
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.2,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "HuddleRecording",
+			"label": {
+				"file": "packages/table/bake.ts",
+				"line": 88
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/bake.ts",
+					"line": 88
+				},
+				{
+					"file": "packages/table/bake.ts",
+					"line": 297
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.1,
+			"tokens": 80
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "sha256File",
+			"label": {
+				"file": "packages/table/bake.ts",
+				"line": 286
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/bake.ts",
+					"line": 286
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.6,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "sha256File",
+			"label": {
+				"file": "packages/table/bake.ts",
+				"line": 286
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/bake.ts",
+					"line": 286
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.2,
+			"tokens": 43
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "FLOW_SCHEMA_VERSION",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 26
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 26
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.2,
+			"tokens": 30
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "FLOW_SCHEMA_VERSION",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 26
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 26
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.8,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "FlowKind",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 28
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.6,
+			"tokens": 23
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "FlowKind",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 28
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.8,
+			"tokens": 44
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"record is not an object\"",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 123
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 123
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.8,
+			"tokens": 37
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"record is not an object\"",
+			"label": {
+				"file": "packages/telemetry/flow-stream.ts",
+				"line": 123
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telemetry/flow-stream.ts",
+					"line": 123
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 76.2,
+			"tokens": 25
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "MinutesParticipant",
+			"label": {
+				"file": "packages/daemon/huddle-minutes.ts",
+				"line": 51
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-minutes.ts",
+					"line": 51
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.3,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "MinutesParticipant",
+			"label": {
+				"file": "packages/daemon/huddle-minutes.ts",
+				"line": 51
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-minutes.ts",
+					"line": 51
+				},
+				{
+					"file": "packages/daemon/huddle-minutes.ts",
+					"line": 271
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.2,
+			"tokens": 85
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "MinutesDecision",
+			"label": {
+				"file": "packages/daemon/huddle-minutes.ts",
+				"line": 58
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-minutes.ts",
+					"line": 58
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.7,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "MinutesDecision",
+			"label": {
+				"file": "packages/daemon/huddle-minutes.ts",
+				"line": 58
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-minutes.ts",
+					"line": 58
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.3,
+			"tokens": 48
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "idle for an unknown agent or channel is a no-op, never a throw",
+			"label": {
+				"file": "packages/daemon/__tests__/table-presence.test.ts",
+				"line": 119
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/daemon/__tests__/table-presence.test.ts",
+					"line": 119
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.9,
+			"tokens": 55
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "idle for an unknown agent or channel is a no-op, never a throw",
+			"label": {
+				"file": "packages/daemon/__tests__/table-presence.test.ts",
+				"line": 119
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/__tests__/table-presence.test.ts",
+					"line": 119
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.8,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "ActivityState",
+			"label": {
+				"file": "packages/daemon/table-presence.ts",
+				"line": 34
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 34
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.1,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "ActivityState",
+			"label": {
+				"file": "packages/daemon/table-presence.ts",
+				"line": 34
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 34
+				},
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 55
+				},
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 104
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.4,
+			"tokens": 116
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "PRESENCE_STALE_MS",
+			"label": {
+				"file": "packages/daemon/table-presence.ts",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.5,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "PRESENCE_STALE_MS",
+			"label": {
+				"file": "packages/daemon/table-presence.ts",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-presence.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.6,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "isChatAuthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 313
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 313
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.4,
+			"tokens": 51
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "isChatAuthorized",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 313
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 313
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.8,
+			"tokens": 49
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"expected this dispatch to be denied, but the policy allowed it\"",
+			"label": {
+				"file": "packages/permissions/dispatch-policy.test.ts",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/permissions/dispatch-policy.test.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 67.3,
+			"tokens": 56
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"expected this dispatch to be denied, but the policy allowed it\"",
+			"label": {
+				"file": "packages/permissions/dispatch-policy.test.ts",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/dispatch-policy.test.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 78.5,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "SPEAK_BUDGET_MS",
+			"label": {
+				"file": "packages/table/floor.ts",
+				"line": 83
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/floor.ts",
+					"line": 83
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.6,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "SPEAK_BUDGET_MS",
+			"label": {
+				"file": "packages/table/floor.ts",
+				"line": 83
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/floor.ts",
+					"line": 83
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.5,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "AUDIO_START_GRACE_MS",
+			"label": {
+				"file": "packages/table/floor.ts",
+				"line": 95
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/floor.ts",
+					"line": 95
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "AUDIO_START_GRACE_MS",
+			"label": {
+				"file": "packages/table/floor.ts",
+				"line": 95
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/floor.ts",
+					"line": 95
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.5,
+			"tokens": 48
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "[telegram-bridge] boardroom failed:",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 972
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 972
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.1,
+			"tokens": 42
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "[telegram-bridge] boardroom failed:",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 972
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 972
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75,
+			"tokens": 26
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"[telegram-bridge] sendTracked failed:\"",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 995
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 995
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.5,
+			"tokens": 42
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"[telegram-bridge] sendTracked failed:\"",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 995
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 995
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.8,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "BOARD_ROSTER",
+			"label": {
+				"file": "packages/telegram-bot/boardroom.ts",
+				"line": 34
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/telegram-bot/boardroom.ts",
+					"line": 34
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.1,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "BOARD_ROSTER",
+			"label": {
+				"file": "packages/telegram-bot/boardroom.ts",
+				"line": 34
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telegram-bot/boardroom.ts",
+					"line": 34
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.9,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "VOICE_BY_OFFICER",
+			"label": {
+				"file": "packages/telegram-bot/boardroom.ts",
+				"line": 46
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/telegram-bot/boardroom.ts",
+					"line": 46
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.3,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "VOICE_BY_OFFICER",
+			"label": {
+				"file": "packages/telegram-bot/boardroom.ts",
+				"line": 46
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/telegram-bot/boardroom.ts",
+					"line": 46
+				},
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 916
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.6,
+			"tokens": 83
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "[telegram-bridge] ffmpeg failed:",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 266
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 266
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 64.5,
+			"tokens": 45
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "[telegram-bridge] ffmpeg failed:",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 266
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 266
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.3,
+			"tokens": 30
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"[telegram-bridge] whisper failed:\"",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 277
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 277
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.9,
+			"tokens": 45
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"[telegram-bridge] whisper failed:\"",
+			"label": {
+				"file": "packages/daemon/telegram-bridge.ts",
+				"line": 277
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge.ts",
+					"line": 277
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.8,
+			"tokens": 30
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TASKS_DIR",
+			"label": {
+				"file": "packages/table/artifacts.ts",
+				"line": 40
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.3,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TASKS_DIR",
+			"label": {
+				"file": "packages/table/artifacts.ts",
+				"line": 40
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 28.5,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "Artifact",
+			"label": {
+				"file": "packages/table/artifacts.ts",
+				"line": 51
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 51
+				},
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 62
+				},
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 83
+				},
+				{
+					"file": "packages/table/helm-bridge.ts",
+					"line": 367
+				},
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 601
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.5,
+			"tokens": 99
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "Artifact",
+			"label": {
+				"file": "packages/table/artifacts.ts",
+				"line": 51
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 51
+				},
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 62
+				},
+				{
+					"file": "packages/table/artifacts.ts",
+					"line": 83
+				},
+				{
+					"file": "packages/table/helm-bridge.ts",
+					"line": 367
+				},
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 601
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.1,
+			"tokens": 492
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "normalisePunctuation",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 558
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 558
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.7,
+			"tokens": 36
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "normalisePunctuation",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 558
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 558
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26,
+			"tokens": 50
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "THEME_VERSION",
+			"label": {
+				"file": "packages/table/slide-render.ts",
+				"line": 40
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/slide-render.ts",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.6,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "THEME_VERSION",
+			"label": {
+				"file": "packages/table/slide-render.ts",
+				"line": 40
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-render.ts",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.5,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "CODE_MAX_LINES",
+			"label": {
+				"file": "packages/table/slide-render.ts",
+				"line": 121
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/slide-render.ts",
+					"line": 121
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.7,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "CODE_MAX_LINES",
+			"label": {
+				"file": "packages/table/slide-render.ts",
+				"line": 121
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-render.ts",
+					"line": 121
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 29.1,
+			"tokens": 47
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "the composed spec carries no motion tokens",
+			"label": {
+				"file": "packages/table/slide-theme.ts",
+				"line": 490
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/table/slide-theme.ts",
+					"line": 490
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 69.7,
+			"tokens": 52
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "the composed spec carries no motion tokens",
+			"label": {
+				"file": "packages/table/slide-theme.ts",
+				"line": 490
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-theme.ts",
+					"line": 490
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.5,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "TYPE_RATIOS",
+			"label": {
+				"file": "packages/design-compose/axes.ts",
+				"line": 35
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/design-compose/axes.ts",
+					"line": 35
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.7,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "TYPE_RATIOS",
+			"label": {
+				"file": "packages/design-compose/axes.ts",
+				"line": 35
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/design-compose/axes.ts",
+					"line": 35
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.4,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TypeRatioName",
+			"label": {
+				"file": "packages/design-compose/axes.ts",
+				"line": 47
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/design-compose/axes.ts",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.3,
+			"tokens": 25
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TypeRatioName",
+			"label": {
+				"file": "packages/design-compose/axes.ts",
+				"line": 47
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/design-compose/axes.ts",
+					"line": 47
+				},
+				{
+					"file": "packages/design-compose/scales.ts",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.8,
+			"tokens": 79
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "setHuddleMedia",
+			"label": {
+				"file": "packages/daemon/huddle-stage.ts",
+				"line": 77
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-stage.ts",
+					"line": 77
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "setHuddleMedia",
+			"label": {
+				"file": "packages/daemon/huddle-stage.ts",
+				"line": 77
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-stage.ts",
+					"line": 77
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "huddleMediaEnabled",
+			"label": {
+				"file": "packages/daemon/huddle-stage.ts",
+				"line": 81
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-stage.ts",
+					"line": 81
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "huddleMediaEnabled",
+			"label": {
+				"file": "packages/daemon/huddle-stage.ts",
+				"line": 81
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-stage.ts",
+					"line": 81
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27,
+			"tokens": 49
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"spec must be a JSON object\"",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 424
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 424
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 65.3,
+			"tokens": 43
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"spec must be a JSON object\"",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 424
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 424
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.6,
+			"tokens": 30
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "metric must be an object",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 448
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 448
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 64.8,
+			"tokens": 46
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "metric must be an object",
+			"label": {
+				"file": "packages/table/slide-spec.ts",
+				"line": 448
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/slide-spec.ts",
+					"line": 448
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75,
+			"tokens": 32
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DeskPlan",
+			"label": {
+				"file": "packages/table/officer-desks.ts",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.5,
+			"tokens": 25
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DeskPlan",
+			"label": {
+				"file": "packages/table/officer-desks.ts",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 48
+				},
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 63
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.3,
+			"tokens": 78
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "DeskResult",
+			"label": {
+				"file": "packages/table/officer-desks.ts",
+				"line": 54
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 54
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "DeskResult",
+			"label": {
+				"file": "packages/table/officer-desks.ts",
+				"line": 54
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 54
+				},
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 116
+				},
+				{
+					"file": "packages/table/officer-desks.ts",
+					"line": 157
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 113
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"simulated officer failure\"",
+			"label": {
+				"file": "packages/daemon/__tests__/huddle-floor.test.ts",
+				"line": 387
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/daemon/__tests__/huddle-floor.test.ts",
+					"line": 387
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 61.5,
+			"tokens": 47
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"simulated officer failure\"",
+			"label": {
+				"file": "packages/daemon/__tests__/huddle-floor.test.ts",
+				"line": 387
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/__tests__/huddle-floor.test.ts",
+					"line": 387
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.7,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "notifyHuddleMessagePosted",
+			"label": {
+				"file": "packages/daemon/huddle-routes.ts",
+				"line": 130
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-routes.ts",
+					"line": 130
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.6,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "notifyHuddleMessagePosted",
+			"label": {
+				"file": "packages/daemon/huddle-routes.ts",
+				"line": 130
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-routes.ts",
+					"line": 130
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.9,
+			"tokens": 53
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "isHuddleFrame",
+			"label": {
+				"file": "packages/daemon/huddle-routes.ts",
+				"line": 317
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-routes.ts",
+					"line": 317
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.5,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "isHuddleFrame",
+			"label": {
+				"file": "packages/daemon/huddle-routes.ts",
+				"line": 317
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/huddle-routes.ts",
+					"line": 317
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 27.5,
+			"tokens": 47
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "does not throw for a prompt comfortably under budget",
+			"label": {
+				"file": "packages/table/__tests__/floor.test.ts",
+				"line": 111
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/table/__tests__/floor.test.ts",
+					"line": 111
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 68.1,
+			"tokens": 48
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "does not throw for a prompt comfortably under budget",
+			"label": {
+				"file": "packages/table/__tests__/floor.test.ts",
+				"line": 111
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/__tests__/floor.test.ts",
+					"line": 111
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.1,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "tableSystemPrompt",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 678
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 678
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.8,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "tableSystemPrompt",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 678
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 678
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 26.1,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "buildTurnPrompt",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 779
+			},
+			"system": "locate",
+			"mode": "symbol",
+			"rule": "identifier",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 779
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.2,
+			"tokens": 58
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "buildTurnPrompt",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 779
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 779
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.3,
+			"tokens": 48
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"id (agent ids are daemon-minted, not client-declared): got\"",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 128
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 128
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 61.2,
+			"tokens": 60
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"id (agent ids are daemon-minted, not client-declared): got\"",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 128
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 128
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.4,
+			"tokens": 39
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "Table is loopback-only; frame rejected from non-loopback peer",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 196
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 196
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 63.7,
+			"tokens": 50
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "Table is loopback-only; frame rejected from non-loopback peer",
+			"label": {
+				"file": "packages/daemon/table-routes.ts",
+				"line": 196
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/table-routes.ts",
+					"line": 196
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 72,
+			"tokens": 29
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"detached HEAD (no current branch)\"",
+			"label": {
+				"file": "packages/verify/extractors.ts",
+				"line": 173
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/verify/extractors.ts",
+					"line": 173
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 62.5,
+			"tokens": 40
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"detached HEAD (no current branch)\"",
+			"label": {
+				"file": "packages/verify/extractors.ts",
+				"line": 173
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/verify/extractors.ts",
+					"line": 173
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74,
+			"tokens": 25
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "CliHarness requires a name",
+			"label": {
+				"file": "packages/harness/adapters/cli.ts",
+				"line": 141
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "packages/harness/adapters/cli.ts",
+					"line": 141
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 69.9,
+			"tokens": 41
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "CliHarness requires a name",
+			"label": {
+				"file": "packages/harness/adapters/cli.ts",
+				"line": 141
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/harness/adapters/cli.ts",
+					"line": 141
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 73.7,
+			"tokens": 28
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"taskId and a non-empty input string are required\"",
+			"label": {
+				"file": "packages/harness/http.ts",
+				"line": 70
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "packages/harness/http.ts",
+					"line": 70
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 64.4,
+			"tokens": 52
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"taskId and a non-empty input string are required\"",
+			"label": {
+				"file": "packages/harness/http.ts",
+				"line": 70
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/harness/http.ts",
+					"line": 70
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 74.9,
+			"tokens": 33
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "prompt is required: refusing to dispatch an empty prompt (#2803)",
+			"label": {
+				"file": "packages/harness/runner.ts",
+				"line": 50
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "packages/harness/runner.ts",
+					"line": 50
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 66.8,
+			"tokens": 53
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "prompt is required: refusing to dispatch an empty prompt (#2803)",
+			"label": {
+				"file": "packages/harness/runner.ts",
+				"line": 50
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/harness/runner.ts",
+					"line": 50
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 75,
+			"tokens": 30
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+			"label": {
+				"file": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 39.5,
+			"tokens": 56
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+			"label": {
+				"file": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 26.8,
+			"tokens": 16
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "components/buffered-text-input.tsx",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.8,
+			"tokens": 41
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "components/buffered-text-input.tsx",
+			"label": {
+				"file": "apps/tui/src/components/buffered-text-input.tsx",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/components/buffered-text-input.tsx",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25,
+			"tokens": 12
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "provider-readiness.test.ts",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.2,
+			"tokens": 40
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "provider-readiness.test.ts",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.3,
+			"tokens": 11
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "apps/tui/src/lib/provider-readiness.ts",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 1
+				},
+				{
+					"file": "apps/tui/src/lib/provider-readiness.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.3,
+			"tokens": 84
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "apps/tui/src/lib/provider-readiness.ts",
+			"label": {
+				"file": "apps/tui/src/lib/provider-readiness.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "apps/tui/src/lib/provider-readiness.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.6,
+			"tokens": 10
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "eval/rules-eval.ts",
+			"label": {
+				"file": "packages/decide/eval/rules-eval.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/eval/rules-eval.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.4,
+			"tokens": 35
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "eval/rules-eval.ts",
+			"label": {
+				"file": "packages/decide/eval/rules-eval.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/eval/rules-eval.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.7,
+			"tokens": 9
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "rules.test.ts",
+			"label": {
+				"file": "packages/decide/rules.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/rules.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.3,
+			"tokens": 28
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "rules.test.ts",
+			"label": {
+				"file": "packages/decide/rules.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/rules.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.2,
+			"tokens": 8
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "packages/core/path-within.test.ts",
+			"label": {
+				"file": "packages/core/path-within.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/path-within.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.5,
+			"tokens": 30
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "packages/core/path-within.test.ts",
+			"label": {
+				"file": "packages/core/path-within.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/path-within.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.3,
+			"tokens": 9
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "core/path-within.ts",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 1
+				},
+				{
+					"file": "packages/core/path-within.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36,
+			"tokens": 44
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "core/path-within.ts",
+			"label": {
+				"file": "packages/core/path-within.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/path-within.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.6,
+			"tokens": 7
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "system-one-gate.test.ts",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.8,
+			"tokens": 43
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "system-one-gate.test.ts",
+			"label": {
+				"file": "packages/permissions/system-one-gate.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.5,
+			"tokens": 11
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "packages/permissions/system-one-gate.ts",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 1
+				},
+				{
+					"file": "packages/permissions/system-one-gate.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.7,
+			"tokens": 94
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "packages/permissions/system-one-gate.ts",
+			"label": {
+				"file": "packages/permissions/system-one-gate.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/permissions/system-one-gate.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.6,
+			"tokens": 10
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "security/README.md",
+			"label": {
+				"file": "tests/security/README.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/security/README.md",
+					"line": 1
+				},
+				{
+					"file": "README.md",
+					"line": 1
+				},
+				{
+					"file": "docs/README.md",
+					"line": 1
+				},
+				{
+					"file": "eval/README.md",
+					"line": 1
+				},
+				{
+					"file": "scores/README.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 34.9,
+			"tokens": 63
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "security/README.md",
+			"label": {
+				"file": "tests/security/README.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/security/README.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.5,
+			"tokens": 6
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "decide-guard.test.ts",
+			"label": {
+				"file": "tests/security/decide-guard.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/security/decide-guard.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.9,
+			"tokens": 33
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "decide-guard.test.ts",
+			"label": {
+				"file": "tests/security/decide-guard.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/security/decide-guard.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.5,
+			"tokens": 9
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "packages/decide/backends/llamacpp.test.ts",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36,
+			"tokens": 42
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "packages/decide/backends/llamacpp.test.ts",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.4,
+			"tokens": 11
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "backends/llamacpp.ts",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 1
+				},
+				{
+					"file": "packages/decide/backends/llamacpp.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 34.9,
+			"tokens": 80
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "backends/llamacpp.ts",
+			"label": {
+				"file": "packages/decide/backends/llamacpp.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/llamacpp.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.4,
+			"tokens": 9
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "ENGINE.md",
+			"label": {
+				"file": "packages/decide/docs/ENGINE.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/docs/ENGINE.md",
+					"line": 1
+				},
+				{
+					"file": "docs/bmad/phase3-integration/epics.md",
+					"line": 1
+				},
+				{
+					"file": "docs/design/LSP-INTEGRATION-SPEC.md",
+					"line": 1
+				},
+				{
+					"file": "docs/bmad/phase3-integration/architecture.md",
+					"line": 1
+				},
+				{
+					"file": "docs/bmad/phase3-integration/project-brief.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.1,
+			"tokens": 117
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "ENGINE.md",
+			"label": {
+				"file": "packages/decide/docs/ENGINE.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/docs/ENGINE.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.8,
+			"tokens": 8
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "packages/decide/README.md",
+			"label": {
+				"file": "packages/decide/README.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/README.md",
+					"line": 1
+				},
+				{
+					"file": "README.md",
+					"line": 1
+				},
+				{
+					"file": "docs/README.md",
+					"line": 1
+				},
+				{
+					"file": "eval/README.md",
+					"line": 1
+				},
+				{
+					"file": "scores/README.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.8,
+			"tokens": 67
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "packages/decide/README.md",
+			"label": {
+				"file": "packages/decide/README.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/README.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25.4,
+			"tokens": 7
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "backends/laya.ts",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.9,
+			"tokens": 48
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "backends/laya.ts",
+			"label": {
+				"file": "packages/decide/backends/laya.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/decide/backends/laya.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24,
+			"tokens": 8
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "recall-error.ts",
+			"label": {
+				"file": "packages/memory/recall-error.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/memory/recall-error.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.3,
+			"tokens": 26
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "recall-error.ts",
+			"label": {
+				"file": "packages/memory/recall-error.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/memory/recall-error.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.1,
+			"tokens": 8
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "benchmarks/memory/fixture.ts",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.8,
+			"tokens": 41
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "benchmarks/memory/fixture.ts",
+			"label": {
+				"file": "benchmarks/memory/fixture.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "benchmarks/memory/fixture.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25.1,
+			"tokens": 7
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "memory/recall-eval.test.ts",
+			"label": {
+				"file": "benchmarks/memory/recall-eval.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "benchmarks/memory/recall-eval.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38.8,
+			"tokens": 41
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "memory/recall-eval.test.ts",
+			"label": {
+				"file": "benchmarks/memory/recall-eval.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "benchmarks/memory/recall-eval.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25,
+			"tokens": 10
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "dj-platform.test.ts",
+			"label": {
+				"file": "packages/music/tests/dj-platform.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/music/tests/dj-platform.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.5,
+			"tokens": 29
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "dj-platform.test.ts",
+			"label": {
+				"file": "packages/music/tests/dj-platform.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/music/tests/dj-platform.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.4,
+			"tokens": 10
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "packages/core/home.test.ts",
+			"label": {
+				"file": "packages/core/home.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/home.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37,
+			"tokens": 39
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "packages/core/home.test.ts",
+			"label": {
+				"file": "packages/core/home.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/home.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.8,
+			"tokens": 7
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "core/home.ts",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 1
+				},
+				{
+					"file": "packages/core/home.test.ts",
+					"line": 1
+				},
+				{
+					"file": "benchmarks/categories/long-horizon/tests/LH005-cli-framework.test.ts",
+					"line": 1
+				},
+				{
+					"file": "benchmarks/categories/long-horizon/tests/LH002-migration-engine.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.1,
+			"tokens": 117
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "core/home.ts",
+			"label": {
+				"file": "packages/core/home.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/home.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.3,
+			"tokens": 6
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "win-path.test.ts",
+			"label": {
+				"file": "packages/core/win-path.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/win-path.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.2,
+			"tokens": 34
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "win-path.test.ts",
+			"label": {
+				"file": "packages/core/win-path.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/win-path.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.7,
+			"tokens": 8
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "packages/core/win-path.ts",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 1
+				},
+				{
+					"file": "packages/core/win-path.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.9,
+			"tokens": 63
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "packages/core/win-path.ts",
+			"label": {
+				"file": "packages/core/win-path.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/core/win-path.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.7,
+			"tokens": 7
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "memory/sql.d.ts",
+			"label": {
+				"file": "packages/memory/sql.d.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/memory/sql.d.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.4,
+			"tokens": 23
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "memory/sql.d.ts",
+			"label": {
+				"file": "packages/memory/sql.d.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/memory/sql.d.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.4,
+			"tokens": 6
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "smoke-compiled.sh",
+			"label": {
+				"file": "scripts/smoke-compiled.sh",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "scripts/smoke-compiled.sh",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.5,
+			"tokens": 23
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "smoke-compiled.sh",
+			"label": {
+				"file": "scripts/smoke-compiled.sh",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "scripts/smoke-compiled.sh",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.3,
+			"tokens": 7
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "packages/daemon/telegram-bridge-routing.test.ts",
+			"label": {
+				"file": "packages/daemon/telegram-bridge-routing.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge-routing.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 40.1,
+			"tokens": 50
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "packages/daemon/telegram-bridge-routing.test.ts",
+			"label": {
+				"file": "packages/daemon/telegram-bridge-routing.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-bridge-routing.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.9,
+			"tokens": 12
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "skills/retro.test.ts",
+			"label": {
+				"file": "packages/skills/retro.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/skills/retro.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37,
+			"tokens": 34
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "skills/retro.test.ts",
+			"label": {
+				"file": "packages/skills/retro.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/skills/retro.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.5,
+			"tokens": 8
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "retro/SKILL.md",
+			"label": {
+				"file": "packages/skills/retro/SKILL.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/skills/retro/SKILL.md",
+					"line": 1
+				},
+				{
+					"file": "packages/skills/boardroom/SKILL.md",
+					"line": 1
+				},
+				{
+					"file": "packages/skills/dogfood-qa/SKILL.md",
+					"line": 1
+				},
+				{
+					"file": "packages/skills/ieee-paper/SKILL.md",
+					"line": 1
+				},
+				{
+					"file": "packages/skills/clone-react/SKILL.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38,
+			"tokens": 66
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "retro/SKILL.md",
+			"label": {
+				"file": "packages/skills/retro/SKILL.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/skills/retro/SKILL.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25,
+			"tokens": 8
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "packages/daemon/telegram-observe.test.ts",
+			"label": {
+				"file": "packages/daemon/telegram-observe.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-observe.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 38,
+			"tokens": 40
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "packages/daemon/telegram-observe.test.ts",
+			"label": {
+				"file": "packages/daemon/telegram-observe.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/telegram-observe.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.8,
+			"tokens": 10
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "__tests__/repl-provider-commands.test.ts",
+			"label": {
+				"file": "packages/eight/__tests__/repl-provider-commands.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/eight/__tests__/repl-provider-commands.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.9,
+			"tokens": 48
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "__tests__/repl-provider-commands.test.ts",
+			"label": {
+				"file": "packages/eight/__tests__/repl-provider-commands.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/eight/__tests__/repl-provider-commands.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.5,
+			"tokens": 14
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "declared-dispatch.test.ts",
+			"label": {
+				"file": "packages/eight/clients/declared-dispatch.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/eight/clients/declared-dispatch.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 35.8,
+			"tokens": 45
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "declared-dispatch.test.ts",
+			"label": {
+				"file": "packages/eight/clients/declared-dispatch.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/eight/clients/declared-dispatch.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.7,
+			"tokens": 12
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "packages/daemon/notifications.test.ts",
+			"label": {
+				"file": "packages/daemon/notifications.test.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/daemon/notifications.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 36.5,
+			"tokens": 40
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "packages/daemon/notifications.test.ts",
+			"label": {
+				"file": "packages/daemon/notifications.test.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/daemon/notifications.test.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 24.7,
+			"tokens": 10
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "table/message-audio.ts",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 37.9,
+			"tokens": 49
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "table/message-audio.ts",
+			"label": {
+				"file": "packages/table/message-audio.ts",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "packages/table/message-audio.ts",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 25.8,
+			"tokens": 8
+		}
+	]
+}

@@ -1167,6 +1167,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"get_outline",
 			"get_symbol",
 			"search_symbols",
+			"locate",
 			"git_status",
 			"git_diff",
 			"git_add",
