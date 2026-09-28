@@ -397,7 +397,12 @@ export function sanitize(input: string): string {
 }
 ```
 
-Run `sanitize()` on all user input before the Extractor processes it.
+**Where it actually runs:** `sanitize()` (with `redact()`) is invoked on the
+memory **write** path, via `admission.ts` from `MemoryManager.remember()` and
+`MemoryStore.write()` — not on extractor input. Wiring it in front of the
+Extractor (`extractAutoMemories`, `index.ts:1204`) is still outstanding. The full
+rule and its current enforcement status are in
+[`MEMORY-TRUST.md`](./MEMORY-TRUST.md).
 
 ### 6. Porter Stemmer + Prefix Queries (+10 lines)
 
