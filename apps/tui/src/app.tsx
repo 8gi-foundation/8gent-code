@@ -396,6 +396,12 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import {
+	FALLBACK_SYSTEM_VOICE,
+	listInstalledSystemVoices,
+	resolveSpeechVoice,
+} from "../../../packages/voice/voice-resolver.js";
 
 // ----------------------------------------------------------------------------
 // TTS helper — speak agent replies via macOS `say` when voice.outputEnabled.
@@ -439,17 +445,17 @@ function speakAgentReply(role: string | undefined, text: string): void {
 // prompt so the auto-detect block + tagline body don't get read aloud. Gated
 // by voice.outputEnabled so users who turn TTS off don't hear startup banter.
 //
-// Soft modulation:
-// - rate 150 wpm via `-r 150` (macOS `say` default ~180 wpm). Calmer pace
-//   than chat replies, less corporate cadence.
-// - `[[pbas 35]]` speech-command tag drops the pitch base from default 50 to
-//   35, giving the line a gentler, more inviting feel. The `[[rset 0]]` tag
-//   resets any prior modulation state on the same `say` voice so this stays
-//   consistent across calls.
-// - Both modulations apply ONLY to onboarding. Normal chat replies use the
-//   speakLine helper (above) at default rate/pitch.
+// Engine and voice come from resolveSpeechVoice (packages/voice/voice-resolver):
+// macOS `say` with the onboarding pick, else settings.json voice.ttsVoice, else
+// the most natural installed voice. KittenTTS only on an explicit opt-in.
+// Normal rate and pitch: an earlier `[[pbas 35]]` pitch drop at 150 wpm made
+// the greeting sound slurred, and is gone. Off macOS the resolver returns
+// "none" and we stay silent, as before.
 // ----------------------------------------------------------------------------
-function speakOnboardingLine(rawText: string, voiceOverride?: string | null): void {
+function speakOnboardingLine(
+	rawText: string,
+	preference?: { engine?: string | null; voiceId?: string | null } | null,
+): void {
 	if (process.platform !== "darwin") return;
 	// Skip TTS entirely in non-TTY/CI so the smoke harness and piped
 	// invocations don't fork off background `say` processes.
@@ -472,28 +478,44 @@ function speakOnboardingLine(rawText: string, voiceOverride?: string | null): vo
 			.split("\n")
 			.map((l) => l.trim())
 			.find((l) => l.length > 0) ?? trimmed;
-	// Strip quotes (would terminate the shell argument) and inline `[[ ]]`
-	// tags from raw text so users can't accidentally inject speech commands.
+	// Strip quotes and inline `[[ ]]` speech-command tags from raw text so
+	// users can't accidentally inject speech commands.
 	const safe = firstLine
 		.replace(/"/g, "")
 		.replace(/\[\[[^\]]*\]\]/g, "")
 		.slice(0, 120);
-	const voice = (voiceOverride && voiceOverride.trim()) || "Moira";
-	// `[[rset 0]]` resets the voice state, then `[[pbas 35]]` lowers the
-	// pitch base for a softer delivery. Tags are inline speech commands; see
-	// `man say` (Speech Synthesis Manager).
-	const softText = `[[rset 0]] [[pbas 35]] ${safe}`;
-	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-r", "150", "-v", voice, softText], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {});
-		proc.unref();
-	} catch {
-		// Fail silently
-	}
+	void (async () => {
+		try {
+			const installed = await listInstalledSystemVoices();
+			const settingsVoice = s.voice?.ttsVoice;
+			const resolved = resolveSpeechVoice({
+				platform: process.platform,
+				settingsVoice,
+				preference,
+				installed,
+			});
+			if (resolved.engine === "none") return;
+			if (resolved.engine === "kitten") {
+				const proc = await new KittenTTSProvider().speak(safe, { voice: resolved.voice });
+				if ((await proc.exited) === 0) return;
+			}
+			// System voice, or the fallback when KittenTTS is missing or failed.
+			const voice =
+				resolved.engine === "system"
+					? resolved.voice
+					: (resolveSpeechVoice({ platform: process.platform, settingsVoice, installed }).voice ??
+						FALLBACK_SYSTEM_VOICE);
+			const { spawn } = require("node:child_process");
+			const proc = spawn("say", ["-v", voice, safe], {
+				stdio: "ignore",
+				detached: true,
+			});
+			proc.on("error", () => {});
+			proc.unref();
+		} catch {
+			// Fail silently
+		}
+	})();
 }
 
 // Import design agent
@@ -2386,7 +2408,10 @@ export function App({
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question (first line only, gated by voice.outputEnabled)
-					speakOnboardingLine(question.question);
+					speakOnboardingLine(
+						question.question,
+						onboardingManager.getUser()?.preferences?.voice,
+					);
 					// Use setMessages directly to avoid stale closure issue
 					setMessages((prev) => [
 						...prev,
@@ -4910,7 +4935,10 @@ export function App({
 			if (/^\d+:/.test(input.trim())) {
 				addSystemMessage("Telegram token received. Your bot will activate on next launch.");
 				// Speak confirmation (gated by voice.outputEnabled)
-				speakOnboardingLine("Telegram bot token saved. Brilliant.");
+				speakOnboardingLine(
+					"Telegram bot token saved. Brilliant.",
+					onboardingManager.getUser()?.preferences?.voice,
+				);
 			}
 
 			const result = onboardingManager.processAnswer(input);
@@ -4927,7 +4955,7 @@ export function App({
 					]);
 					// Speak each question aloud during onboarding (gated by voice.outputEnabled)
 					{
-						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId;
+						const voice = onboardingManager.getUser()?.preferences?.voice;
 						speakOnboardingLine(result.nextQuestion.question, voice);
 					}
 				} else {
@@ -4944,7 +4972,7 @@ export function App({
 					);
 					// Speak the welcome (gated by voice.outputEnabled)
 					{
-						const voice = user.preferences?.voice?.voiceId;
+						const voice = user.preferences?.voice;
 						speakOnboardingLine(
 							`Welcome ${name}. Let's build something magnificent.`,
 							voice,
