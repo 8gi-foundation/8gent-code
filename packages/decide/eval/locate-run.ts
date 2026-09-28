@@ -14,7 +14,9 @@
  * through two systems:
  *
  *   locate      - ast-index/locate.ts exactly as the tool calls it (index
- *                 refresh + route + search + formatted answer). No model.
+ *                 refresh + route + search + formatted answer). No model:
+ *                 System One routing is off here whatever the env says (the
+ *                 prose set, locate-prose-run.ts, measures it).
  *   baseline A  - today's tools with no model, and with the right tool picked
  *                 for each class (an oracle choice, so generous to A):
  *                   identifier -> the real ToolExecutor search_symbols tool
@@ -75,7 +77,7 @@ interface Row {
 	tokens: number;
 }
 
-function percentile(sorted: number[], p: number): number {
+export function percentile(sorted: number[], p: number): number {
 	if (sorted.length === 0) return Number.NaN;
 	const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
 	return sorted[idx];
@@ -101,7 +103,7 @@ function run(cmd: string, args: string[], cwd: string): string {
 	return r.stdout ?? "";
 }
 
-function extractAnchor(repo: string, anchor: string): { dir: string; tree: string } {
+export function extractAnchor(repo: string, anchor: string): { dir: string; tree: string } {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-eval-"));
 	const tree = path.join(dir, "tree");
 	fs.mkdirSync(tree);
@@ -199,7 +201,7 @@ async function main(): Promise<void> {
 		);
 
 		// Warm both systems once (JIT, file cache, rg binary); not timed.
-		await locate("createDecider", { root: tree, repoId: index.id });
+		await locate("createDecider", { root: tree, repoId: index.id, systemOne: null });
 		run("rg", ["--no-config", "--files"], tree);
 
 		const rows: Row[] = [];
@@ -209,7 +211,7 @@ async function main(): Promise<void> {
 			const label = { file: q.file, line: q.line };
 
 			const s0 = performance.now();
-			const result = await locate(q.query, { root: tree, repoId: index.id });
+			const result = await locate(q.query, { root: tree, repoId: index.id, systemOne: null });
 			const text = formatLocate(result);
 			const ms = performance.now() - s0;
 			const top = result.rows.map((r) => ({ file: r.file, line: r.line }));
@@ -309,4 +311,5 @@ async function main(): Promise<void> {
 	}
 }
 
-await main();
+// Imported by locate-prose-run.ts for its helpers; runs only as a script.
+if (import.meta.main) await main();

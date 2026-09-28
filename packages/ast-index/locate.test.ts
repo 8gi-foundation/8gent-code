@@ -22,6 +22,7 @@ import {
 	routeQuery,
 	runRg,
 } from "./locate";
+import type { ProseRouting } from "./locate-system-one";
 
 const has =
 	(...names: string[]) =>
@@ -654,6 +655,137 @@ describe("index still building", () => {
 		expect(formatLocate(r)).toContain("symbol index is still building");
 		expect(formatLocate(await locate("createDecider", { root, repoId: null }))).not.toContain(
 			"still building",
+		);
+	});
+});
+
+describe("System One on prose (EIGHT_SYSTEM_ONE_LOCATE)", () => {
+	/** A router that always answers `mode` and counts its calls. */
+	function router(mode: ProseRouting["mode"], reason: ProseRouting["reason"] = "model") {
+		const calls: string[] = [];
+		const fn = async (q: string): Promise<ProseRouting> => {
+			calls.push(q);
+			return {
+				mode: reason === "model" ? mode : "hybrid",
+				chosen: mode,
+				confidence: 0.9,
+				threshold: 0.5,
+				reason,
+				latencyMs: 1,
+			};
+		};
+		return { fn, calls };
+	}
+
+	test("the model's mode leads the prose answer", async () => {
+		const path1 = router("path");
+		const p = await locate("where is the rate limiter", { ...ctx(), systemOne: path1.fn });
+		expect(path1.calls).toEqual(["where is the rate limiter"]);
+		expect(p.route).toMatchObject({ mode: "path", rule: "system_one" });
+		expect(p.route.systemOne).toMatchObject({ chosen: "path", reason: "model" });
+		expect(p.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "file" });
+
+		const grep = await locate("where is the rate limiter", {
+			...ctx(),
+			systemOne: router("grep").fn,
+		});
+		expect(grep.route.mode).toBe("grep");
+		expect(grep.rows[0].kind).toBe("match");
+
+		const sym = await locate("where is the rate limiter", {
+			...ctx(),
+			systemOne: router("symbol").fn,
+		});
+		expect(sym.route.mode).toBe("symbol");
+		expect(sym.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "class" });
+	});
+
+	test("the led list admits a single-word match that hybrid would drop", async () => {
+		// "gadget" is nowhere, so no row holds two words: hybrid finds nothing.
+		const plain = await locate("where is the rate gadget", { ...ctx(), systemOne: null });
+		expect(plain.rows).toEqual([]);
+		const led = await locate("where is the rate gadget", {
+			...ctx(),
+			systemOne: router("symbol").fn,
+		});
+		expect(led.rows[0]).toMatchObject({ file: "src/limits/rate-limiter.ts", kind: "class" });
+	});
+
+	test("below the threshold, semantic, or hybrid: the rules' hybrid answer, unchanged", async () => {
+		const plain = await locate("where is the rate limiter", { ...ctx(), systemOne: null });
+		for (const r of [
+			router("symbol", "below_threshold"),
+			router("semantic"),
+			router("hybrid"),
+			router("path", "timeout"),
+		]) {
+			const got = await locate("where is the rate limiter", { ...ctx(), systemOne: r.fn });
+			expect(got.route).toMatchObject({ mode: "hybrid", rule: "prose" });
+			expect(got.route.systemOne).toBeDefined();
+			expect(got.rows).toEqual(plain.rows);
+		}
+	});
+
+	test("a router that throws is treated as hybrid", async () => {
+		const plain = await locate("where is the rate limiter", { ...ctx(), systemOne: null });
+		const got = await locate("where is the rate limiter", {
+			...ctx(),
+			systemOne: async () => {
+				throw new Error("boom");
+			},
+		});
+		expect(got.route).toMatchObject({
+			mode: "hybrid",
+			rule: "prose",
+			systemOne: { reason: "error" },
+		});
+		expect(got.rows).toEqual(plain.rows);
+	});
+
+	test("only prose reaches the model", async () => {
+		const r = router("path");
+		for (const q of [
+			"createDecider",
+			"limits/rate-limiter.ts",
+			'"Rate limit exceeded for tool"',
+			"only_in_python",
+			"",
+		]) {
+			await locate(q, { ...ctx(), systemOne: r.fn });
+		}
+		expect(r.calls).toEqual([]);
+		// A phrase found literally never asks; one with no literal hit asks once for its prose reading.
+		await locate("Rate limit exceeded for tool", { ...ctx(), systemOne: r.fn });
+		expect(r.calls).toEqual([]);
+		await locate("limiter rate check", { ...ctx(), systemOne: r.fn });
+		expect(r.calls).toEqual(["limiter rate check"]);
+	});
+
+	test("off by default: no router unless the flag is set", async () => {
+		const saved = process.env.EIGHT_SYSTEM_ONE_LOCATE;
+		delete process.env.EIGHT_SYSTEM_ONE_LOCATE;
+		try {
+			const got = await locate("where is the rate limiter", ctx());
+			expect(got.route).toMatchObject({ mode: "hybrid", rule: "prose" });
+			expect(got.route.systemOne).toBeUndefined();
+		} finally {
+			if (saved !== undefined) process.env.EIGHT_SYSTEM_ONE_LOCATE = saved;
+		}
+	});
+
+	test("the header says System One chose the mode, or why it did not", async () => {
+		const led = formatLocate(
+			await locate("where is the rate limiter", { ...ctx(), systemOne: router("path").fn }),
+		);
+		expect(led.split("\n")[0]).toBe("locate path (system_one path 0.90): rate limiter");
+		const low = formatLocate(
+			await locate("where is the rate limiter", {
+				...ctx(),
+				systemOne: router("symbol", "below_threshold").fn,
+			}),
+		);
+		expect(low.split("\n")[0]).toBe(
+			"locate hybrid (prose, system_one below_threshold symbol 0.90): rate limiter",
 		);
 	});
 });

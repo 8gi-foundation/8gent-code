@@ -14,6 +14,13 @@
  *                   (or a lone word)                the symbol map, else grep
  *   6. hybrid       anything else (prose)        -> symbol + path + grep, merged
  *
+ * Prose (rule 6) may be routed by System One when env EIGHT_SYSTEM_ONE_LOCATE=1
+ * (off by default; see locate-system-one.ts). The model's mode is kept only
+ * above a calibrated threshold, and then leads the merged answer: its list
+ * comes first and admits rows that carry one query word, not two. Anything
+ * else (unsure, uncalibrated, slow, failed, or semantic, which M3 builds)
+ * leaves the hybrid answer exactly as the rules give it.
+ *
  * Grep is ripgrep with -F (the query is a literal, never a regex), spawned
  * with an argv array (never a shell string) and confined to the repo root.
  * The answer is at most five "file:line kind text" rows, about 300 tokens.
@@ -24,6 +31,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Symbol } from "../types";
 import { getFileOutline, getFileTree, refreshIndexAsync, searchSymbols } from "./index";
+import { type ProseRouter, type ProseRouting, defaultProseRouter } from "./locate-system-one";
 
 export type LocateMode = "path" | "symbol" | "grep" | "hybrid";
 
@@ -40,7 +48,8 @@ export interface LocateRoute {
 		| "identifier"
 		| "identifier_no_symbol"
 		| "phrase"
-		| "prose";
+		| "prose"
+		| "system_one";
 	/** What the mode searches for: a symbol name, a path, a literal, or the raw query. */
 	term: string;
 	/** Line asked for with a path ("a.ts:42"). */
@@ -49,6 +58,8 @@ export interface LocateRoute {
 	terms?: string[];
 	/** Literal-first routes (error_like, phrase): how to read the query when the literal is absent. */
 	fallback?: LocateRoute;
+	/** Prose only, flag on: what System One answered, whether or not locate used it. */
+	systemOne?: ProseRouting;
 }
 
 export interface LocateRow {
@@ -625,6 +636,11 @@ export interface LocateContext {
 	rgTimeoutMs?: number;
 	/** The index is still building (repoId is null for that reason); the answer says so. */
 	indexPending?: boolean;
+	/**
+	 * System One router for prose queries. Undefined: the process router when
+	 * env EIGHT_SYSTEM_ONE_LOCATE is on, else none. null: none.
+	 */
+	systemOne?: ProseRouter | null;
 }
 
 /** How long a locate call waits for a first index build before answering without it. */
@@ -744,9 +760,19 @@ async function grepRows(ctx: RunCtx, term: string): Promise<LocateRow[]> {
 	}));
 }
 
-async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
+/** A retrieval list System One may put first in a prose answer. */
+type Lead = "symbol" | "grep" | "path";
+
+/**
+ * Prose: symbols, text lines and files that carry at least two query words,
+ * interleaved. With a `lead` (System One's mode), that list comes first, may
+ * fill all five rows, and admits rows that carry a single query word.
+ */
+async function hybridRows(ctx: RunCtx, terms: string[], lead?: Lead): Promise<LocateRow[]> {
 	if (terms.length === 0) return [];
-	const need = Math.min(2, terms.length);
+	const pair = Math.min(2, terms.length);
+	const need = (list: Lead) => (lead === list ? 1 : pair);
+	const cap = (list: Lead, n: number) => (lead === list ? LOCATE_MAX_ROWS : n);
 	const count = (s: string) => {
 		const l = s.toLowerCase();
 		return terms.filter((t) => l.includes(t)).length;
@@ -760,16 +786,16 @@ async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 		}
 	}
 	const symbols = [...bySymbol.values()]
-		.filter((x) => x.n >= need)
+		.filter((x) => x.n >= need("symbol"))
 		.sort((a, b) => b.n - a.n)
-		.slice(0, 3)
+		.slice(0, cap("symbol", 3))
 		.map((x) => symbolRow(ctx.root, x.s));
 
 	const files = (await listFiles(ctx))
 		.map((f) => ({ f, n: count(f) }))
-		.filter((x) => x.n >= need)
+		.filter((x) => x.n >= need("path"))
 		.sort((a, b) => b.n - a.n || a.f.length - b.f.length || (a.f < b.f ? -1 : 1))
-		.slice(0, 2)
+		.slice(0, cap("path", 2))
 		.map(({ f }) => ({
 			file: f,
 			line: 1,
@@ -779,7 +805,7 @@ async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 
 	const lines = (await grepLiteral(ctx.state, ctx.root, terms, true))
 		.map((h) => ({ h, n: count(h.text) }))
-		.filter((x) => x.n >= need)
+		.filter((x) => x.n >= need("grep"))
 		.sort(
 			(a, b) =>
 				b.n - a.n ||
@@ -788,10 +814,13 @@ async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 				(a.h.file < b.h.file ? -1 : a.h.file > b.h.file ? 1 : 0) ||
 				a.h.line - b.h.line,
 		)
-		.slice(0, 3)
+		.slice(0, cap("grep", 3))
 		.map(({ h }) => ({ file: h.file, line: h.line, kind: "match", text: clip(h.text) }));
 
-	return mergeRows([symbols, lines, files]);
+	if (!lead) return mergeRows([symbols, lines, files]);
+	const lists: Record<Lead, LocateRow[]> = { symbol: symbols, grep: lines, path: files };
+	const rest = (["symbol", "grep", "path"] as const).filter((l) => l !== lead).map((l) => lists[l]);
+	return mergeRows([[...lists[lead], ...mergeRows(rest, Number.POSITIVE_INFINITY)]]);
 }
 
 /** Interleave row lists (first of each, then second of each ...), drop repeats of file:line. */
@@ -818,6 +847,9 @@ async function runRoute(
 	route: LocateRoute,
 	lookup: (name: string) => Symbol[],
 ): Promise<LocateRow[]> {
+	if (route.rule === "system_one" && route.mode !== "hybrid") {
+		return hybridRows(ctx, route.terms ?? [], route.mode);
+	}
 	switch (route.mode) {
 		case "symbol":
 			return lookup(route.term)
@@ -833,6 +865,36 @@ async function runRoute(
 		case "hybrid":
 			return hybridRows(ctx, route.terms ?? []);
 	}
+}
+
+const LEADS = new Set<string>(["symbol", "grep", "path"]);
+
+/**
+ * Ask System One about a prose route. Its mode replaces hybrid only when the
+ * router kept it (above threshold); the answer is recorded either way. A
+ * router that throws counts as an error: hybrid.
+ */
+async function consultSystemOne(
+	route: LocateRoute,
+	router: ProseRouter | null,
+): Promise<LocateRoute> {
+	if (!router || route.rule !== "prose" || !route.terms?.length) return route;
+	let s: ProseRouting;
+	const t0 = performance.now();
+	try {
+		s = await router(route.term);
+	} catch (err) {
+		s = {
+			mode: "hybrid",
+			reason: "error",
+			latencyMs: Math.round(performance.now() - t0),
+			error: err instanceof Error ? err.message : String(err),
+		};
+	}
+	if (s.reason === "model" && LEADS.has(s.mode)) {
+		return { ...route, mode: s.mode as Lead, rule: "system_one", systemOne: s };
+	}
+	return { ...route, systemOne: s };
 }
 
 /** Answer "where is X?" for `query` under `ctx.root`. Read-only. */
@@ -859,11 +921,13 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 		}
 		return hits;
 	};
+	const router = context.systemOne === undefined ? defaultProseRouter() : context.systemOne;
 	let route = routeQuery(q, (name) => lookup(name)[0]?.name.toLowerCase() === name.toLowerCase());
+	route = await consultSystemOne(route, router);
 	let rows = await runRoute(ctx, route, lookup);
 	// Pasted text that is not in the repo: read it as a path, name or prose.
 	if (rows.length === 0 && route.fallback) {
-		route = route.fallback;
+		route = await consultSystemOne(route.fallback, router);
 		rows = await runRoute(ctx, route, lookup);
 	}
 	const result: LocateResult = { query: q, route, rows: rows.slice(0, LOCATE_MAX_ROWS) };
@@ -873,10 +937,22 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 	return result;
 }
 
+/** "prose", or what System One said about it: "system_one path 0.91", "prose, system_one timeout". */
+function ruleLabel(route: LocateRoute): string {
+	const s = route.systemOne;
+	if (!s) return route.rule;
+	const said = [s.chosen, typeof s.confidence === "number" ? s.confidence.toFixed(2) : undefined]
+		.filter(Boolean)
+		.join(" ");
+	if (route.rule === "system_one") return `system_one ${said}`.trim();
+	return `${route.rule}, system_one ${s.reason}${said ? ` ${said}` : ""}`;
+}
+
 /** The tool's text answer: one header line, then at most five rows. */
 export function formatLocate(result: LocateResult): string {
 	const { route, rows } = result;
-	const head = `locate ${route.mode} (${route.rule}): ${clip(route.mode === "hybrid" ? (route.terms ?? []).join(" ") : route.term) || "(empty)"}`;
+	const byTerms = route.mode === "hybrid" || route.rule === "system_one";
+	const head = `locate ${route.mode} (${ruleLabel(route)}): ${clip(byTerms ? (route.terms ?? []).join(" ") : route.term) || "(empty)"}`;
 	// When a search did not run or did not finish, say so rather than
 	// reporting that the text does not exist.
 	const notes: string[] = [];

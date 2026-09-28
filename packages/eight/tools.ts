@@ -1717,7 +1717,8 @@ export class ToolExecutor {
 	/**
 	 * Read-only "where is X?": rules route the query to the ranked symbol
 	 * index, a fuzzy path match or a literal rg search under the working
-	 * directory (see ast-index/locate.ts). No model is called.
+	 * directory (see ast-index/locate.ts). No model is called unless
+	 * EIGHT_SYSTEM_ONE_LOCATE=1, and then only for prose the rules cannot route.
 	 */
 	private async locate(query: string): Promise<string> {
 		// Wait for the index build only briefly: path and text search do not

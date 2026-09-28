@@ -1,0 +1,1921 @@
+{
+	"summary": {
+		"date": "2026-09-28T20:09:09.682Z",
+		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
+		"set": "locate-queries-prose.json",
+		"synthetic": true,
+		"backend": "ollama",
+		"model": "llama3.2:3b",
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max",
+			"loadavg": [
+				36.24,
+				30.31,
+				27.98
+			]
+		},
+		"n": 40,
+		"answered": 40,
+		"warmUpMs": 7380,
+		"rawAccuracy": 0.225,
+		"thresholdAll": 0.5674,
+		"heldOut": {
+			"accuracy": 0.25,
+			"coverage": 0.7,
+			"acceptedAccuracy": 0.21428571428571427,
+			"method": "leave-one-out"
+		},
+		"classifierMs": {
+			"p50": 687.9,
+			"p95": 763.7,
+			"max": 852.2
+		},
+		"m1": {
+			"top5": 0.5,
+			"ms": {
+				"p50": 266.5,
+				"p95": 345,
+				"max": 406.9
+			}
+		},
+		"m2": {
+			"top5": 0.375,
+			"ms": {
+				"p50": 432.7,
+				"p95": 573.5,
+				"max": 612.8
+			},
+			"reasons": {
+				"below_threshold": 12,
+				"model": 28
+			}
+		},
+		"byMode": {
+			"symbol": {
+				"n": 10,
+				"raw": 0.9,
+				"gated": 0.6,
+				"m1Top5": 0.6,
+				"m2Top5": 0.5
+			},
+			"grep": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0.375,
+				"m2Top5": 0.25
+			},
+			"path": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0.625,
+				"m2Top5": 0.375
+			},
+			"semantic": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0,
+				"m2Top5": 0
+			},
+			"hybrid": {
+				"n": 6,
+				"raw": 0,
+				"gated": 0.6666666666666666,
+				"m1Top5": 1,
+				"m2Top5": 0.8333333333333334
+			}
+		},
+		"confusion": {
+			"symbol": {
+				"symbol": 9,
+				"path": 1
+			},
+			"grep": {
+				"symbol": 8
+			},
+			"path": {
+				"symbol": 8
+			},
+			"semantic": {
+				"symbol": 8
+			},
+			"hybrid": {
+				"symbol": 6
+			}
+		},
+		"target": {
+			"accuracy": 0.85,
+			"p95Ms": 500
+		}
+	},
+	"rows": [
+		{
+			"id": "prose-01",
+			"query": "the function that turns token logprobs into a distribution over answer letters",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6056,
+				"probabilities": [
+					0.6056,
+					0.0385,
+					0.2021,
+					0.0578,
+					0.0961
+				],
+				"latencyMs": 765.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 343.7,
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"packages/db/convex/admin.ts",
+					"packages/decide/decide.test.ts",
+					"packages/ai/tools.ts"
+				]
+			},
+			"heldOutThreshold": 0.6421,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 517.4,
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"packages/db/convex/admin.ts",
+					"packages/decide/decide.test.ts",
+					"packages/ai/tools.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-02",
+			"query": "which class runs every tool call the agent makes",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tools.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.8055,
+				"probabilities": [
+					0.8055,
+					0.0218,
+					0.0732,
+					0.0391,
+					0.0603
+				],
+				"latencyMs": 581.9
+			},
+			"m1": {
+				"top5": false,
+				"ms": 267.4,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"docs/STRESS-TEST-1M.md",
+					"packages/secrets/libsecret.ts",
+					"packages/decide/README.md",
+					"SOUL.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 444.9,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-03",
+			"query": "the function that picks which installed local model answers decisions",
+			"label": "symbol",
+			"files": [
+				"packages/decide/probe.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6421,
+				"probabilities": [
+					0.6421,
+					0.0422,
+					0.1691,
+					0.0743,
+					0.0723
+				],
+				"latencyMs": 700.1
+			},
+			"m1": {
+				"top5": true,
+				"ms": 345,
+				"top": [
+					"packages/decide/probe.ts",
+					"README.md",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/providers/model-reroute.ts",
+					"CHANGELOG.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 559.8,
+				"top": [
+					"packages/decide/probe.ts",
+					"packages/providers/model-reroute.ts",
+					"scripts/install-wizard.tsx",
+					"packages/daemon/telegram-bridge.ts",
+					"packages/decide/eval/smoke.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-04",
+			"query": "the helper that fits temperature and bias for guard calibration",
+			"label": "symbol",
+			"files": [
+				"packages/decide/calibrate.ts"
+			],
+			"model": {
+				"chosen": "path",
+				"confidence": 0.3693,
+				"probabilities": [
+					0.367,
+					0.0949,
+					0.3693,
+					0.0834,
+					0.0855
+				],
+				"latencyMs": 583.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 317.4,
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 470.1,
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-05",
+			"query": "where is the offline mock backend class for system one",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/mock.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6384,
+				"probabilities": [
+					0.6384,
+					0.0445,
+					0.1806,
+					0.0582,
+					0.0783
+				],
+				"latencyMs": 746.5
+			},
+			"m1": {
+				"top5": true,
+				"ms": 243.2,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/security/README.md"
+				]
+			},
+			"heldOutThreshold": 0.6421,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 475.5,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/security/README.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-06",
+			"query": "the class that detects doom loops in tool calls",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tool-loop-detector.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7657,
+				"probabilities": [
+					0.7657,
+					0.0262,
+					0.0981,
+					0.0412,
+					0.0687
+				],
+				"latencyMs": 533.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 299.7,
+				"top": [
+					"scripts/nightly-train.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/tool-loop-detector.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 492.4,
+				"top": [
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/memory/migrate.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-07",
+			"query": "the function that resolves the ollama base url from the environment",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7436,
+				"probabilities": [
+					0.7436,
+					0.031,
+					0.1245,
+					0.034,
+					0.067
+				],
+				"latencyMs": 733.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 349.2,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"docs/MODELS.md",
+					"packages/table/officers.ts",
+					"scripts/smoke.ts",
+					"scripts/utility-factory.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 577.6,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"packages/table/officers.ts",
+					"scripts/utility-factory.ts",
+					"packages/ai/edge-inference.ts",
+					"packages/eight/clui-bridge.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-08",
+			"query": "the memory store class backed by sqlite",
+			"label": "symbol",
+			"files": [
+				"packages/memory/store.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.712,
+				"probabilities": [
+					0.712,
+					0.0399,
+					0.1149,
+					0.0428,
+					0.0905
+				],
+				"latencyMs": 575.5
+			},
+			"m1": {
+				"top5": true,
+				"ms": 340.2,
+				"top": [
+					"packages/memory/store.ts",
+					"packages/table/SPEC.md",
+					"packages/memory/store.ts",
+					"packages/memory/store.test.ts",
+					"packages/control-plane/tenant.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 470,
+				"top": [
+					"packages/memory/store.ts",
+					"bin/8gent.ts",
+					"packages/eight/agent.ts",
+					"packages/eight/tools.ts",
+					"packages/eight/tools.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-09",
+			"query": "the class that keeps secrets in the macos keychain",
+			"label": "symbol",
+			"files": [
+				"packages/secrets/keychain.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7148,
+				"probabilities": [
+					0.7148,
+					0.0501,
+					0.1161,
+					0.0514,
+					0.0676
+				],
+				"latencyMs": 730.1
+			},
+			"m1": {
+				"top5": false,
+				"ms": 333.4,
+				"top": [
+					"packages/hands/index.ts",
+					"docs/guides/DEPLOYMENT.md",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 480.6,
+				"top": [
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/ai/task-router.ts",
+					"packages/memory/migrate.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-10",
+			"query": "the bandit class that learns which model provider to route to",
+			"label": "symbol",
+			"files": [
+				"packages/providers/router-bandit.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5674,
+				"probabilities": [
+					0.5674,
+					0.0537,
+					0.2512,
+					0.0586,
+					0.0691
+				],
+				"latencyMs": 763.7
+			},
+			"m1": {
+				"top5": false,
+				"ms": 329.8,
+				"top": [
+					"packages/providers/host-placement.ts",
+					"README.md",
+					"CHANGELOG.md"
+				]
+			},
+			"heldOutThreshold": 0.6421,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 368.7,
+				"top": [
+					"packages/providers/host-placement.ts",
+					"README.md",
+					"CHANGELOG.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-11",
+			"query": "where do we set temperature zero and one predicted token for the judge request",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5907,
+				"probabilities": [
+					0.5907,
+					0.07,
+					0.1757,
+					0.0694,
+					0.0942
+				],
+				"latencyMs": 688.7
+			},
+			"m1": {
+				"top5": false,
+				"ms": 313.7,
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 453.9,
+				"top": [
+					"packages/ai/text-tool-endpoint.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/generate-landing-variations.ts",
+					"benchmarks/autoresearch/autoresearch-loop.ts",
+					"benchmarks/autoresearch/harness-v2.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-12",
+			"query": "which lines read the ollama host environment variable",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts",
+				"packages/memory/embeddings.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7411,
+				"probabilities": [
+					0.7411,
+					0.0913,
+					0.0799,
+					0.0284,
+					0.0593
+				],
+				"latencyMs": 705.7
+			},
+			"m1": {
+				"top5": false,
+				"ms": 276,
+				"top": [
+					"scripts/board-vessel/daemon.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/board-vessel/inference.ts",
+					"AGENTS.md",
+					"apps/tui/src/lib/provider-health.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 371.7,
+				"top": [
+					"scripts/board-vessel/daemon.ts",
+					"packages/board-vessel/inference.ts",
+					"apps/tui/src/lib/provider-health.ts",
+					"packages/board-vessel/inference.ts",
+					"packages/decide/backends/ollama.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-13",
+			"query": "where is the comment about float output drifting between identical calls",
+			"label": "grep",
+			"files": [
+				"packages/decide/index.ts",
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.8229,
+				"probabilities": [
+					0.8229,
+					0.0319,
+					0.0732,
+					0.0267,
+					0.0453
+				],
+				"latencyMs": 691.2
+			},
+			"m1": {
+				"top5": true,
+				"ms": 230,
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 308.3,
+				"top": [
+					"packages/tools/line-counter.ts",
+					"packages/tools/line-counter.ts",
+					"packages/ast-index/typescript-parser.ts",
+					"packages/decide/guard.ts",
+					"tests/security/grader-env.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-14",
+			"query": "where does the readme mention the no think prefix for reasoning models",
+			"label": "grep",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5186,
+				"probabilities": [
+					0.5186,
+					0.0551,
+					0.2956,
+					0.0678,
+					0.0628
+				],
+				"latencyMs": 707.3
+			},
+			"m1": {
+				"top5": true,
+				"ms": 218.6,
+				"top": [
+					"packages/decide/README.md",
+					"packages/personality/voice.ts",
+					"packages/decide/docs/ENGINE.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 314.6,
+				"top": [
+					"packages/decide/README.md",
+					"packages/personality/voice.ts",
+					"packages/decide/docs/ENGINE.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-15",
+			"query": "where is the default localhost port for ollama written",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6261,
+				"probabilities": [
+					0.6261,
+					0.0454,
+					0.2204,
+					0.046,
+					0.0621
+				],
+				"latencyMs": 532.9
+			},
+			"m1": {
+				"top5": true,
+				"ms": 254.2,
+				"top": [
+					"apps/proxy/src/server.ts",
+					"packages/decide/backends/ollama.ts",
+					"apps/8gent-flow/src/index.ts",
+					"docs/MODELS.md",
+					"packages/decide/backends/llamacpp.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 366.1,
+				"top": [
+					"apps/proxy/src/server.ts",
+					"apps/8gent-flow/src/index.ts",
+					"packages/decide/backends/llamacpp.ts",
+					"benchmarks/gate.ts",
+					"benchmarks/gate.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-16",
+			"query": "where is the log line printed when the index build finishes",
+			"label": "grep",
+			"files": [
+				"packages/eight/tools.ts",
+				"packages/eight/agent.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7363,
+				"probabilities": [
+					0.7363,
+					0.0429,
+					0.1203,
+					0.0382,
+					0.0623
+				],
+				"latencyMs": 653.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 237.3,
+				"top": [
+					"apps/tui/src/components/pulse-logo.tsx",
+					"demo.tape",
+					"docs/frameworks.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 495.9,
+				"top": [
+					"benchmarks/runner.ts",
+					"scripts/benchmark.ts",
+					"packages/eight/repl.ts",
+					"packages/g8way/usage.ts",
+					"packages/g8way/usage.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-17",
+			"query": "where do we write the blocked marker into a shell error message",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6607,
+				"probabilities": [
+					0.6607,
+					0.0727,
+					0.1518,
+					0.049,
+					0.0657
+				],
+				"latencyMs": 744.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 202.7,
+				"top": [
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/ai/text-tool-loop.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 344.4,
+				"top": [
+					"packages/eight/honesty.test.ts",
+					"packages/eight/honesty.test.ts",
+					"packages/ai/text-tool-loop.ts",
+					"packages/ai/text-tool-loop.ts",
+					"packages/memory/store.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-18",
+			"query": "which config line sets the timeout for a system one gate call",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6943,
+				"probabilities": [
+					0.6943,
+					0.078,
+					0.1107,
+					0.0437,
+					0.0733
+				],
+				"latencyMs": 722.3
+			},
+			"m1": {
+				"top5": false,
+				"ms": 221.3,
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 453.4,
+				"top": [
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx",
+					"benchmarks/grader.ts",
+					"benchmarks/grader.ts",
+					"benchmarks/grader.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-19",
+			"query": "the calibration files for the bash guard",
+			"label": "path",
+			"files": [
+				"packages/decide/calibration/ollama-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
+				"packages/decide/calibration/ollama-llama3.2_3b.json",
+				"packages/decide/calibration/ollama-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/llamacpp-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+				"packages/decide/calibrate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5773,
+				"probabilities": [
+					0.5773,
+					0.0955,
+					0.1977,
+					0.047,
+					0.0825
+				],
+				"latencyMs": 590.3
+			},
+			"m1": {
+				"top5": true,
+				"ms": 246.2,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 432.7,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-20",
+			"query": "the readme for the decision engine package",
+			"label": "path",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5281,
+				"probabilities": [
+					0.5281,
+					0.0798,
+					0.2437,
+					0.0514,
+					0.0971
+				],
+				"latencyMs": 584.8
+			},
+			"m1": {
+				"top5": false,
+				"ms": 266.8,
+				"top": [
+					"SOUL.md",
+					"packages/pet/README.md",
+					"AGENTS.md",
+					"packages/eyes/README.md",
+					"AGENTS.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 543.4,
+				"top": [
+					"SOUL.md",
+					"packages/pet/README.md",
+					"AGENTS.md",
+					"packages/eyes/README.md",
+					"AGENTS.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-21",
+			"query": "the default permission policies yaml",
+			"label": "path",
+			"files": [
+				"packages/permissions/default-policies.yaml"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6357,
+				"probabilities": [
+					0.6357,
+					0.0404,
+					0.1771,
+					0.0452,
+					0.1016
+				],
+				"latencyMs": 633.5
+			},
+			"m1": {
+				"top5": true,
+				"ms": 250.5,
+				"top": [
+					"packages/hooks/index.ts",
+					"CONVENTIONS.md",
+					"packages/permissions/default-policies.yaml",
+					"docs/VESSEL-ABILITIES.md",
+					"docs/specs/MEMORY-TRUST.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 485.8,
+				"top": [
+					"packages/hooks/index.ts",
+					"benchmarks/gate.ts",
+					"benchmarks/gate.ts",
+					"benchmarks/gate.ts",
+					"packages/ai/agent.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-22",
+			"query": "the brand guide at the repo root",
+			"label": "path",
+			"files": [
+				"BRAND.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5546,
+				"probabilities": [
+					0.5546,
+					0.0522,
+					0.2729,
+					0.0427,
+					0.0776
+				],
+				"latencyMs": 474.9
+			},
+			"m1": {
+				"top5": true,
+				"ms": 266.5,
+				"top": [
+					"bin/8gent.ts",
+					"docs/prd/8gent-computer/ux-spec.md",
+					"scripts/research-scraper.ts",
+					"BRAND.md",
+					"scripts/research-evaluate.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 573.5,
+				"top": [
+					"bin/8gent.ts",
+					"docs/prd/8gent-computer/ux-spec.md",
+					"scripts/research-scraper.ts",
+					"BRAND.md",
+					"scripts/research-evaluate.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-23",
+			"query": "the daemon websocket protocol spec",
+			"label": "path",
+			"files": [
+				"docs/specs/DAEMON-PROTOCOL.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6468,
+				"probabilities": [
+					0.6468,
+					0.0547,
+					0.1796,
+					0.0436,
+					0.0753
+				],
+				"latencyMs": 554.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 285.6,
+				"top": [
+					"docs/README.md",
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"AGENTS.md",
+					"README.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 458.1,
+				"top": [
+					"packages/daemon/index.ts",
+					"packages/daemon/index.ts",
+					"packages/daemon/types.ts",
+					"packages/daemon/events.ts",
+					"scripts/test-ws-client.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-24",
+			"query": "the theme file for the terminal ui",
+			"label": "path",
+			"files": [
+				"apps/tui/src/theme.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6591,
+				"probabilities": [
+					0.6591,
+					0.0638,
+					0.1515,
+					0.0429,
+					0.0826
+				],
+				"latencyMs": 640.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 339,
+				"top": [
+					"AGENTS.md",
+					"AGENTS.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 612.8,
+				"top": [
+					"apps/tui/src/theme.ts",
+					"packages/table/slide-theme.ts",
+					"packages/table/slide-render.ts",
+					"packages/table/__tests__/slide-theme.test.ts",
+					"packages/table/__tests__/slide-render.determinism.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-25",
+			"query": "the python script that trains lora adapters",
+			"label": "path",
+			"files": [
+				"packages/kernel/train_lora.py"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5346,
+				"probabilities": [
+					0.5346,
+					0.0633,
+					0.2547,
+					0.0605,
+					0.0869
+				],
+				"latencyMs": 723.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 333.5,
+				"top": [
+					"scripts/social-feed-research.ts",
+					"packages/kernel/local-trainer.ts",
+					"docs/BENCHMARKS.md",
+					"packages/eight/repl.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 447.5,
+				"top": [
+					"scripts/social-feed-research.ts",
+					"packages/kernel/local-trainer.ts",
+					"docs/BENCHMARKS.md",
+					"packages/eight/repl.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-26",
+			"query": "the hyperagent spec document",
+			"label": "path",
+			"files": [
+				"docs/HYPERAGENT-SPEC.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6541,
+				"probabilities": [
+					0.6541,
+					0.0383,
+					0.1909,
+					0.0424,
+					0.0744
+				],
+				"latencyMs": 687.9
+			},
+			"m1": {
+				"top5": true,
+				"ms": 406.9,
+				"top": [
+					"AGENTS.md",
+					"docs/HYPERAGENT-SPEC.md",
+					"README.md",
+					"README.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 419.1,
+				"top": [
+					"packages/orchestration/sequential-pipeline.ts",
+					"apps/linkedin-vessel/src/telegram-notify.ts",
+					"packages/table/bake.ts",
+					"packages/table/bake.ts",
+					"packages/table/slide-spec.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-27",
+			"query": "how does the agent notice it keeps repeating the same action",
+			"label": "semantic",
+			"files": [
+				"packages/eight/tool-loop-detector.ts",
+				"packages/daemon/loop-guard.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6019,
+				"probabilities": [
+					0.6019,
+					0.0552,
+					0.1717,
+					0.0636,
+					0.1076
+				],
+				"latencyMs": 553.8
+			},
+			"m1": {
+				"top5": false,
+				"ms": 231.9,
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 341.2,
+				"top": [
+					"bin/8gent.ts",
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"packages/ai/agent.ts",
+					"packages/ai/agent.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-28",
+			"query": "how do we stop the agent claiming it finished work it did not do",
+			"label": "semantic",
+			"files": [
+				"packages/eight/honesty.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7145,
+				"probabilities": [
+					0.7145,
+					0.0418,
+					0.1269,
+					0.046,
+					0.0708
+				],
+				"latencyMs": 750
+			},
+			"m1": {
+				"top5": false,
+				"ms": 248.6,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 427.6,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"packages/music/dj.ts",
+					"packages/lsp/index.ts",
+					"packages/voice/vad.ts",
+					"packages/kernel/loop.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-29",
+			"query": "how is personal information kept out of prompts sent to cloud models",
+			"label": "semantic",
+			"files": [
+				"packages/permissions/pii-anonymizer.ts",
+				"packages/permissions/privacy-router.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6724,
+				"probabilities": [
+					0.6724,
+					0.0477,
+					0.1443,
+					0.0598,
+					0.0758
+				],
+				"latencyMs": 760.9
+			},
+			"m1": {
+				"top5": false,
+				"ms": 264.1,
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 373.3,
+				"top": [
+					"packages/eight/agent.ts",
+					"packages/personality/voice.ts",
+					"packages/personality/voice.ts",
+					"packages/kernel/version-manager.ts",
+					"packages/kernel/version-manager.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-30",
+			"query": "how are passwords and tokens scrubbed from text before it is saved",
+			"label": "semantic",
+			"files": [
+				"packages/eight/secret-scanner.ts",
+				"packages/memory/redact.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6528,
+				"probabilities": [
+					0.6528,
+					0.0792,
+					0.1592,
+					0.0507,
+					0.058
+				],
+				"latencyMs": 545.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 250.2,
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 427.7,
+				"top": [
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"scripts/run-eval-set.ts",
+					"packages/decide/rules.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-31",
+			"query": "what happens when a turn runs for too long",
+			"label": "semantic",
+			"files": [
+				"packages/eight/turn-timeout.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6465,
+				"probabilities": [
+					0.6465,
+					0.049,
+					0.1439,
+					0.056,
+					0.1045
+				],
+				"latencyMs": 503.1
+			},
+			"m1": {
+				"top5": false,
+				"ms": 293.8,
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/table/tools/post-to-channel.ts",
+					"README.md",
+					"docs/HARNESS-PLAN.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 416.5,
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/ai/text-tool-loop.ts",
+					"packages/goal/executor-eight.ts",
+					"packages/goal/goal-loop.test.ts",
+					"packages/ai/text-tool-client.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-32",
+			"query": "how does the conversation get shorter when the context window fills up",
+			"label": "semantic",
+			"files": [
+				"packages/eight/compaction.ts",
+				"packages/eight/two-stage-compactor.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7289,
+				"probabilities": [
+					0.7289,
+					0.0355,
+					0.0732,
+					0.0539,
+					0.1086
+				],
+				"latencyMs": 705.3
+			},
+			"m1": {
+				"top5": false,
+				"ms": 250.9,
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 390.5,
+				"top": [
+					"packages/memory/types.ts",
+					"packages/memory/types.ts",
+					"packages/eight/context-engineering.ts",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/orchestration/local-model-detect.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-33",
+			"query": "how does the system switch to another model when one stops answering",
+			"label": "semantic",
+			"files": [
+				"packages/providers/failover.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.7577,
+				"probabilities": [
+					0.7577,
+					0.0328,
+					0.0804,
+					0.0558,
+					0.0733
+				],
+				"latencyMs": 560.7
+			},
+			"m1": {
+				"top5": false,
+				"ms": 272.8,
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 386,
+				"top": [
+					"packages/table/huddle-demo.ts",
+					"packages/design-systems/seed.ts",
+					"packages/design-agent/suggester.ts",
+					"packages/ai/text-tool-client.test.ts",
+					"benchmarks/types.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-34",
+			"query": "how are memories turned into vectors for similarity search",
+			"label": "semantic",
+			"files": [
+				"packages/memory/embeddings.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.63,
+				"probabilities": [
+					0.63,
+					0.0432,
+					0.1511,
+					0.0772,
+					0.0985
+				],
+				"latencyMs": 570
+			},
+			"m1": {
+				"top5": false,
+				"ms": 241,
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 329.6,
+				"top": [
+					"packages/memory/wiki.ts",
+					"packages/memory/index.ts",
+					"packages/daemon/routes/store/kg.ts",
+					"packages/eight/agent.ts",
+					"packages/memory/wiki.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-35",
+			"query": "keychain vault on linux",
+			"label": "hybrid",
+			"files": [
+				"packages/secrets/libsecret.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.502,
+				"probabilities": [
+					0.502,
+					0.0793,
+					0.2857,
+					0.0545,
+					0.0785
+				],
+				"latencyMs": 593.2
+			},
+			"m1": {
+				"top5": true,
+				"ms": 289.3,
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 433.5,
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-36",
+			"query": "memory consolidation schema",
+			"label": "hybrid",
+			"files": [
+				"packages/memory/consolidation.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5266,
+				"probabilities": [
+					0.5266,
+					0.0637,
+					0.2567,
+					0.0657,
+					0.0873
+				],
+				"latencyMs": 587
+			},
+			"m1": {
+				"top5": true,
+				"ms": 306.4,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 432.5,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-37",
+			"query": "session manager",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/session-manager.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6417,
+				"probabilities": [
+					0.6417,
+					0.045,
+					0.1773,
+					0.0478,
+					0.0881
+				],
+				"latencyMs": 710.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 204.1,
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 367.3,
+				"top": [
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"bin/debug.ts",
+					"bin/debug.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-38",
+			"query": "auto commit",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/auto-commit.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.6379,
+				"probabilities": [
+					0.6379,
+					0.0661,
+					0.1323,
+					0.0442,
+					0.1195
+				],
+				"latencyMs": 852.2
+			},
+			"m1": {
+				"top5": true,
+				"ms": 184.8,
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 292.9,
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"packages/decide/backends/llamacpp.test.ts",
+					"apps/tui/src/app.tsx",
+					"apps/tui/src/app.tsx",
+					"packages/ai/tools.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			}
+		},
+		{
+			"id": "prose-39",
+			"query": "maker checker enforcer",
+			"label": "hybrid",
+			"files": [
+				"packages/permissions/maker-checker-enforcer.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4595,
+				"probabilities": [
+					0.4595,
+					0.1032,
+					0.251,
+					0.0794,
+					0.1069
+				],
+				"latencyMs": 738.1
+			},
+			"m1": {
+				"top5": true,
+				"ms": 243.5,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 344.5,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		},
+		{
+			"id": "prose-40",
+			"query": "loop guard in the daemon",
+			"label": "hybrid",
+			"files": [
+				"packages/daemon/loop-guard.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5614,
+				"probabilities": [
+					0.5614,
+					0.106,
+					0.1604,
+					0.0767,
+					0.0954
+				],
+				"latencyMs": 722.5
+			},
+			"m1": {
+				"top5": true,
+				"ms": 245.8,
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				]
+			},
+			"heldOutThreshold": 0.5674,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 482.3,
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			}
+		}
+	]
+}
