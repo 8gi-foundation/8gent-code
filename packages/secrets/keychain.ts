@@ -9,6 +9,8 @@
  * fine and faster.
  */
 
+import type { OSVault } from "./os-vault";
+
 const DEFAULT_SERVICE = "8gent-secrets";
 const INDEX_KEY = "__index__";
 
@@ -16,7 +18,7 @@ export interface KeychainVaultOptions {
 	service?: string;
 }
 
-export class KeychainVault {
+export class KeychainVault implements OSVault {
 	private service: string;
 
 	constructor(opts: KeychainVaultOptions = {}) {
@@ -103,11 +105,11 @@ export class KeychainVault {
 			this.service,
 			"-a",
 			account,
-			"-w",
+			"-g",
 		]);
 		if (!result.success) return undefined;
-		const trimmed = result.stdout.trim();
-		return trimmed.length > 0 ? trimmed : undefined;
+		const value = parsePasswordLine(result.stderr);
+		return value !== undefined && value.length > 0 ? value : undefined;
 	}
 
 	private async deleteEntry(account: string): Promise<void> {
@@ -147,6 +149,18 @@ export class KeychainVault {
 			};
 		}
 	}
+}
+
+// `-w` prints non-ASCII passwords as bare hex, indistinguishable from an ASCII
+// password that happens to be hex. `-g` marks the hex form with a 0x prefix.
+function parsePasswordLine(output: string): string | undefined {
+	const line = output.split("\n").find((l) => l.startsWith("password: "));
+	if (!line) return undefined;
+	const rest = line.slice("password: ".length);
+	const hex = /^0x([0-9A-Fa-f]*)/.exec(rest);
+	if (hex) return Buffer.from(hex[1], "hex").toString("utf8");
+	if (rest.startsWith('"') && rest.endsWith('"')) return rest.slice(1, -1);
+	return undefined;
 }
 
 let _keychain: KeychainVault | null = null;

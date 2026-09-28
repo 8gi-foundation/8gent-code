@@ -1,7 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { LibsecretVault } from "./libsecret";
-
-const TEST_SERVICE = `8gent-secrets-test-${process.pid}`;
+import { describeVaultContract } from "./vault-contract";
 
 const isLinux = process.platform === "linux";
 
@@ -18,80 +17,32 @@ const hasSecretTool = await (async () => {
 	}
 })();
 
-const cleanup = async () => {
-	if (!isLinux || !hasSecretTool) return;
-	const vault = new LibsecretVault({ service: TEST_SERVICE });
-	for (const key of await vault.list()) {
-		await vault.delete(key);
-	}
-};
+const services: string[] = [];
 
-afterAll(cleanup);
+// The vault API cannot remove its own __index__ entry, so clear each test
+// service directly.
+if (isLinux && hasSecretTool) {
+	afterAll(async () => {
+		for (const service of services) {
+			await Bun.spawn(["secret-tool", "clear", "service", service]).exited;
+		}
+	}, 30_000);
+}
 
-describe.skipIf(!isLinux || !hasSecretTool)("LibsecretVault", () => {
-	test("stores and retrieves a secret", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("API_KEY", "sk-test-456");
-		expect(await vault.get("API_KEY")).toBe("sk-test-456");
-	});
+let serial = 0;
 
-	test("returns undefined for missing key", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		expect(await vault.get("DOES_NOT_EXIST")).toBeUndefined();
-	});
-
-	test("has() reports presence correctly", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("PRESENT", "yes");
-		expect(await vault.has("PRESENT")).toBe(true);
-		expect(await vault.has("ABSENT")).toBe(false);
-	});
-
-	test("delete() removes the secret and updates index", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("TO_DELETE", "bye");
-		expect(await vault.delete("TO_DELETE")).toBe(true);
-		expect(await vault.has("TO_DELETE")).toBe(false);
-		expect(await vault.list()).not.toContain("TO_DELETE");
-	});
-
-	test("list() reflects all stored keys, sorted", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("ZED", "z");
-		await vault.set("ALPHA", "a");
-		const keys = await vault.list();
-		expect(keys).toContain("ZED");
-		expect(keys).toContain("ALPHA");
-		expect(keys.indexOf("ALPHA")).toBeLessThan(keys.indexOf("ZED"));
-	});
-
-	test("set() overwrites existing value", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("MUTABLE", "first");
-		await vault.set("MUTABLE", "second");
-		expect(await vault.get("MUTABLE")).toBe("second");
-	});
-
-	test("useSecret() runs callback with decrypted value, returns result", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await vault.set("TOKEN", "secret-value");
-		const result = await vault.useSecret("TOKEN", async (value) => value.length);
-		expect(result).toBe("secret-value".length);
-	});
-
-	test("useSecret() throws when key is missing", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await expect(vault.useSecret("MISSING", async () => "ok")).rejects.toThrow(/not found/);
-	});
-
-	test("reserved __index__ key cannot be set", async () => {
-		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await expect(vault.set("__index__", "value")).rejects.toThrow(/Reserved/);
-	});
-});
+describeVaultContract(
+	"LibsecretVault",
+	() => {
+		const service = `8gent-secrets-test-${process.pid}-${serial++}`;
+		services.push(service);
+		return new LibsecretVault({ service });
+	},
+	isLinux && hasSecretTool ? false : "requires Linux with secret-tool",
+);
 
 describe.skipIf(isLinux)("LibsecretVault on non-Linux", () => {
 	test("constructor throws on non-Linux platforms", () => {
-		expect(() => new LibsecretVault({ service: TEST_SERVICE })).toThrow(/Linux/);
+		expect(() => new LibsecretVault({ service: "8gent-secrets-test" })).toThrow(/Linux/);
 	});
 });

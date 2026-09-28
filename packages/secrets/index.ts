@@ -242,8 +242,12 @@ export function getVault(): SecretVault {
 
 export { KeychainVault, getKeychainVault } from "./keychain";
 export type { KeychainVaultOptions } from "./keychain";
-export { LibsecretVault, getLibsecretVault, getOSVault } from "./libsecret";
+export { LibsecretVault, getLibsecretVault } from "./libsecret";
 export type { LibsecretVaultOptions } from "./libsecret";
+export { DpapiVault, getDpapiVault, powershellDpapiCipher } from "./dpapi";
+export type { DpapiCipher, DpapiVaultOptions } from "./dpapi";
+export { getOSVault } from "./os-vault";
+export type { OSVault } from "./os-vault";
 
 // Lightweight ~/.8gent/keys.env path (file-backed, user-editable, no
 // encryption). Complements the encrypted SecretVault above for users

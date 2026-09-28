@@ -11,6 +11,8 @@
  * libsecret is unavailable.
  */
 
+import type { OSVault } from "./os-vault";
+
 const DEFAULT_SERVICE = "8gent-secrets";
 const INDEX_KEY = "__index__";
 
@@ -18,7 +20,7 @@ export interface LibsecretVaultOptions {
 	service?: string;
 }
 
-export class LibsecretVault {
+export class LibsecretVault implements OSVault {
 	private service: string;
 
 	constructor(opts: LibsecretVaultOptions = {}) {
@@ -165,20 +167,4 @@ export function getLibsecretVault(): LibsecretVault {
 		_libsecret = new LibsecretVault();
 	}
 	return _libsecret;
-}
-
-/**
- * Platform-aware OS vault factory. Picks Keychain on macOS, libsecret on
- * Linux, throws elsewhere. Callers wanting a fallback to file-based
- * SecretVault should catch and retry with getVault().
- */
-export async function getOSVault() {
-	if (process.platform === "darwin") {
-		const { getKeychainVault } = await import("./keychain");
-		return getKeychainVault();
-	}
-	if (process.platform === "linux") {
-		return getLibsecretVault();
-	}
-	throw new Error(`No OS vault available for platform "${process.platform}". Use SecretVault.`);
 }
