@@ -28,6 +28,7 @@ import {
 } from "../memory/session-kg.js";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
+import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -234,6 +235,10 @@ export class Agent {
 				unattended: config.unattended ?? false,
 			},
 		);
+		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
+		// background, so the first gated command does not pay the model load.
+		// Idempotent per process; flag off it is a no-op with no import.
+		startSystemOneWarmup()?.catch(() => {});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();

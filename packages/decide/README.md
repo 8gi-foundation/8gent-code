@@ -274,6 +274,15 @@ default thresholds.
     message says `timed out after N ms, failing closed`. A load that overruns
     blocks that one command and carries on, and the next call uses it. The
     escalate prompt to a human is outside the budget.
+- **Warm-up:** with the flag on, `startSystemOneWarmup` runs at TUI startup
+  and in the `Agent` constructor. It builds the decider and asks the judge
+  one throwaway question (`echo warmup`, never run) in the background, so the
+  model load does not land on the user's first command. The TUI shows
+  "System One judge loading..." then "System One judge ready.". A gate call
+  that arrives during warm-up waits for it inside its own budget. If the
+  budget runs out first, the block says the judge is still loading and to
+  retry in a few seconds. A failed warm-up does not stick. Flag off: no
+  warm-up and no import.
 - **Not on the gate:** `write_terminal` and `term_send`. They send keystrokes
   to a live PTY or tmux pane, not a discrete command, so the bash question does
   not fit them. The TUI terminal tab is typed by the user.
@@ -287,7 +296,9 @@ Tests (`packages/permissions/system-one-gate.test.ts`): a stub backend sits
 behind the real `createDecider` and `bashGuard`. They cover allow, block,
 escalate (approve, decline, no human, TUI channel), error, a hung decider and
 a hung backend resolution (timeout), the timeout defaults, a forged judge
-answer, and calibration. They then drive the real entry points
+answer, calibration, and the warm-up (starts with the flag on and not off, a
+call during warm-up waits and gets a real verdict, budget expiry during
+warm-up says the judge is still loading, a failed warm-up is retried). They then drive the real entry points
 (`ToolExecutor.execute` and `agentTools.run_command` / `background_start` /
 `spawn_agent` with `runtime: "shell"`) with the flag on. A destructive
 fixture leaves its victim file in place, and blocked sentinels are never

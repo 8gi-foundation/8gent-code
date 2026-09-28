@@ -33,6 +33,7 @@ import {
 	SYSTEM_ONE_TIMEOUT_ENV,
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
+	startSystemOneWarmup,
 	systemOneEnabled,
 	systemOneGate,
 	systemOneTimeoutMs,
@@ -375,6 +376,91 @@ describe("systemOneGate verdicts (stub decider)", () => {
 		const d = await systemOneGate("echo SYS1_LOW", on);
 		expect(d.thresholds).toBe("default");
 		expect(d.guard?.verdict).toBe("allow");
+	});
+});
+
+describe("judge warm-up at startup", () => {
+	const on = { [SYSTEM_ONE_FLAG]: "1" };
+
+	/** A backend whose first ask (the model load) takes `loadMs`, or never finishes when loadMs is Infinity. */
+	class SlowLoadBackend extends StubBackend {
+		private loaded: Promise<void>;
+		constructor(loadMs: number) {
+			super();
+			this.loaded = Number.isFinite(loadMs) ? Bun.sleep(loadMs) : new Promise(() => {});
+		}
+		async ask(request: SystemOneRequest): Promise<SystemOneResponse> {
+			await this.loaded;
+			return super.ask(request);
+		}
+	}
+
+	test("flag on: warm-up constructs the decider and asks the judge once, before any command", async () => {
+		const p = startSystemOneWarmup(on);
+		expect(p).not.toBeNull();
+		await p;
+		expect(constructed).toBe(1);
+		expect(stub.asks.length).toBe(1);
+		expect(stub.asks[0]).toContain("echo warmup");
+		// The warm-up counts as the first answer, so real calls get the warm budget.
+		expect(systemOneTimeoutMs({})).toBe(DEFAULT_TIMEOUT_MS);
+		// Idempotent: a second start reuses the same warm-up.
+		await startSystemOneWarmup(on);
+		expect(constructed).toBe(1);
+		expect(stub.asks.length).toBe(1);
+	});
+
+	test("flag off: no warm-up, no decider, judge never asked", async () => {
+		expect(startSystemOneWarmup({})).toBeNull();
+		await Bun.sleep(20);
+		expect(constructed).toBe(0);
+		expect(stub.asks.length).toBe(0);
+	});
+
+	test("first call during warm-up waits for it, then gets a real verdict", async () => {
+		const slow = new SlowLoadBackend(300);
+		installStub({ decider: () => createDecider({ backend: slow, cacheSize: 0 }) });
+		const warm = startSystemOneWarmup(on);
+		const t0 = Date.now();
+		const r = await systemOneGate("ls sentinel.txt", on);
+		expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
+		expect(r.run).toBe(true);
+		expect(r.guard?.verdict).toBe("allow");
+		expect(r.guard?.backend).toBe("stub");
+		expect(constructed).toBe(1);
+		// Warm-up asked first; the real command only after it.
+		expect(slow.asks.length).toBe(2);
+		expect(slow.asks[0]).toContain("echo warmup");
+		expect(slow.asks[1]).toContain("ls sentinel.txt");
+		await warm;
+	});
+
+	test("budget expires while the judge is still loading: block says still loading, retry", async () => {
+		const hung = new SlowLoadBackend(Number.POSITIVE_INFINITY);
+		installStub({ decider: () => createDecider({ backend: hung, cacheSize: 0 }) });
+		startSystemOneWarmup(on);
+		const r = await systemOneGate("ls", { ...on, [SYSTEM_ONE_TIMEOUT_ENV]: "200" });
+		expect(r.run).toBe(false);
+		expect(r.message).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(r.message).toContain("verdict=block");
+		expect(r.message).toContain("judge is still loading");
+		expect(r.message).toContain("retry in a few seconds");
+		expect(r.message).not.toContain("timed out after 200 ms, failing closed");
+	});
+
+	test("a failed warm-up does not stick: the next call retries and gets a verdict", async () => {
+		let n = 0;
+		installStub({
+			decider: () => {
+				n++;
+				if (n === 1) throw new Error("module failed to load");
+				return createDecider({ backend: stub, cacheSize: 0 });
+			},
+		});
+		await expect(startSystemOneWarmup(on) as Promise<void>).rejects.toThrow("module failed to load");
+		const r = await systemOneGate("ls", on);
+		expect(r.run).toBe(true);
+		expect(n).toBe(2);
 	});
 });
 
