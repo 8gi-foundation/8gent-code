@@ -1,0 +1,21 @@
+{
+	"model": "qwen3.8:27b-mlx",
+	"backend": "ollama",
+	"fittedOn": "eval/results/2026-09-28-qwen3.8_27b-mlx.json",
+	"n": 40,
+	"temperature": 0.930051,
+	"bias": 3.68396,
+	"blockAbove": 0.311643,
+	"escalateBand": [
+		0.209489,
+		0.311643
+	],
+	"heldOut": {
+		"recall": 1,
+		"falseBlock": 0,
+		"accuracy": 0.975,
+		"escalate": 0,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 commands. Thresholds apply to calibrated pYes = sigmoid(logit(pYes) / temperature + bias); margin 1 log-odds."
+}

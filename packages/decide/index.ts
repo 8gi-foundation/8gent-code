@@ -3,11 +3,13 @@
  *
  * A local decision engine. The harness asks typed questions about a
  * `state` string and gets calibrated probabilities back; calling code
- * owns every threshold. Backends: a local laya-serve, Ollama via token
- * logprobs, and a deterministic mock for tests.
+ * owns every threshold. Backends: in-process llama.cpp (optional
+ * node-llama-cpp), a local laya-serve, Ollama via token logprobs, and a
+ * deterministic mock for tests.
  */
 
 import { LayaBackend } from "./backends/laya";
+import { LlamaCppBackend, type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { MockBackend } from "./backends/mock";
 import { OllamaBackend, resolveOllamaHost } from "./backends/ollama";
 import { detectBackend, listOllamaModels, pickModel, type ProbeResult } from "./probe";
@@ -26,6 +28,14 @@ export * from "./types";
 export { LayaBackend, mapProbabilities, resolveLayaUrl } from "./backends/laya";
 export { MockBackend } from "./backends/mock";
 export {
+	LlamaCppBackend,
+	type LlamaCppLoader,
+	disposeLlamaCpp,
+	listOllamaGgufs,
+	manifestName,
+	resolveGguf,
+} from "./backends/llamacpp";
+export {
 	OllamaBackend,
 	buildPrompt,
 	distributionFromLogprobs,
@@ -37,18 +47,20 @@ export {
 export { detectBackend, pickModel, MODEL_PREFERENCE, type ProbeResult } from "./probe";
 export { bashGuard, BASH_GUARD_QUESTION, type BashGuardOptions, type BashGuardResult } from "./guard";
 
-export type BackendSelection = "auto" | "laya" | "ollama" | "mock";
+export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock";
 
 export interface DeciderOptions {
 	/** A ready backend instance, or which kind to build. Default "auto". */
 	backend?: DecideBackend | BackendSelection;
-	/** Model override (Ollama). Defaults to env EIGHT_DECIDE_MODEL, then probe choice. */
+	/** Model override (Ollama name; llamacpp resolves it in the Ollama store). Defaults to env EIGHT_DECIDE_MODEL, then probe choice. */
 	model?: string;
 	timeoutMs?: number;
 	/** Max memoised requests (FIFO eviction). 0 disables. Default 256. */
 	cacheSize?: number;
 	fetch?: FetchLike;
 	env?: Record<string, string | undefined>;
+	/** How to load the optional node-llama-cpp package; null disables llamacpp in auto. Tests inject a fake. */
+	llamacppLoader?: LlamaCppLoader | null;
 }
 
 export interface Decider {
@@ -75,6 +87,14 @@ async function buildBackend(opts: DeciderOptions): Promise<DecideBackend> {
 	if (sel === "mock") return new MockBackend();
 	if (sel === "laya") return new LayaBackend(common);
 	const model = opts.model ?? env.EIGHT_DECIDE_MODEL;
+	if (sel === "llamacpp") {
+		const loader = opts.llamacppLoader ?? defaultLlamaCppLoader;
+		const gguf = resolveGguf(env, model);
+		if (!gguf.path) throw new DecideUnavailableError(`llamacpp: ${gguf.note ?? "no EIGHT_DECIDE_GGUF, OLLAMA_MODELS or HOME to find a GGUF"}`);
+		const missing = await llamaCppUnavailable(loader);
+		if (missing) throw new DecideUnavailableError(missing);
+		return new LlamaCppBackend({ model: gguf.model, modelPath: gguf.path, loader });
+	}
 	if (sel === "ollama") {
 		if (model) return new OllamaBackend({ ...common, model });
 		const host = resolveOllamaHost(env);
@@ -85,7 +105,14 @@ async function buildBackend(opts: DeciderOptions): Promise<DecideBackend> {
 		if (!picked) throw new DecideUnavailableError(`ollama at ${host} has no usable models installed`);
 		return new OllamaBackend({ ...common, model: picked, host });
 	}
-	const probe: ProbeResult = await detectBackend({ fetch: opts.fetch, env: model ? { ...env, EIGHT_DECIDE_MODEL: model } : env });
+	const probe: ProbeResult = await detectBackend({
+		fetch: opts.fetch,
+		env: model ? { ...env, EIGHT_DECIDE_MODEL: model } : env,
+		llamacppLoader: opts.llamacppLoader,
+	});
+	if (probe.backend === "llamacpp" && probe.model && probe.path) {
+		return new LlamaCppBackend({ model: probe.model, modelPath: probe.path, loader: opts.llamacppLoader ?? undefined });
+	}
 	if (probe.backend === "laya") return new LayaBackend({ ...common, url: probe.url ?? undefined });
 	if (probe.backend === "ollama" && probe.model) {
 		return new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined });

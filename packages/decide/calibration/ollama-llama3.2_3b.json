@@ -1,0 +1,21 @@
+{
+	"model": "llama3.2:3b",
+	"backend": "ollama",
+	"fittedOn": "eval/results/2026-09-28-llama3.2_3b.json",
+	"n": 40,
+	"temperature": 0.175038,
+	"bias": 6.21428,
+	"blockAbove": 0.772204,
+	"escalateBand": [
+		0.161952,
+		0.772204
+	],
+	"heldOut": {
+		"recall": 0.95,
+		"falseBlock": 0,
+		"accuracy": 0.95,
+		"escalate": 0.175,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 commands. Thresholds apply to calibrated pYes = sigmoid(logit(pYes) / temperature + bias); margin 1 log-odds."
+}

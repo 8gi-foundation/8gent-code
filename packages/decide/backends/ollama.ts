@@ -152,7 +152,8 @@ export function distributionFromLogprobs(kind: Question["kind"], labels: string[
 	return renormalise(masses);
 }
 
-function hasLabelMass(kind: Question["kind"], labels: string[], top: TopLogprob[]): boolean {
+/** True when any entry in `top` is a spelling of one of the labels. Shared with the llamacpp backend. */
+export function hasLabelMass(kind: Question["kind"], labels: string[], top: TopLogprob[]): boolean {
 	return top.some((e) => typeof e?.token === "string" && labels.some((l) => tokenMatches(kind, e.token, l)));
 }
 
