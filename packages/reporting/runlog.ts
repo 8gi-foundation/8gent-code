@@ -11,8 +11,8 @@ import * as path from "node:path";
 export interface RunLogEntry {
 	/** ISO timestamp */
 	ts: string;
-	/** "ok" | "fail" | "timeout" */
-	status: "ok" | "fail" | "timeout";
+	/** "ok" | "fail" | "timeout" | "error" (a local text-tool turn that ended in an error) */
+	status: "ok" | "fail" | "timeout" | "error";
 	/** Model identifier */
 	model: string;
 	/** Duration in seconds */

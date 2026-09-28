@@ -18,6 +18,7 @@
  * `call`; the tool `run`s do whatever their injected executor does.
  */
 
+import { modelFetch } from "./model-fetch";
 import type { ToolSpec } from "./text-tools";
 import type { TextTool } from "./text-tool-loop";
 
@@ -128,6 +129,10 @@ export function extractUsage(data: unknown): TextToolUsage | null {
  * (socket accepted, no body) is then torn down when the caller aborts (turn
  * timeout, circuit breaker, user ESC) instead of leaving the request - and the
  * turn - hung forever.
+ *
+ * The request never inherits Bun's hidden 300 s fetch cap: it goes through
+ * modelFetch, whose limit is `timeoutMs` (default: EIGHT_TURN_TIMEOUT_MS via
+ * resolveTurnTimeoutMs). A step that runs past it rejects with TurnTimeoutError.
  */
 export function buildTextToolCall(opts: {
 	provider: string;
@@ -142,6 +147,11 @@ export function buildTextToolCall(opts: {
 	temperature?: number;
 	signal?: AbortSignal;
 	/**
+	 * Limit for one model step in ms. Default: resolveTurnTimeoutMs(), so
+	 * EIGHT_TURN_TIMEOUT_MS governs. Injectable so tests need not wait minutes.
+	 */
+	timeoutMs?: number;
+	/**
 	 * Fired once per completed call with the REAL usage the endpoint reported
 	 * (#2805). Never fired when the endpoint omits usage - no fabricated tokens.
 	 */
@@ -151,17 +161,21 @@ export function buildTextToolCall(opts: {
 	const temperature = opts.temperature ?? 0.2;
 
 	return async (messages: ChatMessage[]): Promise<string> => {
-		const res = await fetch(endpoint, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				model: opts.model,
-				messages,
-				temperature,
-				stream: false,
-			}),
-			signal: opts.signal,
-		});
+		const res = await modelFetch(
+			endpoint,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					model: opts.model,
+					messages,
+					temperature,
+					stream: false,
+				}),
+				signal: opts.signal,
+			},
+			{ timeoutMs: opts.timeoutMs, label: `${opts.provider}/${opts.model}` },
+		);
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
 			throw new Error(

@@ -3,6 +3,7 @@
  */
 
 import type { LLMClient, LLMResponse, Message, MessageContentPart } from "../types";
+import { modelFetch } from "../../ai/model-fetch";
 
 /**
  * Resolve the Ollama base URL, checking for training proxy override.
@@ -112,7 +113,8 @@ export class OllamaClient implements LLMClient {
 	}
 
 	async generate(prompt: string): Promise<string> {
-		const response = await fetch(`${this.baseUrl}/api/generate`, {
+		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
+		const response = await modelFetch(`${this.baseUrl}/api/generate`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({

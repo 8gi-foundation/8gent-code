@@ -11,6 +11,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { TurnTimeoutError } from "../eight/turn-timeout";
 import { buildTextToolCall, extractUsage, type TextToolUsage } from "./text-tool-endpoint";
 
 const realFetch = globalThis.fetch;
@@ -105,5 +106,53 @@ describe("extractUsage (#2805)", () => {
 		expect(
 			extractUsage({ usage: { prompt_tokens: Number.NaN, completion_tokens: 2 } }),
 		).toBeNull();
+	});
+});
+
+describe("buildTextToolCall model-step limit (hidden 300 s Bun timeout)", () => {
+	it("sends timeout: false so Bun never kills a long model step on its own", async () => {
+		let seen: Record<string, unknown> | undefined;
+		globalThis.fetch = (async (_input: unknown, init?: Record<string, unknown>) => {
+			seen = init;
+			return Response.json({ choices: [{ message: { content: "ok" } }] });
+		}) as unknown as typeof fetch;
+		const call = buildTextToolCall({ provider: "ollama", model: "m", timeoutMs: 5_000 });
+		expect(await call([{ role: "user", content: "hi" }])).toBe("ok");
+		expect(seen?.timeout).toBe(false);
+	});
+
+	it("honours an injected limit against a real slow local server", async () => {
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			idleTimeout: 0,
+			async fetch(req) {
+				const delay = Number(new URL(req.url).searchParams.get("delay") ?? "0");
+				await Bun.sleep(delay);
+				return Response.json({ choices: [{ message: { content: `slept ${delay}` } }] });
+			},
+		});
+		try {
+			const endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
+			const fast = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: `${endpoint}?delay=300`,
+				timeoutMs: 3_000,
+			});
+			expect(await fast([{ role: "user", content: "hi" }])).toBe("slept 300");
+
+			const slow = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: `${endpoint}?delay=2000`,
+				timeoutMs: 150,
+			});
+			const err = await slow([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(TurnTimeoutError);
+			expect((err as TurnTimeoutError).timeoutMs).toBe(150);
+		} finally {
+			server.stop(true);
+		}
 	});
 });
