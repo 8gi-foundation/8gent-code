@@ -1,6 +1,6 @@
 {
 	"summary": {
-		"date": "2026-09-28T19:00:58.581Z",
+		"date": "2026-09-28T19:17:59.778Z",
 		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
 		"machine": {
 			"os": "darwin",
@@ -10,7 +10,7 @@
 		"index": {
 			"files": 1488,
 			"symbols": 34692,
-			"buildMs": 2369
+			"buildMs": 3339
 		},
 		"lineTolerance": 2,
 		"locate": {
@@ -19,8 +19,8 @@
 			"top5": 1,
 			"lineHitTop5": 1,
 			"lineN": 105,
-			"p50Ms": 32.9,
-			"p95Ms": 70.1,
+			"p50Ms": 41.3,
+			"p95Ms": 85.1,
 			"meanTokens": 44,
 			"p95Tokens": 74,
 			"maxTokens": 117,
@@ -32,8 +32,8 @@
 					"top5": 1,
 					"lineHitTop5": 1,
 					"lineN": 70,
-					"p50Ms": 25,
-					"p95Ms": 31.7,
+					"p50Ms": 29.3,
+					"p95Ms": 41.6,
 					"meanTokens": 39,
 					"p95Tokens": 73,
 					"maxTokens": 99
@@ -44,8 +44,8 @@
 					"top5": 1,
 					"lineHitTop5": null,
 					"lineN": 0,
-					"p50Ms": 37,
-					"p95Ms": 39.5,
+					"p50Ms": 44.7,
+					"p95Ms": 50.7,
 					"meanTokens": 50,
 					"p95Tokens": 117,
 					"maxTokens": 117
@@ -56,8 +56,8 @@
 					"top5": 1,
 					"lineHitTop5": 1,
 					"lineN": 35,
-					"p50Ms": 66.6,
-					"p95Ms": 114.6,
+					"p50Ms": 78.7,
+					"p95Ms": 132.9,
 					"meanTokens": 47,
 					"p95Tokens": 60,
 					"maxTokens": 60
@@ -70,8 +70,8 @@
 			"top5": 1,
 			"lineHitTop5": 1,
 			"lineN": 105,
-			"p50Ms": 27.4,
-			"p95Ms": 75.9,
+			"p50Ms": 32.8,
+			"p95Ms": 104.8,
 			"meanTokens": 44,
 			"p95Tokens": 108,
 			"maxTokens": 492,
@@ -82,8 +82,8 @@
 					"top5": 1,
 					"lineHitTop5": 1,
 					"lineN": 70,
-					"p50Ms": 27.4,
-					"p95Ms": 35.1,
+					"p50Ms": 31.8,
+					"p95Ms": 45.9,
 					"meanTokens": 69,
 					"p95Tokens": 156,
 					"maxTokens": 492
@@ -94,8 +94,8 @@
 					"top5": 1,
 					"lineHitTop5": null,
 					"lineN": 0,
-					"p50Ms": 24.5,
-					"p95Ms": 25.8,
+					"p50Ms": 32,
+					"p95Ms": 33.6,
 					"meanTokens": 9,
 					"p95Tokens": 14,
 					"maxTokens": 16
@@ -106,8 +106,8 @@
 					"top5": 1,
 					"lineHitTop5": 1,
 					"lineN": 35,
-					"p50Ms": 74.6,
-					"p95Ms": 83.6,
+					"p50Ms": 99.6,
+					"p95Ms": 146,
 					"meanTokens": 30,
 					"p95Tokens": 37,
 					"maxTokens": 39
@@ -140,7 +140,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 31.7,
+			"ms": 41.6,
 			"tokens": 35
 		},
 		{
@@ -161,7 +161,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 39.6,
+			"ms": 50.7,
 			"tokens": 55
 		},
 		{
@@ -184,7 +184,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 32.4,
+			"ms": 41.5,
 			"tokens": 52
 		},
 		{
@@ -205,7 +205,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 35.2,
+			"ms": 45.9,
 			"tokens": 52
 		},
 		{
@@ -228,7 +228,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 32.5,
+			"ms": 43.7,
 			"tokens": 36
 		},
 		{
@@ -253,7 +253,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 35.1,
+			"ms": 45.7,
 			"tokens": 94
 		},
 		{
@@ -280,7 +280,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 32.9,
+			"ms": 42.2,
 			"tokens": 79
 		},
 		{
@@ -305,7 +305,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 33.7,
+			"ms": 37.5,
 			"tokens": 93
 		},
 		{
@@ -336,7 +336,7 @@
 			"top1": false,
 			"top5": true,
 			"lineHit": true,
-			"ms": 30.3,
+			"ms": 32.7,
 			"tokens": 65
 		},
 		{
@@ -369,7 +369,7 @@
 			"top1": false,
 			"top5": true,
 			"lineHit": true,
-			"ms": 35.6,
+			"ms": 37.2,
 			"tokens": 156
 		},
 		{
@@ -396,7 +396,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 30.1,
+			"ms": 34.2,
 			"tokens": 74
 		},
 		{
@@ -429,7 +429,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 34.4,
+			"ms": 38.1,
 			"tokens": 164
 		},
 		{
@@ -452,7 +452,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 124.8,
+			"ms": 132.9,
 			"tokens": 57
 		},
 		{
@@ -473,7 +473,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 83.6,
+			"ms": 117.9,
 			"tokens": 34
 		},
 		{
@@ -496,7 +496,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.7,
+			"ms": 35.4,
 			"tokens": 49
 		},
 		{
@@ -517,7 +517,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 29.9,
+			"ms": 40.1,
 			"tokens": 46
 		},
 		{
@@ -540,7 +540,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.3,
+			"ms": 37.9,
 			"tokens": 50
 		},
 		{
@@ -561,7 +561,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.9,
+			"ms": 63.2,
 			"tokens": 44
 		},
 		{
@@ -584,7 +584,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.6,
+			"ms": 43.7,
 			"tokens": 40
 		},
 		{
@@ -605,7 +605,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 29.8,
+			"ms": 47.9,
 			"tokens": 43
 		},
 		{
@@ -628,7 +628,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26,
+			"ms": 39.6,
 			"tokens": 47
 		},
 		{
@@ -649,7 +649,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.9,
+			"ms": 44.1,
 			"tokens": 45
 		},
 		{
@@ -672,7 +672,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.6,
+			"ms": 39.2,
 			"tokens": 30
 		},
 		{
@@ -693,7 +693,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.1,
+			"ms": 42.8,
 			"tokens": 50
 		},
 		{
@@ -716,7 +716,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.3,
+			"ms": 37.3,
 			"tokens": 36
 		},
 		{
@@ -737,7 +737,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 30,
+			"ms": 41,
 			"tokens": 47
 		},
 		{
@@ -760,7 +760,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.6,
+			"ms": 98.3,
 			"tokens": 43
 		},
 		{
@@ -781,7 +781,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 82.9,
+			"ms": 104.8,
 			"tokens": 31
 		},
 		{
@@ -804,7 +804,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.5,
+			"ms": 84.8,
 			"tokens": 37
 		},
 		{
@@ -825,7 +825,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 80.5,
+			"ms": 100.8,
 			"tokens": 23
 		},
 		{
@@ -848,7 +848,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 67.1,
+			"ms": 86.7,
 			"tokens": 40
 		},
 		{
@@ -869,7 +869,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.2,
+			"ms": 106.8,
 			"tokens": 25
 		},
 		{
@@ -892,7 +892,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.5,
+			"ms": 32.5,
 			"tokens": 31
 		},
 		{
@@ -913,7 +913,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.1,
+			"ms": 32.9,
 			"tokens": 51
 		},
 		{
@@ -936,7 +936,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 64.8,
+			"ms": 82.5,
 			"tokens": 51
 		},
 		{
@@ -957,7 +957,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75.1,
+			"ms": 102.1,
 			"tokens": 31
 		},
 		{
@@ -980,7 +980,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.8,
+			"ms": 85.7,
 			"tokens": 49
 		},
 		{
@@ -1001,7 +1001,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.2,
+			"ms": 101.8,
 			"tokens": 35
 		},
 		{
@@ -1024,7 +1024,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.5,
+			"ms": 35.1,
 			"tokens": 31
 		},
 		{
@@ -1045,7 +1045,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28,
+			"ms": 35,
 			"tokens": 50
 		},
 		{
@@ -1068,7 +1068,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.8,
+			"ms": 32.2,
 			"tokens": 31
 		},
 		{
@@ -1089,7 +1089,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.4,
+			"ms": 30.2,
 			"tokens": 50
 		},
 		{
@@ -1112,7 +1112,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 72.6,
+			"ms": 80.8,
 			"tokens": 47
 		},
 		{
@@ -1133,7 +1133,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.9,
+			"ms": 86.4,
 			"tokens": 32
 		},
 		{
@@ -1156,7 +1156,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25,
+			"ms": 30.7,
 			"tokens": 28
 		},
 		{
@@ -1177,7 +1177,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.9,
+			"ms": 31.9,
 			"tokens": 48
 		},
 		{
@@ -1200,7 +1200,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24,
+			"ms": 27.7,
 			"tokens": 31
 		},
 		{
@@ -1221,7 +1221,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.2,
+			"ms": 32.6,
 			"tokens": 50
 		},
 		{
@@ -1244,7 +1244,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.9,
+			"ms": 75.9,
 			"tokens": 45
 		},
 		{
@@ -1265,7 +1265,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 76.4,
+			"ms": 105.9,
 			"tokens": 30
 		},
 		{
@@ -1288,7 +1288,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.4,
+			"ms": 78.7,
 			"tokens": 42
 		},
 		{
@@ -1309,7 +1309,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.6,
+			"ms": 95.5,
 			"tokens": 29
 		},
 		{
@@ -1332,7 +1332,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.9,
+			"ms": 29.9,
 			"tokens": 28
 		},
 		{
@@ -1353,7 +1353,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.7,
+			"ms": 28.9,
 			"tokens": 48
 		},
 		{
@@ -1376,7 +1376,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.9,
+			"ms": 26.3,
 			"tokens": 28
 		},
 		{
@@ -1397,7 +1397,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25,
+			"ms": 30.8,
 			"tokens": 48
 		},
 		{
@@ -1424,7 +1424,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.2,
+			"ms": 29,
 			"tokens": 66
 		},
 		{
@@ -1449,7 +1449,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.4,
+			"ms": 28.3,
 			"tokens": 84
 		},
 		{
@@ -1472,7 +1472,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.9,
+			"ms": 29.1,
 			"tokens": 26
 		},
 		{
@@ -1493,7 +1493,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.1,
+			"ms": 29.8,
 			"tokens": 46
 		},
 		{
@@ -1516,7 +1516,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.9,
+			"ms": 78.7,
 			"tokens": 53
 		},
 		{
@@ -1537,7 +1537,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75.9,
+			"ms": 100,
 			"tokens": 37
 		},
 		{
@@ -1560,7 +1560,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.5,
+			"ms": 32.6,
 			"tokens": 39
 		},
 		{
@@ -1581,7 +1581,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.1,
+			"ms": 30.8,
 			"tokens": 44
 		},
 		{
@@ -1604,7 +1604,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.9,
+			"ms": 27.7,
 			"tokens": 45
 		},
 		{
@@ -1625,7 +1625,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.3,
+			"ms": 28.9,
 			"tokens": 42
 		},
 		{
@@ -1652,7 +1652,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.8,
+			"ms": 27.2,
 			"tokens": 73
 		},
 		{
@@ -1681,7 +1681,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.3,
+			"ms": 31.8,
 			"tokens": 115
 		},
 		{
@@ -1704,7 +1704,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.7,
+			"ms": 28.8,
 			"tokens": 20
 		},
 		{
@@ -1733,7 +1733,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.5,
+			"ms": 31.1,
 			"tokens": 108
 		},
 		{
@@ -1756,7 +1756,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.4,
+			"ms": 28.9,
 			"tokens": 44
 		},
 		{
@@ -1777,7 +1777,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26,
+			"ms": 29.9,
 			"tokens": 43
 		},
 		{
@@ -1800,7 +1800,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.6,
+			"ms": 27.5,
 			"tokens": 41
 		},
 		{
@@ -1821,7 +1821,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.8,
+			"ms": 30.8,
 			"tokens": 44
 		},
 		{
@@ -1844,7 +1844,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.9,
+			"ms": 26.5,
 			"tokens": 40
 		},
 		{
@@ -1865,7 +1865,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.8,
+			"ms": 31.1,
 			"tokens": 43
 		},
 		{
@@ -1888,7 +1888,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 71.1,
+			"ms": 82,
 			"tokens": 48
 		},
 		{
@@ -1909,7 +1909,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74,
+			"ms": 87.3,
 			"tokens": 29
 		},
 		{
@@ -1932,7 +1932,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 67.3,
+			"ms": 74.3,
 			"tokens": 46
 		},
 		{
@@ -1953,7 +1953,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.4,
+			"ms": 87.2,
 			"tokens": 28
 		},
 		{
@@ -1976,7 +1976,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.8,
+			"ms": 28.3,
 			"tokens": 55
 		},
 		{
@@ -1997,7 +1997,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.9,
+			"ms": 30.4,
 			"tokens": 50
 		},
 		{
@@ -2020,7 +2020,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 70.1,
+			"ms": 76.3,
 			"tokens": 60
 		},
 		{
@@ -2041,7 +2041,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.5,
+			"ms": 86.5,
 			"tokens": 35
 		},
 		{
@@ -2068,7 +2068,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.2,
+			"ms": 29.3,
 			"tokens": 62
 		},
 		{
@@ -2093,7 +2093,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.3,
+			"ms": 32.4,
 			"tokens": 91
 		},
 		{
@@ -2120,7 +2120,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.7,
+			"ms": 27.6,
 			"tokens": 64
 		},
 		{
@@ -2145,7 +2145,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.7,
+			"ms": 32.5,
 			"tokens": 93
 		},
 		{
@@ -2168,7 +2168,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24,
+			"ms": 28.8,
 			"tokens": 27
 		},
 		{
@@ -2189,7 +2189,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28,
+			"ms": 31.7,
 			"tokens": 47
 		},
 		{
@@ -2212,7 +2212,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.5,
+			"ms": 27.4,
 			"tokens": 37
 		},
 		{
@@ -2233,7 +2233,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.1,
+			"ms": 31.4,
 			"tokens": 50
 		},
 		{
@@ -2256,7 +2256,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.5,
+			"ms": 27.1,
 			"tokens": 41
 		},
 		{
@@ -2277,7 +2277,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.6,
+			"ms": 30.8,
 			"tokens": 48
 		},
 		{
@@ -2300,7 +2300,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.8,
+			"ms": 26.4,
 			"tokens": 39
 		},
 		{
@@ -2321,7 +2321,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.9,
+			"ms": 30,
 			"tokens": 49
 		},
 		{
@@ -2344,7 +2344,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25,
+			"ms": 27.6,
 			"tokens": 35
 		},
 		{
@@ -2365,7 +2365,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.3,
+			"ms": 32.3,
 			"tokens": 47
 		},
 		{
@@ -2388,7 +2388,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.1,
+			"ms": 73.9,
 			"tokens": 40
 		},
 		{
@@ -2409,7 +2409,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.5,
+			"ms": 94.2,
 			"tokens": 24
 		},
 		{
@@ -2432,7 +2432,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.3,
+			"ms": 32.8,
 			"tokens": 31
 		},
 		{
@@ -2453,7 +2453,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.9,
+			"ms": 36.7,
 			"tokens": 48
 		},
 		{
@@ -2480,7 +2480,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.3,
+			"ms": 36.2,
 			"tokens": 61
 		},
 		{
@@ -2505,7 +2505,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.5,
+			"ms": 36.3,
 			"tokens": 84
 		},
 		{
@@ -2528,7 +2528,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 71.7,
+			"ms": 90.2,
 			"tokens": 37
 		},
 		{
@@ -2549,7 +2549,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.9,
+			"ms": 99.6,
 			"tokens": 24
 		},
 		{
@@ -2572,7 +2572,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.8,
+			"ms": 34.8,
 			"tokens": 48
 		},
 		{
@@ -2593,7 +2593,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.9,
+			"ms": 34.8,
 			"tokens": 47
 		},
 		{
@@ -2616,7 +2616,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.2,
+			"ms": 33.2,
 			"tokens": 28
 		},
 		{
@@ -2637,7 +2637,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.5,
+			"ms": 35.7,
 			"tokens": 48
 		},
 		{
@@ -2660,7 +2660,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.6,
+			"ms": 84.9,
 			"tokens": 34
 		},
 		{
@@ -2681,7 +2681,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 95.9,
+			"ms": 95,
 			"tokens": 23
 		},
 		{
@@ -2704,7 +2704,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 30.3,
+			"ms": 29.6,
 			"tokens": 24
 		},
 		{
@@ -2725,7 +2725,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.5,
+			"ms": 32.4,
 			"tokens": 44
 		},
 		{
@@ -2748,7 +2748,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 31.4,
+			"ms": 29.3,
 			"tokens": 29
 		},
 		{
@@ -2785,7 +2785,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.7,
+			"ms": 30.4,
 			"tokens": 222
 		},
 		{
@@ -2808,7 +2808,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 114.6,
+			"ms": 76,
 			"tokens": 48
 		},
 		{
@@ -2829,7 +2829,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75.8,
+			"ms": 92.8,
 			"tokens": 33
 		},
 		{
@@ -2852,7 +2852,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.2,
+			"ms": 29.6,
 			"tokens": 27
 		},
 		{
@@ -2877,7 +2877,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.1,
+			"ms": 30.8,
 			"tokens": 80
 		},
 		{
@@ -2900,7 +2900,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.6,
+			"ms": 26.4,
 			"tokens": 29
 		},
 		{
@@ -2921,7 +2921,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.2,
+			"ms": 29.7,
 			"tokens": 43
 		},
 		{
@@ -2944,7 +2944,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.2,
+			"ms": 27.3,
 			"tokens": 30
 		},
 		{
@@ -2965,7 +2965,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.8,
+			"ms": 29.4,
 			"tokens": 50
 		},
 		{
@@ -2988,7 +2988,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.6,
+			"ms": 27.9,
 			"tokens": 23
 		},
 		{
@@ -3009,7 +3009,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.8,
+			"ms": 30.4,
 			"tokens": 44
 		},
 		{
@@ -3032,7 +3032,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.8,
+			"ms": 72.9,
 			"tokens": 37
 		},
 		{
@@ -3053,7 +3053,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 76.2,
+			"ms": 88.2,
 			"tokens": 25
 		},
 		{
@@ -3076,7 +3076,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.3,
+			"ms": 29.7,
 			"tokens": 31
 		},
 		{
@@ -3101,7 +3101,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.2,
+			"ms": 29.1,
 			"tokens": 85
 		},
 		{
@@ -3124,7 +3124,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.7,
+			"ms": 28.3,
 			"tokens": 29
 		},
 		{
@@ -3145,7 +3145,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.3,
+			"ms": 30.1,
 			"tokens": 48
 		},
 		{
@@ -3168,7 +3168,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.9,
+			"ms": 75.2,
 			"tokens": 55
 		},
 		{
@@ -3189,7 +3189,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.8,
+			"ms": 95.7,
 			"tokens": 33
 		},
 		{
@@ -3212,7 +3212,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.1,
+			"ms": 32.3,
 			"tokens": 26
 		},
 		{
@@ -3241,7 +3241,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.4,
+			"ms": 31,
 			"tokens": 116
 		},
 		{
@@ -3264,7 +3264,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.5,
+			"ms": 28.8,
 			"tokens": 29
 		},
 		{
@@ -3285,7 +3285,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.6,
+			"ms": 32,
 			"tokens": 49
 		},
 		{
@@ -3308,7 +3308,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.4,
+			"ms": 28,
 			"tokens": 51
 		},
 		{
@@ -3329,7 +3329,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.8,
+			"ms": 31.8,
 			"tokens": 49
 		},
 		{
@@ -3352,7 +3352,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 67.3,
+			"ms": 73.9,
 			"tokens": 56
 		},
 		{
@@ -3373,7 +3373,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 78.5,
+			"ms": 92,
 			"tokens": 34
 		},
 		{
@@ -3396,7 +3396,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.6,
+			"ms": 27.9,
 			"tokens": 26
 		},
 		{
@@ -3417,7 +3417,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.5,
+			"ms": 30.7,
 			"tokens": 46
 		},
 		{
@@ -3440,7 +3440,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.9,
+			"ms": 28.1,
 			"tokens": 28
 		},
 		{
@@ -3461,7 +3461,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.5,
+			"ms": 31.9,
 			"tokens": 48
 		},
 		{
@@ -3484,7 +3484,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.1,
+			"ms": 75.5,
 			"tokens": 42
 		},
 		{
@@ -3505,7 +3505,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75,
+			"ms": 100,
 			"tokens": 26
 		},
 		{
@@ -3528,7 +3528,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.5,
+			"ms": 81.2,
 			"tokens": 42
 		},
 		{
@@ -3549,7 +3549,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.8,
+			"ms": 100.6,
 			"tokens": 26
 		},
 		{
@@ -3572,7 +3572,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.1,
+			"ms": 30.9,
 			"tokens": 27
 		},
 		{
@@ -3593,7 +3593,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.9,
+			"ms": 31.4,
 			"tokens": 47
 		},
 		{
@@ -3616,7 +3616,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.3,
+			"ms": 28.5,
 			"tokens": 29
 		},
 		{
@@ -3641,7 +3641,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.6,
+			"ms": 30,
 			"tokens": 83
 		},
 		{
@@ -3664,7 +3664,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 64.5,
+			"ms": 78.2,
 			"tokens": 45
 		},
 		{
@@ -3685,7 +3685,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.3,
+			"ms": 146,
 			"tokens": 30
 		},
 		{
@@ -3708,7 +3708,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.9,
+			"ms": 80,
 			"tokens": 45
 		},
 		{
@@ -3729,7 +3729,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.8,
+			"ms": 94.5,
 			"tokens": 30
 		},
 		{
@@ -3752,7 +3752,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.3,
+			"ms": 30.6,
 			"tokens": 24
 		},
 		{
@@ -3773,7 +3773,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 28.5,
+			"ms": 29.5,
 			"tokens": 44
 		},
 		{
@@ -3812,7 +3812,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.5,
+			"ms": 27.4,
 			"tokens": 99
 		},
 		{
@@ -3849,7 +3849,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.1,
+			"ms": 33.5,
 			"tokens": 492
 		},
 		{
@@ -3872,7 +3872,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.7,
+			"ms": 33.1,
 			"tokens": 36
 		},
 		{
@@ -3893,7 +3893,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26,
+			"ms": 37.2,
 			"tokens": 50
 		},
 		{
@@ -3916,7 +3916,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.6,
+			"ms": 32.9,
 			"tokens": 26
 		},
 		{
@@ -3937,7 +3937,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.5,
+			"ms": 36.6,
 			"tokens": 46
 		},
 		{
@@ -3960,7 +3960,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.7,
+			"ms": 27.4,
 			"tokens": 27
 		},
 		{
@@ -3981,7 +3981,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 29.1,
+			"ms": 30.4,
 			"tokens": 47
 		},
 		{
@@ -4004,7 +4004,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 69.7,
+			"ms": 75.7,
 			"tokens": 52
 		},
 		{
@@ -4025,7 +4025,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.5,
+			"ms": 99.6,
 			"tokens": 34
 		},
 		{
@@ -4048,7 +4048,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.7,
+			"ms": 34.6,
 			"tokens": 26
 		},
 		{
@@ -4069,7 +4069,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.4,
+			"ms": 35.1,
 			"tokens": 46
 		},
 		{
@@ -4092,7 +4092,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.3,
+			"ms": 28.7,
 			"tokens": 25
 		},
 		{
@@ -4117,7 +4117,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.8,
+			"ms": 29.4,
 			"tokens": 79
 		},
 		{
@@ -4140,7 +4140,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25,
+			"ms": 27.4,
 			"tokens": 34
 		},
 		{
@@ -4161,7 +4161,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26,
+			"ms": 30,
 			"tokens": 47
 		},
 		{
@@ -4184,7 +4184,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.4,
+			"ms": 28.1,
 			"tokens": 33
 		},
 		{
@@ -4205,7 +4205,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27,
+			"ms": 29.6,
 			"tokens": 49
 		},
 		{
@@ -4228,7 +4228,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 65.3,
+			"ms": 76.2,
 			"tokens": 43
 		},
 		{
@@ -4249,7 +4249,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.6,
+			"ms": 87.5,
 			"tokens": 30
 		},
 		{
@@ -4272,7 +4272,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 64.8,
+			"ms": 74.9,
 			"tokens": 46
 		},
 		{
@@ -4293,7 +4293,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75,
+			"ms": 87.6,
 			"tokens": 32
 		},
 		{
@@ -4316,7 +4316,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.5,
+			"ms": 29.2,
 			"tokens": 25
 		},
 		{
@@ -4341,7 +4341,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.3,
+			"ms": 31.9,
 			"tokens": 78
 		},
 		{
@@ -4364,7 +4364,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.1,
+			"ms": 29.2,
 			"tokens": 26
 		},
 		{
@@ -4393,7 +4393,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 22.9,
+			"ms": 31.5,
 			"tokens": 113
 		},
 		{
@@ -4416,7 +4416,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 61.5,
+			"ms": 73.5,
 			"tokens": 47
 		},
 		{
@@ -4437,7 +4437,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.7,
+			"ms": 85.7,
 			"tokens": 34
 		},
 		{
@@ -4460,7 +4460,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 25.6,
+			"ms": 28,
 			"tokens": 49
 		},
 		{
@@ -4481,7 +4481,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.9,
+			"ms": 31.5,
 			"tokens": 53
 		},
 		{
@@ -4504,7 +4504,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 22.5,
+			"ms": 33.3,
 			"tokens": 34
 		},
 		{
@@ -4525,7 +4525,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 27.5,
+			"ms": 45.1,
 			"tokens": 47
 		},
 		{
@@ -4548,7 +4548,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 68.1,
+			"ms": 85.1,
 			"tokens": 48
 		},
 		{
@@ -4569,7 +4569,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.1,
+			"ms": 102.3,
 			"tokens": 28
 		},
 		{
@@ -4592,7 +4592,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.8,
+			"ms": 32.8,
 			"tokens": 48
 		},
 		{
@@ -4613,7 +4613,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 26.1,
+			"ms": 35.6,
 			"tokens": 49
 		},
 		{
@@ -4636,7 +4636,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 23.2,
+			"ms": 32.2,
 			"tokens": 58
 		},
 		{
@@ -4657,7 +4657,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 24.3,
+			"ms": 34,
 			"tokens": 48
 		},
 		{
@@ -4680,7 +4680,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 61.2,
+			"ms": 77.6,
 			"tokens": 60
 		},
 		{
@@ -4701,7 +4701,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.4,
+			"ms": 105.9,
 			"tokens": 39
 		},
 		{
@@ -4724,7 +4724,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 63.7,
+			"ms": 89.1,
 			"tokens": 50
 		},
 		{
@@ -4745,7 +4745,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 72,
+			"ms": 101.3,
 			"tokens": 29
 		},
 		{
@@ -4768,7 +4768,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 62.5,
+			"ms": 78.3,
 			"tokens": 40
 		},
 		{
@@ -4789,7 +4789,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74,
+			"ms": 98.2,
 			"tokens": 25
 		},
 		{
@@ -4812,7 +4812,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 69.9,
+			"ms": 161.2,
 			"tokens": 41
 		},
 		{
@@ -4833,7 +4833,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 73.7,
+			"ms": 147.1,
 			"tokens": 28
 		},
 		{
@@ -4856,7 +4856,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 64.4,
+			"ms": 82.7,
 			"tokens": 52
 		},
 		{
@@ -4877,7 +4877,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 74.9,
+			"ms": 99.7,
 			"tokens": 33
 		},
 		{
@@ -4900,7 +4900,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 66.8,
+			"ms": 84,
 			"tokens": 53
 		},
 		{
@@ -4921,7 +4921,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": true,
-			"ms": 75,
+			"ms": 104.8,
 			"tokens": 30
 		},
 		{
@@ -4944,7 +4944,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 39.5,
+			"ms": 50.8,
 			"tokens": 56
 		},
 		{
@@ -4965,7 +4965,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 26.8,
+			"ms": 33.5,
 			"tokens": 16
 		},
 		{
@@ -4988,7 +4988,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.8,
+			"ms": 50.3,
 			"tokens": 41
 		},
 		{
@@ -5009,7 +5009,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25,
+			"ms": 33.1,
 			"tokens": 12
 		},
 		{
@@ -5032,7 +5032,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.2,
+			"ms": 48.4,
 			"tokens": 40
 		},
 		{
@@ -5053,7 +5053,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.3,
+			"ms": 33.1,
 			"tokens": 11
 		},
 		{
@@ -5080,7 +5080,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.3,
+			"ms": 50.7,
 			"tokens": 84
 		},
 		{
@@ -5101,7 +5101,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.6,
+			"ms": 33.2,
 			"tokens": 10
 		},
 		{
@@ -5124,7 +5124,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.4,
+			"ms": 47,
 			"tokens": 35
 		},
 		{
@@ -5145,7 +5145,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.7,
+			"ms": 31.8,
 			"tokens": 9
 		},
 		{
@@ -5168,7 +5168,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.3,
+			"ms": 42.8,
 			"tokens": 28
 		},
 		{
@@ -5189,7 +5189,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.2,
+			"ms": 30.9,
 			"tokens": 8
 		},
 		{
@@ -5212,7 +5212,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.5,
+			"ms": 44.9,
 			"tokens": 30
 		},
 		{
@@ -5233,7 +5233,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.3,
+			"ms": 33.4,
 			"tokens": 9
 		},
 		{
@@ -5260,7 +5260,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36,
+			"ms": 49.5,
 			"tokens": 44
 		},
 		{
@@ -5281,7 +5281,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.6,
+			"ms": 33,
 			"tokens": 7
 		},
 		{
@@ -5304,7 +5304,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.8,
+			"ms": 43.8,
 			"tokens": 43
 		},
 		{
@@ -5325,7 +5325,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.5,
+			"ms": 33.9,
 			"tokens": 11
 		},
 		{
@@ -5352,7 +5352,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.7,
+			"ms": 45.6,
 			"tokens": 94
 		},
 		{
@@ -5373,7 +5373,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.6,
+			"ms": 32.2,
 			"tokens": 10
 		},
 		{
@@ -5412,7 +5412,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 34.9,
+			"ms": 46,
 			"tokens": 63
 		},
 		{
@@ -5433,7 +5433,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.5,
+			"ms": 32.7,
 			"tokens": 6
 		},
 		{
@@ -5456,7 +5456,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.9,
+			"ms": 45.2,
 			"tokens": 33
 		},
 		{
@@ -5477,7 +5477,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.5,
+			"ms": 32.4,
 			"tokens": 9
 		},
 		{
@@ -5500,7 +5500,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36,
+			"ms": 41.4,
 			"tokens": 42
 		},
 		{
@@ -5521,7 +5521,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.4,
+			"ms": 29.7,
 			"tokens": 11
 		},
 		{
@@ -5548,7 +5548,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 34.9,
+			"ms": 43.5,
 			"tokens": 80
 		},
 		{
@@ -5569,7 +5569,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.4,
+			"ms": 29.1,
 			"tokens": 9
 		},
 		{
@@ -5608,7 +5608,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.1,
+			"ms": 41.7,
 			"tokens": 117
 		},
 		{
@@ -5629,7 +5629,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.8,
+			"ms": 28.7,
 			"tokens": 8
 		},
 		{
@@ -5668,7 +5668,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.8,
+			"ms": 42.4,
 			"tokens": 67
 		},
 		{
@@ -5689,7 +5689,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25.4,
+			"ms": 29.2,
 			"tokens": 7
 		},
 		{
@@ -5712,7 +5712,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.9,
+			"ms": 48.1,
 			"tokens": 48
 		},
 		{
@@ -5733,7 +5733,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24,
+			"ms": 33,
 			"tokens": 8
 		},
 		{
@@ -5756,7 +5756,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.3,
+			"ms": 41.8,
 			"tokens": 26
 		},
 		{
@@ -5777,7 +5777,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.1,
+			"ms": 28.9,
 			"tokens": 8
 		},
 		{
@@ -5800,7 +5800,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.8,
+			"ms": 41,
 			"tokens": 41
 		},
 		{
@@ -5821,7 +5821,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25.1,
+			"ms": 29.4,
 			"tokens": 7
 		},
 		{
@@ -5844,7 +5844,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38.8,
+			"ms": 40,
 			"tokens": 41
 		},
 		{
@@ -5865,7 +5865,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25,
+			"ms": 31.5,
 			"tokens": 10
 		},
 		{
@@ -5888,7 +5888,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.5,
+			"ms": 47.8,
 			"tokens": 29
 		},
 		{
@@ -5909,7 +5909,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.4,
+			"ms": 33.6,
 			"tokens": 10
 		},
 		{
@@ -5932,7 +5932,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37,
+			"ms": 49.2,
 			"tokens": 39
 		},
 		{
@@ -5953,7 +5953,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.8,
+			"ms": 30.6,
 			"tokens": 7
 		},
 		{
@@ -5988,7 +5988,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.1,
+			"ms": 42.8,
 			"tokens": 117
 		},
 		{
@@ -6009,7 +6009,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.3,
+			"ms": 27.6,
 			"tokens": 6
 		},
 		{
@@ -6032,7 +6032,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.2,
+			"ms": 40.4,
 			"tokens": 34
 		},
 		{
@@ -6053,7 +6053,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.7,
+			"ms": 28.8,
 			"tokens": 8
 		},
 		{
@@ -6080,7 +6080,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.9,
+			"ms": 43.4,
 			"tokens": 63
 		},
 		{
@@ -6101,7 +6101,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.7,
+			"ms": 28.8,
 			"tokens": 7
 		},
 		{
@@ -6124,7 +6124,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.4,
+			"ms": 41.3,
 			"tokens": 23
 		},
 		{
@@ -6145,7 +6145,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.4,
+			"ms": 32,
 			"tokens": 6
 		},
 		{
@@ -6168,7 +6168,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.5,
+			"ms": 44.7,
 			"tokens": 23
 		},
 		{
@@ -6189,7 +6189,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.3,
+			"ms": 31.5,
 			"tokens": 7
 		},
 		{
@@ -6212,7 +6212,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 40.1,
+			"ms": 42.6,
 			"tokens": 50
 		},
 		{
@@ -6233,7 +6233,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.9,
+			"ms": 28.4,
 			"tokens": 12
 		},
 		{
@@ -6256,7 +6256,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37,
+			"ms": 40.4,
 			"tokens": 34
 		},
 		{
@@ -6277,7 +6277,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.5,
+			"ms": 28.5,
 			"tokens": 8
 		},
 		{
@@ -6316,7 +6316,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38,
+			"ms": 45.9,
 			"tokens": 66
 		},
 		{
@@ -6337,7 +6337,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25,
+			"ms": 32.8,
 			"tokens": 8
 		},
 		{
@@ -6360,7 +6360,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 38,
+			"ms": 48.6,
 			"tokens": 40
 		},
 		{
@@ -6381,7 +6381,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.8,
+			"ms": 32.1,
 			"tokens": 10
 		},
 		{
@@ -6404,7 +6404,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.9,
+			"ms": 43.2,
 			"tokens": 48
 		},
 		{
@@ -6425,7 +6425,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.5,
+			"ms": 31.1,
 			"tokens": 14
 		},
 		{
@@ -6448,7 +6448,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 35.8,
+			"ms": 43.6,
 			"tokens": 45
 		},
 		{
@@ -6469,7 +6469,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 23.7,
+			"ms": 32.2,
 			"tokens": 12
 		},
 		{
@@ -6492,7 +6492,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 36.5,
+			"ms": 46.9,
 			"tokens": 40
 		},
 		{
@@ -6513,7 +6513,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 24.7,
+			"ms": 33,
 			"tokens": 10
 		},
 		{
@@ -6536,7 +6536,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 37.9,
+			"ms": 46.4,
 			"tokens": 49
 		},
 		{
@@ -6557,7 +6557,7 @@
 			"top1": true,
 			"top5": true,
 			"lineHit": null,
-			"ms": 25.8,
+			"ms": 32.3,
 			"tokens": 8
 		}
 	]

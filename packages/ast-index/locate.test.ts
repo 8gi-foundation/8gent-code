@@ -17,6 +17,7 @@ import {
 	pathToken,
 	rankGrepHits,
 	rankPaths,
+	refreshDue,
 	routeQuery,
 } from "./locate";
 
@@ -124,8 +125,14 @@ describe("routeQuery", () => {
 	});
 
 	test("an apostrophe inside a word is not a quote", () => {
-		expect(routeQuery("where's the user's session store", none)).toMatchObject({ mode: "hybrid", rule: "prose" });
-		expect(routeQuery("can't open the lockfile", none)).toMatchObject({ mode: "grep", rule: "error_like" });
+		expect(routeQuery("where's the user's session store", none)).toMatchObject({
+			mode: "hybrid",
+			rule: "prose",
+		});
+		expect(routeQuery("can't open the lockfile", none)).toMatchObject({
+			mode: "grep",
+			rule: "error_like",
+		});
 	});
 
 	test("an error-like string routes to grep on the whole text", () => {
@@ -417,5 +424,107 @@ describe("literal first, then a fallback reading", () => {
 		const miss = await locate("please open src/decide/index.ts for me", ctx());
 		expect(miss.route.mode).toBe("path");
 		expect(miss.rows[0]).toMatchObject({ file: "src/decide/index.ts" });
+	});
+});
+
+// A tree larger than any output chunk rg writes at once, so a line cap on its
+// output would cut the listing (and, with a parallel walker, cut it at random).
+describe("a repo larger than one rg output chunk", () => {
+	let big: string;
+	const FILES = 12_000;
+
+	beforeAll(() => {
+		big = fs.mkdtempSync(path.join(os.tmpdir(), "locate-big-"));
+		for (let d = 0; d < FILES / 100; d++) {
+			const dir = path.join(big, `m${d}`);
+			fs.mkdirSync(dir);
+			for (let f = 0; f < 100; f++) {
+				fs.writeFileSync(path.join(dir, `f${d * 100 + f}.ts`), "");
+			}
+		}
+		fs.mkdirSync(path.join(big, "zz"));
+		fs.writeFileSync(path.join(big, "zz/needle-target.ts"), "export const x = 1;\n");
+		// A common name: 300 files x 20 uses (6,000 lines) and one definition
+		// in a file that sorts and walks last.
+		const uses = Array.from({ length: 20 }, () => "commonThing();").join("\n");
+		for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(big, `m${i % 10}/use${i}.ts`), uses);
+		fs.writeFileSync(path.join(big, "zz/def.ts"), "export function commonThing() {}\n");
+	}, 60_000);
+
+	afterAll(() => {
+		fs.rmSync(big, { recursive: true, force: true });
+	});
+
+	test("path: a file outside the first few thousand listed is still found, every run", async () => {
+		for (let i = 0; i < 3; i++) {
+			const r = await locate("needle-target.ts", { root: big, repoId: null });
+			expect(r.rows[0]).toMatchObject({ file: "zz/needle-target.ts", kind: "file" });
+		}
+	});
+
+	test("path: the same query gives the same rows every run", async () => {
+		const runs = await Promise.all(
+			[0, 1, 2].map(() => locate("f4999.ts", { root: big, repoId: null })),
+		);
+		expect(runs[0].rows[0]).toMatchObject({ file: "m49/f4999.ts" });
+		expect(runs[1].rows).toEqual(runs[0].rows);
+		expect(runs[2].rows).toEqual(runs[0].rows);
+	});
+
+	test("grep: the definition of a common name is not cut before ranking", async () => {
+		const runs = [];
+		for (let i = 0; i < 3; i++) runs.push(await locate("commonThing", { root: big, repoId: null }));
+		expect(runs[0].route.mode).toBe("grep");
+		expect(runs[0].rows[0]).toMatchObject({ file: "zz/def.ts", line: 1 });
+		expect(runs[1].rows).toEqual(runs[0].rows);
+		expect(runs[2].rows).toEqual(runs[0].rows);
+	});
+});
+
+describe("ripgrep missing", () => {
+	test("the answer says rg is unavailable instead of 'no matches'", async () => {
+		const r = await locate('"Rate limit exceeded for tool"', {
+			root,
+			repoId,
+			rg: path.join(parent, "no-such-dir", "rg"),
+		});
+		expect(r.rgMissing).toBe(true);
+		const out = formatLocate(r);
+		expect(out).toContain("ripgrep (rg) was not found");
+		expect(out).not.toContain("no matches");
+	});
+
+	test("with PATH that has no rg, the same note appears", async () => {
+		const saved = process.env.PATH;
+		process.env.PATH = path.join(parent, "no-such-dir");
+		try {
+			const r = await locate('"Rate limit exceeded for tool"', { root, repoId });
+			expect(formatLocate(r)).toContain("ripgrep (rg) was not found");
+		} finally {
+			process.env.PATH = saved;
+		}
+	});
+
+	test("symbol mode still answers from the index without rg", async () => {
+		const r = await locate("createDecider", { root, repoId, rg: path.join(parent, "nope", "rg") });
+		expect(r.rows[0]).toMatchObject({ file: "src/decide/index.ts", line: 3 });
+		expect(formatLocate(r)).not.toContain("ripgrep");
+	});
+});
+
+describe("refreshDue", () => {
+	test("never refreshed: refresh", () => {
+		expect(refreshDue(undefined, 1000)).toBe(true);
+	});
+	test("a cheap refresh runs on every call, so a file written a moment ago is seen", () => {
+		expect(refreshDue({ at: 1000, costMs: 20 }, 1001)).toBe(true);
+	});
+	test("an expensive refresh is skipped until ten times its cost has passed", () => {
+		expect(refreshDue({ at: 1000, costMs: 200 }, 1500)).toBe(false);
+		expect(refreshDue({ at: 1000, costMs: 200 }, 3000)).toBe(true);
+	});
+	test("the skip window is capped at five seconds", () => {
+		expect(refreshDue({ at: 1000, costMs: 2000 }, 5999)).toBe(false);
+		expect(refreshDue({ at: 1000, costMs: 2000 }, 6000)).toBe(true);
 	});
 });
