@@ -245,6 +245,15 @@ git clone https://github.com/8gi-foundation/8gent-code.git && cd 8gent-code && b
 bun run tui
 ```
 
+On Linux, some native modules (better-sqlite3, and tree-sitter on arm64) compile at install time. Bun reports itself as Node 24, whose headers need C++20, which those modules do not build with yet. Install the build tools and build against the Node 22 headers:
+
+```bash
+sudo apt install build-essential python3 mpv ffmpeg   # mpv + ffmpeg (and yt-dlp) are for /dj
+export npm_config_target=22.12.0 npm_config_runtime=node npm_config_disturl=https://nodejs.org/dist
+bun install --frozen-lockfile
+bun run tui
+```
+
 <br />
 
 ---
