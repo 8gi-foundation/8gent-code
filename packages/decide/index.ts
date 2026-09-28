@@ -47,6 +47,8 @@ export {
 export { detectBackend, pickModel, MODEL_PREFERENCE, type ProbeResult } from "./probe";
 export {
 	bashGuard,
+	modelGuard,
+	stricterVerdict,
 	guardState,
 	promptControlText,
 	stripShellComments,
@@ -55,6 +57,7 @@ export {
 	type BashGuardOptions,
 	type BashGuardResult,
 } from "./guard";
+export { decideRules, BLOCK_RULES, type RuleResult, type RuleVerdict } from "./rules";
 
 export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock";
 

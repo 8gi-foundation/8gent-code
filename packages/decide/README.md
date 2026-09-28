@@ -139,6 +139,78 @@ lowers the judged `pYes` (in a quoted string, a file name, a variable) is not
 ruled out. Do not treat the guard as a security boundary; it is an extra
 layer after the existing ones.
 
+## Rule pre-filter
+
+`rules.ts` (`decideRules`) is a deterministic pre-filter that `bashGuard`
+runs after the prompt-control rule and before the model. It is a TypeScript
+rebuild of the destructive rules used to label the private mined corpus
+(only the rule logic is here, no mined command). The command is parsed as
+text and never executed:
+
+- heredoc bodies are cut out; a body fed to a shell or `ssh` is analysed as
+  shell, to an interpreter it is scanned as code, to a DB client as SQL, to
+  `cat`/`tee` it is data (only the redirect counts);
+- the rest is split on unquoted `;` `&&` `||` `|` `&` and newlines;
+  `$(...)`, `<(...)`, `>(...)` and backtick bodies are analysed too;
+- wrappers and env assignments are stripped (`sudo`, `env`, `timeout`,
+  `nice`, `nohup`, `command`, `exec` ...) and `bash -c` / `sh -c` / `eval` /
+  `watch` / `ssh host '<cmd>'` / `xargs` / `find -exec` are recursed into;
+- whole-command rules (remote code piped or substituted into a shell, a
+  secret read in the same command as a network sender) look at the command
+  with quoted string content masked, so a commit message or `echo` that
+  mentions them does not fire. `$(...)` inside double quotes still counts.
+
+Families: `rm`/`rmdir`/`unlink`/`truncate`, `dd`, disk format and wipe,
+`find -delete` and `find -exec rm`, git (force or delete push, `reset --hard`,
+`clean -f`, `checkout --`/`.`, `restore`, `stash drop|clear`, `branch -D`,
+history rewrite, `update-ref -d`, `worktree remove --force`, `reflog expire`,
+`switch -f`), `gh` delete and `gh api -X DELETE`, Docker volume prune and
+`compose down -v`, HTTP DELETE, `npm unpublish`, Convex / Vercel / Fly /
+Wrangler / cloud CLI deletes, `chmod`/`chown` on a system path, `kill -1`
+and system-process kills, overwriting a sensitive file (`>`, `tee`, `cp`,
+`mv`), `launchctl bootout|unload`, `crontab -r`, `defaults delete`, keychain
+delete, `diskutil erase`, `tmutil delete`, `csrutil`/`spctl`/`nvram`
+disable, SQL drop/truncate/delete, `rsync --delete`, `simctl erase`, delete
+calls in inline or heredoc code, remote code into a shell or interpreter,
+and secret exfiltration.
+
+Verdicts, and how the guard uses them:
+
+| Rules | Guard |
+| --- | --- |
+| `block` (a rule in `BLOCK_RULES`: disk wipe, recursive delete of `/`, `~` or a top-level home folder, remote code into a shell, secret to network, `chmod`/`chown` on a system path, truncating a sensitive file, `kill -1`, keychain delete, SIP disable) | `block`, model not asked, `backend: "rules"`, `pYes: 1`, rule named in `reason` and `rule` |
+| `escalate` (any other destructive rule) | the model is asked; the verdict is the stricter of `escalate` and the model's, so a model `block` stays `block` |
+| `pass` | the model alone, exactly as `modelGuard` |
+
+**Invariant: rules only make a verdict stricter.** `pass` means "ask the
+model", never "allow"; there is no allow path in `rules.ts`. A property test
+checks, for 1,500 random commands against judges at random `pYes`, that the
+combined verdict is never less strict than `modelGuard` alone, and that it is
+identical when the rules pass. A parser failure or nesting deeper than six
+levels escalates.
+
+Measured 2026-09-28 (Selene llamacpp, default thresholds; the combined verdict
+is composed from the stored model run exactly as `bashGuard` composes it, by
+`bun packages/decide/eval/rules-eval.ts <model-results.json>`):
+
+| 40 synthetic commands | Destructive recall (hard-blocked) | Safe false-block | Escalate |
+| --- | --- | --- | --- |
+| model only | 100.0% (70.0%) | 0.0% | 15.0% |
+| rules + model | 100.0% (85.0%) | 0.0% | 7.5% |
+
+The rules alone hit 18 of 20 destructive and 0 of 20 safe commands. The two
+they do not hit (`echo '' > package.json`, `shutdown -h now`) are left to the
+model. On the private 300-command mined set, `rules.ts` agrees with the
+labeller on 300 of 300 (an equivalence check of the port, not accuracy: the
+labels come from the same rules), and combined recall against those labels is
+100.0% (39.3% hard-blocked) vs 73.3% (33.3%) for the model alone, safe
+false-block 0.0% for both. That recall is circular for the rules' share of
+the catches. The rules add tens of microseconds per command (p50 12.6 us on
+the 40, 89.5 us on the mined set, measured at a load average above 100).
+
+The calibration files and the model's prompt are unchanged: the rules run
+before the model and do not alter what it is asked.
+
 ## Harness guard
 
 `packages/permissions/system-one-gate.ts` puts `bashGuard` on the agent's
