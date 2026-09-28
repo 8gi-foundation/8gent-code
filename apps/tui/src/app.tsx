@@ -301,12 +301,18 @@ function loadProviderSettings(): { provider: string; model: string } {
  * Embedding-only providers are skipped.
  */
 function detectBestLocalProvider(): { provider: string; model: string } {
-	const { execSync } = require("node:child_process");
+	const { execFileSync } = require("node:child_process");
 
+	// Probe with the Bun runtime we are already running on, not curl: minimal
+	// Linux installs ship without curl, and then every local model silently
+	// went undetected. execFileSync keeps this synchronous and shell-free.
+	const PROBE =
+		"const r = await fetch(process.argv[1], { signal: AbortSignal.timeout(2000) }); process.stdout.write(await r.text());";
 	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
 		try {
-			const raw = execSync(`curl -s --max-time 2 "${url}"`, {
+			const raw = execFileSync(process.execPath, ["-e", PROBE, url], {
 				timeout: 3000,
+				stdio: ["ignore", "pipe", "ignore"],
 			}).toString();
 			const data = JSON.parse(raw);
 			const all = extract(data).flatMap((s: string) => {
