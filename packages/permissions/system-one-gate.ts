@@ -29,6 +29,10 @@
  * exactly the commands those rules consider harmless, so routing through it would
  * silently turn "escalate" into "allow".
  *
+ * bashGuard runs the deterministic rule pre-filter (packages/decide/rules.ts)
+ * before the model: a block rule blocks without asking (backend "rules"), an
+ * escalate rule escalates unless the model blocks.
+ *
  * One decider per process (createDecider, auto backend). Thresholds come from
  * calibration/<backend>-<model>.json for the detected (backend, model) via
  * loadCalibration + toRawGuardOptions, else bashGuard's defaults.
@@ -227,7 +231,7 @@ export async function systemOneGate(
 				: `System One unavailable, failing closed: ${detail}`;
 		return { run: false, guard, message: blockMessage(guard, thresholds, why, command) };
 	}
-	if (guard.backend !== "unavailable" && guard.backend !== "rule") warmed = true;
+	if (guard.backend !== "unavailable" && guard.backend !== "rule" && guard.backend !== "rules") warmed = true;
 	const t = thresholds as SystemOneThresholds;
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
@@ -239,7 +243,9 @@ export async function systemOneGate(
 	try {
 		humanApproved = await (overrides.askHuman ?? defaultAskHuman)({
 			action: "System One escalation",
-			details: `System One is unsure whether this command is safe (pYes ${fmtP(guard.pYes)}, ${guard.backend}/${guard.model}). Approve only if you meant it.`,
+			details: guard.rule
+				? `A System One safety rule (${guard.rule}) matched this command (pYes ${fmtP(guard.pYes)}, ${guard.backend}/${guard.model}). Approve only if you meant it.`
+				: `System One is unsure whether this command is safe (pYes ${fmtP(guard.pYes)}, ${guard.backend}/${guard.model}). Approve only if you meant it.`,
 			command,
 		});
 	} catch {
