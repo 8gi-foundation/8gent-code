@@ -717,7 +717,7 @@ describe("System One on prose (EIGHT_SYSTEM_ONE_LOCATE)", () => {
 		expect(got.rows).toEqual(plain.rows);
 	});
 
-	test("below the threshold, semantic, or hybrid: the rules' hybrid answer, unchanged", async () => {
+	test("below the threshold, hybrid, or semantic with no search: the rules' hybrid answer, unchanged", async () => {
 		const plain = await locate("where is the rate limiter", { ...ctx(), systemOne: null });
 		for (const r of [
 			router("symbol", "below_threshold"),
@@ -725,7 +725,11 @@ describe("System One on prose (EIGHT_SYSTEM_ONE_LOCATE)", () => {
 			router("hybrid"),
 			router("path", "timeout"),
 		]) {
-			const got = await locate("where is the rate limiter", { ...ctx(), systemOne: r.fn });
+			const got = await locate("where is the rate limiter", {
+				...ctx(),
+				systemOne: r.fn,
+				semantic: null,
+			});
 			expect(got.route).toMatchObject({ mode: "hybrid", rule: "prose" });
 			expect(got.route.systemOne).toBeDefined();
 			expect(got.rows).toEqual(plain.rows);

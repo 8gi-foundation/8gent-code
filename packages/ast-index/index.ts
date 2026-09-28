@@ -11,6 +11,13 @@ import type { FileOutline, RepoIndex, Symbol, SymbolKind } from "../types";
 export type { RepoIndex, FileOutline, Symbol, SymbolKind };
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+	type CachedFile,
+	defaultCacheRoot,
+	loadIndexCache,
+	pruneIndexCaches,
+	saveIndexCache,
+} from "./index-cache";
 import { matchTier } from "./rank";
 import { parseTypeScriptFile } from "./typescript-parser";
 
@@ -39,7 +46,7 @@ export interface ParsedSymbol {
 }
 
 // ============================================
-// Index Storage (in-memory, will persist to disk)
+// Index Storage (in memory; persisted per repo by index-cache.ts when a cacheDir is given)
 // ============================================
 
 const repoIndices: Map<string, RepoIndex> = new Map();
@@ -61,6 +68,95 @@ const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx)$/;
 const YIELD_EVERY = 50;
 /** Ignore patterns each repo was built with, so a refresh walks the same tree. */
 const repoIgnores: Map<string, string[]> = new Map();
+/** Cache root each repo persists to (absent: memory only). */
+const repoCacheRoots: Map<string, string> = new Map();
+/** Bumped whenever a repo's symbols change, so derived data (embeddings) knows it is stale. */
+const generations: Map<string, number> = new Map();
+let generationCounter = 0;
+
+/** How the last build of a repo went: from cache or cold, and what it parsed. */
+export interface BuildInfo {
+	fromCache: boolean;
+	/** Files parsed (new or changed since the cache). */
+	parsed: number;
+	/** Files whose cached outline was used as is. */
+	reused: number;
+	/** Cached files no longer on disk. */
+	removed: number;
+	ms: number;
+}
+const buildInfos: Map<string, BuildInfo> = new Map();
+
+/** A saved cache is rewritten this long after the last change a refresh saw. */
+const CACHE_SAVE_DELAY_MS = 2000;
+const pendingSaves: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
+function bumpGeneration(repoId: string): void {
+	generations.set(repoId, ++generationCounter);
+}
+
+/** Changes whenever the repo's symbols change (build, refresh, fresh outline). 0: not indexed. */
+export function indexGeneration(repoId: string): number {
+	return generations.get(repoId) ?? 0;
+}
+
+/** How the repo's current index was built, or null when it is not indexed. */
+export function getBuildInfo(repoId: string): BuildInfo | null {
+	return buildInfos.get(repoId) ?? null;
+}
+
+/** The cache root a repo persists to, or null when it lives in memory only. */
+export function getRepoCacheRoot(repoId: string): string | null {
+	return repoCacheRoots.get(repoId) ?? null;
+}
+
+function cachedFiles(repoId: string): CachedFile[] {
+	const outlines = fileOutlines.get(repoId);
+	const mtimes = fileMtimes.get(repoId);
+	if (!outlines || !mtimes) return [];
+	const out: CachedFile[] = [];
+	for (const [rel, outline] of outlines) {
+		const mtimeMs = mtimes.get(rel);
+		if (mtimeMs !== undefined) out.push({ rel, mtimeMs, outline });
+	}
+	return out;
+}
+
+function writeCache(repoId: string): void {
+	const cacheRoot = repoCacheRoots.get(repoId);
+	const repo = repoIndices.get(repoId);
+	if (!cacheRoot || !repo) return;
+	saveIndexCache(
+		cacheRoot,
+		repo.sourceRoot,
+		repoIgnores.get(repoId) ?? DEFAULT_IGNORE,
+		cachedFiles(repoId),
+	);
+}
+
+/** A repo's symbols changed: new generation, and a cache write a moment later. */
+function markChanged(repoId: string): void {
+	bumpGeneration(repoId);
+	if (!repoCacheRoots.has(repoId)) return;
+	const prev = pendingSaves.get(repoId);
+	if (prev) clearTimeout(prev);
+	const timer = setTimeout(() => {
+		pendingSaves.delete(repoId);
+		writeCache(repoId);
+	}, CACHE_SAVE_DELAY_MS);
+	// A pending save never keeps the process alive.
+	(timer as { unref?: () => void }).unref?.();
+	pendingSaves.set(repoId, timer);
+}
+
+/** Write a repo's pending cache update now (tests, and callers about to exit). */
+export async function flushIndexCache(repoId: string): Promise<void> {
+	const timer = pendingSaves.get(repoId);
+	if (!timer) return;
+	clearTimeout(timer);
+	pendingSaves.delete(repoId);
+	writeCache(repoId);
+}
 
 /** Every indexable source file under `root`, skipping ignored and dot entries. */
 function listSourceFiles(root: string, ignorePatterns: string[]): string[] {
@@ -81,6 +177,20 @@ function listSourceFiles(root: string, ignorePatterns: string[]): string[] {
 	return files;
 }
 
+export interface IndexFolderOptions {
+	incremental?: boolean;
+	ignorePatterns?: string[];
+	/**
+	 * Cache root to load from and save to (see index-cache.ts). With one, a
+	 * warm start reuses every file whose mtime is unchanged and parses only
+	 * the rest. Absent or null: parse everything, keep the index in memory.
+	 */
+	cacheDir?: string | null;
+}
+
+/** Stats between yields when a warm start reuses cached outlines. */
+const YIELD_EVERY_REUSED = 1000;
+
 /**
  * Index a local folder.
  *
@@ -90,14 +200,14 @@ function listSourceFiles(root: string, ignorePatterns: string[]): string[] {
  */
 export async function indexFolder(
 	folderPath: string,
-	options?: {
-		incremental?: boolean;
-		ignorePatterns?: string[];
-	},
+	options?: IndexFolderOptions,
 ): Promise<RepoIndex> {
+	const t0 = performance.now();
 	const absolutePath = path.resolve(folderPath);
 	const repoId = absolutePath;
 	const ignorePatterns = options?.ignorePatterns ?? DEFAULT_IGNORE;
+	const cacheRoot = options?.cacheDir ?? null;
+	const cached = cacheRoot ? loadIndexCache(cacheRoot, absolutePath, ignorePatterns) : null;
 
 	const files = listSourceFiles(absolutePath, ignorePatterns);
 
@@ -105,14 +215,32 @@ export async function indexFolder(
 	const repoFileOutlines = new Map<string, FileOutline>();
 	const repoFileMtimes = new Map<string, number>();
 	const languages: Record<string, number> = {};
+	let parsed = 0;
+	let reused = 0;
+	let parsedAtYield = 0;
+	let indexAtYield = 0;
 
 	for (let i = 0; i < files.length; i++) {
-		if (i > 0 && i % YIELD_EVERY === 0) await new Promise((r) => setImmediate(r));
+		// Parsing is the slow part: yield every YIELD_EVERY parses, and every
+		// YIELD_EVERY_REUSED files when outlines come from the cache.
+		if (parsed - parsedAtYield >= YIELD_EVERY || i - indexAtYield >= YIELD_EVERY_REUSED) {
+			await new Promise((r) => setImmediate(r));
+			parsedAtYield = parsed;
+			indexAtYield = i;
+		}
 		const file = files[i];
 		try {
 			const mtimeMs = fs.statSync(file).mtimeMs;
-			const outline = parseTypeScriptFile(file);
 			const relativePath = path.relative(absolutePath, file);
+			const hit = cached?.get(relativePath);
+			let outline: FileOutline;
+			if (hit && hit.mtimeMs === mtimeMs) {
+				outline = hit.outline;
+				reused++;
+			} else {
+				outline = parseTypeScriptFile(file);
+				parsed++;
+			}
 			repoFileOutlines.set(relativePath, outline);
 			repoFileMtimes.set(relativePath, mtimeMs);
 
@@ -141,6 +269,28 @@ export async function indexFolder(
 	fileOutlines.set(repoId, repoFileOutlines);
 	fileMtimes.set(repoId, repoFileMtimes);
 	repoIgnores.set(repoId, ignorePatterns);
+	bumpGeneration(repoId);
+
+	let removed = 0;
+	if (cached) for (const rel of cached.keys()) if (!repoFileMtimes.has(rel)) removed++;
+	if (cacheRoot) {
+		repoCacheRoots.set(repoId, cacheRoot);
+		// Written only when something differs from what was loaded.
+		if (!cached || parsed > 0 || removed > 0) {
+			saveIndexCache(cacheRoot, absolutePath, ignorePatterns, cachedFiles(repoId));
+			// A cold build is when stale caches (deleted temp checkouts) get cleared.
+			if (!cached) pruneIndexCaches(cacheRoot);
+		}
+	} else {
+		repoCacheRoots.delete(repoId);
+	}
+	buildInfos.set(repoId, {
+		fromCache: cached !== null,
+		parsed,
+		reused,
+		removed,
+		ms: Math.round(performance.now() - t0),
+	});
 
 	return repoIndex;
 }
@@ -205,6 +355,7 @@ function* refreshSteps(repoId: string): Generator<void, RefreshCounts | null, vo
 	}
 	repo.fileCount = outlines.size;
 	repo.symbolCount = symbols.size;
+	if (counts.added + counts.changed + counts.removed > 0) markChanged(repoId);
 	return counts;
 }
 
@@ -251,7 +402,7 @@ export function refreshIndexAsync(repoId: string): Promise<RefreshCounts | null>
  */
 export function ensureIndexed(
 	folderPath: string,
-	options?: { ignorePatterns?: string[] },
+	options?: { ignorePatterns?: string[]; cacheDir?: string | null },
 ): Promise<RepoIndex> {
 	const key = path.resolve(folderPath);
 	const cached = sharedBuilds.get(key);
@@ -259,7 +410,10 @@ export function ensureIndexed(
 		return cached.promise;
 	}
 	const entry = { index: null } as { promise: Promise<RepoIndex>; index: RepoIndex | null };
-	entry.promise = indexFolder(key, options).then(
+	// The shared build persists by default (see index-cache.ts), so the next
+	// session loads instead of re-parsing the tree.
+	const cacheDir = options && "cacheDir" in options ? options.cacheDir : defaultCacheRoot();
+	entry.promise = indexFolder(key, { ...options, cacheDir }).then(
 		(index) => {
 			entry.index = index;
 			return index;
@@ -436,6 +590,7 @@ export function getFreshFileOutline(repoId: string, filePath: string): FileOutli
 	outlines.set(rel, next);
 	mtimes.set(rel, mtimeMs);
 	repo.symbolCount = symbols.size;
+	markChanged(repo.id);
 	return next;
 }
 
@@ -452,6 +607,7 @@ function dropFile(
 	mtimes.delete(rel);
 	repo.fileCount = outlines.size;
 	repo.symbolCount = symbols.size;
+	markChanged(repo.id);
 }
 
 /**
@@ -494,6 +650,12 @@ export function clearIndex(repoId: string): boolean {
 	fileOutlines.delete(repoId);
 	fileMtimes.delete(repoId);
 	repoIgnores.delete(repoId);
+	repoCacheRoots.delete(repoId);
+	buildInfos.delete(repoId);
+	generations.delete(repoId);
+	const pending = pendingSaves.get(repoId);
+	if (pending) clearTimeout(pending);
+	pendingSaves.delete(repoId);
 	return had;
 }
 

@@ -17,9 +17,11 @@
  * Prose (rule 6) may be routed by System One when env EIGHT_SYSTEM_ONE_LOCATE=1
  * (off by default; see locate-system-one.ts). A mode the model gives at or
  * above its threshold replaces hybrid: that mode's own search runs on each
- * query word. Anything else (unsure, slow, failed, a kept mode that finds
- * nothing, or semantic, which M3 builds) leaves the hybrid answer exactly as
- * the rules give it.
+ * query word, or for semantic, on the whole query (nearest symbol signatures
+ * by embedding, semantic.ts). Anything else (unsure, slow, failed, or a kept
+ * mode that finds nothing, including semantic while its index is building or
+ * with no embedding model) leaves the hybrid answer exactly as the rules
+ * give it, with a note when semantic was the reason.
  *
  * Grep is ripgrep with -F (the query is a literal, never a regex), spawned
  * with an argv array (never a shell string) and confined to the repo root.
@@ -32,8 +34,9 @@ import * as path from "node:path";
 import type { Symbol } from "../types";
 import { getFileOutline, getFileTree, refreshIndexAsync, searchSymbols } from "./index";
 import { type ProseRouter, type ProseRouting, defaultProseRouter } from "./locate-system-one";
+import { type SemanticAnswer, semanticSearch } from "./semantic";
 
-export type LocateMode = "path" | "symbol" | "grep" | "hybrid";
+export type LocateMode = "path" | "symbol" | "grep" | "hybrid" | "semantic";
 
 export interface LocateRoute {
 	mode: LocateMode;
@@ -80,6 +83,8 @@ export interface LocateResult {
 	incomplete?: boolean;
 	/** The symbol index was still building, so symbol search did not run. */
 	indexPending?: boolean;
+	/** Semantic mode was chosen but could not answer, so the rows are hybrid's. */
+	semantic?: Omit<SemanticAnswer, "hits">;
 }
 
 export const LOCATE_MAX_ROWS = 5;
@@ -514,6 +519,8 @@ interface RunState {
 	timeoutMs?: number;
 	rgMissing: boolean;
 	rgTimedOut: boolean;
+	/** Set when a kept semantic mode could not answer. */
+	semantic?: Omit<SemanticAnswer, "hits">;
 }
 
 async function rg(
@@ -641,6 +648,11 @@ export interface LocateContext {
 	 * env EIGHT_SYSTEM_ONE_LOCATE is on, else none. null: none.
 	 */
 	systemOne?: ProseRouter | null;
+	/**
+	 * Semantic search for a kept semantic mode. Undefined: semanticSearch
+	 * with the nomic client over Ollama. null: none (semantic falls back to hybrid).
+	 */
+	semantic?: ((repoId: string, query: string) => Promise<SemanticAnswer>) | null;
 }
 
 /** How long a locate call waits for a first index build before answering without it. */
@@ -811,8 +823,40 @@ async function hybridRows(ctx: RunCtx, terms: string[]): Promise<LocateRow[]> {
 	return mergeRows([symbols, lines, files]);
 }
 
-/** A mode System One may pick for prose that has its own search. */
+/** A mode System One may pick for prose that runs a per-word search. */
 type KeptMode = "symbol" | "grep" | "path";
+
+/**
+ * A kept semantic mode: the symbols nearest the whole query in meaning.
+ * When semantic cannot answer (building, no model, slow, no index) the
+ * reason is recorded and no rows come back, so locate falls back to hybrid.
+ */
+async function semanticRows(ctx: RunCtx, query: string): Promise<LocateRow[]> {
+	const search = ctx.semantic === undefined ? semanticSearch : ctx.semantic;
+	if (!search || !ctx.repoId) {
+		ctx.state.semantic = {
+			status: "unavailable",
+			detail: ctx.indexPending ? "the symbol index is still building" : "no semantic search",
+		};
+		return [];
+	}
+	let answer: SemanticAnswer;
+	try {
+		answer = await search(ctx.repoId, query);
+	} catch (err) {
+		answer = {
+			status: "error",
+			hits: [],
+			detail: err instanceof Error ? err.message : String(err),
+		};
+	}
+	if (answer.status !== "ready" || answer.hits.length === 0) {
+		const { hits: _hits, ...rest } = answer;
+		ctx.state.semantic = rest;
+		return [];
+	}
+	return answer.hits.slice(0, LOCATE_MAX_ROWS).map((h) => symbolRow(ctx.root, h.symbol));
+}
 
 /** How many hits per query word a kept mode pools before ranking by word count. */
 const KEPT_POOL_PER_WORD = 50;
@@ -904,8 +948,10 @@ async function runRoute(
 	route: LocateRoute,
 	lookup: (name: string) => Symbol[],
 ): Promise<LocateRow[]> {
-	if (route.rule === "system_one" && route.mode !== "hybrid") {
-		return keptModeRows(ctx, route.mode, route.terms ?? [], lookup);
+	if (route.rule === "system_one") {
+		const mode = route.mode;
+		if (mode === "semantic") return semanticRows(ctx, route.term);
+		if (mode !== "hybrid") return keptModeRows(ctx, mode, route.terms ?? [], lookup);
 	}
 	switch (route.mode) {
 		case "symbol":
@@ -920,17 +966,17 @@ async function runRoute(
 		case "grep":
 			return grepRows(ctx, route.term);
 		case "hybrid":
+		case "semantic":
 			return hybridRows(ctx, route.terms ?? []);
 	}
 }
 
-const KEPT_MODES = new Set<string>(["symbol", "grep", "path"]);
+const KEPT_MODES = new Set<string>(["symbol", "grep", "path", "semantic"]);
 
 /**
  * Ask System One about a prose route. Its mode replaces hybrid only when the
- * router kept it (at or above threshold) and it has its own search (semantic
- * does not yet, M3); the answer is recorded either way. A router that throws
- * counts as an error: hybrid.
+ * router kept it (at or above threshold); the answer is recorded either way.
+ * A router that throws counts as an error: hybrid.
  */
 async function consultSystemOne(
 	route: LocateRoute,
@@ -950,7 +996,7 @@ async function consultSystemOne(
 		};
 	}
 	if (s.reason === "model" && KEPT_MODES.has(s.mode)) {
-		return { ...route, mode: s.mode as KeptMode, rule: "system_one", systemOne: s };
+		return { ...route, mode: s.mode as LocateMode, rule: "system_one", systemOne: s };
 	}
 	return { ...route, systemOne: s };
 }
@@ -1002,6 +1048,7 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 	if (ctx.state.rgMissing) result.rgMissing = true;
 	if (ctx.state.rgTimedOut) result.incomplete = true;
 	if (ctx.indexPending) result.indexPending = true;
+	if (ctx.state.semantic) result.semantic = ctx.state.semantic;
 	return result;
 }
 
@@ -1019,7 +1066,9 @@ function ruleLabel(route: LocateRoute): string {
 /** The tool's text answer: one header line, then at most five rows. */
 export function formatLocate(result: LocateResult): string {
 	const { route, rows } = result;
-	const byTerms = route.mode === "hybrid" || route.rule === "system_one";
+	// Semantic searches the whole query; the other System One modes, like hybrid, its words.
+	const byTerms =
+		route.mode === "hybrid" || (route.rule === "system_one" && route.mode !== "semantic");
 	const head = `locate ${route.mode} (${ruleLabel(route)}): ${clip(byTerms ? (route.terms ?? []).join(" ") : route.term) || "(empty)"}`;
 	// When a search did not run or did not finish, say so rather than
 	// reporting that the text does not exist.
@@ -1036,6 +1085,20 @@ export function formatLocate(result: LocateResult): string {
 	if (result.indexPending) {
 		notes.push(
 			"The symbol index is still building, so this answer used text and file search only.",
+		);
+	}
+	const sem = result.semantic;
+	if (sem?.status === "building") {
+		notes.push(
+			`The semantic index is still being built (${sem.done ?? 0} of ${sem.total ?? 0} signatures embedded), so this is the hybrid answer.`,
+		);
+	} else if (sem?.status === "unavailable") {
+		notes.push(
+			`Semantic search is not available${sem.detail ? ` (${sem.detail})` : ""}, so this is the hybrid answer.`,
+		);
+	} else if (sem) {
+		notes.push(
+			`Semantic search did not answer (${sem.status}${sem.detail ? `: ${sem.detail}` : ""}), so this is the hybrid answer.`,
 		);
 	}
 	if (rows.length > 0) {
