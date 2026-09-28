@@ -74,6 +74,18 @@ export function toLongPath(p: string, platform: NodeJS.Platform = process.platfo
 }
 
 /**
+ * Inverse of toLongPath: drop the `\\?\` marker so the path compares equal to
+ * its DOS form (`\\?\UNC\server\share` becomes `\\server\share`). No-op off win32
+ * and for paths without the marker.
+ */
+export function fromLongPath(p: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return p;
+  if (p.startsWith(EXTENDED_UNC)) return `\\\\${p.slice(EXTENDED_UNC.length)}`;
+  if (p.startsWith(EXTENDED)) return p.slice(EXTENDED.length);
+  return p;
+}
+
+/**
  * spawn() with a long-path-safe working directory.
  *
  * The executable token is NOT prefixed (CreateProcess rejects a marked

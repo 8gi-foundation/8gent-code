@@ -12,10 +12,21 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isPathWithin, pathFor } from "../core/path-within";
+import { resolveSafe } from "./src/workspace-boundary";
 
 export type ValidatePathResult =
 	| { ok: true }
 	| { ok: false; reason: string };
+
+/**
+ * The machine the path will be opened on. Defaults to the current process and
+ * its home directory; tests inject a foreign platform.
+ */
+export interface PathGuardHost {
+	platform?: NodeJS.Platform;
+	home?: string;
+}
 
 // ============================================
 // Protected configuration
@@ -90,39 +101,16 @@ export function isWindowsDeviceName(basename: string): boolean {
 	return WINDOWS_DEVICES.has(stem);
 }
 
-function isDeviceFile(resolved: string, raw: string): boolean {
+function isDeviceFile(resolved: string, raw: string, platform: NodeJS.Platform): boolean {
 	// Posix device tree.
 	if (resolved.startsWith("/dev/") || resolved === "/dev") return true;
 	// Windows device names (NUL, CON, PRN ...) only enforced on win32 to avoid
 	// false positives for files literally named "NUL" on case-sensitive FS.
-	if (process.platform === "win32") {
-		const base = path.basename(raw);
+	if (platform === "win32") {
+		const base = path.win32.basename(raw);
 		if (isWindowsDeviceName(base)) return true;
 	}
 	return false;
-}
-
-function resolveLikeRealpath(raw: string, cwd: string): string {
-	const absolute = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
-	const normalised = path.normalize(absolute);
-	// Try realpathSync to collapse symlinks; if missing, walk up to deepest
-	// existing ancestor and realpath that.
-	try {
-		return fs.realpathSync(normalised);
-	} catch {
-		let cursor = normalised;
-		const tail: string[] = [];
-		while (cursor && cursor !== path.dirname(cursor)) {
-			try {
-				const real = fs.realpathSync(cursor);
-				return tail.length === 0 ? real : path.join(real, ...tail.reverse());
-			} catch {
-				tail.push(path.basename(cursor));
-				cursor = path.dirname(cursor);
-			}
-		}
-		return normalised;
-	}
 }
 
 function parseSafePaths(): string[] {
@@ -141,23 +129,10 @@ function parseSafePaths(): string[] {
 		});
 }
 
-function canonicalHome(): string {
-	const home = homeDir();
-	try {
-		return fs.realpathSync(home);
-	} catch {
-		return path.resolve(home);
-	}
-}
-
-function isUnderProtectedDir(resolved: string): boolean {
-	const home = canonicalHome();
-	for (const dir of PROTECTED_DIRS) {
-		const guard = path.join(home, dir);
-		if (resolved === guard) return true;
-		if (resolved.startsWith(guard + path.sep)) return true;
-	}
-	return false;
+function isUnderProtectedDir(resolved: string, home: string, platform: NodeJS.Platform): boolean {
+	const flavor = pathFor(platform);
+	const canonicalHome = resolveSafe(home, home, platform);
+	return PROTECTED_DIRS.some((dir) => isPathWithin(resolved, flavor.join(canonicalHome, dir), platform));
 }
 
 // ============================================
@@ -172,7 +147,12 @@ function isUnderProtectedDir(resolved: string): boolean {
  * any direct tool integration) MUST treat a `false` result as a hard deny
  * and skip further policy evaluation.
  */
-export function validatePath(rawPath: string, workingDirectory: string): ValidatePathResult {
+export function validatePath(
+	rawPath: string,
+	workingDirectory: string,
+	host: PathGuardHost = {},
+): ValidatePathResult {
+	const platform = host.platform ?? process.platform;
 	if (typeof rawPath !== "string" || rawPath.length === 0) {
 		return { ok: false, reason: "empty path" };
 	}
@@ -183,8 +163,8 @@ export function validatePath(rawPath: string, workingDirectory: string): Validat
 	}
 
 	// 2. Resolve through realpath so symlinks cannot tunnel into a protected
-	// location. resolveLikeRealpath also normalises '..' segments.
-	const resolved = resolveLikeRealpath(rawPath, workingDirectory);
+	// location. resolveSafe also normalises '..' segments.
+	const resolved = resolveSafe(rawPath, workingDirectory, platform);
 
 	// 3. SAFE_PATHS escape hatch - checked AFTER resolve so the allowlist
 	// matches canonical paths, not user-supplied aliases.
@@ -194,18 +174,19 @@ export function validatePath(rawPath: string, workingDirectory: string): Validat
 	}
 
 	// 4. Device files.
-	if (isDeviceFile(resolved, rawPath)) {
+	if (isDeviceFile(resolved, rawPath, platform)) {
 		return { ok: false, reason: "device file" };
 	}
 
 	// 5. Protected directories under the user's home.
-	if (isUnderProtectedDir(resolved)) {
+	if (isUnderProtectedDir(resolved, host.home ?? homeDir(), platform)) {
 		return { ok: false, reason: "protected credential file" };
 	}
 
 	// 6. Protected basenames anywhere (e.g. a .netrc dropped into the project).
-	const base = path.basename(resolved);
-	if (PROTECTED_BASENAMES.has(base)) {
+	// NTFS matches names case-insensitively, so ID_RSA opens id_rsa.
+	const base = pathFor(platform).basename(resolved);
+	if (PROTECTED_BASENAMES.has(platform === "win32" ? base.toLowerCase() : base)) {
 		return { ok: false, reason: "protected credential file" };
 	}
 
