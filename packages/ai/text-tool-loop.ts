@@ -82,6 +82,22 @@ const SHELL_WRITE_NOTE =
 	"was written unless you call write_file and see its success result.";
 
 /**
+ * The message fed back when a reply ended inside an unclosed tool_call block.
+ * Structural, not a guess at wording: the parser saw a `tool_call` fence whose
+ * JSON object never closed.
+ */
+export function cutOffToolCallMessage(name: string | null): string {
+	const which = name ? `Your ${name} tool_call` : "Your last tool_call";
+	return (
+		`Error: ${which} was cut off before its JSON closed, most likely because ` +
+		"the reply hit the model's output token limit. Nothing was run. If you " +
+		"were writing a file, write it in smaller parts: call write_file with the " +
+		"first part, then add the rest with edit_file in further calls. Keep each " +
+		"tool_call short enough to finish."
+	);
+}
+
+/**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
  * throwing `run` is captured as a short error string so the loop can feed it
  * back to the model instead of aborting.
@@ -139,6 +155,28 @@ export async function runTextToolAgent(
 		});
 		lastContent = turn.content;
 
+		// A reply that stopped inside a tool_call block (output token limit) is
+		// neither a final answer nor a runnable call. Tell the model exactly what
+		// happened and let it try again in smaller pieces, instead of ending the
+		// turn on its partial JSON or a bare "Unterminated string".
+		let cutOffNote = "";
+		if (turn.cutOffToolCall) {
+			cutOffNote = cutOffToolCallMessage(turn.cutOffToolCall.name);
+			// No round left to retry in: surface the error as the turn's text.
+			if (round === maxRounds) {
+				lastContent = [turn.content, cutOffNote].filter(Boolean).join("\n\n");
+			}
+			if (turn.toolCalls.length === 0) {
+				if (round === maxRounds) break;
+				messages = [
+					...messages,
+					{ role: "assistant", content: turn.content },
+					{ role: "user", content: cutOffNote },
+				];
+				continue;
+			}
+		}
+
 		if (turn.toolCalls.length === 0) {
 			// Model gave its final answer.
 			return { content: turn.content, rounds: round, toolLog };
@@ -163,6 +201,7 @@ export async function runTextToolAgent(
 		// user turn, and loop. We feed the raw turn content (prose minus the
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
+		if (cutOffNote) resultParts.push(cutOffNote);
 		messages = [
 			...messages,
 			{ role: "assistant", content: turn.content },

@@ -101,6 +101,70 @@ describe("runTextToolAgent", () => {
 	});
 });
 
+describe("runTextToolAgent - cut-off tool_call", () => {
+	test("a truncated tool_call is fed back as an error and the loop continues", async () => {
+		const writes: Array<Record<string, unknown>> = [];
+		const WRITE_TOOL: TextTool = {
+			spec: { name: "write_file", description: "Write a file", parameters: {} },
+			run: async (args) => {
+				writes.push(args);
+				return "File written";
+			},
+		};
+		const full = JSON.stringify({
+			name: "write_file",
+			arguments: { path: "deck/outline.md", content: "# Outline \u2014 slide 1\n- `state` -> answers\n".repeat(40) },
+		});
+		const seen: TextToolMessage[][] = [];
+		let turn = 0;
+		const call = async (messages: TextToolMessage[]): Promise<string> => {
+			seen.push(messages);
+			turn++;
+			// Round 1: the reply stops mid-string, as when it hits max tokens.
+			if (turn === 1) return ["```tool_call", full.slice(0, 900)].join("\n");
+			if (turn === 2) {
+				return [
+					"```tool_call",
+					'{"name": "write_file", "arguments": {"path": "deck/outline.md", "content": "# part 1"}}',
+					"```",
+				].join("\n");
+			}
+			return "Wrote the outline.";
+		};
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write the outline" }],
+			tools: [WRITE_TOOL],
+			call,
+		});
+
+		expect(result.rounds).toBe(3);
+		expect(result.content).toBe("Wrote the outline.");
+		expect(writes).toEqual([{ path: "deck/outline.md", content: "# part 1" }]);
+		const feedback = seen[1][seen[1].length - 1].content;
+		expect(feedback).toContain("write_file");
+		expect(feedback).toMatch(/cut off/i);
+		expect(feedback).toMatch(/token limit/i);
+		expect(feedback).toMatch(/smaller parts/i);
+		expect(feedback).not.toContain("Unterminated string");
+		// The partial JSON never leaks out as the "final answer".
+		expect(result.content).not.toContain('"arguments"');
+	});
+
+	test("a cut-off call on the last round returns the error, not raw JSON", async () => {
+		const call = async (): Promise<string> =>
+			'```tool_call\n{"name": "write_file", "arguments": {"path": "a.md", "content": "abc';
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "go" }],
+			tools: [READ_FILE_TOOL],
+			call,
+			maxRounds: 1,
+		});
+		expect(result.content).toMatch(/cut off/i);
+		expect(result.content).not.toContain('"arguments"');
+	});
+});
+
 describe("isShellFileWrite", () => {
 	test("flags echo/printf/cat into a redirect", () => {
 		expect(isShellFileWrite("echo 'hi' > /tmp/out.txt")).toBe(true);

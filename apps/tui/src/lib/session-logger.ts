@@ -219,6 +219,45 @@ export function logMessage(tabId: string, tabName: string, role: string, content
 	});
 }
 
+/** Longest string value kept in a logged tool_call preview. */
+const ARG_PREVIEW_MAX_CHARS = 2000;
+
+function previewValue(value: unknown, seen: WeakSet<object>): unknown {
+	if (typeof value === "string") {
+		if (value.length <= ARG_PREVIEW_MAX_CHARS) return value;
+		return `${value.slice(0, ARG_PREVIEW_MAX_CHARS)}... [${value.length - ARG_PREVIEW_MAX_CHARS} more chars]`;
+	}
+	if (value === null || typeof value !== "object") return value;
+	if (seen.has(value)) return "[circular]";
+	seen.add(value);
+	if (Array.isArray(value)) return value.map((v) => previewValue(v, seen));
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(value)) out[k] = previewValue(v, seen);
+	return out;
+}
+
+/**
+ * Bounded copy of a tool call's args for the session log. Long string values
+ * are shortened per value, so the result is always a valid object.
+ *
+ * This used to be `JSON.parse(JSON.stringify(args).slice(0, 2000))`, which cut
+ * the serialized JSON mid-string and threw "JSON Parse error: Unterminated
+ * string" for any call whose args serialized past 2000 chars. logToolStart runs
+ * inside the agent's onToolStart callback, BEFORE the tool executes, so that
+ * throw failed the tool call itself: every write_file over ~2 KB never ran.
+ * A logger must never be able to break a tool, so this never throws.
+ */
+export function previewToolArgs(args: unknown): Record<string, unknown> {
+	try {
+		const preview = previewValue(args ?? {}, new WeakSet());
+		return preview !== null && typeof preview === "object" && !Array.isArray(preview)
+			? (preview as Record<string, unknown>)
+			: { value: preview };
+	} catch {
+		return { preview: "[unavailable]" };
+	}
+}
+
 export function logToolStart(
 	tabId: string,
 	tabName: string,
@@ -235,7 +274,7 @@ export function logToolStart(
 		toolCall: {
 			toolCallId,
 			name: toolName,
-			arguments: JSON.parse(JSON.stringify(args || {}).slice(0, 2000)),
+			arguments: previewToolArgs(args),
 		},
 		tabId,
 		tabName,
