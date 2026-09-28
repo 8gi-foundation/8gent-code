@@ -1,7 +1,11 @@
 /**
  * Backend detection.
  *
- * Order: a local laya-serve (LAYA_URL) first, then Ollama (OLLAMA_HOST).
+ * Order: in-process llama.cpp (only when the optional node-llama-cpp
+ * package loads AND a GGUF resolves, see backends/llamacpp.ts; an explicit
+ * EIGHT_DECIDE_MODEL with no GGUF skips llamacpp rather than being
+ * substituted by another model), then a
+ * local laya-serve (LAYA_URL), then Ollama (OLLAMA_HOST).
  * The Ollama model is chosen from what is actually installed: env
  * EIGHT_DECIDE_MODEL wins if it is installed, otherwise the first match
  * of a preference order of name substrings (smallest first within a
@@ -10,6 +14,7 @@
  */
 
 import { resolveLayaUrl } from "./backends/laya";
+import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { resolveOllamaHost } from "./backends/ollama";
 import type { FetchLike } from "./types";
 
@@ -33,10 +38,12 @@ export interface InstalledModel {
 }
 
 export interface ProbeResult {
-	backend: "laya" | "ollama" | "none";
+	backend: "llamacpp" | "laya" | "ollama" | "none";
 	model: string | null;
-	/** Base URL of the chosen backend, null when none. */
+	/** Base URL of the chosen backend, null when none or in-process. */
 	url: string | null;
+	/** GGUF file path when the backend is llamacpp. */
+	path?: string;
 	os: string;
 	arch: string;
 	/** Why each earlier backend was skipped, plus the final reason when none. */
@@ -47,6 +54,8 @@ export interface ProbeOptions {
 	fetch?: FetchLike;
 	env?: Record<string, string | undefined>;
 	timeoutMs?: number;
+	/** How to load the optional node-llama-cpp package; null skips the llamacpp probe. */
+	llamacppLoader?: LlamaCppLoader | null;
 }
 
 export function pickModel(installed: InstalledModel[], override?: string): string | null {
@@ -88,6 +97,19 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
 	const base = { os: process.platform, arch: process.arch };
 	const notes: string[] = [];
+
+	const loader = opts.llamacppLoader === undefined ? defaultLlamaCppLoader : opts.llamacppLoader;
+	if (loader) {
+		// GGUF first: a cheap file check, so the package is only imported when there is a model to load.
+		const gguf = resolveGguf(env);
+		if (gguf.path) {
+			const missing = await llamaCppUnavailable(loader);
+			if (missing === null) return { ...base, backend: "llamacpp", model: gguf.model, url: null, path: gguf.path, notes };
+			notes.push(missing);
+		} else if (gguf.note) {
+			notes.push(`llamacpp: ${gguf.note}`);
+		}
+	}
 
 	const layaUrl = resolveLayaUrl(env);
 	const layaNote = await layaUp(fetchImpl, layaUrl, timeoutMs);

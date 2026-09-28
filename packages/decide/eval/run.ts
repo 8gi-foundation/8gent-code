@@ -1,7 +1,11 @@
 /**
  * Bash guard eval runner.
  *
- *   bun packages/decide/eval/run.ts <ollama-model> [<ollama-model> ...]
+ *   bun packages/decide/eval/run.ts [--backend ollama|llamacpp] <ollama-model> [<ollama-model> ...]
+ *
+ * --backend ollama (default) asks the Ollama server. --backend llamacpp
+ * loads the same model's GGUF from the Ollama blob store in-process with
+ * node-llama-cpp (EIGHT_DECIDE_GGUF overrides the file); no server needed.
  *
  * For each model: one warm-up question (loads the model, excluded from
  * latency), then every command in commands.ts through `bashGuard` with the
@@ -19,6 +23,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { LlamaCppBackend, disposeLlamaCpp, resolveGguf } from "../backends/llamacpp";
 import { OllamaBackend } from "../backends/ollama";
 import { type BashGuardResult, bashGuard } from "../guard";
 import { createDecider } from "../index";
@@ -62,8 +67,18 @@ function slug(model: string): string {
 	return model.replace(/[^a-zA-Z0-9.-]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-async function runModel(model: string) {
-	const backend = new OllamaBackend({ model, timeoutMs: 120_000 });
+type EvalBackend = "ollama" | "llamacpp";
+
+function makeBackend(kind: EvalBackend, model: string) {
+	if (kind === "ollama") return new OllamaBackend({ model, timeoutMs: 120_000 });
+	const gguf = resolveGguf(process.env, model);
+	if (!gguf.path) throw new Error(`llamacpp: cannot resolve a GGUF for ${model}: ${gguf.note}`);
+	if (gguf.model !== model) throw new Error(`llamacpp: ${model} is not installed as a GGUF (resolved ${gguf.model})`);
+	return new LlamaCppBackend({ model, modelPath: gguf.path });
+}
+
+async function runModel(model: string, kind: EvalBackend) {
+	const backend = makeBackend(kind, model);
 	const decider = createDecider({ backend });
 	const warmStarted = performance.now();
 	let warmError: string | undefined;
@@ -95,6 +110,8 @@ async function runModel(model: string) {
 	const lat = rows.map((r) => r.latencyMs).sort((a, b) => a - b);
 	const summary = {
 		model,
+		backend: kind,
+		modelPath: backend instanceof LlamaCppBackend ? backend.modelPath : undefined,
 		date: new Date().toISOString(),
 		machine: { os: process.platform, arch: process.arch },
 		n: rows.length,
@@ -116,7 +133,7 @@ async function runModel(model: string) {
 		p95Ms: percentile(lat, 95),
 	};
 	fs.mkdirSync(RESULTS_DIR, { recursive: true });
-	const file = path.join(RESULTS_DIR, `${summary.date.slice(0, 10)}-${slug(model)}.json`);
+	const file = path.join(RESULTS_DIR, `${summary.date.slice(0, 10)}-${kind === "ollama" ? "" : `${kind}-`}${slug(model)}.json`);
 	fs.writeFileSync(file, `${JSON.stringify({ summary, rows }, null, "\t")}\n`);
 	return { summary, file };
 }
@@ -124,14 +141,26 @@ async function runModel(model: string) {
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 async function main() {
-	const models = process.argv.slice(2);
+	const args = process.argv.slice(2);
+	let kind: EvalBackend = "ollama";
+	const flag = args.indexOf("--backend");
+	if (flag !== -1) {
+		const value = args[flag + 1];
+		if (value !== "ollama" && value !== "llamacpp") {
+			console.error(`--backend must be ollama or llamacpp (got ${value ?? "nothing"})`);
+			process.exit(2);
+		}
+		kind = value;
+		args.splice(flag, 2);
+	}
+	const models = args;
 	if (models.length === 0) {
-		console.error("usage: bun packages/decide/eval/run.ts <ollama-model> [<ollama-model> ...]");
+		console.error("usage: bun packages/decide/eval/run.ts [--backend ollama|llamacpp] <ollama-model> [<ollama-model> ...]");
 		process.exit(2);
 	}
 	for (const model of models) {
-		console.log(`\n== ${model}`);
-		const { summary, file } = await runModel(model);
+		console.log(`\n== ${model} (${kind})`);
+		const { summary, file } = await runModel(model, kind);
 		console.log(`  n=${summary.n} errors=${summary.errors} warmup=${summary.warmupMs}ms`);
 		if (summary.firstError) console.log(`  first error: ${summary.firstError}`);
 		console.log(`  accuracy           ${pct(summary.accuracy)}`);
@@ -145,3 +174,4 @@ async function main() {
 }
 
 await main();
+await disposeLlamaCpp();
