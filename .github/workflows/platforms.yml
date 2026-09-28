@@ -1,0 +1,87 @@
+name: Platforms
+
+# ci.yml gates Linux on every PR. This workflow proves the same repo installs,
+# tests, builds and runs on Windows too, and that the compiled binary for each
+# host actually starts. The repo is private, so it runs on GitHub-hosted
+# minutes: Windows bills at 2x, which is why macOS is left to the helm runner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platform:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: 8gent-linux-x64
+          - os: windows-latest
+            binary: 8gent-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Checkout has LF line endings
+        run: |
+          bad=$(git ls-files --eol | awk '$2 ~ /crlf/ {print $NF}')
+          if [ -n "$bad" ]; then echo "::error::CRLF in working tree:"; echo "$bad"; exit 1; fi
+          echo "LF OK"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Test
+        run: bun run test
+
+      - name: CLI runs from source
+        run: bun run bin/8gent.ts --version | grep "8gent Code v"
+
+      - name: Build bundled CLI
+        run: |
+          bun run build
+          bun dist/cli.js --version | grep "8gent Code v"
+
+      - name: Compile host binary
+        run: bun run build:binaries:host
+
+      - name: Compiled binary smoke
+        run: bash scripts/smoke-compiled.sh "dist/bin/${{ matrix.binary }}"
+
+      # PowerShell sets USERPROFILE but not HOME. Git Bash hides that, so run
+      # the binary the way a Windows user does and check where state lands.
+      - name: Compiled binary under PowerShell, no HOME
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item Env:HOME -ErrorAction SilentlyContinue
+          $bin = Resolve-Path "dist/bin/${{ matrix.binary }}"
+          & $bin --version
+          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          $out = & $bin memory remember "pwsh-smoke-marker" 2>&1 | Out-String
+          if ($out -notmatch "Remembered") { throw "memory remember failed: $out" }
+          $out = & $bin memory recall pwsh-smoke 2>&1 | Out-String
+          if ($out -notmatch "pwsh-smoke-marker") { throw "memory recall failed: $out" }
+          $state = Join-Path $env:USERPROFILE ".8gent"
+          if (-not (Test-Path $state)) { throw "state dir not under USERPROFILE: $state" }
+          if (Test-Path (Join-Path (Get-Location) "~")) { throw "state leaked into a literal ~ directory" }
+          Write-Host "state dir: $state"

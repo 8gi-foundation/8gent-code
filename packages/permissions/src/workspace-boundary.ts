@@ -11,7 +11,9 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { type HomeEnv, resolveHome } from "../../core/home";
+import { isPathWithin, pathFor } from "../../core/path-within";
+import { fromLongPath } from "../../core/win-path";
 
 // ============================================
 // Types
@@ -32,6 +34,21 @@ export interface BoundaryCheckResult {
 }
 
 /**
+ * The machine a command will run on. Paths are parsed with its separator and
+ * case rules, and `~`, `$VAR` and `%VAR%` expand from its environment.
+ * Defaults to the current process; tests inject a foreign platform, and the
+ * real filesystem is consulted only when the platform is the host's own.
+ */
+export interface BoundaryHost {
+	platform: NodeJS.Platform;
+	env: HomeEnv;
+}
+
+function hostOf(host: Partial<BoundaryHost> = {}): BoundaryHost {
+	return { platform: host.platform ?? process.platform, env: host.env ?? process.env };
+}
+
+/**
  * Options for command extraction. Allowlists let callers permit known safe
  * absolute prefixes outside the workspace (e.g. system binaries on PATH).
  */
@@ -39,6 +56,7 @@ export interface ExtractOptions {
 	workspaceRoot: string;
 	/** Absolute path prefixes that are always allowed (e.g. /usr/bin) */
 	allowedAbsolutePrefixes?: string[];
+	host?: Partial<BoundaryHost>;
 }
 
 // ============================================
@@ -47,75 +65,47 @@ export interface ExtractOptions {
 
 /**
  * Resolve a path through `realpathSync` if it exists; otherwise fall back to
- * `path.resolve` so we still collapse `..` segments for not-yet-created files.
+ * `resolve` so we still collapse `..` segments for not-yet-created files.
  *
  * For non-existent paths we walk up to the deepest existing ancestor and
  * realpath that, then re-append the remainder. This catches the common
  * "/workspace/symlink-to-etc/passwd" pattern even when `passwd` itself does
  * not exist under the symlinked target.
  */
-export function resolveSafe(p: string, cwd: string): string {
-	const absolute = path.isAbsolute(p) ? p : path.resolve(cwd, p);
+export function resolveSafe(p: string, cwd: string, platform: NodeJS.Platform = process.platform): string {
+	const flavor = pathFor(platform);
+	const absolute = flavor.resolve(fromLongPath(cwd, platform), fromLongPath(p, platform));
+	if (platform !== process.platform) return absolute;
 
-	try {
-		return fs.realpathSync(absolute);
-	} catch {
-		// Path doesn't exist — climb to deepest existing ancestor.
-		let parent = path.dirname(absolute);
-		const segments: string[] = [path.basename(absolute)];
-		while (parent !== path.dirname(parent)) {
-			try {
-				const realParent = fs.realpathSync(parent);
-				return path.resolve(realParent, ...segments.reverse());
-			} catch {
-				segments.push(path.basename(parent));
-				parent = path.dirname(parent);
-			}
+	const tail: string[] = [];
+	let cursor = absolute;
+	for (;;) {
+		try {
+			return fromLongPath(flavor.resolve(fs.realpathSync(cursor), ...tail), platform);
+		} catch {
+			const parent = flavor.dirname(cursor);
+			if (parent === cursor) return absolute;
+			tail.unshift(flavor.basename(cursor));
+			cursor = parent;
 		}
-		// Reached filesystem root without finding any real ancestor — just
-		// normalize, which still collapses `..`.
-		return path.resolve(absolute);
-	}
-}
-
-function canonicalize(p: string): string {
-	try {
-		return fs.realpathSync(p);
-	} catch {
-		// Path doesn't exist — canonicalize the deepest existing ancestor.
-		const absolute = path.resolve(p);
-		let parent = path.dirname(absolute);
-		const segments: string[] = [path.basename(absolute)];
-		while (parent !== path.dirname(parent)) {
-			try {
-				const realParent = fs.realpathSync(parent);
-				return path.resolve(realParent, ...segments.reverse());
-			} catch {
-				segments.push(path.basename(parent));
-				parent = path.dirname(parent);
-			}
-		}
-		return absolute;
 	}
 }
 
 /**
  * `true` iff `resolvedPath` is `workspaceRoot` itself or lives strictly
- * beneath it. Comparisons are made on canonicalised paths (both sides are
- * realpath'd) so symlink wrappers around the workspace don't false-positive
- * as escapes — and platform-specific symlinks like macOS `/var` -> `/private/var`
- * don't break the prefix check.
+ * beneath it. Both sides are realpath'd so symlink wrappers around the
+ * workspace (macOS `/var` -> `/private/var`) don't read as escapes.
  */
-export function isWithinWorkspace(resolvedPath: string, workspaceRoot: string): boolean {
-	const canonicalRoot = canonicalize(workspaceRoot);
-	const canonicalPath = canonicalize(resolvedPath);
-
-	if (canonicalPath === canonicalRoot) return true;
-
-	const rootWithSep = canonicalRoot.endsWith(path.sep)
-		? canonicalRoot
-		: canonicalRoot + path.sep;
-	return canonicalPath.startsWith(rootWithSep);
+export function isWithinWorkspace(
+	resolvedPath: string,
+	workspaceRoot: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	return isPathWithin(
+		resolveSafe(resolvedPath, workspaceRoot, platform),
+		resolveSafe(workspaceRoot, workspaceRoot, platform),
+		platform,
+	);
 }
 
 /**
@@ -124,15 +114,12 @@ export function isWithinWorkspace(resolvedPath: string, workspaceRoot: string): 
 export function checkPath(
 	rawPath: string,
 	workspaceRoot: string,
-	options: { allowedAbsolutePrefixes?: string[] } = {},
+	options: { allowedAbsolutePrefixes?: string[]; host?: Partial<BoundaryHost> } = {},
 ): BoundaryCheckResult {
-	const resolved = resolveSafe(rawPath, workspaceRoot);
+	const { platform } = hostOf(options.host);
+	const resolved = resolveSafe(rawPath, workspaceRoot, platform);
 
-	if (isAllowedByPrefix(resolved, options.allowedAbsolutePrefixes)) {
-		return { allowed: true, violations: [] };
-	}
-
-	if (isWithinWorkspace(resolved, workspaceRoot)) {
+	if (isConfined(resolved, workspaceRoot, options.allowedAbsolutePrefixes, platform)) {
 		return { allowed: true, violations: [] };
 	}
 
@@ -148,15 +135,17 @@ export function checkPath(
 	};
 }
 
-function isAllowedByPrefix(resolved: string, prefixes?: string[]): boolean {
-	if (!prefixes || prefixes.length === 0) return false;
-	for (const prefix of prefixes) {
-		const canonical = path.resolve(prefix);
-		if (resolved === canonical) return true;
-		const withSep = canonical.endsWith(path.sep) ? canonical : canonical + path.sep;
-		if (resolved.startsWith(withSep)) return true;
+function isConfined(
+	resolved: string,
+	workspaceRoot: string,
+	prefixes: string[] | undefined,
+	platform: NodeJS.Platform,
+): boolean {
+	const flavor = pathFor(platform);
+	for (const prefix of prefixes ?? []) {
+		if (isPathWithin(resolved, flavor.resolve(prefix), platform)) return true;
 	}
-	return false;
+	return isWithinWorkspace(resolved, workspaceRoot, platform);
 }
 
 // ============================================
@@ -181,10 +170,14 @@ export interface CommandSegment {
  *   - backslash-escaped spaces and metacharacters outside quotes
  *   - tabs/whitespace as separators
  *
+ * `escapes` names the characters that escape the next one: `\` for POSIX
+ * shells, `^` and a backtick for cmd.exe and PowerShell, where `\` is a path
+ * separator.
+ *
  * Does NOT do variable expansion or command substitution — those are
  * deliberately left raw so we can detect them as suspicious downstream.
  */
-export function tokenize(input: string): string[] {
+export function tokenize(input: string, escapes = "\\"): string[] {
 	const tokens: string[] = [];
 	let current = "";
 	let started = false;
@@ -202,7 +195,7 @@ export function tokenize(input: string): string[] {
 			continue;
 		}
 
-		if (ch === "\\" && !inSingle) {
+		if (escapes.includes(ch) && !inSingle) {
 			escape = true;
 			continue;
 		}
@@ -219,7 +212,7 @@ export function tokenize(input: string): string[] {
 			continue;
 		}
 
-		if (!inSingle && !inDouble && (ch === " " || ch === "\t" || ch === "\n")) {
+		if (!inSingle && !inDouble && (ch === " " || ch === "\t" || ch === "\n" || ch === "\r")) {
 			if (started) {
 				tokens.push(current);
 				current = "";
@@ -238,9 +231,10 @@ export function tokenize(input: string): string[] {
 
 /**
  * Split a command line into pipeline segments, respecting quotes. Splits on
- * `&&`, `||`, `;`, and standalone `|` (when not piping inside a quoted token).
+ * `&&`, `||`, `;`, `|`, `&` (cmd.exe's sequencing operator and the POSIX
+ * background operator) and line breaks, none of them inside a quoted token.
  */
-export function splitPipeline(input: string): string[] {
+export function splitPipeline(input: string, escapes = "\\"): string[] {
 	const segments: string[] = [];
 	let current = "";
 	let inSingle = false;
@@ -257,7 +251,7 @@ export function splitPipeline(input: string): string[] {
 			continue;
 		}
 
-		if (ch === "\\" && !inSingle) {
+		if (escapes.includes(ch) && !inSingle) {
 			current += ch;
 			escape = true;
 			continue;
@@ -282,7 +276,7 @@ export function splitPipeline(input: string): string[] {
 				i++;
 				continue;
 			}
-			if (ch === ";" || ch === "|") {
+			if (ch === ";" || ch === "|" || ch === "&" || ch === "\n" || ch === "\r") {
 				segments.push(current);
 				current = "";
 				continue;
@@ -300,21 +294,33 @@ export function splitPipeline(input: string): string[] {
 // File-path extraction from shell commands
 // ============================================
 
+/**
+ * One way a shell may read a command line: which characters escape the next
+ * one, and whether `%VAR%` and `$env:VAR` expand.
+ */
+interface ShellReading {
+	escapes: string;
+	windowsVars: boolean;
+}
+
+const POSIX_SHELL: ShellReading = { escapes: "\\", windowsVars: false };
+const WINDOWS_SHELL: ShellReading = { escapes: "^`", windowsVars: true };
+
+/**
+ * On Windows the agent's shell may be sh (Git Bash), cmd.exe or PowerShell,
+ * so the line is read every way and a path that escapes under any reading is
+ * a violation.
+ */
+function readings(platform: NodeJS.Platform): ShellReading[] {
+	return platform === "win32" ? [POSIX_SHELL, WINDOWS_SHELL] : [POSIX_SHELL];
+}
+
 /** Argv tokens that look like file paths to a heuristic eye. */
-function looksLikePath(token: string): boolean {
+function looksLikePath(token: string, platform: NodeJS.Platform): boolean {
 	if (token.length === 0) return false;
-	// `--flag=value` form: peel the prefix and inspect the value side first,
-	// otherwise the leading `-` causes us to skip real path arguments.
-	if (token.startsWith("-") && token.includes("=")) {
-		const rhs = token.slice(token.indexOf("=") + 1);
-		return looksLikePath(rhs);
-	}
-	if (token.startsWith("-")) return false; // bare flag, not a path
 	if (token.includes("$") || token.includes("`")) return true; // suspicious expansion
+	if (platform === "win32" && (token.includes("\\") || /^[A-Za-z]:/.test(token))) return true;
 	return (
-		token.startsWith("/") ||
-		token.startsWith("./") ||
-		token.startsWith("../") ||
 		token === ".." ||
 		token === "." ||
 		token.includes("/") ||
@@ -323,10 +329,52 @@ function looksLikePath(token: string): boolean {
 	);
 }
 
-/** Strip `--flag=` prefix when present and return the value side. */
-function valueSide(token: string): string {
-	if (token.includes("=")) return token.slice(token.indexOf("=") + 1);
-	return token;
+/**
+ * The operand side of an argv token, or `null` for a bare flag. `--out=x`
+ * yields `x`, and on Windows so does PowerShell's `-Path:x`.
+ */
+function operandOf(token: string, platform: NodeJS.Platform): string | null {
+	if (token.startsWith("-")) {
+		const eq = token.indexOf("=");
+		if (eq !== -1) return token.slice(eq + 1);
+		const colon = token.indexOf(":");
+		if (platform === "win32" && colon !== -1) return token.slice(colon + 1);
+		return null;
+	}
+	const eq = token.indexOf("=");
+	return eq === -1 ? token : token.slice(eq + 1);
+}
+
+function envLookup(env: HomeEnv, name: string, platform: NodeJS.Platform): string | undefined {
+	if (platform !== "win32") return env[name];
+	const key = Object.keys(env).find((k) => k.toUpperCase() === name.toUpperCase());
+	return key === undefined ? undefined : env[key];
+}
+
+/**
+ * Expand `~`, `$VAR`, `${VAR}` and, for a Windows shell, `%VAR%` and
+ * `$env:VAR` the way the shell will before the command sees them, so a path
+ * rooted in the user's profile is checked where it really points. An unset
+ * `$VAR` expands to nothing; an unset `%VAR%` stays literal, as in cmd.exe.
+ */
+function expand(token: string, host: BoundaryHost, reading: ShellReading): string {
+	const { env, platform } = host;
+	let out = token;
+	if (reading.windowsVars) {
+		out = out.replace(/%([A-Za-z_][A-Za-z0-9_()]*)%/g, (m, name) => envLookup(env, name, platform) ?? m);
+		out = out.replace(/\$env:([A-Za-z_][A-Za-z0-9_]*)/gi, (_, name) => envLookup(env, name, platform) ?? "");
+	}
+	out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, braced, bare) => {
+		return envLookup(env, braced ?? bare, platform) ?? "";
+	});
+	const tilde = (platform === "win32" ? /^~([^/\\]*)(?=$|[/\\])/ : /^~([^/]*)(?=$|\/)/).exec(out);
+	if (tilde) {
+		const home = resolveHome(env, platform);
+		const flavor = pathFor(platform);
+		const base = tilde[1] ? flavor.join(flavor.dirname(home), tilde[1]) : home;
+		out = base + out.slice(tilde[0].length);
+	}
+	return out;
 }
 
 /**
@@ -335,56 +383,52 @@ function valueSide(token: string): string {
  * statements so paths in later segments are anchored to the chained cwd
  * (the holaOS attack surface).
  */
-export function extractAndCheckPaths(
-	command: string,
-	options: ExtractOptions,
-): BoundaryCheckResult {
-	const violations: BoundaryViolation[] = [];
-	let cwd = options.workspaceRoot;
+export function extractAndCheckPaths(command: string, options: ExtractOptions): BoundaryCheckResult {
+	const host = hostOf(options.host);
+	const { platform } = host;
+	const { workspaceRoot, allowedAbsolutePrefixes } = options;
+	const violations = new Map<string, BoundaryViolation>();
+	const flag = (raw: string, resolved: string, reason: string) => {
+		violations.set(`${raw}\0${resolved}`, { raw, resolved, reason });
+	};
+	const delimiter = pathFor(platform).delimiter;
 
-	for (const segment of splitPipeline(command)) {
-		const argv = tokenize(segment);
-		if (argv.length === 0) continue;
+	for (const reading of readings(platform)) {
+		let cwd = workspaceRoot;
+		for (const segment of splitPipeline(command, reading.escapes)) {
+			const argv = tokenize(segment, reading.escapes);
+			if (argv.length === 0) continue;
 
-		const head = argv[0];
-
-		// Track `cd <dir>` so subsequent segments resolve relative to it.
-		if (head === "cd" && argv.length >= 2) {
-			const target = valueSide(argv[1]);
-			const resolved = resolveSafe(target, cwd);
-			if (
-				!isWithinWorkspace(resolved, options.workspaceRoot) &&
-				!isAllowedByPrefix(resolved, options.allowedAbsolutePrefixes)
-			) {
-				violations.push({
-					raw: target,
-					resolved,
-					reason: `cd target escapes workspace root (${options.workspaceRoot})`,
-				});
+			let first = 1;
+			if (argv[0].toLowerCase() === "cd" && argv.length >= 2) {
+				// cmd.exe's `cd /d <dir>` also switches drive.
+				const hasDriveSwitch = platform === "win32" && argv.length >= 3 && argv[1].toLowerCase() === "/d";
+				const index = hasDriveSwitch ? 2 : 1;
+				const target = expand(operandOf(argv[index], platform) ?? argv[index], host, reading);
+				const resolved = resolveSafe(target, cwd, platform);
+				if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
+					flag(argv[index], resolved, `cd target escapes workspace root (${workspaceRoot})`);
+				}
+				cwd = resolved;
+				first = index + 1;
 			}
-			cwd = resolved;
-			continue;
-		}
 
-		for (let i = 1; i < argv.length; i++) {
-			const token = argv[i];
-			if (!looksLikePath(token)) continue;
+			for (const token of argv.slice(first)) {
+				const operand = operandOf(token, platform);
+				if (operand === null) continue;
+				const candidate = expand(operand, host, reading);
+				// `echo $PATH` names a search list, not a file.
+				if (candidate !== operand && candidate.includes(delimiter)) continue;
+				if (!looksLikePath(candidate, platform)) continue;
 
-			const candidate = valueSide(token);
-			const resolved = resolveSafe(candidate, cwd);
-
-			if (isAllowedByPrefix(resolved, options.allowedAbsolutePrefixes)) continue;
-			if (isWithinWorkspace(resolved, options.workspaceRoot)) continue;
-
-			violations.push({
-				raw: token,
-				resolved,
-				reason: `Path argument escapes workspace root (${options.workspaceRoot})`,
-			});
+				const resolved = resolveSafe(candidate, cwd, platform);
+				if (isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) continue;
+				flag(token, resolved, `Path argument escapes workspace root (${workspaceRoot})`);
+			}
 		}
 	}
 
-	return { allowed: violations.length === 0, violations };
+	return { allowed: violations.size === 0, violations: [...violations.values()] };
 }
 
 // ============================================
@@ -400,8 +444,9 @@ export function checkFilePathBoundary(
 	rawPath: string,
 	workspaceRoot: string,
 	allowedAbsolutePrefixes?: string[],
+	host?: Partial<BoundaryHost>,
 ): BoundaryCheckResult {
-	return checkPath(rawPath, workspaceRoot, { allowedAbsolutePrefixes });
+	return checkPath(rawPath, workspaceRoot, { allowedAbsolutePrefixes, host });
 }
 
 /**
@@ -413,9 +458,7 @@ export function checkCommandBoundary(
 	command: string,
 	workspaceRoot: string,
 	allowedAbsolutePrefixes?: string[],
+	host?: Partial<BoundaryHost>,
 ): BoundaryCheckResult {
-	return extractAndCheckPaths(command, {
-		workspaceRoot,
-		allowedAbsolutePrefixes,
-	});
+	return extractAndCheckPaths(command, { workspaceRoot, allowedAbsolutePrefixes, host });
 }
