@@ -4,8 +4,9 @@
  * Run commands in the background and retrieve their status/output later.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
+import { killProcessTree, spawnShell } from "../core/shell";
 
 // ============================================
 // Types
@@ -91,21 +92,20 @@ export class BackgroundTaskManager {
 		};
 
 		// Spawn the process
-		const proc = spawn("sh", ["-c", command], {
+		const proc = spawnShell(command, {
 			cwd: workingDirectory,
 			env: {
 				...process.env,
 				...options.env,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
-			detached: false,
 		});
 
 		task.process = proc;
 		this.tasks.set(id, task);
 
 		// Capture stdout
-		proc.stdout.on("data", (data) => {
+		proc.stdout?.on("data", (data) => {
 			const str = data.toString();
 			if (task.stdout.length + str.length <= this.maxOutputSize) {
 				task.stdout += str;
@@ -120,7 +120,7 @@ export class BackgroundTaskManager {
 		});
 
 		// Capture stderr
-		proc.stderr.on("data", (data) => {
+		proc.stderr?.on("data", (data) => {
 			const str = data.toString();
 			if (task.stderr.length + str.length <= this.maxOutputSize) {
 				task.stderr += str;
@@ -309,20 +309,14 @@ export class BackgroundTaskManager {
 		const task = this.tasks.get(taskId);
 		if (!task || !task.process) return false;
 
-		try {
-			task.process.kill("SIGTERM");
-
-			// Force kill after 5 seconds if still running
-			setTimeout(() => {
-				if (task.status === "running" && task.process) {
-					task.process.kill("SIGKILL");
-				}
-			}, 5000);
-
-			return true;
-		} catch {
-			return false;
-		}
+		const pid = task.process.pid;
+		killProcessTree(pid, "SIGTERM");
+		setTimeout(() => {
+			if (task.status === "running" && task.process) {
+				killProcessTree(pid, "SIGKILL");
+			}
+		}, 5000);
+		return true;
 	}
 
 	/**

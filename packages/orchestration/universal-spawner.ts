@@ -11,6 +11,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { killProcessTree, shellInvocation } from "../core/shell";
 
 // ============================================
 // Types
@@ -67,7 +68,7 @@ function generateCLIId(): string {
  * Spawn a CLI agent with the given runtime.
  *
  * - "claude": runs `claude --print --dangerously-skip-permissions "<task>"`
- * - "shell": runs `sh -c "<task>"`
+ * - "shell": runs the task through the platform shell (`sh -c`, or cmd.exe on Windows)
  * - "8gent": delegates to AgentPool (returns null — handled separately)
  */
 export function spawnCLIAgent(
@@ -88,6 +89,7 @@ export function spawnCLIAgent(
 
 	let cmd: string;
 	let args: string[];
+	let windowsVerbatimArguments = false;
 
 	switch (runtime) {
 		case "claude":
@@ -95,8 +97,7 @@ export function spawnCLIAgent(
 			args = ["--print", "--dangerously-skip-permissions", task];
 			break;
 		case "shell":
-			cmd = "sh";
-			args = ["-c", task];
+			({ file: cmd, args, windowsVerbatimArguments } = shellInvocation(task));
 			break;
 		default:
 			throw new Error(`Runtime "${runtime}" should be handled by AgentPool, not spawnCLIAgent`);
@@ -111,6 +112,8 @@ export function spawnCLIAgent(
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],
 		env: { ...process.env, ...(options.env || {}) },
+		windowsHide: true,
+		windowsVerbatimArguments,
 	});
 
 	const promise = new Promise<CLIAgentResult>((resolve) => {
@@ -120,13 +123,9 @@ export function spawnCLIAgent(
 			if (settled) return;
 			settled = true;
 			timedOut = true;
-			proc.kill("SIGTERM");
+			killProcessTree(proc.pid, "SIGTERM");
 			// Give it 5s to die gracefully, then SIGKILL
-			setTimeout(() => {
-				try {
-					proc.kill("SIGKILL");
-				} catch {}
-			}, 5000);
+			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 5000);
 
 			const result: CLIAgentResult = {
 				runtime,

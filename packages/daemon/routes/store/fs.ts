@@ -27,6 +27,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { killProcessTree, shellInvocation } from "../../../core/shell";
 import { evaluatePolicy } from "../../../permissions/policy-engine";
 import {
 	isWithinWorkspace,
@@ -563,7 +564,8 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	}
 
 	const start = Date.now();
-	const child = Bun.spawn(["/bin/sh", "-c", params.command], {
+	const sh = shellInvocation(params.command, { posix: ["/bin/sh", "-c"] });
+	const child = Bun.spawn([sh.file, ...sh.args], {
 		cwd: root,
 		env: {
 			PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -573,12 +575,10 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
+		windowsHide: true,
+		windowsVerbatimArguments: sh.windowsVerbatimArguments,
 	});
-	const killTimer = setTimeout(() => {
-		try {
-			child.kill();
-		} catch {}
-	}, 30_000);
+	const killTimer = setTimeout(() => killProcessTree(child.pid, "SIGTERM"), 30_000);
 	let stdout = "";
 	let stderr = "";
 	try {

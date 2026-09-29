@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { killProcessTree, spawnShell } from "../core/shell";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -1097,32 +1098,20 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
-	const { spawn } = await import("node:child_process");
-
 	return new Promise((resolve) => {
-		const proc = spawn("sh", ["-c", finalCommand], {
+		const proc = spawnShell(finalCommand, {
 			cwd: _ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
-			detached: true,
+			processGroup: true,
 		});
 
 		let stdout = "";
 		let stderr = "";
 		let settled = false;
 
-		const killProcessTree = () => {
-			try {
-				process.kill(-proc.pid!, "SIGTERM");
-				setTimeout(() => {
-					try {
-						process.kill(-proc.pid!, "SIGKILL");
-					} catch {}
-				}, 3000);
-			} catch {
-				try {
-					proc.kill("SIGKILL");
-				} catch {}
-			}
+		const killTree = () => {
+			killProcessTree(proc.pid, "SIGTERM");
+			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 3000);
 		};
 
 		proc.stdout.on("data", (data) => {
@@ -1157,7 +1146,7 @@ async function runShellCommand(command: string): Promise<string> {
 					`[STILL RUNNING - promoted to background task]\nTask ID: ${taskId}\nThe command didn't exit within 10s, so it was moved to a background task.\nUse background_status("${taskId}") or background_output("${taskId}") to check on it.\n${partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""}`,
 				);
 			} catch {
-				killProcessTree();
+				killTree();
 				resolve(
 					`TIMEOUT: Command still running after 10s. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
 				);
@@ -1168,7 +1157,7 @@ async function runShellCommand(command: string): Promise<string> {
 			if (settled) return;
 			settled = true;
 			clearTimeout(autoPromoteTimeout);
-			killProcessTree();
+			killTree();
 			hookManager.executeHooks("afterCommand", {
 				command: finalCommand,
 				exitCode: -1,

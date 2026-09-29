@@ -22,6 +22,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { shellInvocation } from "../core/shell";
 import { LEARNED_SKILLS_DIR } from "./compound.js";
 
 /**
@@ -32,10 +33,13 @@ import { LEARNED_SKILLS_DIR } from "./compound.js";
 export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } = (cmd) => {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const bun = (globalThis as any).Bun as { spawnSync?: Function } | undefined;
+	const sh = shellInvocation(cmd);
 	if (bun && typeof bun.spawnSync === "function") {
-		const proc = bun.spawnSync(["sh", "-c", cmd], {
+		const proc = bun.spawnSync([sh.file, ...sh.args], {
 			stdout: "pipe",
 			stderr: "pipe",
+			windowsHide: true,
+			windowsVerbatimArguments: sh.windowsVerbatimArguments,
 		});
 		const stderr =
 			proc.stderr && typeof proc.stderr.toString === "function" ? proc.stderr.toString() : "";
@@ -47,7 +51,11 @@ export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } =
 	// node fallback
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const { spawnSync } = require("node:child_process") as typeof import("child_process");
-	const result = spawnSync("sh", ["-c", cmd], { encoding: "utf-8" });
+	const result = spawnSync(sh.file, sh.args, {
+		encoding: "utf-8",
+		windowsHide: true,
+		windowsVerbatimArguments: sh.windowsVerbatimArguments,
+	});
 	return { exitCode: result.status ?? 1, stderr: result.stderr ?? "" };
 };
 
