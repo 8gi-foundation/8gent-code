@@ -18,6 +18,8 @@ const TOOL_CAPABILITIES: Record<string, Capability[]> = {
 	get_symbol: ["code", "code.symbol"],
 	search_symbols: ["code", "code.symbol"],
 	locate: ["code", "code.symbol"],
+	// Plan reporting: executes nothing, the TUI reads its args (#3035)
+	update_plan: ["workflow"],
 
 	// File operations
 	read_file: ["code"],

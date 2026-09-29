@@ -16,6 +16,7 @@ import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -259,6 +260,17 @@ const locate = tool({
 		);
 		return formatLocate(await runLocate(query, { root, repoId, indexPending: pending }));
 	},
+});
+
+const updatePlanTool = tool({
+	description: UPDATE_PLAN_DESCRIPTION,
+	inputSchema: z.object({
+		plan: z
+			.array(z.object({ step: z.string(), status: z.enum(PLAN_STATUSES) }))
+			.describe("Every step, in order"),
+	}),
+	// Executes nothing: the TUI reads the plan from the tool-start event.
+	execute: async ({ plan }) => updatePlan({ plan }),
 });
 
 // ============================================
@@ -2892,6 +2904,7 @@ export const agentTools = {
 	get_symbol: getSymbol,
 	search_symbols: searchSymbols,
 	locate,
+	update_plan: updatePlanTool,
 
 	// File operations
 	read_file: readFile,
