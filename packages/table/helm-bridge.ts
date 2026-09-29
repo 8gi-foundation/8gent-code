@@ -228,6 +228,23 @@ export function stagePending(p: HelmProposal, channelId: string, agentId: string
 }
 
 /**
+ * Read the live staged proposals WITHOUT consuming them, newest first.
+ *
+ * Exists for the tasks board, which has to show what is waiting on a human
+ * without spending the approval to find out. Expired entries are dropped on the
+ * way past (the same sweep stagePending does) so a caller can never be handed a
+ * proposal that /approve would refuse.
+ *
+ * This is a READ of the same map the approval path uses - deliberately not a
+ * second copy, so the board cannot drift from what is actually approvable.
+ */
+export function listPending(): PendingApproval[] {
+	const now = Date.now();
+	for (const [k, v] of PENDING) if (now - v.createdAt > TTL_MS) PENDING.delete(k);
+	return [...PENDING.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
  * Tasks that already RAN, so an officer cannot restage work it just did.
  *
  * James approved a diagram task. It ran and produced output. He said "i dont
@@ -336,6 +353,28 @@ async function helm(method: "GET" | "POST", route: string, body?: unknown): Prom
 	return { status: res.status, json };
 }
 
+/**
+ * Read the live worker fleet. READ-ONLY and deliberately narrow: the tasks
+ * board needs to see what is running without being handed the ability to spawn
+ * or stop anything, so it gets these two accessors rather than `helm()` itself.
+ * Throws on an unreachable relay so the caller can say so out loud instead of
+ * rendering an empty board that looks like "nothing is happening".
+ */
+export async function readWorkers(): Promise<unknown[]> {
+	const { status, json } = await helm("GET", "/helm/workers");
+	if (status !== 200) throw new Error(`relay returned ${status}`);
+	return Array.isArray(json?.workers) ? json.workers : [];
+}
+
+/** Tail of one worker's output. Empty string when the worker has printed
+ *  nothing or has already gone; never throws for a missing worker, because a
+ *  row without a tail is still a row worth showing. */
+export async function readWorkerOutput(id: string, tailLines = 60): Promise<string> {
+	const { status, json } = await helm("GET", `/helm/worker/${id}/output?tail=${tailLines}`);
+	if (status !== 200) return "";
+	return String(json?.output ?? "");
+}
+
 export interface ExecutionResult {
 	ok: boolean;
 	label: "verified" | "asserted" | "failed" | "needs_input";
@@ -373,7 +412,18 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 		...(p.model ? { model: p.model } : {}),
 		// Worker->officer attribution (opaque passthrough; Helm never interprets
 		// it, only displays it - same trust level as prompt_hash in its ledger).
-		meta: { officer: p.agentId.replace(/^agent:/, "") },
+		// `token` and `channel` ride along so a running worker traces back to the
+		// PROPOSAL that authorised it and the conversation it came from. Without
+		// them the tasks board could only correlate worker to proposal by officer
+		// and timestamp, which is a guess; with them it is proof. `isTask` records
+		// whether this was natural-language work or a shell line - the board shows
+		// the two differently because they read differently.
+		meta: {
+			officer: p.agentId.replace(/^agent:/, ""),
+			token: p.token,
+			channel: p.channelId,
+			isTask: p.isTask === true,
+		},
 	});
 	if (spawn.status !== 200 || !spawn.json?.id) {
 		return { ok: false, label: "failed", output: "", detail: `spawn failed (${spawn.status}): ${JSON.stringify(spawn.json).slice(0, 200)}` };

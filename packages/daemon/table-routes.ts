@@ -61,6 +61,7 @@ import {
 	stageAwaiting,
 	takeAwaiting,
 } from "../table/helm-bridge";
+import { buildBoard, liveSources } from "../table/board";
 import { discoverAll, formatDiscovery } from "../table/discovery";
 import { resolveHarness } from "../table/harness-config";
 import { artifactDirFor, humanBytes } from "../table/artifacts";
@@ -162,7 +163,13 @@ export interface TableRouteDeps {
 export function isTableFrame(type: unknown): boolean {
 	return (
 		typeof type === "string" &&
-		(type.startsWith("channel:") || type.startsWith("message:") || type.startsWith("huddle:"))
+		(type.startsWith("channel:") ||
+			type.startsWith("message:") ||
+			type.startsWith("huddle:") ||
+			// `board:*` is the tasks board (packages/table/board.ts). Routed here so
+			// it inherits the same F1 loopback guard as every other Table frame - it
+			// reads what the officers are running, which is not public.
+			type.startsWith("board:"))
 	);
 }
 
@@ -205,6 +212,20 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 	// this same pinned `actor` - never re-derived, never re-trusted.
 	if (type.startsWith("huddle:")) {
 		return handleHuddleFrame(deps, msg, actor);
+	}
+
+	// The tasks board. READ-ONLY by construction: it derives rows from the
+	// pending map and the live worker fleet and returns them. There is no
+	// `board:approve` and there never should be - approval stays on the existing
+	// `/approve <token>` message path, where a human types it as themselves into
+	// a channel and it lands in the ledger. A one-click approve button on a board
+	// would be a second, quieter authorisation path around that, which is exactly
+	// the thing the bridge's safety model exists to prevent.
+	if (type === "board:get") {
+		buildBoard(liveSources)
+			.then((board) => sendRaw({ type: "board:state", id, ...board }))
+			.catch((err) => replyError(sendRaw, id, err));
+		return true;
 	}
 
 	try {
