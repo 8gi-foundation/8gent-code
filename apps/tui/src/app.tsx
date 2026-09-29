@@ -183,6 +183,7 @@ import {
 	deriveProviders,
 	deriveAgents,
 	deriveActiveTasks,
+	planStepsFromText,
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import {
@@ -573,6 +574,13 @@ type ViewMode =
 	| "history"
 	| "music"
 	| "message-viewer";
+
+// Honest empty states for the plan surfaces. Both fill only from a real
+// source; neither is ever padded with placeholder rows.
+const PLAN_EMPTY_LINE =
+	"No plan steps yet. They appear when the agent writes a PLAN: with numbered steps while working on a request.";
+const AVENUES_EMPTY_LINE =
+	"No avenues in this session. Nothing produces them yet, so this stays empty rather than showing guesses.";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -984,7 +992,10 @@ export function App({
 
 	// Auto-populating kanban from real agent events
 	const autoKanban = useAutoKanban();
-	const [avenues, setAvenues] = useState<Avenue[]>([]);
+	// No real source produces avenues yet (packages/planning AvenueTracker is
+	// keyword triggers with invented probabilities). Stays empty until one does;
+	// /avenues says so in one line instead of showing placeholder paths.
+	const [avenues] = useState<Avenue[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [predictedSteps, setPredictedSteps] = useState<ProactiveStep[]>([]);
@@ -2150,32 +2161,30 @@ export function App({
 				}
 
 				if (isActive && event.text?.trim()) {
-					const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
-					if (planMatch) {
-						const planText = planMatch[1];
-						const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
-						if (stepMatches && stepMatches.length > 0) {
-							const steps = stepMatches.map((s, i) => ({
-								id: `plan-${Date.now()}-${i}`,
-								description: s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim(),
-								tool: "auto",
-								input: {},
-								priority: stepMatches.length - i,
-								confidence: 0.9,
-								category: "plan" as const,
-								predictedAt: new Date(),
-								basedOn: [],
-							}));
-							setKanbanBoard({
-								backlog: steps.slice(3) as any,
-								ready: steps.slice(0, 3) as any,
-								inProgress: [],
-								done: [],
-							});
-							setPredictedSteps(steps);
-							setPlanNextStep(steps[0]?.description || null);
-							setProcessingStage("executing");
-						}
+					// The only source of plan steps is the plan the agent itself
+					// wrote in this run. Nothing is guessed from the user's words.
+					const planLines = planStepsFromText(event.text);
+					if (planLines.length > 0) {
+						const steps = planLines.map((description, i) => ({
+							id: `plan-${Date.now()}-${i}`,
+							description,
+							tool: "auto",
+							input: {},
+							priority: planLines.length - i,
+							confidence: 1,
+							category: "plan" as const,
+							predictedAt: new Date(),
+							basedOn: [`step-${event.stepNumber}`],
+						}));
+						setKanbanBoard({
+							backlog: steps.slice(3) as any,
+							ready: steps.slice(0, 3) as any,
+							inProgress: [],
+							done: [],
+						});
+						setPredictedSteps(steps);
+						setPlanNextStep(steps[0]?.description || null);
+						setProcessingStage("executing");
 					}
 				}
 
@@ -2584,24 +2593,40 @@ export function App({
 					break;
 
 				case "predict":
+					if (predictedSteps.length === 0) {
+						addSystemMessage(PLAN_EMPTY_LINE);
+						break;
+					}
 					setViewMode((prev) => (prev === "predict" ? "chat" : "predict"));
 					break;
 
 				case "avenues":
+					if (avenues.length === 0) {
+						addSystemMessage(AVENUES_EMPTY_LINE);
+						break;
+					}
 					setViewMode((prev) => (prev === "avenues" ? "chat" : "avenues"));
 					break;
 
-				case "plan":
+				case "plan": {
+					const planTotal =
+						kanbanBoard.backlog.length +
+						kanbanBoard.ready.length +
+						kanbanBoard.inProgress.length +
+						kanbanBoard.done.length;
 					if (autoKanban.stats.total > 0) {
 						addSystemMessage(
 							`Task board (auto):\n  Backlog: ${autoKanban.columns.backlog.length}\n  Ready: ${autoKanban.columns.ready.length}\n  In Progress: ${autoKanban.columns.inProgress.length}\n  Done: ${autoKanban.stats.done} | Failed: ${autoKanban.stats.failed}\n  Total: ${autoKanban.stats.total} tasks`,
 						);
-					} else {
+					} else if (planTotal > 0) {
 						addSystemMessage(
 							`Current plan status:\n  Backlog: ${kanbanBoard.backlog.length} items\n  Ready: ${kanbanBoard.ready.length} items\n  In Progress: ${kanbanBoard.inProgress.length} items\n  Done: ${kanbanBoard.done.length} items`,
 						);
+					} else {
+						addSystemMessage(PLAN_EMPTY_LINE);
 					}
 					break;
+				}
 
 				case "status": {
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
@@ -4747,147 +4772,6 @@ export function App({
 		// clearActivity() removed — keep completed tools in the process log as history
 	}, []);
 
-	// Generate predictions based on input
-	const generatePredictions = useCallback((input: string) => {
-		const inputLower = input.toLowerCase();
-		const predictions: ProactiveStep[] = [];
-
-		// Generate context-aware predictions
-		if (inputLower.includes("fix") || inputLower.includes("bug")) {
-			predictions.push({
-				id: `pred-${Date.now()}-1`,
-				description: "Run tests to verify fix",
-				tool: "exec",
-				input: { command: "npm test" },
-				priority: 9,
-				confidence: 0.85,
-				category: "test",
-				predictedAt: new Date(),
-				basedOn: [],
-			});
-		}
-
-		if (inputLower.includes("add") || inputLower.includes("create")) {
-			predictions.push({
-				id: `pred-${Date.now()}-2`,
-				description: "Create test file for new feature",
-				tool: "write_file",
-				input: {},
-				priority: 7,
-				confidence: 0.7,
-				category: "test",
-				predictedAt: new Date(),
-				basedOn: [],
-			});
-		}
-
-		// Always add some general predictions
-		predictions.push(
-			{
-				id: `pred-${Date.now()}-3`,
-				description: "Search for related code",
-				tool: "search_symbols",
-				input: { query: input.split(" ").slice(0, 3).join(" ") },
-				priority: 6,
-				confidence: 0.6,
-				category: "exploration",
-				predictedAt: new Date(),
-				basedOn: [],
-			},
-			{
-				id: `pred-${Date.now()}-4`,
-				description: "Commit changes",
-				tool: "exec",
-				input: { command: "git commit" },
-				priority: 5,
-				confidence: 0.5,
-				category: "git",
-				predictedAt: new Date(),
-				basedOn: [],
-			},
-		);
-
-		return predictions.sort((a, b) => b.confidence * b.priority - a.confidence * a.priority);
-	}, []);
-
-	// Generate avenues based on input
-	const generateAvenues = useCallback((input: string): Avenue[] => {
-		const inputLower = input.toLowerCase();
-		const avenues: Avenue[] = [];
-
-		if (inputLower.includes("fix") || inputLower.includes("bug") || inputLower.includes("error")) {
-			avenues.push({
-				id: `avenue-${Date.now()}-1`,
-				name: "Fix Bug",
-				description: `Debug and fix: ${input.slice(0, 30)}...`,
-				probability: 0.8,
-				category: "bugfix",
-				triggers: ["fix", "bug", "error"],
-				plan: {
-					goal: "Fix the reported issue",
-					steps: [
-						{
-							id: "1",
-							description: "Search for error",
-							tool: "search_symbols",
-						},
-						{ id: "2", description: "Get symbol details", tool: "get_symbol" },
-						{ id: "3", description: "Apply fix", tool: "edit_file" },
-					],
-					estimatedTime: 120,
-				},
-			});
-		}
-
-		if (
-			inputLower.includes("add") ||
-			inputLower.includes("create") ||
-			inputLower.includes("implement")
-		) {
-			avenues.push({
-				id: `avenue-${Date.now()}-2`,
-				name: "Implement Feature",
-				description: `Build: ${input.slice(0, 30)}...`,
-				probability: 0.7,
-				category: "feature",
-				triggers: ["add", "create", "implement"],
-				plan: {
-					goal: "Implement the new feature",
-					steps: [
-						{
-							id: "1",
-							description: "Search existing code",
-							tool: "search_symbols",
-						},
-						{ id: "2", description: "Create new file", tool: "write_file" },
-						{ id: "3", description: "Add tests", tool: "write_file" },
-					],
-					estimatedTime: 180,
-				},
-			});
-		}
-
-		// Always add exploration avenue
-		avenues.push({
-			id: `avenue-${Date.now()}-3`,
-			name: "Explore Codebase",
-			description: `Understand: ${input.slice(0, 30)}...`,
-			probability: 0.5,
-			category: "explore",
-			triggers: ["show", "find", "where", "what"],
-			plan: {
-				goal: "Understand the relevant code",
-				steps: [
-					{ id: "1", description: "Get file outline", tool: "get_outline" },
-					{ id: "2", description: "Search symbols", tool: "search_symbols" },
-				],
-				estimatedTime: 60,
-			},
-		});
-
-		return avenues.sort((a, b) => b.probability - a.probability);
-	}, []);
-
 	// Handle command submission. Defaults to the active tab; pass `submitTabId`
 	// explicitly to route a submission to a specific (potentially non-active)
 	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
@@ -5133,18 +5017,14 @@ export function App({
 				return;
 			}
 
-			// Foreground-only: kanban / avenues only reset on active tab.
+			// Foreground-only: the plan board resets on the active tab so a new
+			// request never inherits the previous run's steps. Nothing is seeded
+			// here: the board fills only from the plan the agent writes during
+			// this run (PLAN: text), a live tool call, or a step the user accepts.
 			if (tabId === activeTabId) {
-				const newPredictions = generatePredictions(routeHint);
-				setPredictedSteps(newPredictions);
-				setPlanNextStep(newPredictions[0]?.description || null);
-				const newAvenues = generateAvenues(routeHint);
-				setAvenues(newAvenues);
-				setKanbanBoard((prev) => ({
-					...prev,
-					ready: newPredictions.slice(0, 3) as any,
-					backlog: newPredictions.slice(3) as any,
-				}));
+				setPredictedSteps([]);
+				setPlanNextStep(null);
+				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
 			}
 
 			if (!currentModel) {
