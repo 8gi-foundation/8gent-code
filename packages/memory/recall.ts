@@ -10,6 +10,7 @@
  */
 
 import { getEmbeddingProvider } from "./embeddings.js";
+import { MemoryRecallError } from "./recall-error.js";
 import type { MemoryStore } from "./store.js";
 import type { MemoryType, SearchOptions, SearchResult } from "./types.js";
 
@@ -85,8 +86,18 @@ export class SemanticRecall {
 			}
 
 			return results.slice(0, limit);
-		} catch {
-			return [];
+		} catch (err) {
+			// Fail loudly. Returning [] here is indistinguishable from "there are
+			// no memories", so a broken store makes the agent look like an agent
+			// with no memory: it silently re-learns things it already knows, and
+			// the failure is invisible because nothing is logged. The memory path
+			// has already been the site of this three times (unreadable store
+			// reported as empty, at three sites). An error that is visible to the
+			// caller is recoverable; one that looks like an empty world is not.
+			throw new MemoryRecallError(
+				`recall failed for ${JSON.stringify(query)}: ${err instanceof Error ? err.message : String(err)}. ` +
+					`This is a store failure, not an empty result - do not treat it as "no memories".`,
+			);
 		}
 	}
 

@@ -12,6 +12,41 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
 
+### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2959)
+
+- **Sender allowlist.** The bridge authenticated inbound updates by chat id
+  only, and `dispatch-policy.ts` grants the `telegram` channel full
+  capability on the strength of that, assuming the allowlisted chat is one
+  operator's private chat. In a group that assumption fails: every member
+  could prompt an agent holding tools in the operator's home directory.
+  `TELEGRAM_AUTHORIZED_USER_IDS` is now checked at the same three points as
+  the chat allowlist, and fails closed: without it, a private chat behaves as
+  before and a group rejects every sender.
+- **Reply routing.** The daemon's wire format carries no chat id, so every
+  outbound went to the first allowlisted chat. With a group and a private
+  chat both allowlisted, a message sent in one was answered in the other. The
+  bridge now remembers the originating chat for the turn in flight and
+  replies there; the adapter and file sender take a resolver instead of a
+  fixed string. One field is sound rather than racy because `agentBusy`
+  already admits one prompt at a time.
+- **Consent.** Approvals were bound to the chat, not the person, so any
+  allowlisted sender could press Approve on a tool call, and an approval
+  raised in one chat could be resolved from another. Approvals are now bound
+  to the chat that raised them, and only `TELEGRAM_OPERATOR_USER_IDS` may
+  decide. Conversation and consent are different powers.
+
+### Fixed - the repo lint passes, so the CI gate can gate (#2961)
+
+- `bun run lint` had exited 1 on `main` since at least 2026-08-25, so the
+  `Validate` job failed on every pull request whatever it contained. Ten
+  errors across nine files are fixed: seven mechanical and
+  behaviour-preserving, three where the rule mis-reads correct code and now
+  carries a suppression with its reason. The 1417 warnings are untouched;
+  this makes the gate work, it does not clean the repo.
+
+### Added
+- `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
+
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"

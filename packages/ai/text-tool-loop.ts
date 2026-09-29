@@ -7,6 +7,13 @@
  * the results back as a follow-up user message, and repeats until the model
  * replies with prose and no further tool calls (or a round cap is reached).
  *
+ * The follow-up message tells the model to keep calling tools until every step
+ * the user asked for is done: plain prose ends the turn, so prose is reserved
+ * for reporting completion or asking the user a genuine question. As a bounded
+ * backstop, a reply that structurally cannot be a final answer (see
+ * isUnfinishedReply) right after a successful tool round gets ONE "continue"
+ * message per turn.
+ *
  * A tool that throws never breaks the loop: the error is turned into a short
  * string result and fed back to the model like any other tool output. The only
  * network/I/O the loop performs is whatever the caller's `call` and the tools'
@@ -82,6 +89,72 @@ const SHELL_WRITE_NOTE =
 	"was written unless you call write_file and see its success result.";
 
 /**
+ * The message fed back when a reply ended inside an unclosed tool_call block.
+ * Structural, not a guess at wording: the parser saw a `tool_call` fence whose
+ * JSON object never closed.
+ */
+export function cutOffToolCallMessage(name: string | null): string {
+	const which = name ? `Your ${name} tool_call` : "Your last tool_call";
+	return (
+		`Error: ${which} was cut off before its JSON closed, most likely because ` +
+		"the reply hit the model's output token limit. Nothing was run. If you " +
+		"were writing a file, write it in smaller parts: call write_file with the " +
+		"first part, then add the rest with edit_file in further calls. Keep each " +
+		"tool_call short enough to finish."
+	);
+}
+
+/**
+ * The instruction appended after every round of tool results. The previous
+ * wording ("If you have enough information, reply with your final answer as
+ * plain prose") invited the model to stop after ANY step of a multi-step task:
+ * a local model that had just written deck/outline.md replied "Now let me write
+ * the Marp-style deck:" with no tool call, and that ended the turn. Plain prose
+ * with no tool_call block always ends the turn, so the instruction says so and
+ * reserves prose for the two cases where ending is right.
+ */
+export const FOLLOW_UP_INSTRUCTION = [
+	"If any step the user asked for is not done yet, call the tool for the next",
+	"step now: reply with only the tool_call block(s), and do not announce the",
+	"step first. A reply with no tool_call block ENDS your turn, so reply with",
+	"plain prose only when every step the user asked for is done (say what you",
+	"did) or when you must ask the user a question that no tool can answer.",
+].join("\n");
+
+/** The one continuation message a turn may receive (see isUnfinishedReply). */
+export const CONTINUE_MESSAGE =
+	"Your last reply had no tool_call block, so nothing ran. Continue with the " +
+	"next step now by calling its tool, or, if every step the user asked for is " +
+	"done, state that you are finished and summarise what you did.";
+
+/** Upper bound (in characters, trimmed) for a reply isUnfinishedReply flags. */
+export const NOT_FINAL_MAX_CHARS = 200;
+
+/**
+ * Does this no-tool-call reply structurally fail to be a final answer?
+ *
+ * Structural only: the reply's length and its last character, never its words.
+ * - Empty (after trimming): there is no answer at all.
+ * - Shorter than NOT_FINAL_MAX_CHARS and ending in ":": a colon at the very end
+ *   of a text introduces something that follows it, and nothing follows. That
+ *   is the shape of a lead-in to an action the model never took (the pilot's
+ *   "Now let me write the Marp-style deck:"). The length bound keeps a long
+ *   reply that carries a real report, and merely ends on a colon, from being
+ *   second-guessed.
+ * A reply ending in "?" (a question to the user) or "." is left alone.
+ */
+export function isUnfinishedReply(content: string): boolean {
+	const t = content.trim();
+	if (t.length === 0) return true;
+	return t.length < NOT_FINAL_MAX_CHARS && t.endsWith(":");
+}
+
+/** executeTool's own failures, and tools' conventional error results. */
+function isErrorResult(result: string): boolean {
+	return /^\s*error\b/i.test(result);
+}
+
+/**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
  * throwing `run` is captured as a short error string so the loop can feed it
  * back to the model instead of aborting.
@@ -125,6 +198,10 @@ export async function runTextToolAgent(
 	// so we own the growth here.
 	let messages: TextToolMessage[] = opts.messages.slice();
 	let lastContent = "";
+	// Did the previous round run at least one tool that did not error?
+	let prevRoundHadSuccess = false;
+	// The bounded continuation fires at most once per turn.
+	let continued = false;
 
 	for (let round = 1; round <= maxRounds; round++) {
 		// Stop before starting another round if the caller aborted (turn timeout,
@@ -139,16 +216,62 @@ export async function runTextToolAgent(
 		});
 		lastContent = turn.content;
 
+		// A reply that stopped inside a tool_call block (output token limit) is
+		// neither a final answer nor a runnable call. Tell the model exactly what
+		// happened and let it try again in smaller pieces, instead of ending the
+		// turn on its partial JSON or a bare "Unterminated string".
+		let cutOffNote = "";
+		if (turn.cutOffToolCall) {
+			cutOffNote = cutOffToolCallMessage(turn.cutOffToolCall.name);
+			// No round left to retry in: surface the error as the turn's text.
+			if (round === maxRounds) {
+				lastContent = [turn.content, cutOffNote].filter(Boolean).join("\n\n");
+			}
+			if (turn.toolCalls.length === 0) {
+				if (round === maxRounds) break;
+				// Nothing ran this round, so the next round no longer directly
+				// follows a successful tool round.
+				prevRoundHadSuccess = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: turn.content },
+					{ role: "user", content: cutOffNote },
+				];
+				continue;
+			}
+		}
+
 		if (turn.toolCalls.length === 0) {
+			// One bounded continuation: straight after a successful tool round, a
+			// reply that cannot be a final answer (isUnfinishedReply) is most
+			// likely an announced step the model forgot to take. Ask once, and
+			// only while a round remains; the next no-tool-call reply is final.
+			if (
+				!continued &&
+				prevRoundHadSuccess &&
+				round < maxRounds &&
+				isUnfinishedReply(turn.content)
+			) {
+				continued = true;
+				prevRoundHadSuccess = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: turn.content },
+					{ role: "user", content: CONTINUE_MESSAGE },
+				];
+				continue;
+			}
 			// Model gave its final answer.
 			return { content: turn.content, rounds: round, toolLog };
 		}
 
 		// Execute every requested tool and build a single labelled result block.
 		const resultParts: string[] = [];
+		prevRoundHadSuccess = false;
 		for (const tc of turn.toolCalls) {
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
+			if (!isErrorResult(result)) prevRoundHadSuccess = true;
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
 			// this result so the next round is steered back to the right tool.
@@ -163,6 +286,7 @@ export async function runTextToolAgent(
 		// user turn, and loop. We feed the raw turn content (prose minus the
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
+		if (cutOffNote) resultParts.push(cutOffNote);
 		messages = [
 			...messages,
 			{ role: "assistant", content: turn.content },
@@ -171,8 +295,7 @@ export async function runTextToolAgent(
 				content: [
 					...resultParts,
 					"",
-					"Use these tool results to answer. If you have enough information,",
-					"reply with your final answer as plain prose (no tool_call block).",
+					FOLLOW_UP_INSTRUCTION,
 				].join("\n"),
 			},
 		];

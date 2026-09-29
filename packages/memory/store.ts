@@ -10,6 +10,7 @@
 
 import { Database } from "bun:sqlite";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
+import { admitMemory } from "./admission.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import {
 	type VecLoadResult,
@@ -327,8 +328,14 @@ export class MemoryStore {
 	/**
 	 * Store a memory. Generates an embedding asynchronously if provider is available.
 	 * Returns the memory ID.
+	 *
+	 * Admission gate: content passes through `admitMemory()` first, so this is the
+	 * single choke point covering every caller — `MemoryManager`, the shared bus,
+	 * migrations, and `writeBatch`. Throws MemoryTrustError on content that may not
+	 * be stored (see docs/specs/MEMORY-SPEC.md).
 	 */
 	write(memory: Memory): string {
+		memory = admitMemory(memory);
 		const now = Date.now();
 		const id = memory.id || generateId("mem");
 		const contentText = extractContentText(memory);

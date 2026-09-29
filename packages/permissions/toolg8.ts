@@ -133,7 +133,13 @@ export class ToolG8 {
 			} else if (bash?.denied) {
 				result.reason = `[bash-segment] ${bash.reason ?? "denied by per-segment policy"}`;
 			}
-			result.alternative = this.suggestAlternative(action);
+			// The generic write_file hint ("use edit_file with targeted
+			// replacements") is misleading for a secrets block: the problem is
+			// the content, not the write method, and the rule's own message
+			// already says what to do (.env + process.env).
+			result.alternative = result.reason?.includes("[no-secrets-in-files]")
+				? undefined
+				: this.suggestAlternative(action);
 		}
 
 		// Audit log (fire-and-forget, never blocks)

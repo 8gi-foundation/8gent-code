@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { indexFolder as astIndexFolder } from "../ast-index";
+import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
@@ -28,6 +28,7 @@ import {
 } from "../memory/session-kg.js";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
+import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -71,6 +72,7 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
+import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
 	type CheckpointEntry,
@@ -234,6 +236,10 @@ export class Agent {
 				unattended: config.unattended ?? false,
 			},
 		);
+		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
+		// background, so the first gated command does not pay the model load.
+		// Idempotent per process; flag off it is a no-op with no import.
+		startSystemOneWarmup()?.catch(() => {});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -283,11 +289,12 @@ export class Agent {
 		// constructed lazily on first observe so providerConfig is in scope.
 		this.twoStageCompactor = null;
 
-		// Fire-and-forget AST indexing of working directory for AST-first retrieval.
-		// Lite mode skips it — first AST tool call will index on demand.
+		// AST index for AST-first retrieval. ensureIndexed returns the build the
+		// ToolExecutor above already started for this folder, so this only
+		// attaches the debug log; it never indexes the repo a second time.
 		const cwd = config.workingDirectory || process.cwd();
 		if (!LITE) {
-			astIndexFolder(cwd)
+			astEnsureIndexed(cwd)
 				.then((index) => {
 					// Gated behind DEBUG: stdout writes after Ink mounts get buffered
 					// above the frame and push the rounded header out of the viewport.
@@ -769,6 +776,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				baseUrl: this.config.baseUrl,
 				temperature: getRuntimeParams().temperature ?? 0.2,
 				signal,
+				// Same limit as withTurnTimeout below, so EIGHT_TURN_TIMEOUT_MS is the
+				// only thing that bounds a model step (never Bun's hidden 300 s cap).
+				timeoutMs: attemptTimeoutMs,
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;
@@ -848,6 +858,31 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			}
 		}
 
+		// A turn that ends in an error is still a run: record it in runs.jsonl
+		// with status "error" and the reason, like a successful turn records "ok".
+		const recordFailedRun = (reason: string) => {
+			if (!this.enableReporting) return;
+			try {
+				appendRun(
+					failedTurnRunEntry({
+						model: this.config.model,
+						startedAt: chatStartTime,
+						tokens: usageTotals.totalTokens,
+						cost: this.totalCost,
+						tools: this.turnToolLedger.length,
+						created: Array.from(this.sessionWriter.getFilesCreated()),
+						modified: Array.from(this.sessionWriter.getFilesModified()),
+						session: this.sessionId,
+						cwd: this.config.workingDirectory || process.cwd(),
+						prompt: textForAgent,
+						reason,
+					}),
+				);
+			} catch {
+				// The run log is best-effort; it must never mask the turn's reply.
+			}
+		};
+
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
 			// A missing/unavailable local model must never surface a raw provider
@@ -868,6 +903,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			if (!outcome.ok) {
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
+				recordFailedRun(`no local model: ${outcome.message}`);
 				return outcome.message;
 			}
 			if (outcome.rerouted) {
@@ -877,22 +913,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			}
 			agentResult = outcome.value;
 		} catch (err) {
-			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
-			// timeout, or an abort. Return a friendly turn in the normal chat()
-			// shape so the TUI/Pill render it cleanly instead of throwing a raw
-			// fetch error up through the surface.
+			// Provider down (ECONNREFUSED -> raw "fetch failed"), a model step
+			// that ran past EIGHT_TURN_TIMEOUT_MS, or an abort. Return a friendly
+			// turn in the normal chat() shape so the TUI/Pill render it cleanly
+			// instead of throwing a raw fetch error up through the surface. A slow
+			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
-			const raw = err instanceof Error ? err.message : String(err);
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
-			const isReachability =
-				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
-					raw,
-				);
-			const friendly = isReachability
-				? `The local model endpoint (${endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`
-				: `The local model turn could not complete: ${raw}`;
-			this.messageHistory.push({ role: "assistant", content: friendly });
-			return friendly;
+			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
+			this.messageHistory.push({ role: "assistant", content: failure.message });
+			recordFailedRun(failure.reason);
+			return failure.message;
 		}
 		this.abortController = null;
 
@@ -1161,6 +1192,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"get_outline",
 			"get_symbol",
 			"search_symbols",
+			"locate",
 			"git_status",
 			"git_diff",
 			"git_add",

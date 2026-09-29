@@ -12,20 +12,44 @@ import { fileURLToPath } from "node:url";
 
 const VERSION = "0.17.3";
 
-// Resolve the directory of this script across runtimes. `__dirname` is
-// undefined in pure ESM and unreliable after bundling, so derive it from
-// `import.meta.url` (works under Bun, Node ESM, and bundled output).
-const BIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+// Two different "here" directories matter, and conflating them is what broke
+// the compiled build:
+//
+//   MODULE_DIR - the directory this *module* was loaded from. Under an npm
+//     install that is `<pkg>/dist` (the module is the bundled `dist/cli.js`);
+//     from a git checkout it is `<repo>/bin`. Correct for anything that ships
+//     next to this file, e.g. `dist/tui.js` or `bin/lil-eight.sh`.
+//
+//   EXEC_DIR - the directory of the *running executable*. `bun build --compile`
+//     embeds the module graph in Bun's virtual filesystem, where
+//     `import.meta.url` is `B:/~BUN/root/<entry>` (Windows) or
+//     `/$bunfs/root/<entry>` (POSIX) instead of a real path. `process.execPath`
+//     is the only valid anchor there, and it is the directory the installer
+//     drops `tui.js` into. (`process.argv[0]` is literally "bun" in a compiled
+//     binary, so it is no help.)
+//
+// `import.meta.url` is reliable under Bun, Node ESM, and a non-compiled bundle;
+// only the compiled case needs EXEC_DIR.
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const EXEC_DIR = path.dirname(process.execPath);
 
-// Walk up from BIN_DIR to find the source tree root. When installed via
-// npm we only ship `dist/cli.js` + `bin/8gent-run.js`, so packages/apps/
-// scripts don't exist alongside the bundle — `repoRoot()` returns null in
-// that case and dev-only commands print a clear error instead of trying
-// to spawn a missing file with a Windows path that has never existed.
+// MODULE_DIR points into Bun's embedded filesystem rather than the user's disk.
+// It still passes `fs.existsSync`, but only the embedded modules are readable
+// there, so joining paths onto it is meaningless.
+const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
+
+// Walk up from MODULE_DIR to find the source tree root. When installed via
+// npm we only ship `dist/cli.js` + `dist/tui.js`, so packages/apps/
+// scripts don't exist alongside the bundle, so `repoRoot()` returns null in
+// that case, and always in a compiled binary, where there is no source tree
+// to find relative to a virtual module path. Dev-only commands then print a
+// clear error instead of trying to spawn a missing file with a Windows path
+// that has never existed.
 function repoRoot(): string | null {
+	if (MODULE_IS_EMBEDDED) return null;
 	const candidates = [
-		path.join(BIN_DIR, ".."),
-		path.join(BIN_DIR, "..", ".."),
+		path.join(MODULE_DIR, ".."),
+		path.join(MODULE_DIR, "..", ".."),
 	];
 	for (const candidate of candidates) {
 		if (
@@ -1058,7 +1082,9 @@ async function spawnPet(sessionId?: string) {
 	} catch {}
 
 	const root = repoRoot();
-	const lilEightScript = path.join(BIN_DIR, "lil-eight.sh");
+	// `bin/lil-eight.sh` is a source-checkout sibling of this module; it is not
+	// shipped in dist or embedded in a compiled binary, so MODULE_DIR is right.
+	const lilEightScript = path.join(MODULE_DIR, "lil-eight.sh");
 
 	// Kill existing pets, then spawn fresh
 	try {
@@ -1169,14 +1195,23 @@ async function tuiCommand(args: string[]) {
 }
 
 /**
- * Find the TUI entry. Prefer a bundled `dist/tui.js` (shipped via npm),
- * fall back to the source `apps/tui/src/index.tsx` when running from a
- * git checkout. Returns null when neither exists so the caller can print
- * a clear error instead of spawning bun against a phantom path.
+ * Find the TUI entry, trying each layout the tool can be installed in:
+ *
+ *   1. `tui.js` next to this module: the npm/bundled layout, where it ships
+ *      as `dist/tui.js` beside `dist/cli.js`.
+ *   2. `tui.js` next to the executable: the `bun build --compile` layout. The
+ *      module path is virtual there (see MODULE_IS_EMBEDDED), so the copy the
+ *      installer placed next to the binary is the one that must be picked up.
+ *   3. `apps/tui/src/index.tsx`: running from a git checkout.
+ *
+ * Returns null when none exists so the caller can print a clear error instead
+ * of spawning bun against a phantom path.
  */
 function resolveTuiEntry(): string | null {
-	const bundled = path.join(BIN_DIR, "tui.js");
-	if (fs.existsSync(bundled)) return bundled;
+	for (const dir of [MODULE_DIR, EXEC_DIR]) {
+		const bundled = path.join(dir, "tui.js");
+		if (fs.existsSync(bundled)) return bundled;
+	}
 	const root = repoRoot();
 	if (root) {
 		const src = path.join(root, "apps", "tui", "src", "index.tsx");
@@ -1263,7 +1298,8 @@ async function airdropCommand(args: string[]) {
 async function petCommand(args: string[]) {
 	const subCmd = args[0] || "start";
 	const { execSync } = await import("node:child_process");
-	const lilEightScript = path.join(BIN_DIR, "lil-eight.sh");
+	// Same checkout-only sibling asset as in spawnPet(): MODULE_DIR, not EXEC_DIR.
+	const lilEightScript = path.join(MODULE_DIR, "lil-eight.sh");
 	const root = repoRoot();
 
 	if (!fs.existsSync(lilEightScript)) {

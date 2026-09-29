@@ -93,7 +93,7 @@ describe("clampVerdict", () => {
 describe("EditThrottle", () => {
 	test("coalesces a burst into one edit instead of one per officer", async () => {
 		const seen: string[] = [];
-		let now = 0;
+		const now = 0;
 		const t = new EditThrottle(
 			async (text) => {
 				seen.push(text);

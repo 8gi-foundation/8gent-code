@@ -95,3 +95,110 @@ describe("handleCallbackQuery authorization", () => {
 		expect(calls.filter((c) => c.includes("editMessageText"))).toEqual([]);
 	});
 });
+
+// ── Sender allowlist ────────────────────────────────────────────────
+//
+// The chat allowlist names WHERE the bridge listens. In a private chat that
+// also names WHO is talking, which is the whole basis for trusting the channel
+// with full dispatch capability. In a group it does not: every member can send
+// a prompt and press Approve. The sender allowlist closes that, and like the
+// chat allowlist it fails closed.
+
+import { isSenderAuthorized } from "./telegram-bridge";
+
+const OPERATOR = 5551;
+const STRANGER = 7772;
+const GROUP_CHAT = -1001234567890;
+
+function makeGroupBridge(authorizedUserIds?: string[]) {
+	return new TelegramDaemonBridge({
+		telegramToken: "test-token",
+		chatId: String(GROUP_CHAT),
+		daemonUrl: "ws://127.0.0.1:1",
+		authorizedChatIds: [String(GROUP_CHAT)],
+		authorizedUserIds,
+	});
+}
+
+function groupCallbackFrom(userId: number) {
+	return {
+		id: "cbq_2",
+		from: { id: userId },
+		data: "approve:req_2",
+		message: { message_id: 43, chat: { id: GROUP_CHAT, type: "supergroup" } },
+	};
+}
+
+describe("isSenderAuthorized", () => {
+	test("with an allowlist, only listed user ids pass, in any chat type", () => {
+		const cfg = { authorizedUserIds: [String(OPERATOR)] };
+		expect(isSenderAuthorized({ chatType: "supergroup", fromId: OPERATOR }, cfg)).toBe(true);
+		expect(isSenderAuthorized({ chatType: "private", fromId: OPERATOR }, cfg)).toBe(true);
+		expect(isSenderAuthorized({ chatType: "supergroup", fromId: STRANGER }, cfg)).toBe(false);
+		expect(isSenderAuthorized({ chatType: "private", fromId: STRANGER }, cfg)).toBe(false);
+		expect(isSenderAuthorized({ chatType: "private", fromId: undefined }, cfg)).toBe(false);
+	});
+
+	test("without an allowlist, a private chat keeps today's behaviour", () => {
+		expect(isSenderAuthorized({ chatType: "private", fromId: STRANGER }, {})).toBe(true);
+		expect(isSenderAuthorized({ fromId: STRANGER }, {})).toBe(true);
+	});
+
+	test("without an allowlist, a group or supergroup rejects everyone", () => {
+		expect(isSenderAuthorized({ chatType: "supergroup", fromId: OPERATOR }, {})).toBe(false);
+		expect(isSenderAuthorized({ chatType: "group", fromId: OPERATOR }, {})).toBe(false);
+		expect(
+			isSenderAuthorized({ chatType: "supergroup", fromId: OPERATOR }, { authorizedUserIds: [] }),
+		).toBe(false);
+	});
+});
+
+describe("handleCallbackQuery sender authorization", () => {
+	const realFetch = globalThis.fetch;
+	let calls: string[] = [];
+
+	beforeEach(() => {
+		calls = [];
+		globalThis.fetch = (async (url: unknown) => {
+			calls.push(String(url));
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+	});
+
+	test("a stranger pressing Approve in the allowlisted group causes no side effect", async () => {
+		const bridge = makeGroupBridge([String(OPERATOR)]);
+		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
+		await (bridge as any).handleCallbackQuery(groupCallbackFrom(STRANGER));
+		expect(calls).toEqual([]);
+	});
+
+	test("the operator pressing Approve in the allowlisted group is processed", async () => {
+		const bridge = makeGroupBridge([String(OPERATOR)]);
+		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
+		await (bridge as any).handleCallbackQuery(groupCallbackFrom(OPERATOR));
+		expect(calls.length).toBeGreaterThan(0);
+		expect(calls[0]).toContain("answerCallbackQuery");
+	});
+
+	test("a group with no sender allowlist rejects even the primary chat's members", async () => {
+		const bridge = makeGroupBridge(undefined);
+		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
+		await (bridge as any).handleCallbackQuery(groupCallbackFrom(OPERATOR));
+		expect(calls).toEqual([]);
+	});
+
+	test("a refused sender gets one plain refusal, then silence for an hour", async () => {
+		const bridge = makeGroupBridge([String(OPERATOR)]);
+		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
+		await (bridge as any).refuseSender(GROUP_CHAT, STRANGER);
+		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
+		await (bridge as any).refuseSender(GROUP_CHAT, STRANGER);
+		expect(calls.filter((c) => c.includes("sendMessage"))).toHaveLength(1);
+	});
+});

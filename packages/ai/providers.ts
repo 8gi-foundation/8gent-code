@@ -7,6 +7,7 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
+import { modelFetchAsFetch } from "./model-fetch";
 
 export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel";
 
@@ -50,6 +51,9 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		name: config.name,
 		baseURL,
 		apiKey: config.apiKey || getApiKeyFromEnv(config.name),
+		// Every generation request goes through modelFetch: Bun's hidden 300 s
+		// fetch cap is off and EIGHT_TURN_TIMEOUT_MS bounds the step instead.
+		fetch: modelFetchAsFetch,
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"

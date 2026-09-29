@@ -10,12 +10,22 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import {
+	type FileOutline,
 	type RepoIndex,
+	ensureIndexed as astEnsureIndexed,
 	getFileOutline as astGetFileOutline,
 	getFileTree as astGetFileTree,
-	indexFolder as astIndexFolder,
+	getFreshFileOutline as astGetFreshFileOutline,
 	listRepos as astListRepos,
+	refreshIndex as astRefreshIndex,
+	searchSymbols as astSearchSymbols,
 } from "../ast-index";
+import {
+	awaitIndex,
+	formatLocate,
+	LOCATE_INDEX_WAIT_MS,
+	locate as astLocate,
+} from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -77,6 +87,7 @@ import {
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { systemOneGate } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
@@ -295,8 +306,12 @@ export class ToolExecutor {
 		// sessionId to thread it through to disk for later inspection.
 		this.artifactStore = new ArtifactStore(sessionId ?? `${agentId}-${process.pid}`);
 
-		// Fire-and-forget AST indexing of the working directory
-		this.astIndexPromise = astIndexFolder(this.workingDirectory)
+		// Background AST indexing of the working directory. The build yields to
+		// the event loop between batches of files, so the constructor returns
+		// at once. ensureIndexed shares one build per folder per process, keyed
+		// by absolute path, so the agent and every executor on the same
+		// directory reuse it instead of re-indexing.
+		this.astIndexPromise = astEnsureIndexed(this.workingDirectory)
 			.then((index) => {
 				this.astIndexReady = true;
 				this.astRepoId = index.id;
@@ -368,6 +383,25 @@ export class ToolExecutor {
 								type: "array",
 								items: { type: "string" },
 								description: "Filter by kinds: function, class, method, variable",
+							},
+						},
+						required: ["query"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "locate",
+					description:
+						'[CODE] Answers "where is X?" in one call with at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
+					parameters: {
+						type: "object",
+						properties: {
+							query: {
+								type: "string",
+								description:
+									"Symbol name, path fragment, quoted text, error message or short description",
 							},
 						},
 						required: ["query"],
@@ -1214,7 +1248,15 @@ export class ToolExecutor {
 			});
 			if (!gateResult.allowed) {
 				const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
-				return `[TOOLG8 BLOCKED] ${gateResult.reason}${alt}`;
+				// Say plainly that nothing happened. A small model given only the
+				// rule text ignored the block and reported the file as written
+				// (Rishi's pilot, 2026-09-29).
+				const target = typeof args.path === "string" && args.path ? ` ${args.path}` : "";
+				const notDone =
+					policyAction === "write_file"
+						? ` The file${target} was NOT written.`
+						: " Nothing was changed.";
+				return `[TOOLG8 BLOCKED] ${toolName} did NOT run.${notDone} Reason: ${gateResult.reason}${alt}`;
 			}
 		}
 
@@ -1236,6 +1278,8 @@ export class ToolExecutor {
 				return this.getSymbol(args.symbolId as string);
 			case "search_symbols":
 				return this.searchSymbols(args.query as string, args.kinds as string[]);
+			case "locate":
+				return this.locate(args.query as string);
 			case "get_project_outline":
 				return this.getProjectOutline();
 
@@ -1577,7 +1621,7 @@ export class ToolExecutor {
 		}
 
 		try {
-			const outline = parseTypeScriptFile(absolutePath);
+			const outline = this.readOutline(absolutePath);
 			const symbols = outline.symbols.map((s) => ({
 				name: s.name,
 				kind: s.kind,
@@ -1618,7 +1662,7 @@ export class ToolExecutor {
 		}
 
 		try {
-			const outline = parseTypeScriptFile(absolutePath);
+			const outline = this.readOutline(absolutePath);
 			const symbol = outline.symbols.find((s) => s.name === symbolName);
 
 			if (!symbol) {
@@ -1632,45 +1676,78 @@ export class ToolExecutor {
 		}
 	}
 
-	private async searchSymbols(query: string, kinds?: string[]): Promise<string> {
-		const { glob } = await import("glob");
-
-		const files = await glob("**/*.{ts,tsx,js,jsx}", {
-			cwd: this.workingDirectory,
-			absolute: true,
-			ignore: ["**/node_modules/**", "**/dist/**"],
-		});
-
-		const queryLower = query.toLowerCase();
-		const matches: {
-			name: string;
-			kind: string;
-			file: string;
-			line: number;
-		}[] = [];
-
-		for (const file of files.slice(0, 50)) {
-			try {
-				const outline = parseTypeScriptFile(file);
-				for (const symbol of outline.symbols) {
-					if (kinds && !kinds.includes(symbol.kind)) continue;
-					if (symbol.name.toLowerCase().includes(queryLower)) {
-						matches.push({
-							name: symbol.name,
-							kind: symbol.kind,
-							file: path.relative(this.workingDirectory, file),
-							line: symbol.startLine,
-						});
-					}
-					if (matches.length >= 20) break;
-				}
-			} catch {
-				// Skip unparseable files
+	/**
+	 * Outline for one file: the shared index when it holds the file (re-parsed
+	 * in place if the file changed on disk), otherwise a direct parse.
+	 */
+	private readOutline(absolutePath: string): FileOutline {
+		if (this.astIndexReady && this.astRepoId) {
+			const rel = path.relative(this.workingDirectory, absolutePath);
+			if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+				const indexed = astGetFreshFileOutline(this.astRepoId, rel);
+				if (indexed) return indexed;
 			}
-			if (matches.length >= 20) break;
+		}
+		return parseTypeScriptFile(absolutePath);
+	}
+
+	private async searchSymbols(query: string, kinds?: string[]): Promise<string> {
+		if (!this.astIndexReady && this.astIndexPromise) {
+			await this.astIndexPromise;
+		}
+		if (!this.astRepoId) {
+			return JSON.stringify(
+				{ query, matches: [], error: "AST index not available. Use run_command with rg instead." },
+				null,
+				2,
+			);
 		}
 
+		const repoId = this.astRepoId;
+		// Pick up files created, edited or deleted since the build (by any
+		// tool, shell or editor) before ranking: one stat per file, no re-parse
+		// unless the mtime moved.
+		astRefreshIndex(repoId);
+		const hits = astSearchSymbols(repoId, query, {
+			kinds: kinds?.length ? kinds : undefined,
+			limit: 20,
+		});
+
+		const matches = hits.map((symbol) => ({
+			name: symbol.name,
+			kind: symbol.kind,
+			file: path.relative(this.workingDirectory, symbol.filePath),
+			line: symbol.startLine,
+		}));
 		return JSON.stringify({ query, matches }, null, 2);
+	}
+
+	/**
+	 * Read-only "where is X?": rules route the query to the ranked symbol
+	 * index, a fuzzy path match or a literal rg search under the working
+	 * directory (see ast-index/locate.ts). No model is called unless
+	 * EIGHT_SYSTEM_ONE_LOCATE=1, and then only for prose the rules cannot route.
+	 */
+	private async locate(query: string): Promise<string> {
+		// Wait for the index build only briefly: path and text search do not
+		// need it, and a first call on a large repo would otherwise stall for
+		// the whole build. The answer says when symbol search was skipped.
+		let repoId = this.astRepoId;
+		let indexPending = false;
+		if (!this.astIndexReady && this.astIndexPromise) {
+			const waited = await awaitIndex(
+				this.astIndexPromise.then((index) => index?.id ?? null),
+				LOCATE_INDEX_WAIT_MS,
+			);
+			repoId = waited.repoId;
+			indexPending = waited.pending;
+		}
+		const result = await astLocate(typeof query === "string" ? query : "", {
+			root: this.workingDirectory,
+			repoId,
+			indexPending,
+		});
+		return formatLocate(result);
 	}
 
 	private async getProjectOutline(): Promise<string> {
@@ -1894,6 +1971,11 @@ export class ToolExecutor {
 		if (!validation.safe) {
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}
+
+		// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after
+		// every existing check. It can only stop a command, never allow one.
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
 
 		const startTime = Date.now();
 		await this.hookManager.executeHooks("beforeCommand", {
@@ -2296,6 +2378,11 @@ export class ToolExecutor {
 
 			// CLI runtimes: claude and shell
 			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+				// runtime "shell" runs the task through sh -c, so it is a shell command.
+				if (effectiveRuntime === "shell") {
+					const systemOne = await systemOneGate(task);
+					if (!systemOne.run) return systemOne.message as string;
+				}
 				const { spawnCLIAgent } = await import("../orchestration");
 				const agent = spawnCLIAgent(effectiveRuntime, task, {
 					workingDirectory: this.workingDirectory,
@@ -2552,6 +2639,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);
 			const taskId = taskManager.startTask(command, { timeout });
@@ -3178,7 +3267,7 @@ export class ToolExecutor {
 			const failover = new ModelFailover();
 
 			// Skip providers that lack credentials or aren't installed.
-			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
+			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-flash", "deepseek");
 			if (!process.env.OPENROUTER_API_KEY)
 				failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
 			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {

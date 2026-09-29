@@ -136,6 +136,7 @@ export function validateFlowRecord(raw: unknown): ValidationResult {
 			if (spec.optional) continue;
 			return { ok: false, reason: `${kind}: missing required field ${name}` };
 		}
+		// biome-ignore lint/suspicious/useValidTypeof: spec.type is typed `"string" | "number"` (FieldSpec), so both sides are always valid typeof results.
 		if (typeof value !== spec.type)
 			return { ok: false, reason: `${kind}.${name}: expected ${spec.type}, got ${typeof value}` };
 		if (spec.type === "number" && !Number.isFinite(value))
