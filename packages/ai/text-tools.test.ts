@@ -463,7 +463,7 @@ describe("parseToolCalls - bare / ```json calls from small local models", () => 
 		const content = String(calls[1].arguments.content);
 		expect(content.startsWith("---\nmarp: true\n")).toBe(true);
 		expect(content.match(/^## /gm)?.length).toBe(6);
-		expect(String(calls[1].arguments.path).endsWith("/work/deck/deck.md")).toBe(true);
+		expect(String(calls[1].arguments.path).endsWith("/project/deck/deck.md")).toBe(true);
 	});
 
 	test("strips the exact llama3.2:3b reply down to no prose", () => {
