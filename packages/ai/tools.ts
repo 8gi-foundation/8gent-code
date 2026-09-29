@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { deckVideoAfterWrite } from "../deck/auto";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -279,7 +280,9 @@ const writeFile = tool({
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(absolutePath, content);
-		return `File written: ${absolutePath}`;
+		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
+		const deckLine = await deckVideoAfterWrite(absolutePath, content, _ctx.workingDirectory);
+		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 
