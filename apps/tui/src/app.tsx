@@ -118,6 +118,7 @@ import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
+import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -548,6 +549,8 @@ export interface Message {
 	timestamp: Date;
 	/** For tool messages: whether the tool succeeded */
 	toolSuccess?: boolean;
+	/** For tool-end messages: the one-line trail entry shown in chat (lib/tool-trail.ts) */
+	toolTrail?: ToolTrailEntry;
 	/** For assistant messages: total ms from request to last token (footer) */
 	latencyMs?: number;
 	/** For assistant messages: total tokens used by this turn (footer) */
@@ -2097,6 +2100,7 @@ export function App({
 					content,
 					timestamp: new Date(),
 					toolSuccess: !isRealFailure,
+					toolTrail: toTrailEntry(event),
 				});
 			},
 			onStepFinish: (event: AgentStepEvent) => {
