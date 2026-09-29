@@ -1,7 +1,7 @@
 /**
  * Tests for the spoken-voice resolver.
  *
- * The onboarding greeting ("Good day. I'm 8gent, The Infinite Gentleman.")
+ * The onboarding greeting ("Good day. I'm 8gent.")
  * used to go out as a pitch-dropped Moira, then as `say -v Bruno` - a KittenTTS
  * voice name that macOS does not have, so `say` silently substituted another
  * voice. These tests pin the rule that replaced it:

@@ -1,44 +1,57 @@
 /**
- * IntroBanner — cinematic 8GENT wordmark on TUI launch with cascade reveal.
+ * IntroBanner - the launch splash. Design: ~/.8gent/evidence/hud-design/INTRO-AUDIT.md
+ * and MOTION.md (motion 4), Moira (8DO).
  *
- * Sequence over ~13500ms (paced to the KittenTTS Jasper narration track):
- *   T+0      wordmark begins fade-in + music + narration both start
- *   T+1500   flourish rule + ∞ appears
- *   T+2500   title ("Your intelligence shouldn't be a subscription.") types in
- *   T+5500   subhead ("Take back custody of your cognition.") types in
- *   T+9000   body line ("Infinite General Intelligence. free. local. open.") types in
- *   T+12500  hold completes
- *   T+13500  dismiss (fades music + narration together over 2.4s)
+ * When: first run and once after each update only (lib/intro-gate.ts).
  *
- * Skippable: esc / q / Ctrl+C, but ONLY after the body line has finished
- *            typing in. Stray terminal events during launch (paste markers,
- *            focus reports, accidental keystrokes) cannot dismiss it early.
- * Opt-out:   set 8GENT_NO_INTRO=1 to skip entirely.
+ * Sequence, about 1.5 s in all:
+ *   T+0      the figure-8 mark, the wordmark and the hint, still
+ *   T+150    three lines type into a fixed left column, 300 ms each
+ *   T+1250   the mark collapses into the header's 8: 4 frames x 60 ms
+ *   T+1490   the HUD
  *
- * Audio: bundled `apps/tui/sounds/launch.mp3` is played at 65% via afplay.
- * On first run we copy the bundled file to `~/.8gent/sounds/launch.mp3` so
- * the user can swap it (or set `ui.introSound` to override the path).
+ * Any key skips at once, from the first frame. A printable key is handed on
+ * to the input, so nothing typed during the splash is lost.
+ *
+ * Reduced motion (Ctrl+A, or 8GENT_REDUCED_MOTION=1): the final frame is
+ * drawn at once, nothing types and nothing collapses.
+ *
+ * Layout: the whole block is centred vertically. The three lines share one
+ * left column whose width is the longest line, so typing only grows to the
+ * right and nothing jitters sideways.
+ *
+ * Audio (macOS only): the bundled launch instrumental at 10% via afplay,
+ * faded out when the splash leaves. ~/.8gent/sounds/launch.mp3 or
+ * `ui.introSound` override it.
  *
  * Brand amber per BRAND.md. No purple / pink / violet.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Text, useInput } from "ink";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { loadSettings } from "../../../../packages/settings/index.js";
+import { useViewport } from "../hooks/useViewport.js";
+import { motionEnabled } from "../lib/motion.js";
+import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
+import { Mark8, type MarkSize, markSize } from "./Mark8.js";
+
+// ============================================
+// Audio
+// ============================================
 
 /**
  * Resolve the bundled launch sound. Looks (in order) at:
- *   1. user override (~/.8gent/sounds/launch.mp3) — copied here on first run
+ *   1. user override (~/.8gent/sounds/launch.mp3), copied here on first run
  *   2. dev source: apps/tui/sounds/launch.mp3 (when running from src)
  *   3. built dist: dist/sounds/launch.mp3 (when running the npm-published bin)
  * Returns null if nothing usable is found.
@@ -68,64 +81,17 @@ function resolveLaunchSound(): string | null {
 }
 
 /**
- * Resolve the bundled splash narration MP3. Same lookup pattern as
- * resolveLaunchSound — user override + dev source + built dist. Pre-rendered
- * via KittenTTS (Jasper voice) at build time; never regenerated at runtime
- * to avoid Python + KittenTTS being a runtime dep of the TUI.
+ * Tracked afplay child for the intro music. Module-level so we can kill it
+ * on TUI exit, on banner dismiss, or via the /quiet command. Not detached:
+ * the child dies with the TUI.
  */
-function resolveNarrationSound(): string | null {
-	const userPath = join(homedir(), ".8gent", "sounds", "splash-narration.mp3");
-	if (existsSync(userPath)) return userPath;
-
-	const here = dirname(fileURLToPath(import.meta.url));
-	const candidates = [
-		resolve(here, "../../sounds/splash-narration.mp3"),
-		resolve(here, "../sounds/splash-narration.mp3"),
-		resolve(here, "./sounds/splash-narration.mp3"),
-	];
-	for (const c of candidates) {
-		if (existsSync(c)) {
-			try {
-				mkdirSync(dirname(userPath), { recursive: true });
-				copyFileSync(c, userPath);
-				return userPath;
-			} catch {
-				return c;
-			}
-		}
-	}
-	return null;
-}
-
-/**
- * Tracked afplay child for the intro music. Module-level so we can
- * kill it on TUI exit, on banner dismiss, or via the /quiet command.
- *
- * NOT detached, NOT unref'd — the child dies with the TUI. Earlier
- * versions used `{ detached: true }` + `proc.unref()` which made the
- * music outlive even Ctrl+C; that was the bug.
- */
-import { execSync } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
-
 let introProc: ChildProcess | null = null;
 let introPath: string | null = null;
 let introStartedAt = 0;
-// Music sits under the narration. Lowered from 0.15 to 0.10 when the
-// splash-narration track was added so Jasper's voice can speak clearly
-// over it without the music drowning him.
-const INTRO_VOLUME = 0.10;
-
-// Pre-rendered narration via KittenTTS (Jasper voice). Plays in parallel
-// with the music. Bundled at apps/tui/sounds/splash-narration.mp3.
-// KittenTTS-only per the no-ElevenLabs rule.
-let narrationProc: ChildProcess | null = null;
-const NARRATION_VOLUME = 0.55;
+const INTRO_VOLUME = 0.1;
 let exitHooksInstalled = false;
 
-/** True if `ffplay` is on $PATH — needed for the proper afade-based
- * gradual fade-out. afplay (default macOS player) has no fade or seek
- * support so we fall back to an abrupt cut without ffmpeg. */
+/** True if `ffplay` is on $PATH, needed for a smooth afade fade-out. */
 function hasFfplay(): boolean {
 	try {
 		execSync("command -v ffplay", { stdio: "ignore", timeout: 1500 });
@@ -146,26 +112,12 @@ function stopIntroSound(): void {
 			/* already gone */
 		}
 	}
-	// Also kill any in-flight narration. Both tracks live or die together.
-	const nproc = narrationProc;
-	narrationProc = null;
-	if (nproc) {
-		try {
-			nproc.kill("SIGTERM");
-		} catch {
-			/* already gone */
-		}
-	}
 }
 
 /**
- * Gradually fade out the intro music over `durationMs`, then stop.
- * Strategy: kill the current afplay, then immediately spawn an
- * `ffplay` continuation that picks up at the same position and applies
- * an `afade=t=out` filter for a smooth fade. Falls back to abrupt cut
- * if ffplay isn't available — better silence than a broken stream.
- *
- * Idempotent: calling while a fade is already in flight is a no-op.
+ * Fade the intro music out over `durationMs`, then stop. Kills afplay and
+ * continues the track in ffplay from the same position with afade. Without
+ * ffplay it cuts. Idempotent.
  */
 function fadeOutIntroSound(durationMs = 2400): void {
 	const proc = introProc;
@@ -183,18 +135,6 @@ function fadeOutIntroSound(durationMs = 2400): void {
 	}
 	introProc = null;
 	introPath = null;
-	// Narration is short (~13s) and usually finished before fade fires;
-	// when the user skips with Esc/q mid-narration, just cut it abruptly —
-	// music fade-out is the audible cushion, narration cut is fine.
-	const nproc = narrationProc;
-	narrationProc = null;
-	if (nproc) {
-		try {
-			nproc.kill("SIGTERM");
-		} catch {
-			/* already gone */
-		}
-	}
 	const fadeSec = Math.max(0.5, durationMs / 1000);
 	try {
 		const fadeProc = spawn(
@@ -218,20 +158,16 @@ function fadeOutIntroSound(durationMs = 2400): void {
 		introProc = fadeProc;
 		introPath = path;
 		introStartedAt = Date.now() - elapsedSec * 1000;
-		fadeProc.on("exit", () => {
+		const clear = () => {
 			if (introProc === fadeProc) {
 				introProc = null;
 				introPath = null;
 			}
-		});
-		fadeProc.on("error", () => {
-			if (introProc === fadeProc) {
-				introProc = null;
-				introPath = null;
-			}
-		});
+		};
+		fadeProc.on("exit", clear);
+		fadeProc.on("error", clear);
 	} catch {
-		/* ffplay spawn failed — leave silence, afplay already killed */
+		/* ffplay spawn failed; afplay is already stopped */
 	}
 }
 
@@ -253,18 +189,7 @@ function installIntroExitHooks(): void {
 	});
 }
 
-/**
- * Play the launch sound once. Volume 15% (0.15) via `afplay -v` — the
- * launch instrumental is mastered loud, so we keep it well below the
- * splash text reveal and any narration we layer on top later.
- *
- * The child IS tracked and dies with the TUI under any exit path.
- * Banner dismiss also calls stopIntroSound() so the music goes away
- * once the splash is gone.
- *
- * `ui.introSound` setting still wins if the user set an absolute path.
- * Non-macOS: silent.
- */
+/** Play the launch sound once, quietly. `ui.introSound` wins. macOS only. */
 function playIntroSound(): void {
 	if (platform() !== "darwin") return;
 	let userOverride = "";
@@ -275,9 +200,7 @@ function playIntroSound(): void {
 	}
 	let path: string | null;
 	if (userOverride) {
-		path = userOverride.startsWith("~")
-			? userOverride.replace("~", homedir())
-			: userOverride;
+		path = userOverride.startsWith("~") ? userOverride.replace("~", homedir()) : userOverride;
 		if (!existsSync(path)) path = resolveLaunchSound();
 	} else {
 		path = resolveLaunchSound();
@@ -285,55 +208,26 @@ function playIntroSound(): void {
 	if (!path) return;
 	try {
 		installIntroExitHooks();
-		// Kill any prior intro proc — should never happen but defensive.
 		stopIntroSound();
-		const proc = spawn("afplay", ["-v", String(INTRO_VOLUME), path], {
-			stdio: "ignore",
-		});
-		proc.on("exit", () => {
+		const proc = spawn("afplay", ["-v", String(INTRO_VOLUME), path], { stdio: "ignore" });
+		const clear = () => {
 			if (introProc === proc) {
 				introProc = null;
 				introPath = null;
 			}
-		});
-		proc.on("error", () => {
-			if (introProc === proc) {
-				introProc = null;
-				introPath = null;
-			}
-		});
+		};
+		proc.on("exit", clear);
+		proc.on("error", clear);
 		introProc = proc;
 		introPath = path;
 		introStartedAt = Date.now();
 	} catch {
 		// best-effort; never break the banner
 	}
-
-	// Layer in the pre-rendered narration (Jasper voice). Spawned in
-	// parallel with the music; killed together via stopIntroSound. Pure
-	// best-effort — if the narration MP3 is missing or afplay errors out,
-	// the splash still plays with music only.
-	try {
-		const narrationPath = resolveNarrationSound();
-		if (!narrationPath) return;
-		const nproc = spawn("afplay", ["-v", String(NARRATION_VOLUME), narrationPath], {
-			stdio: "ignore",
-		});
-		nproc.on("exit", () => {
-			if (narrationProc === nproc) narrationProc = null;
-		});
-		nproc.on("error", () => {
-			if (narrationProc === nproc) narrationProc = null;
-		});
-		narrationProc = nproc;
-	} catch {
-		// best-effort; narration is decorative
-	}
 }
 
 /** Exposed so app.tsx and slash commands can stop the music on demand.
- * Default behaviour fades over 2.4s; pass `{ abrupt: true }` for an
- * instant kill (e.g. when the TUI itself is exiting). */
+ * Fades over 2.4 s by default; `{ abrupt: true }` kills it at once. */
 export function stopIntroMusic(opts?: { abrupt?: boolean; durationMs?: number }): void {
 	if (opts?.abrupt) {
 		stopIntroSound();
@@ -342,148 +236,251 @@ export function stopIntroMusic(opts?: { abrupt?: boolean; durationMs?: number })
 	fadeOutIntroSound(opts?.durationMs ?? 2400);
 }
 
-// Block-letter "8GENT" - 5 rows tall, fits in ~46 cols.
-const BANNER_LINES: readonly string[] = [
-	" ▄▄▄▄    ▄▄▄▄▄  ▄▄▄▄▄  ▄▄▄ ▄▄  ▄▄▄▄▄▄ ",
-	"▐▌  ▐▌  ▐▌      ▐▌     ▐▌▀▄ ▐▌   ▐▌   ",
-	" ▀▀▄▀    ▐▌ ▀▀  ▐▀▀▀   ▐▌ ▀▄▐▌   ▐▌   ",
-	"▐▌  ▐▌  ▐▌  ▐▌  ▐▌     ▐▌  ▀▐▌   ▐▌   ",
-	" ▀▀▀▀    ▀▀▀▀▀  ▀▀▀▀▀  ▀▀   ▀▀   ▀▀   ",
+// ============================================
+// Copy and timeline (pure, tested)
+// ============================================
+
+export const INTRO_LINES = [
+	"Your intelligence shouldn't be a subscription.",
+	"Take back custody of your cognition.",
+	"Infinite General Intelligence. Free, local, open.",
 ] as const;
 
-const FLOURISH = "─────────────  ∞  ─────────────";
-const TITLE = "Your intelligence shouldn't be a subscription.";
-const SUBHEAD = "Take back custody of your cognition.";
-const BODY = "Infinite General Intelligence. free. local. open.";
+/** Theme tokens per line, then the hint. All at least 4.5:1 on the background. */
+export const INTRO_LINE_TOKENS = ["textPrimary", "textSecondary", "textTertiary"] as const;
+export const INTRO_HINT_TOKEN = "textTertiary" as const;
 
-// Cinematic schedule — paced to the slow-starting launch instrumental.
-// Skip entirely with 8GENT_NO_INTRO=1 or 8GENT_LITE=1.
-// Paced to the KittenTTS Jasper narration (~13.2s):
-//   ~1.0s pre-pad, title line, gap, subhead line, gap, body line.
-// Visual reveals lead the narration slightly so the user sees the text
-// just before Jasper speaks it.
-const T_WORDMARK = 0;
-const T_FLOURISH = 1500;
-const T_TITLE = 2500;
-const T_SUBHEAD = 5500;
-const T_BODY = 9000;
-const T_HOLD_END = 12500;
-const T_DONE = 13500;
+export const INTRO_TYPE_START_MS = 150;
+/** Each line types in this long. */
+export const INTRO_LINE_MS = 300;
+export const INTRO_COLLAPSE_AT_MS = 1250;
+export const COLLAPSE_FRAME_MS = 60;
+/** Eased progress of the collapse, one entry per frame; ends exactly on the header. */
+export const COLLAPSE_EASE: readonly number[] = [0.35, 0.7, 0.9, 1];
+export const COLLAPSE_SIZES: readonly MarkSize[] = ["medium", "small", "header", "header"];
+export const INTRO_DONE_MS = INTRO_COLLAPSE_AT_MS + COLLAPSE_FRAME_MS * COLLAPSE_EASE.length;
 
-// Typewriter speed — characters revealed per second.
-const TYPE_CPS = 24;
+/** Width of the shared text column: the longest line, so typing never re-centres. */
+export const INTRO_BLOCK_WIDTH = Math.max(...INTRO_LINES.map((l) => l.length));
 
-function typedSlice(line: string, elapsed: number, startMs: number): string {
-	if (elapsed < startMs) return "";
-	const chars = Math.floor(((elapsed - startMs) / 1000) * TYPE_CPS);
+const WORDMARK_WIDTH = "8gent Code".length;
+
+/** Where the header's "8" sits: row 1, column 2, inside the brand pill's border. */
+export const HEADER_EIGHT = { row: 1, col: 2 } as const;
+
+/** How much of line `i` has typed in at `elapsed` ms. Motion off shows it all. */
+export function typedLine(i: number, elapsed: number, animate: boolean): string {
+	const line = INTRO_LINES[i] ?? "";
+	if (!animate) return line;
+	const start = INTRO_TYPE_START_MS + i * INTRO_LINE_MS;
+	if (elapsed <= start) return "";
+	const chars = Math.ceil(((elapsed - start) / INTRO_LINE_MS) * line.length);
 	return line.slice(0, Math.min(chars, line.length));
 }
 
-interface IntroBannerProps {
-	onDone: () => void;
-	/** Speed multiplier for tests. 0.1 = 10x faster. Default 1. */
-	speed?: number;
+/** The largest mark that leaves the whole block room in `rows` terminal rows. */
+export function introMarkSize(rows: number): MarkSize {
+	if (rows >= 30) return "intro";
+	if (rows >= 24) return "medium";
+	if (rows >= 18) return "small";
+	return "header";
 }
 
-export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
-	const [elapsed, setElapsed] = useState(0);
+/** Rows below the mark: gap, wordmark, gap, three lines, gap, hint. */
+export const BELOW_MARK_ROWS = 8;
 
-	useEffect(() => {
-		playIntroSound();
-	}, []);
+export interface IntroLayout {
+	size: MarkSize;
+	top: number;
+	markLeft: number;
+	wordLeft: number;
+	blockLeft: number;
+	markCols: number;
+	markRows: number;
+}
 
-	// Single dismiss handler — gracefully fades out the music, then runs
-	// onDone. The fade overlaps with the splash leaving so by the time
-	// the user is in chat, the music is already half-faded. Without this
-	// the slow instrumental would either outlive the splash or get cut
-	// abruptly mid-note.
-	const dismiss = () => {
-		fadeOutIntroSound(2400);
-		onDone();
+/** Centred placement of the splash block in a cols x rows viewport. */
+export function introLayout(cols: number, rows: number, rich: boolean): IntroLayout {
+	const size = introMarkSize(rows);
+	const m = markSize(size, rich);
+	const height = m.rows + BELOW_MARK_ROWS;
+	return {
+		size,
+		top: Math.max(0, Math.floor((rows - height) / 2)),
+		markLeft: Math.max(0, Math.floor((cols - m.cols) / 2)),
+		wordLeft: Math.max(0, Math.floor((cols - WORDMARK_WIDTH) / 2)),
+		blockLeft: Math.max(1, Math.floor((cols - INTRO_BLOCK_WIDTH) / 2)),
+		markCols: m.cols,
+		markRows: m.rows,
 	};
+}
 
-	useEffect(() => {
-		const start = performance.now();
-		const tick = setInterval(() => {
-			const ms = (performance.now() - start) / speed;
-			setElapsed(ms);
-			if (ms >= T_DONE) {
-				clearInterval(tick);
-				dismiss();
-			}
-		}, 40);
-		return () => clearInterval(tick);
-	}, []);
+export interface CollapseFrame {
+	size: MarkSize;
+	top: number;
+	left: number;
+}
 
-	useInput((input, key) => {
-		// Skip is gated: only Esc / q / Ctrl+C dismiss, and only AFTER the
-		// body line has finished animating in. Earlier launches died at ~3s
-		// because stray terminal events (bracketed-paste markers, focus
-		// reports, accidental keystrokes during heavy init) fired this
-		// callback while the user had not yet seen the subtitle or body.
-		const bodyDoneAt = T_BODY + (BODY.length / TYPE_CPS) * 1000;
-		if (elapsed < bodyDoneAt) return;
-		if (key.escape || input === "q" || (key.ctrl && input === "c")) {
-			dismiss();
-		}
+/**
+ * The collapse, one frame per COLLAPSE_EASE entry. The mark's centre travels
+ * from its splash position to the header's 8 while it steps down in size, so
+ * the last frame lands the small braille 8 over the header's 8.
+ */
+export function collapseFrames(layout: IntroLayout, rich: boolean): CollapseFrame[] {
+	const fromY = layout.top + layout.markRows / 2;
+	const fromX = layout.markLeft + layout.markCols / 2;
+	const toY = HEADER_EIGHT.row + 0.5;
+	const toX = HEADER_EIGHT.col + 0.5;
+	return COLLAPSE_EASE.map((p, k) => {
+		const size = COLLAPSE_SIZES[k] ?? "header";
+		const m = markSize(size, rich);
+		const cy = fromY + (toY - fromY) * p;
+		const cx = fromX + (toX - fromX) * p;
+		return {
+			size,
+			top: Math.max(0, Math.round(cy - m.rows / 2)),
+			left: Math.max(0, Math.round(cx - m.cols / 2)),
+		};
+	});
+}
+
+/** The collapse frame index at `elapsed`, or -1 before the collapse starts. */
+export function collapseIndex(elapsed: number): number {
+	if (elapsed < INTRO_COLLAPSE_AT_MS) return -1;
+	return Math.min(
+		COLLAPSE_EASE.length - 1,
+		Math.floor((elapsed - INTRO_COLLAPSE_AT_MS) / COLLAPSE_FRAME_MS),
+	);
+}
+
+/**
+ * The text a key press hands on to the input: printable characters only, and
+ * nothing for a bare space, Enter, Esc or a control chord.
+ */
+export function carriedText(
+	input: string,
+	key: { ctrl?: boolean; meta?: boolean; escape?: boolean; return?: boolean },
+): string {
+	if (key.ctrl || key.meta || key.escape || key.return) return "";
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: strip control characters
+	const clean = input.replace(/[\x00-\x1f\x7f]/g, "");
+	return clean.trim() ? clean : "";
+}
+
+// ============================================
+// Component
+// ============================================
+
+interface IntroBannerProps {
+	/** Called once, with any printable text typed to skip the splash. */
+	onDone: (carried?: string) => void;
+	/** Animations on (Ctrl+A). 8GENT_REDUCED_MOTION=1 also turns motion off. */
+	animate?: boolean;
+	version?: string;
+	/** Speed multiplier for tests. 10 = ten times faster. Default 1. */
+	speed?: number;
+	/** Override the glyph capability check (tests). */
+	rich?: boolean;
+	/** Play the launch music. Default true. */
+	sound?: boolean;
+}
+
+export function IntroBanner({
+	onDone,
+	animate = true,
+	version,
+	speed = 1,
+	rich,
+	sound = true,
+}: IntroBannerProps) {
+	const viewport = useViewport();
+	const [elapsed, setElapsed] = useState(0);
+	const done = useRef(false);
+	const motion = motionEnabled(animate);
+	const onDoneRef = useRef(onDone);
+	onDoneRef.current = onDone;
+
+	const finishRef = useRef((carried?: string) => {
+		if (done.current) return;
+		done.current = true;
+		fadeOutIntroSound(2400);
+		onDoneRef.current(carried);
 	});
 
-	if (elapsed >= T_DONE) return null;
+	useEffect(() => {
+		if (sound) playIntroSound();
+	}, [sound]);
 
-	const showFlourish = elapsed >= T_FLOURISH;
-	const showTitle = elapsed >= T_TITLE;
-	const showSubhead = elapsed >= T_SUBHEAD;
-	const showBody = elapsed >= T_BODY;
-	const inFadeOut = elapsed >= T_HOLD_END;
+	useEffect(() => {
+		// Reduced motion: one still frame, then the HUD. No ticking repaints.
+		if (!motion) {
+			const timer = setTimeout(() => finishRef.current(), INTRO_DONE_MS / speed);
+			return () => clearTimeout(timer);
+		}
+		const start = performance.now();
+		const tick = setInterval(() => {
+			const ms = (performance.now() - start) * speed;
+			setElapsed(ms);
+			if (ms >= INTRO_DONE_MS) {
+				clearInterval(tick);
+				finishRef.current();
+			}
+		}, 30);
+		return () => clearInterval(tick);
+	}, [motion, speed]);
 
-	const wordmarkDim = elapsed < T_WORDMARK + 350 || inFadeOut;
-	const flourishDim = !showFlourish || elapsed < T_FLOURISH + 300 || inFadeOut;
+	useInput((input, key) => {
+		finishRef.current(carriedText(input, key));
+	});
 
-	const titleText = typedSlice(TITLE, elapsed, T_TITLE);
-	const subheadText = typedSlice(SUBHEAD, elapsed, T_SUBHEAD);
-	const bodyText = typedSlice(BODY, elapsed, T_BODY);
+	if (done.current) return null;
 
-	const titleTyping = showTitle && titleText.length < TITLE.length;
-	const subheadTyping = showSubhead && subheadText.length < SUBHEAD.length;
-	const bodyTyping = showBody && bodyText.length < BODY.length;
+	const isRich = rich ?? glyphs().eight === null;
+	const layout = introLayout(viewport.width, viewport.height, isRich);
+
+	const k = motion ? collapseIndex(elapsed) : -1;
+	const frame = k >= 0 ? collapseFrames(layout, isRich)[k] : undefined;
+	if (frame) {
+		return (
+			<Box flexDirection="column" paddingTop={frame.top} paddingLeft={frame.left}>
+				<Mark8 size={frame.size} rich={isRich} />
+			</Box>
+		);
+	}
+
+	const hint = `any key to continue${version ? ` · v${version}` : ""}`;
 
 	return (
-		<Box flexDirection="column" alignItems="center" paddingY={1}>
-			{/* BANNER_LINES is a module-level constant ASCII banner; rows are positional and never reorder. */}
-			{BANNER_LINES.map((line, i) => (
-				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-				<Text key={i} color={t.orange} bold dimColor={wordmarkDim}>
-					{line}
-				</Text>
-			))}
-			<Box marginTop={1} minHeight={1}>
-				<Text color={t.textPrimary} dimColor={flourishDim}>
-					{showFlourish ? FLOURISH : ""}
-				</Text>
+		<Box flexDirection="column" paddingTop={layout.top}>
+			<Box paddingLeft={layout.markLeft}>
+				<Mark8 size={layout.size} rich={isRich} />
 			</Box>
-			<Box marginTop={1} minHeight={1}>
-				<Text color={t.textPrimary} bold dimColor={inFadeOut}>
-					{titleText}
-					{titleTyping ? "▌" : ""}
+			<Box marginTop={1} paddingLeft={layout.wordLeft}>
+				<Text color={t.orange} bold>
+					8
 				</Text>
-			</Box>
-			<Box marginTop={0} minHeight={1}>
-				<Text color={t.textSecondary} dimColor={inFadeOut}>
-					{subheadText}
-					{subheadTyping ? "▌" : ""}
+				<Text color={t.textPrimary} bold>
+					gent
 				</Text>
+				<Text color={t.textTertiary}> Code</Text>
 			</Box>
-			<Box marginTop={0} minHeight={1}>
-				<Text color={t.textTertiary} dimColor>
-					{bodyText}
-					{bodyTyping ? "▌" : ""}
-				</Text>
+			<Box marginTop={1} paddingLeft={layout.blockLeft} flexDirection="column">
+				{INTRO_LINES.map((line, i) => {
+					const shown = typedLine(i, elapsed, motion);
+					const typing = shown.length > 0 && shown.length < line.length;
+					return (
+						<Box key={line} width={INTRO_BLOCK_WIDTH} minHeight={1}>
+							<Text color={t[INTRO_LINE_TOKENS[i] ?? "textTertiary"]} bold={i === 0}>
+								{shown}
+								{typing ? (isRich ? "▌" : "_") : ""}
+							</Text>
+						</Box>
+					);
+				})}
 			</Box>
-			{!inFadeOut && elapsed > T_BODY + 400 && (
-				<Box marginTop={1}>
-					<Text color={t.textDim}>esc / q to skip</Text>
-				</Box>
-			)}
+			<Box marginTop={1} paddingLeft={layout.blockLeft}>
+				<Text color={t[INTRO_HINT_TOKEN]}>{hint}</Text>
+			</Box>
 		</Box>
 	);
 }

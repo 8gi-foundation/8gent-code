@@ -142,5 +142,8 @@ export const theme = {
 
 type ThemeColor = keyof typeof dark;
 
+/** Both palettes, for checks that must hold in either mode (contrast tests). */
+export const palettes = { dark, light } as const;
+
 // Shorthand for the most common pattern: `import { t } from "../theme.js"`
 export const t = theme.color;

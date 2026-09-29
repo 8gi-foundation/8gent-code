@@ -32,6 +32,7 @@ import {
 } from "./components/ActivityMonitor.js";
 import { TabBar } from "./components/TabBar.js";
 import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
+import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
 import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
@@ -696,7 +697,6 @@ export function App({
 		"Ah, a new task. Excellent.",
 		"Ready to craft something magnificent?",
 		"At your service. What's the mission?",
-		"\u221E The infinite gentleman awaits.",
 		"Splendid to see you. Where shall we begin?",
 	];
 	const randomGreeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
@@ -719,7 +719,7 @@ export function App({
 		{
 			id: "welcome",
 			role: "system",
-			content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\n${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.`,
+			content: `\u221E ${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.`,
 			timestamp: new Date(),
 		},
 	]);
@@ -747,22 +747,26 @@ export function App({
 		live: 0,
 		total: 1,
 	});
-	// One-shot intro banner shown for ~1.5s on launch, dismissable on any key.
-	// Skipped entirely if the user opts out (8GENT_NO_INTRO=1 or 8GENT_LITE=1).
-	// Lite mode in v0.11.1+ also disables auxiliary subsystems for jcode-style
-	// fast launch when the user prefers speed over polish.
-	// Persisted preference at performance.introBanner overrides env var detection
-	// when set to "on" or "off". "auto" falls back to env var logic.
+	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
+	// run and once after each update only (lib/intro-gate.ts); the
+	// performance.introBanner setting ("on" / "off") and 8GENT_NO_INTRO=1 /
+	// 8GENT_LITE=1 override that.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [introVisible, setIntroVisible] = useState(() => {
+		let setting: "on" | "off" | "auto" | undefined;
 		try {
-			const s = loadAppSettings();
-			if (s?.performance?.introBanner === "off") return false;
-			if (s?.performance?.introBanner === "on") return true;
+			setting = loadAppSettings()?.performance?.introBanner;
 		} catch {
-			// Fall through to env var detection
+			// Fall through to the version check
 		}
-		return process.env["8GENT_NO_INTRO"] !== "1" && process.env["8GENT_LITE"] !== "1";
+		const show = shouldShowIntro({
+			setting,
+			env: process.env,
+			seenVersion: readSeenVersion(),
+			version: pkgInfo.version,
+		});
+		if (show) markIntroSeen(pkgInfo.version);
+		return show;
 	});
 	// Legacy foreground refs migrated into perTabAgents.{trackPromise,
 	// getPromise, getLabel, clearPromise} - see Ctrl+G handler. Kept these
@@ -1090,7 +1094,7 @@ export function App({
 						id: `welcome-${activeTabId}`,
 						role: "system",
 						content:
-							"\u221E 8gent Code \u2014 The Infinite Gentleman\n\nNew thread. What shall we work on?",
+							"\u221E New thread. What shall we work on?",
 						timestamp: new Date(),
 					},
 				];
@@ -2468,7 +2472,7 @@ export function App({
 						{
 							id: `onboard-${Date.now()}`,
 							role: "system" as const,
-							content: `∞ Welcome to 8gent, The Infinite Gentleman.\n\nBefore we begin, I'd like to learn about you.\n(Type /skip to skip any question, /skip all to skip onboarding)\n\n${question.question}`,
+							content: `∞ Welcome to 8gent.\n\nBefore we begin, I'd like to learn about you.\n(Type /skip to skip any question, /skip all to skip onboarding)\n\n${question.question}`,
 							timestamp: new Date(),
 						},
 					]);
@@ -5720,7 +5724,15 @@ export function App({
 		return (
 			<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 				<FixedFrame>
-					<IntroBanner onDone={() => setIntroVisible(false)} />
+					<IntroBanner
+						version={pkgInfo.version}
+						animate={showAnimations}
+						onDone={(carried) => {
+							setIntroVisible(false);
+							// Keys typed to skip the splash land in the input, not the void.
+							if (carried) setVoiceTranscript(carried);
+						}}
+					/>
 				</FixedFrame>
 			</ADHDModeContext.Provider>
 		);

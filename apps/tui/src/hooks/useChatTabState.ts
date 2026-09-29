@@ -118,7 +118,6 @@ const GREETINGS = [
 	"Ah, a new task. Excellent.",
 	"Ready to craft something magnificent?",
 	"At your service. What's the mission?",
-	"\u221E The infinite gentleman awaits.",
 	"Splendid to see you. Where shall we begin?",
 ];
 
@@ -127,7 +126,7 @@ function makeWelcomeMessage(): Message {
 	return {
 		id: "welcome",
 		role: "system",
-		content: `\u221E 8gent Code - The Infinite Gentleman\n\n${greeting}\n\nTry /help for commands, Tab for suggestions, or just ask.`,
+		content: `\u221E ${greeting}\n\nTry /help for commands, Tab for suggestions, or just ask.`,
 		timestamp: new Date(),
 	};
 }
