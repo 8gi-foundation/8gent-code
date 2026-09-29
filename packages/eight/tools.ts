@@ -1248,7 +1248,15 @@ export class ToolExecutor {
 			});
 			if (!gateResult.allowed) {
 				const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
-				return `[TOOLG8 BLOCKED] ${gateResult.reason}${alt}`;
+				// Say plainly that nothing happened. A small model given only the
+				// rule text ignored the block and reported the file as written
+				// (Rishi's pilot, 2026-09-29).
+				const target = typeof args.path === "string" && args.path ? ` ${args.path}` : "";
+				const notDone =
+					policyAction === "write_file"
+						? ` The file${target} was NOT written.`
+						: " Nothing was changed.";
+				return `[TOOLG8 BLOCKED] ${toolName} did NOT run.${notDone} Reason: ${gateResult.reason}${alt}`;
 			}
 		}
 

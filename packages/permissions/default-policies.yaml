@@ -4,7 +4,10 @@ version: 1
 # User can override by placing a custom policies.yaml at ~/.8gent/policies.yaml
 #
 # Condition syntax: plain English checked against context fields.
-# Examples: "content contains SECRET", "branch in [main, master]", "command contains rm -rf"
+# Examples: "command contains rm -rf", "branch in [main, master]", "content has_secret"
+# "has_secret" matches credential SHAPES (vendor key formats, PEM key blocks,
+# URL credentials, high-entropy values assigned to KEY/TOKEN/SECRET names),
+# never the bare words, so docs and prose that mention them can be written.
 #
 # Decisions:
 #   block           — hard deny, no bypass
@@ -16,7 +19,7 @@ policies:
 
   - name: "no-secrets-in-files"
     action: write_file
-    condition: "content contains API_KEY or content contains SECRET or content contains PASSWORD or content contains TOKEN or content contains PRIVATE_KEY"
+    condition: "content has_secret"
     decision: block
     message: "Cannot write secrets or credentials to files. Use .env + process.env."
 
