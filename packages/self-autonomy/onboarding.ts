@@ -240,7 +240,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "language",
 		question:
-			"Good day. I'm 8gent, The Infinite Gentleman.\n\n" +
+			"Good day. I'm 8gent.\n\n" +
 			"Here's what I detected from your environment:\n" +
 			"  Name: {detected_name}\n" +
 			"  Email: {detected_email}\n" +
