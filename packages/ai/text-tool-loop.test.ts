@@ -9,6 +9,7 @@ import {
 	type TextTool,
 } from "./text-tool-loop";
 import type { TextToolMessage } from "./text-tool-client";
+import { LLAMA32_BARE_JSON_REPLY } from "./text-tools.fixtures";
 
 const READ_FILE_TOOL: TextTool = {
 	spec: {
@@ -998,5 +999,43 @@ describe("runTextToolAgent - claim check", () => {
 		expect(model.calls()).toBe(2);
 		expect(result.unverified).toEqual(["'ls deck' was requested but never ran"]);
 		expect(result.content).toStartWith("Outline written. Should I run ls deck now?\n\n[harness]");
+	});
+});
+
+describe("runTextToolAgent - bare JSON calls (llama3.2:3b, rishi-pilot l2-split-deck)", () => {
+	test("runs both bare calls from the recorded reply, in order", async () => {
+		const ran: string[] = [];
+		const tool = (name: string): TextTool => ({
+			spec: { name, description: name, parameters: { type: "object", properties: {} } },
+			run: async () => {
+				ran.push(name);
+				return `${name} ok`;
+			},
+		});
+		let turn = 0;
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Turn deck/outline.md into deck/deck.md" }],
+			tools: [tool("get_outline"), tool("write_file")],
+			call: async () =>
+				++turn === 1 ? LLAMA32_BARE_JSON_REPLY : `${DONE_MARKER} wrote deck/deck.md`,
+		});
+		expect(ran).toEqual(["get_outline", "write_file"]);
+		expect(result.toolLog.map((e) => e.name)).toEqual(["get_outline", "write_file"]);
+	});
+
+	test("a JSON example naming an unregistered tool ends the turn as prose", async () => {
+		const answer = [
+			"Example body:",
+			"```json",
+			'{"name": "create_user", "arguments": {}}',
+			"```",
+		].join("\n");
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "show me an example" }],
+			tools: [READ_FILE_TOOL],
+			call: async () => answer,
+		});
+		expect(result.toolLog).toEqual([]);
+		expect(result.content).toBe(answer);
 	});
 });
