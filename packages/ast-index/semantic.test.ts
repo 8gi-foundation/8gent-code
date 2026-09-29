@@ -17,7 +17,10 @@ import {
 	SEMANTIC_KINDS,
 	clearSemanticIndex,
 	ensureSemanticIndex,
+	fileHeader,
+	isTestPath,
 	semanticDoc,
+	semanticFileCard,
 	semanticSearch,
 	semanticStatus,
 } from "./semantic";
@@ -132,30 +135,125 @@ describe("semanticDoc", () => {
 	});
 });
 
+describe("file cards", () => {
+	test("the header comment is the leading block or line comment, without tags", () => {
+		expect(
+			fileHeader(
+				"#!/usr/bin/env bun\n/**\n * Loop Guard - stop conditions.\n *\n * Prevents infinite loops.\n * @see issue 12\n */\nexport const A = 1;\n",
+			),
+		).toBe("Loop Guard - stop conditions. Prevents infinite loops.");
+		expect(fileHeader("// Retry limits\n// for flaky calls\nexport const A = 1;\n")).toBe(
+			"Retry limits for flaky calls",
+		);
+		expect(fileHeader("export const A = 1; // not a header\n")).toBe("");
+		expect(fileHeader("/* never closed")).toBe("");
+	});
+
+	test("a card is the header, the path, then symbol docs (or names when none have docs)", () => {
+		const sym = (name: string, docstring?: string) => ({
+			id: `x::${name}`,
+			name,
+			kind: "function" as const,
+			filePath: "/r/src/a.ts",
+			startLine: 1,
+			endLine: 1,
+			docstring,
+		});
+		expect(
+			semanticFileCard("src/a.ts", "/** Scrubs secrets. */\nexport function scrub() {}\n", [
+				sym("scrub", "Remove   API keys. Then more text."),
+				sym("other"),
+			]),
+		).toBe("Scrubs secrets.\nsrc/a.ts\nscrub: Remove API keys.");
+		expect(semanticFileCard("src/b.ts", "export function f() {}\n", [sym("f"), sym("g")])).toBe(
+			"src/b.ts\nf g",
+		);
+	});
+
+	test("test files are recognised by name and directory", () => {
+		for (const t of [
+			"src/a.test.ts",
+			"src/a.spec.tsx",
+			"pkg/__tests__/a.ts",
+			"pkg/tests/a.ts",
+			"pkg/fixtures/a.ts",
+		]) {
+			expect(isTestPath(t)).toBe(true);
+		}
+		for (const t of ["src/testing-utils.ts", "src/turn-timeout.ts", "src/contest.ts"]) {
+			expect(isTestPath(t)).toBe(false);
+		}
+	});
+});
+
 describe("semantic index", () => {
 	test("ranks the symbol whose signature and path carry the query's meaning", async () => {
 		expect(await ensureSemanticIndex(root, { provider: emb })).toMatchObject({ state: "ready" });
-		// Constants are not embedded: 4 symbols (class, method, 2 functions).
-		expect(emb.texts.length).toBe(4);
+		// Constants are not embedded: 4 symbols (class, method, 2 functions), plus one card per file.
+		expect(emb.texts.length).toBe(8);
 		expect(emb.texts.every((t) => t.startsWith("search_document: "))).toBe(true);
 		const r = await semanticSearch(root, "notice a repeated action", { provider: emb });
 		expect(r.status).toBe("ready");
-		expect(r.hits[0]?.symbol.filePath).toBe(path.join(root, "src/guard/repeat-detector.ts"));
+		expect(r.hits[0]?.file).toBe(path.join(root, "src/guard/repeat-detector.ts"));
 		expect(emb.texts.at(-1)).toBe("search_query: notice a repeated action");
 		const f = await semanticSearch(root, "switch model when a provider stops", { provider: emb });
-		expect(f.hits[0]?.symbol.name).toBe("switchModelWhenProviderStops");
+		expect(f.hits[0]?.symbol?.name).toBe("switchModelWhenProviderStops");
+	});
+
+	test("a file whose header comment carries the meaning is found, answered by its best symbol", async () => {
+		write(
+			"src/safety/honesty.ts",
+			"/**\n * Stops the agent claiming finished work it never did.\n */\nexport function gate(reply: string): string {\n\treturn reply;\n}\n",
+		);
+		refreshIndex(root);
+		await ensureSemanticIndex(root, { provider: emb });
+		const r = await semanticSearch(root, "stop the agent claiming finished work", {
+			provider: emb,
+		});
+		expect(r.hits[0]).toMatchObject({
+			file: path.join(root, "src/safety/honesty.ts"),
+			line: 4,
+		});
+		expect(r.hits[0]?.symbol?.name).toBe("gate");
+	});
+
+	test("a file with no embedded symbols is found by its card, as a file hit at line 1", async () => {
+		write(
+			"src/util/consts.ts",
+			"// Retry limits for flaky network calls\nexport const SOME_LIMIT = 5;\n",
+		);
+		fs.utimesSync(path.join(root, "src/util/consts.ts"), new Date(), new Date(Date.now() + 5000));
+		refreshIndex(root);
+		await ensureSemanticIndex(root, { provider: emb });
+		const r = await semanticSearch(root, "retry limits flaky network", { provider: emb });
+		expect(r.hits[0]).toMatchObject({ file: path.join(root, "src/util/consts.ts"), line: 1 });
+		expect(r.hits[0]?.symbol).toBeUndefined();
+	});
+
+	test("one hit per file, and test files get no card", async () => {
+		write(
+			"src/guard/repeat-detector.test.ts",
+			"// notice repeated action tests\nexport const T = 1;\n",
+		);
+		refreshIndex(root);
+		await ensureSemanticIndex(root, { provider: emb });
+		expect(emb.texts.some((t) => t.includes("repeat-detector.test.ts"))).toBe(false);
+		const r = await semanticSearch(root, "notice a repeated action", { provider: emb, k: 10 });
+		const files = r.hits.map((h) => h.file);
+		expect(new Set(files).size).toBe(files.length);
+		expect(files).not.toContain(path.join(root, "src/guard/repeat-detector.test.ts"));
 	});
 
 	test("vectors persist beside the index cache: a new process embeds nothing twice", async () => {
 		await ensureSemanticIndex(root, { provider: emb });
-		expect(emb.texts.length).toBe(4);
+		expect(emb.texts.length).toBe(8);
 		clearSemanticIndex(root);
 		const again = new FakeEmbedder();
 		expect(await ensureSemanticIndex(root, { provider: again })).toMatchObject({ state: "ready" });
 		expect(again.texts).toEqual([]);
 	});
 
-	test("after a file changes, only the new signatures are embedded", async () => {
+	test("after a file changes, only its new signatures and card are embedded", async () => {
 		await ensureSemanticIndex(root, { provider: emb });
 		write(
 			"src/util/strings.ts",
@@ -167,12 +265,13 @@ describe("semantic index", () => {
 		expect(await ensureSemanticIndex(root, { provider: emb })).toMatchObject({ state: "ready" });
 		expect(emb.texts).toEqual([
 			"search_document: function padRight(s: string, n: number) src/util/strings.ts",
+			"search_document: src/util/strings.ts\npadRight",
 		]);
 		const r = await semanticSearch(root, "pad right", { provider: emb });
-		expect(r.hits[0]?.symbol.name).toBe("padRight");
+		expect(r.hits[0]?.symbol?.name).toBe("padRight");
 	});
 
-	test("a change that keeps every signature embeds nothing and leaves the store file alone", async () => {
+	test("a change that keeps every signature and card embeds nothing and leaves the store file alone", async () => {
 		await ensureSemanticIndex(root, { provider: emb });
 		const dir = fs.readdirSync(cacheRoot).map((d) => path.join(cacheRoot, d))[0];
 		const bin = fs.readdirSync(dir).find((f) => f.endsWith(".f32"));
@@ -197,7 +296,7 @@ describe("semantic index", () => {
 		});
 		const first = await semanticSearch(root, "repeated action", { provider: emb });
 		expect(first).toMatchObject({ status: "building", hits: [] });
-		expect(semanticStatus(root)).toMatchObject({ state: "building", total: 4 });
+		expect(semanticStatus(root)).toMatchObject({ state: "building", total: 8 });
 		open();
 		await ensureSemanticIndex(root, { provider: emb });
 		expect((await semanticSearch(root, "repeated action", { provider: emb })).status).toBe("ready");
@@ -261,6 +360,23 @@ describe("locate in semantic mode", () => {
 		);
 	});
 
+	test("a file hit with no symbol is a file row at line 1", async () => {
+		write(
+			"src/util/consts.ts",
+			"// Retry limits for flaky network calls\nexport const SOME_LIMIT = 5;\n",
+		);
+		fs.utimesSync(path.join(root, "src/util/consts.ts"), new Date(), new Date(Date.now() + 5000));
+		refreshIndex(root);
+		await ensureSemanticIndex(root, { provider: emb });
+		const r = await locate("where are the retry limits for flaky network calls", {
+			root,
+			repoId: root,
+			systemOne: semanticRouter,
+			semantic: (id, q) => semanticSearch(id, q, { provider: emb }),
+		});
+		expect(r.rows[0]).toMatchObject({ file: "src/util/consts.ts", line: 1, kind: "file" });
+	});
+
 	test("semantic unavailable: the hybrid answer with a note", async () => {
 		emb.available = false;
 		const plain = await locate("how does it notice a repeated action", {
@@ -289,6 +405,8 @@ describe("locate in semantic mode", () => {
 			semantic: (id, q) => semanticSearch(id, q, { provider: emb }),
 		});
 		expect(r.route).toMatchObject({ mode: "hybrid" });
-		expect(formatLocate(r)).toContain("semantic index is still being built (0 of 4");
+		expect(formatLocate(r)).toContain(
+			"semantic index is still being built (0 of 8 texts embedded)",
+		);
 	});
 });

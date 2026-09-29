@@ -855,7 +855,11 @@ async function semanticRows(ctx: RunCtx, query: string): Promise<LocateRow[]> {
 		ctx.state.semantic = rest;
 		return [];
 	}
-	return answer.hits.slice(0, LOCATE_MAX_ROWS).map((h) => symbolRow(ctx.root, h.symbol));
+	return answer.hits.slice(0, LOCATE_MAX_ROWS).map((h) => {
+		if (h.symbol) return symbolRow(ctx.root, h.symbol);
+		const rel = toPosix(path.relative(ctx.root, h.file));
+		return { file: rel, line: 1, kind: "file", text: clip(fileSummary(ctx.root, ctx.repoId, rel)) };
+	});
 }
 
 /** How many hits per query word a kept mode pools before ranking by word count. */
@@ -1090,7 +1094,7 @@ export function formatLocate(result: LocateResult): string {
 	const sem = result.semantic;
 	if (sem?.status === "building") {
 		notes.push(
-			`The semantic index is still being built (${sem.done ?? 0} of ${sem.total ?? 0} signatures embedded), so this is the hybrid answer.`,
+			`The semantic index is still being built (${sem.done ?? 0} of ${sem.total ?? 0} texts embedded), so this is the hybrid answer.`,
 		);
 	} else if (sem?.status === "unavailable") {
 		notes.push(

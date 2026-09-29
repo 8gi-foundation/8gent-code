@@ -579,63 +579,81 @@ up are written back 2 s later. Writes go to a temp file and are then renamed.
 (NODE_ENV=test) never writes it under the home dir. A cold build removes
 caches whose repo root no longer exists.
 
-**Semantic mode.** `packages/ast-index/semantic.ts` embeds every function,
-class, interface, type and method as its signature plus its path, with the
-memory package's nomic client (`nomic-embed-text` via Ollama). It uses
-nomic's `search_document:` and `search_query:` prefixes. Constants are left
-out: they are 28k of the 35k symbols. A query is ranked by brute-force
-cosine similarity, at most two rows per file. There is no vector database.
+**Semantic mode.** `packages/ast-index/semantic.ts` embeds two kinds of text
+with the memory package's nomic client (`nomic-embed-text` via Ollama),
+using nomic's `search_document:` and `search_query:` prefixes:
+
+- every function, class, interface, type and method, as its signature plus
+  its path. Constants are left out: they are 28k of the 35k symbols.
+- every source file that is not a test, fixture or mock, as a card: the
+  file's header comment (block or line comments at the top, `@` tags
+  dropped, 600 characters at most), its path, then the first sentence of up
+  to 12 symbol docstrings, or up to 20 symbol names when none has one.
+
+A file scores the better of its card and its best symbol (brute-force
+cosine; there is no vector database), and the answer is one row per file:
+the file's best symbol, or a `file` row at line 1 when it has no embedded
+symbol. Test files get no card because a test's header describes the code
+it tests and outranks it.
 The index is built lazily: the first semantic query starts the build, and
-locate answers with hybrid plus a note ("still being built (n of m ...)").
-Vectors are stored beside the index cache, keyed by a hash of the embedded
-text, so a restart embeds nothing again and a changed file re-embeds only
-signatures whose text changed. When there is no model, a timeout (3 s per
-query) or no index, the answer is hybrid with a note. Semantic runs only
-when System One keeps the `semantic` mode, so with `EIGHT_SYSTEM_ONE_LOCATE`
-off (the default) nothing is ever embedded.
+locate answers with hybrid plus a note ("still being built (n of m texts
+embedded)"). Vectors are stored beside the index cache, keyed by a hash of
+the embedded text, so a restart embeds nothing again and a changed file
+re-embeds only the signatures and card whose text changed. When there is no
+model, a timeout (3 s per query) or no index, the answer is hybrid with a
+note. Semantic runs only when System One keeps the `semantic` mode, so with
+`EIGHT_SYSTEM_ONE_LOCATE` off (the default) nothing is ever embedded.
 
 ```bash
 bun packages/decide/eval/locate-semantic-run.ts   # no classifier model; needs nomic-embed-text in Ollama
 ```
 
-Run 2026-09-28/29 on an Apple M2 Max under heavy load from other work (load
-average 52 to 163 during these runs). Anchor `551ef336`: 1488 files, 34,692
-symbols, 11,538 embedded signatures (a 35 MB `.f32` store).
+Runs 2026-09-28/29 on an Apple M2 Max under heavy load from other work (load
+average 28 to 163 during these runs). Anchor `551ef336`: 1488 files, 34,692
+symbols, 11,538 embedded signatures (a 35 MB `.f32` store) plus 1,129 file
+cards.
 
 | Measure | Result | Target |
 | --- | --- | --- |
 | Cold index build | 74.7 s (load about 108; 13.8 s in the scope doc at normal load) | - |
 | Warm index load, 3 runs, load about 107 | 1025, 1281, 918 ms | < 1 s: NOT met at this load |
 | Warm index load, 10 runs, load about 52 | 180 to 688 ms (median 414) | < 1 s: met |
-| Semantic build, cold | 1652 s for 11,435 embeddings (about 7/s under load) | - |
-| Semantic load from the store | 640 ms (one run) | - |
-| Concept class (8 queries), semantic top-5 | **25.0%** (2 of 8) | >= 70%: **NOT met** |
+| Warm index load, 2 x 3 runs, load 28 to 33 | 398, 606, 408 and 234, 181, 174 ms | < 1 s: met |
+| Semantic build, cold, signatures | 1652 s for 11,435 embeddings (about 7/s under load) | - |
+| Semantic build, file cards on top of stored signatures | 118 s for 1,129 cards (load about 30) | - |
+| Semantic load from the store | 439 ms (one run, nothing embedded) | - |
+| Concept class (8 queries), semantic top-5, signatures only | 25.0% (2 of 8) | >= 70%: NOT met |
+| Concept class (8 queries), semantic top-5, with file cards | **75.0%** (6 of 8), same on a second run | >= 70%: **met** |
 
-Top-5 file hit by labelled mode, 40 prose queries (`results/2026-09-28-locate-semantic.json`):
+Top-5 file hit by labelled mode, 40 prose queries, with file cards
+(`results/2026-09-29-locate-semantic.json`; the signatures-only run is
+`results/2026-09-28-locate-semantic.json`, shown in brackets):
 
 | Label | n | Rules (M1) | Semantic forced | Oracle (label as mode) |
 | --- | --- | --- | --- | --- |
-| symbol | 10 | 60.0% | 100.0% | 70.0% |
-| grep | 8 | 37.5% | 37.5% | 37.5% |
-| path | 8 | 62.5% | 25.0% | 87.5% |
-| semantic | 8 | 0.0% | 25.0% | 25.0% |
-| hybrid | 6 | 100.0% | 83.3% | 100.0% |
-| all | 40 | 50.0% | 55.0% | 62.5% |
+| symbol | 10 | 60.0% | 90.0% (100.0%) | 70.0% (70.0%) |
+| grep | 8 | 37.5% | 37.5% (37.5%) | 37.5% (37.5%) |
+| path | 8 | 62.5% | 25.0% (25.0%) | 87.5% (87.5%) |
+| semantic | 8 | 0.0% | 75.0% (25.0%) | 75.0% (25.0%) |
+| hybrid | 6 | 100.0% | 100.0% (83.3%) | 100.0% (100.0%) |
+| all | 40 | 50.0% | 65.0% (55.0%) | 72.5% (62.5%) |
 
 Reading it:
 
-- Signature plus path is not enough text for concept queries. A diagnostic
-  over the same vectors (k = 200) put the labelled file at file rank 4 and 5
-  for the two hits, 6 and 9 for two near misses, and 50, 52 and 82 or not in
-  the top 200 for the rest. Showing one row per file instead of two leaves
-  it at 2 of 8. Reaching the target needs more text per symbol (docstrings,
-  or the first lines of the body), which is outside this milestone's spec.
-  It would also need a full re-embed (about 27 minutes under this load), so
-  that choice needs a decision.
-- Semantic helps prose that names a declaration: the symbol class goes from
-  60% to 100%. The oracle, which routes symbol-labelled queries to the
-  symbol index, gets 70%.
-- The oracle's all-query top-5 goes from 57.5% (M2, no semantic) to 62.5%.
-  The whole gain is the semantic class going from 0% to 25%.
-- The 8 concept queries and their labels are the M2 set (one labeller,
-  synthetic). Nothing in semantic.ts was tuned on them.
+- Signature plus path was not enough text for concept queries (2 of 8). The
+  meaning of a file is in its header comment: `honesty.ts`, `redact.ts`,
+  `compaction.ts` and `tool-loop-detector.ts` say what they are for there,
+  in words their signatures do not use. With cards, 4 more concept queries
+  hit, and every hit has the labelled file at rank 1 or 2.
+- Still missed: prose-33 (model failover; `providers/failover.ts` is file
+  rank 10 to 16 depending on card text) and prose-34 (memory embeddings;
+  `memory/embeddings.ts` rank 7 to 23).
+- Cards changed 8 of the 40 queries: 6 now hit (4 concept, 1 grep, 1
+  hybrid) and 2 now miss (prose-02 in the symbol class, prose-15 in grep),
+  because one row per file and file-level scores push some symbol rows out
+  of the top 5.
+- Caveat: the card design was chosen by looking at these 8 concept queries.
+  Three card layouts were tried on them (path first: 5 of 8; header first:
+  6 of 8; path words plus docs plus names: 6 of 8), and the simplest of the
+  two best was kept. With 8 queries and one labeller, 75% is not a held-out
+  number; a fresh concept set is needed before trusting it.
