@@ -311,6 +311,17 @@ export function MessageList({
 
 	const { startIdx: sliceStart, sliceEnd } = computeWindow(clampedOffset);
 	const visibleMessages = chatMessages.slice(sliceStart, sliceEnd);
+	// A window taller than the box (one message longer than the whole chat
+	// area, or estimates that undercount) is anchored to its bottom so the
+	// newest lines stay on screen and the oldest clip off the top (#3019).
+	let windowRows = 0;
+	for (let i = sliceStart; i < sliceEnd; i++) windowRows += rowEstimates[i] ?? 0;
+	const anchorBottom = windowRows > resolvedRowBudget;
+	// When the top is clipped, say so on a row of its own, outside the clip
+	// box, so the reader knows the reply did not start where the box does.
+	// The marker costs one row, so it is counted in what is hidden.
+	const hiddenAbove = anchorBottom ? windowRows - (resolvedRowBudget - 1) : 0;
+	const canScrollUp = clampedOffset < maxScrollOffset;
 	const _maxVisibleCap = maxVisible; // legacy prop retained for callers; not used in slicing.
 
 	// Find the most recent assistant message — that's the only one that gets
@@ -325,44 +336,63 @@ export function MessageList({
 
 	return (
 		<Box flexDirection="column" flexGrow={1} minHeight={0}>
-			{visibleMessages.length === 0 ? (
-				<Box flexGrow={1} alignItems="center" justifyContent="center">
-					<Text color={t.dim}>
-						<Text color={t.orange}>8</Text>
-						<Text color={t.textPrimary}>▣ </Text>
-						<Text color={t.dim}>waiting with you</Text>
+			{hiddenAbove > 0 && (
+				<Box flexShrink={0}>
+					<Text color={t.muted} dimColor>
+						{`↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  shift+↑" : ""}`}
 					</Text>
 				</Box>
-			) : null}
-			{visibleMessages.map((message, index) => {
-				// Animate only the first time we see this message. Once it's been
-				// rendered as "new", subsequent renders (scroll back, slice churn)
-				// treat it as static so TypingText doesn't replay.
-				const isFirstShow =
-					message.id === newMessageId && !animatedIdsRef.current.has(message.id);
-				return (
-					<MessageItem
-						key={message.id}
-						message={message}
-						isNew={isFirstShow}
-						animate={animateTyping}
-						soundEnabled={soundEnabled}
-						index={index}
-						contentWidth={resolvedContentWidth}
-						showAnimations={showAnimations}
-						isLatestAssistant={message.id === lastAssistantId}
-						trail={trailById.get(message.id) ?? []}
-						trailMaxRows={trailCaps.get(message.id)}
-						onAnimationStart={(id) => {
-							animatedIdsRef.current.add(id);
-						}}
-					/>
-				);
-			})}
+			)}
+			<Box
+				flexDirection="column"
+				flexGrow={1}
+				minHeight={0}
+				overflow="hidden"
+				justifyContent={anchorBottom ? "flex-end" : "flex-start"}
+			>
+				{visibleMessages.length === 0 ? (
+					<Box flexGrow={1} alignItems="center" justifyContent="center">
+						<Text color={t.dim}>
+							<Text color={t.orange}>8</Text>
+							<Text color={t.textPrimary}>▣ </Text>
+							<Text color={t.dim}>waiting with you</Text>
+						</Text>
+					</Box>
+				) : null}
+				{visibleMessages.map((message, index) => {
+					// Animate only the first time we see this message. Once it's been
+					// rendered as "new", subsequent renders (scroll back, slice churn)
+					// treat it as static so TypingText doesn't replay.
+					const isFirstShow =
+						message.id === newMessageId && !animatedIdsRef.current.has(message.id);
+					// flexShrink 0: Ink squeezes a shrinkable item to fit, and a
+					// squeezed text block draws its lines on top of each other.
+					// Rows that do not fit are clipped by the list box instead.
+					return (
+						<Box key={message.id} flexDirection="column" flexShrink={0}>
+							<MessageItem
+								message={message}
+								isNew={isFirstShow}
+								animate={animateTyping}
+								soundEnabled={soundEnabled}
+								index={index}
+								contentWidth={resolvedContentWidth}
+								showAnimations={showAnimations}
+								isLatestAssistant={message.id === lastAssistantId}
+								trail={trailById.get(message.id) ?? []}
+								trailMaxRows={trailCaps.get(message.id)}
+								onAnimationStart={(id) => {
+									animatedIdsRef.current.add(id);
+								}}
+							/>
+						</Box>
+					);
+				})}
+			</Box>
 			{clampedOffset > 0 && (
 				<Box justifyContent="center" flexShrink={0}>
 					<Text color={t.muted} dimColor>
-						{`↓ ${clampedOffset} below — shift+↓ or scroll down to follow`}
+						{`↓ ${clampedOffset} below  shift+↓ or scroll down to follow`}
 					</Text>
 				</Box>
 			)}
@@ -516,20 +546,14 @@ function MessageItem({
 
 	// Bar color: orange for user, teal for the latest assistant, muted for
 	// older assistant turns (echoes the existing label-color contract).
-	const barColor = isUser
-		? t.orange
-		: isLatestAssistant
-			? t.teal
-			: t.muted;
+	const barColor = isUser ? t.orange : isLatestAssistant ? t.teal : t.muted;
 
 	// Footer renders only on assistant turns and only when the data exists.
 	// Phase 2 will plumb latencyMs+tokens from the agent's onStepFinish event
 	// onto the Message at completion. For now this is a no-op until the data
 	// is present — keeps this PR purely visual.
 	const showFooter =
-		!isUser &&
-		typeof message.latencyMs === "number" &&
-		typeof message.tokens === "number";
+		!isUser && typeof message.latencyMs === "number" && typeof message.tokens === "number";
 	const footerLatency =
 		message.latencyMs && message.latencyMs >= 1000
 			? `${(message.latencyMs / 1000).toFixed(1)}s`
@@ -568,7 +592,9 @@ function MessageItem({
 			</Box>
 
 			{/* This turn's tool calls, one line each, above the reply text */}
-			{!isUser && trail.length > 0 && <ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />}
+			{!isUser && trail.length > 0 && (
+				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />
+			)}
 
 			{/* Message body — left-bar carries the visual frame, strict width */}
 			<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
