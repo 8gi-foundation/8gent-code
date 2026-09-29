@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-	CONTINUE_MESSAGE,
-	NOT_FINAL_MAX_CHARS,
+	COMPLETION_CHECK_MESSAGE,
+	DONE_MARKER,
+	isQuestionToUser,
 	isShellFileWrite,
-	isUnfinishedReply,
 	runTextToolAgent,
+	stripDoneMarker,
 	type TextTool,
 } from "./text-tool-loop";
 import type { TextToolMessage } from "./text-tool-client";
@@ -46,7 +47,8 @@ describe("runTextToolAgent", () => {
 		});
 
 		expect(result.content).toBe("The secret number is 4242.");
-		expect(result.rounds).toBe(2);
+		// Round 3 is the one completion check after the successful tool round.
+		expect(result.rounds).toBe(3);
 		expect(result.toolLog).toHaveLength(1);
 		expect(result.toolLog[0].name).toBe("read_file");
 		expect(result.toolLog[0].args).toEqual({ path: "/tmp/x.txt" });
@@ -145,7 +147,8 @@ describe("runTextToolAgent - cut-off tool_call", () => {
 			call,
 		});
 
-		expect(result.rounds).toBe(3);
+		// Round 4 is the one completion check after the successful write.
+		expect(result.rounds).toBe(4);
 		expect(result.content).toBe("Wrote the outline.");
 		expect(writes).toEqual([{ path: "deck/outline.md", content: "# part 1" }]);
 		const feedback = seen[1][seen[1].length - 1].content;
@@ -304,8 +307,8 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			"run_command",
 			"run_command",
 		]);
-		// Exactly one continuation message was sent, right after the announcement.
-		const continuations = model.seen.filter((m) => lastUserMessage(m) === CONTINUE_MESSAGE);
+		// Exactly one completion check was sent, right after the announcement.
+		const continuations = model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE);
 		expect(continuations).toHaveLength(1);
 		expect(model.seen[3][model.seen[3].length - 2]).toEqual({
 			role: "assistant",
@@ -377,11 +380,12 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		expect(result.content).toBe("Now let me write the deck:");
 	});
 
-	test("a real final answer after a tool round ends the turn with no continuation", async () => {
+	test("a real final answer after a tool round costs one short check round, then ends", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("read_file", { path: "packages/decide/README.md" }),
 			"The package is called Eight System One.",
+			"DONE: The package is called Eight System One.",
 			"UNREACHED",
 		]);
 		const result = await runTextToolAgent({
@@ -389,7 +393,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			tools: ws.tools,
 			call: model.call,
 		});
-		expect(model.calls()).toBe(2);
+		expect(model.calls()).toBe(3);
 		expect(result.content).toBe("The package is called Eight System One.");
 	});
 
@@ -436,18 +440,39 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		expect(result.content).toBe("Let me try another way:");
 	});
 
-	test("a long colon-ended reply carries substance and is treated as final", async () => {
+	test("reply length and ending do not matter: a long report is checked once like any other", async () => {
 		const ws = fakeWorkspace();
 		const long = `${"I researched the package and wrote the outline and the deck. ".repeat(6)}Files written:`;
-		expect(long.length).toBeGreaterThan(NOT_FINAL_MAX_CHARS);
-		const model = scriptedModel([tc("read_file", { path: "packages/decide/README.md" }), long, "UNREACHED"]);
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			long,
+			`${DONE_MARKER} ${long}`,
+			"UNREACHED",
+		]);
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "go" }],
 			tools: ws.tools,
 			call: model.call,
 		});
-		expect(model.calls()).toBe(2);
+		expect(model.calls()).toBe(3);
 		expect(result.content).toBe(long);
+	});
+
+	test("a bare marker answer to the check keeps the summary the model gave before it", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Wrote deck/outline.md.",
+			"DONE:",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write the outline" }],
+			tools: ws.tools,
+			call: model.call,
+		});
+		expect(model.calls()).toBe(3);
+		expect(result.content).toBe("Wrote deck/outline.md.");
 	});
 
 	test("a cut-off round in between means the reply no longer follows a successful tool round", async () => {
@@ -484,19 +509,33 @@ describe("runTextToolAgent - continue until every step is done", () => {
 	});
 });
 
-describe("isUnfinishedReply", () => {
-	test("short colon-terminated lead-ins and empty replies are unfinished", () => {
-		expect(isUnfinishedReply("Now let me write the Marp-style deck:")).toBe(true);
-		expect(isUnfinishedReply("Next step:  \n")).toBe(true);
-		expect(isUnfinishedReply("")).toBe(true);
-		expect(isUnfinishedReply("   \n")).toBe(true);
+describe("isQuestionToUser", () => {
+	test("a reply whose last non-space character is ? is a question", () => {
+		expect(isQuestionToUser("Which theme do you want?")).toBe(true);
+		expect(isQuestionToUser("Outline written. Marp or reveal.js?  \n")).toBe(true);
 	});
 
-	test("replies ending in any other way are final", () => {
-		expect(isUnfinishedReply("Done. Wrote deck/deck.md.")).toBe(false);
-		expect(isUnfinishedReply("Which theme do you want?")).toBe(false);
-		expect(isUnfinishedReply("Let me write the deck")).toBe(false);
-		expect(isUnfinishedReply(`${"x".repeat(NOT_FINAL_MAX_CHARS)}:`)).toBe(false);
+	test("any other ending is not a question", () => {
+		expect(isQuestionToUser("Now creating the Marp deck from the outline.")).toBe(false);
+		expect(isQuestionToUser("Now let me write the Marp-style deck:")).toBe(false);
+		expect(isQuestionToUser("")).toBe(false);
+		expect(isQuestionToUser("Is it done? Yes, it is.")).toBe(false);
+	});
+});
+
+describe("stripDoneMarker", () => {
+	test("removes a leading marker, plain or in markdown bold", () => {
+		expect(stripDoneMarker("DONE: Wrote deck/deck.md.")).toBe("Wrote deck/deck.md.");
+		expect(stripDoneMarker("  DONE:\nWrote it.")).toBe("Wrote it.");
+		expect(stripDoneMarker("**DONE:** Wrote it.")).toBe("Wrote it.");
+		expect(stripDoneMarker("**DONE**: Wrote it.")).toBe("Wrote it.");
+		expect(stripDoneMarker("DONE:")).toBe("");
+	});
+
+	test("leaves everything else alone, including the marker mid-text", () => {
+		expect(stripDoneMarker("Wrote it.")).toBe("Wrote it.");
+		expect(stripDoneMarker("Done. Wrote it.")).toBe("Done. Wrote it.");
+		expect(stripDoneMarker("Status DONE: all good")).toBe("Status DONE: all good");
 	});
 });
 
@@ -515,5 +554,114 @@ describe("follow-up instruction after a tool round", () => {
 		expect(followUp).toMatch(/every step/i);
 		expect(followUp).toMatch(/tool_call/);
 		expect(followUp).toMatch(/question/i);
+	});
+});
+
+// ── Completion check (Rishi pilot run 2026-09-29_141338, l2-solo-deck) ──────
+//
+// On main with #3008, qwen3.8:27b-mlx wrote deck/outline.md, then replied
+// "Now creating the Marp deck from the outline." with no tool call. It ended in
+// "." so the colon rule never fired and 2 of 5 steps were never done.
+// Punctuation is not a signal; the loop now asks once whether every step is done.
+
+const isCheck = (msgs: TextToolMessage[]) => lastUserMessage(msgs) === COMPLETION_CHECK_MESSAGE;
+
+describe("runTextToolAgent - completion check", () => {
+	test("the pilot reply 'Now creating the Marp deck from the outline.' is checked and all 5 steps finish", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What\n2. Why" }),
+			"Now creating the Marp deck from the outline.",
+			tc("write_file", { path: "deck/deck.md", content: "# What\n---\n# Why" }),
+			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"Researched the package, wrote deck/outline.md and deck/deck.md, listed deck, counted 3 lines.",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: FIVE_STEP_TASK }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(ws.files.get("deck/deck.md")).toBe("# What\n---\n# Why");
+		expect(ws.commands).toEqual(["ls deck", "wc -l deck/deck.md"]);
+		expect(result.toolLog.map((t) => t.name)).toEqual([
+			"read_file",
+			"write_file",
+			"write_file",
+			"run_command",
+			"run_command",
+		]);
+		expect(result.rounds).toBe(7);
+		expect(result.content).toStartWith("Researched the package");
+		// Exactly one check, sent straight after the period-ended announcement.
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(isCheck(model.seen[3])).toBe(true);
+	});
+
+	test("a model that did finish gets exactly one check, answers DONE, and the turn ends with the marker stripped", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Wrote deck/outline.md with five slides.",
+			"DONE: Wrote deck/outline.md with five slides.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write deck/outline.md" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(model.calls()).toBe(3);
+		expect(result.rounds).toBe(3);
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(result.content).toBe("Wrote deck/outline.md with five slides.");
+	});
+
+	test("no infinite loop: a model that keeps announcing with a period gets one check, then the turn ends", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Now creating the Marp deck from the outline.",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: FIVE_STEP_TASK }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(model.calls()).toBe(3);
+		expect(result.rounds).toBe(3);
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(result.content).toBe("Now creating the Marp deck from the outline.");
+		expect(ws.files.has("deck/deck.md")).toBe(false);
+	});
+
+	test("a question to the user after a tool round is not checked", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Outline written. Do you want the deck in Marp or reveal.js?",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "make a deck" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(model.calls()).toBe(2);
+		expect(model.seen.filter(isCheck)).toHaveLength(0);
+		expect(result.content).toBe("Outline written. Do you want the deck in Marp or reveal.js?");
 	});
 });
