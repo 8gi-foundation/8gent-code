@@ -75,15 +75,6 @@ function chatCompletionsUrl(provider: string): string | null {
 }
 
 /**
- * Ceiling on a single tools probe. Was 90s, which is most of the two minutes a
- * hung model costs before anyone gives up - the probe meant to protect the turn
- * was itself the stall. 15s is far beyond any healthy local answer measured on
- * this hardware (apfel 998ms, LM Studio 3803ms) and short enough that a hang is
- * caught rather than endured. Override with EIGHT_TOOL_PROBE_TIMEOUT_MS.
- */
-const TOOL_PROBE_TIMEOUT_MS = Number(process.env.EIGHT_TOOL_PROBE_TIMEOUT_MS || 15_000);
-
-/**
  * Probe whether a local model can accept a native `tools` payload (Law 2,
  * issue #2747). Sends ONE trivial chat-completions request with a no-op tool
  * and max_tokens: 1.
@@ -124,27 +115,12 @@ export async function probeToolCapability(
 				max_tokens: 1,
 				stream: false,
 			}),
-			signal: AbortSignal.timeout(opts?.timeoutMs ?? TOOL_PROBE_TIMEOUT_MS),
+			signal: AbortSignal.timeout(opts?.timeoutMs ?? 90_000),
 		});
 		if (res.ok) return "native";
 		if (res.status === 400) return "none";
 		return "unknown";
-	} catch (err) {
-		// A HANG IS NOT UNCERTAINTY. This branch used to return "unknown" for
-		// everything, and "unknown" is deliberately never demoted - so a model
-		// that never responds was scored as safe to route, and the next turn
-		// sent it a tools payload and hung again. That is the user-visible half
-		// of #2894: qwen3.8:27b-mlx advertises capabilities:["tools"], never
-		// returns, and was re-selected every time.
-		//
-		// Measured 2026-08-28: qwen3.8:27b-mlx did not answer a tools payload in
-		// 15s. apfel answered one in 998ms and LM Studio's ornith-1.0-9b in
-		// 3803ms, so the budget is not the constraint - the model is.
-		//
-		// A timeout is therefore "none" (unusable for tool work), while a
-		// genuinely uncertain result - refused connection, DNS, TLS - stays
-		// "unknown" and is not held against the model.
-		if ((err as { name?: string })?.name === "TimeoutError") return "none";
+	} catch {
 		return "unknown";
 	}
 }
@@ -437,17 +413,21 @@ const KNOWN_CONTEXT: Partial<Record<ProviderName, number>> = {
  * payload (HTTP 200), false when it rejects it (HTTP 400 / any error). Injected
  * so tests never touch the network.
  */
-export interface NativeToolsProbe {
-	(args: { baseUrl: string; model: string; apiKey?: string }): Promise<boolean>;
-}
+export type NativeToolsProbe = (args: {
+	baseUrl: string;
+	model: string;
+	apiKey?: string;
+}) => Promise<boolean>;
 
 /**
  * Context-window lookup against a provider's models endpoint. Returns the
  * advertised window in tokens, or null when unknown. Injected for tests.
  */
-export interface ContextWindowLookup {
-	(args: { baseUrl: string; model: string; apiKey?: string }): Promise<number | null>;
-}
+export type ContextWindowLookup = (args: {
+	baseUrl: string;
+	model: string;
+	apiKey?: string;
+}) => Promise<number | null>;
 
 export interface ResolveCapabilitiesOptions {
 	probe?: NativeToolsProbe;

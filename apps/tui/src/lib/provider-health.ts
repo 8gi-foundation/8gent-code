@@ -46,11 +46,9 @@ async function probeUrl(url: string): Promise<boolean> {
  * "Stopping...". Both would show a green light here.
  *
  * That is fine for a status glyph and NOT fine for routing, so routing must
- * not read this. `packages/providers/liveness.ts` sends a real one-token
- * completion and is the only thing permitted to authorise a route. This stays
- * cheap on purpose: it runs on an 8s poll, and firing real inference at three
- * providers every 8 seconds would pin models in memory to light up one
- * character in the status bar.
+ * not read this. This stays cheap on purpose: it runs on an 8s poll, and
+ * firing real inference at three providers every 8 seconds would pin models
+ * in memory to light up one character in the status bar.
  */
 export async function probeProviders(): Promise<{
 	live: number;

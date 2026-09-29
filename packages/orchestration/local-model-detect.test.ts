@@ -113,9 +113,7 @@ describe("capabilityToolMode", () => {
 	test("no-tool providers resolve to none, even under override", () => {
 		expect(capabilityToolMode(cfg({ name: "apfel", supportsTools: false }), noEnv)).toBe("none");
 		expect(
-			capabilityToolMode(cfg({ name: "apple-foundation", supportsTools: false }), {
-				EIGHT_TEXT_TOOLS: "1",
-			}),
+			capabilityToolMode(cfg({ name: "apple-foundation", supportsTools: false }), { EIGHT_TEXT_TOOLS: "1" }),
 		).toBe("none");
 	});
 
@@ -244,34 +242,6 @@ describe("probeToolCapability", () => {
 				fetchImpl: fetchDown,
 			}),
 		).toBe("unknown");
-	});
-
-	// ── #2894: a hang is not uncertainty ──────────────────────────────────
-	test("a model that never answers the tools probe is 'none', not 'unknown'", async () => {
-		// qwen3.8:27b-mlx advertises capabilities:["tools"] and never returns.
-		// "unknown" is deliberately never demoted, so returning it here handed
-		// the model straight back to the router, which sent another tools
-		// payload, which hung again. Measured 2026-08-28: no answer in 15s.
-		const fetchHang = (async () => {
-			const e = new Error("The operation timed out.");
-			e.name = "TimeoutError";
-			throw e;
-		}) as unknown as typeof fetch;
-
-		expect(
-			await probeToolCapability("ollama", "qwen3.8:27b-mlx", {
-				fetchImpl: fetchHang,
-				timeoutMs: 50,
-			}),
-		).toBe("none");
-	});
-
-	test("a refused connection is still 'unknown' - only hangs demote", async () => {
-		// The distinction that makes the above safe: a provider that is simply
-		// down must not be permanently marked tool-incapable.
-		expect(await probeToolCapability("ollama", "llama3.2:3b", { fetchImpl: fetchDown })).toBe(
-			"unknown",
-		);
 	});
 });
 

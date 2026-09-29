@@ -24,7 +24,6 @@ import {
 	normalizeDeclaredProvider,
 	parseDeclaredProviders,
 } from "../index";
-import { probeCompletion } from "../liveness";
 
 /**
  * Ollama the live tests dispatch against. Defaults to this host; point
@@ -57,22 +56,7 @@ const [live, liveModel] = await (async (): Promise<[boolean, string]> => {
 		// Smallest known-good instruct model on this box; fall back to whatever is
 		// installed so the live tests still mean something on another host.
 		const model = names.find((n) => n.startsWith("llama3.2:3b")) || names[0] || "";
-		if (!model) return [false, ""];
-
-		// A 200 from /api/tags proves Ollama can LIST models, not that it can
-		// answer with one, and those are different facts. Measured 2026-08-28:
-		// with a runner wedged in "Stopping...", /api/tags answered in 3ms while
-		// every completion timed out. The gate opened, both live tests ran, and
-		// each burned its full 120s budget - 4 minutes of red CI caused entirely
-		// by trusting a listing endpoint.
-		//
-		// So the gate now costs a real one-token completion. If the engine cannot
-		// answer, these tests skip (which is the truth) instead of failing slowly.
-		const probe = await probeCompletion(
-			{ provider: "ollama", model, baseUrl: `${LOCAL_OLLAMA}/v1` },
-			10_000,
-		);
-		return [probe.outcome === "alive", model];
+		return [model.length > 0, model];
 	} catch {
 		return [false, ""];
 	}
