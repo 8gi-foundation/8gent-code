@@ -45,6 +45,23 @@ caller's `call` function, then returns the stripped prose plus any parsed tool
 calls. It performs no network or I/O of its own and never mutates the caller's
 messages.
 
+## Ollama's built-in parser (#3012)
+
+Ollama runs the model's own output parser (for qwen3.8, `PARSER qwen3.5`) on
+every `/v1/chat/completions` and `/api/chat` reply, even with no `tools` in the
+request, and the chat endpoints have no switch to turn it off. If a reply holds
+the model's native `<tool_call>` tag, that parser takes over: a closed tag with
+a JSON body fails XML parsing and the request becomes a 500 (`EOF`); an
+unclosed tag, or one mentioned in the model's reasoning, makes the reply come
+back 200 with empty content. Two rules follow:
+
+- `buildToolSystemPrompt` must never spell out a native marker (`<tool_call>`,
+  `<|tool_call|>`, `<function=`). It forbids them in words. A test pins this.
+- `buildTextToolCall` (`text-tool-endpoint.ts`) retries exactly once, with a
+  reminder to use the fenced block, when Ollama returns that parser 500 or an
+  empty reply for tokens it generated. A second parser 500 fails with a clear
+  error; a second empty reply is returned as is.
+
 ## The gate
 
 `needsTextTools({ supportsNativeTools }): boolean` in

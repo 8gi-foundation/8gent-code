@@ -28,6 +28,7 @@ import {
 	extractPreferencesFromMessage,
 } from "./extractor.js";
 import { type Entity, KnowledgeGraph, type Relationship, type SubgraphResult } from "./graph.js";
+import { admitText } from "./admission.js";
 import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
 import {
 	PromotionManager,
@@ -344,6 +345,10 @@ export class MemoryManager {
 		options?: RememberOptions & { tags?: string[]; source?: string },
 	): Promise<string> {
 		await this.init();
+
+		// The v1 session layer writes to workingMemoryCache and never reaches
+		// store.write(), so the store's gate does not cover it.
+		content = admitText(content, "memory content");
 
 		// Detect v1-style call: layer = "session" | "project" | "global"
 		if (typeOrLayer === "session" || typeOrLayer === "project" || typeOrLayer === "global") {

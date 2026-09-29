@@ -85,6 +85,7 @@ docs/branch-audio/*.aiff
 benchmarks/ui-samples/
 benchmarks/artifacts/
 benchmarks/results/
+benchmarks/work/
 
 # Ecosystem media (canonical: 8gent-world public/media)
 /media/

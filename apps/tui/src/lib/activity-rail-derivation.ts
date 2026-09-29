@@ -149,3 +149,22 @@ export function deriveActiveTasks(
 	}
 	return out;
 }
+
+/**
+ * Extract plan steps from text the agent itself wrote during a run.
+ *
+ * This is the only source that may seed the plan board: a `PLAN:` block
+ * followed by numbered (`1.` / `1)`) or bulleted (`-` / `•`) lines. The
+ * user's own words are never inspected, and nothing is invented when no
+ * plan is present - the result is simply empty.
+ */
+export function planStepsFromText(text: string | null | undefined): string[] {
+	if (!text) return [];
+	const planMatch = text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
+	if (!planMatch?.[1]) return [];
+	const stepMatches = planMatch[1].match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
+	if (!stepMatches) return [];
+	return stepMatches
+		.map((s) => s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim())
+		.filter((s) => s.length > 0);
+}

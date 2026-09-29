@@ -11,8 +11,8 @@ import * as path from "node:path";
 export interface RunLogEntry {
 	/** ISO timestamp */
 	ts: string;
-	/** "ok" | "fail" | "timeout" */
-	status: "ok" | "fail" | "timeout";
+	/** "ok" | "fail" | "timeout" | "error" (a local text-tool turn that ended in an error) */
+	status: "ok" | "fail" | "timeout" | "error";
 	/** Model identifier */
 	model: string;
 	/** Duration in seconds */
@@ -35,6 +35,12 @@ export interface RunLogEntry {
 	prompt: string;
 	/** Error message if failed */
 	error?: string;
+	/**
+	 * Claims in the final answer that the turn's own tool log contradicts, one
+	 * short line each (e.g. "'ls deck' was requested but never ran"). Present
+	 * only when non-empty. See packages/ai/claim-check.ts.
+	 */
+	unverified?: string[];
 }
 
 const LOG_PATH = path.join(os.homedir(), ".8gent", "runs.jsonl");

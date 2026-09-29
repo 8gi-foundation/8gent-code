@@ -13,6 +13,7 @@
 
 import {
 	buildToolSystemPrompt,
+	findUnterminatedToolCall,
 	parseToolCalls,
 	stripToolCalls,
 	type ParsedToolCall,
@@ -27,6 +28,13 @@ export type TextToolMessage = {
 export type TextToolTurn = {
 	content: string;
 	toolCalls: ParsedToolCall[];
+	/**
+	 * Set when the reply ended inside a `tool_call` block whose JSON never
+	 * closed (normally the output token limit). That call did not run; the
+	 * partial block is excluded from `content`. `name` is null when the tool
+	 * name itself was cut off.
+	 */
+	cutOffToolCall?: { name: string | null };
 };
 
 export interface TextToolTurnOptions {
@@ -90,6 +98,17 @@ export async function runTextToolTurn(
 ): Promise<TextToolTurn> {
 	const messages = withToolInstructions(opts.messages, opts.tools);
 	const raw = await opts.call(messages);
+	const cutOff = findUnterminatedToolCall(raw);
+	if (cutOff) {
+		// Everything before the cut-off block is still usable; the partial
+		// block itself is neither a call nor prose.
+		const head = raw.slice(0, cutOff.fenceStart);
+		return {
+			content: stripToolCalls(head),
+			toolCalls: parseToolCalls(head),
+			cutOffToolCall: { name: cutOff.name },
+		};
+	}
 	return {
 		content: stripToolCalls(raw),
 		toolCalls: parseToolCalls(raw),

@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
+
 ### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2959)
 
 - **Sender allowlist.** The bridge authenticated inbound updates by chat id

@@ -1,0 +1,21 @@
+{
+	"model": "hf.co/openbmb/MiniCPM5-1B-GGUF:Q8_0",
+	"backend": "ollama",
+	"fittedOn": "eval/results/2026-09-28-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
+	"n": 40,
+	"temperature": 0.0757201,
+	"bias": -0.429197,
+	"blockAbove": 0.899285,
+	"escalateBand": [
+		0.0867458,
+		0.899285
+	],
+	"heldOut": {
+		"recall": 1,
+		"falseBlock": 0,
+		"accuracy": 0.825,
+		"escalate": 0.75,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 commands. Thresholds apply to calibrated pYes = sigmoid(logit(pYes) / temperature + bias); margin 1 log-odds."
+}

@@ -1,0 +1,1133 @@
+{
+	"anchor": "3584c0c7be63f8bd297dd1920a79c3833d76d95e",
+	"repo": "https://github.com/sipeed/picoclaw.git",
+	"lang": "go",
+	"minedBy": "packages/decide/eval/locate-mine.ts",
+	"counts": {
+		"identifier": 70,
+		"path": 35,
+		"string": 35
+	},
+	"queries": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "DoRequestWithRetry",
+			"file": "pkg/utils/http_retry.go",
+			"line": 19,
+			"commit": "f3c1162001fd2562e9f75024d9e33120d753d709"
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "TestDoRequestWithRetry",
+			"file": "pkg/utils/http_retry_test.go",
+			"line": 13,
+			"commit": "f3c1162001fd2562e9f75024d9e33120d753d709"
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "TestDefaultConfig_DMScope",
+			"file": "pkg/config/config_test.go",
+			"line": 418,
+			"commit": "21654f1335aa8039edbacc8ed84a9cd4c04793b2"
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_RequestTimeout",
+			"file": "pkg/config/migration_test.go",
+			"line": 169,
+			"commit": "438f764c7ac0d7aa851bae45b04d2fdf5299f257"
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "TestModelConfig_RequestTimeoutParsing",
+			"file": "pkg/config/model_config_test.go",
+			"line": 369,
+			"commit": "438f764c7ac0d7aa851bae45b04d2fdf5299f257"
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "FormatBuildInfo",
+			"file": "cmd/picoclaw/internal/helpers.go",
+			"line": 40,
+			"commit": "9be1cd6277bdcce85c15cdcd692283fba2302b9e"
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "manual input canceled",
+			"file": "pkg/auth/oauth.go",
+			"line": 159,
+			"commit": "c5e8e19f54843d5461a8fada9f0df477e18e6ad2"
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "NewAgentCommand",
+			"file": "cmd/picoclaw/internal/agent/command.go",
+			"line": 7,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "TestNewAgentCommand",
+			"file": "cmd/picoclaw/internal/agent/command_test.go",
+			"line": 10,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"either --every or --cron must be specified\"",
+			"file": "cmd/picoclaw/internal/cron/add.go",
+			"line": 28,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "error adding job: %w",
+			"file": "cmd/picoclaw/internal/cron/add.go",
+			"line": 42,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "BuildSystemPromptWithCache",
+			"file": "pkg/agent/context.go",
+			"line": 120,
+			"commit": "1f7cbd916490ba39eda9edc6037bf13044eb4494"
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "InvalidateCache",
+			"file": "pkg/agent/context.go",
+			"line": 162,
+			"commit": "1f7cbd916490ba39eda9edc6037bf13044eb4494"
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_EmptyTask",
+			"file": "pkg/tools/spawn_test.go",
+			"line": 9,
+			"commit": "ec6da7a530ce5da48df422b38be697afad36192b"
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_ValidTask",
+			"file": "pkg/tools/spawn_test.go",
+			"line": 43,
+			"commit": "ec6da7a530ce5da48df422b38be697afad36192b"
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"empty response from copilot\"",
+			"file": "pkg/providers/github_copilot_provider.go",
+			"line": 108,
+			"commit": "d09c64fcee20e9eabb13ca9c8de483747aafa930"
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "no content in copilot response",
+			"file": "pkg/providers/github_copilot_provider.go",
+			"line": 111,
+			"commit": "d09c64fcee20e9eabb13ca9c8de483747aafa930"
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "StatefulProvider",
+			"file": "pkg/providers/types.go",
+			"line": 35,
+			"commit": "d09c64fcee20e9eabb13ca9c8de483747aafa930"
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_EmptyHistory",
+			"file": "pkg/agent/context_test.go",
+			"line": 25,
+			"commit": "b47a39af9cbbdf9cdc0ebe2a9ed3607c9d260596"
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_SingleToolCall",
+			"file": "pkg/agent/context_test.go",
+			"line": 37,
+			"commit": "b47a39af9cbbdf9cdc0ebe2a9ed3607c9d260596"
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "TestLoadConfig_WebToolsProxy",
+			"file": "pkg/config/config_test.go",
+			"line": 396,
+			"commit": "76f2b42d5b88bebec2a247b180cf1f19bc69464c"
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"invalid proxy URL: %w\"",
+			"file": "pkg/tools/web.go",
+			"line": 48,
+			"commit": "76f2b42d5b88bebec2a247b180cf1f19bc69464c"
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "invalid proxy URL: missing host",
+			"file": "pkg/tools/web.go",
+			"line": 60,
+			"commit": "76f2b42d5b88bebec2a247b180cf1f19bc69464c"
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "DuckDuckGoSearchProvider",
+			"file": "pkg/tools/web.go",
+			"line": 228,
+			"commit": "76f2b42d5b88bebec2a247b180cf1f19bc69464c"
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "TestListSkillsWorkspaceOverridesGlobal",
+			"file": "pkg/skills/loader_test.go",
+			"line": 150,
+			"commit": "6fe3920a4d836b97c838fd39874cc6a5d07d1d40"
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "TestListSkillsGlobalOverridesBuiltin",
+			"file": "pkg/skills/loader_test.go",
+			"line": 166,
+			"commit": "6fe3920a4d836b97c838fd39874cc6a5d07d1d40"
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "NewEditFileTool",
+			"file": "pkg/tools/edit.go",
+			"line": 18,
+			"commit": "19c698356c2aef8f618a110acef671def19f5261"
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"old_text not found in file. Make sure it matches exactly\"",
+			"file": "pkg/tools/edit.go",
+			"line": 167,
+			"commit": "19c698356c2aef8f618a110acef671def19f5261"
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "old_text appears %d times. Please provide more context to make it unique",
+			"file": "pkg/tools/edit.go",
+			"line": 172,
+			"commit": "19c698356c2aef8f618a110acef671def19f5261"
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "TestReplaceEditContent",
+			"file": "pkg/tools/edit_test.go",
+			"line": 298,
+			"commit": "19c698356c2aef8f618a110acef671def19f5261"
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "GetModelName",
+			"file": "pkg/config/config.go",
+			"line": 185,
+			"commit": "712f5a8300f0ce9d9d22352a1bc92bed3a0c8b88"
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "TestAgentDefaults_GetModelName_BackwardCompat",
+			"file": "pkg/config/model_config_test.go",
+			"line": 118,
+			"commit": "712f5a8300f0ce9d9d22352a1bc92bed3a0c8b88"
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "TavilyConfig",
+			"file": "pkg/config/config.go",
+			"line": 435,
+			"commit": "c6865fe852f4e163767b78b6df72a06b5fdc6204"
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "TavilySearchProvider",
+			"file": "pkg/tools/web.go",
+			"line": 142,
+			"commit": "c6865fe852f4e163767b78b6df72a06b5fdc6204"
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"tavily api error (status %d): %s\"",
+			"file": "pkg/tools/web.go",
+			"line": 193,
+			"commit": "c6865fe852f4e163767b78b6df72a06b5fdc6204"
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "stdio mode not implemented",
+			"file": "pkg/providers/github_copilot_provider.go",
+			"line": 30,
+			"commit": "a849e02917e6c3c6a52a0e2c27e19552cc91f88d"
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"create session failed: %w\"",
+			"file": "pkg/providers/github_copilot_provider.go",
+			"line": 48,
+			"commit": "a849e02917e6c3c6a52a0e2c27e19552cc91f88d"
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "TestNewToolRegistry",
+			"file": "pkg/tools/registry_test.go",
+			"line": 61,
+			"commit": "cb0c8703fb9d5ce373bc0c4f770177ba66508b25"
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "TestToolRegistry_RegisterAndGet",
+			"file": "pkg/tools/registry_test.go",
+			"line": 71,
+			"commit": "cb0c8703fb9d5ce373bc0c4f770177ba66508b25"
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "TestProviderChat_ParsesReasoningContent",
+			"file": "pkg/providers/openai_compat/provider_test.go",
+			"line": 105,
+			"commit": "d224397f40a798ae9ddf4e7a9f00aaf3d62620dd"
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_OutsideWorkspace",
+			"file": "pkg/tools/shell_test.go",
+			"line": 190,
+			"commit": "244eb0b47d0f694df4bdc96c316b23698eab7407"
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_SymlinkEscape",
+			"file": "pkg/tools/shell_test.go",
+			"line": 217,
+			"commit": "244eb0b47d0f694df4bdc96c316b23698eab7407"
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "BuildMessages",
+			"file": "pkg/agent/context.go",
+			"line": 378,
+			"commit": "0675ce7c38ba4139bfce94c47e19275dbaed4017"
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "AddToolResult",
+			"file": "pkg/agent/context.go",
+			"line": 544,
+			"commit": "0675ce7c38ba4139bfce94c47e19275dbaed4017"
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "Failed to record last channel",
+			"file": "pkg/agent/loop.go",
+			"line": 399,
+			"commit": "0675ce7c38ba4139bfce94c47e19275dbaed4017"
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"Context window error detected, attempting compression\"",
+			"file": "pkg/agent/loop.go",
+			"line": 562,
+			"commit": "0675ce7c38ba4139bfce94c47e19275dbaed4017"
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "WeComVerifySignature",
+			"file": "pkg/channels/wecom.go",
+			"line": 486,
+			"commit": "0f70f783bd88c5db875c1ebebe5bde902a96ab27"
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "WeComDecryptMessage",
+			"file": "pkg/channels/wecom.go",
+			"line": 508,
+			"commit": "0f70f783bd88c5db875c1ebebe5bde902a96ab27"
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "failed to decode AES key: %w",
+			"file": "pkg/channels/wecom.go",
+			"line": 527,
+			"commit": "0f70f783bd88c5db875c1ebebe5bde902a96ab27"
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"failed to decode message: %w\"",
+			"file": "pkg/channels/wecom.go",
+			"line": 533,
+			"commit": "0f70f783bd88c5db875c1ebebe5bde902a96ab27"
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "Missing parameters in verification request",
+			"file": "pkg/channels/wecom_app.go",
+			"line": 276,
+			"commit": "ca481035a4ab5731f5f0d7c867db119f151f5b34"
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"failed to get bot user: %w\"",
+			"file": "pkg/channels/discord.go",
+			"line": 73,
+			"commit": "2fb2a733d425ac6b023fd0adcc18a2ee3abc1618"
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "SkillsToolsConfig",
+			"file": "pkg/config/config.go",
+			"line": 479,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "SearchCacheConfig",
+			"file": "pkg/config/config.go",
+			"line": 485,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "search request failed: %w",
+			"file": "pkg/skills/clawhub_registry.go",
+			"line": 120,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"failed to parse search response: %w\"",
+			"file": "pkg/skills/clawhub_registry.go",
+			"line": 125,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "WeComBotMessage",
+			"file": "pkg/channels/wecom.go",
+			"line": 44,
+			"commit": "14ccfb39d94cd2ede66af4d2b21b1765116153fc"
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "TestWeComBotReplyMessage",
+			"file": "pkg/channels/wecom_test.go",
+			"line": 732,
+			"commit": "14ccfb39d94cd2ede66af4d2b21b1765116153fc"
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "Failed to initialize WeCom channel",
+			"file": "pkg/channels/manager.go",
+			"line": 183,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"Failed to initialize WeCom App channel\"",
+			"file": "pkg/channels/manager.go",
+			"line": 196,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "WeComBotChannel",
+			"file": "pkg/channels/wecom.go",
+			"line": 33,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "WeComBotReplyMessage",
+			"file": "pkg/channels/wecom.go",
+			"line": 86,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_NoPrefix",
+			"file": "pkg/config/migration_test.go",
+			"line": 529,
+			"commit": "5cd1597674494b8620753099f653f0cbd7366ba3"
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_AlreadyHasPrefix",
+			"file": "pkg/config/migration_test.go",
+			"line": 536,
+			"commit": "5cd1597674494b8620753099f653f0cbd7366ba3"
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "IsEmpty",
+			"file": "pkg/config/config.go",
+			"line": 342,
+			"commit": "df6958f3125c8a6bd3138ca1f1b3dade73ffc18e"
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "ProcessDirectWithChannel",
+			"file": "pkg/agent/loop.go",
+			"line": 239,
+			"commit": "a89683190386c9da604fc22cf20ec594aa32214f"
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "Context window error detected, attempting compression",
+			"file": "pkg/agent/loop.go",
+			"line": 562,
+			"commit": "a89683190386c9da604fc22cf20ec594aa32214f"
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"Forced compression executed\"",
+			"file": "pkg/agent/loop.go",
+			"line": 815,
+			"commit": "a89683190386c9da604fc22cf20ec594aa32214f"
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "GetStartupInfo",
+			"file": "pkg/agent/loop.go",
+			"line": 823,
+			"commit": "a89683190386c9da604fc22cf20ec594aa32214f"
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens",
+			"file": "pkg/agent/instance_test.go",
+			"line": 10,
+			"commit": "394d1d1197897989d4547037e993f678afb98f60"
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_DefaultsTemperatureWhenZero",
+			"file": "pkg/agent/instance_test.go",
+			"line": 42,
+			"commit": "394d1d1197897989d4547037e993f678afb98f60"
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "ExtraContent",
+			"file": "pkg/providers/protocoltypes/types.go",
+			"line": 13,
+			"commit": "7f241647be570aee1f5cf909a0af06ab814a4f94"
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "GoogleExtra",
+			"file": "pkg/providers/protocoltypes/types.go",
+			"line": 17,
+			"commit": "7f241647be570aee1f5cf909a0af06ab814a4f94"
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "TestCreateProviderReturnsClaudeCliProviderForClaudeCli",
+			"file": "pkg/providers/factory_test.go",
+			"line": 240,
+			"commit": "68cdafc5f2932b173bf193664430cff2630cb0f9"
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "NewProviderWithMaxTokensField",
+			"file": "pkg/providers/openai_compat/provider.go",
+			"line": 86,
+			"commit": "68cdafc5f2932b173bf193664430cff2630cb0f9"
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "Failed to get_login_info",
+			"file": "pkg/channels/onebot.go",
+			"line": 226,
+			"commit": "56a060ff61167c03086a271340574e2f34d28721"
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"Could not parse self ID from get_login_info response\"",
+			"file": "pkg/channels/onebot.go",
+			"line": 264,
+			"commit": "56a060ff61167c03086a271340574e2f34d28721"
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_SingleProvider",
+			"file": "pkg/config/migration_test.go",
+			"line": 432,
+			"commit": "58b5e21d90c6c578c769d5d7cf3c3b49a2baccee"
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_MultipleProviders",
+			"file": "pkg/config/migration_test.go",
+			"line": 466,
+			"commit": "58b5e21d90c6c578c769d5d7cf3c3b49a2baccee"
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_DeepSeek",
+			"file": "pkg/config/migration_test.go",
+			"line": 210,
+			"commit": "ec86b21d3fc4f2cedff00d0631a02b05ba7723b8"
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_OpenAI",
+			"file": "pkg/config/migration_test.go",
+			"line": 235,
+			"commit": "ec86b21d3fc4f2cedff00d0631a02b05ba7723b8"
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TestWebFetchTool_extractText",
+			"file": "pkg/tools/web_test.go",
+			"line": 243,
+			"commit": "e8afd31b28bf7d0c2e7ebddbc2320bc89f996fe0"
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "TestSplitMessage",
+			"file": "pkg/utils/message_test.go",
+			"line": 8,
+			"commit": "7d8894d842e874f1a0e4d413c5931ed8b8185cfa"
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "TestSplitMessage_CodeBlockIntegrity",
+			"file": "pkg/utils/message_test.go",
+			"line": 124,
+			"commit": "7d8894d842e874f1a0e4d413c5931ed8b8185cfa"
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "SplitMessage",
+			"file": "pkg/utils/message.go",
+			"line": 12,
+			"commit": "e03124dc8a695b36b28eb2798fc914efa4493906"
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "AddAssistantMessage",
+			"file": "pkg/agent/context.go",
+			"line": 556,
+			"commit": "9e120f90ea4dcda6a4323850b6e169514e71a3ca"
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "GetSkillsInfo",
+			"file": "pkg/agent/context.go",
+			"line": 571,
+			"commit": "9e120f90ea4dcda6a4323850b6e169514e71a3ca"
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "Forced compression executed",
+			"file": "pkg/agent/loop.go",
+			"line": 815,
+			"commit": "9e120f90ea4dcda6a4323850b6e169514e71a3ca"
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"Feishu websocket stopped with error\"",
+			"file": "pkg/channels/feishu_64.go",
+			"line": 68,
+			"commit": "9e120f90ea4dcda6a4323850b6e169514e71a3ca"
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TestExtractFrontmatter",
+			"file": "pkg/skills/loader_test.go",
+			"line": 82,
+			"commit": "287100f3030b337ac5f24d7577b0e28e26357616"
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "TestStripFrontmatter",
+			"file": "pkg/skills/loader_test.go",
+			"line": 269,
+			"commit": "287100f3030b337ac5f24d7577b0e28e26357616"
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "NewHTTPProviderWithMaxTokensField",
+			"file": "pkg/providers/http_provider.go",
+			"line": 26,
+			"commit": "09a0d19119060c48ce5a24a5692daf2536b59b54"
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "api_key is required for anthropic protocol (model: %s)",
+			"file": "pkg/providers/factory_provider.go",
+			"line": 129,
+			"commit": "e1583f3b1379061f7913b5b7e093cc0f672d2063"
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"no providers configured. Please add entries to model_list in your config\"",
+			"file": "pkg/providers/legacy_provider.go",
+			"line": 40,
+			"commit": "e1583f3b1379061f7913b5b7e093cc0f672d2063"
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "model %q not found in model_list or providers",
+			"file": "pkg/config/config.go",
+			"line": 637,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DefaultConfig",
+			"file": "pkg/config/defaults.go",
+			"line": 9,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "ConvertProvidersToModelList",
+			"file": "pkg/config/migration.go",
+			"line": 37,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"unknown protocol %q in model %q\"",
+			"file": "pkg/providers/factory_provider.go",
+			"line": 172,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "Validate",
+			"file": "pkg/config/config.go",
+			"line": 414,
+			"commit": "a73d8e1a16d63e0f27106eab227bc6e04f8f3eff"
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "GetModelConfig",
+			"file": "pkg/config/config.go",
+			"line": 634,
+			"commit": "a73d8e1a16d63e0f27106eab227bc6e04f8f3eff"
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "unknown protocol %q in model %q",
+			"file": "pkg/providers/factory_provider.go",
+			"line": 172,
+			"commit": "a73d8e1a16d63e0f27106eab227bc6e04f8f3eff"
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "ExecConfig",
+			"file": "pkg/config/config.go",
+			"line": 467,
+			"commit": "eda6e373323861fea99630013946d7aeea94ade0"
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "NewCronTool",
+			"file": "pkg/tools/cron.go",
+			"line": 33,
+			"commit": "eda6e373323861fea99630013946d7aeea94ade0"
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"Failed to read skill metadata\"",
+			"file": "pkg/skills/loader.go",
+			"line": 198,
+			"commit": "994ec72d917ff3cf7c3d2a4df39b8b2a66626849"
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "Skipping invalid tool call in history",
+			"file": "pkg/providers/codex_provider.go",
+			"line": 248,
+			"commit": "0d16525fab81f1010bf6ddafd5ea68d975613a88"
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "pkg/utils/http_retry.go",
+			"file": "pkg/utils/http_retry.go",
+			"line": 1,
+			"commit": "f3c1162001fd2562e9f75024d9e33120d753d709"
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/http_retry_test.go",
+			"file": "pkg/utils/http_retry_test.go",
+			"line": 1,
+			"commit": "f3c1162001fd2562e9f75024d9e33120d753d709"
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "agent/command.go",
+			"file": "cmd/picoclaw/internal/agent/command.go",
+			"line": 1,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "cmd/picoclaw/internal/agent/command_test.go",
+			"file": "cmd/picoclaw/internal/agent/command_test.go",
+			"line": 1,
+			"commit": "73f27803d4b573541f2df6631d4569e149a7753a"
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "agent/context_cache_test.go",
+			"file": "pkg/agent/context_cache_test.go",
+			"line": 1,
+			"commit": "1f7cbd916490ba39eda9edc6037bf13044eb4494"
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "spawn_test.go",
+			"file": "pkg/tools/spawn_test.go",
+			"line": 1,
+			"commit": "ec6da7a530ce5da48df422b38be697afad36192b"
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "pkg/agent/context_test.go",
+			"file": "pkg/agent/context_test.go",
+			"line": 1,
+			"commit": "b47a39af9cbbdf9cdc0ebe2a9ed3607c9d260596"
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/registry_test.go",
+			"file": "pkg/tools/registry_test.go",
+			"line": 1,
+			"commit": "cb0c8703fb9d5ce373bc0c4f770177ba66508b25"
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "string_test.go",
+			"file": "pkg/utils/string_test.go",
+			"line": 1,
+			"commit": "cb0c8703fb9d5ce373bc0c4f770177ba66508b25"
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "docs/channels/dingtalk/README.zh.md",
+			"file": "docs/channels/dingtalk/README.zh.md",
+			"line": 1,
+			"commit": "023b245a285780edfcfbe90ae81b4c9cd7e7913d"
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "discord/README.zh.md",
+			"file": "docs/channels/discord/README.zh.md",
+			"line": 1,
+			"commit": "023b245a285780edfcfbe90ae81b4c9cd7e7913d"
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "wecom-app-configuration.md",
+			"file": "docs/wecom-app-configuration.md",
+			"line": 1,
+			"commit": "0f70f783bd88c5db875c1ebebe5bde902a96ab27"
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "pkg/skills/clawhub_registry.go",
+			"file": "pkg/skills/clawhub_registry.go",
+			"line": 1,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "skills/clawhub_registry_test.go",
+			"file": "pkg/skills/clawhub_registry_test.go",
+			"line": 1,
+			"commit": "d692cc0cc62cfa3a56ad692c31a5020f7e5c3392"
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "wecom.go",
+			"file": "pkg/channels/wecom.go",
+			"line": 1,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "pkg/channels/wecom_app.go",
+			"file": "pkg/channels/wecom_app.go",
+			"line": 1,
+			"commit": "59772cdbf25904a40ae24dddf55a7767e3f4be4d"
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "agent/instance_test.go",
+			"file": "pkg/agent/instance_test.go",
+			"line": 1,
+			"commit": "394d1d1197897989d4547037e993f678afb98f60"
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "mock_provider_test.go",
+			"file": "pkg/agent/mock_provider_test.go",
+			"line": 1,
+			"commit": "394d1d1197897989d4547037e993f678afb98f60"
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "pkg/providers/toolcall_utils.go",
+			"file": "pkg/providers/toolcall_utils.go",
+			"line": 1,
+			"commit": "ec86b21d3fc4f2cedff00d0631a02b05ba7723b8"
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "utils/message_test.go",
+			"file": "pkg/utils/message_test.go",
+			"line": 1,
+			"commit": "7d8894d842e874f1a0e4d413c5931ed8b8185cfa"
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "utils/message.go",
+			"file": "pkg/utils/message.go",
+			"line": 1,
+			"commit": "94a1b8664ba9637890e93f1864d19d7b78cde1c4"
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "docs/design/provider-refactoring-tests.md",
+			"file": "docs/design/provider-refactoring-tests.md",
+			"line": 1,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "design/provider-refactoring.md",
+			"file": "docs/design/provider-refactoring.md",
+			"line": 1,
+			"commit": "ef7078a356d0003a48c73aa39e60346ad056fbf9"
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "model-list-migration.md",
+			"file": "docs/migration/model-list-migration.md",
+			"line": 1,
+			"commit": "a73d8e1a16d63e0f27106eab227bc6e04f8f3eff"
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "pkg/providers/factory_provider.go",
+			"file": "pkg/providers/factory_provider.go",
+			"line": 1,
+			"commit": "a73d8e1a16d63e0f27106eab227bc6e04f8f3eff"
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "docs/tools_configuration.md",
+			"file": "docs/tools_configuration.md",
+			"line": 1,
+			"commit": "eda6e373323861fea99630013946d7aeea94ade0"
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "shell_process_unix.go",
+			"file": "pkg/tools/shell_process_unix.go",
+			"line": 1,
+			"commit": "acac1972e60323607a57d74aaa9e1a767414f138"
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "pkg/tools/shell_process_windows.go",
+			"file": "pkg/tools/shell_process_windows.go",
+			"line": 1,
+			"commit": "acac1972e60323607a57d74aaa9e1a767414f138"
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "protocoltypes/types.go",
+			"file": "pkg/providers/protocoltypes/types.go",
+			"line": 1,
+			"commit": "c4cbb5fb35374d0ff917baff9196746f843b99fa"
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "antigravity_provider_test.go",
+			"file": "pkg/providers/antigravity_provider_test.go",
+			"line": 1,
+			"commit": "caf3913347df406887a76f7e9e881112a7ecb788"
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_AUTH.md",
+			"file": "docs/ANTIGRAVITY_AUTH.md",
+			"line": 1,
+			"commit": "848aaedc24492baf61825638e7d3227a1447800e"
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_USAGE.md",
+			"file": "docs/ANTIGRAVITY_USAGE.md",
+			"line": 1,
+			"commit": "848aaedc24492baf61825638e7d3227a1447800e"
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "termux.jpg",
+			"file": "assets/termux.jpg",
+			"line": 1,
+			"commit": "5fb2721d22d3e8d45d5969d5219e76dd34ff8ec6"
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "pkg/cron/service_test.go",
+			"file": "pkg/cron/service_test.go",
+			"line": 1,
+			"commit": "5c321a90debbd8b711febd8685d38965905a355a"
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "channels/telegram_commands.go",
+			"file": "pkg/channels/telegram_commands.go",
+			"line": 1,
+			"commit": "9d5728ec5b8d6c46e0ff7bdd65e8046a24620aaa"
+		}
+	]
+}

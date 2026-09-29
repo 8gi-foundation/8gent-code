@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from "bun:test";
 import React from "react";
-import { CollapsedDjDeckStrip, StereoDisplay } from "../DjDeck";
+import { CollapsedDjDeckStrip, StereoDisplay, djKey } from "../DjDeck";
 
 function shallow<T>(node: React.ReactElement): T {
 	return node.props as T;
@@ -168,5 +168,20 @@ describe("DjDeck — expanded stereo", () => {
 			termWidth: 80,
 		});
 		expect(el).toBeDefined();
+	});
+});
+
+describe("djKey: DJ keys never collide with the app's Ctrl+letter shortcuts", () => {
+	test("maps Ctrl+Shift letters (delivered upper-case) to DJ commands", () => {
+		expect(djKey("P")).toBe("p");
+		expect(djKey("N")).toBe("n");
+		expect(djKey("B")).toBe("b");
+		expect(djKey("M")).toBe("m");
+	});
+
+	test("ignores plain Ctrl+p/n/b/m, which open the palette, Notes, processes and model picker", () => {
+		for (const k of ["p", "n", "b", "m"]) expect(djKey(k)).toBeNull();
+		expect(djKey(undefined)).toBeNull();
+		expect(djKey("")).toBeNull();
 	});
 });
