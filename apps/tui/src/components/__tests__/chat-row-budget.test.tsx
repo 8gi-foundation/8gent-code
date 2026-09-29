@@ -170,6 +170,8 @@ describe("chat box at 80x45 with 13 chat rows (#3019)", () => {
 		expect(chat.some((l) => /^│ ◆ 8gent \d\d:\d\d [AP]M\s*$/.test(l))).toBe(true);
 		expect(chat.some((l) => /^│ Nectarine\s*$/.test(l))).toBe(true);
 		expect(chat.join("\n")).not.toMatch(/Applent|Nectarine\d/);
+		// Everything in the window fits, so no clipped-top marker.
+		expect(chat.join("\n")).not.toContain("earlier line");
 	});
 
 	test("even the old viewport guess no longer overprints", async () => {
@@ -209,6 +211,11 @@ describe("chat box at 80x45 with 13 chat rows (#3019)", () => {
 		expect(frame[CHROME_TOP - 1]).toContain("HEADER-BOTTOM");
 		expect(frame[ROWS - INPUT_ROWS]).toContain("INPUT-LINE");
 		expect(chat.join("\n")).toContain("/cmd30 - does thing 30");
+		// The clipped top is announced on the first chat row. One message
+		// only, so there is nothing to scroll to and no shift+↑ promise.
+		expect(chat[0]).toMatch(/^↑ 22 earlier lines\s*$/);
+		// 22 is exact: the top divider, the title and /cmd01 to /cmd20.
+		expect(chat[1]).toContain("/cmd21 - does thing 21");
 		expect(chat.join("\n")).not.toContain("/cmd01 ");
 		for (const line of chat) expect(line).not.toMatch(/─+\S*\s*\/cmd|─{3}[a-z]/);
 	});
@@ -229,5 +236,7 @@ describe("chat box at 80x45 with 13 chat rows (#3019)", () => {
 		const chat = (await lastFrame(true, msgs)).slice(CHROME_TOP, CHROME_TOP + CHAT_ROWS).join("\n");
 		expect(chat).toContain("All requested steps are complete.");
 		expect(chat).toContain("step 30 done");
+		// The user turn above is a whole message, so shift+↑ is offered.
+		expect(chat.split("\n")[0]).toMatch(/^↑ \d+ earlier lines {2}shift\+↑\s*$/);
 	});
 });
