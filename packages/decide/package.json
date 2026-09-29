@@ -21,6 +21,7 @@
 		"typescript": "^5.3.0"
 	},
 	"optionalDependencies": {
-		"node-llama-cpp": "3.22.1"
+		"node-llama-cpp": "3.22.1",
+		"onnxruntime-node": "1.30.0"
 	}
 }
