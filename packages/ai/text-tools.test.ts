@@ -108,6 +108,26 @@ describe("buildToolSystemPrompt", () => {
 		expect(typeof prompt).toBe("string");
 		expect(prompt).toContain("tool_call");
 	});
+
+	// Ollama runs the model's built-in parser on every chat reply. Qwen's parser
+	// hijacks anything after a literal <tool_call>, so when the prompt spelled
+	// the tag out ("do NOT use <tool_call>"), a model that quoted or reasoned
+	// about that rule had its reply eaten: 3 of 3 live replies came back empty
+	// on qwen3.8:27b-mlx, 3 of 3 intact once the literals were gone (2026-09-29).
+	test("never spells out a native tool-call marker that a server-side parser hijacks", () => {
+		for (const prompt of [buildToolSystemPrompt(TOOLS), buildToolSystemPrompt([])]) {
+			for (const marker of ["<tool_call>", "</tool_call>", "<|tool_call|>", "<function="]) {
+				expect(prompt).not.toContain(marker);
+			}
+		}
+	});
+
+	test("still forbids native markup in words and keeps the fenced format", () => {
+		const prompt = buildToolSystemPrompt(TOOLS);
+		expect(prompt).toContain("```tool_call");
+		expect(prompt).toMatch(/do NOT use angle brackets/);
+		expect(prompt).toMatch(/built-in tool-call tags or special tokens/);
+	});
 });
 
 describe("parseToolCalls", () => {
