@@ -40,7 +40,19 @@ export const DEFAULT_SETTINGS: Settings = {
 		},
 	},
 	providers: {
-		apfel: { baseURL: "http://localhost:11500/v1" },
+		// 11435 is where the apfel bridge actually listens. Two wrong ports have
+		// shipped here before and each failed in its own misleading way:
+		//
+		//   11500 - nothing listens. Connection refused, so apfel looked "down"
+		//           when the bridge was up the whole time.
+		//   11434 - OLLAMA's port. Far worse, because it does NOT refuse: Ollama
+		//           answers the request and fails on an unknown model, so apfel
+		//           appeared broken while a different engine was silently serving
+		//           it. See packages/providers/__tests__/keyless-local.test.ts.
+		//
+		// packages/providers/index.ts is the source of truth for this URL and is
+		// test-pinned to 11435. Keep this value equal to it or delete this entry.
+		apfel: { baseURL: "http://127.0.0.1:11435/v1" },
 		ollama: { baseURL: "http://localhost:11434/v1" },
 		lmstudio: { baseURL: "http://localhost:1234/v1" },
 		openrouter: { baseURL: "https://openrouter.ai/api/v1" },
