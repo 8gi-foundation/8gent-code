@@ -28,6 +28,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"get_symbol",
 		"search_symbols",
 		"locate",
+		"update_plan",
 	],
 	git: [
 		"git_status",

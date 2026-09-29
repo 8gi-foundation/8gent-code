@@ -26,6 +26,7 @@ import {
 	LOCATE_INDEX_WAIT_MS,
 	locate as astLocate,
 } from "../ast-index/locate";
+import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
@@ -354,6 +355,31 @@ export class ToolExecutor {
 							},
 						},
 						required: ["query"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "update_plan",
+					description: UPDATE_PLAN_DESCRIPTION,
+					parameters: {
+						type: "object",
+						properties: {
+							plan: {
+								type: "array",
+								description: "Every step, in order",
+								items: {
+									type: "object",
+									properties: {
+										step: { type: "string" },
+										status: { type: "string", enum: [...PLAN_STATUSES] },
+									},
+									required: ["step", "status"],
+								},
+							},
+						},
+						required: ["plan"],
 					},
 				},
 			},
@@ -1235,6 +1261,10 @@ export class ToolExecutor {
 				return this.searchSymbols(args.query as string, args.kinds as string[]);
 			case "locate":
 				return this.locate(args.query as string);
+			case "update_plan":
+				// Executes nothing: the plan event is the onToolStart the agent
+				// fires with these args; the TUI PLAN column reads it (#3035).
+				return updatePlan(args as { plan?: unknown });
 			case "get_project_outline":
 				return this.getProjectOutline();
 
