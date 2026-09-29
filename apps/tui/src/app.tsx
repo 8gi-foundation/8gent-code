@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import { Box, useApp, useInput } from "ink";
+import { Box, type DOMElement, useApp, useInput } from "ink";
 import { t } from "./theme.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -106,6 +106,7 @@ import { useProcessPanel } from "./hooks/useProcessPanel.js";
 import { writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
+import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
@@ -1401,6 +1402,10 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// Real rows of the chat box after layout (#3019). The viewport guess
+	// overestimated it and messages overprinted.
+	const chatBoxRef = useRef<DOMElement>(null);
+	const chatBoxRows = useMeasuredHeight(chatBoxRef);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [tvTasks, setTvTasks] = useState<TaskItem[]>([]);
@@ -5806,10 +5811,16 @@ export function App({
 							isProcessing={isProcessing}
 						/>
 
-						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+						<Box
+							ref={chatBoxRef}
+							flexGrow={1}
+							minHeight={0}
+							flexDirection="column"
+							overflow="hidden"
+						>
 							<MessageList
 								messages={messages}
-								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
+								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 								contentWidth={Math.max(
 									24,
 									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
