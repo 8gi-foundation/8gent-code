@@ -1,10 +1,7 @@
 /**
  * locate M3 eval: the persisted AST index and semantic mode.
  *
- *   bun packages/decide/eval/locate-semantic-run.ts [repoRoot] [--tree <dir>] [--cache <dir>] [--cards]
- *
- * Default: the spec's method, symbol signature plus path. --cards also
- * embeds the opt-in file cards (EIGHT_LOCATE_SEMANTIC_CARDS=1).
+ *   bun packages/decide/eval/locate-semantic-run.ts [repoRoot] [--tree <dir>] [--cache <dir>]
  *
  * No classifier model: this measures retrieval, not routing.
  *
@@ -25,7 +22,7 @@
  *    Reported overall and per labelled mode. The M3 target is top-5 >= 70%
  *    for semantic mode on the semantic (concept) class.
  *
- * Writes eval/results/<date>-locate-semantic-<signatures|cards>.json.
+ * Writes eval/results/<date>-locate-semantic.json.
  */
 
 import { spawnSync } from "node:child_process";
@@ -117,9 +114,6 @@ async function main(): Promise<void> {
 		argValue(argv, "--cache") ?? defaultCacheRoot({ ...process.env, NODE_ENV: undefined });
 	if (!cacheDir)
 		throw new Error("the index cache is off (EIGHT_AST_INDEX_CACHE); pass --cache <dir>");
-	const cards = argv.includes("--cards");
-	// locate reads the env var; the build below is told directly.
-	process.env.EIGHT_LOCATE_SEMANTIC_CARDS = cards ? "1" : "0";
 	const load = () => os.loadavg().map((x) => Number(x.toFixed(1)));
 
 	// 1. Index: first build (cold, or warm when an earlier run left a cache), then three warm loads.
@@ -148,7 +142,7 @@ async function main(): Promise<void> {
 		if (st.state === "building")
 			console.log(`  embedding ${st.done} of ${st.total}  load ${load().join(" ")}`);
 	}, 30_000);
-	const sem = await ensureSemanticIndex(repoId, { fileCards: cards });
+	const sem = await ensureSemanticIndex(repoId);
 	clearInterval(progress);
 	const semanticBuildMs = Math.round(performance.now() - s0);
 	console.log(`semantic index: ${JSON.stringify(sem)} in ${semanticBuildMs} ms`);
@@ -230,7 +224,7 @@ async function main(): Promise<void> {
 			warmLoadMs: warm,
 			loadavgAtWarm: warmLoad,
 		},
-		semanticIndex: { ...sem, buildMs: semanticBuildMs, fileCards: cards },
+		semanticIndex: { ...sem, buildMs: semanticBuildMs },
 		n: rows.length,
 		rules: { top5: rate(rows.map((r) => r.rules.top5)), ms: stats(rows.map((r) => r.rules.ms)) },
 		semantic: {
@@ -243,15 +237,13 @@ async function main(): Promise<void> {
 		target: { conceptTop5: TARGET_CONCEPT_TOP5, warmLoadMs: TARGET_WARM_MS },
 	};
 	fs.mkdirSync(RESULTS_DIR, { recursive: true });
-	const name = `${summary.date.slice(0, 10)}-locate-semantic-${cards ? "cards" : "signatures"}.json`;
+	const name = `${summary.date.slice(0, 10)}-locate-semantic.json`;
 	fs.writeFileSync(
 		path.join(RESULTS_DIR, name),
 		`${JSON.stringify({ summary, rows }, null, "\t")}\n`,
 	);
 
-	console.log(
-		`\nn=${rows.length}  method ${cards ? "signature + path + file cards" : "signature + path"}  (top-5 file hit; wall ms p50/p95)`,
-	);
+	console.log(`\nn=${rows.length}  (top-5 file hit; wall ms p50/p95)`);
 	for (const k of ["rules", "semantic", "oracle"] as const) {
 		const v = summary[k];
 		console.log(`  ${k.padEnd(8)} top5 ${pc(v.top5)}  p50 ${v.ms.p50} ms  p95 ${v.ms.p95} ms`);

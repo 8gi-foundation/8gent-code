@@ -1,23 +1,14 @@
 /**
- * Semantic locate (M3b): nearest code by meaning, for queries that
+ * Semantic locate (M3b): nearest symbols by meaning, for queries that
  * describe a behaviour without the words its code uses.
  *
- * Text is embedded with the memory package's nomic client (nomic-embed-text
- * through Ollama, packages/memory/embeddings.ts):
- *   - each function, class, interface, type and method: its signature plus
- *     its path ("function f(a: string) src/a.ts"). This is the M3 spec's
- *     method and the default.
- *   - opt-in (fileCards, or EIGHT_LOCATE_SEMANTIC_CARDS=1): each source file
- *     that is not a test also gets a card of its header comment, its path,
- *     and its symbols' first doc sentences (or their names). This goes
- *     beyond the spec and is off until that is decided: signatures alone
- *     scored 25% top-5 on the concept class, cards 75%, on a set the card
- *     layout was tuned on (packages/decide/README.md).
- * nomic's task prefixes are used: "search_document: " for documents, and
- * "search_query: " for the query. Cosine, brute force; no vector database.
- * The answer is one hit per file: its best symbol, or line 1 for a file
- * matched only by its card. With cards on, a file scores the better of its
- * card and its best symbol.
+ * Each function, class, interface, type and method is embedded once as its
+ * signature plus its path ("function f(a: string) src/a.ts"), with the
+ * memory package's nomic client (nomic-embed-text through Ollama,
+ * packages/memory/embeddings.ts). nomic's task prefixes are used:
+ * "search_document: " for symbols, "search_query: " for the query. A query is
+ * answered by cosine similarity over every vector (brute force; no vector
+ * database), at most two rows per file.
  *
  * Built lazily: the first semantic query starts the build and gets
  * status "building" (locate then answers with hybrid and says so). Vectors
@@ -63,66 +54,8 @@ const SAVE_EVERY = 2048;
 const RETRY_AFTER_MS = 30_000;
 /** Default budget for embedding one query, ms. */
 export const SEMANTIC_QUERY_TIMEOUT_MS = 3000;
+const MAX_ROWS_PER_FILE = 2;
 const STORE_FORMAT = 1;
-/** File card limits: header characters, symbol docs, symbol names, characters per doc, whole card. */
-const CARD_HEADER_MAX = 600;
-const CARD_DOCS = 12;
-const CARD_NAMES = 20;
-const CARD_DOC_MAX = 160;
-const CARD_MAX = 1600;
-/** Source characters read to find a file's header comment. */
-const HEADER_READ = 8000;
-
-/** Tests, fixtures and mocks: they describe the code they test, so their cards outrank it. */
-export function isTestPath(rel: string): boolean {
-	return /(^|\/)(__tests__|__mocks__|fixtures?|tests?)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(rel);
-}
-
-/**
- * The comment a file opens with (after a shebang): a block comment, or a run
- * of line comments, as one line of text without leading stars or @tags.
- */
-export function fileHeader(source: string): string {
-	const s = source.replace(/^#!.*\n/, "").replace(/^\s+/, "");
-	let lines: string[] = [];
-	if (s.startsWith("/*")) {
-		const end = s.indexOf("*/");
-		if (end < 0) return "";
-		lines = s
-			.slice(2, end)
-			.split("\n")
-			.map((l) => l.replace(/^\s*\*+ ?/, "").trim());
-	} else {
-		for (const l of s.split("\n")) {
-			const t = l.trim();
-			if (!t.startsWith("//")) break;
-			lines.push(t.replace(/^\/\/+\s?/, ""));
-		}
-	}
-	return lines
-		.filter((l) => l && !l.startsWith("@"))
-		.join(" ")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
-/** The text embedded for a file: header comment, path, then symbol doc first sentences (or names). */
-export function semanticFileCard(rel: string, source: string, symbols: Symbol[]): string {
-	const header = fileHeader(source.slice(0, HEADER_READ)).slice(0, CARD_HEADER_MAX);
-	const docs = symbols
-		.filter((s) => s.docstring)
-		.slice(0, CARD_DOCS)
-		.map((s) => {
-			const first = (s.docstring ?? "").replace(/\s+/g, " ").split(/(?<=\.)\s/)[0];
-			return `${s.name}: ${first.slice(0, CARD_DOC_MAX)}`;
-		})
-		.join(" ");
-	const names = symbols
-		.slice(0, CARD_NAMES)
-		.map((s) => s.name)
-		.join(" ");
-	return [header, rel, docs || names].filter(Boolean).join("\n").slice(0, CARD_MAX);
-}
 
 /** The text embedded for a symbol: its signature (or kind and name) and its path from the root. */
 export function semanticDoc(root: string, s: Symbol): string {
@@ -141,12 +74,7 @@ export type SemanticStatus =
 	| { state: "none" };
 
 export interface SemanticHit {
-	/** Absolute path of the file. */
-	file: string;
-	/** The symbol's first line, or 1 for a file hit. */
-	line: number;
-	/** The file's best symbol; absent when the file matched by its card and has no embedded symbol. */
-	symbol?: Symbol;
+	symbol: Symbol;
 	score: number;
 }
 
@@ -166,30 +94,15 @@ export interface SemanticOptions {
 	queryTimeoutMs?: number;
 	/** Rows returned. Default 5. */
 	k?: number;
-	/**
-	 * Also embed a card per source file (header comment, path, symbol docs).
-	 * Default: EIGHT_LOCATE_SEMANTIC_CARDS=1, else off (signature + path only).
-	 */
-	fileCards?: boolean;
-}
-
-/** Whether file cards are embedded for these options. */
-export function fileCardsOn(opts?: SemanticOptions): boolean {
-	return opts?.fileCards ?? process.env.EIGHT_LOCATE_SEMANTIC_CARDS === "1";
 }
 
 interface Built {
 	gen: number;
 	model: string;
-	/** Built with file cards. */
-	cards: boolean;
 	dims: number;
 	symbols: Symbol[];
 	/** symbols.length rows of dims floats, each row unit length. */
 	matrix: Float32Array;
-	/** Absolute paths of the files with a card, and their unit rows. */
-	files: string[];
-	fileMatrix: Float32Array;
 }
 
 interface RepoState {
@@ -338,8 +251,7 @@ export function ensureSemanticIndex(
 ): Promise<SemanticStatus> {
 	const st = stateFor(repoId);
 	if (st.building) return st.building;
-	const withCards = fileCardsOn(opts);
-	if (st.built && st.built.gen === indexGeneration(repoId) && st.built.cards === withCards) {
+	if (st.built && st.built.gen === indexGeneration(repoId)) {
 		return Promise.resolve({ state: "ready", count: st.built.symbols.length });
 	}
 	const repo = getRepoStats(repoId);
@@ -354,30 +266,14 @@ export function ensureSemanticIndex(
 	// "building" with its total the moment this returns.
 	const symbols: Symbol[] = [];
 	const texts: string[] = [];
-	const files: string[] = [];
-	const cards: string[] = [];
 	for (const rel of getFileTree(repoId)) {
-		const outline = getFileOutline(repoId, rel);
-		if (!outline) continue;
-		for (const s of outline.symbols) {
+		for (const s of getFileOutline(repoId, rel)?.symbols ?? []) {
 			if (!SEMANTIC_KINDS.has(s.kind)) continue;
 			symbols.push(s);
 			texts.push(semanticDoc(repo.sourceRoot, s));
 		}
-		const posix = rel.split(path.sep).join("/");
-		if (!withCards || isTestPath(posix)) continue;
-		let source = "";
-		try {
-			source = readHead(path.join(repo.sourceRoot, rel));
-		} catch {
-			// Unreadable now: the card has no header.
-		}
-		files.push(outline.filePath);
-		cards.push(semanticFileCard(posix, source, outline.symbols));
 	}
 	const hashes = texts.map(hashText);
-	const cardHashes = cards.map(hashText);
-	const allHashes = new Set([...hashes, ...cardHashes]);
 	let vectors = st.vectors.get(model);
 	if (!vectors) {
 		vectors = loadStore(repoId, model);
@@ -387,9 +283,6 @@ export function ensureSemanticIndex(
 	const missing = new Map<string, string>();
 	hashes.forEach((h, i) => {
 		if (!store.has(h)) missing.set(h, texts[i]);
-	});
-	cardHashes.forEach((h, i) => {
-		if (!store.has(h)) missing.set(h, cards[i]);
 	});
 	st.progress = { done: 0, total: missing.size };
 
@@ -409,18 +302,18 @@ export function ensureSemanticIndex(
 				st.progress = { done: Math.min(todo.length, i + chunk.length), total: todo.length };
 				sinceSave += chunk.length;
 				if (sinceSave >= SAVE_EVERY) {
-					saveStore(repoId, model, store, allHashes);
+					saveStore(repoId, model, store, new Set(hashes));
 					sinceSave = 0;
 				}
 			}
 		} catch (err) {
-			saveStore(repoId, model, store, allHashes);
+			saveStore(repoId, model, store, new Set(hashes));
 			return fail(st, err instanceof Error ? err.message : String(err));
 		}
 		// Written only when something new was embedded (the store also drops
 		// vectors no current symbol uses then), never on a rebuild that
 		// reused every vector.
-		if (todo.length > 0) saveStore(repoId, model, store, allHashes);
+		if (todo.length > 0) saveStore(repoId, model, store, new Set(hashes));
 
 		const kept: Symbol[] = [];
 		const rows: Float32Array[] = [];
@@ -431,26 +324,16 @@ export function ensureSemanticIndex(
 				rows.push(v);
 			}
 		});
-		const keptFiles: string[] = [];
-		const fileRows: Float32Array[] = [];
-		cardHashes.forEach((h, i) => {
-			const v = store.get(h);
-			if (v?.length) {
-				keptFiles.push(files[i]);
-				fileRows.push(v);
-			}
+		const dims = rows[0]?.length ?? 0;
+		const matrix = new Float32Array(rows.length * dims);
+		rows.forEach((v, i) => {
+			if (v.length !== dims) return;
+			let norm = 0;
+			for (let d = 0; d < dims; d++) norm += v[d] * v[d];
+			const inv = norm > 0 ? 1 / Math.sqrt(norm) : 0;
+			for (let d = 0; d < dims; d++) matrix[i * dims + d] = v[d] * inv;
 		});
-		const dims = rows[0]?.length ?? fileRows[0]?.length ?? 0;
-		st.built = {
-			gen,
-			model,
-			cards: withCards,
-			dims,
-			symbols: kept,
-			matrix: unitRows(rows, dims),
-			files: keptFiles,
-			fileMatrix: unitRows(fileRows, dims),
-		};
+		st.built = { gen, model, dims, symbols: kept, matrix };
 		st.failedAt = 0;
 		return { state: "ready", count: kept.length };
 	})().finally(() => {
@@ -458,31 +341,6 @@ export function ensureSemanticIndex(
 	});
 	st.building = run;
 	return run;
-}
-
-/** The first HEADER_READ bytes of a file, as text. */
-function readHead(abs: string): string {
-	const fd = fs.openSync(abs, "r");
-	try {
-		const buf = Buffer.alloc(HEADER_READ);
-		const n = fs.readSync(fd, buf, 0, HEADER_READ, 0);
-		return buf.subarray(0, n).toString("utf8");
-	} finally {
-		fs.closeSync(fd);
-	}
-}
-
-/** Vectors as one matrix of unit-length rows (a row of the wrong size stays zero). */
-function unitRows(rows: Float32Array[], dims: number): Float32Array {
-	const matrix = new Float32Array(rows.length * dims);
-	rows.forEach((v, i) => {
-		if (v.length !== dims) return;
-		let norm = 0;
-		for (let d = 0; d < dims; d++) norm += v[d] * v[d];
-		const inv = norm > 0 ? 1 / Math.sqrt(norm) : 0;
-		for (let d = 0; d < dims; d++) matrix[i * dims + d] = v[d] * inv;
-	});
-	return matrix;
 }
 
 function fail(st: RepoState, reason: string): SemanticStatus {
@@ -516,7 +374,7 @@ export async function semanticSearch(
 	}
 	const st = stateFor(repoId);
 	const provider = providerOf(opts);
-	if (!st.built || st.built.model !== provider.model || st.built.cards !== fileCardsOn(opts)) {
+	if (!st.built || st.built.model !== provider.model) {
 		if (st.building) return { status: "building", hits: [], ...st.progress };
 		if (st.failedAt && Date.now() - st.failedAt < RETRY_AFTER_MS) {
 			return { status: "unavailable", hits: [], detail: st.failure };
@@ -547,57 +405,31 @@ export async function semanticSearch(
 	return { status: "ready", hits: nearest(repoId, built, q, opts?.k ?? 5) };
 }
 
-/** Cosine of each unit row against q (scaled to unit length). */
-function cosines(matrix: Float32Array, n: number, dims: number, q: Float32Array): Float32Array {
+/** Cosine top-k over the unit rows, at most MAX_ROWS_PER_FILE per file, skipping symbols since removed. */
+function nearest(repoId: string, built: Built, q: Float32Array, k: number): SemanticHit[] {
+	const { dims, matrix, symbols } = built;
 	let qn = 0;
 	for (let d = 0; d < dims; d++) qn += q[d] * q[d];
 	const inv = qn > 0 ? 1 / Math.sqrt(qn) : 0;
-	const scores = new Float32Array(n);
-	for (let i = 0; i < n; i++) {
+	const scores = new Float32Array(symbols.length);
+	for (let i = 0; i < symbols.length; i++) {
 		let dot = 0;
 		const off = i * dims;
 		for (let d = 0; d < dims; d++) dot += matrix[off + d] * q[d];
 		scores[i] = dot * inv;
 	}
-	return scores;
-}
-
-/**
- * Top-k files by the better of their card and their best symbol, one hit per
- * file: the best symbol still in the index, or line 1 when the file has none.
- * Files and symbols removed since the build are skipped.
- */
-function nearest(repoId: string, built: Built, q: Float32Array, k: number): SemanticHit[] {
-	const { dims, symbols, files } = built;
-	const symScores = cosines(built.matrix, symbols.length, dims, q);
-	const fileScores = cosines(built.fileMatrix, files.length, dims, q);
-	const best = new Map<string, { score: number; symbol?: Symbol }>();
-	const order = Array.from(symScores.keys()).sort(
-		(a, b) => symScores[b] - symScores[a] || (symbols[a].id < symbols[b].id ? -1 : 1),
+	const order = Array.from(scores.keys()).sort(
+		(a, b) => scores[b] - scores[a] || (symbols[a].id < symbols[b].id ? -1 : 1),
 	);
+	const perFile = new Map<string, number>();
+	const out: SemanticHit[] = [];
 	for (const i of order) {
-		const file = symbols[i].filePath;
-		if (best.has(file)) continue;
 		const current = getSymbol(repoId, symbols[i].id);
 		if (!current) continue;
-		best.set(file, { score: symScores[i], symbol: current });
-	}
-	files.forEach((file, i) => {
-		const b = best.get(file);
-		if (!b) best.set(file, { score: fileScores[i] });
-		else if (fileScores[i] > b.score) b.score = fileScores[i];
-	});
-	const ranked = [...best].sort((a, b) => b[1].score - a[1].score || (a[0] < b[0] ? -1 : 1));
-	const out: SemanticHit[] = [];
-	const root = getRepoStats(repoId)?.sourceRoot ?? "";
-	for (const [file, b] of ranked) {
-		if (!b.symbol && !getFileOutline(repoId, path.relative(root, file))) continue;
-		out.push({
-			file,
-			line: b.symbol?.startLine ?? 1,
-			...(b.symbol ? { symbol: b.symbol } : {}),
-			score: Number(b.score.toFixed(4)),
-		});
+		const n = perFile.get(current.filePath) ?? 0;
+		if (n >= MAX_ROWS_PER_FILE) continue;
+		perFile.set(current.filePath, n + 1);
+		out.push({ symbol: current, score: Number(scores[i].toFixed(4)) });
 		if (out.length === k) break;
 	}
 	return out;
