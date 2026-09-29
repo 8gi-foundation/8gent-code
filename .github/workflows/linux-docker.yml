@@ -46,7 +46,6 @@ jobs:
     timeout-minutes: 40
     env:
       CONTAINER: 8gent-linux-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      IMAGE: 8gent-linux-ci:${{ hashFiles('.github/docker/linux-ci/Dockerfile') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,8 +55,12 @@ jobs:
           docker info --format 'docker {{.ServerVersion}} {{.OSType}}/{{.Architecture}} cpus={{.NCPU}} mem={{.MemTotal}}' \
             || { echo "::error::Docker daemon is not reachable from the runner. Is Docker Desktop running?"; exit 1; }
 
+      # Tag by Dockerfile content, so an unchanged Dockerfile reuses the image.
       - name: Build CI image
-        run: nice -n 10 docker build --pull=false -t "$IMAGE" .github/docker/linux-ci
+        run: |
+          IMAGE="8gent-linux-ci:$(shasum -a 256 .github/docker/linux-ci/Dockerfile | cut -c1-16)"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          nice -n 10 docker build --pull=false -t "$IMAGE" .github/docker/linux-ci
 
       - name: Install, typecheck, test, build (in Docker)
         timeout-minutes: 35
