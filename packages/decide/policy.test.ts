@@ -52,12 +52,38 @@ describe("studentAnswer", () => {
 		expect(studentAnswer({ ...base, forms: [] }, T)).toBe("defer");
 	});
 	test("an escalate rule can only make it stricter (allow becomes ask)", () => {
-		expect(studentAnswer({ ...base, forms: [[0.99, 0.005, 0.005]], rule: "escalate" }, T)).toBe("ask");
-		expect(studentAnswer({ ...base, forms: [[0.01, 0.01, 0.98]], rule: "escalate" }, T)).toBe("block");
+		expect(studentAnswer({ ...base, forms: [[0.99, 0.005, 0.005]], rule: "escalate" }, T)).toBe(
+			"ask",
+		);
+		expect(studentAnswer({ ...base, forms: [[0.01, 0.01, 0.98]], rule: "escalate" }, T)).toBe(
+			"block",
+		);
 	});
 	test("comment-stripped form: stricter answer wins, a deferral on either defers", () => {
-		expect(studentAnswer({ ...base, forms: [[0.99, 0.005, 0.005], [0.05, 0.9, 0.05]] }, T)).toBe("ask");
-		expect(studentAnswer({ ...base, forms: [[0.99, 0.005, 0.005], [0.5, 0.3, 0.2]] }, T)).toBe("defer");
+		expect(
+			studentAnswer(
+				{
+					...base,
+					forms: [
+						[0.99, 0.005, 0.005],
+						[0.05, 0.9, 0.05],
+					],
+				},
+				T,
+			),
+		).toBe("ask");
+		expect(
+			studentAnswer(
+				{
+					...base,
+					forms: [
+						[0.99, 0.005, 0.005],
+						[0.5, 0.3, 0.2],
+					],
+				},
+				T,
+			),
+		).toBe("defer");
 	});
 	test("DEFER_ALL never answers", () => {
 		expect(studentAnswer({ ...base, forms: [[1, 0, 0]] }, DEFER_ALL)).toBe("defer");
@@ -66,7 +92,9 @@ describe("studentAnswer", () => {
 
 function rows(spec: [number[], CalibrationRow["truth"], number][]): CalibrationRow[] {
 	const out: CalibrationRow[] = [];
-	for (const [p, truth, n] of spec) for (let i = 0; i < n; i++) out.push({ forms: [p], truth, ood: false, truncated: false, rule: "pass" });
+	for (const [p, truth, n] of spec)
+		for (let i = 0; i < n; i++)
+			out.push({ forms: [p], truth, ood: false, truncated: false, rule: "pass" });
 	return out;
 }
 
@@ -97,7 +125,9 @@ describe("fitThresholds", () => {
 	});
 	test("under about 600 rows even a zero-error policy cannot certify the 0.5% severe budget", () => {
 		expect(cpUpper(0, 100)).toBeGreaterThan(0.005);
-		expect(withinBudget(countErrors(rows([[[0.99, 0.005, 0.005], "allow", 100]]), DEFER_ALL))).toBe(false);
+		expect(withinBudget(countErrors(rows([[[0.99, 0.005, 0.005], "allow", 100]]), DEFER_ALL))).toBe(
+			false,
+		);
 	});
 	test("mild errors are bounded at 5% over all rows", () => {
 		const cal = rows([

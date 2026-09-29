@@ -41,7 +41,13 @@ export type StudentClass = (typeof STUDENT_CLASSES)[number];
 /** HF `_is_punctuation`: ASCII non-alphanumeric printable ranges, or any Unicode P* category. */
 function isPunctuation(ch: string): boolean {
 	const cp = ch.codePointAt(0) ?? 0;
-	if ((cp >= 33 && cp <= 47) || (cp >= 58 && cp <= 64) || (cp >= 91 && cp <= 96) || (cp >= 123 && cp <= 126)) return true;
+	if (
+		(cp >= 33 && cp <= 47) ||
+		(cp >= 58 && cp <= 64) ||
+		(cp >= 91 && cp <= 96) ||
+		(cp >= 123 && cp <= 126)
+	)
+		return true;
 	return /\p{P}/u.test(ch);
 }
 function isWhitespace(ch: string): boolean {
@@ -101,7 +107,10 @@ export class WordPieceTokenizer {
 			else if (isCjk(cp)) clean += ` ${ch} `;
 			else clean += ch;
 		}
-		clean = clean.toLowerCase().normalize("NFD").replace(/\p{Mn}/gu, "");
+		clean = clean
+			.toLowerCase()
+			.normalize("NFD")
+			.replace(/\p{Mn}/gu, "");
 		const out: string[] = [];
 		for (const word of clean.split(" ")) {
 			if (!word) continue;
@@ -163,7 +172,11 @@ export class WordPieceTokenizer {
 		const p = this.pieces(text);
 		const tokens = p.length + 2;
 		const keep = Math.max(0, maxTokens - 2);
-		return { ids: [this.cls, ...p.slice(0, keep), this.sep], tokens, truncated: tokens > maxTokens };
+		return {
+			ids: [this.cls, ...p.slice(0, keep), this.sep],
+			tokens,
+			truncated: tokens > maxTokens,
+		};
 	}
 }
 
@@ -227,7 +240,12 @@ export function knnScore(bank: Float32Array, dim: number, x: Float32Array, k: nu
 }
 
 /** Sentence vector from a [1, n, dim] hidden state: the CLS row, or the mean over all n rows. */
-export function pool(hidden: Float32Array, n: number, dim: number, how: "cls" | "mean"): Float32Array {
+export function pool(
+	hidden: Float32Array,
+	n: number,
+	dim: number,
+	how: "cls" | "mean",
+): Float32Array {
 	if (how === "cls") return hidden.slice(0, dim);
 	const out = new Float32Array(dim);
 	for (let t = 0; t < n; t++) for (let i = 0; i < dim; i++) out[i] += hidden[t * dim + i];
@@ -292,7 +310,10 @@ export interface Student {
 }
 
 export function defaultStudentDir(env: Record<string, string | undefined> = process.env): string {
-	return env.EIGHT_DECIDE_STUDENT_DIR?.trim() || path.join(env.HOME?.trim() || os.homedir(), ".8gent", "models", "8j-student");
+	return (
+		env.EIGHT_DECIDE_STUDENT_DIR?.trim() ||
+		path.join(env.HOME?.trim() || os.homedir(), ".8gent", "models", "8j-student")
+	);
 }
 
 export interface LoadStudentOptions {
@@ -320,15 +341,27 @@ function readJson<T>(file: string): T {
 export async function loadStudent(opts: LoadStudentOptions = {}): Promise<Student> {
 	const dir = opts.dir ?? defaultStudentDir();
 	const meta: StudentMeta = opts.encoderOnly
-		? { encoder: opts.encoderDir ?? "", dim: 384, maxTokens: opts.maxTokens ?? 256, k: 10, oodThreshold: Number.POSITIVE_INFINITY, pooling: opts.pooling }
+		? {
+				encoder: opts.encoderDir ?? "",
+				dim: 384,
+				maxTokens: opts.maxTokens ?? 256,
+				k: 10,
+				oodThreshold: Number.POSITIVE_INFINITY,
+				pooling: opts.pooling,
+			}
 		: readJson<StudentMeta>(path.join(dir, "meta.json"));
-	const encDir = meta.encoder.startsWith("~") ? path.join(os.homedir(), meta.encoder.slice(1)) : meta.encoder;
+	const encDir = meta.encoder.startsWith("~")
+		? path.join(os.homedir(), meta.encoder.slice(1))
+		: meta.encoder;
 	const modelFile = path.join(encDir, "model_quantized.onnx");
 	const vocabFile = path.join(encDir, "vocab.txt");
-	if (!fs.existsSync(modelFile) || !fs.existsSync(vocabFile)) throw new DecideUnavailableError(`student encoder missing in ${encDir}`);
+	if (!fs.existsSync(modelFile) || !fs.existsSync(vocabFile))
+		throw new DecideUnavailableError(`student encoder missing in ${encDir}`);
 	const tok = WordPieceTokenizer.fromVocabText(fs.readFileSync(vocabFile, "utf8"));
 	const ort = await (opts.loader ?? defaultOnnxLoader)().catch((err: Error) => {
-		throw new DecideUnavailableError(`onnxruntime-node not installed (optional dependency): ${err.message}`);
+		throw new DecideUnavailableError(
+			`onnxruntime-node not installed (optional dependency): ${err.message}`,
+		);
 	});
 	const threads = opts.threads ?? (Number(process.env.EIGHT_STUDENT_THREADS) || 4);
 	const session = await ort.InferenceSession.create(modelFile, {
@@ -338,7 +371,10 @@ export async function loadStudent(opts: LoadStudentOptions = {}): Promise<Studen
 		graphOptimizationLevel: "all",
 	});
 	const head = opts.encoderOnly ? null : readJson<StudentHead>(path.join(dir, "head.json"));
-	if (head && (head.W.length !== 3 || head.W.some((r) => r.length !== meta.dim) || head.b.length !== 3)) {
+	if (
+		head &&
+		(head.W.length !== 3 || head.W.some((r) => r.length !== meta.dim) || head.b.length !== 3)
+	) {
 		throw new DecideUnavailableError(`student head shape is not 3x${meta.dim}`);
 	}
 	let bank = new Float32Array(0);
@@ -351,14 +387,22 @@ export async function loadStudent(opts: LoadStudentOptions = {}): Promise<Studen
 		const { ids, tokens, truncated } = tok.encode(text, meta.maxTokens);
 		const n = ids.length;
 		const feeds: Record<string, unknown> = {
-			input_ids: new ort.Tensor("int64", BigInt64Array.from(ids, (x) => BigInt(x)), [1, n]),
+			input_ids: new ort.Tensor(
+				"int64",
+				BigInt64Array.from(ids, (x) => BigInt(x)),
+				[1, n],
+			),
 			attention_mask: new ort.Tensor("int64", new BigInt64Array(n).fill(1n), [1, n]),
 			token_type_ids: new ort.Tensor("int64", new BigInt64Array(n), [1, n]),
 		};
 		for (const k of Object.keys(feeds)) if (!session.inputNames.includes(k)) delete feeds[k];
 		const out = await session.run(feeds);
 		const hidden = out.last_hidden_state ?? out[session.outputNames[0]];
-		return { vec: l2normalise(pool(hidden.data, n, meta.dim, meta.pooling ?? "cls")), tokens, truncated };
+		return {
+			vec: l2normalise(pool(hidden.data, n, meta.dim, meta.pooling ?? "cls")),
+			tokens,
+			truncated,
+		};
 	};
 
 	return {
@@ -412,12 +456,20 @@ export class StudentBackend implements DecideBackend {
 		const answers: ChoiceAnswer[] = [];
 		for (const q of request.questions) {
 			if (q.kind !== "choice" || q.options.length !== 3) {
-				throw new DecideError(`student answers only the 3-way allow/ask/block choice question, not "${q.id}"`);
+				throw new DecideError(
+					`student answers only the 3-way allow/ask/block choice question, not "${q.id}"`,
+				);
 			}
 			const s = await this.student.score(commandFromState(request.state));
 			let chosen = 0;
 			for (let i = 1; i < 3; i++) if (s.probs[i] > s.probs[chosen]) chosen = i;
-			answers.push({ id: q.id, kind: "choice", probabilities: s.probs, chosen, confidence: s.probs[chosen] });
+			answers.push({
+				id: q.id,
+				kind: "choice",
+				probabilities: s.probs,
+				chosen,
+				confidence: s.probs[chosen],
+			});
 		}
 		return { answers, backend: this.name, model: this.model, latencyMs: performance.now() - t0 };
 	}

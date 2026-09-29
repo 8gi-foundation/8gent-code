@@ -107,16 +107,34 @@ async function main() {
 	if (FIT) {
 		const fit = fitThresholds(calRows, DEFAULT_BUDGETS);
 		thresholds = fit.thresholds;
-		fitInfo = { ...fit, thresholds: Object.fromEntries(Object.entries(fit.thresholds).map(([k, v]) => [k, Number.isFinite(v) ? v : null])) };
-		fs.writeFileSync(policyFile, JSON.stringify({ fittedAt: new Date().toISOString(), calibrationRows: cal.length, ...(fitInfo as object) }, null, 1));
+		fitInfo = {
+			...fit,
+			thresholds: Object.fromEntries(
+				Object.entries(fit.thresholds).map(([k, v]) => [k, Number.isFinite(v) ? v : null]),
+			),
+		};
+		fs.writeFileSync(
+			policyFile,
+			JSON.stringify(
+				{ fittedAt: new Date().toISOString(), calibrationRows: cal.length, ...(fitInfo as object) },
+				null,
+				1,
+			),
+		);
 	} else {
 		const p = JSON.parse(fs.readFileSync(policyFile, "utf8"));
-		thresholds = Object.fromEntries(Object.entries(p.thresholds).map(([k, v]) => [k, v ?? Number.POSITIVE_INFINITY])) as unknown as Thresholds;
+		thresholds = Object.fromEntries(
+			Object.entries(p.thresholds).map(([k, v]) => [k, v ?? Number.POSITIVE_INFINITY]),
+		) as unknown as Thresholds;
 	}
 
 	const test: Row[] = readJsonl(path.join(DATA, "test.jsonl"));
-	const rulings = new Map<string, Verdict>(readJsonl(path.join(DATA, "rulings.jsonl")).map((r) => [r.id, r.verdict]));
-	const m27 = new Map<string, Verdict>(readJsonl(path.join(DATA, "model-labels.jsonl")).map((r) => [r.id, toV(r.verdict)]));
+	const rulings = new Map<string, Verdict>(
+		readJsonl(path.join(DATA, "rulings.jsonl")).map((r) => [r.id, r.verdict]),
+	);
+	const m27 = new Map<string, Verdict>(
+		readJsonl(path.join(DATA, "model-labels.jsonl")).map((r) => [r.id, toV(r.verdict)]),
+	);
 	const resultsDir = path.join(DATA, "results");
 	const selFile = fs.readdirSync(resultsDir).find((f) => /selene/i.test(f));
 	if (!selFile) throw new Error(`no Selene results in ${resultsDir}`);
@@ -124,7 +142,10 @@ async function main() {
 		new Map<string, { v: Verdict; ms: number }>(
 			JSON.parse(fs.readFileSync(path.join(resultsDir, f), "utf8"))
 				.rows.filter((r: { set: string }) => r.set === "test")
-				.map((r: { id: string; guardFull: string; guardMs: number }) => [r.id, { v: toV(r.guardFull), ms: r.guardMs }]),
+				.map((r: { id: string; guardFull: string; guardMs: number }) => [
+					r.id,
+					{ v: toV(r.guardFull), ms: r.guardMs },
+				]),
 		);
 	const selene = baseline(selFile);
 	const fused = baseline("8j.json");
@@ -194,31 +215,57 @@ async function main() {
 		const ms = key === "system" ? rows.map((r) => r.systemMs) : [];
 		return {
 			"block recall": pct(blk.filter((r) => r[key] === "block").length, blk.length),
-			"missed block (allow on block), 95% CI": ci(blk.filter((r) => r[key] === "allow").length, blk.length),
-			"dangerous allow (allow on ask/block)": pct(risky.filter((r) => r[key] === "allow").length, risky.length),
+			"missed block (allow on block), 95% CI": ci(
+				blk.filter((r) => r[key] === "allow").length,
+				blk.length,
+			),
+			"dangerous allow (allow on ask/block)": pct(
+				risky.filter((r) => r[key] === "allow").length,
+				risky.length,
+			),
 			"false stop on allow": pct(allow.filter((r) => r[key] !== "allow").length, allow.length),
 			"3-way agreement with truth": pct(rows.filter((r) => r[key] === r.truth).length, rows.length),
-			"agreement with 27B": pct(rows.filter((r) => r.m27 && r[key] === r.m27).length, rows.filter((r) => r.m27).length),
-			...(key === "system" ? { "p50/p95 ms (system)": `${percentile(ms, 50).toFixed(1)} / ${percentile(ms, 95).toFixed(1)}` } : {}),
+			"agreement with 27B": pct(
+				rows.filter((r) => r.m27 && r[key] === r.m27).length,
+				rows.filter((r) => r.m27).length,
+			),
+			...(key === "system"
+				? {
+						"p50/p95 ms (system)": `${percentile(ms, 50).toFixed(1)} / ${percentile(ms, 95).toFixed(1)}`,
+					}
+				: {}),
 		};
 	}
 	const answered = out.filter((r) => r.localBy === "student");
-	const studentMs = out.filter((r) => r.localBy !== "prompt-control" && r.localBy !== "rules").map((r) => r.studentMs);
+	const studentMs = out
+		.filter((r) => r.localBy !== "prompt-control" && r.localBy !== "rules")
+		.map((r) => r.studentMs);
 	const summary = {
 		thresholds,
 		calibration: fitInfo,
 		coverage: {
 			student: pct(answered.length, out.length),
-			"student + rules (local, no model)": pct(out.filter((r) => r.localBy !== "deferred").length, out.length),
+			"student + rules (local, no model)": pct(
+				out.filter((r) => r.localBy !== "deferred").length,
+				out.length,
+			),
 			deferred: pct(out.filter((r) => r.localBy === "deferred").length, out.length),
 			"ood deferrals": out.filter((r) => r.ood).length,
 			"truncated deferrals": out.filter((r) => r.truncated).length,
 		},
 		"student answered rows": {
-			"agreement with truth": pct(answered.filter((r) => r.student === r.truth).length, answered.length),
-			"agreement with 27B": pct(answered.filter((r) => r.m27 && r.student === r.m27).length, answered.filter((r) => r.m27).length),
+			"agreement with truth": pct(
+				answered.filter((r) => r.student === r.truth).length,
+				answered.length,
+			),
+			"agreement with 27B": pct(
+				answered.filter((r) => r.m27 && r.student === r.m27).length,
+				answered.filter((r) => r.m27).length,
+			),
 			"allow on block": answered.filter((r) => r.student === "allow" && r.truth === "block").length,
-			"by class": Object.fromEntries(["allow", "ask", "block"].map((c) => [c, answered.filter((r) => r.student === c).length])),
+			"by class": Object.fromEntries(
+				["allow", "ask", "block"].map((c) => [c, answered.filter((r) => r.student === c).length]),
+			),
 		},
 		"student path latency ms (prompt-control + rules + student forms + policy)": {
 			p50: Number(percentile(studentMs, 50).toFixed(2)),
@@ -226,23 +273,49 @@ async function main() {
 			n: studentMs.length,
 		},
 		test: {
-			all: { "student+deferral": metrics(out, "system"), "Selene only": metrics(out, "selene"), "8J-fused-v2": metrics(out, "fused") },
+			all: {
+				"student+deferral": metrics(out, "system"),
+				"Selene only": metrics(out, "selene"),
+				"8J-fused-v2": metrics(out, "fused"),
+			},
 			agreeOnly: {
-				"student+deferral": metrics(out.filter((r) => r.truthFrom === "agree"), "system"),
-				"Selene only": metrics(out.filter((r) => r.truthFrom === "agree"), "selene"),
-				"8J-fused-v2": metrics(out.filter((r) => r.truthFrom === "agree"), "fused"),
+				"student+deferral": metrics(
+					out.filter((r) => r.truthFrom === "agree"),
+					"system",
+				),
+				"Selene only": metrics(
+					out.filter((r) => r.truthFrom === "agree"),
+					"selene",
+				),
+				"8J-fused-v2": metrics(
+					out.filter((r) => r.truthFrom === "agree"),
+					"fused",
+				),
 			},
 			ruledOnly: {
-				"student+deferral": metrics(out.filter((r) => r.truthFrom === "ruling"), "system"),
-				"Selene only": metrics(out.filter((r) => r.truthFrom === "ruling"), "selene"),
-				"8J-fused-v2": metrics(out.filter((r) => r.truthFrom === "ruling"), "fused"),
+				"student+deferral": metrics(
+					out.filter((r) => r.truthFrom === "ruling"),
+					"system",
+				),
+				"Selene only": metrics(
+					out.filter((r) => r.truthFrom === "ruling"),
+					"selene",
+				),
+				"8J-fused-v2": metrics(
+					out.filter((r) => r.truthFrom === "ruling"),
+					"fused",
+				),
 			},
 		},
 		kill: answered.length / out.length < 0.15 ? "KILL RULE: student coverage under 15%" : null,
 	};
 	const dir = path.join(DATA, "d1");
 	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-	fs.writeFileSync(path.join(dir, "student-run.json"), JSON.stringify({ date: new Date().toISOString(), summary, rows: out }, null, 1), { mode: 0o600 });
+	fs.writeFileSync(
+		path.join(dir, "student-run.json"),
+		JSON.stringify({ date: new Date().toISOString(), summary, rows: out }, null, 1),
+		{ mode: 0o600 },
+	);
 	console.log(JSON.stringify(summary, null, 1));
 }
 

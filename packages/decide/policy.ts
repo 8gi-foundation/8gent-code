@@ -29,7 +29,11 @@ export interface Thresholds {
 	block: number;
 }
 /** Never answer: every class deferred. */
-export const DEFER_ALL: Thresholds = { allow: Number.POSITIVE_INFINITY, ask: Number.POSITIVE_INFINITY, block: Number.POSITIVE_INFINITY };
+export const DEFER_ALL: Thresholds = {
+	allow: Number.POSITIVE_INFINITY,
+	ask: Number.POSITIVE_INFINITY,
+	block: Number.POSITIVE_INFINITY,
+};
 
 export interface Budgets {
 	/** Upper bound on P(student allow AND truth block). Default 0.005. */
@@ -81,7 +85,10 @@ export function studentAnswer(x: StudentInput, t: Thresholds): Answer {
 // ----- Clopper-Pearson ------------------------------------------------------------
 
 function logGamma(x: number): number {
-	const c = [676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406, 12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7];
+	const c = [
+		676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406,
+		12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7,
+	];
 	if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - logGamma(1 - x);
 	x -= 1;
 	let a = 0.9999999999998099;
@@ -124,8 +131,12 @@ function betacf(a: number, b: number, x: number): number {
 export function betaInc(x: number, a: number, b: number): number {
 	if (x <= 0) return 0;
 	if (x >= 1) return 1;
-	const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
-	return x < (a + 1) / (a + b + 2) ? (bt * betacf(a, b, x)) / a : 1 - (bt * betacf(b, a, 1 - x)) / b;
+	const bt = Math.exp(
+		logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x),
+	);
+	return x < (a + 1) / (a + b + 2)
+		? (bt * betacf(a, b, x)) / a
+		: 1 - (bt * betacf(b, a, 1 - x)) / b;
 }
 
 /** Inverse of I_x(a, b) in x, by bisection (monotone, 200 steps: exact to double precision). */
@@ -187,7 +198,9 @@ export function countErrors(rows: readonly CalibrationRow[], t: Thresholds): Cou
 }
 
 export function withinBudget(c: Counts, b: Budgets = DEFAULT_BUDGETS): boolean {
-	return cpUpper(c.severe, c.n, b.confidence) <= b.severe && cpUpper(c.mild, c.n, b.confidence) <= b.mild;
+	return (
+		cpUpper(c.severe, c.n, b.confidence) <= b.severe && cpUpper(c.mild, c.n, b.confidence) <= b.mild
+	);
 }
 
 export interface FitResult {
@@ -204,12 +217,16 @@ export interface FitResult {
  * on calibration rows) while the whole policy stays within both budgets. Error
  * counts only grow as a threshold drops, so the scan stops at the first breach.
  */
-export function fitThresholds(rows: readonly CalibrationRow[], budgets: Budgets = DEFAULT_BUDGETS): FitResult {
+export function fitThresholds(
+	rows: readonly CalibrationRow[],
+	budgets: Budgets = DEFAULT_BUDGETS,
+): FitResult {
 	const t: Thresholds = { ...DEFER_ALL };
 	for (const c of ["block", "ask", "allow"] as const) {
 		const ci = CLASSES.indexOf(c);
 		const cands = new Set<number>();
-		for (const r of rows) for (const f of r.forms) if (f.length === 3 && argmax(f) === ci) cands.add(f[ci]);
+		for (const r of rows)
+			for (const f of r.forms) if (f.length === 3 && argmax(f) === ci) cands.add(f[ci]);
 		const sorted = [...cands].sort((a, b) => b - a);
 		for (const v of sorted) {
 			const trial = { ...t, [c]: v };
