@@ -51,11 +51,37 @@ const DIRECTIVE_KEYS = new Set([
 	"transition",
 ]);
 
-/** True when the markdown opens with front matter containing `marp: true`. */
+/**
+ * Directives only Marp uses. Blog-style keys (title, author, description...)
+ * are left out so an ordinary markdown post never counts as a deck.
+ */
+const MARP_ONLY_KEYS = [
+	"theme",
+	"paginate",
+	"headingDivider",
+	"size",
+	"class",
+	"backgroundColor",
+	"backgroundImage",
+	"color",
+	"transition",
+];
+
+/**
+ * True when the markdown is a Marp deck: front matter with `marp: true`, or
+ * front matter carrying a Marp-only directive on a file that splits into at
+ * least two slides. Local models often write `theme:` and `paginate:` but
+ * forget `marp: true` (Rishi pilot, 2026-09-29). An explicit `marp: false`
+ * always opts out.
+ */
 export function isMarpDeck(content: string): boolean {
 	const m = FRONT_MATTER.exec(content);
 	if (!m) return false;
-	return /^[ \t]*marp[ \t]*:[ \t]*true[ \t]*$/m.test(m[1]);
+	const fm = m[1];
+	const flag = /^[ \t]*marp[ \t]*:[ \t]*(true|false)[ \t]*$/m.exec(fm);
+	if (flag) return flag[1] === "true";
+	const hasMarpKey = MARP_ONLY_KEYS.some((k) => new RegExp(`^[ \\t]*${k}[ \\t]*:`, "m").test(fm));
+	return hasMarpKey && parseDeck(content).slides.length >= 2;
 }
 
 function isFenceLine(line: string): string | null {

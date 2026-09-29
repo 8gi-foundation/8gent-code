@@ -29,6 +29,23 @@ describe("isMarpDeck", () => {
 	});
 });
 
+describe("isMarpDeck without marp: true", () => {
+	// Rishi pilot run 2026-09-29_221042: qwen wrote theme/paginate but no marp key.
+	const pilotDeck = "---\ntheme: default\ntitle: Eight System One\npaginate: true\n---\n\n# One\n\n---\n\n# Two\n\n---\n\n# Three\n";
+	test("Marp-only directives plus slide breaks count as a deck", () => {
+		expect(isMarpDeck(pilotDeck)).toBe(true);
+	});
+	test("an explicit marp: false still opts out", () => {
+		expect(isMarpDeck(pilotDeck.replace("paginate: true", "paginate: true\nmarp: false"))).toBe(false);
+	});
+	test("a blog post with only title/author is not a deck, even with rules", () => {
+		expect(isMarpDeck("---\ntitle: Post\nauthor: me\n---\n\n# A\n\n---\n\n# B\n")).toBe(false);
+	});
+	test("a Marp directive on a single-slide file is not enough", () => {
+		expect(isMarpDeck("---\ntheme: default\n---\n\n# Only one\n")).toBe(false);
+	});
+});
+
 describe("parseDeck", () => {
 	test("strips front matter and splits the fixture into three slides", () => {
 		const deck = parseDeck(fixture);
