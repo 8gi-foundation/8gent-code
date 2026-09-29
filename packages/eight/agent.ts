@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { indexFolder as astIndexFolder } from "../ast-index";
+import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
@@ -289,11 +289,12 @@ export class Agent {
 		// constructed lazily on first observe so providerConfig is in scope.
 		this.twoStageCompactor = null;
 
-		// Fire-and-forget AST indexing of working directory for AST-first retrieval.
-		// Lite mode skips it — first AST tool call will index on demand.
+		// AST index for AST-first retrieval. ensureIndexed returns the build the
+		// ToolExecutor above already started for this folder, so this only
+		// attaches the debug log; it never indexes the repo a second time.
 		const cwd = config.workingDirectory || process.cwd();
 		if (!LITE) {
-			astIndexFolder(cwd)
+			astEnsureIndexed(cwd)
 				.then((index) => {
 					// Gated behind DEBUG: stdout writes after Ink mounts get buffered
 					// above the frame and push the rounded header out of the viewport.
@@ -1191,6 +1192,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"get_outline",
 			"get_symbol",
 			"search_symbols",
+			"locate",
 			"git_status",
 			"git_diff",
 			"git_add",

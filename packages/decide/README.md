@@ -401,3 +401,249 @@ Reading it:
 - **MiniCPM5-1B** has little signal (mean pYes 0.540 destructive vs 0.484
   safe): everything lands in the escalate band, which is safe but useless.
 - 40 commands is a small set; treat these as a smoke-level comparison.
+
+## Locate eval (no model)
+
+`locate(query)` (`packages/ast-index/locate.ts`, the `locate` tool) answers
+"where is X?" with rules only: quoted or error-like text and phrases go to a
+literal `rg -F` first, then the query is read as a path, an identifier in the
+symbol map, or prose (symbol + path + grep merged). Prose can also be routed
+by System One behind a flag; see "Locate mode routing (M2)" below.
+
+```bash
+bun packages/decide/eval/locate-mine.ts   # rewrite eval/locate-queries.json (deterministic)
+bun packages/decide/eval/locate-run.ts    # run it, write eval/results/<date>-locate.json
+
+# Outside repos, in languages the TS index cannot read (grep and path fallthrough):
+bun packages/decide/eval/locate-mine.ts ~/picoclaw --lang go --anchor 3584c0c7be63f8bd297dd1920a79c3833d76d95e --name picoclaw-go
+bun packages/decide/eval/locate-run.ts ~/picoclaw --set locate-queries-picoclaw-go.json
+bun packages/decide/eval/locate-mine.ts ~/metagpt --lang py --anchor a5cb2fdd48359b04ef4183a0fdd825fd4cf5cad0 --name metagpt-py
+bun packages/decide/eval/locate-run.ts ~/metagpt --set locate-queries-metagpt-py.json
+```
+
+`locate-mine.ts` reads git history at one fixed commit (`551ef336`) and mines
+140 labelled queries: 70 identifiers (an exported declaration added in a
+commit, kept only when it has one exported declaration in the tree), 35 paths
+(files added by a commit, as full path, last two segments or unique file
+name) and 35 strings (message-like literals from throw, error, warn or
+reason/message lines, kept only when they occur once). Labels come from
+`git grep`, never from the locator. `locate-run.ts` extracts that commit with
+`git archive` so the corpus matches the labels whatever branch is checked
+out, builds the index once, and runs every query through `locate` and
+through baseline A: today's tools with the right one picked per class
+(`search_symbols` for identifiers, `rg --files` filtered for paths, `rg -F`
+for strings).
+
+Run 2026-09-28, Apple M2 Max, macOS 26.5, Bun 1.3.14, load average about
+20. Line hit means a top-5 row in the label file within 2 lines of the label
+line. Each set's queries were mined by the same rules; only the 8gent-code set
+was used to tune routing.
+
+| Set (anchor) | n | System | Top-1 file | Top-5 file | Line hit | p50 / p95 ms | Tokens mean / p95 / max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8gent-code, TS (`551ef336`) | 140 | locate | 99.3% | 100.0% | 100.0% | 40.7 / 95.9 | 44 / 74 / 117 |
+| | | baseline A | 99.3% | 100.0% | 100.0% | 37.9 / 109.7 | 44 / 108 / 492 |
+| picoclaw, Go (`3584c0c7`) | 140 | locate | 97.1% | 99.3% | 100.0% | 22.2 / 24.7 | 60 / 132 / 173 |
+| | | baseline A | 50.0% | 50.0% | 33.3% | 5.3 / 24.6 | 16 / 31 / 36 |
+| metagpt, Python (`a5cb2fdd`) | 59 | locate | 100.0% | 100.0% | 100.0% | 19.6 / 21.4 | 64 / 128 / 138 |
+| | | baseline A | 50.8% | 50.8% | 23.7% | 11.0 / 20.1 | 14 / 33 / 41 |
+
+M1 target (top-5 >= 90%, p95 < 250 ms), per class, locate:
+
+| Set | identifier | path | string |
+| --- | --- | --- | --- |
+| 8gent-code (TS) | 100.0%, 41.8 ms | 100.0%, 79.6 ms | 100.0%, 173.7 ms |
+| picoclaw (Go) | 100.0%, 24.7 ms | 97.1%, 47.3 ms | 100.0%, 24.4 ms |
+| metagpt (Python) | 100.0%, 21.4 ms | 100.0%, 16.6 ms | 100.0%, 20.9 ms |
+
+Reading it:
+
+- The mined classes are easy once `search_symbols` reads the ranked index
+  (M0): on the TS set baseline A also hits 100% top-5 when it is handed the
+  right tool. What locate adds is that the agent does not have to pick the
+  tool, and it never answers with an unbounded list: identifier answers
+  average 39 tokens against 69 for `search_symbols` (max 99 against 492).
+  For paths and strings locate prints more than bare rg (50 and 47 tokens
+  against 9 and 30 mean) because each row carries a symbol summary or the
+  matching line.
+- Outside TS the index is empty, so `search_symbols` finds no identifier
+  (0% in both outside sets) while locate routes the name to grep and ranks
+  the declaration line first (100% top-5 on 99 Go and Python identifiers).
+  The outside sets were not used for tuning.
+- The one outside miss is `termux.jpg` (picoclaw): `.jpg` is not in the path
+  extension list, so the name is read as an identifier and grep finds its
+  mention in README.md. Left as measured, not tuned.
+- The one TS top-1 miss is `PROBE_TIMEOUT_MS`: a module-level constant of the
+  same name in `packages/decide/probe.ts` ranks above the exported one. The
+  index does not record whether a symbol is exported.
+- Two routing rules were changed after the first TS run, which had 98.6%
+  top-5 (misses: a message containing `eval/run.ts` was routed to path, and
+  one containing `modelPath` to symbol). Pasted text is now looked up
+  literally first. The TS set was not changed, so its numbers are after
+  tuning on it.
+- Against the spec (200 queries, 80 of them hand-labelled prose, one outside
+  repo), this covers 339 mined queries over three repos but no prose class.
+  Prose needs human labels and is M2 work; until then prose goes to the
+  hybrid route, which needs two query words on one row. When nothing
+  qualifies, the answer names one word to retry with (for "where is the rule
+  prefilter" it suggests `locate("prefilter")`).
+
+## Locate mode routing (M2, flag off)
+
+`EIGHT_SYSTEM_ONE_LOCATE=1` (off by default) lets System One route a locate
+query the rules could not: rule `prose`, reached directly or as the fallback
+of a phrase with no literal hit. Nothing else ever reaches the model.
+`packages/ast-index/locate-system-one.ts` asks one `choice` question through
+`createDecider` (the query is the state; five options stand for symbol,
+grep, path, semantic and hybrid, written as plain descriptions) and applies
+the gate in code (`locate-calibration.ts`):
+
+- With the flag on, every prose query asks the model. Its mode is kept when
+  its choice confidence is at or above the threshold in
+  `calibration/locate/<backend>-<model>.json`, else hybrid.
+- No file for the detected (backend, model): the model is still asked, and
+  gated at `LOCATE_DEFAULT_THRESHOLD` (0.9, not fitted, chosen to be strict).
+- No answer within 500 ms (the backend request has the same limit), or any
+  error: hybrid. Routing is never a safety decision, so it fails open.
+- A kept symbol, grep or path mode runs only that mode's own search (the
+  symbol index, `rg -F`, or the path ranker) over the query words. Hits are
+  pooled and ordered by how many query words a row carries, at most two rows
+  per file. If that search finds nothing, the answer is hybrid (reason
+  `no_rows`). A kept `semantic` stays hybrid until semantic search exists (M3).
+- The model is the package's own pick (`EIGHT_DECIDE_MODEL`, then auto-detection).
+
+```bash
+bun packages/decide/eval/locate-prose-run.ts --model llama3.2:3b [--write-calibration]
+```
+
+The set, `eval/locate-queries-prose.json`, is 40 prose queries written and
+labelled by hand (synthetic; one labeller, not second-checked): 10 symbol,
+8 grep, 8 path, 8 semantic and 6 hybrid, each with the file(s) that answer
+it. Every one reaches rule `prose`. The runner extracts `551ef336`, asks the
+model once per query (memo off; wall time is the latency), fits the threshold
+by leave-one-out (each query is gated by a cut fitted on the other 39), and
+runs locate three ways: with the rules only (M1), with a real router at that
+held-out cut (M2), and with an oracle router that always answers the hand
+label (no model: the top-5 a perfect classifier would get).
+`--write-calibration` writes the cut fitted on all 40.
+
+Run 2026-09-28 22:00 on Ollama, one model at a time, under heavy load from
+other work (load average 41 to 125). Latency is inflated against the bash
+guard runs and varies run to run by 30 to 45%. The 27B model was not run:
+another session was using it.
+
+| Model | Raw mode accuracy | Gated, held out | Kept / accuracy when kept | Classifier p50 / p95 ms | Prose top-5: M1 / M2 / oracle |
+| --- | --- | --- | --- | --- | --- |
+| MiniCPM5-1B Q8_0 | 25.0% | 22.5% | 75.0% / 30.0% | 233 / 341 | 50.0% / 35.0% / 57.5% |
+| llama3.2:3b | 22.5% | 25.0% | 70.0% / 21.4% | 1173 / 1404 | 50.0% / 37.5% / 57.5% |
+| Selene-1-Mini 8B Q4_K_M | 52.5% | 60.0% | 60.0% / 79.2% | 2421 / 3001 | 50.0% / 55.0% / 57.5% |
+
+Targets (85% mode accuracy, p95 under 500 ms, top-5 ten points over M1) are
+**not met** by any model measured. Only MiniCPM5-1B is under 500 ms, and it
+is the least accurate. Reading it:
+
+- The small models answer one letter whatever the query: MiniCPM5-1B and
+  llama3.2:3b put their argmax on "symbol" for 40 and 39 of 40 queries.
+  Three prompts were tried on a separate 25-query dev set (not these 40):
+  the shipped one, one with ten worked examples in the question, and one
+  with wording cues in each option. MiniCPM5-1B still answered "symbol" for
+  64 or 65 of the 65 dev and eval queries under each.
+  With the examples, Selene rose to 20/25 on the dev set and 26/40 raw here
+  (65.0%), but its p95 went to about 3.1 s. That prompt is not shipped.
+- Selene separates symbol (10/10) and grep (8/8) but never answers
+  semantic (7 of 8 went to grep) and gets 3 of 8 path queries.
+- The top-5 target cannot be met by routing alone on this set: with a
+  perfect classifier (oracle) top-5 is 57.5%, 7.5 points over M1. Kept path
+  and symbol beat hybrid (87.5% and 70% against 62.5% and 60%), kept grep
+  ties it (37.5%), and semantic is 0% everywhere, which is M3's job. The
+  pooling in the kept-mode search was shaped on these same 40 queries.
+- A wrong kept mode costs more than it gains: MiniCPM5-1B and llama3.2:3b
+  lower top-5 from 50% to 35% and 37.5%. Their calibration files are
+  checked in because the gate reads them, not because they help: with the
+  flag on and one of them picked, prose answers get worse. Keep the flag off.
+- M2 end-to-end latency comes from a second ask of the same prompt, often
+  answered from Ollama's prompt cache. Use the classifier column for model
+  latency.
+
+## Persisted index and semantic mode (M3)
+
+**Persisted index.** `ensureIndexed` now saves the AST index to
+`<EIGHT_DATA_DIR or ~/.8gent>/ast-index/<hash of repo root>/index.json`
+(`packages/ast-index/index-cache.ts`). It holds each file's outline and the
+mtime it was parsed at. A warm start reads the file, stats every source file,
+parses only files that are new or whose mtime changed, and drops files that
+are gone. A cache written by another parser (parser source or TypeScript
+version) or with other ignore patterns is not used. Changes a refresh picks
+up are written back 2 s later. Writes go to a temp file and are then renamed.
+`EIGHT_AST_INDEX_CACHE=0` turns the cache off, and `bun test`
+(NODE_ENV=test) never writes it under the home dir. A cold build removes
+caches whose repo root no longer exists.
+
+**Semantic mode.** `packages/ast-index/semantic.ts` embeds every function,
+class, interface, type and method as its signature plus its path, with the
+memory package's nomic client (`nomic-embed-text` via Ollama). It uses
+nomic's `search_document:` and `search_query:` prefixes. Constants are left
+out: they are 28k of the 35k symbols. A query is ranked by brute-force
+cosine similarity, at most two rows per file. There is no vector database.
+The index is built lazily: the first semantic query starts the build, and
+locate answers with hybrid plus a note ("still being built (n of m ...)").
+Vectors are stored beside the index cache, keyed by a hash of the embedded
+text, so a restart embeds nothing again and a changed file re-embeds only
+signatures whose text changed. When there is no model, a timeout (3 s per
+query) or no index, the answer is hybrid with a note. Semantic runs only
+when System One keeps the `semantic` mode, so with `EIGHT_SYSTEM_ONE_LOCATE`
+off (the default) nothing is ever embedded.
+
+```bash
+bun packages/decide/eval/locate-semantic-run.ts   # no classifier model; needs nomic-embed-text in Ollama
+```
+
+Run 2026-09-28/29 on an Apple M2 Max under heavy load from other work (load
+average 52 to 163 during these runs). Anchor `551ef336`: 1488 files, 34,692
+symbols, 11,538 embedded signatures (a 35 MB `.f32` store).
+
+| Measure | Result | Target |
+| --- | --- | --- |
+| Cold index build | 74.7 s (load about 108; 13.8 s in the scope doc at normal load) | - |
+| Warm index load, 3 runs, load about 107 | 1025, 1281, 918 ms | < 1 s: NOT met at this load |
+| Warm index load, 10 runs, load about 52 | 180 to 688 ms (median 414) | < 1 s: met |
+| Semantic build, cold | 1652 s for 11,435 embeddings (about 7/s under load) | - |
+| Semantic load from the store | 640 ms (one run) | - |
+| Concept class (8 queries), semantic top-5 | **25.0%** (2 of 8) | >= 70%: **NOT met** |
+
+Top-5 file hit by labelled mode, 40 prose queries (`results/2026-09-28-locate-semantic.json`):
+
+| Label | n | Rules (M1) | Semantic forced | Oracle (label as mode) |
+| --- | --- | --- | --- | --- |
+| symbol | 10 | 60.0% | 100.0% | 70.0% |
+| grep | 8 | 37.5% | 37.5% | 37.5% |
+| path | 8 | 62.5% | 25.0% | 87.5% |
+| semantic | 8 | 0.0% | 25.0% | 25.0% |
+| hybrid | 6 | 100.0% | 83.3% | 100.0% |
+| all | 40 | 50.0% | 55.0% | 62.5% |
+
+Reading it:
+
+- Signature plus path is not enough text for concept queries. A diagnostic
+  over the same vectors (k = 200) put the labelled file at file rank 4 and 5
+  for the two hits, 6 and 9 for two near misses, and 50, 52 and 82 or not in
+  the top 200 for the rest. Showing one row per file instead of two leaves
+  it at 2 of 8. Reaching the target needs more text per symbol (docstrings,
+  or the first lines of the body), which is outside this milestone's spec.
+  It would also need a full re-embed (about 27 minutes under this load), so
+  that choice needs a decision.
+- One such extension was tried and removed as out of scope: a card per
+  source file (header comment, path, symbol doc sentences) scored 6 of 8
+  (75%) on this concept class, but its layout was chosen by looking at
+  these same 8 queries, so that is not a held-out result. Adopting it means
+  amending the spec and measuring on a fresh, independently labelled
+  concept set. A re-run on 2026-09-29 (load about 57) of this signature +
+  path code reproduced every number in the table above; warm loads were
+  307, 321 and 428 ms.
+- Semantic helps prose that names a declaration: the symbol class goes from
+  60% to 100%. The oracle, which routes symbol-labelled queries to the
+  symbol index, gets 70%.
+- The oracle's all-query top-5 goes from 57.5% (M2, no semantic) to 62.5%.
+  The whole gain is the semantic class going from 0% to 25%.
+- The 8 concept queries and their labels are the M2 set (one labeller,
+  synthetic). Nothing in semantic.ts was tuned on them.

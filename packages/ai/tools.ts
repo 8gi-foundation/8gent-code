@@ -218,6 +218,34 @@ const searchSymbols = tool({
 	},
 });
 
+const locate = tool({
+	description:
+		'Answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
+	inputSchema: z.object({
+		query: z
+			.string()
+			.describe("Symbol name, path fragment, quoted text, error message or short description"),
+	}),
+	execute: async ({ query }) => {
+		const { ensureIndexed } = await import("../ast-index");
+		const {
+			awaitIndex,
+			formatLocate,
+			LOCATE_INDEX_WAIT_MS,
+			locate: runLocate,
+		} = await import("../ast-index/locate");
+		const root = _ctx.workingDirectory;
+		// The same shared build the ToolExecutor uses, waited on only briefly:
+		// while it is still running, path and text search answer now and the
+		// answer says symbol search was skipped.
+		const { repoId, pending } = await awaitIndex(
+			ensureIndexed(root).then((index) => index.id),
+			LOCATE_INDEX_WAIT_MS,
+		);
+		return formatLocate(await runLocate(query, { root, repoId, indexPending: pending }));
+	},
+});
+
 // ============================================
 // File Operations
 // ============================================
@@ -2842,6 +2870,7 @@ export const agentTools = {
 	get_outline: getOutline,
 	get_symbol: getSymbol,
 	search_symbols: searchSymbols,
+	locate,
 
 	// File operations
 	read_file: readFile,

@@ -1,0 +1,2914 @@
+{
+	"summary": {
+		"date": "2026-09-28T19:30:49.781Z",
+		"anchor": "a5cb2fdd48359b04ef4183a0fdd825fd4cf5cad0",
+		"set": "locate-queries-metagpt-py.json",
+		"repo": "https://github.com/geekan/metagpt",
+		"lang": "py",
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max"
+		},
+		"index": {
+			"files": 0,
+			"symbols": 0,
+			"buildMs": 4
+		},
+		"lineTolerance": 2,
+		"locate": {
+			"n": 59,
+			"top1": 1,
+			"top5": 1,
+			"lineHitTop5": 1,
+			"lineN": 38,
+			"p50Ms": 19.6,
+			"p95Ms": 21.4,
+			"meanTokens": 64,
+			"p95Tokens": 128,
+			"maxTokens": 138,
+			"routeAccuracy": 1,
+			"byClass": {
+				"identifier": {
+					"n": 29,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 29,
+					"p50Ms": 20.3,
+					"p95Ms": 21.4,
+					"meanTokens": 90,
+					"p95Tokens": 130,
+					"maxTokens": 138
+				},
+				"path": {
+					"n": 21,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 15.6,
+					"p95Ms": 16.6,
+					"meanTokens": 38,
+					"p95Tokens": 68,
+					"maxTokens": 102
+				},
+				"string": {
+					"n": 9,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 9,
+					"p50Ms": 19.7,
+					"p95Ms": 20.9,
+					"meanTokens": 44,
+					"p95Tokens": 67,
+					"maxTokens": 67
+				}
+			}
+		},
+		"baselineA": {
+			"n": 59,
+			"top1": 0.5084745762711864,
+			"top5": 0.5084745762711864,
+			"lineHitTop5": 0.23684210526315788,
+			"lineN": 38,
+			"p50Ms": 11,
+			"p95Ms": 20.1,
+			"meanTokens": 14,
+			"p95Tokens": 33,
+			"maxTokens": 41,
+			"byClass": {
+				"identifier": {
+					"n": 29,
+					"top1": 0,
+					"top5": 0,
+					"lineHitTop5": 0,
+					"lineN": 29,
+					"p50Ms": 2.3,
+					"p95Ms": 2.6,
+					"meanTokens": 12,
+					"p95Tokens": 14,
+					"maxTokens": 15
+				},
+				"path": {
+					"n": 21,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 11.9,
+					"p95Ms": 12.2,
+					"meanTokens": 9,
+					"p95Tokens": 15,
+					"maxTokens": 26
+				},
+				"string": {
+					"n": 9,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 9,
+					"p50Ms": 20,
+					"p95Ms": 20.5,
+					"meanTokens": 29,
+					"p95Tokens": 41,
+					"maxTokens": 41
+				}
+			}
+		},
+		"target": {
+			"top5": 0.9,
+			"p95Ms": 250
+		}
+	},
+	"rows": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "startup",
+			"label": {
+				"file": "startup.py",
+				"line": 11
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "startup.py",
+					"line": 11
+				},
+				{
+					"file": "README.md",
+					"line": 183
+				},
+				{
+					"file": "docs/README_CN.md",
+					"line": 167
+				},
+				{
+					"file": "docs/README_JA.md",
+					"line": 184
+				},
+				{
+					"file": "startup.py",
+					"line": 13
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.4,
+			"tokens": 121
+		},
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "startup",
+			"label": {
+				"file": "startup.py",
+				"line": 11
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.1,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "parse_recipient",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 234
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/utils/common.py",
+					"line": 234
+				},
+				{
+					"file": "metagpt/roles/qa_engineer.py",
+					"line": 19
+				},
+				{
+					"file": "metagpt/roles/qa_engineer.py",
+					"line": 118
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.5,
+			"tokens": 84
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "parse_recipient",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 234
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.5,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "Player",
+			"label": {
+				"file": "tests/metagpt/actions/test_debug_error.py",
+				"line": 22
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_debug_error.py",
+					"line": 22
+				},
+				{
+					"file": "tests/metagpt/actions/mock.py",
+					"line": 111
+				},
+				{
+					"file": "tests/metagpt/actions/test_debug_error.py",
+					"line": 154
+				},
+				{
+					"file": "docs/resources/workspace/pyrogue/resources/seq_flow.svg",
+					"line": 1
+				},
+				{
+					"file": "docs/resources/workspace/pyrogue/resources/data_api_design.svg",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21,
+			"tokens": 118
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "Player",
+			"label": {
+				"file": "tests/metagpt/actions/test_debug_error.py",
+				"line": 22
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.5,
+			"tokens": 10
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestPlayer",
+			"label": {
+				"file": "tests/metagpt/actions/test_debug_error.py",
+				"line": 72
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_debug_error.py",
+					"line": 72
+				},
+				{
+					"file": "tests/metagpt/actions/test_debug_error.py",
+					"line": 124
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 18.6,
+			"tokens": 66
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestPlayer",
+			"label": {
+				"file": "tests/metagpt/actions/test_debug_error.py",
+				"line": 72
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "test_ltm_search",
+			"label": {
+				"file": "tests/metagpt/memory/test_longterm_memory.py",
+				"line": 12
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/memory/test_longterm_memory.py",
+					"line": 12
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.4,
+			"tokens": 32
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "test_ltm_search",
+			"label": {
+				"file": "tests/metagpt/memory/test_longterm_memory.py",
+				"line": 12
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "test_write_code_review",
+			"label": {
+				"file": "tests/metagpt/actions/test_write_code_review.py",
+				"line": 16
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_write_code_review.py",
+					"line": 16
+				},
+				{
+					"file": "tests/metagpt/actions/test_write_code_review.py",
+					"line": 6
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.5,
+			"tokens": 62
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "test_write_code_review",
+			"label": {
+				"file": "tests/metagpt/actions/test_write_code_review.py",
+				"line": 16
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 14
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "LONG_TERM_MEMORY is True",
+			"label": {
+				"file": "metagpt/config.py",
+				"line": 77
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "metagpt/config.py",
+					"line": 77
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.7,
+			"tokens": 29
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "LONG_TERM_MEMORY is True",
+			"label": {
+				"file": "metagpt/config.py",
+				"line": 77
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/config.py",
+					"line": 77
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.1,
+			"tokens": 19
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "LongTermMemory",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 13
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 13
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 19
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 69
+				},
+				{
+					"file": "metagpt/memory/__init__.py",
+					"line": 10
+				},
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 54
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19,
+			"tokens": 138
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "LongTermMemory",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 13
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.2,
+			"tokens": 12
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"It may the first time to run Agent {role_id}, the long-term memory is empty\"",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 30
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.5,
+			"tokens": 59
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"It may the first time to run Agent {role_id}, the long-term memory is empty\"",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 30
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20,
+			"tokens": 36
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "MemoryStorage",
+			"label": {
+				"file": "metagpt/memory/memory_storage.py",
+				"line": 17
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 17
+				},
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 61
+				},
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 10
+				},
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 21
+				},
+				{
+					"file": "tests/metagpt/memory/test_memory_storage.py",
+					"line": 7
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.8,
+			"tokens": 127
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "MemoryStorage",
+			"label": {
+				"file": "metagpt/memory/memory_storage.py",
+				"line": 17
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "google_official_search",
+			"label": {
+				"file": "metagpt/tools/search_engine.py",
+				"line": 56
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/search_engine.py",
+					"line": 56
+				},
+				{
+					"file": "metagpt/tools/search_engine.py",
+					"line": 36
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20,
+			"tokens": 81
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "google_official_search",
+			"label": {
+				"file": "metagpt/tools/search_engine.py",
+				"line": 56
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.5,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "proxy",
+			"label": {
+				"file": "tests/conftest.py",
+				"line": 46
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/conftest.py",
+					"line": 46
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 45
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 52
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine_selenium.py",
+					"line": 41
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine_selenium.py",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.4,
+			"tokens": 117
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "proxy",
+			"label": {
+				"file": "tests/conftest.py",
+				"line": 46
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 10
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "WebBrowserEngineType",
+			"label": {
+				"file": "metagpt/tools/__init__.py",
+				"line": 20
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/__init__.py",
+					"line": 20
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 71
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 10
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 17
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.3,
+			"tokens": 130
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "WebBrowserEngineType",
+			"label": {
+				"file": "metagpt/tools/__init__.py",
+				"line": 20
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.2,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "WebBrowserEngine",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine.py",
+				"line": 14
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/config.py",
+					"line": 71
+				},
+				{
+					"file": "metagpt/tools/__init__.py",
+					"line": 20
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 10
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19,
+			"tokens": 124
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "WebBrowserEngine",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine.py",
+				"line": 14
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 13
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "Fail to install browser for playwright.",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine_playwright.py",
+				"line": 106
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine_playwright.py",
+					"line": 106
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.7,
+			"tokens": 45
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "Fail to install browser for playwright.",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine_playwright.py",
+				"line": 106
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine_playwright.py",
+					"line": 106
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.9,
+			"tokens": 30
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "test_llm_acompletion",
+			"label": {
+				"file": "tests/metagpt/test_llm.py",
+				"line": 30
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/test_llm.py",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 32
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "test_llm_acompletion",
+			"label": {
+				"file": "tests/metagpt/test_llm.py",
+				"line": 30
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.2,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "Claude2",
+			"label": {
+				"file": "metagpt/provider/anthropic_api.py",
+				"line": 15
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/provider/anthropic_api.py",
+					"line": 15
+				},
+				{
+					"file": "metagpt/llm.py",
+					"line": 9
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 47
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "Claude2",
+			"label": {
+				"file": "metagpt/provider/anthropic_api.py",
+				"line": 15
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "SDEngine",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 59
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 59
+				},
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 61
+				},
+				{
+					"file": "tests/metagpt/roles/ui_role.py",
+					"line": 18
+				},
+				{
+					"file": "tests/metagpt/roles/ui_role.py",
+					"line": 206
+				},
+				{
+					"file": "tests/metagpt/tools/test_sd_tool.py",
+					"line": 7
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.3,
+			"tokens": 111
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "SDEngine",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 59
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.4,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "decode_base64_to_image",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 112
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 112
+				},
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 84
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.5,
+			"tokens": 61
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "decode_base64_to_image",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 112
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 14
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"Configure one of SERPAPI_API_KEY, SERPER_API_KEY, GOOGLE_API_KEY to unlock full feature\"",
+			"label": {
+				"file": "metagpt/actions/search_and_summarize.py",
+				"line": 115
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "metagpt/actions/search_and_summarize.py",
+					"line": 115
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20,
+			"tokens": 67
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"Configure one of SERPAPI_API_KEY, SERPER_API_KEY, GOOGLE_API_KEY to unlock full feature\"",
+			"label": {
+				"file": "metagpt/actions/search_and_summarize.py",
+				"line": 115
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/actions/search_and_summarize.py",
+					"line": 115
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.5,
+			"tokens": 41
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "SerperWrapper",
+			"label": {
+				"file": "metagpt/tools/search_engine_serper.py",
+				"line": 17
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/tools/search_engine_serper.py",
+					"line": 17
+				},
+				{
+					"file": "metagpt/tools/search_engine.py",
+					"line": 15
+				},
+				{
+					"file": "metagpt/tools/search_engine.py",
+					"line": 47
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 18.9,
+			"tokens": 73
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "SerperWrapper",
+			"label": {
+				"file": "metagpt/tools/search_engine_serper.py",
+				"line": 17
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "count_message_tokens",
+			"label": {
+				"file": "metagpt/utils/token_counter.py",
+				"line": 28
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/utils/token_counter.py",
+					"line": 28
+				},
+				{
+					"file": "metagpt/utils/__init__.py",
+					"line": 13
+				},
+				{
+					"file": "metagpt/provider/openai_api.py",
+					"line": 21
+				},
+				{
+					"file": "metagpt/provider/openai_api.py",
+					"line": 225
+				},
+				{
+					"file": "metagpt/utils/token_counter.py",
+					"line": 50
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.3,
+			"tokens": 122
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "count_message_tokens",
+			"label": {
+				"file": "metagpt/utils/token_counter.py",
+				"line": 28
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.4,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "Environment",
+			"label": {
+				"file": "metagpt/environment.py",
+				"line": 18
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/environment.py",
+					"line": 18
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 67
+				},
+				{
+					"file": "metagpt/software_company.py",
+					"line": 12
+				},
+				{
+					"file": "metagpt/software_company.py",
+					"line": 24
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.4,
+			"tokens": 110
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "Environment",
+			"label": {
+				"file": "metagpt/environment.py",
+				"line": 18
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.6,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "RoleSetting",
+			"label": {
+				"file": "metagpt/roles/role.py",
+				"line": 50
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 50
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 98
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21,
+			"tokens": 61
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "RoleSetting",
+			"label": {
+				"file": "metagpt/roles/role.py",
+				"line": 50
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "ActionOutput",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 14
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 16
+				},
+				{
+					"file": "metagpt/roles/role.py",
+					"line": 170
+				},
+				{
+					"file": "metagpt/roles/seacher.py",
+					"line": 8
+				},
+				{
+					"file": "metagpt/roles/seacher.py",
+					"line": 29
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.1,
+			"tokens": 107
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "ActionOutput",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 14
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 12
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "Unrecognized block: {field.name}",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 29
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 29
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 18.4,
+			"tokens": 39
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "Unrecognized block: {field.name}",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 29
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 29
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20,
+			"tokens": 27
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"Missing fields: {missing_fields}\"",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 18.5,
+			"tokens": 38
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"Missing fields: {missing_fields}\"",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.9,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "test_create_model_class",
+			"label": {
+				"file": "tests/metagpt/actions/test_action_output.py",
+				"line": 36
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_action_output.py",
+					"line": 36
+				},
+				{
+					"file": "tests/metagpt/actions/test_action_output.py",
+					"line": 41
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.4,
+			"tokens": 60
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "test_create_model_class",
+			"label": {
+				"file": "tests/metagpt/actions/test_action_output.py",
+				"line": 36
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 15
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "OutputParser",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 27
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/utils/common.py",
+					"line": 27
+				},
+				{
+					"file": "metagpt/actions/action.py",
+					"line": 15
+				},
+				{
+					"file": "metagpt/actions/action.py",
+					"line": 60
+				},
+				{
+					"file": "tests/metagpt/utils/test_output_parser.py",
+					"line": 12
+				},
+				{
+					"file": "tests/metagpt/utils/test_output_parser.py",
+					"line": 18
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.7,
+			"tokens": 128
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "OutputParser",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 27
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "SoftwareCompany",
+			"label": {
+				"file": "metagpt/software_company.py",
+				"line": 19
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/software_company.py",
+					"line": 19
+				},
+				{
+					"file": "startup.py",
+					"line": 8
+				},
+				{
+					"file": "startup.py",
+					"line": 14
+				},
+				{
+					"file": "tests/metagpt/roles/test_ui.py",
+					"line": 5
+				},
+				{
+					"file": "tests/metagpt/roles/test_ui.py",
+					"line": 18
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.3,
+			"tokens": 101
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "SoftwareCompany",
+			"label": {
+				"file": "metagpt/software_company.py",
+				"line": 19
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.3,
+			"tokens": 13
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "Insufficient funds: {CONFIG.max_budget}",
+			"label": {
+				"file": "metagpt/software_company.py",
+				"line": 43
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "metagpt/software_company.py",
+					"line": 43
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.9,
+			"tokens": 47
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "Insufficient funds: {CONFIG.max_budget}",
+			"label": {
+				"file": "metagpt/software_company.py",
+				"line": 43
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/software_company.py",
+					"line": 43
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.5,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "mermaid_to_file",
+			"label": {
+				"file": "metagpt/utils/mermaid.py",
+				"line": 17
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 17
+				},
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 102
+				},
+				{
+					"file": "metagpt/actions/design_api.py",
+					"line": 16
+				},
+				{
+					"file": "metagpt/actions/design_api.py",
+					"line": 109
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 117
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "mermaid_to_file",
+			"label": {
+				"file": "metagpt/utils/mermaid.py",
+				"line": 17
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.1,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "check_cmd_exists",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 17
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/utils/common.py",
+					"line": 17
+				},
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.9,
+			"tokens": 69
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "check_cmd_exists",
+			"label": {
+				"file": "metagpt/utils/common.py",
+				"line": 17
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.5,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "test_azure_tts",
+			"label": {
+				"file": "tests/metagpt/actions/test_azure_tts.py",
+				"line": 11
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_azure_tts.py",
+					"line": 11
+				},
+				{
+					"file": "tests/metagpt/actions/test_azure_tts.py",
+					"line": 6
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.1,
+			"tokens": 49
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "test_azure_tts",
+			"label": {
+				"file": "tests/metagpt/actions/test_azure_tts.py",
+				"line": 11
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.2,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "search",
+			"label": {
+				"file": "examples/search_kb.py",
+				"line": 14
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "examples/search_kb.py",
+					"line": 14
+				},
+				{
+					"file": "metagpt/prompts/metagpt_sample.py",
+					"line": 27
+				},
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 77
+				},
+				{
+					"file": "metagpt/document_store/base_store.py",
+					"line": 18
+				},
+				{
+					"file": "metagpt/document_store/faiss_store.py",
+					"line": 53
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.3,
+			"tokens": 128
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "search",
+			"label": {
+				"file": "examples/search_kb.py",
+				"line": 14
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.5,
+			"tokens": 10
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "ActionType",
+			"label": {
+				"file": "metagpt/actions/__init__.py",
+				"line": 27
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "metagpt/actions/__init__.py",
+					"line": 27
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.8,
+			"tokens": 27
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "ActionType",
+			"label": {
+				"file": "metagpt/actions/__init__.py",
+				"line": 27
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 2.4,
+			"tokens": 11
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"Set OPENAI_API_KEY first\"",
+			"label": {
+				"file": "metagpt/config.py",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "metagpt/config.py",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.7,
+			"tokens": 33
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"Set OPENAI_API_KEY first\"",
+			"label": {
+				"file": "metagpt/config.py",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/config.py",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.1,
+			"tokens": 23
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "No available role can handle message: {message}.",
+			"label": {
+				"file": "metagpt/manager.py",
+				"line": 60
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "metagpt/manager.py",
+					"line": 60
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.6,
+			"tokens": 42
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "No available role can handle message: {message}.",
+			"label": {
+				"file": "metagpt/manager.py",
+				"line": 60
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/manager.py",
+					"line": 60
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 19.7,
+			"tokens": 25
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+			"label": {
+				"file": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17,
+			"tokens": 38
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+			"label": {
+				"file": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/resources/MetaGPT-WeChat-Group4.jpeg",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12,
+			"tokens": 11
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/special_tokens.py",
+			"label": {
+				"file": "metagpt/utils/special_tokens.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/utils/special_tokens.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.7,
+			"tokens": 40
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/special_tokens.py",
+			"label": {
+				"file": "metagpt/utils/special_tokens.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/utils/special_tokens.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.8,
+			"tokens": 8
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "test_longterm_memory.py",
+			"label": {
+				"file": "tests/metagpt/memory/test_longterm_memory.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/metagpt/memory/test_longterm_memory.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.6,
+			"tokens": 30
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "test_longterm_memory.py",
+			"label": {
+				"file": "tests/metagpt/memory/test_longterm_memory.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/metagpt/memory/test_longterm_memory.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.5,
+			"tokens": 11
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "metagpt/memory/longterm_memory.py",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/memory/test_longterm_memory.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.1,
+			"tokens": 48
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "metagpt/memory/longterm_memory.py",
+			"label": {
+				"file": "metagpt/memory/longterm_memory.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/memory/longterm_memory.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.2,
+			"tokens": 9
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "memory/memory_storage.py",
+			"label": {
+				"file": "metagpt/memory/memory_storage.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/memory/test_memory_storage.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.5,
+			"tokens": 45
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "memory/memory_storage.py",
+			"label": {
+				"file": "metagpt/memory/memory_storage.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/memory/memory_storage.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.2,
+			"tokens": 8
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "test_web_browser_engine.py",
+			"label": {
+				"file": "tests/metagpt/tools/test_web_browser_engine.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_selenium.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.2,
+			"tokens": 68
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "test_web_browser_engine.py",
+			"label": {
+				"file": "tests/metagpt/tools/test_web_browser_engine.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11,
+			"tokens": 12
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+			"label": {
+				"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.5,
+			"tokens": 39
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+			"label": {
+				"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.9,
+			"tokens": 15
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/web_browser_engine.py",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 1
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine_selenium.py",
+					"line": 1
+				},
+				{
+					"file": "metagpt/tools/web_browser_engine_playwright.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_selenium.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.2,
+			"tokens": 102
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/web_browser_engine.py",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.2,
+			"tokens": 9
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "web_browser_engine_playwright.py",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine_playwright.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine_playwright.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 14.8,
+			"tokens": 52
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "web_browser_engine_playwright.py",
+			"label": {
+				"file": "metagpt/tools/web_browser_engine_playwright.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/tools/web_browser_engine_playwright.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/tools/test_web_browser_engine_playwright.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.1,
+			"tokens": 26
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "metagpt/provider/anthropic_api.py",
+			"label": {
+				"file": "metagpt/provider/anthropic_api.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/provider/anthropic_api.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.2,
+			"tokens": 29
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "metagpt/provider/anthropic_api.py",
+			"label": {
+				"file": "metagpt/provider/anthropic_api.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/provider/anthropic_api.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18.6,
+			"tokens": 9
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "tools/sd_engine.py",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.4,
+			"tokens": 24
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "tools/sd_engine.py",
+			"label": {
+				"file": "metagpt/tools/sd_engine.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/tools/sd_engine.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.9,
+			"tokens": 7
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "search_engine_serper.py",
+			"label": {
+				"file": "metagpt/tools/search_engine_serper.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/tools/search_engine_serper.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16,
+			"tokens": 28
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "search_engine_serper.py",
+			"label": {
+				"file": "metagpt/tools/search_engine_serper.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/tools/search_engine_serper.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.6,
+			"tokens": 10
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "metagpt/actions/action_output.py",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 1
+				},
+				{
+					"file": "tests/metagpt/actions/test_action_output.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.9,
+			"tokens": 47
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "metagpt/actions/action_output.py",
+			"label": {
+				"file": "metagpt/actions/action_output.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/actions/action_output.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.5,
+			"tokens": 8
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "actions/test_action_output.py",
+			"label": {
+				"file": "tests/metagpt/actions/test_action_output.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_action_output.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.5,
+			"tokens": 31
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "actions/test_action_output.py",
+			"label": {
+				"file": "tests/metagpt/actions/test_action_output.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_action_output.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.9,
+			"tokens": 11
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "README_JA.md",
+			"label": {
+				"file": "docs/README_JA.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/README_JA.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.4,
+			"tokens": 22
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "README_JA.md",
+			"label": {
+				"file": "docs/README_JA.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/README_JA.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.9,
+			"tokens": 5
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "docs/ROADMAP.md",
+			"label": {
+				"file": "docs/ROADMAP.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/ROADMAP.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15,
+			"tokens": 18
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "docs/ROADMAP.md",
+			"label": {
+				"file": "docs/ROADMAP.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/ROADMAP.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.5,
+			"tokens": 4
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "utils/mermaid.py",
+			"label": {
+				"file": "metagpt/utils/mermaid.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.7,
+			"tokens": 23
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "utils/mermaid.py",
+			"label": {
+				"file": "metagpt/utils/mermaid.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "metagpt/utils/mermaid.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.8,
+			"tokens": 6
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "README_CN.md",
+			"label": {
+				"file": "docs/README_CN.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/README_CN.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.6,
+			"tokens": 19
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "README_CN.md",
+			"label": {
+				"file": "docs/README_CN.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/README_CN.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.3,
+			"tokens": 5
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "tests/metagpt/actions/test_azure_tts.py",
+			"label": {
+				"file": "tests/metagpt/actions/test_azure_tts.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_azure_tts.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.2,
+			"tokens": 32
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "tests/metagpt/actions/test_azure_tts.py",
+			"label": {
+				"file": "tests/metagpt/actions/test_azure_tts.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "tests/metagpt/actions/test_azure_tts.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12,
+			"tokens": 10
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "config/config.yaml",
+			"label": {
+				"file": "config/config.yaml",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "config/config.yaml",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.6,
+			"tokens": 35
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "config/config.yaml",
+			"label": {
+				"file": "config/config.yaml",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "config/config.yaml",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.1,
+			"tokens": 5
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "llm_hello_world.py",
+			"label": {
+				"file": "examples/llm_hello_world.py",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "examples/llm_hello_world.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 14.8,
+			"tokens": 24
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "llm_hello_world.py",
+			"label": {
+				"file": "examples/llm_hello_world.py",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "examples/llm_hello_world.py",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 11.9,
+			"tokens": 7
+		}
+	]
+}
