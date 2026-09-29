@@ -268,6 +268,7 @@ export class Agent {
 		// Set tool context for AI SDK tools
 		setToolContext({
 			workingDirectory: config.workingDirectory || process.cwd(),
+			agentId: config.agentScope ?? "primary",
 		});
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
