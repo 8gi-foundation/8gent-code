@@ -1,9 +1,19 @@
 -- 8gent Table schema (Phase 1, contract section 1.3).
 -- Applied on open with IF NOT EXISTS so reopen is idempotent.
 
+-- archived_at is nullable and additive (2026-08-27, channel archive): NULL means
+-- an active channel, which is every channel that existed before this column.
+-- Archive is a FLAG, never a delete - the row stays, its messages stay, and a
+-- read of an archived channel still returns everything it ever held. The only
+-- thing archiving changes is whether the channel appears in a default
+-- channel:list. New databases get the column here; an already-initialized
+-- ~/.8gent/table/table.db gets it from the idempotent ALTER TABLE migration in
+-- TableStore's constructor (store.ts), since CREATE TABLE IF NOT EXISTS never
+-- alters an existing table.
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
-  visibility TEXT NOT NULL, topic TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL
+  visibility TEXT NOT NULL, topic TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+  archived_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS members (
