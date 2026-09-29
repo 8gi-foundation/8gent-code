@@ -98,19 +98,22 @@ export async function runTextToolTurn(
 ): Promise<TextToolTurn> {
 	const messages = withToolInstructions(opts.messages, opts.tools);
 	const raw = await opts.call(messages);
+	// Only registered tools may be called in the bare / ```json JSON form, so a
+	// JSON example in an answer never runs.
+	const parse = { knownTools: opts.tools.map((t) => t.name) };
 	const cutOff = findUnterminatedToolCall(raw);
 	if (cutOff) {
 		// Everything before the cut-off block is still usable; the partial
 		// block itself is neither a call nor prose.
 		const head = raw.slice(0, cutOff.fenceStart);
 		return {
-			content: stripToolCalls(head),
-			toolCalls: parseToolCalls(head),
+			content: stripToolCalls(head, parse),
+			toolCalls: parseToolCalls(head, parse),
 			cutOffToolCall: { name: cutOff.name },
 		};
 	}
 	return {
-		content: stripToolCalls(raw),
-		toolCalls: parseToolCalls(raw),
+		content: stripToolCalls(raw, parse),
+		toolCalls: parseToolCalls(raw, parse),
 	};
 }

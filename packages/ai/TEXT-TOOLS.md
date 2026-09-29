@@ -26,13 +26,24 @@ All three live in `packages/ai/text-tools.ts` and are pure (no I/O, no network).
   `{"name": "...", "arguments": {...}}`, plus the full list of available tools
   (name, description, parameter schema). Inject this into the system prompt.
 
-- `parseToolCalls(text: string): ParsedToolCall[]`
+- `parseToolCalls(text: string, opts?: { knownTools?: Iterable<string> }): ParsedToolCall[]`
   Extracts every well-formed `tool_call` block from a model reply. The block
   body is bounded by a balanced JSON object, so a ` ``` ` or a brace inside a
   JSON string value (for example file content) parses correctly. Malformed
-  blocks are skipped, never thrown.
+  blocks are skipped, never thrown. `"parameters"` is accepted in place of
+  `"arguments"`.
 
-- `stripToolCalls(text: string): string`
+  Bare JSON fallback: small local models (ollama llama3.2:3b) often skip the
+  `tool_call` fence and write `{"name": ..., "arguments": {...}}` bare or in a
+  plain ` ``` ` / ` ```json ` fence. When `knownTools` is given (the adapter
+  passes the registered tool names) and the reply has no parsed `tool_call`
+  block, those objects are taken as calls, in order, but only when the name is
+  a registered tool, the object has an `arguments`/`parameters` object, it
+  stands on its own lines (not inline in a sentence), it is not nested in
+  another object, and it is not inside a fence tagged with another language
+  (` ```ts `, ` ```python `). JSON examples in an answer therefore never run.
+
+- `stripToolCalls(text: string, opts?: { knownTools?: Iterable<string> }): string`
   Removes every `tool_call` block and returns the remaining prose, trimmed. Use
   it to recover the model's natural-language answer with no JSON shrapnel left.
 
