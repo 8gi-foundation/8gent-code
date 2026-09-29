@@ -14,6 +14,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
 
 // Execution context passed to tools
@@ -485,7 +486,12 @@ const runCommand = tool({
 	inputSchema: z.object({
 		command: z.string().describe("Command to run"),
 	}),
-	execute: async ({ command }) => runShellCommand(command),
+	execute: async ({ command }) => {
+		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+		return runShellCommand(command);
+	},
 });
 
 // ============================================

@@ -89,6 +89,7 @@ import {
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import {
@@ -162,60 +163,6 @@ function safePath(userPath: string, workingDirectory: string): string {
 	}
 
 	return normalizedTarget;
-}
-
-/**
- * Validate a shell command for dangerous metacharacters.
- * Blocks command chaining, command substitution, and background execution
- * while allowing safe operators like pipes and redirects.
- */
-function sanitizeShellCommand(command: string): {
-	safe: boolean;
-	reason?: string;
-} {
-	// Block command substitution: $(...) and backticks
-	if (/\$\(/.test(command)) {
-		return {
-			safe: false,
-			reason: "Command substitution $(...) is not allowed",
-		};
-	}
-	if (/`/.test(command)) {
-		return {
-			safe: false,
-			reason: "Command substitution via backticks is not allowed",
-		};
-	}
-
-	// Block semicolon chaining: ; cmd
-	if (/;/.test(command)) {
-		return {
-			safe: false,
-			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
-		};
-	}
-
-	// Block && and || chaining
-	if (/&&/.test(command)) {
-		return {
-			safe: false,
-			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
-		};
-	}
-	if (/\|\|/.test(command)) {
-		return {
-			safe: false,
-			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",
-		};
-	}
-
-	// Block background execution: & at end of command (but not 2>&1 which is a redirect)
-	// Match & that is NOT preceded by > (redirect) and NOT part of &&
-	if (/(?<!>)&\s*$/.test(command)) {
-		return { safe: false, reason: "Background execution (&) is not allowed" };
-	}
-
-	return { safe: true };
 }
 
 /**
