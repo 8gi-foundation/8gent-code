@@ -14,10 +14,13 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
 
 // Execution context passed to tools
 export interface ToolContext {
 	workingDirectory: string;
+	/** Agent scope passed to the write-policy gate (defaults to "primary"). */
+	agentId?: string;
 }
 
 let _ctx: ToolContext = { workingDirectory: process.cwd() };
@@ -96,6 +99,15 @@ export function getRuntimeParams(): RuntimeParams {
 
 export function resetRuntimeParams(): void {
 	_runtime = { ...DEFAULT_RUNTIME };
+}
+
+/**
+ * Write-policy gate for tools that put text on disk (#3011). This path had no
+ * policy gate at all; it now runs the same ToolG8 write_file check as the
+ * text-tool path (packages/eight/tools.ts), with the same blocked message.
+ */
+function gateWrite(toolName: string, args: Record<string, unknown>): string | null {
+	return gateWriteTool(_ctx.agentId ?? "primary", toolName, args, _ctx.workingDirectory);
 }
 
 function resolvePath(p: string): string {
@@ -277,6 +289,8 @@ const writeFile = tool({
 		content: z.string().describe("Content to write"),
 	}),
 	execute: async ({ path: filePath, content }) => {
+		const blocked = gateWrite("write_file", { path: filePath, content });
+		if (blocked) return blocked;
 		const absolutePath = resolvePath(filePath);
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -295,12 +309,15 @@ const editFile = tool({
 		newText: z.string().describe("Replacement text"),
 	}),
 	execute: async ({ path: filePath, oldText, newText }) => {
+		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
+		if (blocked) return blocked;
 		const absolutePath = resolvePath(filePath);
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		if (!content.includes(oldText))
+		const edited = applyEdit(content, oldText, newText);
+		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
-		fs.writeFileSync(absolutePath, content.replace(oldText, newText));
+		fs.writeFileSync(absolutePath, edited);
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	},
 });
@@ -770,6 +787,8 @@ const notebookEditCell = tool({
 		newSource: z.string().describe("New cell source content"),
 	}),
 	execute: async ({ path: notebookPath, cellIndex, newSource }) => {
+		const blocked = gateWrite("notebook_edit_cell", { path: notebookPath, newSource });
+		if (blocked) return blocked;
 		const { editCell } = await import("../tools/notebook");
 		const absolutePath = resolvePath(notebookPath);
 		try {
@@ -790,6 +809,8 @@ const notebookInsertCell = tool({
 		source: z.string().describe("Cell source content"),
 	}),
 	execute: async ({ path: notebookPath, afterIndex, cellType, source }) => {
+		const blocked = gateWrite("notebook_insert_cell", { path: notebookPath, source });
+		if (blocked) return blocked;
 		const { insertCell } = await import("../tools/notebook");
 		const absolutePath = resolvePath(notebookPath);
 		try {
@@ -1588,6 +1609,8 @@ const writeNotesTool = tool({
 			.describe("If true, appends to existing note with same title instead of creating new"),
 	}),
 	execute: async ({ title, content, append }) => {
+		const blocked = gateWrite("write_notes", { content });
+		if (blocked) return blocked;
 		const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import("node:fs");
 		const { join } = await import("node:path");
 		const dataDir = join(process.env.HOME || "~", ".8gent", "tabs");
