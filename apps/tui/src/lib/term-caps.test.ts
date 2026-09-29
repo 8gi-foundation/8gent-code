@@ -19,7 +19,7 @@ describe("terminal glyph capability", () => {
 		const ascii = glyphs({ TERM: "linux" }, "linux");
 		expect(ascii.eight).toBe("8");
 		expect(rich.eight).toBeNull();
-		for (const key of ["ok", "fail", "blocked", "dot", "diamond", "rule", "bar"] as const) {
+		for (const key of ["ok", "pending", "fail", "blocked", "dot", "diamond", "rule", "bar"] as const) {
 			expect(/^[\x20-\x7e]$/.test(ascii[key])).toBe(true);
 			expect(ascii[key].length).toBe(rich[key].length);
 		}

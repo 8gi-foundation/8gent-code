@@ -29,6 +29,8 @@ export interface Glyphs {
 	/** The figure-8 when it cannot be drawn in braille. */
 	eight: string | null;
 	ok: string;
+	/** A step not started yet. */
+	pending: string;
 	fail: string;
 	blocked: string;
 	dot: string;
@@ -41,6 +43,7 @@ export interface Glyphs {
 const RICH: Glyphs = {
 	eight: null,
 	ok: "✓",
+	pending: "○",
 	fail: "✗",
 	blocked: "⊘",
 	dot: "●",
@@ -52,6 +55,7 @@ const RICH: Glyphs = {
 const ASCII: Glyphs = {
 	eight: "8",
 	ok: "+",
+	pending: "o",
 	fail: "x",
 	blocked: "-",
 	dot: "*",

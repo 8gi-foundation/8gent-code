@@ -183,7 +183,7 @@ export function FooterHints() {
 	if (rows < 42) return null;
 	return (
 		<Box justifyContent="space-between" overflow="hidden" flexShrink={0}>
-			<Text color={ui.muted}>^O expand  ^B processes  ^K kanban  ^D deck</Text>
+			<Text color={ui.muted}>^O expand  ^B processes  ^K kanban  ^D deck  ^X plan</Text>
 			<Text color={ui.muted}>^A anim  ^S sound  ^C clear</Text>
 		</Box>
 	);
