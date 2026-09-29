@@ -14,6 +14,7 @@ import {
 	stripToolCalls,
 	type ToolSpec,
 } from "./text-tools";
+import { LLAMA32_BARE_JSON_REPLY } from "./text-tools.fixtures";
 
 const TOOLS: ToolSpec[] = [
 	{
@@ -449,5 +450,117 @@ describe("stripToolCalls", () => {
 		expect(stripped).not.toContain("npm i");
 		expect(stripped).not.toContain("tool_call");
 		expect(stripped).toBe(stripped.trim());
+	});
+});
+
+const REGISTERED = ["read_file", "write_file", "get_outline", "run_command"];
+
+describe("parseToolCalls - bare / ```json calls from small local models", () => {
+	test("parses the exact llama3.2:3b reply as two calls, in order", () => {
+		const calls = parseToolCalls(LLAMA32_BARE_JSON_REPLY, { knownTools: REGISTERED });
+		expect(calls.map((c) => c.name)).toEqual(["get_outline", "write_file"]);
+		expect(calls[0].arguments).toEqual({ path: "deck/outline.md" });
+		const content = String(calls[1].arguments.content);
+		expect(content.startsWith("---\nmarp: true\n")).toBe(true);
+		expect(content.match(/^## /gm)?.length).toBe(6);
+		expect(String(calls[1].arguments.path).endsWith("/project/deck/deck.md")).toBe(true);
+	});
+
+	test("strips the exact llama3.2:3b reply down to no prose", () => {
+		expect(stripToolCalls(LLAMA32_BARE_JSON_REPLY, { knownTools: REGISTERED })).toBe("");
+	});
+
+	test("without knownTools the reply is not parsed (fallback is opt-in)", () => {
+		expect(parseToolCalls(LLAMA32_BARE_JSON_REPLY)).toEqual([]);
+	});
+
+	test("accepts a call inside a ```json fence and inside a bare ``` fence", () => {
+		const text = [
+			"```json",
+			'{"name": "read_file", "arguments": {"path": "a.md"}}',
+			"```",
+			"```",
+			'{"name": "run_command", "arguments": {"command": "wc -l a.md"}}',
+			"```",
+		].join("\n");
+		const calls = parseToolCalls(text, { knownTools: REGISTERED });
+		expect(calls).toEqual([
+			{ name: "read_file", arguments: { path: "a.md" } },
+			{ name: "run_command", arguments: { command: "wc -l a.md" } },
+		]);
+		expect(stripToolCalls(text, { knownTools: REGISTERED })).toBe("");
+	});
+
+	test('accepts "parameters" in place of "arguments"', () => {
+		const text = '{"name": "read_file", "parameters": {"path": "deck/outline.md"}}';
+		expect(parseToolCalls(text, { knownTools: REGISTERED })).toEqual([
+			{ name: "read_file", arguments: { path: "deck/outline.md" } },
+		]);
+	});
+
+	test("keeps the prose around bare calls", () => {
+		const text = [
+			"Reading the outline first.",
+			'{"name": "read_file", "arguments": {"path": "deck/outline.md"}}',
+		].join("\n");
+		const opts = { knownTools: REGISTERED };
+		expect(parseToolCalls(text, opts)).toHaveLength(1);
+		expect(stripToolCalls(text, opts)).toBe("Reading the outline first.");
+	});
+
+	test("the ```tool_call format still works and wins over bare JSON", () => {
+		const text = [
+			"```tool_call",
+			'{"name": "read_file", "arguments": {"path": "x"}}',
+			"```",
+			'{"name": "write_file", "arguments": {"path": "y", "content": "z"}}',
+		].join("\n");
+		const calls = parseToolCalls(text, { knownTools: REGISTERED });
+		expect(calls).toEqual([{ name: "read_file", arguments: { path: "x" } }]);
+	});
+});
+
+describe("parseToolCalls - JSON in an answer must NOT execute", () => {
+	const opts = { knownTools: REGISTERED };
+
+	test("a ```json example whose name is not a registered tool", () => {
+		const text = [
+			"Here is the request body the API expects:",
+			"```json",
+			'{"name": "create_user", "arguments": {"email": "a@example.com"}}',
+			"```",
+		].join("\n");
+		expect(parseToolCalls(text, opts)).toEqual([]);
+		expect(stripToolCalls(text, opts)).toBe(text);
+	});
+
+	test("a package.json snippet (name but no arguments)", () => {
+		const text = ["```json", '{"name": "read_file", "version": "1.0.0"}', "```"].join("\n");
+		expect(parseToolCalls(text, opts)).toEqual([]);
+	});
+
+	test("a registered name inside a code example in another language", () => {
+		const text = [
+			"You can build the call like this:",
+			"```ts",
+			'{"name": "write_file", "arguments": {"path": "notes.txt", "content": "x"}}',
+			"```",
+		].join("\n");
+		expect(parseToolCalls(text, opts)).toEqual([]);
+	});
+
+	test("a registered-name object quoted inline in a prose sentence", () => {
+		const text =
+			'The model should send {"name": "run_command", "arguments": {"command": "ls build"}} to the harness.';
+		expect(parseToolCalls(text, opts)).toEqual([]);
+	});
+
+	test("a call-shaped object nested inside another JSON object", () => {
+		const text = [
+			"```json",
+			'{"example": {"name": "run_command", "arguments": {"command": "ls"}}}',
+			"```",
+		].join("\n");
+		expect(parseToolCalls(text, opts)).toEqual([]);
 	});
 });
