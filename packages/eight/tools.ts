@@ -28,6 +28,7 @@ import {
 } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
+import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -1882,6 +1883,10 @@ export class ToolExecutor {
 		}
 
 		fs.writeFileSync(absolutePath, content);
+
+		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
+		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
+		if (deckLine) designHint += `\n${deckLine}`;
 
 		// Auto-open files on macOS for immediate viewing
 		if (process.platform === "darwin") {
