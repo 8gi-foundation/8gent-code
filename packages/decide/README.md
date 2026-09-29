@@ -509,7 +509,7 @@ the gate in code (`locate-calibration.ts`):
   symbol index, `rg -F`, or the path ranker) over the query words. Hits are
   pooled and ordered by how many query words a row carries, at most two rows
   per file. If that search finds nothing, the answer is hybrid (reason
-  `no_rows`). A kept `semantic` stays hybrid until semantic search exists (M3).
+  `no_rows`). A kept `semantic` runs semantic search (M3, below).
 - The model is the package's own pick (`EIGHT_DECIDE_MODEL`, then auto-detection).
 
 ```bash
@@ -579,22 +579,30 @@ up are written back 2 s later. Writes go to a temp file and are then renamed.
 (NODE_ENV=test) never writes it under the home dir. A cold build removes
 caches whose repo root no longer exists.
 
-**Semantic mode.** `packages/ast-index/semantic.ts` embeds two kinds of text
-with the memory package's nomic client (`nomic-embed-text` via Ollama),
-using nomic's `search_document:` and `search_query:` prefixes:
+**Semantic mode.** `packages/ast-index/semantic.ts` embeds text with the
+memory package's nomic client (`nomic-embed-text` via Ollama), using nomic's
+`search_document:` and `search_query:` prefixes:
 
-- every function, class, interface, type and method, as its signature plus
-  its path. Constants are left out: they are 28k of the 35k symbols.
-- every source file that is not a test, fixture or mock, as a card: the
-  file's header comment (block or line comments at the top, `@` tags
-  dropped, 600 characters at most), its path, then the first sentence of up
-  to 12 symbol docstrings, or up to 20 symbol names when none has one.
+- **Default, the M3 spec's method:** every function, class, interface, type
+  and method, as its signature plus its path. Constants are left out: they
+  are 28k of the 35k symbols.
+- **Opt-in file cards, beyond the spec** (`EIGHT_LOCATE_SEMANTIC_CARDS=1`,
+  or `fileCards: true`): every source file that is not a test, fixture or
+  mock also gets a card: the file's header comment (block or line comments
+  at the top, `@` tags dropped, 600 characters at most), its path, then the
+  first sentence of up to 12 symbol docstrings, or up to 20 symbol names
+  when none has one. A file then scores the better of its card and its best
+  symbol. Test files get no card because a test's header describes the code
+  it tests and outranks it.
 
-A file scores the better of its card and its best symbol (brute-force
-cosine; there is no vector database), and the answer is one row per file:
-the file's best symbol, or a `file` row at line 1 when it has no embedded
-symbol. Test files get no card because a test's header describes the code
-it tests and outranks it.
+Cards are off by default because the spec says "signature plus path", and
+the default does not meet the concept target (see below). Turning them on
+by default is a spec change awaiting a decision, not something this code
+assumes.
+
+Scoring is brute-force cosine (there is no vector database), and the answer
+is one row per file: the file's best symbol, or, with cards, a `file` row at
+line 1 for a file matched only by its card.
 The index is built lazily: the first semantic query starts the build, and
 locate answers with hybrid plus a note ("still being built (n of m texts
 embedded)"). Vectors are stored beside the index cache, keyed by a hash of
@@ -605,7 +613,8 @@ note. Semantic runs only when System One keeps the `semantic` mode, so with
 `EIGHT_SYSTEM_ONE_LOCATE` off (the default) nothing is ever embedded.
 
 ```bash
-bun packages/decide/eval/locate-semantic-run.ts   # no classifier model; needs nomic-embed-text in Ollama
+bun packages/decide/eval/locate-semantic-run.ts           # spec method; needs nomic-embed-text in Ollama
+bun packages/decide/eval/locate-semantic-run.ts --cards   # with the opt-in file cards
 ```
 
 Runs 2026-09-28/29 on an Apple M2 Max under heavy load from other work (load
@@ -621,13 +630,23 @@ cards.
 | Warm index load, 2 x 3 runs, load 28 to 33 | 398, 606, 408 and 234, 181, 174 ms | < 1 s: met |
 | Semantic build, cold, signatures | 1652 s for 11,435 embeddings (about 7/s under load) | - |
 | Semantic build, file cards on top of stored signatures | 118 s for 1,129 cards (load about 30) | - |
-| Semantic load from the store | 439 ms (one run, nothing embedded) | - |
-| Concept class (8 queries), semantic top-5, signatures only | 25.0% (2 of 8) | >= 70%: NOT met |
-| Concept class (8 queries), semantic top-5, with file cards | **75.0%** (6 of 8), same on a second run | >= 70%: **met** |
+| Semantic load from the store, nothing embedded | 439 ms (cards); 271 ms signatures only and 1032 ms with cards (2026-09-29 pair, load about 48) | - |
+| Concept class (8 queries), semantic top-5, signature + path (the spec, the default) | **25.0%** (2 of 8), 2 runs | >= 70%: **NOT met** |
+| Concept class (8 queries), semantic top-5, with opt-in file cards | 75.0% (6 of 8), 3 runs | >= 70%: met, but on the set the cards were tuned on (not held out), and not by the spec's method |
+
+So M3(b)'s target is **not met by the specified method**. It is met only by
+the file cards, which the spec did not ask for, and only on a tuning set.
+Whether cards become the default (amending the spec) is an open decision.
+
+The latest pair of runs is on the opt-in code (2026-09-29, load about 48):
+`results/2026-09-29-locate-semantic-signatures.json` (default) and
+`results/2026-09-29-locate-semantic-cards.json` (`--cards`). They reproduce
+the earlier runs exactly: `results/2026-09-28-locate-semantic.json`
+(signatures only) and `results/2026-09-29-locate-semantic.json` (cards).
+Warm loads in that pair were 215 to 462 ms.
 
 Top-5 file hit by labelled mode, 40 prose queries, with file cards
-(`results/2026-09-29-locate-semantic.json`; the signatures-only run is
-`results/2026-09-28-locate-semantic.json`, shown in brackets):
+(signature + path, the default, in brackets):
 
 | Label | n | Rules (M1) | Semantic forced | Oracle (label as mode) |
 | --- | --- | --- | --- | --- |
@@ -656,4 +675,6 @@ Reading it:
   Three card layouts were tried on them (path first: 5 of 8; header first:
   6 of 8; path words plus docs plus names: 6 of 8), and the simplest of the
   two best was kept. With 8 queries and one labeller, 75% is not a held-out
-  number; a fresh concept set is needed before trusting it.
+  number; a fresh concept set, written and labelled by someone who has not
+  seen the card design, is needed before trusting it or making cards the
+  default.

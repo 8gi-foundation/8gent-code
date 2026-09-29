@@ -2,18 +2,22 @@
  * Semantic locate (M3b): nearest code by meaning, for queries that
  * describe a behaviour without the words its code uses.
  *
- * Two kinds of text are embedded with the memory package's nomic client
- * (nomic-embed-text through Ollama, packages/memory/embeddings.ts):
+ * Text is embedded with the memory package's nomic client (nomic-embed-text
+ * through Ollama, packages/memory/embeddings.ts):
  *   - each function, class, interface, type and method: its signature plus
- *     its path ("function f(a: string) src/a.ts");
- *   - each source file that is not a test: a card of its header comment, its
- *     path, and its symbols' first doc sentences (or their names). Signatures
- *     alone carry too little meaning for concept queries (25% top-5 on the
- *     concept class); the header comment is where a file says what it is for.
- * nomic's task prefixes are used: "search_document: " for both, and
- * "search_query: " for the query. A file scores the better of its card and
- * its best symbol (cosine, brute force; no vector database), and the answer
- * is one hit per file: its best symbol, or line 1 when it has none.
+ *     its path ("function f(a: string) src/a.ts"). This is the M3 spec's
+ *     method and the default.
+ *   - opt-in (fileCards, or EIGHT_LOCATE_SEMANTIC_CARDS=1): each source file
+ *     that is not a test also gets a card of its header comment, its path,
+ *     and its symbols' first doc sentences (or their names). This goes
+ *     beyond the spec and is off until that is decided: signatures alone
+ *     scored 25% top-5 on the concept class, cards 75%, on a set the card
+ *     layout was tuned on (packages/decide/README.md).
+ * nomic's task prefixes are used: "search_document: " for documents, and
+ * "search_query: " for the query. Cosine, brute force; no vector database.
+ * The answer is one hit per file: its best symbol, or line 1 for a file
+ * matched only by its card. With cards on, a file scores the better of its
+ * card and its best symbol.
  *
  * Built lazily: the first semantic query starts the build and gets
  * status "building" (locate then answers with hybrid and says so). Vectors
@@ -162,11 +166,23 @@ export interface SemanticOptions {
 	queryTimeoutMs?: number;
 	/** Rows returned. Default 5. */
 	k?: number;
+	/**
+	 * Also embed a card per source file (header comment, path, symbol docs).
+	 * Default: EIGHT_LOCATE_SEMANTIC_CARDS=1, else off (signature + path only).
+	 */
+	fileCards?: boolean;
+}
+
+/** Whether file cards are embedded for these options. */
+export function fileCardsOn(opts?: SemanticOptions): boolean {
+	return opts?.fileCards ?? process.env.EIGHT_LOCATE_SEMANTIC_CARDS === "1";
 }
 
 interface Built {
 	gen: number;
 	model: string;
+	/** Built with file cards. */
+	cards: boolean;
 	dims: number;
 	symbols: Symbol[];
 	/** symbols.length rows of dims floats, each row unit length. */
@@ -322,7 +338,8 @@ export function ensureSemanticIndex(
 ): Promise<SemanticStatus> {
 	const st = stateFor(repoId);
 	if (st.building) return st.building;
-	if (st.built && st.built.gen === indexGeneration(repoId)) {
+	const withCards = fileCardsOn(opts);
+	if (st.built && st.built.gen === indexGeneration(repoId) && st.built.cards === withCards) {
 		return Promise.resolve({ state: "ready", count: st.built.symbols.length });
 	}
 	const repo = getRepoStats(repoId);
@@ -348,7 +365,7 @@ export function ensureSemanticIndex(
 			texts.push(semanticDoc(repo.sourceRoot, s));
 		}
 		const posix = rel.split(path.sep).join("/");
-		if (isTestPath(posix)) continue;
+		if (!withCards || isTestPath(posix)) continue;
 		let source = "";
 		try {
 			source = readHead(path.join(repo.sourceRoot, rel));
@@ -427,6 +444,7 @@ export function ensureSemanticIndex(
 		st.built = {
 			gen,
 			model,
+			cards: withCards,
 			dims,
 			symbols: kept,
 			matrix: unitRows(rows, dims),
@@ -498,7 +516,7 @@ export async function semanticSearch(
 	}
 	const st = stateFor(repoId);
 	const provider = providerOf(opts);
-	if (!st.built || st.built.model !== provider.model) {
+	if (!st.built || st.built.model !== provider.model || st.built.cards !== fileCardsOn(opts)) {
 		if (st.building) return { status: "building", hits: [], ...st.progress };
 		if (st.failedAt && Date.now() - st.failedAt < RETRY_AFTER_MS) {
 			return { status: "unavailable", hits: [], detail: st.failure };
