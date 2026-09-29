@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Text } from "ink";
 import React from "react";
 import {
 	ActivityRail,
@@ -52,6 +53,41 @@ const baseProps: ActivityRailProps = {
 
 function render(props: ActivityRailProps): React.ReactElement {
 	return (ActivityRail as (p: ActivityRailProps) => React.ReactElement)(props);
+}
+
+type AnyElement = React.ReactElement<Record<string, unknown>>;
+
+/**
+ * Expand our own function components (RailSection, NamedRow, MetricRow,
+ * TruncatedValue) so the tree is Ink Box/Text only. Ink's Text is itself a
+ * function component that reads context, so it is left as a leaf.
+ */
+function expand(node: React.ReactNode): React.ReactNode {
+	if (!React.isValidElement(node)) return node;
+	const el = node as AnyElement;
+	if (typeof el.type === "function" && el.type !== Text) {
+		const rendered = (el.type as (p: Record<string, unknown>) => React.ReactNode)(el.props);
+		return expand(rendered);
+	}
+	const kids = React.Children.map(el.props.children as React.ReactNode, expand);
+	return React.cloneElement(el, undefined, ...(kids ?? []));
+}
+
+/** Depth-first list of every element in an expanded tree. */
+function flatten(node: React.ReactNode, out: AnyElement[] = []): AnyElement[] {
+	if (!React.isValidElement(node)) return out;
+	const el = node as AnyElement;
+	out.push(el);
+	React.Children.forEach(el.props.children as React.ReactNode, (child) => flatten(child, out));
+	return out;
+}
+
+/** Direct Box children of the rail column, function components expanded. */
+function railColumn(props: ActivityRailProps): AnyElement[] {
+	const top = expand(render(props)) as AnyElement;
+	return React.Children.toArray(top.props.children as React.ReactNode).filter(
+		React.isValidElement,
+	) as AnyElement[];
 }
 
 describe("ActivityRail", () => {
@@ -138,6 +174,42 @@ describe("ActivityRail", () => {
 		expect(rendered).toBeDefined();
 	});
 
+	test("every block in the rail column refuses to shrink (#2921 idleS)", () => {
+		for (const props of [baseProps, { ...baseProps, tasks: [] }]) {
+			const blocks = railColumn({
+				...props,
+				bodyParts: { hands: "idle", eyes: "idle", handeyes: "disabled" },
+			});
+			expect(blocks.length).toBeGreaterThanOrEqual(7);
+			for (const block of blocks) {
+				expect(block.props.flexShrink).toBe(0);
+			}
+		}
+	});
+
+	test("rows never carry their own overflow clip (Ink honours only the innermost clip)", () => {
+		const top = expand(render({
+			...baseProps,
+			bodyParts: { hands: "idle", eyes: "inFlight", handeyes: "disabled" },
+		})) as AnyElement;
+		const [root, ...rest] = flatten(top);
+		expect(root.props.overflow).toBe("hidden");
+		for (const el of rest) {
+			expect(el.props.overflow).toBeUndefined();
+			expect(el.props.overflowY).toBeUndefined();
+		}
+	});
+
+	test("section headings and data rows are separate blocks", () => {
+		const blocks = railColumn({ ...baseProps, tasks: [] });
+		const tasks = blocks[1] as AnyElement;
+		expect(tasks.props.flexDirection).toBe("column");
+		const [heading, rows] = React.Children.toArray(tasks.props.children as React.ReactNode) as AnyElement[];
+		expect(heading.props.flexShrink).toBe(0);
+		expect(rows.props.flexShrink).toBe(0);
+		expect(rows.props.flexDirection).toBe("column");
+	});
+
 	test("snapshot of full rail is stable", () => {
 		const rendered = render(baseProps);
 		const top = rendered.props as {
@@ -149,6 +221,11 @@ describe("ActivityRail", () => {
 			flexDirection: string;
 			overflow: string;
 		};
+		const blocks = railColumn(baseProps).map((block) => ({
+			flexShrink: block.props.flexShrink,
+			flexDirection: block.props.flexDirection,
+			marginTop: block.props.marginTop,
+		}));
 		expect({
 			width: top.width,
 			flexShrink: top.flexShrink,
@@ -161,6 +238,7 @@ describe("ActivityRail", () => {
 			tools: baseProps.tools.length,
 			providers: baseProps.providers.length,
 			agents: baseProps.agents.length,
+			blocks,
 		}).toMatchSnapshot();
 	});
 });

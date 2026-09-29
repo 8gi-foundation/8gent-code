@@ -132,6 +132,7 @@ describe("computeGitSync", () => {
 		const r = await computeGitSync("/tmp/repo", runner);
 		expect(r.status).toBe("up-to-date");
 		expect(r.label).toBe("main: up to date");
+		expect(r.branch).toBe("main");
 	});
 
 	test("ahead when ahead count > 0", async () => {
@@ -145,6 +146,7 @@ describe("computeGitSync", () => {
 		expect(r.status).toBe("ahead");
 		expect(r.ahead).toBe(3);
 		expect(r.label).toBe("feat/x: 3 ahead");
+		expect(r.branch).toBe("feat/x");
 	});
 
 	test("diverged when both counts > 0", async () => {
@@ -175,12 +177,14 @@ describe("computeGitSync", () => {
 		});
 		const r = await computeGitSync("/tmp/repo", runner);
 		expect(r.status).toBe("detached");
+		expect(r.branch).toBe("HEAD");
 	});
 
 	test("no-repo when rev-parse fails", async () => {
 		const runner = fakeRunner({});
 		const r = await computeGitSync("/tmp/notrepo", runner);
 		expect(r.status).toBe("no-repo");
+		expect(r.branch).toBe("");
 	});
 });
 
