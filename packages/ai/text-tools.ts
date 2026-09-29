@@ -367,30 +367,35 @@ export function findUnterminatedToolCall(
 	return null;
 }
 
-// Parse one JSON object substring into a ParsedToolCall, or null if it is not a
-// valid object with a string `name`. Never throws.
-function parseCall(jsonText: string): ParsedToolCall | null {
-	let parsed: unknown;
+// Parse a JSON object substring, tolerating raw control characters inside
+// string literals. Returns undefined when it is not valid JSON. Never throws.
+function parseJsonLoose(jsonText: string): unknown {
 	try {
-		parsed = JSON.parse(jsonText);
+		return JSON.parse(jsonText);
 	} catch {
 		// Local models often write a long string value (file content) with
 		// literal line breaks or tabs instead of \n / \t escapes. Strict JSON
 		// rejects that. Retry once with ONLY those raw control characters inside
 		// string literals escaped; everything else must still be valid JSON.
 		try {
-			parsed = JSON.parse(escapeControlCharsInStrings(jsonText));
+			return JSON.parse(escapeControlCharsInStrings(jsonText));
 		} catch {
-			return null;
+			return undefined;
 		}
 	}
+}
+
+// Turn a parsed value into a ParsedToolCall, or null if it is not an object
+// with a string `name`. Small local models (llama3.2) often write
+// "parameters" where the protocol says "arguments"; both are accepted.
+function toCall(parsed: unknown): ParsedToolCall | null {
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		return null;
 	}
 	const obj = parsed as Record<string, unknown>;
 	if (typeof obj.name !== "string") return null;
 
-	const rawArgs = obj.arguments;
+	const rawArgs = obj.arguments ?? obj.parameters;
 	const args =
 		typeof rawArgs === "object" && rawArgs !== null && !Array.isArray(rawArgs)
 			? (rawArgs as Record<string, unknown>)
@@ -399,6 +404,136 @@ function parseCall(jsonText: string): ParsedToolCall | null {
 	return { name: obj.name, arguments: args };
 }
 
+// Parse one JSON object substring into a ParsedToolCall, or null if it is not a
+// valid object with a string `name`. Never throws.
+function parseCall(jsonText: string): ParsedToolCall | null {
+	return toCall(parseJsonLoose(jsonText));
+}
+
+// Fence info strings a bare JSON call may sit inside. Anything else (```ts,
+// ```python, ```bash) is a code example and never executes.
+const PLAIN_FENCE_INFO = new Set(["", "json"]);
+
+// A bare call must be the whole line it ends on: after the object, only spaces
+// or tabs up to the end of the line (or the end of the text).
+function restOfLineBlank(text: string, from: number): boolean {
+	const m = /^[ \t]*(\r?\n|$)/.exec(text.slice(from));
+	return m !== null;
+}
+
+/**
+ * Locate tool calls that a small local model wrote WITHOUT the ```tool_call
+ * fence: a JSON object `{"name": ..., "arguments"|"parameters": {...}}`, bare
+ * or inside a plain ``` / ```json fence. Seen live from ollama llama3.2:3b:
+ *
+ *   {"name": "get_outline", "arguments": {"path": "deck/outline.md"}}
+ *   ```
+ *
+ *   {"name": "write_file", "arguments": {...}}
+ *
+ * Accepted only when ALL hold, so ordinary JSON in an answer never runs:
+ * - `name` is one of `known` (a registered tool),
+ * - the object has an "arguments" or "parameters" object,
+ * - the object starts its line and nothing but whitespace (or a closing fence)
+ *   follows it on its last line, i.e. it is not quoted inline in prose,
+ * - it is not inside a fence tagged with another language (```ts, ```python).
+ * A valid JSON object that is not a call is skipped whole, so an object nested
+ * inside it is never considered. Never throws.
+ */
+function locateBareCalls(text: string, known: Set<string>): LocatedBlock[] {
+	const blocks: LocatedBlock[] = [];
+	const len = text.length;
+	// Info string of the open fence, or null when outside any fence.
+	let fence: string | null = null;
+	let fenceLineStart = -1;
+	let fenceBodyStart = -1;
+	let i = 0;
+	while (i < len) {
+		let j = i;
+		while (j < len && (text[j] === " " || text[j] === "\t")) j++;
+		const eol = text.indexOf("\n", j);
+		const lineEnd = eol === -1 ? len : eol + 1;
+
+		if (text.startsWith("```", j)) {
+			if (fence === null) {
+				fence = text
+					.slice(j + 3, eol === -1 ? len : eol)
+					.trim()
+					.toLowerCase();
+				fenceLineStart = i;
+				fenceBodyStart = lineEnd;
+			} else {
+				fence = null;
+			}
+			i = lineEnd;
+			continue;
+		}
+
+		if (text[j] === "{") {
+			const obj = scanBalancedObject(text, j);
+			if (obj) {
+				const parsed = parseJsonLoose(text.slice(obj.open, obj.end));
+				if (parsed !== undefined) {
+					const call = toCall(parsed);
+					const p = parsed as Record<string, unknown>;
+					const argsObj = p.arguments ?? p.parameters;
+					const trailingFenceEnd = consumeTrailingFence(text, obj.end);
+					const standalone =
+						trailingFenceEnd > obj.end || restOfLineBlank(text, obj.end);
+					if (
+						call &&
+						known.has(call.name) &&
+						typeof argsObj === "object" &&
+						argsObj !== null &&
+						!Array.isArray(argsObj) &&
+						standalone &&
+						(fence === null || PLAIN_FENCE_INFO.has(fence))
+					) {
+						// Strip the plain fence that opens directly above the call.
+						const start =
+							fence !== null && text.slice(fenceBodyStart, j).trim() === ""
+								? fenceLineStart
+								: i;
+						if (trailingFenceEnd > obj.end) fence = null;
+						blocks.push({ fenceStart: start, end: trailingFenceEnd, call });
+						i = trailingFenceEnd;
+						continue;
+					}
+					// Valid JSON, not an acceptable call: skip the whole object.
+					const next = text.indexOf("\n", obj.end);
+					i = next === -1 ? len : next + 1;
+					continue;
+				}
+			}
+		}
+		i = lineEnd;
+	}
+	return blocks;
+}
+
+/**
+ * Every tool call in `text`. The ```tool_call format always wins: bare JSON
+ * calls are only looked for when `knownTools` is given and no fenced
+ * tool_call block in the reply parsed.
+ */
+function locateAllCalls(text: string, knownTools?: Iterable<string>): LocatedBlock[] {
+	const fenced = locateBlocks(text);
+	if (!knownTools || fenced.some((b) => b.call)) return fenced;
+	const known = new Set(knownTools);
+	if (known.size === 0) return fenced;
+	const bare = locateBareCalls(text, known);
+	if (bare.length === 0) return fenced;
+	return [...fenced, ...bare].sort((a, b) => a.fenceStart - b.fenceStart);
+}
+
+export type ParseOptions = {
+	/**
+	 * Names of the registered tools. When given, a reply with no ```tool_call
+	 * block is also searched for bare / ```json JSON calls to these tools.
+	 */
+	knownTools?: Iterable<string>;
+};
+
 /**
  * Extract every well-formed `tool_call` block from a model reply.
  *
@@ -406,12 +541,14 @@ function parseCall(jsonText: string): ParsedToolCall | null {
  * is the balanced JSON object after the opening fence, so a ``` or brace inside
  * a JSON string value (for example file content) is parsed correctly. A block
  * is skipped (never throws) when no balanced object parses, it is not an object,
- * or it lacks a string `name`. `arguments` is preserved as-is when it is an
- * object, and defaults to {} when absent. Returns [] when there are none.
+ * or it lacks a string `name`. `arguments` (or `parameters`) is preserved as-is
+ * when it is an object, and defaults to {} when absent. Returns [] when there
+ * are none. With `opts.knownTools`, bare / ```json calls to registered tools
+ * are accepted too (see locateBareCalls), in the order they appear.
  */
-export function parseToolCalls(text: string): ParsedToolCall[] {
+export function parseToolCalls(text: string, opts: ParseOptions = {}): ParsedToolCall[] {
 	const calls: ParsedToolCall[] = [];
-	for (const block of locateBlocks(text)) {
+	for (const block of locateAllCalls(text, opts.knownTools)) {
 		if (block.call) calls.push(block.call);
 	}
 	return calls;
@@ -441,9 +578,9 @@ export function needsTextTools(opts: { supportsNativeTools: boolean }): boolean 
  * trimmed. Blocks are removed even when their JSON did not parse, so no JSON
  * shrapnel is left in the prose.
  */
-export function stripToolCalls(text: string): string {
+export function stripToolCalls(text: string, opts: ParseOptions = {}): string {
 	if (!text) return "";
-	const blocks = locateBlocks(text);
+	const blocks = locateAllCalls(text, opts.knownTools);
 	if (blocks.length === 0) return text.trim();
 
 	let out = "";

@@ -91,6 +91,12 @@ import {
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { systemOneGate } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
+import {
+	WRITE_CONTENT_TOOLS,
+	applyEdit,
+	blockedToolMessage,
+	writtenContentFor,
+} from "../permissions/write-content-gate.js";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
@@ -1140,6 +1146,9 @@ export class ToolExecutor {
 		read_file: "read_file",
 		write_file: "write_file",
 		edit_file: "write_file",
+		// Notebook cell edits write text into a file too (#3011).
+		notebook_edit_cell: "write_file",
+		notebook_insert_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
 		git_push: "git_push",
@@ -1236,23 +1245,26 @@ export class ToolExecutor {
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				path: args.path as string,
-				content: args.content as string,
+				// Every write tool is checked on what it actually writes, not
+				// only write_file's `content` (#3011: edit_file's newText was
+				// never seen by no-secrets-in-files).
+				content: WRITE_CONTENT_TOOLS.has(toolName)
+					? writtenContentFor(toolName, args, this.workingDirectory)
+					: (args.content as string),
 				command: args.command as string,
 				branch: args.branch as string,
 				url: args.url as string,
 				key: args.key as string,
 			});
 			if (!gateResult.allowed) {
-				const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
-				// Say plainly that nothing happened. A small model given only the
-				// rule text ignored the block and reported the file as written
-				// (Rishi's pilot, 2026-09-29).
-				const target = typeof args.path === "string" && args.path ? ` ${args.path}` : "";
-				const notDone =
-					policyAction === "write_file"
-						? ` The file${target} was NOT written.`
-						: " Nothing was changed.";
-				return `[TOOLG8 BLOCKED] ${toolName} did NOT run.${notDone} Reason: ${gateResult.reason}${alt}`;
+				// Say plainly that nothing happened (see blockedToolMessage).
+				return blockedToolMessage(
+					toolName,
+					policyAction === "write_file",
+					typeof args.path === "string" && args.path ? args.path : undefined,
+					gateResult.reason,
+					gateResult.alternative,
+				);
 			}
 		}
 
@@ -1913,11 +1925,13 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 
-		if (!content.includes(oldText)) {
+		// Literal replacement, so the bytes written are the bytes the policy
+		// gate checked (String.replace would expand `$&` etc. in newText).
+		const newContent = applyEdit(content, oldText, newText);
+		if (newContent === null) {
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		}
 
-		const newContent = content.replace(oldText, newText);
 		fs.writeFileSync(absolutePath, newContent);
 
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
