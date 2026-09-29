@@ -119,6 +119,77 @@ export function extractUsage(data: unknown): TextToolUsage | null {
 }
 
 /**
+ * Ollama runs the model's built-in output parser (e.g. `PARSER qwen3.5` for
+ * qwen3.8) on EVERY /v1/chat/completions and /api/chat reply, even when the
+ * request carries no `tools`. When a model drifts out of our fenced
+ * ```tool_call protocol into its own native `<tool_call>` markup, that parser
+ * tries to read the body as its XML `<function=...>` format, `xml.Unmarshal`
+ * fails, and Ollama turns the whole reply into a 500 whose message is the Go
+ * XML error: `EOF`, `unexpected EOF`, or `XML syntax error ...` (Ollama 0.34.4,
+ * model/parsers/qwen3coder.go parseToolCall; seen live in Rishi's pilot,
+ * 2026-09-29). The chat endpoints have no switch to turn that parser off, so
+ * the reply is gone; the only recovery is to ask again.
+ */
+const NATIVE_PARSER_ERROR_RE = /^(?:unexpected EOF|EOF|XML syntax error\b.*)$/;
+
+/**
+ * True when an HTTP failure is Ollama's built-in tool-call parser rejecting the
+ * model's reply (see NATIVE_PARSER_ERROR_RE). Narrow on purpose: only provider
+ * "ollama", only status 500, only an error message that is exactly one of the
+ * Go XML decoder's failures. Pure.
+ */
+export function isNativeToolParserFailure(
+	provider: string,
+	status: number,
+	body: string,
+): boolean {
+	if (provider !== "ollama" || status !== 500) return false;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		return false;
+	}
+	const error = (parsed as { error?: unknown } | null)?.error;
+	const message =
+		typeof error === "string"
+			? error
+			: typeof error === "object" && error !== null
+				? (error as { message?: unknown }).message
+				: undefined;
+	return typeof message === "string" && NATIVE_PARSER_ERROR_RE.test(message.trim());
+}
+
+/**
+ * True when Ollama answered 200 but its built-in parser silently swallowed the
+ * reply: the model generated tokens, yet `content` is empty. Seen live on
+ * qwen3.8 when a reply held an unclosed native tool-call tag, or its reasoning
+ * mentioned one: everything after the tag went into the parser's tool buffer
+ * and was never flushed. Only for provider "ollama", and only when the endpoint
+ * reported real completion tokens (never guessed). Pure.
+ */
+export function isSwallowedReply(
+	provider: string,
+	content: string,
+	completionTokens: number,
+): boolean {
+	return provider === "ollama" && content.trim() === "" && completionTokens > 0;
+}
+
+/**
+ * The one-shot reminder sent when Ollama's built-in parser rejected a reply.
+ * It points the model back at the fenced block and deliberately never spells
+ * out the native tag, so it cannot prime the very markup that failed.
+ */
+export const NATIVE_TOOL_MARKUP_REMINDER = [
+	"Your previous reply could not be delivered: it used the model's built-in",
+	"tool-call tags, which this runtime cannot accept. Reply again.",
+	"To call a tool, use ONLY a fenced block that opens with ```tool_call and",
+	"holds one JSON object, exactly as the instructions show. If you do not need",
+	"a tool, reply in plain prose with no tags or markup.",
+].join("\n");
+
+/**
  * Build a `call` function for runTextToolAgent that hits a local provider's
  * OpenAI-compatible /v1/chat/completions endpoint. Sends NO `tools` field so a
  * GGUF chat template that rejects native tool calling never 400s. Returns the
@@ -133,6 +204,11 @@ export function extractUsage(data: unknown): TextToolUsage | null {
  * The request never inherits Bun's hidden 300 s fetch cap: it goes through
  * modelFetch, whose limit is `timeoutMs` (default: EIGHT_TURN_TIMEOUT_MS via
  * resolveTurnTimeoutMs). A step that runs past it rejects with TurnTimeoutError.
+ *
+ * On provider "ollama" it retries ONCE, with NATIVE_TOOL_MARKUP_REMINDER
+ * appended to a copy of the conversation, when Ollama's built-in tool-call
+ * parser ate the reply: a parser 500 (isNativeToolParserFailure) or an empty
+ * 200 for generated tokens (isSwallowedReply). See #3012.
  */
 export function buildTextToolCall(opts: {
 	provider: string;
@@ -160,8 +236,8 @@ export function buildTextToolCall(opts: {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 
-	return async (messages: ChatMessage[]): Promise<string> => {
-		const res = await modelFetch(
+	const post = (messages: ChatMessage[]) =>
+		modelFetch(
 			endpoint,
 			{
 				method: "POST",
@@ -176,22 +252,58 @@ export function buildTextToolCall(opts: {
 			},
 			{ timeoutMs: opts.timeoutMs, label: `${opts.provider}/${opts.model}` },
 		);
+
+	// One completion: POST, surface a non-2xx as an error, report real usage,
+	// and return the assistant text alongside what we need to judge the reply.
+	const attempt = async (
+		messages: ChatMessage[],
+	): Promise<
+		| { ok: true; content: string; completionTokens: number }
+		| { ok: false; status: number; body: string }
+	> => {
+		const res = await post(messages);
 		if (!res.ok) {
-			const body = await res.text().catch(() => "");
-			throw new Error(
-				`${opts.provider} chat completions ${res.status}: ${body.slice(0, 300)}`,
-			);
+			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
 		const data = (await res.json()) as {
 			choices?: Array<{ message?: { content?: unknown } }>;
 			usage?: unknown;
 		};
-		if (opts.onUsage) {
-			const usage = extractUsage(data);
-			if (usage) opts.onUsage(usage);
-		}
+		const usage = extractUsage(data);
+		if (usage && opts.onUsage) opts.onUsage(usage);
 		const content = data?.choices?.[0]?.message?.content;
-		return typeof content === "string" ? content : "";
+		return {
+			ok: true,
+			content: typeof content === "string" ? content : "",
+			completionTokens: usage?.completionTokens ?? 0,
+		};
+	};
+
+	return async (messages: ChatMessage[]): Promise<string> => {
+		const first = await attempt(messages);
+		if (first.ok) {
+			if (!isSwallowedReply(opts.provider, first.content, first.completionTokens)) {
+				return first.content;
+			}
+		} else if (!isNativeToolParserFailure(opts.provider, first.status, first.body)) {
+			throw new Error(
+				`${opts.provider} chat completions ${first.status}: ${first.body.slice(0, 300)}`,
+			);
+		}
+
+		// Ollama's built-in parser ate the reply, loudly (500) or silently (empty
+		// 200). Ask exactly once more, on a copy of the conversation plus a
+		// reminder. Never more than one retry per call.
+		const retry = await attempt([
+			...messages,
+			{ role: "user", content: NATIVE_TOOL_MARKUP_REMINDER },
+		]);
+		if (retry.ok) return retry.content;
+		throw new Error(
+			`${opts.provider} chat completions ${retry.status}: the model replied in native ` +
+				`tool-call markup that ${opts.provider}'s built-in tool-call parser rejected; ` +
+				`retried once with a format reminder and it failed again: ${retry.body.slice(0, 300)}`,
+		);
 	};
 }
 

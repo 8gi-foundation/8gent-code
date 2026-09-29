@@ -179,8 +179,12 @@ export function buildToolSystemPrompt(tools: ToolSpec[]): string {
 		"The opening fence MUST be three backticks immediately followed by the literal",
 		"word tool_call on its own line, then the JSON object on the next line(s), then",
 		"a closing line of three backticks. Do NOT invent any other syntax. In",
-		"particular do NOT use angle brackets, pipes, XML-style tags, <tool_call>,",
-		"<|tool_call|>, call:, or function-call markup of any kind. ONLY the fenced",
+		// Never spell a native marker out here (e.g. the angle-bracket tool_call
+		// tag): Ollama runs the model's built-in parser on every reply, and a
+		// model that quotes or reasons about this rule would trip it (#3012).
+		"particular do NOT use angle brackets, pipes, XML-style tags, your",
+		"built-in tool-call tags or special tokens, call:, or function-call markup",
+		"of any kind. ONLY the fenced",
 		"```tool_call block shown above is recognized; anything else is ignored and the",
 		"tool will NOT run.",
 		"",
