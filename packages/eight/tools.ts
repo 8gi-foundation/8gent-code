@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
+import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -236,7 +237,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 		const proc = spawn("git", args, {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
-			detached: true,
+			detached: process.platform !== "win32",
 			env: { ...process.env, ...GIT_NON_INTERACTIVE_ENV },
 		});
 		let stdout = "";
@@ -248,13 +249,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			stderr += d.toString();
 		});
 		const timer = setTimeout(() => {
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				try {
-					proc.kill("SIGKILL");
-				} catch {}
-			}
+			killProcessTree(proc.pid, "SIGKILL");
 			resolve(`TIMEOUT after ${TIMEOUT_MS / 1000}s: git ${args[0]}`);
 		}, TIMEOUT_MS);
 		const finish = (code: number | null) => {
@@ -1949,8 +1944,6 @@ export class ToolExecutor {
 	// ============================================
 
 	async runCommand(command: string, timeoutSec?: number): Promise<string> {
-		const { spawn } = await import("node:child_process");
-
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
 		if (permissionCheck === "denied") {
@@ -2006,40 +1999,26 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawn("sh", ["-c", finalCommand], {
+			const proc = spawnShell(finalCommand, {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
-				detached: true,
+				processGroup: true,
 				env: { ...process.env, ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
 			let stdout = "";
 			let stderr = "";
 
-			const killProcessTree = () => {
-				try {
-					process.kill(-proc.pid!, "SIGTERM");
-					setTimeout(() => {
-						try {
-							process.kill(-proc.pid!, "SIGKILL");
-						} catch {}
-					}, 3000);
-				} catch {
-					try {
-						proc.kill("SIGKILL");
-					} catch {}
-				}
-			};
-
-			proc.stdout.on("data", (data) => {
+			proc.stdout?.on("data", (data) => {
 				stdout += data.toString();
 			});
-			proc.stderr.on("data", (data) => {
+			proc.stderr?.on("data", (data) => {
 				stderr += data.toString();
 			});
 
 			const timeout = setTimeout(() => {
-				killProcessTree();
+				killProcessTree(proc.pid, "SIGTERM");
+				setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 3000);
 
 				this.hookManager.executeHooks("afterCommand", {
 					command: finalCommand,

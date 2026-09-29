@@ -222,8 +222,31 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 			}
 
 			case "channel:list": {
-				const channels = store.listChannels({ visibleTo: actor });
+				// Archived channels are omitted unless asked for: the default
+				// listing is the working set. `includeArchived: true` returns
+				// everything, which is how a caller reaches an archived channel's
+				// id in order to read it back or unarchive it.
+				const includeArchived = msg.includeArchived === true;
+				const channels = store.listChannels({ visibleTo: actor, includeArchived });
 				sendRaw({ type: "channel:listed", id, channels });
+				return true;
+			}
+
+			// Archive is a FLAG, never a delete (Chair ruling, 2026-08-27,
+			// issue #2889). The channel row and every message survive; reads of
+			// an archived channel keep working. Only the default listing
+			// changes. Authority is owner/admin of the channel, enforced in the
+			// store - strictly more than channel:create requires, because this
+			// mutates an existing shared record rather than adding a new one.
+			case "channel:archive": {
+				const channel = store.archiveChannel(String(msg.channelId ?? ""), actor);
+				sendRaw({ type: "channel:archived", id, channel });
+				return true;
+			}
+
+			case "channel:unarchive": {
+				const channel = store.unarchiveChannel(String(msg.channelId ?? ""), actor);
+				sendRaw({ type: "channel:unarchived", id, channel });
 				return true;
 			}
 

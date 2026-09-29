@@ -5,6 +5,7 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
+import { shellInvocation } from "../core/shell";
 import { bus } from "./events";
 
 export type JobType = "shell" | "agent-prompt" | "webhook";
@@ -82,9 +83,12 @@ async function executeJob(job: CronJob): Promise<void> {
 	try {
 		let output: unknown;
 		if (job.type === "shell") {
-			const proc = Bun.spawn(["sh", "-c", job.payload], {
+			const sh = shellInvocation(job.payload);
+			const proc = Bun.spawn([sh.file, ...sh.args], {
 				stdout: "pipe",
 				stderr: "pipe",
+				windowsHide: true,
+				windowsVerbatimArguments: sh.windowsVerbatimArguments,
 			});
 			output = await new Response(proc.stdout).text();
 		} else if (job.type === "webhook") {

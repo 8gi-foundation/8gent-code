@@ -14,6 +14,7 @@
  */
 
 import { execSync, spawn } from "node:child_process";
+import { spawnShell } from "../../../../packages/core/shell.js";
 
 // ============================================================================
 // Public types
@@ -292,7 +293,8 @@ async function installAgent(
 		let stderr = "";
 		let exited = false;
 
-		const proc = spawn("bash", ["-lc", command], {
+		const proc = spawnShell(command, {
+			posix: ["bash", "-lc"],
 			stdio: ["ignore", "pipe", "pipe"],
 			env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
 		});

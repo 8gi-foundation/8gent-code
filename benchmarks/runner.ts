@@ -2,8 +2,10 @@
 /**
  * 8gent Code Benchmark Runner
  *
- * Comprehensive benchmark runner following Andrej Karpathy's auto-research methodology.
- * Executes benchmarks, grades results, and outputs scores.
+ * Executes benchmarks against a real, locally running model (Ollama by
+ * default) and grades the output with execution-based + keyword grading.
+ * There is no mock path: if the model cannot be reached or produces no
+ * output, this exits non-zero instead of reporting a score.
  *
  * Usage:
  *   bun run benchmarks/runner.ts                    # Run all benchmarks
@@ -11,50 +13,65 @@
  *   bun run benchmarks/runner.ts --bench BF001
  *   bun run benchmarks/runner.ts --output json
  *   bun run benchmarks/runner.ts --dry-run
+ *   bun run benchmarks/runner.ts --model qwen3:8b
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { BenchmarkGrader } from "./grader";
-import type {
-	BenchmarkCategory,
-	BenchmarkDefinition,
-	BenchmarkResult,
-	BenchmarkSuiteResult,
-	Difficulty,
-} from "./types";
+import { grade } from "./autoresearch/execution-grader";
+import { getSystemPrompt } from "./autoresearch/system-prompt";
+import type { BenchmarkCategory, BenchmarkDefinition, CombinedGradeResult } from "./types";
 
+// Benchmark categories whose fixtures match the current execution-graded
+// BenchmarkDefinition shape (id, category, title, difficulty, prompt,
+// keywords, testExecution). This is the same set benchmarks/autoresearch/
+// multi-model-harness.ts runs -- reused rather than reinvented.
+import { agenticBenchmarks } from "./categories/agentic/benchmarks";
+import { battleTestBenchmarks } from "./categories/battle-test/benchmarks";
 import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
-import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
-import { creativeBenchmarks } from "./categories/creative/benchmarks";
-import { documentationBenchmarks } from "./categories/documentation/benchmarks";
 import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
-// Import all benchmark categories
 import { fileManipulationBenchmarks } from "./categories/file-manipulation/benchmarks";
-import { humanSkillsBenchmarks } from "./categories/human-skills/benchmarks";
-import { multiFileBenchmarks } from "./categories/multi-file/benchmarks";
-import { nextjsBenchmarks } from "./categories/nextjs/benchmarks";
-import { reactNativeBenchmarks } from "./categories/react-native/benchmarks";
-import { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
-// New expanded categories
-import { threejsBenchmarks } from "./categories/threejs/benchmarks";
+import { fullstackBenchmarks } from "./categories/fullstack/benchmarks";
+import { uiDesignBenchmarks } from "./categories/ui-design/benchmarks";
 
 // All benchmarks combined
 const ALL_BENCHMARKS: BenchmarkDefinition[] = [
 	...fileManipulationBenchmarks,
-	...multiFileBenchmarks,
 	...bugFixingBenchmarks,
 	...featureImplementationBenchmarks,
-	...codeReviewBenchmarks,
-	...testGenerationBenchmarks,
-	...documentationBenchmarks,
-	// Expanded categories
-	...threejsBenchmarks,
-	...reactNativeBenchmarks,
-	...nextjsBenchmarks,
-	...creativeBenchmarks,
-	...humanSkillsBenchmarks,
+	...fullstackBenchmarks,
+	...agenticBenchmarks,
+	...uiDesignBenchmarks,
+	...battleTestBenchmarks,
 ];
+
+type Difficulty = BenchmarkDefinition["difficulty"];
+
+interface BenchmarkResult {
+	benchmarkId: string;
+	code: string | null;
+	grade: CombinedGradeResult;
+	tokensUsed: number;
+	duration: number;
+}
+
+interface BenchmarkSuiteResult {
+	suiteId: string;
+	timestamp: string;
+	model: string;
+	provider: string;
+	overallScore: number;
+	categoryScores: Record<string, number>;
+	difficultyScores: Record<string, number>;
+	totalTokensUsed: number;
+	results: BenchmarkResult[];
+	stats: {
+		total: number;
+		passed: number;
+		failed: number;
+		avgScore: number;
+	};
+}
 
 // Colors for terminal output
 const colors = {
@@ -87,8 +104,6 @@ function getDifficultyColor(difficulty: Difficulty): string {
 			return colors.yellow;
 		case "hard":
 			return colors.magenta;
-		case "expert":
-			return colors.red;
 	}
 }
 
@@ -162,6 +177,10 @@ function printHelp(): void {
 	console.log(`
 8gent Code Benchmark Runner
 
+Calls a real, locally running model for every benchmark and grades the
+output with execution tests + keyword matching. Fails non-zero (no score)
+if the model provider is unreachable.
+
 Usage: bun run benchmarks/runner.ts [options]
 
 Options:
@@ -170,24 +189,25 @@ Options:
   --output, -o <format>   Output format: terminal, json, markdown
   --dry-run               List benchmarks without running them
   --verbose, -v           Show detailed output
-  --model <name>          Model name for results
-  --provider <name>       Provider name for results
+  --model <name>          Ollama model to use (default: llama3.2:3b, or $OLLAMA_MODEL)
+  --provider <name>       Model provider (only "ollama" is wired up)
   --help, -h              Show this help message
 
 Categories:
   file-manipulation       Single file create/edit/refactor
-  multi-file              Multi-file coordination
   bug-fixing              Debug and fix bugs
   feature-implementation  Implement new features
-  code-review             Review code for issues
-  test-generation         Generate test suites
-  documentation           Generate documentation
+  fullstack               Multi-layer REST/API features
+  agentic                 Multi-step tool-using tasks
+  ui-design               HTML/CSS UI generation
+  battle-test             Real-world freelance-grade contracts
 
 Examples:
   bun run benchmarks/runner.ts --category bug-fixing
   bun run benchmarks/runner.ts --bench BF001 --verbose
   bun run benchmarks/runner.ts --output json > results.json
   bun run benchmarks/runner.ts --dry-run
+  bun run benchmarks/runner.ts --model qwen3:8b
 `);
 }
 
@@ -218,7 +238,7 @@ function loadFixtures(benchmark: BenchmarkDefinition): string {
 	const benchmarkDir = path.join(__dirname);
 	let content = "";
 
-	for (const fixturePath of benchmark.fixtures) {
+	for (const fixturePath of benchmark.fixtures ?? []) {
 		const fullPath = path.join(benchmarkDir, fixturePath);
 		if (fs.existsSync(fullPath)) {
 			content += `// File: ${fixturePath}\n`;
@@ -230,46 +250,105 @@ function loadFixtures(benchmark: BenchmarkDefinition): string {
 	return content;
 }
 
+// ── Real model call (no mock path) ─────────────────────────────────
+
+interface ChatMessage {
+	role: "system" | "user";
+	content: string;
+}
+
+const DEFAULT_PROVIDER = "ollama";
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
+const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://localhost:11434";
+const CALL_TIMEOUT_MS = Number(process.env.BENCHMARK_CALL_TIMEOUT_MS ?? 120_000);
+
 /**
- * Simulate running a benchmark (placeholder for actual agent execution)
+ * Confirm the configured model is actually reachable and pulled before
+ * claiming any score. Throws (never returns a fabricated result) if not.
+ */
+async function probeOllama(model: string): Promise<void> {
+	let res: Response;
+	try {
+		res = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(3000) });
+	} catch (err) {
+		throw new Error(
+			`Cannot reach Ollama at ${OLLAMA_HOST}. Is it running? (${(err as Error).message})`,
+		);
+	}
+	if (!res.ok) {
+		throw new Error(`Ollama at ${OLLAMA_HOST} returned HTTP ${res.status}`);
+	}
+	const json: any = await res.json();
+	const names: string[] = (json.models ?? []).map((m: any) => m.name);
+	if (!names.includes(model)) {
+		throw new Error(
+			`Model "${model}" is not pulled in Ollama. Available: ${names.join(", ") || "none"}. Run: ollama pull ${model}`,
+		);
+	}
+}
+
+async function callOllama(
+	model: string,
+	messages: ChatMessage[],
+): Promise<{ content: string; tokensUsed: number }> {
+	const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+		body: JSON.stringify({
+			model,
+			messages,
+			stream: false,
+			options: { temperature: 0.2 },
+		}),
+	});
+	if (!res.ok) {
+		throw new Error(`Ollama chat call failed: HTTP ${res.status} ${await res.text()}`);
+	}
+	const json: any = await res.json();
+	const content: string = json.message?.content ?? "";
+	if (!content.trim()) {
+		throw new Error("Ollama returned an empty response");
+	}
+	const tokensUsed = (json.prompt_eval_count ?? 0) + (json.eval_count ?? 0);
+	return { content, tokensUsed };
+}
+
+/**
+ * Execute a benchmark against a real model. There is no mock/placeholder
+ * path -- if the provider is unreachable, unsupported, or errors, this
+ * throws and the runner exits non-zero instead of reporting a score.
  */
 async function executeBenchmark(
 	benchmark: BenchmarkDefinition,
-	_options: RunnerOptions,
+	options: RunnerOptions,
 ): Promise<{ output: string; tokensUsed: number; duration: number }> {
+	const provider = options.provider ?? DEFAULT_PROVIDER;
+	if (provider !== "ollama") {
+		throw new Error(
+			`Unsupported provider "${provider}". Only "ollama" (local, default) is wired up. Refusing to fabricate a result.`,
+		);
+	}
+	const model = options.model ?? DEFAULT_MODEL;
+
 	const startTime = Date.now();
 
-	// Load fixtures
+	// Fail loudly, before doing any work, if the model isn't actually there.
+	await probeOllama(model);
+
 	const fixtureContent = loadFixtures(benchmark);
+	const userPrompt = fixtureContent
+		? `${benchmark.prompt}\n\nContext:\n${fixtureContent}`
+		: benchmark.prompt;
 
-	// In a real implementation, this would:
-	// 1. Send the prompt + fixtures to the agent
-	// 2. Capture the agent's response
-	// 3. Track token usage
-
-	// Placeholder: simulate processing time and return mock output
-	await new Promise((resolve) => setTimeout(resolve, 100));
+	const { content, tokensUsed } = await callOllama(model, [
+		{ role: "system", content: getSystemPrompt() },
+		{ role: "user", content: userPrompt },
+	]);
 
 	const duration = Date.now() - startTime;
 
-	// Mock output - in production, this comes from the agent
-	const mockOutput = `
-// Mock implementation for ${benchmark.id}
-// This would be replaced by actual agent output
-
-${fixtureContent.slice(0, 500)}...
-
-// Agent would complete the implementation here
-export function solution() {
-  // Implementation
-}
-`;
-
-	return {
-		output: mockOutput,
-		tokensUsed: Math.floor(mockOutput.length / 4), // Rough estimate
-		duration,
-	};
+	return { output: content, tokensUsed, duration };
 }
 
 /**
@@ -280,13 +359,6 @@ async function runBenchmarks(
 	options: RunnerOptions,
 ): Promise<BenchmarkSuiteResult> {
 	const results: BenchmarkResult[] = [];
-	const grader = new BenchmarkGrader(path.join(__dirname, "work"));
-
-	// Ensure work directory exists
-	const workDir = path.join(__dirname, "work");
-	if (!fs.existsSync(workDir)) {
-		fs.mkdirSync(workDir, { recursive: true });
-	}
 
 	log(
 		"\n╔══════════════════════════════════════════════════════════════════════════╗",
@@ -306,62 +378,54 @@ async function runBenchmarks(
 
 		if (options.verbose) {
 			log("\n─────────────────────────────────────────────────────────────", colors.dim);
-			log(`📋 ${benchmark.id}: ${benchmark.name}`, colors.bright);
+			log(`📋 ${benchmark.id}: ${benchmark.title}`, colors.bright);
 			log(
 				`   Category: ${benchmark.category} | Difficulty: ${diffColor}${benchmark.difficulty}${colors.reset}`,
 			);
-			log(`   ${benchmark.description}`, colors.dim);
 		} else {
-			process.stdout.write(`  ${benchmark.id.padEnd(8)} ${benchmark.name.padEnd(35)} `);
+			process.stdout.write(`  ${benchmark.id.padEnd(8)} ${benchmark.title.padEnd(35)} `);
 		}
 
-		// Execute benchmark
+		// Execute benchmark against a real model (throws + exits non-zero on failure)
 		const { output, tokensUsed, duration } = await executeBenchmark(benchmark, options);
 
-		// Grade result
-		const result = await grader.grade(benchmark, output, tokensUsed, duration);
+		// Grade result: execution tests (bun test) where available, else keywords only
+		const { code, result: combined } = await grade(output, benchmark);
+		const result: BenchmarkResult = {
+			benchmarkId: benchmark.id,
+			code,
+			grade: combined,
+			tokensUsed,
+			duration,
+		};
 		results.push(result);
 
 		// Display result
-		const scoreColor = getScoreColor(result.scores.overall);
+		const scoreColor = getScoreColor(combined.score);
 		if (options.verbose) {
 			log("\n   Results:", colors.bright);
-			log(
-				`     Correctness:    ${scoreColor}${result.scores.correctness.toString().padStart(3)}%${colors.reset}`,
-			);
-			log(
-				`     Code Quality:   ${scoreColor}${result.scores.codeQuality.toString().padStart(3)}%${colors.reset}`,
-			);
-			log(
-				`     Efficiency:     ${scoreColor}${result.scores.efficiency.toString().padStart(3)}%${colors.reset}`,
-			);
-			log(
-				`     Best Practices: ${scoreColor}${result.scores.bestPractices.toString().padStart(3)}%${colors.reset}`,
-			);
-			log(
-				`     Overall:        ${scoreColor}${result.scores.overall.toString().padStart(3)}%${colors.reset}`,
-			);
-			log(
-				`     Tokens:         ${result.tokens.actual} (expected: ${result.tokens.expected}, efficiency: ${(result.tokens.efficiency * 100).toFixed(1)}%)`,
-			);
-			log(`     Duration:       ${duration}ms (limit: ${benchmark.timeLimit}ms)`);
-
-			if (result.errors.length > 0) {
-				log("\n   Errors:", colors.red);
-				result.errors.forEach((e) => log(`     - ${e}`, colors.red));
+			log(`     Method:         ${combined.method}`);
+			if (combined.execution) {
+				log(
+					`     Execution:      ${scoreColor}${combined.execution.score.toString().padStart(3)}%${colors.reset} (${combined.execution.passedTests}/${combined.execution.totalTests} tests)`,
+				);
 			}
-			if (result.warnings.length > 0) {
-				log("\n   Warnings:", colors.yellow);
-				result.warnings.forEach((w) => log(`     - ${w}`, colors.yellow));
-			}
+			log(
+				`     Keywords:       ${combined.keyword.score.toString().padStart(3)}% (${combined.keyword.matchedKeywords.length}/${combined.keyword.matchedKeywords.length + combined.keyword.missedKeywords.length})`,
+			);
+			log(
+				`     Overall:        ${scoreColor}${combined.score.toString().padStart(3)}%${colors.reset}`,
+			);
+			log(`     Tokens:         ${tokensUsed}`);
+			log(`     Duration:       ${duration}ms`);
 		} else {
-			log(`${scoreColor}${result.scores.overall.toString().padStart(3)}%${colors.reset}`);
+			log(`${scoreColor}${combined.score.toString().padStart(3)}%${colors.reset}`);
 		}
 	}
 
 	// Calculate aggregated stats
-	const categoryScores: Record<BenchmarkCategory, number> = {} as Record<BenchmarkCategory, number>;
-	const difficultyScores: Record<Difficulty, number> = {} as Record<Difficulty, number>;
+	const categoryScores: Record<string, number> = {};
+	const difficultyScores: Record<string, number> = {};
 
 	const categoryCounts: Record<string, { sum: number; count: number }> = {};
 	const difficultyCounts: Record<string, { sum: number; count: number }> = {};
@@ -370,52 +434,46 @@ async function runBenchmarks(
 		const benchmark = benchmarks[i];
 		const result = results[i];
 
-		// Category scores
 		if (!categoryCounts[benchmark.category]) {
 			categoryCounts[benchmark.category] = { sum: 0, count: 0 };
 		}
-		categoryCounts[benchmark.category].sum += result.scores.overall;
+		categoryCounts[benchmark.category].sum += result.grade.score;
 		categoryCounts[benchmark.category].count++;
 
-		// Difficulty scores
 		if (!difficultyCounts[benchmark.difficulty]) {
 			difficultyCounts[benchmark.difficulty] = { sum: 0, count: 0 };
 		}
-		difficultyCounts[benchmark.difficulty].sum += result.scores.overall;
+		difficultyCounts[benchmark.difficulty].sum += result.grade.score;
 		difficultyCounts[benchmark.difficulty].count++;
 	}
 
 	for (const [category, { sum, count }] of Object.entries(categoryCounts)) {
-		categoryScores[category as BenchmarkCategory] = Math.round(sum / count);
+		categoryScores[category] = Math.round(sum / count);
 	}
 
 	for (const [difficulty, { sum, count }] of Object.entries(difficultyCounts)) {
-		difficultyScores[difficulty as Difficulty] = Math.round(sum / count);
+		difficultyScores[difficulty] = Math.round(sum / count);
 	}
 
-	const totalTokensUsed = results.reduce((sum, r) => sum + r.tokens.actual, 0);
-	const totalTokensExpected = results.reduce((sum, r) => sum + r.tokens.expected, 0);
-	const avgScore = results.reduce((sum, r) => sum + r.scores.overall, 0) / results.length;
-	const passedCount = results.filter((r) => r.scores.overall >= 70).length;
+	const totalTokensUsed = results.reduce((sum, r) => sum + r.tokensUsed, 0);
+	const avgScore = results.reduce((sum, r) => sum + r.grade.score, 0) / results.length;
+	const passedCount = results.filter((r) => r.grade.score >= 70).length;
 
 	const suiteResult: BenchmarkSuiteResult = {
 		suiteId: `suite_${Date.now()}`,
 		timestamp: new Date().toISOString(),
-		model: options.model || process.env.MODEL || "unknown",
-		provider: options.provider || process.env.PROVIDER || "unknown",
+		model: options.model || DEFAULT_MODEL,
+		provider: options.provider || DEFAULT_PROVIDER,
 		overallScore: Math.round(avgScore),
 		categoryScores,
 		difficultyScores,
 		totalTokensUsed,
-		totalTokensExpected,
-		overallTokenEfficiency: totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
 		results,
 		stats: {
 			total: results.length,
 			passed: passedCount,
 			failed: results.length - passedCount,
 			avgScore: Math.round(avgScore),
-			avgTokenEfficiency: totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
 		},
 	};
 
@@ -458,7 +516,11 @@ function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 		colors.cyan,
 	);
 	log(
-		`║  Token Efficiency:     ${(suiteResult.overallTokenEfficiency * 100).toFixed(1)}%${" ".repeat(50)}║`,
+		`║  Model:                ${suiteResult.model} (${suiteResult.provider})${" ".repeat(Math.max(0, 40 - suiteResult.model.length - suiteResult.provider.length))}║`,
+		colors.cyan,
+	);
+	log(
+		`║  Total Tokens Used:    ${suiteResult.totalTokensUsed}${" ".repeat(50)}║`,
 		colors.cyan,
 	);
 
@@ -514,7 +576,7 @@ function outputMarkdown(suiteResult: BenchmarkSuiteResult): void {
 |--------|-------|
 | Overall Score | ${suiteResult.overallScore}% |
 | Passed | ${suiteResult.stats.passed}/${suiteResult.stats.total} |
-| Token Efficiency | ${(suiteResult.overallTokenEfficiency * 100).toFixed(1)}% |
+| Total Tokens Used | ${suiteResult.totalTokensUsed} |
 
 ## Scores by Category
 
@@ -543,7 +605,7 @@ ${suiteResult.results
 				ALL_BENCHMARKS.find((b) => b.id === r.benchmarkId)?.category || "N/A"
 			} | ${
 				ALL_BENCHMARKS.find((b) => b.id === r.benchmarkId)?.difficulty || "N/A"
-			} | ${r.scores.overall}% | ${r.tokens.actual} | ${r.timing.duration}ms |`,
+			} | ${r.grade.score}% | ${r.tokensUsed} | ${r.duration}ms |`,
 	)
 	.join("\n")}
 
@@ -573,7 +635,7 @@ function listBenchmarks(benchmarks: BenchmarkDefinition[]): void {
 		for (const b of items) {
 			const diffColor = getDifficultyColor(b.difficulty);
 			log(
-				`  ${b.id.padEnd(8)} ${b.name.padEnd(35)} ${diffColor}${b.difficulty.padEnd(8)}${colors.reset} ${b.expectedTokens} tokens`,
+				`  ${b.id.padEnd(8)} ${b.title.padEnd(35)} ${diffColor}${b.difficulty.padEnd(8)}${colors.reset}`,
 			);
 		}
 	}

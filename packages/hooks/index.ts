@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { killProcessTree, spawnShell } from "../core/shell";
 
 // ============================================
 // Types
@@ -167,7 +168,7 @@ function runYamlHookCommand(
 
 	return new Promise((resolve) => {
 		try {
-			const proc = spawn("sh", ["-c", command], {
+			const proc = spawnShell(command, {
 				cwd,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -183,7 +184,7 @@ function runYamlHookCommand(
 			});
 
 			const timer = setTimeout(() => {
-				proc.kill("SIGTERM");
+				killProcessTree(proc.pid, "SIGTERM");
 				resolve({
 					output: null,
 					success: false,
@@ -500,7 +501,7 @@ export class HookManager {
 		const timeout = hook.timeout || this.config.globalTimeout;
 
 		return new Promise((resolve, reject) => {
-			const proc = spawn("sh", ["-c", command], {
+			const proc = spawnShell(command, {
 				cwd: this.workingDirectory,
 				env: {
 					...process.env,
@@ -523,7 +524,7 @@ export class HookManager {
 			});
 
 			const timeoutId = setTimeout(() => {
-				proc.kill("SIGTERM");
+				killProcessTree(proc.pid, "SIGTERM");
 				reject(new Error(`Hook timed out after ${timeout}ms`));
 			}, timeout);
 
