@@ -236,9 +236,10 @@ export class Agent {
 				unattended: config.unattended ?? false,
 			},
 		);
-		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
-		// background, so the first gated command does not pay the model load.
-		// Idempotent per process; flag off it is a no-op with no import.
+		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): start loading the
+		// judge now, in the background, so the first gated command does not pay
+		// the model load. Idempotent per process; flag off it is a no-op with no
+		// import. A failed load is not fatal: default mode falls back to rules.
 		startSystemOneWarmup()?.catch(() => {});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

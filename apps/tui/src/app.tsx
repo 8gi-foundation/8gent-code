@@ -194,7 +194,11 @@ import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
 } from "../../../packages/permissions/tui-approval-channel.js";
-import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
+import {
+	setSystemOneNoticeSink,
+	startSystemOneWarmup,
+	systemOneMode,
+} from "../../../packages/permissions/system-one-gate.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -1961,20 +1965,27 @@ export function App({
 		]);
 	}, []);
 
-	// System One (EIGHT_SYSTEM_ONE=1): load the judge in the background at
-	// startup so the user's first shell command is not the one that waits for
-	// the model load. Flag off: startSystemOneWarmup returns null, nothing loads.
+	// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): load the
+	// judge in the background at startup so the user's first shell command is
+	// not the one that waits for the model load. Its one-time notices (first
+	// block, rule-only fallback) land here as system messages, not on stderr.
+	// Flag off: startSystemOneWarmup returns null, nothing loads.
 	useEffect(() => {
+		setSystemOneNoticeSink(addSystemMessage);
 		const warmup = startSystemOneWarmup();
-		if (!warmup) return;
+		if (!warmup) return () => setSystemOneNoticeSink(null);
+		const strict = systemOneMode() === "strict";
 		addSystemMessage("System One judge loading...");
 		warmup.then(
-			() => addSystemMessage("System One judge ready."),
+			() => addSystemMessage("System One judge ready. EIGHT_SYSTEM_ONE=0 turns it off."),
 			(err: Error) =>
 				addSystemMessage(
-					`System One judge failed to load (${err?.message ?? err}). Shell commands fail closed until it loads.`,
+					strict
+						? `System One judge failed to load (${err?.message ?? err}). Shell commands fail closed until it loads.`
+						: `System One judge not available (${err?.message ?? err}). Shell commands are checked by the rule pre-filter only. EIGHT_SYSTEM_ONE=0 turns it off.`,
 				),
 		);
+		return () => setSystemOneNoticeSink(null);
 	}, [addSystemMessage]);
 
 	/**

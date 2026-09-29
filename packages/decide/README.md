@@ -214,13 +214,34 @@ before the model and do not alter what it is asked.
 ## Harness guard
 
 `packages/permissions/system-one-gate.ts` puts `bashGuard` on the agent's
-shell path. **Off by default**, and it stays off until the eval says
-otherwise: 40 commands is smoke-level, and only Selene hard-blocks at the
-default thresholds.
+shell path. **On by default.** The flip waits on three clean live pilot runs;
+until then this section describes the draft behaviour.
 
-- **Flag:** env `EIGHT_SYSTEM_ONE=1` (or `true`). `packages/settings` has no
-  section for feature flags (its keys are voice, performance, models,
-  providers, ui, agents), so the flag is env only, like `EIGHT_TEXT_TOOLS`.
+- **Flag:** env `EIGHT_SYSTEM_ONE`, three modes (`systemOneMode`).
+  `packages/settings` has no section for feature flags (its keys are voice,
+  performance, models, providers, ui, agents), so the flag is env only, like
+  `EIGHT_TEXT_TOOLS`.
+  - unset (or any other value): **default**. On, and it never blocks
+    everything: when the judge cannot answer it falls back to the rule
+    pre-filter alone (see Verdicts).
+  - `1` / `true`: **strict**, the explicit opt-in. Fails closed exactly as
+    before the flip.
+  - `0` / `false` / `off` / `no`: **off**, the opt-out.
+  - Under `bun test` (`NODE_ENV=test`) an unset flag means off, so unrelated
+    tests never load a judge model. Tests that pass their own env object
+    without `NODE_ENV` get the real default.
+- **Notices, once per process each:** the first block in default mode adds
+  one line to the tool output, `System One blocked a shell command. It is on
+  by default; set EIGHT_SYSTEM_ONE=0 to turn it off.`, and the first fallback
+  says the judge is unavailable and that the rule pre-filter alone is
+  checking commands. Both go to the TUI as system messages
+  (`setSystemOneNoticeSink`), else to stderr.
+- **Cost of on** (measured on an M-series Mac, Selene-1 8B Q4_K_M found in
+  the Ollama store, in-process llamacpp): warm-up 4.4 s in the background,
+  resident memory up about 5.6 GB per process that runs the gate, then about
+  0.24 s per gated command. With no judge installed the probe is a GGUF file
+  check plus two local HTTP probes with a 1 s timeout each, and a failed
+  probe is retried on the next command.
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.
@@ -263,9 +284,14 @@ default thresholds.
     infinite mode, with `autoApprove`, for allow-listed commands, and for any
     non-dangerous command when headless. Those rules would quietly turn
     escalate into allow.
-  - Any error blocks (fail closed): the decider or module fails to load, no
-    backend, an unreachable backend, or an invalid probability.
-  - A timeout blocks (fail closed). Decider construction, the calibration
+  - Any error, strict mode: blocks (fail closed): the decider or module
+    fails to load, no backend, an unreachable backend, or an invalid
+    probability. Default mode: the rule pre-filter decides alone. A block
+    rule blocks, an escalate rule asks a human (no human: block), the
+    prompt-control rule blocks, and a command no rule matches runs. The
+    verdict's backend is `rules-only`.
+  - A timeout, strict mode: blocks (fail closed); default mode: the same
+    rule-only fallback. Decider construction, the calibration
     lookup and the guard question share one budget: 30 s until the decider
     has answered once in the process (that includes the model load; the
     first gate call took 5.9 to 6.7 s here with the GGUF in the disk cache,
@@ -274,11 +300,13 @@ default thresholds.
     message says `timed out after N ms, failing closed`. A load that overruns
     blocks that one command and carries on, and the next call uses it. The
     escalate prompt to a human is outside the budget.
-- **Warm-up:** with the flag on, `startSystemOneWarmup` runs at TUI startup
+- **Warm-up:** with the flag on (default or strict), `startSystemOneWarmup` runs at TUI startup
   and in the `Agent` constructor. It builds the decider and asks the judge
   one throwaway question (`echo warmup`, never run) in the background, so the
   model load does not land on the user's first command. The TUI shows
-  "System One judge loading..." then "System One judge ready.". A gate call
+  "System One judge loading..." then "System One judge ready.", or, when no
+  judge loads in default mode, that shell commands are checked by the rule
+  pre-filter only. A gate call
   that arrives during warm-up waits for it inside its own budget. If the
   budget runs out first, the block says the judge is still loading and to
   retry in a few seconds. A failed warm-up does not stick. Flag off: no
