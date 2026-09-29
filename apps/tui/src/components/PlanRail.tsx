@@ -148,12 +148,8 @@ export interface LivePlanRailProps {
 	visible?: boolean;
 }
 
-export function LivePlanRail({
-	manager,
-	limit,
-	compact,
-	visible,
-}: LivePlanRailProps): React.ReactElement | null {
+/** Tasks in a TaskManager, re-read on every task mutation. */
+export function useManagerTasks(manager: TaskManager): ReadonlyArray<Task> {
 	const [tasks, setTasks] = useState<ReadonlyArray<Task>>(() => snapshot(manager));
 
 	useEffect(() => {
@@ -174,6 +170,16 @@ export function LivePlanRail({
 		};
 	}, [manager]);
 
+	return tasks;
+}
+
+export function LivePlanRail({
+	manager,
+	limit,
+	compact,
+	visible,
+}: LivePlanRailProps): React.ReactElement | null {
+	const tasks = useManagerTasks(manager);
 	return <PlanRail tasks={tasks} limit={limit} compact={compact} visible={visible} />;
 }
 

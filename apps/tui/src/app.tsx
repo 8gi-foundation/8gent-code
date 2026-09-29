@@ -171,7 +171,9 @@ import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.j
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { ContextRail } from "./components/ContextRail.js";
-import { LivePlanRail } from "./components/PlanRail.js";
+import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
+import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
+import { type PlanStep, applyPlanUpdate, mergePlanText, settlePlan } from "./lib/plan-state.js";
 import { getTaskManager } from "../../../packages/tasks/index.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
@@ -575,6 +577,9 @@ type ViewMode =
 	| "history"
 	| "music"
 	| "message-viewer";
+
+/** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
+const PLAN_COLUMN_WIDTH = 24;
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
@@ -990,6 +995,15 @@ export function App({
 		inProgress: [],
 		done: [],
 	});
+
+	// The PLAN column: this turn's plan, written by the agent (PLAN: text and
+	// update_plan calls, see lib/plan-state.ts). Saved tasks from the task
+	// manager show there when no turn plan exists. Ctrl+X opens and closes it.
+	const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+	const planStartedAtRef = useRef<number | null>(null);
+	const [planElapsedMs, setPlanElapsedMs] = useState<number | null>(null);
+	const savedTasks = useManagerTasks(taskManagerRef.current);
+	const [planPref, togglePlanColumn] = usePlanPref(planSteps.length > 0 || savedTasks.length > 0);
 
 	// Auto-populating kanban from real agent events
 	const autoKanban = useAutoKanban();
@@ -1494,6 +1508,10 @@ export function App({
 			);
 			setLastTurnSuccess(!hadError);
 			setLastActivityAt(Date.now());
+			// The plan settles: nothing is still in progress, and the turn's
+			// wall time goes into the summary line.
+			setPlanSteps((prev) => (prev.length > 0 ? settlePlan(prev) : prev));
+			if (planStartedAtRef.current != null) setPlanElapsedMs(Date.now() - planStartedAtRef.current);
 		}
 		if (isProcessing) {
 			setLastActivityAt(Date.now());
@@ -1858,6 +1876,11 @@ export function App({
 
 		// Ctrl+Y: cycle agent modes. Y because Ctrl+M = Enter, Ctrl+I = Tab,
 		// Ctrl+S = XOFF — most single letters collide with TTY control codes.
+		// Ctrl+X: open or close the PLAN column; the chat takes the width back.
+		if (key.ctrl && input === "x") {
+			togglePlanColumn();
+		}
+
 		if (key.ctrl && input === "y") {
 			const order: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
 			setAgentMode((prev) => order[(order.indexOf(prev) + 1) % order.length] ?? "Planning");
@@ -1993,6 +2016,12 @@ export function App({
 		(tabId: string, tabTitle: string): AgentEventCallbacks => ({
 			onToolStart: (event: AgentToolStartEvent) => {
 				const isActive = tabId === activeTabId;
+				// update_plan carries the agent's own step statuses: the only
+				// thing that may tick, fail or mark the current plan step.
+				if (isActive && event.toolName === "update_plan") {
+					const items = (event.args as { plan?: unknown } | undefined)?.plan;
+					if (Array.isArray(items)) setPlanSteps((prev) => applyPlanUpdate(prev, items));
+				}
 				if (isActive) {
 					setActiveTool(event.toolName);
 					setProcessingStage("executing");
@@ -2191,6 +2220,7 @@ export function App({
 						});
 						setPredictedSteps(steps);
 						setPlanNextStep(steps[0]?.description || null);
+						setPlanSteps((prev) => mergePlanText(prev, planLines));
 						setProcessingStage("executing");
 					}
 				}
@@ -2590,6 +2620,7 @@ export function App({
 							"  Ctrl+S - Toggle sound\n" +
 							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
 							"  Ctrl+H - Toggle fancy header\n" +
+							"  Ctrl+X - Open or close the PLAN column\n" +
 							"  Ctrl+M - Model picker\n" +
 							"  Ctrl+Shift+M - Provider picker",
 					);
@@ -5032,6 +5063,9 @@ export function App({
 				setPredictedSteps([]);
 				setPlanNextStep(null);
 				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
+				setPlanSteps([]);
+				setPlanElapsedMs(null);
+				planStartedAtRef.current = Date.now();
 			}
 
 			if (!currentModel) {
@@ -5695,6 +5729,10 @@ export function App({
 	// V2 three-zone shell - the only render path.
 	const cols = viewport.width;
 	const showContextRail = cols >= 120;
+	// The PLAN column sits beside the context rail on wide terminals, and
+	// only while it is open (Ctrl+X, or a plan exists).
+	const showPlanColumn =
+		showContextRail && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
 	const showActivityRail = cols >= 90;
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
@@ -5784,9 +5822,21 @@ export function App({
 								adhdMode={adhdMode}
 							/>
 						)}
-						{showContextRail && (
-							<LivePlanRail manager={taskManagerRef.current} limit={8} />
-						)}
+						{showPlanColumn &&
+							(planSteps.length > 0 ? (
+								<PlanPanel
+									steps={planSteps}
+									running={isProcessing}
+									elapsedMs={planElapsedMs}
+									width={PLAN_COLUMN_WIDTH}
+									animate={showAnimations}
+									toggleHint="^X"
+								/>
+							) : savedTasks.length > 0 ? (
+								<PlanRail tasks={savedTasks} limit={8} />
+							) : (
+								<PlanEmpty width={PLAN_COLUMN_WIDTH} />
+							))}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
 						<LiveFocalStripWithGoal
@@ -5827,7 +5877,11 @@ export function App({
 								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 								contentWidth={Math.max(
 									24,
-									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
+									viewport.width -
+										(showContextRail ? 31 : 0) -
+										(showPlanColumn ? PLAN_COLUMN_WIDTH : 0) -
+										(showActivityRail ? 36 : 0) -
+										8,
 								)}
 							/>
 						</Box>

@@ -162,7 +162,11 @@ export function planStepsFromText(text: string | null | undefined): string[] {
 	if (!text) return [];
 	const planMatch = text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
 	if (!planMatch?.[1]) return [];
-	const stepMatches = planMatch[1].match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
+	// A plan written on one line ("PLAN: 1) read 2) patch 3) test") becomes
+	// one step per number. Only a marker after whitespace splits, so "1.2"
+	// or "v2.1" inside a step never does.
+	const block = planMatch[1].replace(/\s+(?=\d+[.)]\s)/g, "\n");
+	const stepMatches = block.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
 	if (!stepMatches) return [];
 	return stepMatches
 		.map((s) => s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim())
