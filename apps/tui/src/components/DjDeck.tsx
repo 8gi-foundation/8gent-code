@@ -227,9 +227,50 @@ function sanitizeTrack(value: string): string {
 	return value.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/\s+/g, " ").trim();
 }
 
+/** The 8GENT FM segment at the start of the one-row footer. It takes its
+ *  natural width up to `width`, the columns the status segments after it
+ *  budget for it, so the row never overflows. */
+export function FmFooterSegment(props: {
+	width: number;
+	playing: boolean;
+	track: string;
+	label: string;
+	labelColor: string;
+}) {
+	const wide = props.width >= 20;
+	const showLabel = !props.track && wide && props.label.length > 0;
+	const natural = 2 + (props.track ? props.track.length : 8 + (showLabel ? props.label.length + 1 : 0));
+	return (
+		<Box width={Math.min(natural, props.width)} flexShrink={0} overflow="hidden">
+			<Text wrap="truncate-end">
+				<Text color={t.orange}>{props.playing ? "▶ " : "● "}</Text>
+				{props.track ? (
+					<Text color={t.textPrimary}>{props.track}</Text>
+				) : (
+					<>
+						<Text color={t.orange}>8GENT FM</Text>
+						{showLabel ? <Text color={props.labelColor}> {props.label}</Text> : null}
+					</>
+				)}
+			</Text>
+		</Box>
+	);
+}
+
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
-export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}) {
+export function DjDeck({
+	isProcessing = false,
+	footer,
+	fmWidth = 14,
+}: {
+	isProcessing?: boolean;
+	/** When set, the deck renders as the first segment of a one-row footer
+	 *  and `footer` fills the rest of that row. The full stereo still opens
+	 *  above the row while a track is actually playing. */
+	footer?: React.ReactNode;
+	fmWidth?: number;
+} = {}) {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -401,6 +442,20 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 		const stripTrack = status.title
 			? sanitizeTrack(status.title)
 			: "";
+		if (footer !== undefined) {
+			return (
+				<Box width="100%" flexShrink={0} height={1}>
+					<FmFooterSegment
+						width={fmWidth}
+						playing={playing}
+						track={stripTrack}
+						label={playing ? "" : "idle"}
+						labelColor={t.dim}
+					/>
+					{footer}
+				</Box>
+			);
+		}
 		return <CollapsedDjDeckStrip playing={playing} track={stripTrack} tick={tick} />;
 	}
 
@@ -416,6 +471,20 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 				? "agent pulse"
 				: "idle";
 		const idleColor = isProcessing ? t.teal : t.dim;
+		if (footer !== undefined) {
+			return (
+				<Box width="100%" flexShrink={0} height={1}>
+					<FmFooterSegment
+						width={fmWidth}
+						playing={false}
+						track=""
+						label={idleLabel}
+						labelColor={idleColor}
+					/>
+					{footer}
+				</Box>
+			);
+		}
 		return (
 			<Box
 				width="100%"
@@ -432,7 +501,7 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 		);
 	}
 
-	return (
+	const fullDeck = (
 		<Box
 			width="100%"
 			borderStyle="round"
@@ -463,6 +532,17 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 
 			<Box marginTop={1}>
 				<ShortcutHintRow playing={playing} />
+			</Box>
+		</Box>
+	);
+
+	if (footer === undefined) return fullDeck;
+	return (
+		<Box width="100%" flexDirection="column" flexShrink={0}>
+			{fullDeck}
+			<Box width="100%" flexShrink={0} height={1}>
+				<FmFooterSegment width={fmWidth} playing track="" label="playing" labelColor={t.orangeAlt} />
+				{footer}
 			</Box>
 		</Box>
 	);
