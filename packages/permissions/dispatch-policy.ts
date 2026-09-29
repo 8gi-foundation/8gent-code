@@ -7,13 +7,53 @@
  *   2. NemoClaw policy hook via evaluatePolicy("dispatch", ctx) so YAML
  *      policies can deny / require_approval per channel pair.
  *
- * The capability table mirrors the issue spec (#1896):
+ * The capability table mirrors the issue spec (#1896), with one channel
+ * since re-classified:
  *   - computer (Mac panel, locally authed): full
  *   - os/app (Clerk-authed web): full
- *   - telegram, discord (bot bridges): READ + write_basic only;
- *     write_full requires second-factor approval on the originator
+ *   - telegram (single-user allowlisted bridge): full. See below.
+ *   - discord, browser (bot bridges / untrusted page contexts): READ +
+ *     write_basic only; write_full requires second-factor approval on the
+ *     originator
  *   - api: scope per token grant (caller controls)
  *   - mobile: read default, write_full requires second-factor
+ *
+ * Why telegram is trusted and discord is not
+ * ------------------------------------------
+ * The original spec put every bot bridge in one category: a bot is a public
+ * surface, so anyone who finds it can drive it. That holds for a Discord bot
+ * sitting in a server. It does not describe how the Telegram bridge is built.
+ *
+ * `packages/daemon/telegram-bridge.ts` enforces a chat-id allowlist at three
+ * independent points, before any inbound update produces a side effect:
+ *   1. the poll loop, which drops non-allowlisted message updates ahead of
+ *      transcription, typing indicators, and agent dispatch,
+ *   2. `handleTelegramMessage`, which re-checks before prompting the agent,
+ *   3. `handleCallbackQuery`, which re-checks before any inline-keyboard
+ *      button (approve / deny / cancel / new task) changes state.
+ * All three call `isAuthorizedChat`, which fails closed: with no allowlist
+ * configured it accepts only the single configured chat id, and local mode
+ * refuses to start unless at least one id is allowlisted.
+ *
+ * So this channel is not an open bot surface. It is a single-user,
+ * pre-authenticated pipe to one operator, authenticated the same way the Mac
+ * panel is: by possession of a local secret. A second-factor prompt on top of
+ * that asked the same person, on the same device, to confirm they were
+ * themselves. It bought no security and cost every ordinary action a round
+ * trip, which is a real harm: gates that fire constantly on safe work train
+ * the operator to approve without reading, so the gate stops working on the
+ * day it matters.
+ *
+ * Discord and browser keep the lite treatment because they have no equivalent
+ * control. There is no per-user allowlist on the Discord path, and `browser`
+ * is a page context driven by whatever the page loaded. If either ever grows
+ * an allowlist of this shape, revisit it deliberately. Do not widen them by
+ * analogy to this entry.
+ *
+ * The trust rests on the allowlist, not on the bot token. A leaked token lets
+ * an attacker read and impersonate the bot, but not drive the daemon, because
+ * updates from any other chat id are dropped before they reach the agent. The
+ * allowlist is the control; token rotation is the kill switch.
  */
 
 import type { DaemonChannel, DispatchCapability } from "../daemon/types";
@@ -33,7 +73,10 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	os: ["read", "write_basic", "write_full", "admin"],
 	app: ["read", "write_basic", "write_full"],
 	api: [], // Empty = caller controls scope per minted token.
-	telegram: ["read", "write_basic"],
+	// Single-user allowlisted bridge, not an open bot surface. Same ceiling as
+	// `computer` because it is the same operator behind the same local secret.
+	// Rationale and the three allowlist checks it depends on: file header.
+	telegram: ["read", "write_basic", "write_full", "admin"],
 	discord: ["read", "write_basic"],
 	browser: ["read", "write_basic"],
 	delegation: ["read", "write_basic", "write_full"],
@@ -48,10 +91,17 @@ const SECOND_FACTOR_CAPS: ReadonlySet<DispatchCapability> = new Set(["write_full
 
 /**
  * Channels considered "lite" - not allowed to send write_full / admin
- * dispatches without a separate approval prompt on the originator. The
- * issue spec calls this out for telegram/discord/mobile.
+ * dispatches without a separate approval prompt on the originator.
+ *
+ * `telegram` was here and is deliberately no longer, because it is allowlisted
+ * to one chat id at three separate points in the bridge. See the file header
+ * for the full argument. discord and browser stay because they are not.
+ *
+ * The second-factor mechanism below is untouched and still fires for these
+ * channels, and for anything a YAML policy marks require_approval. This
+ * removed one channel from the list; it did not weaken the gate.
  */
-const LITE_CHANNELS: ReadonlySet<DaemonChannel> = new Set(["telegram", "discord", "browser"]);
+const LITE_CHANNELS: ReadonlySet<DaemonChannel> = new Set(["discord", "browser"]);
 
 export interface DispatchPolicyInput {
 	fromChannel: DaemonChannel;

@@ -17,6 +17,7 @@ const TOOL_CAPABILITIES: Record<string, Capability[]> = {
 	get_outline: ["code", "code.ast"],
 	get_symbol: ["code", "code.symbol"],
 	search_symbols: ["code", "code.symbol"],
+	locate: ["code", "code.symbol"],
 
 	// File operations
 	read_file: ["code"],

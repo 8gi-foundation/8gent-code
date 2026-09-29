@@ -28,6 +28,14 @@ export interface Channel {
 	createdBy: ParticipantId;
 	/** epoch ms */
 	createdAt: number;
+	/**
+	 * Archive tombstone, epoch ms; undefined = active. Archiving is a flag, not
+	 * a delete: the channel row and every message it holds survive untouched,
+	 * and an archived channel still reads back in full. It is hidden from a
+	 * default listChannels() and returned again with includeArchived. Reversible
+	 * via unarchiveChannel.
+	 */
+	archivedAt?: number;
 }
 
 export interface Member {
@@ -54,6 +62,16 @@ export interface Message {
 	deletedAt?: number;
 	/** epoch ms */
 	createdAt: number;
+	/**
+	 * Daemon-local narration path, e.g. "/table/audio/<messageId>/<file>",
+	 * served loopback-only by handleTableAudioHttp and proxied for the phone at
+	 * the relay's identical public path (no rewrite needed - the two paths are
+	 * the same string by design, mirroring the huddle audio pattern). Nullable
+	 * and additive: a message with no narration simply omits this field.
+	 */
+	audioUrl?: string;
+	/** Real duration of the narration wav, ms. Present only alongside audioUrl. */
+	audioDurationMs?: number;
 }
 
 export interface ThreadView {

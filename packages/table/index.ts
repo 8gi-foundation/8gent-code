@@ -81,3 +81,22 @@ export {
 	type PostToChannelResult,
 	makePostToChannelTool,
 } from "./tools/post-to-channel.js";
+
+export {
+	SPEAK_URL_RE,
+	handleTableSpeakHttp,
+	synthesizeMessageSpeech,
+	voiceForAuthor,
+	type SpeakFailureReason,
+	type SpeakResult,
+	type SynthesizeDeps,
+} from "./message-speak.js";
+
+export {
+	MESSAGE_AUDIO_URL_RE,
+	handleTableAudioHttp,
+	messageAudioDir,
+	messageAudioRoot,
+	messageAudioUrl,
+	prepareMessageAudioDir,
+} from "./message-audio.js";

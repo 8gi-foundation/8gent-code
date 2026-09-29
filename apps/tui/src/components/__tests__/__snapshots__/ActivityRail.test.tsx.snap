@@ -3,6 +3,38 @@
 exports[`ActivityRail snapshot of full rail is stable 1`] = `
 {
   "agents": 4,
+  "blocks": [
+    {
+      "flexDirection": undefined,
+      "flexShrink": 0,
+      "marginTop": undefined,
+    },
+    {
+      "flexDirection": "column",
+      "flexShrink": 0,
+      "marginTop": 1,
+    },
+    {
+      "flexDirection": "column",
+      "flexShrink": 0,
+      "marginTop": 1,
+    },
+    {
+      "flexDirection": "column",
+      "flexShrink": 0,
+      "marginTop": 1,
+    },
+    {
+      "flexDirection": "column",
+      "flexShrink": 0,
+      "marginTop": 1,
+    },
+    {
+      "flexDirection": "column",
+      "flexShrink": 0,
+      "marginTop": 1,
+    },
+  ],
   "borderColor": "#2E2A26",
   "borderStyle": "single",
   "flexDirection": "column",

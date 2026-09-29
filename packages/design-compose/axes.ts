@@ -37,6 +37,7 @@ export const TYPE_RATIOS = [
 	{ name: "minor-third", value: 1.2 },
 	{ name: "major-third", value: 1.25 },
 	{ name: "perfect-fourth", value: 1.333 },
+	// biome-ignore lint/suspicious/noApproximativeNumericConstant: a typographic scale ratio quoted to three places, not an approximation of Math.SQRT2. Math.SQRT2 would change every size this scale produces.
 	{ name: "augmented-fourth", value: 1.414 },
 	{ name: "perfect-fifth", value: 1.5 },
 	{ name: "golden", value: 1.618 },

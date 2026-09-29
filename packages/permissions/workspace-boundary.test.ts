@@ -288,9 +288,11 @@ describe("allowedAbsolutePrefixes escape hatch", () => {
 describe("boundary gate runs before YAML rule evaluation", () => {
 	test("file write inside boundary still subject to YAML rules", () => {
 		// Secret-in-source rule should still block even when path is inside workspace.
+		// The rule matches credential shapes, so the value must look like one
+		// (runtime-assembled, fake).
 		const decision = evaluatePolicy("write_file", {
 			path: "src/conf.ts",
-			content: "const API_KEY = 'leaked'",
+			content: `const API_KEY = '${["q8Zr", "T2vLx9", "Mw4Kp7Nb", "3Yc6Hd1Fs"].join("")}'`,
 		});
 		expect(decision.allowed).toBe(false);
 	});

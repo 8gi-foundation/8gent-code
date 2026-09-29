@@ -112,6 +112,7 @@ interface ChannelRow {
 	topic: string | null;
 	created_by: string;
 	created_at: number;
+	archived_at: number | null;
 }
 
 interface MemberRow {
@@ -131,6 +132,8 @@ interface MessageRow {
 	edited_at: number | null;
 	deleted_at: number | null;
 	created_at: number;
+	audio_url: string | null;
+	audio_duration_ms: number | null;
 }
 
 function rowToChannel(r: ChannelRow): Channel {
@@ -142,6 +145,7 @@ function rowToChannel(r: ChannelRow): Channel {
 		topic: r.topic ?? undefined,
 		createdBy: r.created_by,
 		createdAt: r.created_at,
+		archivedAt: r.archived_at ?? undefined,
 	};
 }
 
@@ -165,6 +169,8 @@ function rowToMessage(r: MessageRow): Message {
 		editedAt: r.edited_at ?? undefined,
 		deletedAt: r.deleted_at ?? undefined,
 		createdAt: r.created_at,
+		audioUrl: r.audio_url ?? undefined,
+		audioDurationMs: r.audio_duration_ms ?? undefined,
 	};
 }
 
@@ -190,6 +196,7 @@ export class TableStore {
 
 		const schema = fs.readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
 		this.db.exec(schema);
+		this.migrate();
 
 		if (opts.ledger) {
 			this.ledger = opts.ledger;
@@ -203,6 +210,51 @@ export class TableStore {
 	/** Expose the ledger for verification / inspection (e.g. tests, `ledger.verify()`). */
 	getLedger(): Ledger {
 		return this.ledger;
+	}
+
+	/**
+	 * Read a single message by id, or null when it does not exist. Public,
+	 * unlike getMessageRow (the private row-level accessor) - this is the seam
+	 * a caller outside the store uses (e.g. the on-demand narration HTTP route,
+	 * message-speak.ts) to fetch a message's content without reaching into row
+	 * internals. Does NOT check delete/authority - callers that care (like
+	 * message-speak.ts) check deletedAt and read-authority themselves, same
+	 * split editMessage/attachAudio already use.
+	 */
+	getMessage(messageId: string): Message | null {
+		const row = this.getMessageRow(messageId);
+		return row ? rowToMessage(row) : null;
+	}
+
+	/**
+	 * Additive, idempotent migrations for columns added after a database was
+	 * first created. CREATE TABLE IF NOT EXISTS (schema.sql) never alters an
+	 * EXISTING table, so a ~/.8gent/table/table.db from before 2026-08-21 needs
+	 * these ALTER TABLEs to pick up audio_url/audio_duration_ms. Both columns
+	 * are nullable, so every pre-existing row reads back with audioUrl/
+	 * audioDurationMs simply absent - no behavior change for a message that
+	 * never had narration. Safe to run on every open: "duplicate column name"
+	 * is swallowed (already migrated), any other error is real and rethrown.
+	 *
+	 * channels.archived_at (2026-08-27) follows the identical shape and is
+	 * non-lossy by construction: ADD COLUMN on a nullable column with no
+	 * DEFAULT rewrites no rows and backfills NULL, so every channel that
+	 * existed before the migration reads back as active. No channel row and no
+	 * message is touched.
+	 */
+	private migrate(): void {
+		const alters = [
+			"ALTER TABLE messages ADD COLUMN audio_url TEXT",
+			"ALTER TABLE messages ADD COLUMN audio_duration_ms INTEGER",
+			"ALTER TABLE channels ADD COLUMN archived_at INTEGER",
+		];
+		for (const sql of alters) {
+			try {
+				this.db.exec(sql);
+			} catch (err) {
+				if (!/duplicate column name/i.test((err as Error).message ?? "")) throw err;
+			}
+		}
 	}
 
 	// ── channels ────────────────────────────────────────────────────────
@@ -280,14 +332,87 @@ export class TableStore {
 		return channel;
 	}
 
-	listChannels(opts: { visibleTo?: ParticipantId } = {}): Channel[] {
+	/**
+	 * Active channels, oldest first. Archived channels are omitted by default -
+	 * the default listing is the WORKING SET, which is the entire point of
+	 * archiving. Pass includeArchived to get everything; the archive is always
+	 * one flag away, never gone.
+	 */
+	listChannels(opts: { visibleTo?: ParticipantId; includeArchived?: boolean } = {}): Channel[] {
 		const rows = this.db
-			.prepare("SELECT * FROM channels ORDER BY created_at ASC")
+			.prepare(
+				opts.includeArchived
+					? "SELECT * FROM channels ORDER BY created_at ASC"
+					: "SELECT * FROM channels WHERE archived_at IS NULL ORDER BY created_at ASC",
+			)
 			.all() as ChannelRow[];
 		const channels = rows.map(rowToChannel);
 		if (!opts.visibleTo) return channels;
 		const viewer = opts.visibleTo;
 		return channels.filter((c) => c.visibility === "open" || this.isMember(c.id, viewer));
+	}
+
+	/**
+	 * Flag a channel archived. NON-DESTRUCTIVE and REVERSIBLE: this writes one
+	 * nullable timestamp and touches nothing else. The channel row survives,
+	 * every message survives, and reads (thread / subscribe / search) keep
+	 * working exactly as before - hiding the channel from a default
+	 * listChannels() is the only behavior that changes. Idempotent: archiving
+	 * an already-archived channel returns it unchanged rather than moving the
+	 * timestamp, so a retry cannot rewrite when it was archived.
+	 *
+	 * Authority: owner/admin of the channel, matching removeMember. Archiving
+	 * is a state change on the shared record, so it takes more than mere
+	 * membership.
+	 */
+	archiveChannel(channelId: string, archivedBy: ParticipantId): Channel {
+		const channel = this.requireChannel(channelId);
+		if (!this.hasRole(channelId, archivedBy, ADMIN_ROLES)) {
+			throw new TableAuthError(
+				`${archivedBy} is not owner/admin of ${channelId} and cannot archive it`,
+			);
+		}
+		if (channel.archivedAt !== undefined) return channel;
+
+		const archivedAt = Date.now();
+		this.db.prepare("UPDATE channels SET archived_at = ? WHERE id = ?").run(archivedAt, channelId);
+
+		this.ledger.append({
+			kind: "table.channel.archive",
+			payload: { channelId, name: channel.name, archivedBy, archivedAt },
+		});
+
+		return { ...channel, archivedAt };
+	}
+
+	/**
+	 * Clear the archive flag, returning the channel to the default listing. The
+	 * counterpart that keeps archive from being a delete in disguise. Idempotent
+	 * on an already-active channel.
+	 */
+	unarchiveChannel(channelId: string, unarchivedBy: ParticipantId): Channel {
+		const channel = this.requireChannel(channelId);
+		if (!this.hasRole(channelId, unarchivedBy, ADMIN_ROLES)) {
+			throw new TableAuthError(
+				`${unarchivedBy} is not owner/admin of ${channelId} and cannot unarchive it`,
+			);
+		}
+		if (channel.archivedAt === undefined) return channel;
+
+		this.db.prepare("UPDATE channels SET archived_at = NULL WHERE id = ?").run(channelId);
+
+		this.ledger.append({
+			kind: "table.channel.unarchive",
+			payload: {
+				channelId,
+				name: channel.name,
+				unarchivedBy,
+				wasArchivedAt: channel.archivedAt,
+				ts: Date.now(),
+			},
+		});
+
+		return { ...channel, archivedAt: undefined };
 	}
 
 	getChannel(channelId: string): Channel | null {
@@ -426,6 +551,10 @@ export class TableStore {
 		replyTo?: string;
 		/** optional precomputed ed25519 signature (base64) over canonicalMessage(). */
 		sig?: string;
+		/** Narration already synthesised at post time; nullable/additive - most
+		 *  posts carry neither field. See attachAudio() for adding it later. */
+		audioUrl?: string;
+		audioDurationMs?: number;
 	}): Message {
 		this.requireChannel(input.channelId);
 		if (input.content.length === 0) {
@@ -457,11 +586,13 @@ export class TableStore {
 			replyTo: input.replyTo,
 			sig: input.sig,
 			createdAt: Date.now(),
+			audioUrl: input.audioUrl,
+			audioDurationMs: input.audioDurationMs,
 		};
 
 		this.db
 			.prepare(
-				"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+				"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at, audio_url, audio_duration_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)",
 			)
 			.run(
 				message.id,
@@ -471,6 +602,8 @@ export class TableStore {
 				message.replyTo ?? null,
 				message.sig ?? null,
 				message.createdAt,
+				message.audioUrl ?? null,
+				message.audioDurationMs ?? null,
 			);
 
 		this.ledger.append({
@@ -518,6 +651,52 @@ export class TableStore {
 				editorId: input.editorId,
 				contentHash: contentHash(input.content),
 				editedAt,
+			},
+		});
+
+		return rowToMessage(this.getMessageRow(input.messageId) as MessageRow);
+	}
+
+	/**
+	 * Attach (or replace) narration on an already-posted message. Same author-
+	 * only authority as editMessage - narration is content, just spoken rather
+	 * than written, so the same person who could edit the text is the one who
+	 * can attach what speaks it. Shape validation of audioUrl (the daemon-local
+	 * /table/audio/<messageId>/<file> form) is the caller's job (table-routes.ts),
+	 * same split as editMessage's content non-empty check living one layer up
+	 * from here for messageId/actor resolution.
+	 */
+	attachAudio(input: {
+		messageId: string;
+		actorId: ParticipantId;
+		audioUrl: string;
+		audioDurationMs: number;
+	}): Message {
+		const row = this.getMessageRow(input.messageId);
+		if (!row || row.deleted_at !== null) {
+			throw new TableNotFoundError(`message ${input.messageId} not found`);
+		}
+		if (row.author_id !== input.actorId) {
+			throw new TableAuthError(
+				`${input.actorId} is not the author of ${input.messageId} and cannot attach audio to it`,
+			);
+		}
+		if (input.audioUrl.length === 0) {
+			throw new TableValidationError("audioUrl must be non-empty");
+		}
+
+		this.db
+			.prepare("UPDATE messages SET audio_url = ?, audio_duration_ms = ? WHERE id = ?")
+			.run(input.audioUrl, input.audioDurationMs, input.messageId);
+
+		this.ledger.append({
+			kind: "table.message.attachAudio",
+			payload: {
+				messageId: input.messageId,
+				actorId: input.actorId,
+				audioUrl: input.audioUrl,
+				audioDurationMs: input.audioDurationMs,
+				at: Date.now(),
 			},
 		});
 

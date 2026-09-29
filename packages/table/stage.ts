@@ -109,11 +109,20 @@ export function stagePage(opts: StagePageOptions): string {
     justify-content:center;gap:18px;color:#8A8078}
   #idle h2{font-size:34px;color:#FAF7F4;font-weight:600}
   #idle.hidden{display:none}
+  /* The narration band. The slide carries the ARGUMENT; this carries what is
+     actually being said, so the story is legible with the sound off and during
+     the seconds before a slide exists. Sits above the HUD, never over it. */
+  #said{position:absolute;left:0;right:0;bottom:52px;padding:14px 40px;
+    background:linear-gradient(to top,rgba(9,10,12,.92),rgba(9,10,12,0));
+    color:#EFEAE4;font-size:21px;line-height:1.45;text-align:center;
+    opacity:0;transition:opacity .28s ease;pointer-events:none}
+  #said.show{opacity:1}
 </style>
 </head>
 <body>
   <div id="stage">
     <div id="idle"><h2>${topic || "8gent huddle"}</h2><div>waiting for the first turn</div></div>
+    <div id="said"></div>
     <div id="hud"><span id="dot"></span><span id="who">-</span><span id="phase">idle</span><span id="topic">${topic}</span></div>
   </div>
   <audio id="voice"></audio>
@@ -123,6 +132,7 @@ export function stagePage(opts: StagePageOptions): string {
   var CFG = ${cfg};
   var stage = document.getElementById("stage");
   var idle  = document.getElementById("idle");
+  var said  = document.getElementById("said");
   var hud   = { who: document.getElementById("who"), phase: document.getElementById("phase"), dot: document.getElementById("dot") };
   var audio = document.getElementById("voice");
   var live  = null;   // the currently mounted frame
@@ -227,17 +237,47 @@ export function stagePage(opts: StagePageOptions): string {
       switch(m.type){
         case "huddle:floor":
           setHud(m.name || m.holder, "preparing", false);
+          // Name WHO is thinking rather than showing nothing. An officer's turn
+          // takes several seconds before its slide exists, and James watched
+          // that gap as a black rectangle with a name band underneath: "there's
+          // not enough visuals going on... it's just a name coming up still".
+          // Only while nothing has been presented yet - once a slide is up the
+          // previous one stays parked, which is the designed behaviour and far
+          // better than replacing it with a spinner.
+          if (!live) {
+            idle.classList.remove("hidden");
+            idle.textContent = "";
+            var h2 = document.createElement("h2");
+            h2.textContent = String(m.name || m.holder || "");
+            var sub = document.createElement("div");
+            sub.textContent = "taking the floor";
+            idle.appendChild(h2); idle.appendChild(sub);
+          }
           break;
         case "huddle:slide":
           showSlide(m.turnId, m.html, m.name);
           setHud(m.name || m.holder, "on the floor", true);
           break;
         case "huddle:speak":
+          // textContent, never innerHTML: this is model output on a page
+          // that renders slides, and it is never markup.
+          if (m.text) { said.textContent = m.text; said.classList.add("show"); }
           speak(m.turnId, m.audioUrl);
           break;
         case "huddle:floor_released":
+          said.classList.remove("show");
           setHud(hud.who.textContent, "released", false);
-          try { audio.pause(); } catch(e){}
+          // Stopping the audio here USED to be unconditional, which turned any
+          // early release into an audible cut mid-sentence - James watching a
+          // live huddle: "the 8gents get cut off after only a few seconds". The
+          // floor now holds the turn for the narration's MEASURED length, so a
+          // normal release already lands after the last word; pausing on it only
+          // ever truncates. A human CUT is the one case where silence is the
+          // whole point, so that one still stops immediately. Any other case is
+          // superseded naturally when the next turn sets audio.src.
+          if (m.reason === "cut" || m.reason === "skipped") {
+            try { audio.pause(); } catch(e){}
+          }
           break;
         case "huddle:closed":
           setHud("", "closed", false);

@@ -6,6 +6,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import { generateId } from "./types.js";
+// Text import so `bun build --compile` embeds the SQL. A runtime read next to
+// import.meta.dir resolves inside /$bunfs in a compiled binary and crashes on import.
+import MIGRATION_SQL from "./migrations/001-traces.sql" with { type: "text" };
 
 export type TraceOutcome = "ok" | "error" | "timeout" | "aborted";
 export type PerceptionKind = "tree" | "screenshot" | "none";
@@ -69,11 +72,6 @@ export interface TraceStepRow {
 export interface FullTrace extends TraceRow {
 	steps: TraceStepRow[];
 }
-
-const MIGRATION_SQL = fs.readFileSync(
-	path.join(import.meta.dir, "migrations", "001-traces.sql"),
-	"utf-8",
-);
 
 export function defaultTracesDir(): string {
 	return (

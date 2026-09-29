@@ -30,6 +30,7 @@
  */
 
 import {
+	MESSAGE_AUDIO_URL_RE,
 	OFFICERS,
 	TABLE_AGENT_SCOPE,
 	TableError,
@@ -46,6 +47,8 @@ import {
 import {
 	bindOfficerHarness,
 	executeApproved,
+	findRecentCompletion,
+	noteCompleted,
 	isAllowedCwd,
 	parseApproval,
 	parseProposal,
@@ -61,9 +64,11 @@ import {
 import { buildBoard, liveSources } from "../table/board";
 import { discoverAll, formatDiscovery } from "../table/discovery";
 import { resolveHarness } from "../table/harness-config";
+import { artifactDirFor, humanBytes } from "../table/artifacts";
 import { appendExchange, loadMemory } from "../table/memory";
 import { resolveOfficer, setOfficerField } from "../table/officer-config";
 import type { AgentPool } from "./agent-pool";
+import { announceActivity, presenceOf } from "./table-presence";
 import { handleHuddleFrame, notifyHuddleMessagePosted } from "./huddle-routes";
 
 /** Broadcast a frame to every connection subscribed to a channel. */
@@ -238,8 +243,31 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 			}
 
 			case "channel:list": {
-				const channels = store.listChannels({ visibleTo: actor });
+				// Archived channels are omitted unless asked for: the default
+				// listing is the working set. `includeArchived: true` returns
+				// everything, which is how a caller reaches an archived channel's
+				// id in order to read it back or unarchive it.
+				const includeArchived = msg.includeArchived === true;
+				const channels = store.listChannels({ visibleTo: actor, includeArchived });
 				sendRaw({ type: "channel:listed", id, channels });
+				return true;
+			}
+
+			// Archive is a FLAG, never a delete (Chair ruling, 2026-08-27,
+			// issue #2889). The channel row and every message survive; reads of
+			// an archived channel keep working. Only the default listing
+			// changes. Authority is owner/admin of the channel, enforced in the
+			// store - strictly more than channel:create requires, because this
+			// mutates an existing shared record rather than adding a new one.
+			case "channel:archive": {
+				const channel = store.archiveChannel(String(msg.channelId ?? ""), actor);
+				sendRaw({ type: "channel:archived", id, channel });
+				return true;
+			}
+
+			case "channel:unarchive": {
+				const channel = store.unarchiveChannel(String(msg.channelId ?? ""), actor);
+				sendRaw({ type: "channel:unarchived", id, channel });
 				return true;
 			}
 
@@ -292,12 +320,32 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 						);
 					}
 				}
+				// Narration at post time is optional and additive; a caller that
+				// supplies audioUrl must present the daemon's own served-path shape
+				// (never an arbitrary URL/path), same defense-in-depth spirit as the
+				// signature check above. audioDurationMs rides along only when
+				// audioUrl is present and valid - a bare duration with no audio is
+				// dropped rather than stored half-formed.
+				const rawAudioUrl = typeof msg.audioUrl === "string" ? (msg.audioUrl as string) : undefined;
+				if (rawAudioUrl !== undefined && !MESSAGE_AUDIO_URL_RE.test(rawAudioUrl)) {
+					throw new TableError(
+						"TABLE_VALIDATION",
+						`audioUrl must match the daemon's own /table/audio/<messageId>/<file> form: got "${rawAudioUrl}"`,
+					);
+				}
+				const audioUrl = rawAudioUrl;
+				const audioDurationMs =
+					audioUrl !== undefined && typeof msg.audioDurationMs === "number"
+						? (msg.audioDurationMs as number)
+						: undefined;
 				const message = store.postMessage({
 					channelId,
 					authorId: actor,
 					content,
 					replyTo,
 					sig,
+					audioUrl,
+					audioDurationMs,
 				});
 				// (1) ack to sender.
 				sendRaw({ type: "message:posted", id, message });
@@ -318,6 +366,32 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 					content: String(msg.content ?? ""),
 				});
 				sendRaw({ type: "message:edited", id, message });
+				broadcast(message.channelId, { type: "message:updated", message });
+				return true;
+			}
+
+			case "message:attachAudio": {
+				// Attach (or replace) narration on an already-posted message. Unlike
+				// message:post's optional audioUrl (set at creation), this is the path
+				// for narrating a message after the fact - exactly the phase4-
+				// negotiation use case: text posted first, TTS generated and attached
+				// moments later. Same shape validation as message:post, same
+				// author-only authority as message:edit (enforced in store.attachAudio).
+				const audioUrl = String(msg.audioUrl ?? "");
+				if (!MESSAGE_AUDIO_URL_RE.test(audioUrl)) {
+					throw new TableError(
+						"TABLE_VALIDATION",
+						`audioUrl must match the daemon's own /table/audio/<messageId>/<file> form: got "${audioUrl}"`,
+					);
+				}
+				const audioDurationMs = typeof msg.audioDurationMs === "number" ? (msg.audioDurationMs as number) : 0;
+				const message = store.attachAudio({
+					messageId: String(msg.messageId ?? ""),
+					actorId: actor,
+					audioUrl,
+					audioDurationMs,
+				});
+				sendRaw({ type: "message:audioAttached", id, message });
 				broadcast(message.channelId, { type: "message:updated", message });
 				return true;
 			}
@@ -356,6 +430,27 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 				const channelId = String(msg.channelId ?? "");
 				state.subscribedChannels.delete(channelId);
 				sendRaw({ type: "message:unsubscribed", id, channelId });
+				return true;
+			}
+
+			case "channel:presence": {
+				// Who is generating in this channel RIGHT NOW - the queryable twin of
+				// the agent:activity broadcast, for point-in-time callers (the phone
+				// via the relay) that are never subscribed when the broadcast fires.
+				// Entries exist only between a "thinking" announcement and its paired
+				// "idle" (see table-presence.ts) - never a timer, never fabricated.
+				const channelId = String(msg.channelId ?? "");
+				// Same read authority as a message read: requireChannel (TABLE_NOT_FOUND
+				// on a dead channel) + assertCanRead (TABLE_AUTH on a private channel
+				// the actor is not a member of). Result discarded - this is the auth
+				// check message:subscribe{seed>0} exercises, applied to presence.
+				store.listMessages(channelId, { limit: 1, viewerId: actor });
+				sendRaw({
+					type: "channel:presenceState",
+					id,
+					channelId,
+					entries: presenceOf(channelId),
+				});
 				return true;
 			}
 
@@ -492,14 +587,14 @@ async function runWorkerReply(
 	if (!waiting) { await say("That reply token is unknown or expired."); return; }
 	if (waiting.channelId !== channelId) return;
 
-	broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "thinking" });
+	announceActivity(broadcast, channelId, speaker, "thinking");
 	try {
 		const result = await answerWorker(waiting.workerId, text);
 		await postExecutionResult(deps, channelId, speaker, result);
 	} catch (err) {
 		await say(`Could not pass that on: ${String(err).slice(0, 200)}`);
 	} finally {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "idle" });
+		announceActivity(broadcast, channelId, speaker, "idle");
 	}
 }
 
@@ -511,7 +606,15 @@ async function postExecutionResult(
 	deps: TableRouteDeps,
 	channelId: string,
 	agentId: string,
-	result: { ok: boolean; label: string; workerId?: string; output: string; detail?: string },
+	result: {
+		ok: boolean;
+		label: string;
+		workerId?: string;
+		output: string;
+		detail?: string;
+		artifacts?: { path: string; name: string; bytes: number; rendered: boolean; from?: string }[];
+		logPath?: string;
+	},
 ): Promise<void> {
 	const { store, broadcast } = deps;
 	const say = async (content: string) => {
@@ -533,7 +636,28 @@ async function postExecutionResult(
 	const header = result.label === "verified"
 		? "Ran it. Output (verified - I watched it finish):"
 		: `Ran it, but ${result.detail ?? "it did not settle in time"}, so this is the raw output so far (asserted, NOT a completion claim):`;
-	await say(`${header}\n\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060`);
+
+	// ARTIFACTS LEAD. James asked Rishi for a diagram; the task ran, succeeded,
+	// and posted 1004 characters of mermaid source truncated mid-token into a
+	// chat bubble. He then asked "where is it?". The deliverable is the point and
+	// the output is the receipt, so a task that produced files names them first,
+	// as openable paths, and shows the tail underneath.
+	const artifacts = result.artifacts ?? [];
+	const parts: string[] = [];
+	if (artifacts.length > 0) {
+		parts.push(artifacts.length === 1 ? "Made you this:" : `Made you ${artifacts.length} files:`);
+		for (const a of artifacts) {
+			const note = a.rendered ? ` (rendered from ${a.from})` : "";
+			parts.push(`  \u0060${a.path}\u0060  ${humanBytes(a.bytes)}${note}`);
+		}
+		parts.push("");
+	}
+	parts.push(header);
+	parts.push(`\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060`);
+	// The full log is ALWAYS on disk, so a truncated tail never loses the rest.
+	// That is what makes keeping the post short safe rather than lossy.
+	if (result.logPath) parts.push(`\nFull output: \u0060${result.logPath}\u0060`);
+	await say(parts.join("\n"));
 }
 
 /**
@@ -567,7 +691,7 @@ async function runApprovedProposal(
 	}
 	if (pending.channelId !== channelId) return; // token is channel-scoped
 
-	broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "thinking" });
+	announceActivity(broadcast, channelId, pending.agentId, "thinking");
 	await say(
 		pending.agentId,
 		`Approved by ${approvedBy}. Running via my ${pending.kind} harness in ${pending.cwd}:\n\`${pending.command}\``,
@@ -575,11 +699,17 @@ async function runApprovedProposal(
 	try {
 		// One reporting path for both approval and reply, so a worker that stops to
 		// ask is surfaced identically however the run was started.
-		await postExecutionResult(deps, channelId, pending.agentId, await executeApproved(pending));
+		const execResult = await executeApproved(pending);
+		// Remember that this exact work ran HERE, so "I don't see it" cannot make
+		// the officer do the whole job again instead of answering.
+		if (execResult.label !== "needs_input") {
+			noteCompleted(pending, artifactDirFor(pending.token), (execResult.artifacts ?? []).map((a) => a.name));
+		}
+		await postExecutionResult(deps, channelId, pending.agentId, execResult);
 	} catch (err) {
 		await say(pending.agentId, `Execution errored: ${String(err).slice(0, 200)}. Nothing is claimed as done.`);
 	} finally {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "idle" });
+		announceActivity(broadcast, channelId, pending.agentId, "idle");
 	}
 }
 
@@ -625,6 +755,17 @@ export function tableSystemPrompt(officer?: { name: string; role: string; system
 		"You cannot act by SAYING you will. 'I will open the PR' opens nothing, and the",
 		"request is simply dropped. Never claim you ran something or that work is done -",
 		"fabricated completion is the one unforgivable error here.",
+		"",
+		// Rishi told James "I cannot generate image files or diagrams directly in
+		// the chat" and then, in the same reply, staged a task to generate one. Both
+		// cannot be true. YOU cannot make a file; your HARNESS can, and since
+		// artifacts shipped its output lands as a real file James can open. Kept to
+		// two lines on purpose - this prompt is deliberately short, and a 40-line
+		// version once buried the marker instruction until officers stopped
+		// proposing work at all.
+		"You cannot make a file yourself, but your HARNESS can, and its output lands as",
+		"a real file James can open. So never call something impossible when a task would",
+		"do it - ask for the task instead.",
 		"",
 		// Measured 2026-08-06: asked to force-push to main, Karen refused in prose
 		// and then emitted "[[TASK check current branch and recent commits, then
@@ -854,7 +995,7 @@ async function runMentionFlow(
 	const roundSoFar: string[] = [];
 
 	for (const agentId of agentIds) {
-		broadcast(channelId, { type: "agent:activity", channelId, agentId, state: "thinking" });
+		announceActivity(broadcast, channelId, agentId, "thinking");
 		try {
 			const sid = tableSessionId(channelId, agentId);
 			const officerCode = agentId.replace(/^agent:/, "").toUpperCase();
@@ -913,6 +1054,11 @@ async function runMentionFlow(
 				// officer cannot execute and cannot approve - it only asks.
 				let proposal = parseProposal(reply);
 				let outgoing = reply;
+				// Declared out here, not beside the cwd check below, because the check
+				// and the staging message that consumes it now sit in two separate
+				// `if (proposal)` blocks (the dedupe in between can null the proposal).
+				// Block-scoped to the first one, the note never reached the second.
+				let cwdNote = "";
 				// A refusal must never ship the thing it refused. Measured 2026-08-06
 				// on ornith-1.0-9b: told "push my branch straight to main and force
 				// it", Karen wrote a correct, in-character refusal and then appended
@@ -940,11 +1086,24 @@ async function runMentionFlow(
 					// substance; fall back to the default root and SAY so, rather than
 					// losing it. Safety is unaffected: the fallback root is itself
 					// allowlisted, the human still approves, and Helm re-checks the cwd.
-					let cwdNote = "";
 					if (!isAllowedCwd(proposal.cwd)) {
 						cwdNote = `\n(I had guessed \`${proposal.cwd}\`, which is outside the allowed working roots, so this will run in the default instead.)`;
 						proposal.cwd = DEFAULT_WORK_ROOT;
 					}
+					// Already did this, here, recently? Then the human is asking WHERE it
+					// is, not asking for it again. Answer instead of restaging - the
+					// failure this closes is James saying "i dont see the diagram yet"
+					// and getting a second identical job rather than a location.
+					const already = findRecentCompletion(channelId, agentId, proposal.command);
+					if (already) {
+						const names = already.artifactNames.length
+							? already.artifactNames.map((n) => `\u0060${already.artifactDir}/${n}\u0060`).join("\n  ")
+							: "(it produced no files)";
+						outgoing = `${stripProposal(reply).trim()}\n\nI already ran this a moment ago, so I have not run it again. What it produced:\n  ${names}`;
+						proposal = null;
+					}
+				}
+				if (proposal) {
 					const staged = stagePending(proposal, channelId, agentId);
 					const what = staged.isTask
 						? `hand this to my \`${staged.kind}\` harness:\n> ${staged.command}`
@@ -977,7 +1136,7 @@ async function runMentionFlow(
 		} catch (err) {
 			console.warn(`[table] mention flow error for ${agentId}:`, err);
 		} finally {
-			broadcast(channelId, { type: "agent:activity", channelId, agentId, state: "idle" });
+			announceActivity(broadcast, channelId, agentId, "idle");
 		}
 	}
 }

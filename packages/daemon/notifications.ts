@@ -28,6 +28,26 @@ const MACOS_NOTIFY_TYPES = new Set<NotificationType>([
 ]);
 
 /**
+ * Bodies that carry no information for the reader. macOS substitutes the
+ * literal word "Notification" when the body is empty - that is exactly the
+ * alert that reached the Chair in #2883 - and a stringified nullish value is
+ * a producer bug rather than a message.
+ */
+const PLACEHOLDER_BODIES = new Set(["notification", "null", "undefined", "none", "n/a"]);
+
+/**
+ * Does this body say anything? A notification is the system's most direct
+ * claim on a person's attention; an empty one costs that attention and
+ * returns nothing. Guarded here at the dispatcher (#2883) so no call site
+ * can post one, whatever it passes.
+ */
+export function isPostableBody(message: string): boolean {
+	const body = (message ?? "").trim();
+	if (!body) return false;
+	return !PLACEHOLDER_BODIES.has(body.toLowerCase());
+}
+
+/**
  * Send a macOS native notification via osascript.
  * No dependencies required - uses built-in AppleScript.
  */
@@ -36,6 +56,9 @@ export async function sendNativeNotification(
 	message: string,
 	options: { subtitle?: string; sound?: string } = {},
 ): Promise<boolean> {
+	// #2883: no body, no notification. Checked ahead of the platform test so
+	// the refusal is identical on every host and provable without a screen.
+	if (!isPostableBody(message)) return false;
 	if (process.platform !== "darwin") return false;
 
 	const sound = options.sound || "Glass";
@@ -43,6 +66,14 @@ export async function sendNativeNotification(
 
 	const script = `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}"${subtitle} sound name "${sound}"`;
 
+	// #2883, DEFERRED: a notification posted through osascript belongs to
+	// Script Editor, not to us - its icon, its identity, and its click target,
+	// so activating a finding opens a code editor with an empty file dialog.
+	// Fixing that means posting from a real app identity
+	// (UNUserNotificationCenter in mac-body/Sources/EightBody, or
+	// terminal-notifier -sender), which is a Swift-side change tracked under
+	// its own issue. This slice fixes the empty-body defect only; the sender
+	// identity is knowingly still wrong here.
 	try {
 		const proc = Bun.spawn(["osascript", "-e", script], {
 			stdout: "pipe",
@@ -162,6 +193,9 @@ export class NotificationDispatcher {
 	}
 
 	async notify(type: NotificationType, message: string): Promise<void> {
+		// #2883: nothing to say means nothing to send, on every channel.
+		if (!isPostableBody(message)) return;
+
 		// Telegram
 		const chatId = this.getChatForType(type);
 		await this.send(chatId, message);

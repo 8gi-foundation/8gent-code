@@ -231,7 +231,7 @@ function persistAgentName(
 // Onboarding Questions
 // ============================================
 
-const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
+export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	// ── 1. Welcome banner ────────────────────────────────────
 	// Read-only summary of what auto-detect saw. The user just presses Enter
 	// (or picks the single "Continue" item) to advance. We keep this as a
@@ -489,7 +489,9 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 					...user.preferences,
 					voice: {
 						...user.preferences.voice,
-						voiceId: user.preferences.voice?.voiceId ?? "Bruno",
+						// null = the most natural installed system voice. KittenTTS
+						// voices are an explicit opt-in in the voice picker.
+						voiceId: user.preferences.voice?.voiceId ?? null,
 						agentName,
 					} as any,
 				},
@@ -500,21 +502,23 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "voice-services",
 		question:
-			"Would you like to install AI voice services?\n\n" +
-			"This downloads KittenTTS - a free, local neural text-to-speech engine.\n" +
-			"No API keys needed. Runs entirely on your machine.\n" +
+			"Your 8gent speaks with your computer's own natural voice.\n\n" +
+			"Optionally, you can also install KittenTTS - a small, free, local\n" +
+			"text-to-speech model. No API keys, runs on your machine.\n" +
 			"Download size: ~200MB (model + dependencies)",
 		kind: "select",
+		// First choice is the default on Enter. Values stay "1" = KittenTTS,
+		// "2" = system so typed answers keep their meaning.
 		choices: [
 			{
-				label: "Yes, install AI voices",
-				value: "1",
-				description: "Recommended. Free local neural TTS via KittenTTS.",
+				label: "Use the natural system voice",
+				value: "2",
+				description: "Recommended. Clear, human-sounding, no download.",
 			},
 			{
-				label: "No, use system voices only",
-				value: "2",
-				description: "Skip the download. Use macOS built-in voices.",
+				label: "Also install KittenTTS",
+				value: "1",
+				description: "Optional. Small local model, more robotic than system voices.",
 			},
 		],
 		options: ["1", "2", "yes", "no", "y", "n"],
@@ -554,43 +558,52 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		question: "Pick a voice for your agent.",
 		kind: "select",
 		choices: [
-			{ label: "Bruno", value: "1", description: "AI - male, warm & authoritative (recommended)" },
-			{ label: "Bella", value: "2", description: "AI - female, warm & clear" },
-			{ label: "Jasper", value: "3", description: "AI - male, crisp & technical" },
-			{ label: "Luna", value: "4", description: "AI - female, soft & creative" },
-			{ label: "Rosie", value: "5", description: "AI - female, bright & energetic" },
-			{ label: "Hugo", value: "6", description: "AI - male, neutral & steady" },
-			{ label: "Kiki", value: "7", description: "AI - female, light & friendly" },
-			{ label: "Leo", value: "8", description: "AI - male, rich & expressive" },
-			{ label: "Moira", value: "9", description: "System - Irish (macOS)" },
-			{ label: "Daniel", value: "10", description: "System - British (macOS)" },
-			{ label: "Samantha", value: "11", description: "System - American (macOS)" },
-			{ label: "Karen", value: "12", description: "System - Australian (macOS)" },
-			{ label: "Rishi", value: "13", description: "System - Indian (macOS)" },
+			{
+				label: "Natural system voice",
+				value: "1",
+				description: "Recommended. Your computer's most natural installed voice.",
+			},
+			{ label: "Samantha", value: "2", description: "System - American (macOS)" },
+			{ label: "Daniel", value: "3", description: "System - British (macOS)" },
+			{ label: "Moira", value: "4", description: "System - Irish (macOS)" },
+			{ label: "Karen", value: "5", description: "System - Australian (macOS)" },
+			{ label: "Rishi", value: "6", description: "System - Indian (macOS)" },
+			{ label: "Bruno", value: "7", description: "KittenTTS - male, small local model" },
+			{ label: "Bella", value: "8", description: "KittenTTS - female, small local model" },
+			{ label: "Jasper", value: "9", description: "KittenTTS - male, small local model" },
+			{ label: "Luna", value: "10", description: "KittenTTS - female, small local model" },
+			{ label: "Rosie", value: "11", description: "KittenTTS - female, small local model" },
+			{ label: "Hugo", value: "12", description: "KittenTTS - male, small local model" },
+			{ label: "Kiki", value: "13", description: "KittenTTS - female, small local model" },
+			{ label: "Leo", value: "14", description: "KittenTTS - male, small local model" },
 		],
-		options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
+		options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"],
 		processor: (answer, user) => {
-			const kittenVoices: Record<string, string> = {
-				"1": "Bruno",
-				"2": "Bella",
-				"3": "Jasper",
-				"4": "Luna",
-				"5": "Rosie",
-				"6": "Hugo",
-				"7": "Kiki",
-				"8": "Leo",
+			// "1" (the default) stores no voice id: the speech resolver then picks
+			// the most natural installed system voice on each machine.
+			const systemVoices: Record<string, string | null> = {
+				"1": null,
+				"2": "Samantha",
+				"3": "Daniel",
+				"4": "Moira",
+				"5": "Karen",
+				"6": "Rishi",
 			};
-			const systemVoices: Record<string, string> = {
-				"9": "Moira",
-				"10": "Daniel",
-				"11": "Samantha",
-				"12": "Karen",
-				"13": "Rishi",
+			// KittenTTS voices are an explicit opt-in, never the default.
+			const kittenVoices: Record<string, string> = {
+				"7": "Bruno",
+				"8": "Bella",
+				"9": "Jasper",
+				"10": "Luna",
+				"11": "Rosie",
+				"12": "Hugo",
+				"13": "Kiki",
+				"14": "Leo",
 			};
 
 			const choice = answer.trim() || "1";
 			const isKitten = choice in kittenVoices;
-			const voice = kittenVoices[choice] || systemVoices[choice] || "Bruno";
+			const voice = isKitten ? kittenVoices[choice] : (systemVoices[choice] ?? null);
 			const engine = isKitten ? "kitten" : "system";
 
 			return {
@@ -1054,7 +1067,7 @@ export class OnboardingManager {
 		text = text.replace("{language}", this.user.identity.language || "en");
 		text = text.replace("{provider}", this.user.preferences.model.provider || "ollama");
 		const voiceDesc = this.user.preferences.voice.enabled
-			? `${this.user.preferences.voice.voiceId || "Bruno"} (${this.user.preferences.voice.engine || "system"})`
+			? `${this.user.preferences.voice.voiceId || "natural system voice"} (${this.user.preferences.voice.engine || "system"})`
 			: "disabled";
 		text = text.replace("{voice}", voiceDesc);
 		text = text.replace(

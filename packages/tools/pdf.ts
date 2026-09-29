@@ -7,7 +7,15 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PDFParse } from "pdf-parse";
+import type { PDFParse as PDFParseClass } from "pdf-parse";
+
+// Loaded on first use, not at import: pdf-parse pulls in pdfjs, which needs browser
+// globals (DOMMatrix) that a compiled binary lacks, and crashed rpc and mcp-server at startup.
+let pdfParseClass: typeof PDFParseClass | null = null;
+async function loadPdfParse(): Promise<typeof PDFParseClass> {
+	if (!pdfParseClass) pdfParseClass = (await import("pdf-parse")).PDFParse;
+	return pdfParseClass;
+}
 
 // ============================================
 // Types
@@ -58,7 +66,7 @@ export async function readPdf(pdfPath: string): Promise<PdfInfo> {
 	}
 
 	const buffer = await fs.promises.readFile(absolutePath);
-	const pdf = new PDFParse({ data: buffer });
+	const pdf = new (await loadPdfParse())({ data: buffer });
 
 	// Get text from all pages
 	const textResult = await pdf.getText();
@@ -97,7 +105,7 @@ export async function readPdfPage(pdfPath: string, pageNum: number): Promise<Pdf
 	}
 
 	const buffer = await fs.promises.readFile(absolutePath);
-	const pdf = new PDFParse({ data: buffer });
+	const pdf = new (await loadPdfParse())({ data: buffer });
 
 	// Get text with page info
 	const textResult = await pdf.getText({ partial: [pageNum] });
@@ -138,7 +146,7 @@ export async function getPdfMetadata(pdfPath: string): Promise<{
 
 	const stats = fs.statSync(absolutePath);
 	const buffer = await fs.promises.readFile(absolutePath);
-	const pdf = new PDFParse({ data: buffer });
+	const pdf = new (await loadPdfParse())({ data: buffer });
 
 	const infoResult = await pdf.getInfo();
 
@@ -236,7 +244,7 @@ export async function readPdfPageRange(
 	}
 
 	const buffer = await fs.promises.readFile(absolutePath);
-	const pdf = new PDFParse({ data: buffer });
+	const pdf = new (await loadPdfParse())({ data: buffer });
 
 	// Generate page range array
 	const pageRange: number[] = [];

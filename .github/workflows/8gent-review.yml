@@ -12,6 +12,11 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
+      # An explicit permissions block sets every UNLISTED scope to `none`, so
+      # listing only pull-requests left contents: none and actions/checkout@v4
+      # failed with "remote: Repository not found" on every PR since this
+      # workflow was added. The review step never ran once.
+      contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
@@ -31,16 +36,32 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          REVIEW=$(bun run bin/8gent.ts review --diff=/tmp/pr.diff --json 2>&1 || true)
-          echo "$REVIEW" > /tmp/review.json
+          # stdout only. Folding stderr in (2>&1) corrupted the JSON with any
+          # warning the harness printed, which then broke the parse below.
+          bun run bin/8gent.ts review --diff=/tmp/pr.diff --json > /tmp/review.json 2>/tmp/review.err || true
+          echo "--- review stderr ---"
+          cat /tmp/review.err || true
 
       - name: Post review comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY=$(cat /tmp/review.json | bun -e "
-            const j = JSON.parse(await Bun.stdin.text());
-            console.log('## 8gent Review\n\n' + (j.review || j.error || 'No output'));
-          ")
+          # The reviewer needs a model. There is no OPENROUTER_API_KEY secret on
+          # this repo and no local model on the runner, so a non-JSON body is the
+          # NORMAL case, not an anomaly. Report that plainly instead of dying on
+          # JSON.parse and painting the PR red for a reason unrelated to the code.
+          BODY=$(bun -e "
+            const raw = (await Bun.stdin.text()).trim();
+            let out;
+            try {
+              const j = JSON.parse(raw);
+              out = j.review || j.error || 'No output';
+            } catch {
+              out = raw
+                ? '_The reviewer did not return JSON. Raw output:_\n\n\`\`\`\n' + raw.slice(0, 4000) + '\n\`\`\`'
+                : '_The reviewer produced no output (no model configured for CI)._';
+            }
+            console.log('## 8gent Review\n\n' + out);
+          " < /tmp/review.json)
           gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             -f body="$BODY"

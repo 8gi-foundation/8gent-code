@@ -48,7 +48,7 @@ console.log(`[smoke-failover] computer tier 3: ${tier3.provider}/${tier3.model}`
 assert(tier3.provider === "deepseek", "tier 3 should be DeepSeek");
 
 // Mark DeepSeek down → expect OpenRouter free.
-fo.markDown("deepseek-v4-flash", "deepseek");
+fo.markDown("deepseek-flash", "deepseek");
 const tier4 = fo.resolve("qwen3.6:27b", "computer");
 console.log(`[smoke-failover] computer tier 4: ${tier4.provider}/${tier4.model}`);
 assert(tier4.provider === "openrouter", "tier 4 should be OpenRouter free");

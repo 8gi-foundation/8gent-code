@@ -109,7 +109,7 @@ function main(): void {
 	console.log(`beats:   ${slides.length} slides, ZERO LLM tokens\n`);
 
 	const turns: BakedTurn[] = slides.map((slide, i) => {
-		const ctx = { code: "HUMAN", name: "James", index: i + 1, total: slides.length };
+		const ctx = { code: "HUMAN", name: "James", index: i + 1, total: slides.length, huddleId: HUDDLE_ID };
 		const { html, sha256 } = renderSlide(slide.spec, ctx);
 		const turnId = `zen-${String(i).padStart(2, "0")}`;
 		writeFileSync(join(dir, "slides", `slide-${turnId}.html`), html, "utf8");

@@ -22,6 +22,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { shellInvocation } from "../core/shell";
 
 // ============================================
 // Types
@@ -702,10 +703,13 @@ export class TelegramBot {
 			}).catch(() => {});
 
 			try {
-				const proc = Bun.spawn(["bash", "-c", cmd], {
+				const sh = shellInvocation(cmd, { posix: ["bash", "-c"] });
+				const proc = Bun.spawn([sh.file, ...sh.args], {
 					cwd: this.agent?.getWorkingDirectory?.() ?? process.cwd(),
 					stdout: "pipe",
 					stderr: "pipe",
+					windowsHide: true,
+					windowsVerbatimArguments: sh.windowsVerbatimArguments,
 				});
 				const stdout = await new Response(proc.stdout).text();
 				const stderr = await new Response(proc.stderr).text();

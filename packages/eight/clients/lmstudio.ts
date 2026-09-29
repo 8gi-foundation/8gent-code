@@ -3,6 +3,7 @@
  */
 
 import type { LLMClient, LLMResponse, Message } from "../types";
+import { modelFetch } from "../../ai/model-fetch";
 
 export class LMStudioClient implements LLMClient {
 	private baseUrl: string;
@@ -32,7 +33,8 @@ export class LMStudioClient implements LLMClient {
 	}
 
 	async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
-		const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
+		const response = await modelFetch(`${this.baseUrl}/v1/chat/completions`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -108,7 +110,7 @@ export class LMStudioClient implements LLMClient {
 	}
 
 	async generate(prompt: string): Promise<string> {
-		const response = await fetch(`${this.baseUrl}/v1/completions`, {
+		const response = await modelFetch(`${this.baseUrl}/v1/completions`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",

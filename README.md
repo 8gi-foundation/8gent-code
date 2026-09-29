@@ -4,8 +4,9 @@
 
 <p align="center">
   <strong>The kernel of the <a href="https://8gent.world">8gent ecosystem</a>.</strong><br />
-  Open source autonomous coding agent powered by local LLMs or free cloud models.<br />
-  No API keys. No usage caps. No cloud dependency.
+  Open source autonomous coding agent powered by local LLMs or free cloud models, for developers who want an agent that runs on their own machine.<br />
+  No API keys. No usage caps. No cloud dependency.<br />
+  Run it: <code>npm install -g @8gi-foundation/8gent-code &amp;&amp; 8gent</code>
 </p>
 
 <br />
@@ -97,8 +98,8 @@ The 8GI board consists of AI officers, not humans. 8GI Foundation serves as Foun
 | **8PO** | Samantha | Eight Product Officer - product vision, UX, user advocacy |
 | **8DO** | Moira | Eight Design Officer - brand, visual identity, design systems |
 | **8SO** | Karen | Eight Security Officer - policy, compliance, threat modeling |
+| **8CO** | *Unnamed* | Eight Community Officer - seat defined in `packages/board-plane/main.ts` |
 | **8MO** | *Pending* | Eight Marketing Officer |
-| **8CO** | *Pending* | Eight Community Officer |
 | **8GO** | *Pending* | Eight Governance Officer |
 
 ### The Lotus Model
@@ -150,7 +151,7 @@ npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
-That's it. 8gent uses an adaptive 11-provider router. Default active provider is `8gent` local (model `eight-1.0-q3:14b`) with `ollama` also enabled by default. Cloud providers (OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok) are opt-in via API key. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
+That's it. 8gent uses an adaptive 11-provider router. Two run locally and are on by default: `8gent` (model `eight-1.0-q3:14b`) and `ollama`. The other nine are hosted providers, each opt-in with your own API key; the registry in `packages/providers/` is the list. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
 ## Install
 
@@ -244,6 +245,15 @@ git clone https://github.com/8gi-foundation/8gent-code.git && cd 8gent-code && b
 bun run tui
 ```
 
+On Linux, some native modules (better-sqlite3, and tree-sitter on arm64) compile at install time. Bun reports itself as Node 24, whose headers need C++20, which those modules do not build with yet. Install the build tools and build against the Node 22 headers:
+
+```bash
+sudo apt install build-essential python3 mpv ffmpeg   # mpv + ffmpeg (and yt-dlp) are for /dj
+export npm_config_target=22.12.0 npm_config_runtime=node npm_config_disturl=https://nodejs.org/dist
+bun install --frozen-lockfile
+bun run tui
+```
+
 <br />
 
 ---
@@ -262,7 +272,7 @@ bun run tui
 <br />
 
 **Model-agnostic**<br />
-<sub>Adaptive 11-provider router: 8gent local, Ollama, OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok. Everything except 8gent/ollama is opt-in via API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
+<sub>Adaptive 11-provider router: two local providers on by default (8gent, Ollama) and nine hosted providers, each opt-in with your own API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
 
 <br />
 
@@ -432,7 +442,7 @@ Every session spawns a unique companion. Your coding history becomes a collectib
 
 - **40 species** across 5 rarity tiers (Common 60% to Legendary 1%)
 - **10 elements** inspired by MTG color pie (Void, Ember, Aether, Verdant, Radiant, Chrome, Prism, Frost, Thunder, Shadow)
-- **29 accessories** from Pokeball to Triforce to One Ring
+- **28 accessories** from Pokeball to Triforce to One Ring
 - **6 stats** per companion (DEBUG, CHAOS, WISDOM, PATIENCE, SNARK, ARCANA)
 - **1% shiny** chance
 - **Collection deck** persists at `~/.8gent/companion-deck.json`
@@ -514,18 +524,27 @@ User prompt
 
 <br />
 
+The battle-test category is 15 tasks. Eight pass, seven do not. Both halves:
+
 | ID | Domain | Task | Score |
 |:---|:-------|:-----|------:|
+| BT003 | Data Engineering | Stream Processing Pipeline | **100** |
+| BT011 | Video Production | Scene Graph, Timeline, FFmpeg CLI | **100** |
+| BT007 | Digital Marketing | SEO Audit Engine: Scoring, Core Web Vitals | **96** |
+| BT014 | AI Consulting | Assessment Report Generator | **95** |
 | BT001 | Software Engineering | SaaS Auth: JWT, Roles, Rate Limiting | **94** |
 | BT002 | Software Engineering | Event-Driven Architecture: Pub/Sub, DLQ, Retry | **92** |
-| BT003 | Data Engineering | Stream Processing Pipeline | **100** |
 | BT005 | Software Engineering | Typed State Machine: Guards, Actions | **92** |
-| BT007 | Digital Marketing | SEO Audit Engine: Scoring, Core Web Vitals | **96** |
-| BT011 | Video Production | Scene Graph, Timeline, FFmpeg CLI | **100** |
 | BT012 | Music Technology | Notes, Chords, Scales, Progressions | **81** |
-| BT014 | AI Consulting | Assessment Report Generator | **95** |
+| BT006 | Finance | Financial Dashboard | 54 |
+| BT008 | Marketing | Email Campaign | 54 |
+| BT004 | Developer Tooling | CLI Framework | 53 |
+| BT010 | Design | Design Tokens | 39 |
+| BT009 | DevOps | CI/CD Pipeline | 33 |
+| BT013 | Data Visualization | Data Visualization | 30 |
+| BT015 | Security | Security Audit | 30 |
 
-<sub>Additional categories: long-horizon (LH001-LH005), agentic (TC001-MR001), fullstack (FS001-FS003), UI design (UI001-UI008), ability showcase.</sub>
+<sub>Scores are from the run recorded in <a href="benchmarks/README.md">benchmarks/README.md</a> (Bun on an Apple M2 Max, all local inference). BT001 moved 85 to 94 after one round of prompt mutations; the rest are single-pass. Additional categories: long-horizon (LH001-LH005), agentic (TC001-MR001), fullstack (FS001-FS003), UI design (UI001-UI008), ability showcase.</sub>
 
 ```bash
 bun run benchmark:v2                    # single pass
@@ -574,7 +593,7 @@ packages/
   validation/    Self-healing executor - shipped
   proactive/     Business agents, opportunity scanner - shipped
   ast-index/     Blast radius engine - shipped
-  tools/         75 tools: filesystem, shell, git, browser, AST - shipped
+  tools/         filesystem, shell, git, browser, AST tooling - shipped
   voice/         STT (whisper.cpp) + TTS (macOS/KittenTTS) - partial
   kernel/        RL fine-tuning pipeline (off by default) - shipped
   personality/   Brand voice, "Infinite Gentleman" - shipped
@@ -657,7 +676,7 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 
 ### Process amendments
 - **#2475** Constitutional amendment (2026-05-09): any extraction / refactor / feature touching MORE THAN 3 GitHub issues requires boardroom alignment + signed PRD + minutes filed BEFORE Wave 1 dispatch.
-- **CleanRoomPort skill** at `~/.claude/skills/CleanRoomPort/SKILL.md` for AGPL-safe pattern porting.
+- **CleanRoomPort skill** in the maintainer's local skill library, for AGPL-safe pattern porting.
 - **Strategic note** #2469 - owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
 
 <br />
@@ -718,7 +737,7 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 | Doc | What it covers |
 |:----|:---------------|
 | [SOUL.md](SOUL.md) | Agent persona and principles |
-| [CLAUDE.md](CLAUDE.md) | Dev conventions, design system, repo rules |
+| [AGENTS.md](AGENTS.md) | Dev conventions, design system, repo rules (also served as `8GENT.md`) |
 | [docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md) | HyperAgent metacognitive self-modification spec |
 | [docs/MODEL-SHOOTOUT.md](docs/MODEL-SHOOTOUT.md) | Local vs cloud model comparison results |
 | [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
@@ -768,7 +787,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 <td valign="top" width="50%">
 
 - Blast Radius Engine -AST-based change impact estimation
-- Claude Code -worktree isolation pattern for parallel agent execution
+- Coding-agent worktree isolation -the pattern for parallel agent execution
 - Karpathy's autoresearch methodology -iterative prompt mutation and meta-optimization
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) -agent persona standard
 - [usecomputer](https://github.com/remorses/usecomputer) -cross-platform desktop automation via native Zig N-API

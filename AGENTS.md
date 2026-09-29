@@ -203,6 +203,41 @@ Individual contributors may add personal preferences (voice, formatting, review 
 7. **Project board:** https://github.com/orgs/8gi-foundation/projects/1 - ALL work tracked here. Todo -> In Progress -> Done.
 8. **Close issues with evidence:** Include commit hash, PR number, and validation URL when closing.
 
+## The 8GI Working Agreement (READ FIRST, ALWAYS)
+
+**Before touching this repo, load the `EightGIWorkingAgreement` skill.**
+`~/.claude/skills/EightGIWorkingAgreement/SKILL.md`
+
+Every rule in it was written after it cost a real incident, not from principle.
+The single theme: **the thing you built, the thing that merged, and the thing
+that is running are three different things**, and nearly every incident was one
+being mistaken for another.
+
+The six that cost the most:
+
+1. **Branch from `origin/main`, `gh pr create --base main` explicitly, then
+   verify with `git merge-base --is-ancestor`.** A PR opened while a feature
+   branch is checked out targets THAT branch and still reports `MERGED`. Three
+   landed that way in one day; one carried 4,634 lines and was reported as
+   shipped while sitting on a side branch.
+2. **Merged is not deployed.** Restart the daemon and grep for the symbol you
+   added before claiming anything is live.
+3. **A worktree is for WRITING code, never for SHIPPING it.** Never install to
+   `/Applications` from one. Note the trap: an in-repo guard cannot enforce this,
+   because every worktree carries its own copy of `scripts/` pinned to its branch.
+4. **Never `pkill -f` matching `bun run tui` or `apps/tui/src/index.tsx`** - both
+   kill live officer desks, because the `8gent` binary execs exactly that. Use
+   `~/.claude/bin/tui-smoke`, which kills only the pid it started.
+5. **A deliverable is a FILE, not a chat message.** Approved tasks write to
+   `~/.8gent/creative/tasks/<token>/`; renderable source becomes a PNG.
+6. **Read the output, do not admire it.** "It compiles" is not "it works", and a
+   passing test is not a render.
+
+Background reading, in the `main` wiki: *How We Ship Here*, *Task Artifacts*,
+*Wayfinding and Sprawl*.
+
+---
+
 ## No-BS Mode (ALWAYS ON)
 
 **Every agent working on this repo MUST follow these rules:**

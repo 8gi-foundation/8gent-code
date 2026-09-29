@@ -42,6 +42,7 @@ import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import type { DaemonChannel } from "./types";
+import { installFlowTap } from "../telemetry/flow-stream";
 
 // EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
 // isolated instance can run alongside the shared production daemon without
@@ -179,6 +180,12 @@ export async function main(): Promise<void> {
 
 	const config = await loadConfig();
 	const poolConfig = await loadPoolConfig();
+
+	// Resonant Flow Wave 1: mirror LLM telemetry into the local flow stream
+	// (~/.8gent/flow/telemetry.jsonl). Passive read-side tap - the existing
+	// sink still receives everything unchanged, and flow records never leave
+	// the machine (packages/telemetry/flow-stream.ts).
+	installFlowTap();
 
 	if (localMode) {
 		console.log("[daemon-local] starting in local mode (loopback only)");

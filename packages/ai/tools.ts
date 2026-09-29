@@ -12,6 +12,8 @@ import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { killProcessTree, spawnShell } from "../core/shell";
+import { deckVideoAfterWrite } from "../deck/auto";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -218,6 +220,34 @@ const searchSymbols = tool({
 	},
 });
 
+const locate = tool({
+	description:
+		'Answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
+	inputSchema: z.object({
+		query: z
+			.string()
+			.describe("Symbol name, path fragment, quoted text, error message or short description"),
+	}),
+	execute: async ({ query }) => {
+		const { ensureIndexed } = await import("../ast-index");
+		const {
+			awaitIndex,
+			formatLocate,
+			LOCATE_INDEX_WAIT_MS,
+			locate: runLocate,
+		} = await import("../ast-index/locate");
+		const root = _ctx.workingDirectory;
+		// The same shared build the ToolExecutor uses, waited on only briefly:
+		// while it is still running, path and text search answer now and the
+		// answer says symbol search was skipped.
+		const { repoId, pending } = await awaitIndex(
+			ensureIndexed(root).then((index) => index.id),
+			LOCATE_INDEX_WAIT_MS,
+		);
+		return formatLocate(await runLocate(query, { root, repoId, indexPending: pending }));
+	},
+});
+
 // ============================================
 // File Operations
 // ============================================
@@ -251,7 +281,9 @@ const writeFile = tool({
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(absolutePath, content);
-		return `File written: ${absolutePath}`;
+		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
+		const deckLine = await deckVideoAfterWrite(absolutePath, content, _ctx.workingDirectory);
+		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 
@@ -968,6 +1000,9 @@ const backgroundStart = tool({
 		timeout: z.number().optional().describe("Timeout in milliseconds"),
 	}),
 	execute: async ({ command, timeout }) => {
+		const { systemOneGate } = await import("../permissions/system-one-gate");
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
 			const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
@@ -1046,6 +1081,12 @@ async function runShellCommand(command: string): Promise<string> {
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
 
+	// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after the
+	// permission check. It can only stop a command, never allow one.
+	const { systemOneGate } = await import("../permissions/system-one-gate");
+	const systemOne = await systemOneGate(command);
+	if (!systemOne.run) return systemOne.message as string;
+
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
 		command,
@@ -1060,32 +1101,20 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
-	const { spawn } = await import("node:child_process");
-
 	return new Promise((resolve) => {
-		const proc = spawn("sh", ["-c", finalCommand], {
+		const proc = spawnShell(finalCommand, {
 			cwd: _ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
-			detached: true,
+			processGroup: true,
 		});
 
 		let stdout = "";
 		let stderr = "";
 		let settled = false;
 
-		const killProcessTree = () => {
-			try {
-				process.kill(-proc.pid!, "SIGTERM");
-				setTimeout(() => {
-					try {
-						process.kill(-proc.pid!, "SIGKILL");
-					} catch {}
-				}, 3000);
-			} catch {
-				try {
-					proc.kill("SIGKILL");
-				} catch {}
-			}
+		const killTree = () => {
+			killProcessTree(proc.pid, "SIGTERM");
+			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 3000);
 		};
 
 		proc.stdout.on("data", (data) => {
@@ -1120,7 +1149,7 @@ async function runShellCommand(command: string): Promise<string> {
 					`[STILL RUNNING - promoted to background task]\nTask ID: ${taskId}\nThe command didn't exit within 10s, so it was moved to a background task.\nUse background_status("${taskId}") or background_output("${taskId}") to check on it.\n${partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""}`,
 				);
 			} catch {
-				killProcessTree();
+				killTree();
 				resolve(
 					`TIMEOUT: Command still running after 10s. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
 				);
@@ -1131,7 +1160,7 @@ async function runShellCommand(command: string): Promise<string> {
 			if (settled) return;
 			settled = true;
 			clearTimeout(autoPromoteTimeout);
-			killProcessTree();
+			killTree();
 			hookManager.executeHooks("afterCommand", {
 				command: finalCommand,
 				exitCode: -1,
@@ -1208,6 +1237,12 @@ const spawnAgent = tool({
 			const effectiveRuntime = runtime || "8gent";
 
 			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+				// runtime "shell" runs the task through sh -c, so it is a shell command.
+				if (effectiveRuntime === "shell") {
+					const { systemOneGate } = await import("../permissions/system-one-gate");
+					const systemOne = await systemOneGate(task);
+					if (!systemOne.run) return systemOne.message as string;
+				}
 				const { spawnCLIAgent } = await import("../orchestration");
 				const agent = spawnCLIAgent(effectiveRuntime, task, {
 					workingDirectory: _ctx.workingDirectory,
@@ -2174,7 +2209,7 @@ const runComputerTask = tool({
 			const visionCfg = loadVisionConfig();
 			const failover = new ModelFailover();
 
-			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
+			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-flash", "deepseek");
 			if (!process.env.OPENROUTER_API_KEY)
 				failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
 			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {
@@ -2827,6 +2862,7 @@ export const agentTools = {
 	get_outline: getOutline,
 	get_symbol: getSymbol,
 	search_symbols: searchSymbols,
+	locate,
 
 	// File operations
 	read_file: readFile,

@@ -27,6 +27,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"get_outline",
 		"get_symbol",
 		"search_symbols",
+		"locate",
 	],
 	git: [
 		"git_status",
@@ -119,6 +120,7 @@ const READONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"get_outline",
 	"get_symbol",
 	"search_symbols",
+	"locate",
 	"web_fetch",
 	"web_search",
 	"lsp_goto_definition",

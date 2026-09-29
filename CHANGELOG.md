@@ -9,6 +9,102 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
+
+### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2959)
+
+- **Sender allowlist.** The bridge authenticated inbound updates by chat id
+  only, and `dispatch-policy.ts` grants the `telegram` channel full
+  capability on the strength of that, assuming the allowlisted chat is one
+  operator's private chat. In a group that assumption fails: every member
+  could prompt an agent holding tools in the operator's home directory.
+  `TELEGRAM_AUTHORIZED_USER_IDS` is now checked at the same three points as
+  the chat allowlist, and fails closed: without it, a private chat behaves as
+  before and a group rejects every sender.
+- **Reply routing.** The daemon's wire format carries no chat id, so every
+  outbound went to the first allowlisted chat. With a group and a private
+  chat both allowlisted, a message sent in one was answered in the other. The
+  bridge now remembers the originating chat for the turn in flight and
+  replies there; the adapter and file sender take a resolver instead of a
+  fixed string. One field is sound rather than racy because `agentBusy`
+  already admits one prompt at a time.
+- **Consent.** Approvals were bound to the chat, not the person, so any
+  allowlisted sender could press Approve on a tool call, and an approval
+  raised in one chat could be resolved from another. Approvals are now bound
+  to the chat that raised them, and only `TELEGRAM_OPERATOR_USER_IDS` may
+  decide. Conversation and consent are different powers.
+
+### Fixed - the repo lint passes, so the CI gate can gate (#2961)
+
+- `bun run lint` had exited 1 on `main` since at least 2026-08-25, so the
+  `Validate` job failed on every pull request whatever it contained. Ten
+  errors across nine files are fixed: seven mechanical and
+  behaviour-preserving, three where the rule mis-reads correct code and now
+  carries a suppression with its reason. The 1417 warnings are untouched;
+  this makes the gate work, it does not clean the repo.
+
+### Added
+- `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
+
+### Added - Table: on-demand real-time message narration, never persisted (#2877)
+
+- `packages/table/message-speak.ts` (new): a "play this message aloud"
+  affordance for ANY Table message - synthesizes from the message's live
+  `content` in real time via `narrateTurn`/`voiceFor`/`HUMAN_VOICE`, reused
+  verbatim from `huddle-voice.ts` (no second TTS engine, no reimplementation
+  of the Supertonic call). `voiceForAuthor` picks an agent author's own
+  officer voice or `HUMAN_VOICE` for a human author - declared identity,
+  never inferred, same rule huddle-voice.ts already documents.
+  `synthesizeMessageSpeech` writes to a fresh temp directory removed in a
+  `finally` regardless of outcome - nothing survives past the call, by
+  design (this deliberately replaces the earlier persisted `audio_url`
+  direction from #2875/#2876 as the general pattern; that stays as-is for
+  the one message that already has a curated narration).
+- `packages/table/store.ts`: new public `TableStore.getMessage(id)`.
+- `packages/daemon/gateway.ts`: wires `POST /table/messages/<id>/speak` in,
+  mirroring the existing `handleAuditAccess` route idiom. Read authority
+  reuses the exact `listMessages({viewerId})` check `channel:presence`
+  already exercises - a private channel `human:local` isn't a member of
+  403s, never leaks content.
+- 13 new tests in `packages/table/__tests__/message-speak.test.ts`: voice
+  selection, ephemeral cleanup on success AND failure (injected fake
+  narrator, fast), full HTTP status mapping (404/403/422/503/200), and one
+  test that shells out to the REAL `supertonic` binary end to end (skipped,
+  never failed, when it is not installed) proving genuine non-silent WAV
+  bytes come back and no temp file survives.
+
+### Added - Table message narration: nullable audio_url/audio_duration_ms (#2875)
+
+- `packages/table/schema.sql`: `messages` gains nullable `audio_url TEXT` and
+  `audio_duration_ms INTEGER`. Additive only - a message without narration is
+  unaffected, and `TableStore`'s constructor now runs an idempotent
+  `ALTER TABLE` migration so an existing `~/.8gent/table/table.db` (from
+  before `CREATE TABLE IF NOT EXISTS` could pick up the new columns) gets
+  them too, on every open, safely re-run.
+- `packages/table/types.ts`: `Message.audioUrl` / `Message.audioDurationMs`.
+- `packages/table/message-audio.ts` (new): the daemon-local narration path
+  shape `/table/audio/<messageId>/<file>` and its loopback-only HTTP handler,
+  mirroring `huddle-stage.ts`'s `handleStageHttp` for a single persisted
+  message instead of a live huddle turn.
+- `packages/table/store.ts`: `postMessage` accepts optional
+  `audioUrl`/`audioDurationMs` at creation; new `attachAudio()` narrates an
+  already-posted message after the fact (author-only, same authority as
+  `editMessage`).
+- `packages/daemon/table-routes.ts`: `message:post` validates an optional
+  `audioUrl` against the daemon's own served-path shape; new
+  `message:attachAudio` frame for the after-the-fact case, broadcasting the
+  existing `message:updated` event.
+- `packages/daemon/gateway.ts`: wires `handleTableAudioHttp` in alongside the
+  huddle stage's HTTP handler.
+- 2 new tests in `packages/table/__tests__/store.test.ts` covering
+  `postMessage` with/without audio and `attachAudio`'s author-only authority
+  and round-trip through a re-read.
+
+This is the daemon half of Table message narration; the relay proxy
+(8gent-glasses#pending) and Flow playback UI (8gent-flow#pending) land as
+their own repos' changes.
+
 ### Added - Per-model benchmark attribution, step 4 (#2758)
 
 - `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second

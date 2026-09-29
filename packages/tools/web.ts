@@ -7,7 +7,8 @@
 
 import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
-import { JSDOM } from "jsdom";
+// jsdom is imported on first use: at import time it reads its default stylesheet
+// from its own install path, which does not exist inside a compiled binary.
 
 // ============================================
 // Types
@@ -168,6 +169,7 @@ export async function webFetch(
 
 		if (extractMain) {
 			// Use Readability for main content extraction
+			const { JSDOM } = await import("jsdom");
 			const dom = new JSDOM(html, { url: response.url });
 			const reader = new Readability(dom.window.document);
 			const article = reader.parse();

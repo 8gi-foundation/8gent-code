@@ -24,9 +24,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { renderSlide, THEME_VERSION, esc, type RenderContext } from "./slide-render";
 import type { SlideSpec } from "./slide-spec";
 
@@ -71,6 +72,28 @@ export interface BakedTurn {
 	assertedFields: string[];
 }
 
+/**
+ * The watchable artifact this huddle produced, recorded IN the manifest at
+ * bake time so replay resolves BY REFERENCE. Before this field existed the
+ * phone matched recordings by re-deriving the topic slug and comparing close
+ * times - fragile (the slug truncates at 40 chars) and unverifiable. The
+ * filename is the exact ~/.8gent/creative entry; the sha256 is of the MP4
+ * bytes, so the linkage is checkable after the fact.
+ *
+ * RETENTION: huddle recordings in ~/.8gent/creative are never auto-deleted by
+ * anything in this codebase; only James removes them. A manifest reference is
+ * therefore expected to stay resolvable - a gallery miss means the file was
+ * removed by hand, and replay honestly disappears rather than guessing.
+ */
+export interface HuddleRecording {
+	/** Bare filename inside ~/.8gent/creative - no path separators. */
+	file: string;
+	/** Hex sha256 of the MP4 bytes, proving WHICH file this huddle baked. */
+	sha256: string;
+	/** When the bake finished, epoch ms. */
+	bakedAt: number;
+}
+
 export interface HuddleManifest {
 	huddleId: string;
 	channelId: string;
@@ -79,6 +102,10 @@ export interface HuddleManifest {
 	openedAt: number;
 	closedAt: number;
 	turns: BakedTurn[];
+	/** Present only when a bake actually produced an MP4. Absent on manifests
+	 *  written before this field existed, on media-off closes, and on failed
+	 *  bakes - readers must treat absence as "no recording", never guess. */
+	recording?: HuddleRecording;
 }
 
 export function huddleDir(huddleId: string): string {
@@ -98,7 +125,8 @@ export function ensureHuddleDirs(huddleId: string): string {
  */
 export function writeSlide(huddleId: string, turnId: string, spec: SlideSpec, ctx: RenderContext): { path: string; sha256: string } {
 	const dir = ensureHuddleDirs(huddleId);
-	const { html, sha256 } = renderSlide(spec, ctx);
+	// The huddle id is already an argument here, so the caller cannot forget it.
+	const { html, sha256 } = renderSlide(spec, { ...ctx, huddleId });
 	const path = join(dir, "slides", `slide-${turnId}.html`);
 	writeFileSync(path, html, "utf8");
 	return { path, sha256 };
@@ -242,12 +270,43 @@ export interface BakeResult {
 	videoPath: string | null;
 	/** Honest, human-readable failure reason when videoPath is null. */
 	videoError?: string;
+	/** The manifest's recording linkage, when the MP4 was built AND the
+	 *  manifest rewrite landed. undefined otherwise - never fabricated. */
+	recording?: HuddleRecording;
 	slidePngs: string[];
 }
 
 function ffmpegClip(args: string[]): boolean {
 	const r = spawnSync("ffmpeg", args, { encoding: "utf8", timeout: 300_000 });
 	return r.status === 0;
+}
+
+/** Hex sha256 of a file's bytes. Huddle MP4s are tens of MB; one buffered
+ *  read at bake time (already seconds of Chrome + ffmpeg) is noise. */
+export function sha256File(path: string): string {
+	return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/**
+ * Link a freshly baked MP4 back into the manifest ON DISK. The manifest is
+ * written at the start of the bake - before the MP4 exists - so the recording
+ * field can only be added by this second write, after the concat succeeded.
+ * Old manifests are simply never rewritten: absence of the field IS the
+ * backfill story, and every reader treats absence as "no recording".
+ */
+export function writeRecordingToManifest(
+	manifestPath: string,
+	manifest: HuddleManifest,
+	videoPath: string,
+): HuddleRecording {
+	const recording: HuddleRecording = {
+		file: basename(videoPath),
+		sha256: sha256File(videoPath),
+		bakedAt: Date.now(),
+	};
+	manifest.recording = recording;
+	writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+	return recording;
 }
 
 /** Filesystem-safe slug. Deterministic. */
@@ -307,6 +366,9 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult 
 				index: turn.index + 1,
 				total: manifest.turns.length,
 				assertedFields: turn.assertedFields,
+				// Same design as the live render, because it comes from the same id.
+				// A re-bake of an old manifest reproduces the original visuals.
+				huddleId: manifest.huddleId,
 			});
 			writeFileSync(htmlPath, html, "utf8");
 		}
@@ -363,6 +425,16 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult 
 	}
 
 	result.videoPath = outPath;
+
+	// The recording is real - link it back into the manifest so replay resolves
+	// by reference (filename + hash), not by re-deriving a truncated slug. A
+	// failed rewrite must not unmake the good bake: the video still exists and
+	// is still reported; only the linkage is honestly absent.
+	try {
+		result.recording = writeRecordingToManifest(manifestPath, manifest, outPath);
+	} catch (err) {
+		console.warn(`[bake] recording linkage failed for ${manifest.huddleId}: ${(err as Error).message}`);
+	}
 	return result;
 }
 

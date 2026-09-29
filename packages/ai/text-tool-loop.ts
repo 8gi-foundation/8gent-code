@@ -7,12 +7,30 @@
  * the results back as a follow-up user message, and repeats until the model
  * replies with prose and no further tool calls (or a round cap is reached).
  *
+ * The follow-up message tells the model to keep calling tools until every step
+ * the user asked for is done: plain prose ends the turn, so prose is reserved
+ * for reporting completion or asking the user a genuine question. As a bounded
+ * backstop, the first no-tool-call reply that follows a successful tool round
+ * gets ONE completion check per turn (COMPLETION_CHECK_MESSAGE): the model
+ * either calls the tool for a step it has not done, or confirms with a summary
+ * that starts with DONE_MARKER. The check never reads the reply's wording or
+ * punctuation, except to leave a question to the user alone.
+ *
+ * The final answer is then checked against the turn's own tool log
+ * (claim-check.ts): commands the user asked to run that never ran, and files the
+ * answer says it wrote whose last write was blocked or never happened. Anything
+ * contradicted gets ONE follow-up per turn (claimFollowUpMessage) while a round
+ * remains; whatever is still contradicted when the turn ends is appended to the
+ * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
+ * A false completion claim is never passed through silently.
+ *
  * A tool that throws never breaks the loop: the error is turned into a short
  * string result and fed back to the model like any other tool output. The only
  * network/I/O the loop performs is whatever the caller's `call` and the tools'
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { checkClaims, claimFollowUpMessage, formatHarnessNote } from "./claim-check";
 import { runTextToolTurn, type TextToolMessage } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
 
@@ -42,9 +60,16 @@ export interface TextToolAgentOptions {
 }
 
 export interface TextToolAgentResult {
+	/** The answer to show the user, with any "[harness] Not verified" lines appended. */
 	content: string;
 	rounds: number;
 	toolLog: TextToolLogEntry[];
+	/**
+	 * Claims the tool log contradicts at the end of the turn, one short line
+	 * each (e.g. "'ls deck' was requested but never ran"). Empty when nothing
+	 * checkable was contradicted. Recorded in runs.jsonl as `unverified`.
+	 */
+	unverified: string[];
 }
 
 /**
@@ -80,6 +105,76 @@ const SHELL_WRITE_NOTE =
 	"shell. That is not the correct tool. To create or change a file, call " +
 	"write_file (or edit_file) with the path and content. Do not claim the file " +
 	"was written unless you call write_file and see its success result.";
+
+/**
+ * The message fed back when a reply ended inside an unclosed tool_call block.
+ * Structural, not a guess at wording: the parser saw a `tool_call` fence whose
+ * JSON object never closed.
+ */
+export function cutOffToolCallMessage(name: string | null): string {
+	const which = name ? `Your ${name} tool_call` : "Your last tool_call";
+	return (
+		`Error: ${which} was cut off before its JSON closed, most likely because ` +
+		"the reply hit the model's output token limit. Nothing was run. If you " +
+		"were writing a file, write it in smaller parts: call write_file with the " +
+		"first part, then add the rest with edit_file in further calls. Keep each " +
+		"tool_call short enough to finish."
+	);
+}
+
+/**
+ * The instruction appended after every round of tool results. The previous
+ * wording ("If you have enough information, reply with your final answer as
+ * plain prose") invited the model to stop after ANY step of a multi-step task:
+ * a local model that had just written deck/outline.md replied "Now let me write
+ * the Marp-style deck:" with no tool call, and that ended the turn. Plain prose
+ * with no tool_call block always ends the turn, so the instruction says so and
+ * reserves prose for the two cases where ending is right.
+ */
+export const FOLLOW_UP_INSTRUCTION = [
+	"If any step the user asked for is not done yet, call the tool for the next",
+	"step now: reply with only the tool_call block(s), and do not announce the",
+	"step first. A reply with no tool_call block ENDS your turn, so reply with",
+	"plain prose only when every step the user asked for is done (say what you",
+	"did) or when you must ask the user a question that no tool can answer.",
+].join("\n");
+
+/** The explicit marker a model puts at the start of its final summary. */
+export const DONE_MARKER = "DONE:";
+
+/** The one completion check a turn may receive. */
+export const COMPLETION_CHECK_MESSAGE = [
+	"Your last reply had no tool_call block, so nothing ran. Check the user's",
+	"request against what you have done so far.",
+	"- If any step the user asked for is not done yet, call the tool for the next",
+	"step now: reply with only the tool_call block(s).",
+	"- If every step is done, reply with your final summary of what you did, and",
+	`start it with "${DONE_MARKER}".`,
+].join("\n");
+
+/**
+ * Is this no-tool-call reply a question to the user? Structural: its last
+ * non-space character is "?". A question is a legitimate reason to end the turn
+ * (FOLLOW_UP_INSTRUCTION reserves prose for it), so it is never checked.
+ */
+export function isQuestionToUser(content: string): boolean {
+	return content.trim().endsWith("?");
+}
+
+/**
+ * Strip a leading DONE_MARKER (tolerating markdown bold around it, e.g.
+ * "**DONE:**") so the marker never reaches the user. Content without the
+ * marker is returned unchanged.
+ */
+export function stripDoneMarker(content: string): string {
+	const m = /^\s*\**DONE\**\s*:\s*\**\s*/.exec(content);
+	return m ? content.slice(m[0].length) : content;
+}
+
+/** executeTool's own failures, and tools' conventional error results. */
+function isErrorResult(result: string): boolean {
+	return /^\s*error\b/i.test(result);
+}
 
 /**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
@@ -125,12 +220,45 @@ export async function runTextToolAgent(
 	// so we own the growth here.
 	let messages: TextToolMessage[] = opts.messages.slice();
 	let lastContent = "";
+	// Did the previous round run at least one tool that did not error?
+	let prevRoundHadSuccess = false;
+	// The completion check fires at most once per turn.
+	let checked = false;
+	// The reply the check was sent after: the summary to fall back on when the
+	// model answers the check with a bare marker ("DONE:") and nothing else.
+	let preCheckContent = "";
+	const finalContent = (content: string): string => {
+		const stripped = stripDoneMarker(content);
+		if (stripped.trim() === "" && content.trim() !== "" && preCheckContent.trim() !== "") {
+			return preCheckContent;
+		}
+		return stripped;
+	};
+	// The claim check's follow-up fires at most once per turn.
+	let claimFollowUpSent = false;
+	// The user's request this turn: the last user message the caller sent.
+	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+	const claimsAgainstLog = (answer: string) =>
+		toolLog.length > 0 ? checkClaims({ request, answer, toolLog }) : [];
+	// Every exit goes through here: whatever the log still contradicts is
+	// appended as a factual note, never passed through silently.
+	const finish = (content: string, rounds: number): TextToolAgentResult => {
+		const unfulfilled = claimsAgainstLog(content);
+		if (unfulfilled.length === 0) return { content, rounds, toolLog, unverified: [] };
+		const note = formatHarnessNote(unfulfilled);
+		return {
+			content: content.trim() ? `${content.trimEnd()}\n\n${note}` : note,
+			rounds,
+			toolLog,
+			unverified: unfulfilled.map((u) => u.note),
+		};
+	};
 
 	for (let round = 1; round <= maxRounds; round++) {
 		// Stop before starting another round if the caller aborted (turn timeout,
 		// circuit breaker, user ESC). Return whatever prose the last round yielded.
 		if (opts.signal?.aborted) {
-			return { content: lastContent, rounds: round - 1, toolLog };
+			return finish(finalContent(lastContent), round - 1);
 		}
 		const turn = await runTextToolTurn({
 			messages,
@@ -139,16 +267,81 @@ export async function runTextToolAgent(
 		});
 		lastContent = turn.content;
 
+		// A reply that stopped inside a tool_call block (output token limit) is
+		// neither a final answer nor a runnable call. Tell the model exactly what
+		// happened and let it try again in smaller pieces, instead of ending the
+		// turn on its partial JSON or a bare "Unterminated string".
+		let cutOffNote = "";
+		if (turn.cutOffToolCall) {
+			cutOffNote = cutOffToolCallMessage(turn.cutOffToolCall.name);
+			// No round left to retry in: surface the error as the turn's text.
+			if (round === maxRounds) {
+				lastContent = [turn.content, cutOffNote].filter(Boolean).join("\n\n");
+			}
+			if (turn.toolCalls.length === 0) {
+				if (round === maxRounds) break;
+				// Nothing ran this round, so the next round no longer directly
+				// follows a successful tool round.
+				prevRoundHadSuccess = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: turn.content },
+					{ role: "user", content: cutOffNote },
+				];
+				continue;
+			}
+		}
+
 		if (turn.toolCalls.length === 0) {
-			// Model gave its final answer.
-			return { content: turn.content, rounds: round, toolLog };
+			// One bounded completion check: straight after a successful tool
+			// round, a reply with no tool call may be a real summary or a step the
+			// model announced and never took ("Now creating the Marp deck from the
+			// outline."). Its wording and punctuation cannot tell those apart, so
+			// ask the model once, while a round remains. It either calls the next
+			// tool (the loop carries on) or replies with prose, which is final.
+			if (
+				!checked &&
+				prevRoundHadSuccess &&
+				round < maxRounds &&
+				!isQuestionToUser(turn.content)
+			) {
+				checked = true;
+				preCheckContent = turn.content;
+				prevRoundHadSuccess = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: turn.content },
+					{ role: "user", content: COMPLETION_CHECK_MESSAGE },
+				];
+				continue;
+			}
+			// Model gave its final answer. Check it against the tool log once; a
+			// contradiction gets one follow-up while a round remains. A question
+			// to the user is left alone here (finish() still notes it).
+			const answer = finalContent(turn.content);
+			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(turn.content)) {
+				const unfulfilled = claimsAgainstLog(answer);
+				if (unfulfilled.length > 0) {
+					claimFollowUpSent = true;
+					prevRoundHadSuccess = false;
+					messages = [
+						...messages,
+						{ role: "assistant", content: turn.content },
+						{ role: "user", content: claimFollowUpMessage(unfulfilled) },
+					];
+					continue;
+				}
+			}
+			return finish(answer, round);
 		}
 
 		// Execute every requested tool and build a single labelled result block.
 		const resultParts: string[] = [];
+		prevRoundHadSuccess = false;
 		for (const tc of turn.toolCalls) {
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
+			if (!isErrorResult(result)) prevRoundHadSuccess = true;
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
 			// this result so the next round is steered back to the right tool.
@@ -163,6 +356,7 @@ export async function runTextToolAgent(
 		// user turn, and loop. We feed the raw turn content (prose minus the
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
+		if (cutOffNote) resultParts.push(cutOffNote);
 		messages = [
 			...messages,
 			{ role: "assistant", content: turn.content },
@@ -171,13 +365,12 @@ export async function runTextToolAgent(
 				content: [
 					...resultParts,
 					"",
-					"Use these tool results to answer. If you have enough information,",
-					"reply with your final answer as plain prose (no tool_call block).",
+					FOLLOW_UP_INSTRUCTION,
 				].join("\n"),
 			},
 		];
 	}
 
 	// Round cap hit with the model still calling tools: return the last prose.
-	return { content: lastContent, rounds: maxRounds, toolLog };
+	return finish(finalContent(lastContent), maxRounds);
 }

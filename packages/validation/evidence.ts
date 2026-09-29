@@ -13,10 +13,10 @@
  * - test_result: Test execution results
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Step, ToolCallRecord } from "../workflow/plan-validate";
+import { killProcessTree, spawnShell } from "../core/shell";
 
 // ============================================
 // Types
@@ -433,12 +433,12 @@ export class EvidenceCollector {
 			let stdout = "";
 			let stderr = "";
 
-			const proc = spawn("sh", ["-c", command], {
+			const proc = spawnShell(command, {
 				cwd: this.config.workingDirectory,
 			});
 
 			const timeout = setTimeout(() => {
-				proc.kill("SIGTERM");
+				killProcessTree(proc.pid, "SIGTERM");
 				reject(new Error(`Command timed out: ${command}`));
 			}, timeoutMs);
 

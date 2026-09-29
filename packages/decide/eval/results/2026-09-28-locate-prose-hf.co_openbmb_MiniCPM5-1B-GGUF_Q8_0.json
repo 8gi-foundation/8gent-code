@@ -1,0 +1,2348 @@
+{
+	"summary": {
+		"date": "2026-09-28T20:54:58.117Z",
+		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
+		"set": "locate-queries-prose.json",
+		"synthetic": true,
+		"backend": "ollama",
+		"model": "hf.co/openbmb/MiniCPM5-1B-GGUF:Q8_0",
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max",
+			"loadavg": [
+				41.84,
+				48.54,
+				42.52
+			]
+		},
+		"n": 40,
+		"answered": 40,
+		"warmUpMs": 420,
+		"rawAccuracy": 0.25,
+		"thresholdAll": 0.4273,
+		"heldOut": {
+			"accuracy": 0.225,
+			"coverage": 0.75,
+			"acceptedAccuracy": 0.3,
+			"method": "leave-one-out"
+		},
+		"classifierMs": {
+			"p50": 232.7,
+			"p95": 340.6,
+			"max": 441.3
+		},
+		"m1": {
+			"top5": 0.5,
+			"ms": {
+				"p50": 1195,
+				"p95": 3026,
+				"max": 8791.3
+			}
+		},
+		"m2": {
+			"top5": 0.35,
+			"ms": {
+				"p50": 596.3,
+				"p95": 841.1,
+				"max": 1206.9
+			},
+			"reasons": {
+				"model": 30,
+				"below_threshold": 10
+			}
+		},
+		"oracle": {
+			"top5": 0.575
+		},
+		"byMode": {
+			"symbol": {
+				"n": 10,
+				"raw": 1,
+				"gated": 0.9,
+				"m1Top5": 0.6,
+				"m2Top5": 0.7,
+				"oracleTop5": 0.7
+			},
+			"grep": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0.375,
+				"m2Top5": 0.125,
+				"oracleTop5": 0.375
+			},
+			"path": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0.625,
+				"m2Top5": 0.25,
+				"oracleTop5": 0.875
+			},
+			"semantic": {
+				"n": 8,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 0,
+				"m2Top5": 0,
+				"oracleTop5": 0
+			},
+			"hybrid": {
+				"n": 6,
+				"raw": 0,
+				"gated": 0,
+				"m1Top5": 1,
+				"m2Top5": 0.6666666666666666,
+				"oracleTop5": 1
+			}
+		},
+		"confusion": {
+			"symbol": {
+				"symbol": 10
+			},
+			"grep": {
+				"symbol": 8
+			},
+			"path": {
+				"symbol": 8
+			},
+			"semantic": {
+				"symbol": 8
+			},
+			"hybrid": {
+				"symbol": 6
+			}
+		},
+		"target": {
+			"accuracy": 0.85,
+			"p95Ms": 500
+		}
+	},
+	"rows": [
+		{
+			"id": "prose-01",
+			"query": "the function that turns token logprobs into a distribution over answer letters",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5067,
+				"probabilities": [
+					0.5067,
+					0.1805,
+					0.0267,
+					0.068,
+					0.218
+				],
+				"latencyMs": 232.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1222.3,
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"packages/db/convex/admin.ts",
+					"packages/decide/decide.test.ts",
+					"packages/ai/tools.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 618,
+				"top": [
+					"packages/decide/backends/llamacpp.ts",
+					"packages/decide/backends/ollama.ts",
+					"scripts/run-eval-set.ts",
+					"packages/design-compose/motion.ts",
+					"scripts/run-eval-set.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/llamacpp.ts",
+					"packages/decide/backends/ollama.ts",
+					"scripts/run-eval-set.ts",
+					"packages/design-compose/motion.ts",
+					"scripts/run-eval-set.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-02",
+			"query": "which class runs every tool call the agent makes",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tools.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5232,
+				"probabilities": [
+					0.5232,
+					0.2226,
+					0.0369,
+					0.0762,
+					0.1411
+				],
+				"latencyMs": 306.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1190.8,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"docs/STRESS-TEST-1M.md",
+					"packages/secrets/libsecret.ts",
+					"packages/decide/README.md",
+					"SOUL.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 208.1,
+				"top": [
+					"packages/ai/tools.ts",
+					"packages/eight/pre-tool-router.ts",
+					"packages/eight/tools.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/permissions/maker-checker-enforcer.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/ai/tools.ts",
+					"packages/eight/pre-tool-router.ts",
+					"packages/eight/tools.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/permissions/maker-checker-enforcer.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-03",
+			"query": "the function that picks which installed local model answers decisions",
+			"label": "symbol",
+			"files": [
+				"packages/decide/probe.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4664,
+				"probabilities": [
+					0.4664,
+					0.2434,
+					0.052,
+					0.0999,
+					0.1383
+				],
+				"latencyMs": 296.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1489.5,
+				"top": [
+					"packages/decide/probe.ts",
+					"README.md",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/providers/model-reroute.ts",
+					"CHANGELOG.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 579,
+				"top": [
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/decide/probe.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/decide/probe.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-04",
+			"query": "the helper that fits temperature and bias for guard calibration",
+			"label": "symbol",
+			"files": [
+				"packages/decide/calibrate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4273,
+				"probabilities": [
+					0.4273,
+					0.2427,
+					0.0483,
+					0.1222,
+					0.1596
+				],
+				"latencyMs": 264.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1731,
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"heldOutThreshold": 0.443,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 787.5,
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"bin/8gent.ts",
+					"packages/providers/host-placement.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/smoke.ts",
+					"packages/decide/calibrate.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-05",
+			"query": "where is the offline mock backend class for system one",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/mock.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4618,
+				"probabilities": [
+					0.4618,
+					0.2396,
+					0.0516,
+					0.1169,
+					0.13
+				],
+				"latencyMs": 259.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1064.2,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/security/README.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 365.5,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/dispatch/dispatch.smoke-test.ts",
+					"packages/eight/verdict.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/dispatch/dispatch.smoke-test.ts",
+					"packages/eight/verdict.test.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-06",
+			"query": "the class that detects doom loops in tool calls",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tool-loop-detector.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4676,
+				"probabilities": [
+					0.4676,
+					0.2279,
+					0.0425,
+					0.0991,
+					0.1629
+				],
+				"latencyMs": 213.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1341.6,
+				"top": [
+					"scripts/nightly-train.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/tool-loop-detector.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 640.4,
+				"top": [
+					"packages/eight/loops/computer-use.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/loops/computer-use.ts",
+					"packages/handeyes/__tests__/triggers.test.ts",
+					"packages/ai/task-router.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/eight/loops/computer-use.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/loops/computer-use.ts",
+					"packages/handeyes/__tests__/triggers.test.ts",
+					"packages/ai/task-router.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-07",
+			"query": "the function that resolves the ollama base url from the environment",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4542,
+				"probabilities": [
+					0.4542,
+					0.2275,
+					0.0495,
+					0.0723,
+					0.1965
+				],
+				"latencyMs": 340.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1434.3,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"docs/MODELS.md",
+					"packages/table/officers.ts",
+					"scripts/smoke.ts",
+					"scripts/utility-factory.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 597.9,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"packages/table/officers.ts",
+					"scripts/utility-factory.ts",
+					"packages/ai/edge-inference.ts",
+					"packages/eight/clui-bridge.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"packages/table/officers.ts",
+					"scripts/utility-factory.ts",
+					"packages/ai/edge-inference.ts",
+					"packages/eight/clui-bridge.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-08",
+			"query": "the memory store class backed by sqlite",
+			"label": "symbol",
+			"files": [
+				"packages/memory/store.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4538,
+				"probabilities": [
+					0.4538,
+					0.2521,
+					0.0536,
+					0.0814,
+					0.1591
+				],
+				"latencyMs": 214.5
+			},
+			"m1": {
+				"top5": true,
+				"ms": 8791.3,
+				"top": [
+					"packages/memory/store.ts",
+					"packages/table/SPEC.md",
+					"packages/memory/store.ts",
+					"packages/memory/store.test.ts",
+					"packages/control-plane/tenant.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 596.3,
+				"top": [
+					"packages/daemon/routes/store/kg.ts",
+					"packages/memory/scripts/traces.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/bus.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/daemon/routes/store/kg.ts",
+					"packages/memory/scripts/traces.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/bus.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-09",
+			"query": "the class that keeps secrets in the macos keychain",
+			"label": "symbol",
+			"files": [
+				"packages/secrets/keychain.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.443,
+				"probabilities": [
+					0.443,
+					0.2475,
+					0.0467,
+					0.1016,
+					0.1611
+				],
+				"latencyMs": 441.3
+			},
+			"m1": {
+				"top5": false,
+				"ms": 5121.6,
+				"top": [
+					"packages/hands/index.ts",
+					"docs/guides/DEPLOYMENT.md",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 666.7,
+				"top": [
+					"packages/hands/index.ts",
+					"packages/voice/tts-engine.ts",
+					"packages/ai/task-router.ts",
+					"packages/eight/harness/vault.ts",
+					"packages/voice/tts-engine.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/hands/index.ts",
+					"packages/voice/tts-engine.ts",
+					"packages/ai/task-router.ts",
+					"packages/eight/harness/vault.ts",
+					"packages/voice/tts-engine.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-10",
+			"query": "the bandit class that learns which model provider to route to",
+			"label": "symbol",
+			"files": [
+				"packages/providers/router-bandit.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4497,
+				"probabilities": [
+					0.4497,
+					0.2534,
+					0.0472,
+					0.0934,
+					0.1563
+				],
+				"latencyMs": 250.9
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1797,
+				"top": [
+					"packages/providers/host-placement.ts",
+					"README.md",
+					"CHANGELOG.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 452.8,
+				"top": [
+					"packages/providers/router-bandit.ts",
+					"packages/daemon/moa-verb.test.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/learned-skills.ts",
+					"scripts/e2e-tests.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/providers/router-bandit.ts",
+					"packages/daemon/moa-verb.test.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/learned-skills.ts",
+					"scripts/e2e-tests.ts"
+				],
+				"route": "symbol/system_one"
+			}
+		},
+		{
+			"id": "prose-11",
+			"query": "where do we set temperature zero and one predicted token for the judge request",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4384,
+				"probabilities": [
+					0.4384,
+					0.267,
+					0.0459,
+					0.0796,
+					0.169
+				],
+				"latencyMs": 229.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1941.3,
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 403.7,
+				"top": [
+					"apps/tui/src/components/plan-kanban.tsx",
+					"apps/tui/src/components/plan-kanban.tsx",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/repair-table-ledger.ts",
+					"packages/design-compose/__tests__/compose.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md",
+					"apps/8gent-eyes/README.md",
+					"packages/eight/honesty.ts"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-12",
+			"query": "which lines read the ollama host environment variable",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts",
+				"packages/memory/embeddings.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4434,
+				"probabilities": [
+					0.4434,
+					0.315,
+					0.0371,
+					0.0734,
+					0.1311
+				],
+				"latencyMs": 185.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 3026,
+				"top": [
+					"scripts/board-vessel/daemon.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/board-vessel/inference.ts",
+					"AGENTS.md",
+					"apps/tui/src/lib/provider-health.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 588,
+				"top": [
+					"apps/tui/src/lib/provider-readiness.ts",
+					"scripts/board-vessel/daemon.ts",
+					"bin/8gent.ts",
+					"packages/permissions/capability-manifest.test.ts",
+					"packages/decide/backends/llamacpp.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"README.md",
+					"packages/decide/README.md",
+					"packages/decide/docs/ENGINE.md",
+					"apps/tui/src/lib/provider-readiness.ts",
+					"AGENTS.md"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-13",
+			"query": "where is the comment about float output drifting between identical calls",
+			"label": "grep",
+			"files": [
+				"packages/decide/index.ts",
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4165,
+				"probabilities": [
+					0.4165,
+					0.2713,
+					0.0309,
+					0.1176,
+					0.1636
+				],
+				"latencyMs": 217.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1560.4,
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": true,
+				"ms": 766.1,
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md",
+					"SOUL.md",
+					"AGENTS.md",
+					"AGENTS.md"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-14",
+			"query": "where does the readme mention the no think prefix for reasoning models",
+			"label": "grep",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.431,
+				"probabilities": [
+					0.431,
+					0.2588,
+					0.0408,
+					0.071,
+					0.1984
+				],
+				"latencyMs": 294.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 767.8,
+				"top": [
+					"packages/decide/README.md",
+					"packages/personality/voice.ts",
+					"packages/decide/docs/ENGINE.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 371.5,
+				"top": [
+					"packages/executor/autonomous.ts",
+					"apps/8gent-bot/src/router.ts",
+					"packages/types/index.ts",
+					"packages/eight/__tests__/timetravel-checkpoint-store.test.ts",
+					"packages/eight/timetravel/checkpoint-store.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/README.md",
+					"README.md",
+					"README.md",
+					"apps/proxy/README.md",
+					"packages/decide/README.md"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-15",
+			"query": "where is the default localhost port for ollama written",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4542,
+				"probabilities": [
+					0.4542,
+					0.2443,
+					0.0498,
+					0.1065,
+					0.1453
+				],
+				"latencyMs": 380.8
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1625.8,
+				"top": [
+					"apps/proxy/src/server.ts",
+					"packages/decide/backends/ollama.ts",
+					"apps/8gent-flow/src/index.ts",
+					"docs/MODELS.md",
+					"packages/decide/backends/llamacpp.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 379.6,
+				"top": [
+					"apps/proxy/src/server.ts",
+					"apps/8gent-flow/src/index.ts",
+					"benchmarks/gate.ts",
+					"packages/marketplace/url-allowlist.ts",
+					"apps/8gent-computer/scripts/mock-daemon.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"docs/MODELS.md",
+					"packages/kernel/proxy.ts",
+					"packages/settings/defaults.ts",
+					"quarantine/model-comparison.md"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-16",
+			"query": "where is the log line printed when the index build finishes",
+			"label": "grep",
+			"files": [
+				"packages/eight/tools.ts",
+				"packages/eight/agent.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4613,
+				"probabilities": [
+					0.4613,
+					0.2869,
+					0.0374,
+					0.074,
+					0.1403
+				],
+				"latencyMs": 180.8
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1927.1,
+				"top": [
+					"apps/tui/src/components/pulse-logo.tsx",
+					"demo.tape",
+					"docs/frameworks.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 362.7,
+				"top": [
+					"packages/daemon/index.ts",
+					"packages/design-agent/index.ts",
+					"packages/self-autonomy/index.ts",
+					"packages/self-autonomy/index.ts",
+					"benchmarks/runner.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/daemon/index.ts",
+					"packages/permissions/index.ts",
+					"packages/ast-index/test-parser.ts",
+					"packages/ast-index/test-parser.ts",
+					"apps/tui/src/components/pulse-logo.tsx"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-17",
+			"query": "where do we write the blocked marker into a shell error message",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.3975,
+				"probabilities": [
+					0.3975,
+					0.2777,
+					0.0457,
+					0.1063,
+					0.1728
+				],
+				"latencyMs": 296.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 939.6,
+				"top": [
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/ai/text-tool-loop.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 841.1,
+				"top": [
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/ai/text-tool-loop.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/verify/index.ts",
+					"packages/decide/README.md",
+					"packages/verify/marker.ts"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-18",
+			"query": "which config line sets the timeout for a system one gate call",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4864,
+				"probabilities": [
+					0.4864,
+					0.2885,
+					0.0368,
+					0.0805,
+					0.1079
+				],
+				"latencyMs": 240.4
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1478,
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 599.3,
+				"top": [
+					"packages/eight/index.ts",
+					"packages/music/dj.ts",
+					"packages/db/src/workspace-db.ts",
+					"scripts/table-live-mesh.ts",
+					"bin/8gent.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts",
+					"packages/db/client.ts",
+					"packages/db/client.ts"
+				],
+				"route": "grep/system_one"
+			}
+		},
+		{
+			"id": "prose-19",
+			"query": "the calibration files for the bash guard",
+			"label": "path",
+			"files": [
+				"packages/decide/calibration/ollama-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
+				"packages/decide/calibration/ollama-llama3.2_3b.json",
+				"packages/decide/calibration/ollama-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/llamacpp-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+				"packages/decide/calibrate.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4618,
+				"probabilities": [
+					0.4618,
+					0.2233,
+					0.0546,
+					0.0909,
+					0.1694
+				],
+				"latencyMs": 179.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1950.9,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 464.9,
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"benchmarks/fixtures/documentation/DOC002-state-machine.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/decide/calibration/ollama-llama3.2_3b.json",
+					"packages/tools/bash-tool.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+					"packages/tools/bash-parser.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-20",
+			"query": "the readme for the decision engine package",
+			"label": "path",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.465,
+				"probabilities": [
+					0.465,
+					0.2339,
+					0.045,
+					0.0883,
+					0.1678
+				],
+				"latencyMs": 128.8
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1314.4,
+				"top": [
+					"SOUL.md",
+					"packages/pet/README.md",
+					"AGENTS.md",
+					"packages/eyes/README.md",
+					"AGENTS.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 708.6,
+				"top": [
+					"packages/executor/autonomous.ts",
+					"packages/decide/backends/llamacpp.ts",
+					"packages/eight/timetravel/checkpoint-store.ts",
+					"packages/permissions/coppa.test.ts",
+					"packages/gamedev/cli.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/voice/tts-engine.ts",
+					"packages/audit/decision-store.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/audit/decision-store.test.ts",
+					"packages/proactive/revenue-engine.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-21",
+			"query": "the default permission policies yaml",
+			"label": "path",
+			"files": [
+				"packages/permissions/default-policies.yaml"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4537,
+				"probabilities": [
+					0.4537,
+					0.216,
+					0.0653,
+					0.1067,
+					0.1583
+				],
+				"latencyMs": 299.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1115.1,
+				"top": [
+					"packages/hooks/index.ts",
+					"CONVENTIONS.md",
+					"packages/permissions/default-policies.yaml",
+					"docs/VESSEL-ABILITIES.md",
+					"docs/specs/MEMORY-TRUST.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 679.7,
+				"top": [
+					"packages/permissions/policy-engine.ts",
+					"packages/permissions/policy-engine.smoke-test.ts",
+					"packages/permissions/policy-engine.ts",
+					"packages/permissions/policy-engine.smoke-test.ts",
+					"packages/hooks/index.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/permissions/default-policies.yaml",
+					"packages/hooks/defaults.ts",
+					"docs/guides/permissions.md",
+					"config/board-vessels.yaml",
+					"packages/settings/defaults.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-22",
+			"query": "the brand guide at the repo root",
+			"label": "path",
+			"files": [
+				"BRAND.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4373,
+				"probabilities": [
+					0.4373,
+					0.2388,
+					0.0493,
+					0.0947,
+					0.1799
+				],
+				"latencyMs": 180.2
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1256.9,
+				"top": [
+					"bin/8gent.ts",
+					"docs/prd/8gent-computer/ux-spec.md",
+					"scripts/research-scraper.ts",
+					"BRAND.md",
+					"scripts/research-evaluate.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 550.1,
+				"top": [
+					"bin/8gent.ts",
+					"packages/personality/brand.ts",
+					"scripts/scan-to-table.ts",
+					"packages/verify/demo.ts",
+					"bin/8gent.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"BRAND.md",
+					"docs/guides/hooks.md",
+					"packages/reporting/index.ts",
+					"apps/video/src/Root.tsx",
+					"brand/BRAND_HEART.md"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-23",
+			"query": "the daemon websocket protocol spec",
+			"label": "path",
+			"files": [
+				"docs/specs/DAEMON-PROTOCOL.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4881,
+				"probabilities": [
+					0.4881,
+					0.2261,
+					0.0519,
+					0.0946,
+					0.1394
+				],
+				"latencyMs": 181.1
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1735.3,
+				"top": [
+					"docs/README.md",
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"AGENTS.md",
+					"README.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 711.4,
+				"top": [
+					"packages/telegram-bot/daemon-client.ts",
+					"packages/daemon/types.ts",
+					"apps/8gent-computer/scripts/mock-daemon.ts",
+					"scripts/dispatch-issues.ts",
+					"packages/daemon/index.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"packages/daemon/cron.ts",
+					"packages/table/SPEC.md",
+					"packages/daemon/index.ts",
+					"packages/eyes/marlin/tests/test_protocol.py"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-24",
+			"query": "the theme file for the terminal ui",
+			"label": "path",
+			"files": [
+				"apps/tui/src/theme.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5104,
+				"probabilities": [
+					0.5104,
+					0.2117,
+					0.0484,
+					0.0757,
+					0.1539
+				],
+				"latencyMs": 163.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 897.6,
+				"top": [
+					"AGENTS.md",
+					"AGENTS.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 583.8,
+				"top": [
+					"apps/tui/src/theme.ts",
+					"packages/goal/state-machine.ts",
+					"packages/table/__tests__/slide-theme.test.ts",
+					"apps/tui/src/lib/orchestrator-model.ts",
+					"packages/table/__tests__/slide-render.determinism.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"apps/tui/src/theme.ts",
+					"benchmarks/TERMINAL-BENCH.md",
+					"apps/tui/src/theme/index.ts",
+					"packages/pet/terminal-pet.ts",
+					"apps/tui/src/theme/tokens.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-25",
+			"query": "the python script that trains lora adapters",
+			"label": "path",
+			"files": [
+				"packages/kernel/train_lora.py"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4802,
+				"probabilities": [
+					0.4802,
+					0.2252,
+					0.0446,
+					0.0839,
+					0.1662
+				],
+				"latencyMs": 185.5
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1402.5,
+				"top": [
+					"scripts/social-feed-research.ts",
+					"packages/kernel/local-trainer.ts",
+					"docs/BENCHMARKS.md",
+					"packages/eight/repl.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 516.9,
+				"top": [
+					"scripts/social-feed-research.ts",
+					"scripts/nightly-train.ts",
+					"packages/core/win-path.test.ts",
+					"apps/tui/src/app.tsx",
+					"packages/eyes/marlin/capability.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"scripts/smoke.ts",
+					"packages/kernel/train_lora.py",
+					"scripts/test-bot.ts",
+					"scripts/benchmark.ts",
+					"scripts/e2e-tests.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-26",
+			"query": "the hyperagent spec document",
+			"label": "path",
+			"files": [
+				"docs/HYPERAGENT-SPEC.md"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4642,
+				"probabilities": [
+					0.4642,
+					0.2399,
+					0.0507,
+					0.0979,
+					0.1474
+				],
+				"latencyMs": 213.8
+			},
+			"m1": {
+				"top5": true,
+				"ms": 1871.5,
+				"top": [
+					"AGENTS.md",
+					"docs/HYPERAGENT-SPEC.md",
+					"README.md",
+					"README.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 519.9,
+				"top": [
+					"packages/orchestration/sequential-pipeline.ts",
+					"packages/design-compose/demo.ts",
+					"packages/lsp/index.ts",
+					"apps/linkedin-vessel/src/telegram-notify.ts",
+					"packages/memory/scripts/traces.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"docs/HYPERAGENT-SPEC.md",
+					"packages/table/SPEC.md",
+					"benchmarks/categories/documentation/benchmarks.ts",
+					"apps/linkedin-vessel/src/hyperagent.ts",
+					"benchmarks/fixtures/documentation/DOC001-api-module.ts"
+				],
+				"route": "path/system_one"
+			}
+		},
+		{
+			"id": "prose-27",
+			"query": "how does the agent notice it keeps repeating the same action",
+			"label": "semantic",
+			"files": [
+				"packages/eight/tool-loop-detector.ts",
+				"packages/daemon/loop-guard.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4164,
+				"probabilities": [
+					0.4164,
+					0.2687,
+					0.0431,
+					0.1227,
+					0.1491
+				],
+				"latencyMs": 244.8
+			},
+			"m1": {
+				"top5": false,
+				"ms": 1195,
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 1206.9,
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-28",
+			"query": "how do we stop the agent claiming it finished work it did not do",
+			"label": "semantic",
+			"files": [
+				"packages/eight/honesty.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.3884,
+				"probabilities": [
+					0.3884,
+					0.2787,
+					0.0486,
+					0.1237,
+					0.1606
+				],
+				"latencyMs": 125.1
+			},
+			"m1": {
+				"top5": false,
+				"ms": 607.1,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 771.6,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-29",
+			"query": "how is personal information kept out of prompts sent to cloud models",
+			"label": "semantic",
+			"files": [
+				"packages/permissions/pii-anonymizer.ts",
+				"packages/permissions/privacy-router.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4116,
+				"probabilities": [
+					0.4116,
+					0.2578,
+					0.0623,
+					0.1246,
+					0.1437
+				],
+				"latencyMs": 221
+			},
+			"m1": {
+				"top5": false,
+				"ms": 836.1,
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 872.5,
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-30",
+			"query": "how are passwords and tokens scrubbed from text before it is saved",
+			"label": "semantic",
+			"files": [
+				"packages/eight/secret-scanner.ts",
+				"packages/memory/redact.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4037,
+				"probabilities": [
+					0.4037,
+					0.2885,
+					0.0438,
+					0.1271,
+					0.1369
+				],
+				"latencyMs": 250.6
+			},
+			"m1": {
+				"top5": false,
+				"ms": 489,
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 790.8,
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-31",
+			"query": "what happens when a turn runs for too long",
+			"label": "semantic",
+			"files": [
+				"packages/eight/turn-timeout.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4411,
+				"probabilities": [
+					0.4411,
+					0.2637,
+					0.0441,
+					0.1116,
+					0.1395
+				],
+				"latencyMs": 227
+			},
+			"m1": {
+				"top5": false,
+				"ms": 805.3,
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/table/tools/post-to-channel.ts",
+					"README.md",
+					"docs/HARNESS-PLAN.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 311.7,
+				"top": [
+					"packages/ai/text-tool-client.test.ts",
+					"packages/ai/tools.ts",
+					"packages/ai/text-tool-loop.ts",
+					"packages/eight/tools.ts",
+					"packages/secrets/libsecret.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/table/tools/post-to-channel.ts",
+					"README.md",
+					"docs/HARNESS-PLAN.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-32",
+			"query": "how does the conversation get shorter when the context window fills up",
+			"label": "semantic",
+			"files": [
+				"packages/eight/compaction.ts",
+				"packages/eight/two-stage-compactor.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4006,
+				"probabilities": [
+					0.4006,
+					0.2539,
+					0.0408,
+					0.0854,
+					0.2193
+				],
+				"latencyMs": 190
+			},
+			"m1": {
+				"top5": false,
+				"ms": 533.5,
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 576.1,
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-33",
+			"query": "how does the system switch to another model when one stops answering",
+			"label": "semantic",
+			"files": [
+				"packages/providers/failover.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4128,
+				"probabilities": [
+					0.4128,
+					0.2669,
+					0.0508,
+					0.1317,
+					0.1377
+				],
+				"latencyMs": 224.3
+			},
+			"m1": {
+				"top5": false,
+				"ms": 545.8,
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 814.1,
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-34",
+			"query": "how are memories turned into vectors for similarity search",
+			"label": "semantic",
+			"files": [
+				"packages/memory/embeddings.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4023,
+				"probabilities": [
+					0.4023,
+					0.2807,
+					0.06,
+					0.0923,
+					0.1647
+				],
+				"latencyMs": 234.3
+			},
+			"m1": {
+				"top5": false,
+				"ms": 798.4,
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "hybrid",
+			"m2": {
+				"top5": false,
+				"ms": 638.2,
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				],
+				"route": "hybrid/prose",
+				"reason": "below_threshold"
+			},
+			"oracle": {
+				"top5": false,
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-35",
+			"query": "keychain vault on linux",
+			"label": "hybrid",
+			"files": [
+				"packages/secrets/libsecret.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5093,
+				"probabilities": [
+					0.5093,
+					0.2195,
+					0.0543,
+					0.0867,
+					0.1302
+				],
+				"latencyMs": 233.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 897.8,
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 654.4,
+				"top": [
+					"packages/secrets/keychain.test.ts",
+					"packages/secrets/keychain.test.ts",
+					"packages/secrets/keychain.ts",
+					"packages/secrets/keychain.ts",
+					"packages/auth/github.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-36",
+			"query": "memory consolidation schema",
+			"label": "hybrid",
+			"files": [
+				"packages/memory/consolidation.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5051,
+				"probabilities": [
+					0.5051,
+					0.2318,
+					0.0469,
+					0.0869,
+					0.1292
+				],
+				"latencyMs": 257.6
+			},
+			"m1": {
+				"top5": true,
+				"ms": 655.1,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 676,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"packages/memory/lint.ts",
+					"packages/memory/wiki.ts",
+					"packages/memory/types.ts",
+					"packages/memory/consolidation.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-37",
+			"query": "session manager",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/session-manager.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5042,
+				"probabilities": [
+					0.5042,
+					0.231,
+					0.0525,
+					0.0804,
+					0.1319
+				],
+				"latencyMs": 272.1
+			},
+			"m1": {
+				"top5": true,
+				"ms": 706.1,
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": false,
+				"ms": 280.8,
+				"top": [
+					"bin/debug.ts",
+					"packages/eight/cli.ts",
+					"bin/debug.ts",
+					"packages/lsp/index.ts",
+					"packages/lsp/index.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-38",
+			"query": "auto commit",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/auto-commit.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4997,
+				"probabilities": [
+					0.4997,
+					0.2222,
+					0.0502,
+					0.0888,
+					0.1392
+				],
+				"latencyMs": 252.3
+			},
+			"m1": {
+				"top5": true,
+				"ms": 463.4,
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 413.7,
+				"top": [
+					"packages/self-autonomy/index.ts",
+					"packages/self-autonomy/index.ts",
+					"benchmarks/autoresearch/tests/CB001-git-analyzer.test.ts",
+					"packages/eight/auto-commit.ts",
+					"packages/decide/backends/llamacpp.test.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-39",
+			"query": "maker checker enforcer",
+			"label": "hybrid",
+			"files": [
+				"packages/permissions/maker-checker-enforcer.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.5277,
+				"probabilities": [
+					0.5277,
+					0.2217,
+					0.0441,
+					0.0835,
+					0.1229
+				],
+				"latencyMs": 209.7
+			},
+			"m1": {
+				"top5": true,
+				"ms": 722.7,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 375.4,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.test.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/daemon/maker-checker.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		},
+		{
+			"id": "prose-40",
+			"query": "loop guard in the daemon",
+			"label": "hybrid",
+			"files": [
+				"packages/daemon/loop-guard.ts"
+			],
+			"model": {
+				"chosen": "symbol",
+				"confidence": 0.4957,
+				"probabilities": [
+					0.4957,
+					0.2131,
+					0.0426,
+					0.099,
+					0.1495
+				],
+				"latencyMs": 240.4
+			},
+			"m1": {
+				"top5": true,
+				"ms": 559.4,
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				]
+			},
+			"heldOutThreshold": 0.4273,
+			"gated": "symbol",
+			"m2": {
+				"top5": true,
+				"ms": 608.7,
+				"top": [
+					"packages/daemon/loop-guard.test.ts",
+					"packages/daemon/loop-guard.test.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/goal-rpc.ts"
+				],
+				"route": "symbol/system_one",
+				"reason": "model"
+			},
+			"oracle": {
+				"top5": true,
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				],
+				"route": "hybrid/prose"
+			}
+		}
+	]
+}

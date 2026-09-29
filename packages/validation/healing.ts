@@ -13,6 +13,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { shellInvocation } from "../core/shell";
 import { type Checkpoint, createCheckpoint, dropCheckpoint, restoreCheckpoint } from "./checkpoint";
 import { type FailureEntry, findPriorFailure, logFailure } from "./failure-log";
 
@@ -75,8 +76,11 @@ export class SelfHealer {
 	 */
 	verify(checks: VerifyCheck[]): VerifyResult {
 		const results = checks.map((check) => {
-			const r = spawnSync("sh", ["-c", check.command], {
+			const sh = shellInvocation(check.command);
+			const r = spawnSync(sh.file, sh.args, {
 				cwd: this.cwd,
+				windowsHide: true,
+				windowsVerbatimArguments: sh.windowsVerbatimArguments,
 				encoding: "utf-8",
 				timeout: check.timeoutMs ?? 60_000,
 			});

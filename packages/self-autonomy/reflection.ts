@@ -5,6 +5,7 @@
  * Inspired by Hermes (ArcadeAI) self-evolution patterns, rebuilt from scratch.
  */
 
+import { processFinding } from "../proactive/surfacing-gate.js";
 import { saveReflection } from "./evolution-db.js";
 import type { SessionReflection } from "./evolution-db.js";
 
@@ -80,6 +81,29 @@ export function reflect(sessionData: SessionData): SessionReflection {
 	};
 
 	saveReflection(reflection);
+
+	// Surfacing gate (Resonant Flow Wave 1): decide whether this background
+	// finding earns surfacing now or stays silently in the evolution DB.
+	// Fire-and-forget - reflection never blocks or fails on the gate, and the
+	// gate itself honors EIGHT_SURFACING_GATE=0. Error patterns only join the
+	// finding text when the session mostly failed; a healthy session's
+	// transient errors are not a finding worth an interruption.
+	const summaryLines = [
+		...skillsLearned.map((s) => `Learned: ${s}`),
+		...allPatterns.map((p) => `Pattern: ${p}`),
+		...(successRate < 0.5 && totalCalls > 0
+			? errorPatterns.map((e) => `Recurring problem: ${e}`)
+			: []),
+	];
+	if (summaryLines.length > 0) {
+		void processFinding({
+			text: summaryLines.join("\n"),
+			source: "reflection",
+			sessionId,
+			severity: totalCalls > 0 && successRate === 0 ? "failed" : "info",
+		}).catch(() => {});
+	}
+
 	return reflection;
 }
 

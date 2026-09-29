@@ -13,7 +13,7 @@
  * entry point; see `bin/8gent.ts` for that wiring.
  */
 
-import { spawn } from "node:child_process";
+import { spawnShell } from "../core/shell";
 
 // Minimal preset shape we need — kept loose so we don't import the
 // full type from apps/tui (cross-layer dep). The CLI subcommand
@@ -98,7 +98,7 @@ export async function runInstall(opts: RunInstallOpts): Promise<InstallRunResult
 	const stdio = opts.stdio ?? "inherit";
 
 	return new Promise((resolve) => {
-		const proc = spawn("bash", ["-lc", cmd], { stdio });
+		const proc = spawnShell(cmd, { stdio, posix: ["bash", "-lc"] });
 		proc.on("error", () => {
 			resolve({ action: "ran", command: cmd, exitCode: null });
 		});
