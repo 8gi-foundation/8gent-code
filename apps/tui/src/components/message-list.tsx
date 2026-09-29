@@ -5,8 +5,10 @@
  * - User messages: orange left-bar, "You" label
  * - 8gent messages: teal left-bar (latest assistant) or muted (older), "8gent" label
  * - Footer (assistant only, when metadata present): "Xs · N tok" in muted
- * - Tool calls: NEVER rendered in chat — they live in the ^B processes panel.
- *   The agent's in-flight activity surfaces via the status bar's plan verb.
+ * - Tool calls: one compact line each (✓ / ✗ / ⊘ + tool + short args), grouped
+ *   into the assistant reply of their turn (components/ToolTrail.tsx). Calls
+ *   with no reply yet show as a live trail. Raw tool output stays in the ^B
+ *   processes panel; the live "Running <tool>" status is unchanged.
  * - System messages: compact centered hints (single line) or blocks (multi-line)
  *
  * Width math: outer Box uses contentWidth; borderLeft consumes 1 col,
@@ -27,12 +29,14 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
+import { buildChatItems, type ChatItem, type ToolTrailEntry } from "../lib/tool-trail.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { t } from "../theme.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
 import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Stack } from "./primitives/Stack.js";
+import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 
@@ -135,8 +139,10 @@ interface MessageListProps {
  * Overhead per message: 1 header row + 1 marginBottom; assistant footer adds 1.
  * Body: count wrapped lines for each line of content.
  */
-function estimateMessageRows(message: Message, wrapWidth: number): number {
-	if (message.role === "tool") return 0;
+function estimateMessageRows(message: Message, wrapWidth: number, trail: ToolTrailEntry[] = []): number {
+	const trailRows = toolTrailRows(trail);
+	// A standalone trail (calls with no reply yet): its rows + marginBottom.
+	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
 	const safe = breakLongTokens(message.content, w);
 	let rows = 0;
@@ -154,7 +160,7 @@ function estimateMessageRows(message: Message, wrapWidth: number): number {
 		typeof message.tokens === "number"
 			? 3
 			: 2;
-	return rows + overhead;
+	return rows + overhead + trailRows;
 }
 
 export function MessageList({
@@ -183,11 +189,27 @@ export function MessageList({
 	// back) render statically — pages stay stable like a book.
 	const animatedIdsRef = useRef<Set<string>>(new Set());
 
-	// Tool messages never render in chat — they flow to the ^B processes panel.
-	const chatMessages = messages.filter((m) => m.role !== "tool");
+	// Raw tool messages never render in chat. Each finished call's trail entry
+	// attaches to its turn's assistant reply; calls with no reply yet become a
+	// standalone trail item.
+	const chatItems: ChatItem<Message>[] = buildChatItems(messages);
+	const chatMessages = chatItems.map((i) => i.message);
+	const trailById = new Map(chatItems.map((i) => [i.message.id, i.trail]));
 
 	// Per-message estimated row counts. Cheap to compute; no memo needed.
-	const rowEstimates = chatMessages.map((m) => estimateMessageRows(m, wrapBudget));
+	// A turn whose trail would push it past the whole window gets its trail
+	// capped (oldest calls fold into one summary row): an item taller than
+	// the container is what makes Ink leave stale characters behind.
+	const trailCaps = new Map<string, number>();
+	const rowEstimates = chatItems.map((i) => {
+		const full = estimateMessageRows(i.message, wrapBudget, i.trail);
+		const trailRows = toolTrailRows(i.trail);
+		if (trailRows === 0 || full <= resolvedRowBudget) return full;
+		const base = full - trailRows;
+		const cap = Math.max(1, resolvedRowBudget - base);
+		trailCaps.set(i.message.id, cap);
+		return base + toolTrailRows(i.trail, cap);
+	});
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
 	// scrollOffset = messages held back from the bottom. autoScrollRef tracks
@@ -329,6 +351,8 @@ export function MessageList({
 						contentWidth={resolvedContentWidth}
 						showAnimations={showAnimations}
 						isLatestAssistant={message.id === lastAssistantId}
+						trail={trailById.get(message.id) ?? []}
+						trailMaxRows={trailCaps.get(message.id)}
 						onAnimationStart={(id) => {
 							animatedIdsRef.current.add(id);
 						}}
@@ -355,6 +379,10 @@ interface MessageItemProps {
 	contentWidth: number;
 	showAnimations: boolean;
 	isLatestAssistant?: boolean;
+	/** Tool calls of this turn (assistant), or of a turn with no reply yet (tool). */
+	trail?: ToolTrailEntry[];
+	/** Row ceiling for the trail when the turn would not fit the window. */
+	trailMaxRows?: number;
 	/** Fires once on first mount when isNew=true. Parent uses it to record
 	 *  that this message has begun its typing animation, so future remounts
 	 *  (from scroll) render the message statically. */
@@ -370,6 +398,8 @@ function MessageItem({
 	contentWidth,
 	showAnimations,
 	isLatestAssistant = false,
+	trail = [],
+	trailMaxRows,
 	onAnimationStart,
 }: MessageItemProps) {
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
@@ -403,8 +433,26 @@ function MessageItem({
 		}
 	}, [isNew, message.id, onAnimationStart]);
 
-	// Tool messages never render in chat (filtered at MessageList level). Guard anyway.
-	if (message.role === "tool") return null;
+	// A "tool" item here is a standalone trail: calls with no reply yet. Raw
+	// tool messages are dropped by buildChatItems and never reach this point.
+	if (message.role === "tool") {
+		if (trail.length === 0) return null;
+		return (
+			<Box
+				flexDirection="column"
+				marginBottom={1}
+				width={contentWidth}
+				borderStyle="single"
+				borderTop={false}
+				borderRight={false}
+				borderBottom={false}
+				borderColor={t.muted}
+				paddingLeft={1}
+			>
+				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />
+			</Box>
+		);
+	}
 
 	// System messages render as subtle centered cards
 	if (message.role === "system") {
@@ -518,6 +566,9 @@ function MessageItem({
 					</>
 				)}
 			</Box>
+
+			{/* This turn's tool calls, one line each, above the reply text */}
+			{!isUser && trail.length > 0 && <ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />}
 
 			{/* Message body — left-bar carries the visual frame, strict width */}
 			<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
