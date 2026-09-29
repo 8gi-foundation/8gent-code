@@ -53,6 +53,30 @@ jobs:
       - name: Test
         run: bun run test
 
+      # Installs the real login service (Scheduled Task on Windows, systemd
+      # --user on Linux), checks the daemon answers /health, then removes it.
+      # The test file skips itself anywhere but a GitHub-hosted runner, so the
+      # grep makes a silent skip fail the step.
+      - name: Daemon login service, real install
+        env:
+          EIGHT_SERVICE_E2E: installed
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo loginctl enable-linger "$USER"
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            for _ in $(seq 1 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+          fi
+          bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          grep -q " 1 pass" service-e2e.log
+
+      - name: Daemon login service, no systemd user manager
+        if: runner.os == 'Linux'
+        env:
+          EIGHT_SERVICE_E2E: unavailable
+        run: |
+          XDG_RUNTIME_DIR=/nonexistent env -u DBUS_SESSION_BUS_ADDRESS bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          grep -q " 1 pass" service-e2e.log
+
       - name: CLI runs from source
         run: bun run bin/8gent.ts --version | grep "8gent Code v"
 

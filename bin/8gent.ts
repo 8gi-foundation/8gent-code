@@ -61,6 +61,14 @@ function repoRoot(): string | null {
 	}
 	return null;
 }
+// The argv a background service uses to run `8gent daemon run` through this
+// same install: the compiled binary alone, or the runtime plus this module
+// (bin/8gent.ts from a checkout, dist/cli.js from npm).
+function daemonProgram(): string[] {
+	const self = MODULE_IS_EMBEDDED ? [] : [fileURLToPath(import.meta.url)];
+	return [process.execPath, ...self, "daemon", "run"];
+}
+
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -116,6 +124,7 @@ COMMANDS:
   review --pr <number>        Review a specific PR diff
   auth <sub>                  Authentication (login, logout, status)
   cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
+  daemon <sub>                Always-on daemon (run, install, uninstall, start, stop, status)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
   mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
   publish <app-dir>           Build a .8gent-app.tar.gz archive for marketplace submission
@@ -153,6 +162,15 @@ CRON COMMANDS:
   cron remove <id>            Remove a cron job
   cron enable <id>            Enable a job
   cron disable <id>           Disable a job
+
+DAEMON COMMANDS:
+  daemon run                  Run the daemon in the foreground
+  daemon install              Install and start it as a login service
+                              (launchd on macOS, systemd --user on Linux,
+                              a Scheduled Task on Windows; no admin needed)
+  daemon uninstall            Stop and remove the login service
+  daemon start | stop         Start or stop the installed service
+  daemon status               Show whether the service is installed and running
 
 OPTIONS:
   -h, --help     Show this help message
@@ -450,6 +468,13 @@ async function main() {
 		case "cron":
 			await cronCommand(restArgs);
 			break;
+
+		case "daemon": {
+			const { daemonCommand } = await import("../packages/daemon/service.ts");
+			const code = await daemonCommand(restArgs, daemonProgram());
+			if (code !== null) process.exit(code);
+			break;
+		}
 
 		case "rpc": {
 			const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
