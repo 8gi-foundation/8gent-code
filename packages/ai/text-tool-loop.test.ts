@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
 	COMPLETION_CHECK_MESSAGE,
 	DONE_MARKER,
+	hasDoneMarker,
 	isQuestionToUser,
+	MAX_COMPLETION_CHECKS,
 	isShellFileWrite,
 	runTextToolAgent,
 	stripDoneMarker,
@@ -38,7 +40,7 @@ describe("runTextToolAgent", () => {
 					"```",
 				].join("\n");
 			}
-			return "The secret number is 4242.";
+			return "DONE: The secret number is 4242.";
 		};
 
 		const result = await runTextToolAgent({
@@ -139,7 +141,7 @@ describe("runTextToolAgent - cut-off tool_call", () => {
 					"```",
 				].join("\n");
 			}
-			return "Wrote the outline.";
+			return "DONE: Wrote the outline.";
 		};
 
 		const result = await runTextToolAgent({
@@ -287,7 +289,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			tc("write_file", { path: "deck/deck.md", content: "# What\n---\n# Why" }),
 			tc("run_command", { command: "ls deck" }),
 			tc("run_command", { command: "wc -l deck/deck.md" }),
-			"Done. Researched the package, wrote deck/outline.md and deck/deck.md (3 lines).",
+			"DONE: Researched the package, wrote deck/outline.md and deck/deck.md (3 lines).",
 		]);
 
 		const result = await runTextToolAgent({
@@ -299,7 +301,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 
 		expect(ws.files.has("deck/deck.md")).toBe(true);
 		expect(ws.commands).toEqual(["ls deck", "wc -l deck/deck.md"]);
-		expect(result.content).toStartWith("Done.");
+		expect(result.content).toStartWith("Researched the package");
 		expect(result.rounds).toBe(7);
 		expect(result.toolLog.map((t) => t.name)).toEqual([
 			"read_file",
@@ -317,7 +319,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		});
 	});
 
-	test("does not loop forever: a model that keeps announcing gets ONE continuation, then the turn ends", async () => {
+	test("does not loop forever: a model that keeps announcing is checked up to the cap, then the turn ends", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("write_file", { path: "deck/outline.md", content: "x" }),
@@ -333,10 +335,13 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			maxRounds: 50,
 		});
 
-		// One continuation, then one claim follow-up (ls deck and wc never ran),
-		// then the turn ends with both contradictions noted for the user.
-		expect(model.calls()).toBe(4);
-		expect(result.rounds).toBe(4);
+		// MAX_COMPLETION_CHECKS checks, then one claim follow-up (ls deck and wc
+		// never ran), then the turn ends with both contradictions noted.
+		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(
+			MAX_COMPLETION_CHECKS,
+		);
+		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS + 1);
+		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS + 1);
 		expect(result.content).toBe(
 			"Now let me write the deck:\n\n[harness] Not verified: 'ls deck' was requested but never ran.\n[harness] Not verified: 'wc -l deck/deck.md' was requested but never ran.",
 		);
@@ -344,7 +349,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		expect(ws.files.has("deck/deck.md")).toBe(false);
 	});
 
-	test("at most once per turn, even when the model works in between", async () => {
+	test("re-armed: a stall after the model resumes work is checked again, and DONE then ends it", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("write_file", { path: "deck/outline.md", content: "x" }),
@@ -353,7 +358,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			"Now I will run the checks:",
 			tc("run_command", { command: "ls deck" }),
 			tc("run_command", { command: "wc -l deck/deck.md" }),
-			"Ran ls deck and wc -l deck/deck.md.",
+			"DONE: Ran ls deck and wc -l deck/deck.md.",
 			"UNREACHED",
 		]);
 
@@ -364,10 +369,9 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			maxRounds: 50,
 		});
 
-		// The completion check is spent on "Next, the deck:"; the second
-		// announcement ends as a final answer, so the claim check (a separate,
-		// also once-per-turn follow-up) sends the unrun commands back.
-		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(1);
+		// One check after "Next, the deck:", a second after "Now I will run the
+		// checks:"; the DONE-marked reply after the last tool round is final.
+		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(2);
 		expect(model.calls()).toBe(7);
 		expect(ws.commands).toEqual(["ls deck", "wc -l deck/deck.md"]);
 		expect(result.content).toBe("Ran ls deck and wc -l deck/deck.md.");
@@ -518,7 +522,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		const model = scriptedModel([
 			tc("read_file", { path: "packages/decide/README.md" }),
 			"",
-			"It is called Eight System One.",
+			"DONE: It is called Eight System One.",
 		]);
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "What is it called?" }],
@@ -597,7 +601,7 @@ describe("runTextToolAgent - completion check", () => {
 			tc("write_file", { path: "deck/deck.md", content: "# What\n---\n# Why" }),
 			tc("run_command", { command: "ls deck" }),
 			tc("run_command", { command: "wc -l deck/deck.md" }),
-			"Researched the package, wrote deck/outline.md and deck/deck.md, listed deck, counted 3 lines.",
+			"DONE: Researched the package, wrote deck/outline.md and deck/deck.md, listed deck, counted 3 lines.",
 		]);
 
 		const result = await runTextToolAgent({
@@ -645,7 +649,7 @@ describe("runTextToolAgent - completion check", () => {
 		expect(result.content).toBe("Wrote deck/outline.md with five slides.");
 	});
 
-	test("no infinite loop: a model that keeps announcing with a period gets one check, then the turn ends", async () => {
+	test("no infinite loop: a model that keeps announcing with a period is checked up to the cap, then the turn ends", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("write_file", { path: "deck/outline.md", content: "x" }),
@@ -659,10 +663,10 @@ describe("runTextToolAgent - completion check", () => {
 			maxRounds: 50,
 		});
 
-		// One completion check, one claim follow-up, then the turn ends noted.
-		expect(model.calls()).toBe(4);
-		expect(result.rounds).toBe(4);
-		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		// MAX_COMPLETION_CHECKS checks, one claim follow-up, then the turn ends noted.
+		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS + 1);
+		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS + 1);
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
 		expect(result.content).toStartWith("Now creating the Marp deck from the outline.\n\n[harness] Not verified:");
 		expect(result.unverified).toHaveLength(2);
 		expect(ws.files.has("deck/deck.md")).toBe(false);
@@ -686,6 +690,147 @@ describe("runTextToolAgent - completion check", () => {
 		expect(model.calls()).toBe(2);
 		expect(model.seen.filter(isCheck)).toHaveLength(0);
 		expect(result.content).toBe("Outline written. Do you want the deck in Marp or reveal.js?");
+	});
+});
+
+// ── Re-check until DONE (Rishi pilot l2-solo-deck run 2026-09-29_225823) ─────
+//
+// qwen3.8 27B researched, wrote deck/outline.md, then replied with prose. The
+// one-per-turn check fired, and the model answered it with more prose and no
+// tool call: "I still need to write `deck/deck.md` and then run the
+// verification commands. Doing that now." That became the final answer, and
+// deck.md, ls deck and wc -l never happened.
+
+const RUN_225823_STALL =
+	"I still need to write `deck/deck.md` and then run the verification commands. Doing that now.";
+
+describe("runTextToolAgent - re-check until DONE", () => {
+	test("run 225823 replay: prose, check, 'Doing that now.', check again, then tools, and the task finishes", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What\n2. Why" }),
+			"The outline is written. Next I will build the Marp deck.",
+			RUN_225823_STALL,
+			tc("write_file", { path: "deck/deck.md", content: "# What\n---\n# Why" }),
+			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"DONE: Researched the package, wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: FIVE_STEP_TASK }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(isCheck(model.seen[3])).toBe(true);
+		expect(isCheck(model.seen[4])).toBe(true);
+		expect(model.seen[4][model.seen[4].length - 2]).toEqual({ role: "assistant", content: RUN_225823_STALL });
+		expect(model.seen.filter(isCheck)).toHaveLength(2);
+		expect(ws.files.get("deck/deck.md")).toBe("# What\n---\n# Why");
+		expect(ws.commands).toEqual(["ls deck", "wc -l deck/deck.md"]);
+		expect(model.calls()).toBe(8);
+		expect(result.rounds).toBe(8);
+		expect(result.content).toBe("Researched the package, wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l.");
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("a real finish: 'DONE: summary' ends the turn after one check", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Wrote deck/outline.md.",
+			"DONE: Wrote deck/outline.md with the outline.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write deck/outline.md" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(3);
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(result.content).toBe("Wrote deck/outline.md with the outline.");
+	});
+
+	test("a model that never complies stops at the cap: no infinite loop", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([tc("write_file", { path: "deck/outline.md", content: "x" }), RUN_225823_STALL]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write deck/outline.md, then deck/deck.md" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
+		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS);
+		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS);
+		expect(result.content).toBe(RUN_225823_STALL);
+	});
+
+	test("the cap is per turn: re-armed stalls share it", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "a.md", content: "a" }),
+			"Next.",
+			tc("write_file", { path: "b.md", content: "b" }),
+			"Next.",
+			tc("write_file", { path: "c.md", content: "c" }),
+			"Next.",
+			tc("write_file", { path: "d.md", content: "d" }),
+			"Stopping here.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write four files" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
+		expect(model.calls()).toBe(8);
+		expect(result.content).toBe("Stopping here.");
+	});
+
+	test("a question to the user after a check ends the turn at once", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			"Outline written.",
+			"Should the deck use Marp or reveal.js?",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "make a deck" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(3);
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(result.content).toBe("Should the deck use Marp or reveal.js?");
+	});
+
+	test("the check message still asks for DONE: plus a summary when finished", () => {
+		expect(COMPLETION_CHECK_MESSAGE).toContain(`start it with "${DONE_MARKER}"`);
+		expect(COMPLETION_CHECK_MESSAGE).toContain("final summary");
+	});
+});
+
+describe("hasDoneMarker", () => {
+	test("a leading DONE: or DONE. (plain or bold) is the marker", () => {
+		expect(hasDoneMarker("DONE: wrote it")).toBe(true);
+		expect(hasDoneMarker("  **DONE:** wrote it")).toBe(true);
+		expect(hasDoneMarker("DONE. All requested steps are complete")).toBe(true);
+	});
+	test("anything else is not", () => {
+		expect(hasDoneMarker("Done, mostly")).toBe(false);
+		expect(hasDoneMarker(RUN_225823_STALL)).toBe(false);
+		expect(hasDoneMarker("I am DONE: really")).toBe(false);
 	});
 });
 
@@ -837,7 +982,7 @@ describe("runTextToolAgent - claim check", () => {
 			tc("write_file", { path: "deck/deck.md", content: "# What" }),
 			tc("run_command", { command: "ls deck" }),
 			tc("run_command", { command: "wc -l deck/deck.md" }),
-			"Wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l deck/deck.md.",
+			"DONE: Wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l deck/deck.md.",
 			"UNREACHED",
 		]);
 		const result = await runTextToolAgent({
@@ -868,7 +1013,8 @@ describe("runTextToolAgent - claim check", () => {
 			maxRounds: 50,
 		});
 
-		expect(model.calls()).toBe(6);
+		// 3 tool rounds, the stall, MAX_COMPLETION_CHECKS answers, one claim follow-up.
+		expect(model.calls()).toBe(4 + MAX_COMPLETION_CHECKS + 1);
 		expect(result.unverified).toEqual([
 			"'ls deck' was requested but never ran",
 			"'wc -l deck/deck.md' was requested but never ran",

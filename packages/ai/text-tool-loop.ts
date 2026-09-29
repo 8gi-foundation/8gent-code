@@ -10,11 +10,15 @@
  * The follow-up message tells the model to keep calling tools until every step
  * the user asked for is done: plain prose ends the turn, so prose is reserved
  * for reporting completion or asking the user a genuine question. As a bounded
- * backstop, the first no-tool-call reply that follows a successful tool round
- * gets ONE completion check per turn (COMPLETION_CHECK_MESSAGE): the model
- * either calls the tool for a step it has not done, or confirms with a summary
- * that starts with DONE_MARKER. The check never reads the reply's wording or
- * punctuation, except to leave a question to the user alone.
+ * backstop, a no-tool-call reply that follows a successful tool round gets a
+ * completion check (COMPLETION_CHECK_MESSAGE): the model either calls the tool
+ * for a step it has not done, or confirms with a summary that starts with
+ * DONE_MARKER. Once a check is sent, a reply with no tool call ends the turn
+ * only if it carries DONE_MARKER or is a question to the user; anything else
+ * ("Doing that now.") is checked again. Checks are capped at
+ * MAX_COMPLETION_CHECKS per turn, so a model that never complies cannot loop.
+ * The check never reads the reply's wording or punctuation, except for the
+ * marker and to leave a question to the user alone.
  *
  * The final answer is then checked against the turn's own tool log
  * (claim-check.ts): commands the user asked to run that never ran, and files the
@@ -142,7 +146,18 @@ export const FOLLOW_UP_INSTRUCTION = [
 /** The explicit marker a model puts at the start of its final summary. */
 export const DONE_MARKER = "DONE:";
 
-/** The one completion check a turn may receive. */
+/** The most completion checks one turn may receive. */
+export const MAX_COMPLETION_CHECKS = 3;
+
+/**
+ * Does this reply start with the done marker (plain or in markdown bold)?
+ * "DONE." counts too: qwen answered the check that way in pilot run 142559.
+ */
+export function hasDoneMarker(content: string): boolean {
+	return /^\s*\**DONE\**\s*[:.]/.test(content);
+}
+
+/** The completion check, sent after a reply with no tool call. */
 export const COMPLETION_CHECK_MESSAGE = [
 	"Your last reply had no tool_call block, so nothing ran. Check the user's",
 	"request against what you have done so far.",
@@ -150,6 +165,8 @@ export const COMPLETION_CHECK_MESSAGE = [
 	"step now: reply with only the tool_call block(s).",
 	"- If every step is done, reply with your final summary of what you did, and",
 	`start it with "${DONE_MARKER}".`,
+	`Saying you will do a step is not doing it: a reply without a tool_call block`,
+	`or "${DONE_MARKER}" gets this check again.`,
 ].join("\n");
 
 /**
@@ -222,8 +239,11 @@ export async function runTextToolAgent(
 	let lastContent = "";
 	// Did the previous round run at least one tool that did not error?
 	let prevRoundHadSuccess = false;
-	// The completion check fires at most once per turn.
-	let checked = false;
+	// Completion checks sent this turn (capped at MAX_COMPLETION_CHECKS).
+	let checksSent = 0;
+	// Was the last message we sent a completion check the model has not yet
+	// answered with a tool call? Then prose without DONE_MARKER is not final.
+	let awaitingCheckAnswer = false;
 	// The reply the check was sent after: the summary to fall back on when the
 	// model answers the check with a bare marker ("DONE:") and nothing else.
 	let preCheckContent = "";
@@ -280,6 +300,8 @@ export async function runTextToolAgent(
 			}
 			if (turn.toolCalls.length === 0) {
 				if (round === maxRounds) break;
+				// A cut-off call is an attempt at a tool, not an answer to a check.
+				awaitingCheckAnswer = false;
 				// Nothing ran this round, so the next round no longer directly
 				// follows a successful tool round.
 				prevRoundHadSuccess = false;
@@ -293,20 +315,26 @@ export async function runTextToolAgent(
 		}
 
 		if (turn.toolCalls.length === 0) {
-			// One bounded completion check: straight after a successful tool
-			// round, a reply with no tool call may be a real summary or a step the
-			// model announced and never took ("Now creating the Marp deck from the
+			// Bounded completion check: straight after a successful tool round, a
+			// reply with no tool call may be a real summary or a step the model
+			// announced and never took ("Now creating the Marp deck from the
 			// outline."). Its wording and punctuation cannot tell those apart, so
-			// ask the model once, while a round remains. It either calls the next
-			// tool (the loop carries on) or replies with prose, which is final.
+			// ask the model while a round remains. After a check, only a reply
+			// carrying DONE_MARKER (or a question to the user) is final; more
+			// prose ("Doing that now.") is checked again, up to the cap.
+			// Once the model has been told the protocol this turn, a DONE-marked
+			// reply after later tool rounds is taken at its word.
+			const freshStall = prevRoundHadSuccess && !(checksSent > 0 && hasDoneMarker(turn.content));
+			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(turn.content);
 			if (
-				!checked &&
-				prevRoundHadSuccess &&
+				(freshStall || unansweredCheck) &&
+				checksSent < MAX_COMPLETION_CHECKS &&
 				round < maxRounds &&
 				!isQuestionToUser(turn.content)
 			) {
-				checked = true;
-				preCheckContent = turn.content;
+				checksSent++;
+				awaitingCheckAnswer = true;
+				if (freshStall) preCheckContent = turn.content;
 				prevRoundHadSuccess = false;
 				messages = [
 					...messages,
@@ -323,6 +351,7 @@ export async function runTextToolAgent(
 				const unfulfilled = claimsAgainstLog(answer);
 				if (unfulfilled.length > 0) {
 					claimFollowUpSent = true;
+					awaitingCheckAnswer = false;
 					prevRoundHadSuccess = false;
 					messages = [
 						...messages,
@@ -338,6 +367,8 @@ export async function runTextToolAgent(
 		// Execute every requested tool and build a single labelled result block.
 		const resultParts: string[] = [];
 		prevRoundHadSuccess = false;
+		// The model resumed tools: a later stall is a fresh one (re-armed).
+		awaitingCheckAnswer = false;
 		for (const tc of turn.toolCalls) {
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
