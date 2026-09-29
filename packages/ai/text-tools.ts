@@ -279,6 +279,88 @@ function locateBlocks(text: string): LocatedBlock[] {
 	return blocks;
 }
 
+/**
+ * Escape raw control characters (U+0000 to U+001F) that appear INSIDE JSON
+ * string literals, leaving every other character untouched. Outside strings
+ * those characters are legal whitespace (or a real syntax error that JSON.parse
+ * will still report), so structure is never altered. Escapes already present
+ * (`\n`, `\"`) are respected and not doubled.
+ */
+export function escapeControlCharsInStrings(jsonText: string): string {
+	let out = "";
+	let inString = false;
+	let escaped = false;
+	for (const ch of jsonText) {
+		if (!inString) {
+			if (ch === '"') inString = true;
+			out += ch;
+			continue;
+		}
+		if (escaped) {
+			escaped = false;
+			out += ch;
+			continue;
+		}
+		if (ch === "\\") {
+			escaped = true;
+			out += ch;
+			continue;
+		}
+		if (ch === '"') {
+			inString = false;
+			out += ch;
+			continue;
+		}
+		const code = ch.charCodeAt(0);
+		if (code < 0x20) {
+			out +=
+				ch === "\n"
+					? "\\n"
+					: ch === "\r"
+						? "\\r"
+						: ch === "\t"
+							? "\\t"
+							: `\\u${code.toString(16).padStart(4, "0")}`;
+			continue;
+		}
+		out += ch;
+	}
+	return out;
+}
+
+/**
+ * Detect a `tool_call` block whose JSON object was opened but never closed:
+ * the reply stopped mid-call, almost always because it hit the model's output
+ * token limit while writing a long argument (file content). Such a block
+ * cannot run, and without this check it was silently dropped and its partial
+ * JSON returned as prose. Returns the tool name (null when it cannot be read
+ * from the partial JSON) and the index of the block's opening fence, or null
+ * when every block is complete (or there are none). Never throws.
+ */
+export function findUnterminatedToolCall(
+	text: string,
+): { name: string | null; fenceStart: number } | null {
+	if (!text) return null;
+	const opener = new RegExp(TOOL_CALL_OPEN.source, "g");
+	let match: RegExpExecArray | null;
+	let searchFrom = 0;
+	while ((match = opener.exec(text)) !== null) {
+		if (match.index < searchFrom) continue;
+		const afterFence = opener.lastIndex;
+		const obj = scanBalancedObject(text, afterFence);
+		if (obj) {
+			searchFrom = obj.end;
+			opener.lastIndex = obj.end;
+			continue;
+		}
+		const brace = text.indexOf("{", afterFence);
+		if (brace === -1) continue;
+		const name = /"name"\s*:\s*"([^"\\]+)"/.exec(text.slice(brace));
+		return { name: name ? name[1] : null, fenceStart: match.index };
+	}
+	return null;
+}
+
 // Parse one JSON object substring into a ParsedToolCall, or null if it is not a
 // valid object with a string `name`. Never throws.
 function parseCall(jsonText: string): ParsedToolCall | null {
@@ -286,7 +368,15 @@ function parseCall(jsonText: string): ParsedToolCall | null {
 	try {
 		parsed = JSON.parse(jsonText);
 	} catch {
-		return null;
+		// Local models often write a long string value (file content) with
+		// literal line breaks or tabs instead of \n / \t escapes. Strict JSON
+		// rejects that. Retry once with ONLY those raw control characters inside
+		// string literals escaped; everything else must still be valid JSON.
+		try {
+			parsed = JSON.parse(escapeControlCharsInStrings(jsonText));
+		} catch {
+			return null;
+		}
 	}
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		return null;

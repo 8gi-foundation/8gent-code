@@ -8,6 +8,7 @@
 import { test, expect, describe } from "bun:test";
 import {
 	buildToolSystemPrompt,
+	findUnterminatedToolCall,
 	needsTextTools,
 	parseToolCalls,
 	stripToolCalls,
@@ -282,6 +283,91 @@ describe("parseToolCalls", () => {
 		const calls = parseToolCalls(text);
 		expect(calls).toHaveLength(1);
 		expect(calls[0].name).toBe("list_dir");
+	});
+});
+
+// Same shape as the write_file payload from the 2026-09-28 Rishi pilot turn
+// (ollama qwen3.8:27b-mlx): a multi-line Markdown outline with em dashes,
+// backticks, arrows and braces inside the string value.
+const OUTLINE = [
+	"# Eight System One \u2014 Deck Outline (5 slides)",
+	"",
+	"## Slide 1 \u2014 What is Eight System One?",
+	"- The harness asks typed questions about a `state` string",
+	"- Request/response shape: `{ state, questions[] }` -> `{ answers[] }`",
+	"",
+	"## Slide 2 \u2014 Backends",
+	"- `detectBackend()` tries llamacpp -> laya -> ollama",
+	"\tindented with a tab",
+].join("\n");
+
+describe("parseToolCalls - real local-model output", () => {
+	test("parses a properly escaped multi-line write_file call", () => {
+		const text = [
+			"```tool_call",
+			JSON.stringify({ name: "write_file", arguments: { path: "deck/outline.md", content: OUTLINE } }),
+			"```",
+		].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].arguments.content).toBe(OUTLINE);
+	});
+
+	test("parses a write_file call whose content has RAW newlines and tabs inside the string", () => {
+		// Local models often emit the string value with literal line breaks
+		// instead of \n escapes. Strict JSON.parse rejects that, and the call
+		// used to be dropped silently.
+		const rawBody = `{"name": "write_file", "arguments": {"path": "deck/outline.md", "content": "${OUTLINE.replace(/"/g, '\\"')}"}}`;
+		expect(() => JSON.parse(rawBody)).toThrow();
+		const text = ["```tool_call", rawBody, "```"].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].name).toBe("write_file");
+		expect(calls[0].arguments.content).toBe(OUTLINE);
+	});
+
+	test("raw control-character repair does not touch structure outside strings", () => {
+		const text = [
+			"```tool_call",
+			"{",
+			'\t"name": "write_file",',
+			'\t"arguments": {"path": "a.md", "content": "line one',
+			"line two with } and ``` inside",
+			'last"}',
+			"}",
+			"```",
+		].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].arguments).toEqual({
+			path: "a.md",
+			content: "line one\nline two with } and ``` inside\nlast",
+		});
+	});
+
+	test("still rejects genuinely malformed JSON (repair is not a free-for-all)", () => {
+		const text = ["```tool_call", '{"name": "write_file", "arguments": {path: nope}}', "```"].join("\n");
+		expect(parseToolCalls(text)).toEqual([]);
+	});
+});
+
+describe("findUnterminatedToolCall", () => {
+	test("reports a block cut off mid-string (output token limit)", () => {
+		const full = JSON.stringify({ name: "write_file", arguments: { path: "deck/outline.md", content: OUTLINE } });
+		const text = ["```tool_call", full.slice(0, Math.floor(full.length / 2))].join("\n");
+		expect(parseToolCalls(text)).toEqual([]);
+		expect(findUnterminatedToolCall(text)).toEqual({ name: "write_file", fenceStart: 0 });
+	});
+
+	test("returns null for complete calls and plain prose", () => {
+		const ok = ["```tool_call", '{"name": "list_dir", "arguments": {"path": "."}}', "```"].join("\n");
+		expect(findUnterminatedToolCall(ok)).toBeNull();
+		expect(findUnterminatedToolCall("Just prose, no tools.")).toBeNull();
+		expect(findUnterminatedToolCall("")).toBeNull();
+	});
+
+	test("reports a nameless cut-off block with name null", () => {
+		expect(findUnterminatedToolCall('Writing it now.\n```tool_call\n{"na')).toEqual({ name: null, fenceStart: 16 });
 	});
 });
 
