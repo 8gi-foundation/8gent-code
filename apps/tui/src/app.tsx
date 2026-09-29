@@ -5763,6 +5763,7 @@ export function App({
 						tabs={workspaceTabs.tabs}
 						onSwitch={workspaceTabs.switchTab}
 						isTabProcessing={perTabAgents.isTabProcessing}
+						animate={showAnimations}
 					/>
 				</Box>
 
@@ -5809,6 +5810,9 @@ export function App({
 							approvalPending={isApprovalPending}
 							autonomous={infiniteModeActive}
 							isProcessing={isProcessing}
+							lastTurnEndedAt={lastTurnEndedAt}
+							lastTurnSuccess={lastTurnSuccess}
+							animate={showAnimations}
 						/>
 
 						<Box

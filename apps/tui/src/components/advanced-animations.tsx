@@ -18,6 +18,9 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 
+/** Brand amber scale, dark to light (BRAND.md). No purple, pink or magenta. */
+const AMBER_SCALE = ["#8B3F12", "#C04E08", "#E8610A", "#F07A28", "#F4A259", "#F8C58C"] as const;
+
 // ============================================
 // Matrix Rain Effect
 // ============================================
@@ -390,7 +393,7 @@ interface Dot {
 }
 
 export function BouncingDots({ width = 40, height = 8, count = 8 }: BouncingDotsProps) {
-	const colors = ["cyan", "magenta", "yellow", "green", "red", "blue"];
+	const colors = [...AMBER_SCALE];
 
 	const [dots, setDots] = useState<Dot[]>(() =>
 		Array(count)
@@ -549,7 +552,7 @@ interface Particle {
 }
 
 const CONFETTI_CHARS = ["★", "✦", "✧", "◆", "◇", "●", "○", "■", "□", "▲", "△"];
-const CONFETTI_COLORS = ["red", "yellow", "green", "cyan", "blue", "magenta", "white"];
+const CONFETTI_COLORS = [...AMBER_SCALE, "#FAF7F4"];
 
 export function Confetti({ width = 50, height = 15, duration = 3000, onComplete }: ConfettiProps) {
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
@@ -769,7 +772,7 @@ const FACE_COLORS: Record<string, string> = {
 	B: "blue", // Blue face
 	G: "green", // Green face
 	Y: "yellow", // Yellow face
-	O: "magenta", // Orange (using magenta)
+	O: "#E8610A", // Orange (brand orange)
 };
 
 function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
@@ -863,20 +866,8 @@ interface GradientWaveProps {
 	speed?: number;
 }
 
-const GRADIENT_COLORS = [
-	"red",
-	"redBright",
-	"yellow",
-	"yellowBright",
-	"green",
-	"greenBright",
-	"cyan",
-	"cyanBright",
-	"blue",
-	"blueBright",
-	"magenta",
-	"magentaBright",
-] as const;
+// A warm wave through the brand amber scale and back, no hard wrap.
+const GRADIENT_COLORS = [...AMBER_SCALE, ...AMBER_SCALE.slice(1, -1).reverse()] as const;
 
 export function GradientWave({ text, speed = 150 }: GradientWaveProps) {
 	const [offset, setOffset] = useState(0);

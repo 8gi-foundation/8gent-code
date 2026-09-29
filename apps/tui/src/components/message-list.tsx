@@ -479,7 +479,7 @@ function MessageItem({
 				borderColor={t.muted}
 				paddingLeft={1}
 			>
-				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />
+				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} animate={showAnimations} />
 			</Box>
 		);
 	}
@@ -593,7 +593,7 @@ function MessageItem({
 
 			{/* This turn's tool calls, one line each, above the reply text */}
 			{!isUser && trail.length > 0 && (
-				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} />
+				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} animate={showAnimations} />
 			)}
 
 			{/* Message body — left-bar carries the visual frame, strict width */}

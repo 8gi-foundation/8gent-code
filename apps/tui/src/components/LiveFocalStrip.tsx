@@ -7,8 +7,9 @@
  * to orange when an approval is pending so the eye lands on it without
  * a second glance.
  *
- * Pure presentational: no state, no effects, no side-channels. Caller
- * owns every value.
+ * Presentational: the strip itself holds no state. The one motion, the
+ * figure-8 settling into DONE, lives in TurnStateLabel so it re-renders
+ * only the label. Caller owns every value.
  *
  * Per TUI North Star v2 PRD snippet 1 (issue #2335).
  *
@@ -36,7 +37,11 @@ import {
 	VERDICT_STUCK,
 	assembleVerdict,
 } from "../../../../packages/eight/go/index.js";
+import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
+import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
+import { glyphs } from "../lib/term-caps.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
 
 type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
@@ -56,6 +61,12 @@ interface LiveFocalStripProps {
 	/** True when the agent is actively processing. Drives the NOW vs READY
 	 *  state label - we don't shout "NOW" at an idle TUI. */
 	isProcessing?: boolean;
+	/** When the last turn ended (epoch ms), and whether it ended cleanly.
+	 *  A clean end shows DONE until the next turn starts. */
+	lastTurnEndedAt?: number | null;
+	lastTurnSuccess?: boolean | null;
+	/** False (Ctrl+A) stills the spinner and skips the settle beat. */
+	animate?: boolean;
 }
 
 /**
@@ -76,10 +87,13 @@ export function LiveFocalStrip({
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
+	lastTurnEndedAt = null,
+	lastTurnSuccess = null,
+	animate = true,
 }: LiveFocalStripProps) {
 	const displayMode = autonomous ? "Autonomous" : mode;
 	const showApprovalBorder = approvalPending && !autonomous;
-	const stateLabel = isProcessing ? "NOW" : "READY";
+	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	return (
 		<Box
 			width="100%"
@@ -92,7 +106,12 @@ export function LiveFocalStrip({
 			overflow="hidden"
 		>
 			<Box width={22} flexShrink={0}>
-				<Text color={isProcessing ? t.teal : t.muted}>◆ {stateLabel} </Text>
+				<TurnStateLabel
+					isProcessing={isProcessing}
+					lastTurnEndedAt={lastTurnEndedAt}
+					done={done}
+					animate={animate}
+				/>
 				<Text color={t.textPrimary} bold wrap="truncate-end">
 					{displayMode}
 				</Text>
@@ -100,7 +119,7 @@ export function LiveFocalStrip({
 
 			<Box flexGrow={1} minWidth={0} paddingX={1}>
 				<Text color={t.textSecondary} wrap="truncate-end">
-					{isProcessing ? activeStep : "idle"}
+					{isProcessing ? activeStep : done && lastTurnEndedAt ? `finished ${clock(lastTurnEndedAt)}` : "idle"}
 				</Text>
 			</Box>
 
@@ -112,6 +131,75 @@ export function LiveFocalStrip({
 			</Box>
 		</Box>
 	);
+}
+
+/** A turn is DONE when nothing runs and the last one ended cleanly. */
+export function isTurnDone(
+	isProcessing: boolean,
+	lastTurnEndedAt: number | null | undefined,
+	lastTurnSuccess: boolean | null | undefined,
+): boolean {
+	return !isProcessing && lastTurnSuccess === true && lastTurnEndedAt != null;
+}
+
+function clock(ms: number): string {
+	return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * The state label, and the one motion in the strip: while a turn runs the
+ * figure-8 spinner turns; when it ends cleanly the spinner holds still on its
+ * crossing frame for SETTLE_HOLD_MS, then resolves into DONE. The state lives
+ * here, not in the strip, so the settle re-renders only this label.
+ */
+export function TurnStateLabel({
+	isProcessing,
+	lastTurnEndedAt,
+	done,
+	animate,
+}: {
+	isProcessing: boolean;
+	lastTurnEndedAt: number | null;
+	done: boolean;
+	animate: boolean;
+}) {
+	const moving = motionEnabled(animate);
+	const [settlingFor, setSettlingFor] = useState<number | null>(null);
+	const seenEndRef = useRef<number | null>(lastTurnEndedAt);
+
+	useEffect(() => {
+		if (!done || lastTurnEndedAt == null || lastTurnEndedAt === seenEndRef.current) return;
+		seenEndRef.current = lastTurnEndedAt;
+		if (!moving) return;
+		setSettlingFor(lastTurnEndedAt);
+		const id = setTimeout(() => setSettlingFor(null), SETTLE_HOLD_MS);
+		return () => clearTimeout(id);
+	}, [done, lastTurnEndedAt, moving]);
+
+	const g = glyphs();
+	// Without braille the figure-8 is a plain, still "8".
+	const eight = g.eight;
+	if (isProcessing) {
+		return (
+			<Text>
+				{eight ? <Text color={t.orange}>{eight}</Text> : <FigureEight color={t.orange} animate={moving} />}
+				<Text color={t.teal}> NOW </Text>
+			</Text>
+		);
+	}
+	// The render that first sees a new clean end already shows the still
+	// frame, so DONE never flashes before the settle beat.
+	const unseen = lastTurnEndedAt !== seenEndRef.current;
+	if (done && moving && (unseen || settlingFor === lastTurnEndedAt)) {
+		return (
+			<Text>
+				<Text color={t.orange}>{eight ?? FIGURE_EIGHT_STILL}</Text>
+				<Text color={t.teal}> NOW </Text>
+			</Text>
+		);
+	}
+	if (done) return <Text color={t.green}>{g.dot} DONE </Text>;
+	return <Text color={t.muted}>{g.diamond} READY </Text>;
 }
 
 export type { LiveFocalStripProps };
