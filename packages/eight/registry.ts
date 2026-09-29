@@ -71,7 +71,7 @@ export const MODELS: ModelEntry[] = [
 
 	// Heavy cloud fallback: DeepSeek V4-Flash.
 	{
-		id: "deepseek-v4-flash",
+		id: "deepseek-flash",
 		label: "DeepSeek V4-Flash",
 		provider: "deepseek",
 		context: 1_000_000,

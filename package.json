@@ -35,8 +35,8 @@
     "build:eyes-bridge": "bash packages/eyes/native/build.sh",
     "cli": "bun run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core && node scripts/build-finalize.js",
-    "build:tui": "bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core",
+    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core --external sharp && node scripts/build-finalize.js",
+    "build:tui": "bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core --external sharp",
     "build:binaries": "bun run scripts/build-binaries.ts",
     "build:binaries:host": "bun run scripts/build-binaries.ts --host",
     "package:linux": "bash scripts/package-linux.sh",
@@ -45,6 +45,7 @@
     "postinstall": "node scripts/postinstall.js",
     "test": "bun test packages/ apps/",
     "test:benchmarks": "bun test benchmarks/",
+    "test:security": "bun test tests/security",
     "test:models": "bun scripts/test-models.ts",
     "test:models:providers": "bun scripts/test-models.ts --providers",
     "cua:setup": "bun run packages/eight/scripts/cua-setup.ts",
@@ -130,6 +131,7 @@
     "tree-sitter-python": "^0.21.0",
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-typescript": "^0.21.0",
+    "yaml": "^2.9.1",
     "zod": "^4.3.6"
   },
   "publishConfig": {

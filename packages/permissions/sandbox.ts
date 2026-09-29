@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { killProcessTree, shellInvocation } from "../core/shell";
 import type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
 import {
 	buildSeatbeltProfile,
@@ -106,16 +107,19 @@ async function runInTempdir(
 	let exitCode = 1;
 
 	try {
-		const proc = Bun.spawn(["sh", "-c", command], {
+		const sh = shellInvocation(command);
+		const proc = Bun.spawn([sh.file, ...sh.args], {
 			cwd: tmpDir,
 			stdout: "pipe",
 			stderr: "pipe",
 			env: safeEnv(opts.env),
+			windowsHide: true,
+			windowsVerbatimArguments: sh.windowsVerbatimArguments,
 		});
 
 		const timer = setTimeout(() => {
 			timedOut = true;
-			proc.kill();
+			killProcessTree(proc.pid, "SIGTERM");
 		}, opts.timeout);
 
 		const [out, err] = await Promise.all([

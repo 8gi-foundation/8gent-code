@@ -128,7 +128,7 @@ async function main(): Promise<void> {
 	// so the chain never attempts them and falls through to a hard error.
 	const failover = new ModelFailover();
 	if (!process.env.DEEPSEEK_API_KEY) {
-		failover.markDown("deepseek-v4-flash", "deepseek");
+		failover.markDown("deepseek-flash", "deepseek");
 	}
 	if (!process.env.OPENROUTER_API_KEY) {
 		failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");

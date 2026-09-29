@@ -176,16 +176,16 @@ export class ModelFailover {
 		const computerChain: FailoverEntry[] = [
 			APFEL_ENTRY,
 			{ model: "qwen3.6:27b", provider: "ollama" },
-			{ model: "deepseek-v4-flash", provider: "deepseek" },
+			{ model: "deepseek-flash", provider: "deepseek" },
 			{ model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
 		];
 
 		return {
 			"qwen3.6:27b": { models: computerChain },
 			"apple-foundationmodel": { models: computerChain },
-			"deepseek-v4-flash": {
+			"deepseek-flash": {
 				models: [
-					{ model: "deepseek-v4-flash", provider: "deepseek" },
+					{ model: "deepseek-flash", provider: "deepseek" },
 					{ model: "qwen3.6:27b", provider: "ollama" },
 					{
 						model: "meta-llama/llama-3-8b-instruct:free",

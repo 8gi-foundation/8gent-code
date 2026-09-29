@@ -37,8 +37,17 @@ assert("require_approval push master", checkGitPush("master"), false);
 // Normal branch — allowed
 assert("allow push feature", checkGitPush("feature/my-feature"), true);
 
-// Secret in file — block
-assert("block API_KEY in file", checkFileWrite("src/conf.ts", "const API_KEY = 'x'"), false);
+// Secret in file - block. The rule matches credential shapes, not the word
+// API_KEY, so the fixture needs a realistic (runtime-assembled, fake) value.
+const FAKE_SECRET_WRITE = `const API_KEY = '${["q8Zr", "T2vLx9", "Mw4Kp7Nb", "3Yc6Hd1Fs"].join("")}'`;
+assert("block API_KEY in file", checkFileWrite("src/conf.ts", FAKE_SECRET_WRITE), false);
+
+// Prose that only mentions credential words - allowed (pilot regression 2026-09-29)
+assert(
+	"allow docs that mention secret/token",
+	checkFileWrite("deck/outline.md", "- fires on secret-to-network\n- answer-token mapping"),
+	true,
+);
 
 // Normal file write — allowed
 assert("allow normal file write", checkFileWrite("src/utils.ts", "export const x = 1;"), true);
@@ -51,7 +60,7 @@ assert("allow bun run test", checkCommand("bun run test"), true);
 // Block rules should take priority over allow rules (blocks checked first)
 assert(
 	"block wins over allow - secrets still blocked",
-	checkFileWrite("src/conf.ts", "const API_KEY = 'x'"),
+	checkFileWrite("src/conf.ts", FAKE_SECRET_WRITE),
 	false,
 );
 

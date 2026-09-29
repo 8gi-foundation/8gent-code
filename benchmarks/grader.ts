@@ -6,6 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnShell } from "../packages/core/shell";
 import type {
 	BenchmarkDefinition,
 	BenchmarkResult,
@@ -361,11 +362,9 @@ export class BenchmarkGrader {
 	 * Execute a shell command
 	 */
 	private async executeCommand(command: string, timeout: number): Promise<ExecutionResult> {
-		const { spawn } = await import("node:child_process");
-
 		return new Promise((resolve) => {
 			const startTime = Date.now();
-			const proc = spawn("sh", ["-c", command], {
+			const proc = spawnShell(command, {
 				timeout,
 				cwd: this.workDir,
 			});

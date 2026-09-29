@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import { Box, useApp, useInput } from "ink";
+import { Box, type DOMElement, useApp, useInput } from "ink";
 import { t } from "./theme.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -106,17 +106,20 @@ import { useProcessPanel } from "./hooks/useProcessPanel.js";
 import { writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
+import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import { probeProviders } from "./lib/provider-health.js";
+import { PROBE_TIMEOUT_MS, createReadinessCache, withTimeout } from "./lib/provider-readiness.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
+import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -181,6 +184,7 @@ import {
 	deriveProviders,
 	deriveAgents,
 	deriveActiveTasks,
+	planStepsFromText,
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import {
@@ -188,6 +192,7 @@ import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
 } from "../../../packages/permissions/tui-approval-channel.js";
+import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -301,12 +306,18 @@ function loadProviderSettings(): { provider: string; model: string } {
  * Embedding-only providers are skipped.
  */
 function detectBestLocalProvider(): { provider: string; model: string } {
-	const { execSync } = require("node:child_process");
+	const { execFileSync } = require("node:child_process");
 
+	// Probe with the Bun runtime we are already running on, not curl: minimal
+	// Linux installs ship without curl, and then every local model silently
+	// went undetected. execFileSync keeps this synchronous and shell-free.
+	const PROBE =
+		"const r = await fetch(process.argv[1], { signal: AbortSignal.timeout(2000) }); process.stdout.write(await r.text());";
 	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
 		try {
-			const raw = execSync(`curl -s --max-time 2 "${url}"`, {
+			const raw = execFileSync(process.execPath, ["-e", PROBE, url], {
 				timeout: 3000,
+				stdio: ["ignore", "pipe", "ignore"],
 			}).toString();
 			const data = JSON.parse(raw);
 			const all = extract(data).flatMap((s: string) => {
@@ -388,6 +399,12 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import {
+	FALLBACK_SYSTEM_VOICE,
+	listInstalledSystemVoices,
+	resolveSpeechVoice,
+} from "../../../packages/voice/voice-resolver.js";
 
 // ----------------------------------------------------------------------------
 // TTS helper — speak agent replies via macOS `say` when voice.outputEnabled.
@@ -431,17 +448,17 @@ function speakAgentReply(role: string | undefined, text: string): void {
 // prompt so the auto-detect block + tagline body don't get read aloud. Gated
 // by voice.outputEnabled so users who turn TTS off don't hear startup banter.
 //
-// Soft modulation:
-// - rate 150 wpm via `-r 150` (macOS `say` default ~180 wpm). Calmer pace
-//   than chat replies, less corporate cadence.
-// - `[[pbas 35]]` speech-command tag drops the pitch base from default 50 to
-//   35, giving the line a gentler, more inviting feel. The `[[rset 0]]` tag
-//   resets any prior modulation state on the same `say` voice so this stays
-//   consistent across calls.
-// - Both modulations apply ONLY to onboarding. Normal chat replies use the
-//   speakLine helper (above) at default rate/pitch.
+// Engine and voice come from resolveSpeechVoice (packages/voice/voice-resolver):
+// macOS `say` with the onboarding pick, else settings.json voice.ttsVoice, else
+// the most natural installed voice. KittenTTS only on an explicit opt-in.
+// Normal rate and pitch: an earlier `[[pbas 35]]` pitch drop at 150 wpm made
+// the greeting sound slurred, and is gone. Off macOS the resolver returns
+// "none" and we stay silent, as before.
 // ----------------------------------------------------------------------------
-function speakOnboardingLine(rawText: string, voiceOverride?: string | null): void {
+function speakOnboardingLine(
+	rawText: string,
+	preference?: { engine?: string | null; voiceId?: string | null } | null,
+): void {
 	if (process.platform !== "darwin") return;
 	// Skip TTS entirely in non-TTY/CI so the smoke harness and piped
 	// invocations don't fork off background `say` processes.
@@ -464,28 +481,44 @@ function speakOnboardingLine(rawText: string, voiceOverride?: string | null): vo
 			.split("\n")
 			.map((l) => l.trim())
 			.find((l) => l.length > 0) ?? trimmed;
-	// Strip quotes (would terminate the shell argument) and inline `[[ ]]`
-	// tags from raw text so users can't accidentally inject speech commands.
+	// Strip quotes and inline `[[ ]]` speech-command tags from raw text so
+	// users can't accidentally inject speech commands.
 	const safe = firstLine
 		.replace(/"/g, "")
 		.replace(/\[\[[^\]]*\]\]/g, "")
 		.slice(0, 120);
-	const voice = (voiceOverride && voiceOverride.trim()) || "Moira";
-	// `[[rset 0]]` resets the voice state, then `[[pbas 35]]` lowers the
-	// pitch base for a softer delivery. Tags are inline speech commands; see
-	// `man say` (Speech Synthesis Manager).
-	const softText = `[[rset 0]] [[pbas 35]] ${safe}`;
-	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-r", "150", "-v", voice, softText], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {});
-		proc.unref();
-	} catch {
-		// Fail silently
-	}
+	void (async () => {
+		try {
+			const installed = await listInstalledSystemVoices();
+			const settingsVoice = s.voice?.ttsVoice;
+			const resolved = resolveSpeechVoice({
+				platform: process.platform,
+				settingsVoice,
+				preference,
+				installed,
+			});
+			if (resolved.engine === "none") return;
+			if (resolved.engine === "kitten") {
+				const proc = await new KittenTTSProvider().speak(safe, { voice: resolved.voice });
+				if ((await proc.exited) === 0) return;
+			}
+			// System voice, or the fallback when KittenTTS is missing or failed.
+			const voice =
+				resolved.engine === "system"
+					? resolved.voice
+					: (resolveSpeechVoice({ platform: process.platform, settingsVoice, installed }).voice ??
+						FALLBACK_SYSTEM_VOICE);
+			const { spawn } = require("node:child_process");
+			const proc = spawn("say", ["-v", voice, safe], {
+				stdio: "ignore",
+				detached: true,
+			});
+			proc.on("error", () => {});
+			proc.unref();
+		} catch {
+			// Fail silently
+		}
+	})();
 }
 
 // Import design agent
@@ -518,6 +551,8 @@ export interface Message {
 	timestamp: Date;
 	/** For tool messages: whether the tool succeeded */
 	toolSuccess?: boolean;
+	/** For tool-end messages: the one-line trail entry shown in chat (lib/tool-trail.ts) */
+	toolTrail?: ToolTrailEntry;
 	/** For assistant messages: total ms from request to last token (footer) */
 	latencyMs?: number;
 	/** For assistant messages: total tokens used by this turn (footer) */
@@ -540,6 +575,13 @@ type ViewMode =
 	| "history"
 	| "music"
 	| "message-viewer";
+
+// Honest empty states for the plan surfaces. Both fill only from a real
+// source; neither is ever padded with placeholder rows.
+const PLAN_EMPTY_LINE =
+	"No plan steps yet. They appear when the agent writes a PLAN: with numbered steps while working on a request.";
+const AVENUES_EMPTY_LINE =
+	"No avenues in this session. Nothing produces them yet, so this stays empty rather than showing guesses.";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -934,9 +976,9 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [expandedView, setExpandedView] = useState(false);
 
-	// Git state (would be populated from actual git commands)
-	const [isGitRepo] = useState(true);
-	const [currentBranch] = useState<string | null>("main");
+	// Git state is derived from useGitSync below (isGitRepo / currentBranch
+	// are never hardcoded - the header used to read "main" whatever branch
+	// was checked out, #2921).
 
 	// Session branching tree
 	const sessionTreeRef = useRef(new SessionTree());
@@ -951,7 +993,10 @@ export function App({
 
 	// Auto-populating kanban from real agent events
 	const autoKanban = useAutoKanban();
-	const [avenues, setAvenues] = useState<Avenue[]>([]);
+	// No real source produces avenues yet (packages/planning AvenueTracker is
+	// keyword triggers with invented probabilities). Stays empty until one does;
+	// /avenues says so in one line instead of showing placeholder paths.
+	const [avenues] = useState<Avenue[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [predictedSteps, setPredictedSteps] = useState<ProactiveStep[]>([]);
@@ -1357,6 +1402,10 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// Real rows of the chat box after layout (#3019). The viewport guess
+	// overestimated it and messages overprinted.
+	const chatBoxRef = useRef<DOMElement>(null);
+	const chatBoxRows = useMeasuredHeight(chatBoxRef);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [tvTasks, setTvTasks] = useState<TaskItem[]>([]);
@@ -1488,6 +1537,8 @@ export function App({
 
 	// V2 chrome data sources powering HeaderBar + LilEightBadge.
 	const gitSync = useGitSync(process.cwd(), 30_000);
+	const isGitRepo = gitSync.status !== "no-repo";
+	const currentBranch = gitSync.branch || null;
 	const lilEightStateValue = useLilEightState({
 		messages,
 		isProcessing,
@@ -1887,6 +1938,22 @@ export function App({
 		]);
 	}, []);
 
+	// System One (EIGHT_SYSTEM_ONE=1): load the judge in the background at
+	// startup so the user's first shell command is not the one that waits for
+	// the model load. Flag off: startSystemOneWarmup returns null, nothing loads.
+	useEffect(() => {
+		const warmup = startSystemOneWarmup();
+		if (!warmup) return;
+		addSystemMessage("System One judge loading...");
+		warmup.then(
+			() => addSystemMessage("System One judge ready."),
+			(err: Error) =>
+				addSystemMessage(
+					`System One judge failed to load (${err?.message ?? err}). Shell commands fail closed until it loads.`,
+				),
+		);
+	}, [addSystemMessage]);
+
 	/**
 	 * Append a message to a specific tab's history. Always updates
 	 * tabMessagesRef so background tabs accumulate output silently. If the
@@ -2051,6 +2118,7 @@ export function App({
 					content,
 					timestamp: new Date(),
 					toolSuccess: !isRealFailure,
+					toolTrail: toTrailEntry(event),
 				});
 			},
 			onStepFinish: (event: AgentStepEvent) => {
@@ -2100,32 +2168,30 @@ export function App({
 				}
 
 				if (isActive && event.text?.trim()) {
-					const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
-					if (planMatch) {
-						const planText = planMatch[1];
-						const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
-						if (stepMatches && stepMatches.length > 0) {
-							const steps = stepMatches.map((s, i) => ({
-								id: `plan-${Date.now()}-${i}`,
-								description: s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim(),
-								tool: "auto",
-								input: {},
-								priority: stepMatches.length - i,
-								confidence: 0.9,
-								category: "plan" as const,
-								predictedAt: new Date(),
-								basedOn: [],
-							}));
-							setKanbanBoard({
-								backlog: steps.slice(3) as any,
-								ready: steps.slice(0, 3) as any,
-								inProgress: [],
-								done: [],
-							});
-							setPredictedSteps(steps);
-							setPlanNextStep(steps[0]?.description || null);
-							setProcessingStage("executing");
-						}
+					// The only source of plan steps is the plan the agent itself
+					// wrote in this run. Nothing is guessed from the user's words.
+					const planLines = planStepsFromText(event.text);
+					if (planLines.length > 0) {
+						const steps = planLines.map((description, i) => ({
+							id: `plan-${Date.now()}-${i}`,
+							description,
+							tool: "auto",
+							input: {},
+							priority: planLines.length - i,
+							confidence: 1,
+							category: "plan" as const,
+							predictedAt: new Date(),
+							basedOn: [`step-${event.stepNumber}`],
+						}));
+						setKanbanBoard({
+							backlog: steps.slice(3) as any,
+							ready: steps.slice(0, 3) as any,
+							inProgress: [],
+							done: [],
+						});
+						setPredictedSteps(steps);
+						setPlanNextStep(steps[0]?.description || null);
+						setProcessingStage("executing");
 					}
 				}
 
@@ -2176,6 +2242,12 @@ export function App({
 		[activeTabId, appendToTab, autoKanban, markBodyPartStart, markBodyPartEnd],
 	);
 
+	// One shared readiness probe per provider/model (see createReadinessCache)
+	// and the last readiness notice shown, so a re-running effect neither
+	// starves the probe nor repeats the same line.
+	const readinessCacheRef = useRef(createReadinessCache());
+	const lastReadinessNoticeRef = useRef("");
+
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
 	// instance; the active-tab agent is mirrored into local `agent`/`agentReady`
 	// state so voice-chat / status-bar reads stay tab-correct without
@@ -2183,8 +2255,41 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
+		let cancelled = false;
+		const notify = (tabId: string, content: string) => {
+			if (lastReadinessNoticeRef.current === content) return;
+			lastReadinessNoticeRef.current = content;
+			appendToTab(tabId, {
+				id: `provider-readiness-${Date.now()}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+		};
 		const initAgent = async () => {
 			try {
+				// Bounded readiness gate. A local provider whose port accepts TCP
+				// but never answers used to leave this init awaiting forever, so
+				// the tab never became ready and nothing said why. Probe first;
+				// if it is down, fall back to the next healthy local provider.
+				const _gateTabId = workspaceTabs.activeTab?.id || "default";
+				const decision = await readinessCacheRef.current({
+					provider: currentProvider,
+					model: currentModel,
+				});
+				if (cancelled) return;
+				if (decision.kind === "fallback") {
+					notify(_gateTabId, decision.notice);
+					setCurrentProvider(decision.provider);
+					setCurrentModel(decision.model);
+					return; // Re-triggers this effect on the healthy provider.
+				}
+				if (decision.kind === "none") {
+					setAgentReady(false);
+					notify(_gateTabId, decision.notice);
+					return;
+				}
+
 				// Auto-assign router slots from actually available models
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
@@ -2235,7 +2340,9 @@ export function App({
 					apiKey: process.env.OPENROUTER_API_KEY,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 				});
-				const _readyOuter = await newAgent.isReady();
+				// Belt and braces: the client's own check has no bound, so cap it.
+				const _readyOuter = await withTimeout(newAgent.isReady(), PROBE_TIMEOUT_MS * 2, false);
+				if (cancelled) return;
 				if (_readyOuter) {
 					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
@@ -2266,6 +2373,10 @@ export function App({
 					} catch {}
 				} else {
 					setAgentReady(false);
+					notify(
+						_initTabId,
+						`Provider ${currentProvider} (${currentModel}) did not report ready within ${(PROBE_TIMEOUT_MS * 2) / 1000}s. Nothing will run until it does. Check it, or pick another with /provider.`,
+					);
 				}
 			} catch (err) {
 				setAgentReady(false);
@@ -2273,6 +2384,9 @@ export function App({
 			}
 		};
 		initAgent();
+		return () => {
+			cancelled = true;
+		};
 	}, [currentModel, currentProvider, activeTabId, buildEventsForTab]);
 
 	// When the active tab changes, surface its existing Agent (if any) into
@@ -2314,7 +2428,10 @@ export function App({
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question (first line only, gated by voice.outputEnabled)
-					speakOnboardingLine(question.question);
+					speakOnboardingLine(
+						question.question,
+						onboardingManager.getUser()?.preferences?.voice,
+					);
 					// Use setMessages directly to avoid stale closure issue
 					setMessages((prev) => [
 						...prev,
@@ -2483,24 +2600,40 @@ export function App({
 					break;
 
 				case "predict":
+					if (predictedSteps.length === 0) {
+						addSystemMessage(PLAN_EMPTY_LINE);
+						break;
+					}
 					setViewMode((prev) => (prev === "predict" ? "chat" : "predict"));
 					break;
 
 				case "avenues":
+					if (avenues.length === 0) {
+						addSystemMessage(AVENUES_EMPTY_LINE);
+						break;
+					}
 					setViewMode((prev) => (prev === "avenues" ? "chat" : "avenues"));
 					break;
 
-				case "plan":
+				case "plan": {
+					const planTotal =
+						kanbanBoard.backlog.length +
+						kanbanBoard.ready.length +
+						kanbanBoard.inProgress.length +
+						kanbanBoard.done.length;
 					if (autoKanban.stats.total > 0) {
 						addSystemMessage(
 							`Task board (auto):\n  Backlog: ${autoKanban.columns.backlog.length}\n  Ready: ${autoKanban.columns.ready.length}\n  In Progress: ${autoKanban.columns.inProgress.length}\n  Done: ${autoKanban.stats.done} | Failed: ${autoKanban.stats.failed}\n  Total: ${autoKanban.stats.total} tasks`,
 						);
-					} else {
+					} else if (planTotal > 0) {
 						addSystemMessage(
 							`Current plan status:\n  Backlog: ${kanbanBoard.backlog.length} items\n  Ready: ${kanbanBoard.ready.length} items\n  In Progress: ${kanbanBoard.inProgress.length} items\n  Done: ${kanbanBoard.done.length} items`,
 						);
+					} else {
+						addSystemMessage(PLAN_EMPTY_LINE);
 					}
 					break;
+				}
 
 				case "status": {
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
@@ -4646,147 +4779,6 @@ export function App({
 		// clearActivity() removed — keep completed tools in the process log as history
 	}, []);
 
-	// Generate predictions based on input
-	const generatePredictions = useCallback((input: string) => {
-		const inputLower = input.toLowerCase();
-		const predictions: ProactiveStep[] = [];
-
-		// Generate context-aware predictions
-		if (inputLower.includes("fix") || inputLower.includes("bug")) {
-			predictions.push({
-				id: `pred-${Date.now()}-1`,
-				description: "Run tests to verify fix",
-				tool: "exec",
-				input: { command: "npm test" },
-				priority: 9,
-				confidence: 0.85,
-				category: "test",
-				predictedAt: new Date(),
-				basedOn: [],
-			});
-		}
-
-		if (inputLower.includes("add") || inputLower.includes("create")) {
-			predictions.push({
-				id: `pred-${Date.now()}-2`,
-				description: "Create test file for new feature",
-				tool: "write_file",
-				input: {},
-				priority: 7,
-				confidence: 0.7,
-				category: "test",
-				predictedAt: new Date(),
-				basedOn: [],
-			});
-		}
-
-		// Always add some general predictions
-		predictions.push(
-			{
-				id: `pred-${Date.now()}-3`,
-				description: "Search for related code",
-				tool: "search_symbols",
-				input: { query: input.split(" ").slice(0, 3).join(" ") },
-				priority: 6,
-				confidence: 0.6,
-				category: "exploration",
-				predictedAt: new Date(),
-				basedOn: [],
-			},
-			{
-				id: `pred-${Date.now()}-4`,
-				description: "Commit changes",
-				tool: "exec",
-				input: { command: "git commit" },
-				priority: 5,
-				confidence: 0.5,
-				category: "git",
-				predictedAt: new Date(),
-				basedOn: [],
-			},
-		);
-
-		return predictions.sort((a, b) => b.confidence * b.priority - a.confidence * a.priority);
-	}, []);
-
-	// Generate avenues based on input
-	const generateAvenues = useCallback((input: string): Avenue[] => {
-		const inputLower = input.toLowerCase();
-		const avenues: Avenue[] = [];
-
-		if (inputLower.includes("fix") || inputLower.includes("bug") || inputLower.includes("error")) {
-			avenues.push({
-				id: `avenue-${Date.now()}-1`,
-				name: "Fix Bug",
-				description: `Debug and fix: ${input.slice(0, 30)}...`,
-				probability: 0.8,
-				category: "bugfix",
-				triggers: ["fix", "bug", "error"],
-				plan: {
-					goal: "Fix the reported issue",
-					steps: [
-						{
-							id: "1",
-							description: "Search for error",
-							tool: "search_symbols",
-						},
-						{ id: "2", description: "Get symbol details", tool: "get_symbol" },
-						{ id: "3", description: "Apply fix", tool: "edit_file" },
-					],
-					estimatedTime: 120,
-				},
-			});
-		}
-
-		if (
-			inputLower.includes("add") ||
-			inputLower.includes("create") ||
-			inputLower.includes("implement")
-		) {
-			avenues.push({
-				id: `avenue-${Date.now()}-2`,
-				name: "Implement Feature",
-				description: `Build: ${input.slice(0, 30)}...`,
-				probability: 0.7,
-				category: "feature",
-				triggers: ["add", "create", "implement"],
-				plan: {
-					goal: "Implement the new feature",
-					steps: [
-						{
-							id: "1",
-							description: "Search existing code",
-							tool: "search_symbols",
-						},
-						{ id: "2", description: "Create new file", tool: "write_file" },
-						{ id: "3", description: "Add tests", tool: "write_file" },
-					],
-					estimatedTime: 180,
-				},
-			});
-		}
-
-		// Always add exploration avenue
-		avenues.push({
-			id: `avenue-${Date.now()}-3`,
-			name: "Explore Codebase",
-			description: `Understand: ${input.slice(0, 30)}...`,
-			probability: 0.5,
-			category: "explore",
-			triggers: ["show", "find", "where", "what"],
-			plan: {
-				goal: "Understand the relevant code",
-				steps: [
-					{ id: "1", description: "Get file outline", tool: "get_outline" },
-					{ id: "2", description: "Search symbols", tool: "search_symbols" },
-				],
-				estimatedTime: 60,
-			},
-		});
-
-		return avenues.sort((a, b) => b.probability - a.probability);
-	}, []);
-
 	// Handle command submission. Defaults to the active tab; pass `submitTabId`
 	// explicitly to route a submission to a specific (potentially non-active)
 	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
@@ -4838,7 +4830,10 @@ export function App({
 			if (/^\d+:/.test(input.trim())) {
 				addSystemMessage("Telegram token received. Your bot will activate on next launch.");
 				// Speak confirmation (gated by voice.outputEnabled)
-				speakOnboardingLine("Telegram bot token saved. Brilliant.");
+				speakOnboardingLine(
+					"Telegram bot token saved. Brilliant.",
+					onboardingManager.getUser()?.preferences?.voice,
+				);
 			}
 
 			const result = onboardingManager.processAnswer(input);
@@ -4855,7 +4850,7 @@ export function App({
 					]);
 					// Speak each question aloud during onboarding (gated by voice.outputEnabled)
 					{
-						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId;
+						const voice = onboardingManager.getUser()?.preferences?.voice;
 						speakOnboardingLine(result.nextQuestion.question, voice);
 					}
 				} else {
@@ -4872,7 +4867,7 @@ export function App({
 					);
 					// Speak the welcome (gated by voice.outputEnabled)
 					{
-						const voice = user.preferences?.voice?.voiceId;
+						const voice = user.preferences?.voice;
 						speakOnboardingLine(
 							`Welcome ${name}. Let's build something magnificent.`,
 							voice,
@@ -5029,18 +5024,14 @@ export function App({
 				return;
 			}
 
-			// Foreground-only: kanban / avenues only reset on active tab.
+			// Foreground-only: the plan board resets on the active tab so a new
+			// request never inherits the previous run's steps. Nothing is seeded
+			// here: the board fills only from the plan the agent writes during
+			// this run (PLAN: text), a live tool call, or a step the user accepts.
 			if (tabId === activeTabId) {
-				const newPredictions = generatePredictions(routeHint);
-				setPredictedSteps(newPredictions);
-				setPlanNextStep(newPredictions[0]?.description || null);
-				const newAvenues = generateAvenues(routeHint);
-				setAvenues(newAvenues);
-				setKanbanBoard((prev) => ({
-					...prev,
-					ready: newPredictions.slice(0, 3) as any,
-					backlog: newPredictions.slice(3) as any,
-				}));
+				setPredictedSteps([]);
+				setPlanNextStep(null);
+				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
 			}
 
 			if (!currentModel) {
@@ -5166,24 +5157,21 @@ export function App({
 					}
 				}
 			} else {
-				// Mock mode (per tab)
-				setTimeout(
-					() => {
-						appendToTab(tabId, {
-							id: `assistant-${Date.now()}`,
-							role: "assistant" as const,
-							content: generateResponse(messageForAgent),
-							timestamp: new Date(),
-						});
-						if (tabId === activeTabId) {
-							setLastResponseTime(Date.now() - cmdStartTime);
-							setStatus("success");
-							if (soundEnabled) playSound("success");
-							setTimeout(() => setStatus("idle"), 1500);
-						}
-					},
-					800 + Math.random() * 400,
-				);
+				// No agent is ready for this tab. Say so plainly: nothing ran. This
+				// branch used to print a random canned "Task complete" with invented
+				// numbers (files analyzed, tokens saved), which reads as real work.
+				appendToTab(tabId, {
+					id: `system-agent-not-ready-${Date.now()}`,
+					role: "system" as const,
+					content:
+						`[Agent not ready] Nothing was run. The agent for this tab has not finished starting (model: ${currentModel}).\n` +
+						"Wait a moment and send again, or check the provider with /provider.",
+					timestamp: new Date(),
+				});
+				if (tabId === activeTabId) {
+					setStatus("error");
+					setTimeout(() => setStatus("idle"), 3000);
+				}
 			}
 
 			perTabAgents.setTabProcessing(tabId, false);
@@ -5766,6 +5754,7 @@ export function App({
 						localFirst={true}
 						sessionTime={sessionTime}
 						lilEightState={lilEightState}
+						width={cols}
 					/>
 				</Box>
 
@@ -5822,10 +5811,16 @@ export function App({
 							isProcessing={isProcessing}
 						/>
 
-						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+						<Box
+							ref={chatBoxRef}
+							flexGrow={1}
+							minHeight={0}
+							flexDirection="column"
+							overflow="hidden"
+						>
 							<MessageList
 								messages={messages}
-								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
+								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 								contentWidth={Math.max(
 									24,
 									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
@@ -5928,32 +5923,3 @@ export function App({
 	);
 }
 
-// Personality completion phrases
-const COMPLETION_PHRASES = [
-	"Splendid. Task complete.",
-	"Another victory for elegant code.",
-	"Infinity achieved, as always.",
-	"The gentleman delivers.",
-	"Perfection, if I do say so myself.",
-	"Consider it done. Magnificently.",
-	"Executed with characteristic grace.",
-	"As expected, excellence prevails.",
-];
-
-// Generate a mock response with personality flavor (replace with actual agent logic)
-function generateResponse(input: string): string {
-	const completionPhrase =
-		COMPLETION_PHRASES[Math.floor(Math.random() * COMPLETION_PHRASES.length)];
-
-	const responses = [
-		`[\u221E 8gent] Processing: "${input}"\n\n\u2713 Toolshed query complete\n\u2713 AST retrieval: 3 files analyzed\n\u2713 Context compression: 42% tokens saved\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Analyzing request...\n\n\u25B8 Planner: Identified 2 subtasks\n\u25B8 Toolshed: Found 5 relevant symbols\n\u25B8 Execution: Preparing changes\n\nAST-first approach saved 1,247 tokens.\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Query understood.\n\n\`\`\`typescript\n// Extracted context\nfunction processRequest(input: string) {\n  return analyze(input);\n}\n\`\`\`\n\nToken efficiency: 38% improvement over raw context.\n\n${completionPhrase}`,
-
-		`[\u221E 8gent] Task complete.\n\n\u2022 Files analyzed: 7\n\u2022 Symbols extracted: 23\n\u2022 Context size: 2.1k tokens (vs 5.8k raw)\n\u2022 Savings: 64%\n\nStructured agentic development in action.\n\n${completionPhrase}`,
-	];
-
-	return responses[Math.floor(Math.random() * responses.length)];
-}

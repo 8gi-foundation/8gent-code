@@ -13,6 +13,8 @@
  */
 
 import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
+import { modelFetch } from "../../ai/model-fetch";
+import { TurnTimeoutError } from "../turn-timeout";
 
 const DEFAULT_BASE_URL = "http://localhost:11434/v1";
 const INSTALL_HINT =
@@ -75,12 +77,14 @@ export class ApfelClient implements LLMClient {
 
 		let response: Response;
 		try {
-			response = await fetch(`${this.baseUrl}/chat/completions`, {
+			response = await modelFetch(`${this.baseUrl}/chat/completions`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 			});
 		} catch (err) {
+			// A slow answer is not a missing install: let the timeout through as-is.
+			if (err instanceof TurnTimeoutError) throw err;
 			throw new Error(`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`);
 		}
 
@@ -122,12 +126,14 @@ export class ApfelClient implements LLMClient {
 
 		let response: Response;
 		try {
-			response = await fetch(`${this.baseUrl}/chat/completions`, {
+			response = await modelFetch(`${this.baseUrl}/chat/completions`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 			});
 		} catch (err) {
+			// A slow answer is not a missing install: let the timeout through as-is.
+			if (err instanceof TurnTimeoutError) throw err;
 			throw new Error(`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`);
 		}
 

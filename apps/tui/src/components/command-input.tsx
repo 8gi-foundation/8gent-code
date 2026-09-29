@@ -10,7 +10,6 @@
  */
 
 import { Box, Text, useInput } from "ink";
-import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -33,7 +32,9 @@ import {
 } from "../lib/goal-client.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 import { Blink } from "./fade-transition.js";
+import { BufferedTextInput } from "./buffered-text-input.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Inline } from "./primitives/Inline.js";
 import { ShortcutHint } from "./primitives/ShortcutHint.js";
@@ -91,6 +92,22 @@ function buildBuiltInSlashGhostSuggestions(): ContextSuggestion[] {
 		}
 	}
 	return out.sort((a, b) => b.trigger.length - a.trigger.length);
+}
+
+/**
+ * Ink emits one input event per stdin read. When the event loop is busy
+ * (a heavy TUI re-render) the typed text and the Enter byte land in the
+ * same read, e.g. "hello\r". Ink only flags an event as Enter when it is
+ * exactly "\r", so the text input inserts the CR into the value and the
+ * message is not sent until a second Enter. A value that now ends in a
+ * line break therefore means the user pressed Enter: strip the break and
+ * submit. Line breaks inside the value (a multi-line paste with no
+ * trailing newline) are left alone.
+ */
+export function splitTrailingEnter(value: string): { text: string; submit: boolean } {
+	const trailing = /[\r\n]+$/;
+	if (!trailing.test(value)) return { text: value, submit: false };
+	return { text: value.replace(trailing, ""), submit: true };
 }
 
 // ============================================
@@ -341,10 +358,10 @@ export function CommandInput({
 			{processingStatusLine && (
 				<Box marginBottom={0}>
 					<AnimatedSpinner
-						type="dots"
 						color={t.teal}
 						label={processingStatusLine.label}
-						showDots={true}
+						showDots={showAnimations}
+						animate={showAnimations}
 					/>
 					{processingStatusLine.stats.length > 0 && (
 						<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
@@ -360,7 +377,7 @@ export function CommandInput({
 
 				{/* Text input with ghost overlay */}
 				<Box>
-					<TextInput
+					<BufferedTextInput
 						value={value}
 						onChange={(v) => {
 							// Any manual edit exits history navigation and updates the draft
@@ -368,7 +385,12 @@ export function CommandInput({
 								setHistoryIndex(-1);
 								draftRef.current = "";
 							}
-							setValue(transformInputValue ? transformInputValue(v) : v);
+							const { text, submit } = splitTrailingEnter(v);
+							const next = transformInputValue ? transformInputValue(text) : text;
+							setValue(next);
+							// Enter arrived in the same stdin read as the text, so it
+							// reached the input as text, not as a return key.
+							if (submit) handleSubmit(next);
 						}}
 						onSubmit={handleSubmit}
 						placeholder={
@@ -610,7 +632,7 @@ export function MinimalCommandInput({ onSubmit, isProcessing }: CommandInputProp
 			{isProcessing ? (
 				<Box>
 					<AppText color="cyan">
-						<Spinner type="dots" />
+						<FigureEight />
 					</AppText>
 					<MutedText> Working…</MutedText>
 				</Box>

@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
 import { validatePath } from "./path-guard.js";
+import { hasSecret } from "./secret-detector.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
 	PolicyActionType,
@@ -52,14 +53,21 @@ const POLICY_CHECKSUM_PATH = path.join(
 const MAX_PATTERN_LENGTH = 200;
 
 /** Valid condition operators */
-const VALID_OPERATORS = ["contains", "in", "equals", "starts_with", "ends_with"] as const;
+const VALID_OPERATORS = [
+	"contains",
+	"in",
+	"equals",
+	"starts_with",
+	"ends_with",
+	"has_secret",
+] as const;
 
 type ConditionOperator = (typeof VALID_OPERATORS)[number];
 
 interface ParsedClause {
 	field: string;
 	operator: ConditionOperator;
-	value: string; // for contains, equals, starts_with, ends_with
+	value: string; // for contains, equals, starts_with, ends_with (unused by has_secret)
 	values?: string[]; // for "in" operator
 }
 
@@ -92,7 +100,7 @@ function parseCondition(condition: string): ParsedCondition {
 			const parsed = parseClause(clause);
 			if (!parsed) {
 				throw new Error(
-					`Invalid condition syntax: "${clause}". Expected: "field contains value", "field in [a, b]", "field equals value", "field starts_with value", or "field ends_with value"`,
+					`Invalid condition syntax: "${clause}". Expected: "field contains value", "field in [a, b]", "field equals value", "field starts_with value", "field ends_with value", or "field has_secret"`,
 				);
 			}
 			andClauses.push(parsed);
@@ -105,6 +113,14 @@ function parseCondition(condition: string): ParsedCondition {
 }
 
 function parseClause(clause: string): ParsedClause | null {
+	// "field has_secret" - credential-shaped value (see secret-detector.ts).
+	// Matches key formats and high-entropy assignments, not the bare words
+	// "token" or "secret", so prose and docs are not blocked.
+	const secretMatch = clause.match(/^(\w+)\s+has_secret$/i);
+	if (secretMatch) {
+		return { field: secretMatch[1], operator: "has_secret", value: "" };
+	}
+
 	// "field contains value"
 	const containsMatch = clause.match(/^(\w+)\s+contains\s+(.+)$/i);
 	if (containsMatch) {
@@ -365,9 +381,10 @@ function coerceToString(value: unknown): string {
  *   "field starts_with VALUE"
  *   "field ends_with VALUE"
  *   "field in [a, b, c]"
+ *   "field has_secret"   (credential shapes, case-sensitive, see secret-detector.ts)
  *   Clauses joined by "and" (all must match) or "or" (any must match)
  *
- * All comparisons are case-insensitive.
+ * All comparisons except has_secret are case-insensitive.
  */
 function evaluateCondition(ruleIndex: number, condition: string, context: PolicyContext): boolean {
 	// Use pre-parsed condition if available
@@ -390,6 +407,10 @@ function evaluateCondition(ruleIndex: number, condition: string, context: Policy
 
 function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boolean {
 	const rawValue = context[clause.field];
+
+	// Runs on the ORIGINAL case: AKIA..., ghp_..., PEM headers are case-bound.
+	if (clause.operator === "has_secret") return hasSecret(coerceToString(rawValue));
+
 	const haystack = coerceToString(rawValue).toLowerCase();
 
 	switch (clause.operator) {

@@ -15,6 +15,7 @@ import {
 	deriveAgents,
 	deriveActiveTasks,
 	parseToolName,
+	planStepsFromText,
 } from "../lib/activity-rail-derivation";
 import {
 	registerTuiApprovalHandler,
@@ -131,6 +132,7 @@ describe("computeGitSync", () => {
 		const r = await computeGitSync("/tmp/repo", runner);
 		expect(r.status).toBe("up-to-date");
 		expect(r.label).toBe("main: up to date");
+		expect(r.branch).toBe("main");
 	});
 
 	test("ahead when ahead count > 0", async () => {
@@ -144,6 +146,7 @@ describe("computeGitSync", () => {
 		expect(r.status).toBe("ahead");
 		expect(r.ahead).toBe(3);
 		expect(r.label).toBe("feat/x: 3 ahead");
+		expect(r.branch).toBe("feat/x");
 	});
 
 	test("diverged when both counts > 0", async () => {
@@ -174,12 +177,14 @@ describe("computeGitSync", () => {
 		});
 		const r = await computeGitSync("/tmp/repo", runner);
 		expect(r.status).toBe("detached");
+		expect(r.branch).toBe("HEAD");
 	});
 
 	test("no-repo when rev-parse fails", async () => {
 		const runner = fakeRunner({});
 		const r = await computeGitSync("/tmp/notrepo", runner);
 		expect(r.status).toBe("no-repo");
+		expect(r.branch).toBe("");
 	});
 });
 
@@ -239,6 +244,34 @@ describe("activity-rail-derivation", () => {
 				true,
 			),
 		).toEqual([{ id: "k1", label: "scaffold", progress: 50 }]);
+	});
+
+	test("a fresh session with no plan shows no tasks (#2923)", () => {
+		// The board a new session starts with: nothing seeded, nothing invented.
+		const freshBoard = { inProgress: [], ready: [] };
+		expect(deriveActiveTasks(freshBoard, null, false)).toEqual([]);
+		// Still nothing while the model is thinking but no tool is running.
+		expect(deriveActiveTasks(freshBoard, null, true)).toEqual([]);
+		// Ready items alone never render as running.
+		expect(deriveActiveTasks({ inProgress: [], ready: [{ id: "r1" }] }, null, true)).toEqual([]);
+	});
+
+	test("planStepsFromText only yields steps the agent wrote in a PLAN block", () => {
+		// A user's onboarding answer or a plain prompt is not a plan.
+		expect(planStepsFromText("James")).toEqual([]);
+		expect(planStepsFromText("fix the bug and add a feature then commit")).toEqual([]);
+		expect(planStepsFromText("")).toEqual([]);
+		expect(planStepsFromText(null)).toEqual([]);
+		// A PLAN: block with numbered steps is the real source.
+		expect(planStepsFromText("PLAN:\n1. Read app.tsx\n2) Patch the rail\n- Run tests")).toEqual([
+			"Read app.tsx",
+			"Patch the rail",
+			"Run tests",
+		]);
+		// The block ends at the first blank line.
+		expect(planStepsFromText("PLAN:\n1. Only step\n\n1. Not part of the plan")).toEqual([
+			"Only step",
+		]);
 	});
 });
 

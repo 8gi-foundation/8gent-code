@@ -19,6 +19,10 @@
  *
  * Data rows use the shared RailRow helper so labels and values can never
  * fuse at narrow widths (the bug that produced `MEMORYrouter`).
+ *
+ * Every row and section is flexShrink=0 so a short terminal clips the
+ * rail at the bottom instead of stacking rows on top of each other (the
+ * bug that produced `idleS` at 100x30, #2921).
  */
 
 import { Box, Text } from "ink";
@@ -28,8 +32,18 @@ import { MetricRow, TruncatedValue } from "./RailRow.js";
 
 // RailSection wraps a heading and its rows in a discrete column block.
 // Without this, Ink can fuse the heading line with the next row at narrow
-// widths (the `hitsRY` bug — MEMORY heading running into a cache row tail).
+// widths (the `hitsRY` bug, MEMORY heading running into a cache row tail).
 // Explicit column + marginTop + width=100% guarantees row separation.
+//
+// Every block is flexShrink=0. Ink boxes shrink by default, so when the
+// rail is taller than the shell (a 30-row terminal) yoga squeezed each
+// section to a fraction of a row and headings overprinted their values
+// (`idleS` at 100x30). With shrink off the rail keeps its natural height
+// and the outer overflow="hidden" clips whatever does not fit.
+//
+// Rows must NOT set overflow="hidden" of their own: Ink applies only the
+// innermost clip, so a row-level clip replaces the rail's clip and lets
+// the row paint straight through the rail border and the bars below it.
 function RailSection({
 	title,
 	children,
@@ -38,9 +52,11 @@ function RailSection({
 	children: React.ReactNode;
 }) {
 	return (
-		<Box flexDirection="column" marginTop={1} width="100%">
-			<Text color={t.orange} bold>{title}</Text>
-			<Box flexDirection="column" width="100%">
+		<Box flexDirection="column" marginTop={1} width="100%" flexShrink={0}>
+			<Box flexShrink={0}>
+				<Text color={t.orange} bold>{title}</Text>
+			</Box>
+			<Box flexDirection="column" width="100%" flexShrink={0}>
 				{children}
 			</Box>
 		</Box>
@@ -62,7 +78,7 @@ function NamedRow({
 	trailingColor?: string;
 }) {
 	return (
-		<Box width="100%" overflow="hidden" justifyContent="space-between">
+		<Box width="100%" flexShrink={0} justifyContent="space-between">
 			<Box flexGrow={1} minWidth={0}>
 				<TruncatedValue value={name} color={color} />
 			</Box>
@@ -236,16 +252,20 @@ export function ActivityRail({
 			flexDirection="column"
 			overflow="hidden"
 		>
-			<Text color={t.orange} bold>AGENT ACTIVITY</Text>
+			<Box flexShrink={0}>
+				<Text color={t.orange} bold>AGENT ACTIVITY</Text>
+			</Box>
 
 			<RailSection title="TASKS">
 				{tasks.length === 0 ? (
-					<Text color={t.muted}>idle</Text>
+					<Box flexShrink={0}>
+						<Text color={t.muted}>idle</Text>
+					</Box>
 				) : (
 					tasks.map((task) => (
-						<Box key={task.id} flexDirection="column">
+						<Box key={task.id} flexDirection="column" flexShrink={0}>
 							<Text color={t.textPrimary} wrap="truncate-end">{task.label}</Text>
-							<Box width="100%" overflow="hidden" justifyContent="space-between">
+							<Box width="100%" flexShrink={0} justifyContent="space-between">
 								<Text color={t.steel}>{bar(task.progress)}</Text>
 								<Text color={t.textSecondary}>{`${task.progress}%`}</Text>
 							</Box>

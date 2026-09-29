@@ -120,6 +120,7 @@ function parse(tokens: Token[]): { nodes: Node[]; errors: string[] } {
 		if (t.kind === "text" || t.kind === "var") {
 			sink().push(t.kind === "text" ? t : { kind: "var", path: t.path, raw: t.raw });
 		} else if (t.kind === "if") {
+			// biome-ignore lint/suspicious/noThenProperty: `then` and `else` are the template AST's branch names for {{#if}}; these nodes are pushed into arrays and rendered, never awaited, so they are never treated as a thenable.
 			const node: Extract<Node, { kind: "if" }> = { kind: "if", path: t.path, then: [], else: [] };
 			sink().push(node);
 			stack.push({ node, branch: "then" });
