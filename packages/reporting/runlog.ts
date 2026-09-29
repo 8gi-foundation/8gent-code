@@ -35,6 +35,12 @@ export interface RunLogEntry {
 	prompt: string;
 	/** Error message if failed */
 	error?: string;
+	/**
+	 * Claims in the final answer that the turn's own tool log contradicts, one
+	 * short line each (e.g. "'ls deck' was requested but never ran"). Present
+	 * only when non-empty. See packages/ai/claim-check.ts.
+	 */
+	unverified?: string[];
 }
 
 const LOG_PATH = path.join(os.homedir(), ".8gent", "runs.jsonl");

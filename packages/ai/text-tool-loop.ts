@@ -16,12 +16,21 @@
  * that starts with DONE_MARKER. The check never reads the reply's wording or
  * punctuation, except to leave a question to the user alone.
  *
+ * The final answer is then checked against the turn's own tool log
+ * (claim-check.ts): commands the user asked to run that never ran, and files the
+ * answer says it wrote whose last write was blocked or never happened. Anything
+ * contradicted gets ONE follow-up per turn (claimFollowUpMessage) while a round
+ * remains; whatever is still contradicted when the turn ends is appended to the
+ * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
+ * A false completion claim is never passed through silently.
+ *
  * A tool that throws never breaks the loop: the error is turned into a short
  * string result and fed back to the model like any other tool output. The only
  * network/I/O the loop performs is whatever the caller's `call` and the tools'
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { checkClaims, claimFollowUpMessage, formatHarnessNote } from "./claim-check";
 import { runTextToolTurn, type TextToolMessage } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
 
@@ -51,9 +60,16 @@ export interface TextToolAgentOptions {
 }
 
 export interface TextToolAgentResult {
+	/** The answer to show the user, with any "[harness] Not verified" lines appended. */
 	content: string;
 	rounds: number;
 	toolLog: TextToolLogEntry[];
+	/**
+	 * Claims the tool log contradicts at the end of the turn, one short line
+	 * each (e.g. "'ls deck' was requested but never ran"). Empty when nothing
+	 * checkable was contradicted. Recorded in runs.jsonl as `unverified`.
+	 */
+	unverified: string[];
 }
 
 /**
@@ -218,12 +234,31 @@ export async function runTextToolAgent(
 		}
 		return stripped;
 	};
+	// The claim check's follow-up fires at most once per turn.
+	let claimFollowUpSent = false;
+	// The user's request this turn: the last user message the caller sent.
+	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+	const claimsAgainstLog = (answer: string) =>
+		toolLog.length > 0 ? checkClaims({ request, answer, toolLog }) : [];
+	// Every exit goes through here: whatever the log still contradicts is
+	// appended as a factual note, never passed through silently.
+	const finish = (content: string, rounds: number): TextToolAgentResult => {
+		const unfulfilled = claimsAgainstLog(content);
+		if (unfulfilled.length === 0) return { content, rounds, toolLog, unverified: [] };
+		const note = formatHarnessNote(unfulfilled);
+		return {
+			content: content.trim() ? `${content.trimEnd()}\n\n${note}` : note,
+			rounds,
+			toolLog,
+			unverified: unfulfilled.map((u) => u.note),
+		};
+	};
 
 	for (let round = 1; round <= maxRounds; round++) {
 		// Stop before starting another round if the caller aborted (turn timeout,
 		// circuit breaker, user ESC). Return whatever prose the last round yielded.
 		if (opts.signal?.aborted) {
-			return { content: finalContent(lastContent), rounds: round - 1, toolLog };
+			return finish(finalContent(lastContent), round - 1);
 		}
 		const turn = await runTextToolTurn({
 			messages,
@@ -280,8 +315,24 @@ export async function runTextToolAgent(
 				];
 				continue;
 			}
-			// Model gave its final answer.
-			return { content: finalContent(turn.content), rounds: round, toolLog };
+			// Model gave its final answer. Check it against the tool log once; a
+			// contradiction gets one follow-up while a round remains. A question
+			// to the user is left alone here (finish() still notes it).
+			const answer = finalContent(turn.content);
+			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(turn.content)) {
+				const unfulfilled = claimsAgainstLog(answer);
+				if (unfulfilled.length > 0) {
+					claimFollowUpSent = true;
+					prevRoundHadSuccess = false;
+					messages = [
+						...messages,
+						{ role: "assistant", content: turn.content },
+						{ role: "user", content: claimFollowUpMessage(unfulfilled) },
+					];
+					continue;
+				}
+			}
+			return finish(answer, round);
 		}
 
 		// Execute every requested tool and build a single labelled result block.
@@ -321,5 +372,5 @@ export async function runTextToolAgent(
 	}
 
 	// Round cap hit with the model still calling tools: return the last prose.
-	return { content: finalContent(lastContent), rounds: maxRounds, toolLog };
+	return finish(finalContent(lastContent), maxRounds);
 }

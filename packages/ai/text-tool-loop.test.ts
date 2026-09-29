@@ -332,9 +332,14 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			maxRounds: 50,
 		});
 
-		expect(model.calls()).toBe(3);
-		expect(result.rounds).toBe(3);
-		expect(result.content).toBe("Now let me write the deck:");
+		// One continuation, then one claim follow-up (ls deck and wc never ran),
+		// then the turn ends with both contradictions noted for the user.
+		expect(model.calls()).toBe(4);
+		expect(result.rounds).toBe(4);
+		expect(result.content).toBe(
+			"Now let me write the deck:\n\n[harness] Not verified: 'ls deck' was requested but never ran.\n[harness] Not verified: 'wc -l deck/deck.md' was requested but never ran.",
+		);
+		expect(result.unverified).toHaveLength(2);
 		expect(ws.files.has("deck/deck.md")).toBe(false);
 	});
 
@@ -346,6 +351,9 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			tc("write_file", { path: "deck/deck.md", content: "y" }),
 			"Now I will run the checks:",
 			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"Ran ls deck and wc -l deck/deck.md.",
+			"UNREACHED",
 		]);
 
 		const result = await runTextToolAgent({
@@ -355,9 +363,14 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			maxRounds: 50,
 		});
 
-		expect(model.calls()).toBe(4);
-		expect(result.content).toBe("Now I will run the checks:");
-		expect(ws.commands).toEqual([]);
+		// The completion check is spent on "Next, the deck:"; the second
+		// announcement ends as a final answer, so the claim check (a separate,
+		// also once-per-turn follow-up) sends the unrun commands back.
+		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(1);
+		expect(model.calls()).toBe(7);
+		expect(ws.commands).toEqual(["ls deck", "wc -l deck/deck.md"]);
+		expect(result.content).toBe("Ran ls deck and wc -l deck/deck.md.");
+		expect(result.unverified).toEqual([]);
 	});
 
 	test("the continuation spends a round: maxRounds is still the hard cap", async () => {
@@ -377,7 +390,10 @@ describe("runTextToolAgent - continue until every step is done", () => {
 
 		expect(model.calls()).toBe(2);
 		expect(result.rounds).toBe(2);
-		expect(result.content).toBe("Now let me write the deck:");
+		// No round left for any follow-up: the contradictions are noted instead.
+		expect(result.content).toBe(
+			"Now let me write the deck:\n\n[harness] Not verified: 'ls deck' was requested but never ran.\n[harness] Not verified: 'wc -l deck/deck.md' was requested but never ran.",
+		);
 	});
 
 	test("a real final answer after a tool round costs one short check round, then ends", async () => {
@@ -481,6 +497,7 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			tc("write_file", { path: "deck/outline.md", content: "x" }),
 			'```tool_call\n{"name": "write_file", "arguments": {"path": "deck/deck.md", "content": "abc',
 			"Here is where I got to:",
+			"Here is where I got to:",
 			"UNREACHED",
 		]);
 		const result = await runTextToolAgent({
@@ -488,8 +505,11 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			tools: ws.tools,
 			call: model.call,
 		});
-		expect(model.calls()).toBe(3);
-		expect(result.content).toBe("Here is where I got to:");
+		// No completion check (the round before was cut off), but the claim
+		// check still sends its one follow-up: ls deck and wc never ran.
+		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(0);
+		expect(model.calls()).toBe(4);
+		expect(result.content).toStartWith("Here is where I got to:\n\n[harness] Not verified: 'ls deck'");
 	});
 
 	test("an empty reply right after a tool round is continued once", async () => {
@@ -638,10 +658,12 @@ describe("runTextToolAgent - completion check", () => {
 			maxRounds: 50,
 		});
 
-		expect(model.calls()).toBe(3);
-		expect(result.rounds).toBe(3);
+		// One completion check, one claim follow-up, then the turn ends noted.
+		expect(model.calls()).toBe(4);
+		expect(result.rounds).toBe(4);
 		expect(model.seen.filter(isCheck)).toHaveLength(1);
-		expect(result.content).toBe("Now creating the Marp deck from the outline.");
+		expect(result.content).toStartWith("Now creating the Marp deck from the outline.\n\n[harness] Not verified:");
+		expect(result.unverified).toHaveLength(2);
 		expect(ws.files.has("deck/deck.md")).toBe(false);
 	});
 
@@ -663,5 +685,318 @@ describe("runTextToolAgent - completion check", () => {
 		expect(model.calls()).toBe(2);
 		expect(model.seen.filter(isCheck)).toHaveLength(0);
 		expect(result.content).toBe("Outline written. Do you want the deck in Marp or reveal.js?");
+	});
+});
+
+// ── Claim check (Rishi pilot l2-solo-deck runs 2026-09-29_142559 and _125252) ─
+//
+// Run 142559 (on #3014): the completion check fired and the model answered
+// "DONE. All requested steps are complete and backed by tool results", listing
+// "`ls deck` -> deck.md, outline.md". Its only `ls deck` was chained with && and
+// BLOCKED; it used list_files instead. Run 125252: write_file deck/outline.md
+// was blocked by TOOLG8, then the model said "Good, the outline was written."
+
+const PILOT_PROMPT =
+	"Research this repo's packages/decide folder, then write deck/outline.md with 5 slides about Eight System One, then turn that outline into deck/deck.md in Marp style with --- between slides, then run ls deck and wc -l deck/deck.md, then summarise what you did.";
+const PILOT_WORK = "/pilot/l2-solo-deck/work";
+
+/** The pilot's real executor behaviour: && chains are blocked, TOOLG8 can block a write. */
+function pilotWorkspace(opts: { blockWrites?: Set<string> } = {}) {
+	const files = new Map<string, string>([["packages/decide/README.md", "# @8gent/decide - Eight System One"]]);
+	const commands: string[] = [];
+	const rel = (p: string) => p.replace(`${PILOT_WORK}/`, "");
+	const tools: TextTool[] = [
+		{
+			spec: { name: "read_file", description: "Read a file", parameters: {} },
+			run: async (a) => files.get(rel(String(a.path))) ?? `Error: no such file ${a.path}`,
+		},
+		{
+			spec: { name: "list_files", description: "List files", parameters: {} },
+			run: async (a) => {
+				const dir = `${rel(String(a.path)).replace(/\/$/, "")}/`;
+				return [...files.keys()].filter((p) => p.startsWith(dir)).map((p) => p.slice(dir.length)).join("\n");
+			},
+		},
+		{
+			spec: { name: "write_file", description: "Write a file", parameters: {} },
+			run: async (a) => {
+				const p = rel(String(a.path));
+				if (opts.blockWrites?.has(p)) {
+					return `[TOOLG8 BLOCKED] write_file did NOT run. Reason: [no-secrets-in-files] Cannot write secrets or credentials to files.`;
+				}
+				files.set(p, String(a.content));
+				return `File written and opened: ${PILOT_WORK}/${p}`;
+			},
+		},
+		{
+			spec: { name: "run_command", description: "Run a command", parameters: {} },
+			run: async (a) => {
+				const cmd = String(a.command);
+				commands.push(cmd);
+				if (cmd.includes("&&")) {
+					return `[BLOCKED] Command chaining with && is not allowed. Use separate run_command calls instead. Command: ${cmd}`;
+				}
+				if (cmd.startsWith("mkdir")) return "Command completed successfully.";
+				if (cmd === "ls deck") {
+					return [...files.keys()].filter((p) => p.startsWith("deck/")).map((p) => p.slice(5)).join("\n");
+				}
+				const wc = /^wc -l (.+)$/.exec(cmd);
+				if (wc) {
+					const f = files.get(rel(wc[1]));
+					return f === undefined ? `Exit code 1:\n\nwc: ${wc[1]}: No such file` : `      ${f.split("\n").length} ${wc[1]}\n`;
+				}
+				return "Command completed successfully.";
+			},
+		},
+	];
+	return { files, commands, tools };
+}
+
+const RUN9_TOOL_ROUNDS = [
+	tc("list_files", { path: "packages/decide" }),
+	tc("read_file", { path: "packages/decide/README.md" }),
+	tc("write_file", { path: "deck/outline.md", content: "# Outline\n1. What" }),
+	tc("write_file", { path: "deck/deck.md", content: "---\nmarp: true\n---\n# What" }),
+	tc("run_command", { command: `cd ${PILOT_WORK} && ls deck && echo '---' && wc -l deck/deck.md` }),
+	tc("list_files", { path: `${PILOT_WORK}/deck` }),
+	tc("run_command", { command: `wc -l ${PILOT_WORK}/deck/deck.md` }),
+];
+const RUN9_DONE =
+	"DONE. All requested steps are complete and backed by tool results:\n\n2. **Wrote `deck/outline.md`** with 5 slides.\n\n3. **Wrote `deck/deck.md`** in Marp style.\n\n4. **Verified on disk**:\n   - `ls deck` → `deck.md`, `outline.md`\n   - `wc -l deck/deck.md` → **5 lines**";
+
+const isClaimFollowUp = (msgs: TextToolMessage[]) =>
+	lastUserMessage(msgs).startsWith("Your final answer does not match the tool log:");
+
+describe("runTextToolAgent - claim check", () => {
+	test("run 142559 replay: a DONE that lists a blocked `ls deck` gets one follow-up, and the model runs it", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([
+			...RUN9_TOOL_ROUNDS,
+			RUN9_DONE, // first no-tool reply: the #3014 completion check fires
+			RUN9_DONE, // its answer to the check: the claim check fires
+			tc("run_command", { command: "ls deck" }),
+			"DONE: Ran ls deck (deck.md, outline.md). Everything else as summarised.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		const followUps = model.seen.filter(isClaimFollowUp);
+		expect(followUps).toHaveLength(1);
+		const text = lastUserMessage(followUps[0]);
+		expect(text).toContain("Your summary says `ls deck` ran");
+		expect(text).toContain("[BLOCKED] Command chaining");
+		expect(text).not.toContain("wc -l");
+		expect(ws.commands.at(-1)).toBe("ls deck");
+		expect(result.unverified).toEqual([]);
+		expect(result.content).toBe("Ran ls deck (deck.md, outline.md). Everything else as summarised.");
+		expect(result.content).not.toContain("[harness]");
+		expect(result.rounds).toBe(RUN9_TOOL_ROUNDS.length + 4);
+	});
+
+	test("run 142559 replay: if the model repeats its false DONE, the user sees a harness note", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([...RUN9_TOOL_ROUNDS, RUN9_DONE]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		// Tool rounds + completion check + one claim follow-up; never more.
+		expect(model.calls()).toBe(RUN9_TOOL_ROUNDS.length + 3);
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(1);
+		expect(result.unverified).toEqual(["'ls deck' was requested but never ran (its only attempt was blocked)"]);
+		expect(result.content.endsWith("\n\n[harness] Not verified: 'ls deck' was requested but never ran (its only attempt was blocked).")).toBe(true);
+		expect(result.content.startsWith("DONE. All requested steps")).toBe(true);
+	});
+
+	test("run 125252 replay: a blocked outline write reported as written is followed up, and fixed", async () => {
+		const blocked = new Set(["deck/outline.md"]);
+		const ws = pilotWorkspace({ blockWrites: blocked });
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			tc("run_command", { command: "mkdir -p deck" }),
+			"Good, the outline was written. Now let me write the Marp deck:",
+			"DONE: Good, the outline was written.",
+			(msgs) => {
+				// The follow-up names the blocked write; the gate is lifted (e.g. the
+				// model removed the offending content) and it tries again.
+				expect(lastUserMessage(msgs)).toContain("deck/outline.md was written, but the tool log shows it was not");
+				expect(lastUserMessage(msgs)).toContain("[TOOLG8 BLOCKED]");
+				blocked.clear();
+				return tc("write_file", { path: "deck/outline.md", content: "1. What" });
+			},
+			tc("write_file", { path: "deck/deck.md", content: "# What" }),
+			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"Wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l deck/deck.md.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(1);
+		expect(ws.files.has("deck/outline.md")).toBe(true);
+		expect(result.unverified).toEqual([]);
+		expect(result.content).toBe("Wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l deck/deck.md.");
+	});
+
+	test("run 125252 replay: a model that never acts leaves every contradiction in the note", async () => {
+		const ws = pilotWorkspace({ blockWrites: new Set(["deck/outline.md"]) });
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			tc("run_command", { command: "mkdir -p deck" }),
+			"Good, the outline was written. Now let me write the Marp deck:",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		expect(model.calls()).toBe(6);
+		expect(result.unverified).toEqual([
+			"'ls deck' was requested but never ran",
+			"'wc -l deck/deck.md' was requested but never ran",
+			"'deck/outline.md' was reported written but its last write was blocked",
+		]);
+		expect(result.content).toContain("[harness] Not verified: 'deck/outline.md' was reported written but its last write was blocked.");
+	});
+
+	test("a truthful DONE gets no claim follow-up and no note", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			tc("write_file", { path: "deck/deck.md", content: "# What" }),
+			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"DONE: Wrote deck/outline.md and deck/deck.md; `ls deck` shows both; `wc -l deck/deck.md` is 1 line.",
+			"DONE: Wrote deck/outline.md and deck/deck.md; `ls deck` shows both; `wc -l deck/deck.md` is 1 line.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		// The DONE-prefixed first reply still gets #3014's one completion check;
+		// the script answers it with the same DONE. No claim follow-up.
+		expect(model.calls()).toBe(7);
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(0);
+		expect(result.unverified).toEqual([]);
+		expect(result.content).not.toContain("[harness]");
+	});
+
+	test("rounds exhausted: no follow-up can be sent, the note is appended instead", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([...RUN9_TOOL_ROUNDS, RUN9_DONE]);
+		// Tool rounds + the completion check round leaves no round for a follow-up.
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: RUN9_TOOL_ROUNDS.length + 2,
+		});
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(0);
+		expect(result.rounds).toBe(RUN9_TOOL_ROUNDS.length + 2);
+		expect(result.unverified).toHaveLength(1);
+		expect(result.content).toContain("[harness] Not verified: 'ls deck' was requested but never ran");
+	});
+
+	test("rounds exhausted while still calling tools: the last prose is annotated too", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([tc("read_file", { path: "packages/decide/README.md" })]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "run `ls deck`" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 3,
+		});
+		expect(model.calls()).toBe(3);
+		expect(result.unverified).toEqual(["'ls deck' was requested but never ran"]);
+		expect(result.content).toBe("[harness] Not verified: 'ls deck' was requested but never ran.");
+	});
+
+	test("no loop: a model that answers every follow-up with more false prose gets exactly one", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([tc("read_file", { path: "packages/decide/README.md" }), "DONE: ran ls deck."]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read the README then run ls deck" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		// tool round, completion check, one claim follow-up, then the turn ends.
+		expect(model.calls()).toBe(4);
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(1);
+		expect(result.unverified).toEqual(["'ls deck' was requested but never ran"]);
+	});
+
+	test("no tool use at all: nothing is checked (the agent-level honesty gate owns that case)", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel(["I ran ls deck and wrote deck/outline.md.", "UNREACHED"]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(1);
+		expect(result.unverified).toEqual([]);
+		expect(result.content).toBe("I ran ls deck and wrote deck/outline.md.");
+	});
+
+	test("claims about files outside the request are not over-policed", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			tc("run_command", { command: "bun run build" }),
+			"DONE: Wrote deck/outline.md, and the build generated dist/index.js. I read `README.md` and `index.ts` first.",
+			"DONE: Wrote deck/outline.md, and the build generated dist/index.js. I read `README.md` and `index.ts` first.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read packages/decide/README.md and write deck/outline.md" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.seen.filter(isClaimFollowUp)).toHaveLength(0);
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("a question to the user gets no follow-up, but an unrun requested command is still noted", async () => {
+		const ws = pilotWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			"Outline written. Should I run ls deck now?",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write deck/outline.md then run ls deck" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(2);
+		expect(result.unverified).toEqual(["'ls deck' was requested but never ran"]);
+		expect(result.content).toStartWith("Outline written. Should I run ls deck now?\n\n[harness]");
 	});
 });

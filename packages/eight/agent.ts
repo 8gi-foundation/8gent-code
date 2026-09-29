@@ -955,8 +955,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// refusal, directly undercutting the sentence before it. Those taglines
 		// were previously assumed to be an emergent tic of the small local
 		// models; they are packages/personality/voice.ts, appended right here.
+		// Same for a reply carrying "[harness] Not verified" lines: the tool log
+		// contradicts part of it, so no completion tagline goes on the end.
 		const flavoredContent =
-			gated.violated || this.config.agentScope === "__table__"
+			gated.violated || agentResult.unverified.length > 0 || this.config.agentScope === "__table__"
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -979,6 +981,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				session: this.sessionId,
 				cwd: this.config.workingDirectory || process.cwd(),
 				prompt: textForAgent.slice(0, 120),
+				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
 			});
 		}
 
