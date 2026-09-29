@@ -17,9 +17,9 @@
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as ts from "typescript";
+import { resolveHome } from "../core/home";
 import type { FileOutline, Symbol, SymbolKind } from "../types";
 
 export const INDEX_CACHE_FILE = "index.json";
@@ -47,7 +47,7 @@ export function defaultCacheRoot(
 	const flag = (env.EIGHT_AST_INDEX_CACHE ?? "").trim().toLowerCase();
 	if (flag === "0" || flag === "off" || flag === "false") return null;
 	if (env.NODE_ENV === "test") return null;
-	return path.join(env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"), "ast-index");
+	return path.join(env.EIGHT_DATA_DIR || path.join(resolveHome(env), ".8gent"), "ast-index");
 }
 
 /** The cache dir for one repo root. */
