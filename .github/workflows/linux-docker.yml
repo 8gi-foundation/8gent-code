@@ -1,0 +1,76 @@
+# linux-docker.yml - install, typecheck, test and build on Linux, inside Docker,
+# on the org's self-hosted helm runner.
+#
+# WHY: GitHub-hosted runners are refused for this org over billing, so ci.yml's
+# ubuntu-latest job never runs. The helm runner is an Apple Silicon Mac with
+# Docker Desktop; a macOS runner cannot use the `container:` key, so this job
+# builds a small image and calls `docker run` itself.
+#
+# WHAT RUNS: .github/docker/linux-ci/run.sh inside the image built from
+# .github/docker/linux-ci/Dockerfile (oven/bun:1 pinned by digest, plus git,
+# ripgrep, procps, Node 22, node-gyp, a Secret Service), as a non-root user.
+# The checkout is mounted read-only and copied into the container, so the
+# runner's workspace is never written to and no host node_modules is used.
+#
+# GATES: install, typecheck (baseline-gated: fails only on tsc errors not in
+# .github/docker/linux-ci/typecheck-baseline.txt), full test suite, build.
+# Every stage runs and the job fails if any stage failed.
+#
+# Reproduce locally on any machine with Docker:
+#   docker build -t 8gent-linux-ci:local .github/docker/linux-ci
+#   docker run --rm --init --cpus 6 --memory 6g -v "$PWD":/src:ro \
+#     8gent-linux-ci:local bash /src/.github/docker/linux-ci/run.sh
+
+name: Linux (Docker)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-docker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux install, typecheck, test, build
+    # Self-hosted: never run code from a fork's pull request on this machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, 8gi, helm]
+    timeout-minutes: 40
+    env:
+      CONTAINER: 8gent-linux-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE: 8gent-linux-ci:${{ hashFiles('.github/docker/linux-ci/Dockerfile') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker is up
+        run: |
+          docker info --format 'docker {{.ServerVersion}} {{.OSType}}/{{.Architecture}} cpus={{.NCPU}} mem={{.MemTotal}}' \
+            || { echo "::error::Docker daemon is not reachable from the runner. Is Docker Desktop running?"; exit 1; }
+
+      - name: Build CI image
+        run: nice -n 10 docker build --pull=false -t "$IMAGE" .github/docker/linux-ci
+
+      - name: Install, typecheck, test, build (in Docker)
+        timeout-minutes: 35
+        run: |
+          nice -n 10 docker run --rm --init \
+            --name "$CONTAINER" \
+            --cpus 6 --memory 6g --memory-swap 6g --pids-limit 4096 \
+            -v "$GITHUB_WORKSPACE":/src:ro \
+            -v 8gent-linux-ci-bun-cache:/home/ci/.bun/install/cache \
+            "$IMAGE" bash /src/.github/docker/linux-ci/run.sh
+
+      # Runs on success, failure and cancellation, so a cancelled run never
+      # leaves a container holding CPU on the runner.
+      - name: Remove container
+        if: always()
+        run: docker rm -f "$CONTAINER" >/dev/null 2>&1 || true

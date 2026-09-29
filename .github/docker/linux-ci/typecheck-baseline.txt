@@ -1,0 +1,3 @@
+# Known tsc errors on main, as "path: TSxxxx". See run.sh.
+apps/tui/src/lib/provider-readiness.test.ts: TS2339
+apps/tui/src/lib/provider-readiness.test.ts: TS2741
