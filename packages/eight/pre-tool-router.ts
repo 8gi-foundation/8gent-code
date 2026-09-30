@@ -124,7 +124,7 @@ export class PreToolRouter {
 				strategy: "none",
 				args: {},
 				confidence: 0.05,
-				reason: "greeting or empty input — no retrieval needed",
+				reason: "greeting or empty input, no retrieval needed",
 			};
 		}
 
@@ -136,7 +136,7 @@ export class PreToolRouter {
 				strategy: "grep",
 				args: { pattern: quoted[1] },
 				confidence: 0.9,
-				reason: "literal in quotes — exact-string search",
+				reason: "literal in quotes, exact-string search",
 			};
 		}
 
@@ -180,7 +180,7 @@ export class PreToolRouter {
 				strategy: "grep",
 				args: { pattern: symbol },
 				confidence: 0.7,
-				reason: "ast unavailable — grep on the symbol name",
+				reason: "ast unavailable, grep on the symbol name",
 			};
 		}
 
@@ -192,7 +192,7 @@ export class PreToolRouter {
 					strategy: "vector",
 					args: { query: trimmed },
 					confidence: 0.7,
-					reason: "concept query with no symbol — semantic recall",
+					reason: "concept query with no symbol, semantic recall",
 				};
 			}
 			const fallbackPattern = pickKeyTerm(trimmed);
@@ -200,7 +200,7 @@ export class PreToolRouter {
 				strategy: "grep",
 				args: { pattern: fallbackPattern },
 				confidence: 0.55,
-				reason: "vector unavailable — grep on key term from question",
+				reason: "vector unavailable, grep on key term from question",
 			};
 		}
 
@@ -209,7 +209,7 @@ export class PreToolRouter {
 			strategy: "none",
 			args: {},
 			confidence: 0.2,
-			reason: "no deterministic signal — defer to agent loop",
+			reason: "no deterministic signal, defer to agent loop",
 		};
 	}
 }

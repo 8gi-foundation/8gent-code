@@ -186,6 +186,15 @@ describe("every prompt source a turn may send has no em or en dashes (#3146)", (
 		]).toEqual([]);
 	});
 
+	test("pre-fetched context: every router reason", () => {
+		// formatPreFetchedContext puts decision.reason into the context injected
+		// before the first model turn; every reason is a literal in this file.
+		const src = fs.readFileSync(path.join(import.meta.dir, "pre-tool-router.ts"), "utf8");
+		const reasons = [...src.matchAll(/reason:\s*("[^"]*"|`[^`]*`)/g)].map((m) => m[1]);
+		expect(reasons.length).toBeGreaterThan(5);
+		expect(reasons.flatMap((r) => dashesIn("router reason", r))).toEqual([]);
+	});
+
 	test("the text-tool loop's check and nudge messages", async () => {
 		const loop = await import("../ai/text-tool-loop");
 		const texts: Array<[string, string]> = [
