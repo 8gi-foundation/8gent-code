@@ -236,6 +236,7 @@ export class Agent {
 			{
 				unattended: config.unattended ?? false,
 				allowedPaths: config.allowedPaths,
+				openOnWrite: config.openOnWrite ?? true,
 			},
 		);
 		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
@@ -1038,6 +1039,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		// write_file may open each deliverable once per turn (#3107).
+		this.executor.beginTurn();
 
 		const textForAgent =
 			userMessage.trim() ||

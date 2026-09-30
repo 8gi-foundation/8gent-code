@@ -90,6 +90,7 @@ import {
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
@@ -242,17 +243,25 @@ export class ToolExecutor {
 	 * `allowedPaths` (#3101). Undefined means no limit (the default).
 	 */
 	private allowedPaths: string[] | undefined;
+	/**
+	 * Whether write_file may open a written deliverable for the user (#3107).
+	 * False for agents the agent pool spawns.
+	 */
+	private openOnWrite: boolean;
+	/** Paths write_file opened this turn: each opens at most once per turn. */
+	private openedThisTurn = new Set<string>();
 
 	constructor(
 		workingDirectory: string = process.cwd(),
 		agentId = "primary",
 		sessionId?: string,
-		options: { unattended?: boolean; allowedPaths?: string[] } = {},
+		options: { unattended?: boolean; allowedPaths?: string[]; openOnWrite?: boolean } = {},
 	) {
 		this.workingDirectory = workingDirectory;
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
+		this.openOnWrite = options.openOnWrite ?? true;
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
@@ -282,6 +291,11 @@ export class ToolExecutor {
 
 	getWorkingDirectory(): string {
 		return this.workingDirectory;
+	}
+
+	/** A new turn starts: files may be opened once again (#3107). */
+	beginTurn(): void {
+		this.openedThisTurn.clear();
 	}
 
 	/**
@@ -1896,18 +1910,23 @@ export class ToolExecutor {
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
 		if (deckLine) designHint += `\n${deckLine}`;
 
-		// Auto-open files on macOS for immediate viewing
-		if (process.platform === "darwin") {
-			try {
-				const { spawn } = await import("node:child_process");
-				spawn("open", [absolutePath], {
-					detached: true,
-					stdio: "ignore",
-				}).unref();
-			} catch {}
-		}
+		// Put a finished deliverable in front of the user (#3107): only viewable
+		// files, only interactively, never from a spawned sub-agent, once per
+		// path per turn. Source and config files are never opened.
+		const decision = decideOpenOnWrite({
+			absolutePath,
+			content,
+			platform: process.platform,
+			openOnWrite: this.openOnWrite,
+			isTTY: Boolean(process.stdout.isTTY),
+			env: process.env,
+			openedThisTurn: this.openedThisTurn,
+		});
+		const opened = decision.open && openWrittenFile(absolutePath);
+		if (opened) this.openedThisTurn.add(absolutePath);
 
-		return `File written and opened: ${absolutePath}${designHint}`;
+		// Say "opened" only when it was.
+		return `${opened ? "File written and opened" : "File written"}: ${absolutePath}${designHint}`;
 	}
 
 	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {

@@ -159,6 +159,12 @@ export interface AgentConfig {
 	 * Undefined means no limit (#3101).
 	 */
 	allowedPaths?: string[];
+	/**
+	 * Whether write_file may open a written deliverable (html, pdf, images,
+	 * video, pptx, docx, Marp decks) on macOS. Default true; the agent pool sets
+	 * false so spawned sub-agents never open windows (#3107).
+	 */
+	openOnWrite?: boolean;
 }
 
 export interface LLMResponse {
