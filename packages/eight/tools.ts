@@ -274,7 +274,6 @@ export class ToolExecutor {
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
-		this.hookManager.setWorkingDirectory(workingDirectory);
 		// Per-executor artifact store. Default sessionId derives from
 		// agentId + pid so two long-lived executors in one process never
 		// collide. Callers (agent.ts, mcp/server.ts) can pass an explicit
