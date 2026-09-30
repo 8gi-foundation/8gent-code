@@ -47,9 +47,9 @@ const live: HeaderBarProps = {
 function occupied(props: HeaderBarProps): number {
 	const plan = planHeader(props);
 	return (
-		brandPillWidth(props.version, props.updateAvailable) +
-		headerMiddleWidth(plan.middle) +
-		2 +
+		brandPillWidth(props.version, props.updateAvailable, plan.compactBrand) +
+		// The middle's paddingX={1} is only rendered when the middle is.
+		(plan.middle.branch ? headerMiddleWidth(plan.middle) + 2 : 0) +
 		statusClusterWidth(props, plan.compactHint)
 	);
 }
@@ -78,9 +78,31 @@ describe("HeaderBar", () => {
 		expect(cluster.props.width).toBeUndefined();
 	});
 
-	test("brand pill width matches the rendered pill from the issue frame", () => {
-		// "│ 8gent Code. v0.17.3 │ The Infinite Gentleman │" is 48 cells.
-		expect(brandPillWidth("0.17.3", null)).toBe(48);
+	test("brand pill width matches the rendered pill", () => {
+		// "│ 8gent Code v0.17.3 │ The Infinite Gentleman │" is 47 cells: no
+		// stray full stop between the product name and the version.
+		expect(brandPillWidth("0.17.3", null)).toBe(47);
+		// Compact: "│ 8gent Code v0.17.3 │".
+		expect(brandPillWidth("0.17.3", null, true)).toBe(22);
+	});
+
+	test("the pill reads 8gent Code v0.17.3, with no stray full stop", () => {
+		type El = React.ReactElement<{ children?: React.ReactNode }>;
+		const texts: string[] = [];
+		const walk = (node: React.ReactNode) => {
+			if (typeof node === "string") texts.push(node);
+			if (!React.isValidElement(node)) return;
+			const el = node as El;
+			if (typeof el.type === "function" && (el.type as { name?: string }).name === "BrandPill") {
+				walk((el.type as (p: unknown) => React.ReactNode)(el.props));
+				return;
+			}
+			React.Children.forEach(el.props.children, walk);
+		};
+		walk(render({ ...live, width: 160 }));
+		const pill = texts.join("");
+		expect(pill).toContain(" Code v0.17.3");
+		expect(pill).not.toContain("Code.");
 	});
 
 	test("toggles approval pending chip without crashing", () => {
@@ -130,28 +152,32 @@ describe("HeaderBar", () => {
 		expect(occupied(props)).toBeLessThanOrEqual(90);
 	});
 
-	test("fits every width from the chrome minimum to 200, ask chip and mic on", () => {
-		const busy = { ...live, micOn: true, approvalPending: true };
-		// Pill + padding + compact cluster is the hard floor; below it the
-		// middle is empty and the outer overflow clip trims the cluster.
-		const floor = brandPillWidth(busy.version, busy.updateAvailable) + 2 + statusClusterWidth(busy, true);
-		expect(floor).toBeLessThan(100);
-		for (let width = 60; width <= 200; width++) {
-			const props = { ...busy, width };
-			const plan = planHeader(props);
-			if (width < floor) {
-				expect(plan.middle.branch).toBe("");
-			} else {
-				expect(occupied(props)).toBeLessThanOrEqual(width);
+	test("the status badge is never clipped, 70 to 200 columns, every state (audit #2)", () => {
+		const states = ["idle", "thinking", "working", "done", "error", "sleep"] as const;
+		for (const lilEightState of states) {
+			for (const busy of [false, true]) {
+				const props0 = { ...live, lilEightState, micOn: busy, approvalPending: busy };
+				// 70 is the floor: the compact pill plus the busiest cluster
+				// ("[ASK]", mic on, "thinking") is 66 columns.
+				for (let width = 70; width <= 200; width++) {
+					expect(occupied({ ...props0, width })).toBeLessThanOrEqual(width);
+				}
 			}
 		}
 	});
 
+	test("at 80 columns the tagline gives way before the badge, and the branch stays", () => {
+		// The pilot frame: `│ 8▣ idle` lost its right border off-screen at 80.
+		const props = { ...live, branch: "main", width: 80 };
+		const plan = planHeader(props);
+		expect(plan.compactBrand).toBe(true);
+		expect(plan.middle.branch).toBe("main");
+		expect(occupied(props)).toBeLessThanOrEqual(80);
+	});
+
 	test("defaults to an 80 column plan when width is omitted", () => {
-		const plan = planHeader(live);
-		expect(plan.compactHint).toBe(true);
-		expect(plan.middleAvailable).toBe(0);
-		expect(plan.middle.branch).toBe("");
+		expect(planHeader(live)).toEqual(planHeader({ ...live, width: 80 }));
+		expect(occupied(live)).toBeLessThanOrEqual(80);
 	});
 
 	test("snapshot across mic / ask / state matrix is stable", () => {

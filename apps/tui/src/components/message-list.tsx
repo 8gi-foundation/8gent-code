@@ -29,6 +29,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
+import { bubbleWidths } from "../lib/chat-layout.js";
 import { buildChatItems, type ChatItem, type ToolTrailEntry } from "../lib/tool-trail.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { t } from "../theme.js";
@@ -175,9 +176,8 @@ export function MessageList({
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
-	// Width used to estimate wrapped line count — matches MessageItem's body
-	// width math (contentWidth - 2 outer chrome, * 0.78 bubble, - 2 slack).
-	const wrapBudget = Math.max(8, Math.floor((resolvedContentWidth - 2) * 0.78) - 2);
+	// Width used to estimate wrapped line count: the same per-role math
+	// MessageItem uses for its body (bubbleWidths), so estimate and render agree.
 	// Default rowBudget: tall enough that small chats render fully, low enough
 	// that long sessions still clip on a typical terminal (80x24).
 	const resolvedRowBudget = Math.max(4, rowBudget ?? Math.max(8, (stdout?.rows ?? 24) - 10));
@@ -202,7 +202,7 @@ export function MessageList({
 	// the container is what makes Ink leave stale characters behind.
 	const trailCaps = new Map<string, number>();
 	const rowEstimates = chatItems.map((i) => {
-		const full = estimateMessageRows(i.message, wrapBudget, i.trail);
+		const full = estimateMessageRows(i.message, bubbleWidths(resolvedContentWidth, i.message.role).wrap, i.trail);
 		const trailRows = toolTrailRows(i.trail);
 		if (trailRows === 0 || full <= resolvedRowBudget) return full;
 		const base = full - trailRows;
@@ -439,16 +439,13 @@ function MessageItem({
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
-	// Messages occupy up to 78% of the content column, leaving a margin of
-	// empty space on the opposite side so alignment reads clearly.
-	// The outer Box reserves 2 cols for borderLeft (1) + paddingLeft (1),
-	// so the actual content column is contentWidth-2. The bubble width and
-	// wrap width each subtract 2 to preserve the existing overflow guarantees.
+	// A user message takes 78% of the column so the two voices read as a
+	// conversation; the assistant's reply takes the full column (chat first).
+	// The outer Box reserves 2 cols for borderLeft (1) + paddingLeft (1), so
+	// the content column is contentWidth-2. Text wraps 2 cols inside the
+	// bubble to stay safe from edge-case character-width quirks.
 	const innerContentWidth = Math.max(16, contentWidth - 2);
-	const maxBubbleWidth = Math.max(16, Math.floor(innerContentWidth * 0.78));
-	// Text wraps strictly within that width. 2 chars slack keeps us safe from
-	// edge-case character-width quirks.
-	const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
+	const { bubble: maxBubbleWidth, wrap: textWrapWidth } = bubbleWidths(contentWidth, message.role);
 
 	// Play sound on completion for assistant messages
 	useCompletionSound(typingComplete && message.role === "assistant" && isNew, soundEnabled);

@@ -93,6 +93,21 @@ export function describeLocalTurnFailure(
 	};
 }
 
+/**
+ * True when a reply is one of the failure messages above. The agent returns
+ * them as the turn's reply text, so a client that wants to show the turn as
+ * failed (the TUI header badge) recognises them here, next to where they are
+ * written, instead of copying the wording.
+ */
+export function isLocalTurnFailureReply(text: string): boolean {
+	const t = text.trimStart();
+	return (
+		t.startsWith("The local model turn could not complete: ") ||
+		t.startsWith("The local model endpoint (") ||
+		(t.startsWith("The local model (") && t.includes("so the turn was stopped."))
+	);
+}
+
 /** The runs.jsonl record for a turn that ended in an error. */
 export function failedTurnRunEntry(opts: {
 	model: string;

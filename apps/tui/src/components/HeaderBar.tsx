@@ -10,7 +10,9 @@
  * columns left over by `fitHeaderMiddle`, which gives the branch name
  * priority over the tail of the workspace path. When the middle would be
  * squeezed below HINT_COMPACT_BELOW columns the "palette" word is dropped
- * from the ^P hint to hand those columns to the workspace segment.
+ * from the ^P hint to hand those columns to the workspace segment. Tighter
+ * still, the pill drops its tagline, then the middle goes entirely, so the
+ * status badge on the right edge is never the part that gets clipped.
  *
  * Pure presentational. Theme tokens only. No inline hex.
  */
@@ -67,16 +69,20 @@ interface HeaderBarProps {
 	width?: number;
 }
 
-/** Columns the brand pill occupies, borders and padding included. */
+/**
+ * Columns the brand pill occupies, borders and padding included. The
+ * compact pill drops the tagline: on a narrow terminal the status badge and
+ * the branch carry more than the brand line does.
+ */
 export function brandPillWidth(
 	version: string | undefined,
 	updateAvailable: HeaderBarProps["updateAvailable"],
+	compact = false,
 ): number {
 	const text =
-		"8gent Code." +
+		"8gent Code" +
 		(version ? ` v${version}` : "") +
-		" │" +
-		BRAND_TAGLINE +
+		(compact ? "" : " │" + BRAND_TAGLINE) +
 		(updateAvailable ? `  │ ↑ v${updateAvailable.latest}` : "");
 	return cellWidth(text) + BORDER_AND_PADDING;
 }
@@ -94,29 +100,49 @@ export function statusClusterWidth(
 	return cellWidth(text) + badge;
 }
 
+/** Fewest middle columns worth rendering: the branch glyph and a 4-cell slice. */
+const MIDDLE_MIN = 6;
+
 /**
- * Decide the hint form and the fitted middle segment for a given width.
+ * Decide the pill form, the hint form and the fitted middle segment for a
+ * given width. The status badge is never the thing that gets cut: when the
+ * row is tight the header gives up, in order, the "palette" word, the
+ * tagline, and finally the whole workspace segment with its padding.
  * Exported so tests can pin the layout without rendering.
  */
 export function planHeader(props: HeaderBarProps): {
 	compactHint: boolean;
+	compactBrand: boolean;
 	middle: HeaderMiddle;
 	middleAvailable: number;
 } {
 	const width = props.width ?? DEFAULT_WIDTH;
-	const pill = brandPillWidth(props.version, props.updateAvailable);
-	const fullRight = statusClusterWidth(props, false);
-	let available = width - pill - fullRight - MIDDLE_PADDING;
-	let compactHint = false;
-	if (available < HINT_COMPACT_BELOW) {
-		compactHint = true;
-		available = width - pill - statusClusterWidth(props, true) - MIDDLE_PADDING;
+	const steps: Array<[compactBrand: boolean, compactHint: boolean]> = [
+		[false, false],
+		[false, true],
+		[true, false],
+		[true, true],
+	];
+	for (const [compactBrand, compactHint] of steps) {
+		const available =
+			width -
+			brandPillWidth(props.version, props.updateAvailable, compactBrand) -
+			statusClusterWidth(props, compactHint) -
+			MIDDLE_PADDING;
+		// The first two steps keep the old rule: the full hint needs a roomy
+		// middle, so a merely-fitting branch still trades the word away.
+		const floor = !compactHint && !compactBrand ? HINT_COMPACT_BELOW : MIDDLE_MIN;
+		if (available >= floor) {
+			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			if (middle.branch) return { compactHint, compactBrand, middle, middleAvailable: available };
+		}
 	}
-	const middleAvailable = Math.max(0, available);
+	// No room for a branch at all: compact pill, compact hint, no middle.
 	return {
-		compactHint,
-		middleAvailable,
-		middle: fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, middleAvailable),
+		compactHint: true,
+		compactBrand: true,
+		middleAvailable: 0,
+		middle: { path: "", branch: "", sync: "" },
 	};
 }
 
@@ -130,23 +156,23 @@ export function HeaderBar(props: HeaderBarProps) {
 		sessionTime,
 		lilEightState,
 	} = props;
-	const { compactHint, middle } = planHeader(props);
+	const { compactHint, compactBrand, middle } = planHeader(props);
 
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
 			<Box flexShrink={0}>
-				<BrandPill updateAvailable={updateAvailable} version={version} />
+				<BrandPill updateAvailable={updateAvailable} version={version} compact={compactBrand} />
 			</Box>
 
-			<Box
-				flexGrow={1}
-				flexShrink={1}
-				minWidth={0}
-				paddingX={1}
-				justifyContent="center"
-				overflow="hidden"
-			>
-				{middle.branch ? (
+			{middle.branch ? (
+				<Box
+					flexGrow={1}
+					flexShrink={1}
+					minWidth={0}
+					paddingX={1}
+					justifyContent="center"
+					overflow="hidden"
+				>
 					<Text wrap="truncate-end">
 						{middle.path ? (
 							<>
@@ -159,8 +185,12 @@ export function HeaderBar(props: HeaderBarProps) {
 						<Text color={ui.orange}>{middle.branch}</Text>
 						{middle.sync ? <Text color={ui.muted}> {middle.sync}</Text> : null}
 					</Text>
-				) : null}
-			</Box>
+				</Box>
+			) : (
+				// Nothing fits in the middle: an unpadded spacer, so the row
+				// never spends columns the status badge needs.
+				<Box flexGrow={1} flexShrink={1} minWidth={0} />
+			)}
 
 			<Box flexShrink={0} justifyContent="flex-end">
 				<Text color={ui.dim}>^P</Text>
@@ -187,25 +217,30 @@ export function HeaderBar(props: HeaderBarProps) {
 function BrandPill({
 	updateAvailable,
 	version,
+	compact = false,
 }: {
 	updateAvailable?: { latest: string; current: string } | null;
 	version?: string;
+	compact?: boolean;
 }) {
 	return (
 		<Box borderStyle="round" borderColor={ui.pillBorder} paddingX={1} flexShrink={0}>
 			<BrandWord />
 			<Text color={ui.muted}> Code</Text>
-			<Text color={ui.orange} bold>.</Text>
 			{version ? (
 				<>
 					<Text color={ui.dim}> </Text>
 					<Text color={ui.muted}>v{version}</Text>
 				</>
 			) : null}
-			<Text color={ui.dim}> </Text>
-			<Text color={ui.dim}>│</Text>
-			<Text color={ui.muted}> The Infinite </Text>
-			<Text color={ui.teal}>Gentleman</Text>
+			{compact ? null : (
+				<>
+					<Text color={ui.dim}> </Text>
+					<Text color={ui.dim}>│</Text>
+					<Text color={ui.muted}> The Infinite </Text>
+					<Text color={ui.teal}>Gentleman</Text>
+				</>
+			)}
 			{updateAvailable ? (
 				<>
 					<Text color={ui.dim}>  │ </Text>

@@ -14,6 +14,7 @@ import {
 	classifyLocalTurnError,
 	describeLocalTurnFailure,
 	failedTurnRunEntry,
+	isLocalTurnFailureReply,
 } from "./local-turn-error";
 import { TurnTimeoutError } from "./turn-timeout";
 
@@ -100,6 +101,29 @@ describe("describeLocalTurnFailure", () => {
 		expect(out.message).toBe(
 			"The local model turn could not complete: ollama chat completions 500: boom",
 		);
+	});
+});
+
+describe("isLocalTurnFailureReply", () => {
+	it("recognises every failure message describeLocalTurnFailure writes", () => {
+		const ctx = { endpoint: ENDPOINT, timeoutMs: 300_000 };
+		const errors = [
+			new TurnTimeoutError(300_000, "ollama/m"),
+			Object.assign(new Error("fetch failed"), { code: "ECONNREFUSED" }),
+			new Error('ollama chat completions 500: {"error":{"message":"EOF"}}'),
+		];
+		const kinds = new Set<string>();
+		for (const err of errors) {
+			const failure = describeLocalTurnFailure(err, ctx);
+			kinds.add(failure.kind);
+			expect(isLocalTurnFailureReply(failure.message)).toBe(true);
+		}
+		expect([...kinds].sort()).toEqual(["other", "timeout", "unreachable"]);
+	});
+
+	it("does not flag an ordinary reply", () => {
+		expect(isLocalTurnFailureReply("All 7 tests now pass. The bug was in paginate.ts.")).toBe(false);
+		expect(isLocalTurnFailureReply("The local model is fast today.")).toBe(false);
 	});
 });
 
