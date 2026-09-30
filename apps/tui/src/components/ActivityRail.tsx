@@ -27,6 +27,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { queuedToolCount } from "../lib/activity-rail-derivation.js";
 import { t } from "../theme.js";
 import { MetricRow, TruncatedValue } from "./RailRow.js";
 
@@ -105,8 +106,10 @@ interface BodyPartsRow {
 interface ActiveTask {
 	id: string;
 	label: string;
-	/** 0-100 */
-	progress: number;
+	/** 0-100, the real share of plan steps done. No bar when absent. */
+	progress?: number;
+	/** Right-hand tally beside the bar, e.g. "2/5". Defaults to `${progress}%`. */
+	detail?: string;
 }
 
 interface ToolStatus {
@@ -264,11 +267,18 @@ export function ActivityRail({
 				) : (
 					tasks.map((task) => (
 						<Box key={task.id} flexDirection="column" flexShrink={0}>
-							<Text color={t.textPrimary} wrap="truncate-end">{task.label}</Text>
-							<Box width="100%" flexShrink={0} justifyContent="space-between">
-								<Text color={t.steel}>{bar(task.progress)}</Text>
-								<Text color={t.textSecondary}>{`${task.progress}%`}</Text>
-							</Box>
+							<Text
+								color={typeof task.progress === "number" ? t.textPrimary : t.teal}
+								wrap="truncate-end"
+							>
+								{task.label}
+							</Text>
+							{typeof task.progress === "number" ? (
+								<Box width="100%" flexShrink={0} justifyContent="space-between">
+									<Text color={t.steel}>{bar(task.progress)}</Text>
+									<Text color={t.textSecondary}>{task.detail ?? `${task.progress}%`}</Text>
+								</Box>
+							) : null}
 						</Box>
 					))
 				)}
@@ -276,12 +286,15 @@ export function ActivityRail({
 
 			<RailSection title="TOOLS">
 				{(() => {
-					// Prefer live turn state (chat-truth) over the stale tools array.
-					const liveActive = isProcessing ? (activeTool ?? "reasoning") : null;
-					const arrayActive = tools.find((tl) => tl.state === "running")?.name ?? null;
-					const active = liveActive ?? arrayActive;
+					// Live turn state (chat-truth) wins over the tools array: while
+					// a turn runs with no tool in flight the agent is reasoning,
+					// and once it ends nothing is active or queued.
+					const arrayActive = isProcessing
+						? (tools.find((tl) => tl.state === "running")?.name ?? null)
+						: null;
+					const active = isProcessing ? (activeTool ?? arrayActive ?? "reasoning") : null;
 					const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
-					const queued = tools.filter((tl) => tl.state === "idle").length;
+					const queued = queuedToolCount(tools, isProcessing);
 					return (
 						<>
 							<MetricRow

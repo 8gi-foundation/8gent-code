@@ -179,7 +179,8 @@ import { getTaskManager } from "../../../packages/tasks/index.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { ActivityRail } from "./components/ActivityRail.js";
-import { useLilEightState } from "./hooks/useLilEightState.js";
+import { turnEndedInError, useLilEightState } from "./hooks/useLilEightState.js";
+import { chatColumnWidth } from "./lib/chat-layout.js";
 import { useGitSync } from "./hooks/useGitSync.js";
 import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
@@ -1502,14 +1503,9 @@ export function App({
 		wasProcessingRef.current = isProcessing;
 		if (justFinished) {
 			setLastTurnEndedAt(Date.now());
-			// Best-effort: scan the last few messages for an error tool result
-			// or an agent error message. Anything else counts as a clean turn.
-			const tail = messages.slice(-5);
-			const hadError = tail.some(
-				(m) =>
-					m.toolSuccess === false ||
-					(m.role === "system" && /error|failed/i.test(m.content)),
-			);
+			// The turn failed only if it ended on a failure. A tool that failed
+			// or was blocked mid-turn, then recovered from, is not an error.
+			const hadError = turnEndedInError(messages);
 			setLastTurnSuccess(!hadError);
 			setLastActivityAt(Date.now());
 			// The plan settles: nothing is still in progress, and the turn's
@@ -5768,15 +5764,9 @@ export function App({
 	// (#TODO upstream), so memory tile shows zeros + em-dash cache. Provider
 	// tile shows the active model as `local` and the env-driven fallback as
 	// `fallback` - latency is unknown until vision-router exposes it.
-	const activeTasks = deriveActiveTasks(
-		{
-			inProgress: kanbanBoard.inProgress.map((s) => ({ id: s.id, description: s.description })),
-			ready: kanbanBoard.ready,
-		},
-		activeTool,
-		isProcessing,
-	);
-	const recentTools = deriveTools(messages, activeTool, 5);
+	// TASKS reads the same plan as the PLAN column, so the two never disagree.
+	const activeTasks = deriveActiveTasks(planSteps, isProcessing);
+	const recentTools = deriveTools(messages, isProcessing, 5);
 	const providerRows = deriveProviders({
 		primary: { name: `${currentProvider}:${currentModel || "—"}` },
 		fallback: { name: "openrouter:free" },
@@ -5887,14 +5877,11 @@ export function App({
 							<MessageList
 								messages={messages}
 								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
-								contentWidth={Math.max(
-									24,
-									viewport.width -
-										(showContextRail ? 31 : 0) -
-										(showPlanColumn ? PLAN_COLUMN_WIDTH : 0) -
-										(showActivityRail ? 36 : 0) -
-										8,
-								)}
+								contentWidth={chatColumnWidth(viewport.width, {
+									context: showContextRail,
+									planWidth: showPlanColumn ? PLAN_COLUMN_WIDTH : 0,
+									activity: showActivityRail,
+								})}
 							/>
 						</Box>
 

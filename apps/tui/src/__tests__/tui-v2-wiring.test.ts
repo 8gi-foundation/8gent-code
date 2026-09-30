@@ -7,7 +7,7 @@
  */
 import { describe, expect, test, beforeEach } from "bun:test";
 
-import { deriveLilEightState, _testing } from "../hooks/useLilEightState";
+import { deriveLilEightState, turnEndedInError, _testing } from "../hooks/useLilEightState";
 import { computeGitSync, type GitRunner } from "../hooks/useGitSync";
 import {
 	deriveTools,
@@ -15,6 +15,7 @@ import {
 	deriveAgents,
 	deriveActiveTasks,
 	parseToolName,
+	queuedToolCount,
 	planStepsFromText,
 } from "../lib/activity-rail-derivation";
 import {
@@ -25,13 +26,30 @@ import {
 	type TuiApprovalDecision,
 } from "../../../../packages/permissions/tui-approval-channel";
 
-function msg(partial: { role: string; content?: string; toolSuccess?: boolean }) {
+function msg(partial: { role: string; content?: string; toolSuccess?: boolean; id?: string; toolTrail?: any }) {
 	return {
-		id: `m-${Math.random().toString(36).slice(2, 8)}`,
+		id: partial.id ?? `m-${Math.random().toString(36).slice(2, 8)}`,
 		role: partial.role as any,
 		content: partial.content ?? "",
 		toolSuccess: partial.toolSuccess,
+		toolTrail: partial.toolTrail,
 	};
+}
+
+/** A start row and, when `ok` is given, its matching end row, as app.tsx appends them. */
+function call(id: string, name: string, ok?: boolean) {
+	const start = msg({ role: "tool", id: `tool-start-${id}`, content: `→ ${name}({})` });
+	if (ok === undefined) return [start];
+	return [
+		start,
+		msg({
+			role: "tool",
+			id: `tool-end-${id}`,
+			content: ok ? "  ✓" : "  ✗ exit 1",
+			toolSuccess: ok,
+			toolTrail: { tool: name, summary: "", status: ok ? "ok" : "fail" },
+		}),
+	];
 }
 
 describe("deriveLilEightState", () => {
@@ -96,6 +114,35 @@ describe("deriveLilEightState", () => {
 				lastTurnSuccess: false,
 			}),
 		).toBe("error");
+	});
+
+	test("a recovered blocked or failed tool is not a failed turn (pilot l3-bugfix-m5)", () => {
+		// The run's real tail: two blocked calls mid-turn, then green tests
+		// and the root-cause reply. The header showed `error` for 5 s here.
+		const messages = [
+			...call("5", "run_command", false),
+			...call("6", "run_command", true),
+			...call("7", "run_command", false),
+			...call("8", "run_command", true),
+			msg({ role: "assistant", content: "All 7 tests now pass. The bug was in paginate.ts." }),
+		] as any;
+		expect(turnEndedInError(messages)).toBe(false);
+	});
+
+	test("a turn that ends on an error is a failed turn", () => {
+		expect(turnEndedInError([msg({ role: "assistant", content: "[Error] provider timed out" })] as any)).toBe(true);
+		expect(turnEndedInError([msg({ role: "system", content: "[Agent not ready] Nothing was run." })] as any)).toBe(true);
+		// Stopped on a failed call with no reply after it.
+		expect(turnEndedInError([...call("1", "run_command", false)] as any)).toBe(true);
+		expect(turnEndedInError([] as any)).toBe(false);
+		// The agent's own failed-turn reply, as seen in the before capture:
+		// ollama rejected the tool-call markup and the turn stopped.
+		expect(
+			turnEndedInError([
+				...call("1", "run_command", false),
+				msg({ role: "assistant", content: 'The local model turn could not complete: ollama chat completions 500: {"error":{"message":"EOF"}}' }),
+			] as any),
+		).toBe(true);
 	});
 
 	test("sleep after long idle window", () => {
@@ -195,18 +242,33 @@ describe("activity-rail-derivation", () => {
 		expect(parseToolName("nope")).toBe(null);
 	});
 
-	test("deriveTools picks last 5 tool messages newest-first", () => {
+	test("deriveTools pairs start and end rows into one call each", () => {
 		const messages = [
 			msg({ role: "user", content: "hi" }),
-			msg({ role: "tool", content: "→ a({})", toolSuccess: true }),
-			msg({ role: "tool", content: "→ b({})", toolSuccess: false }),
-			msg({ role: "tool", content: "→ c({})" }),
+			...call("1", "a", true),
+			...call("2", "b", false),
+			...call("3", "c"),
 		] as any;
-		const tools = deriveTools(messages, "c", 5);
+		const tools = deriveTools(messages, true, 5);
 		expect(tools.map((t) => t.name)).toEqual(["c", "b", "a"]);
-		expect(tools[0].state).toBe("running");
-		expect(tools[1].state).toBe("fail");
-		expect(tools[2].state).toBe("ok");
+		expect(tools.map((t) => t.state)).toEqual(["running", "fail", "ok"]);
+	});
+
+	test("finished calls never count as queued, live or idle (audit #4: queued 2 never drained)", () => {
+		const messages = [...call("1", "list_files", true), ...call("2", "run_command", true)] as any;
+		const live = deriveTools(messages, true, 5);
+		expect(live.every((t) => t.state === "ok")).toBe(true);
+		expect(queuedToolCount(live, true)).toBe(0);
+		expect(queuedToolCount(deriveTools(messages, false, 5), false)).toBe(0);
+	});
+
+	test("queued counts calls waiting behind the active one, and drains when the turn ends", () => {
+		const messages = [...call("1", "read_file"), ...call("2", "read_file"), ...call("3", "grep")] as any;
+		const live = deriveTools(messages, true, 5);
+		expect(queuedToolCount(live, true)).toBe(2);
+		const after = deriveTools(messages, false, 5);
+		expect(after.some((t) => t.state === "running")).toBe(false);
+		expect(queuedToolCount(after, false)).toBe(0);
 	});
 
 	test("deriveProviders fmts latency and respects tier order", () => {
@@ -232,28 +294,34 @@ describe("activity-rail-derivation", () => {
 		expect(rows[2]).toEqual({ name: "Other", state: "idle" });
 	});
 
-	test("deriveActiveTasks surfaces in-progress kanban or active tool", () => {
-		expect(deriveActiveTasks(null, null, false)).toEqual([]);
-		expect(deriveActiveTasks(null, "read_file", true)).toEqual([
-			{ id: "tool-active", label: "tool: read_file", progress: 50 },
+	test("TASKS reads the plan: the active step with the real done/total bar", () => {
+		const plan = [
+			{ id: "p1", text: "read the tests", status: "done" as const },
+			{ id: "p2", text: "fix paginate", status: "active" as const },
+			{ id: "p3", text: "run bun test", status: "pending" as const },
+		];
+		expect(deriveActiveTasks(plan, true)).toEqual([
+			{ id: "p2", label: "fix paginate", progress: 33, detail: "1/3" },
 		]);
-		expect(
-			deriveActiveTasks(
-				{ inProgress: [{ id: "k1", description: "scaffold" }], ready: [] },
-				"read_file",
-				true,
-			),
-		).toEqual([{ id: "k1", label: "scaffold", progress: 50 }]);
+	});
+
+	test("TASKS shows the plan tally when no step is in progress", () => {
+		const plan = [
+			{ id: "p1", text: "a", status: "done" as const },
+			{ id: "p2", text: "b", status: "done" as const },
+		];
+		expect(deriveActiveTasks(plan, false)).toEqual([
+			{ id: "plan-tally", label: "2 of 2 steps done", progress: 100, detail: "2/2" },
+		]);
+	});
+
+	test("TASKS never says idle while a turn runs (audit #4)", () => {
+		expect(deriveActiveTasks([], true)).toEqual([{ id: "working", label: "working, no plan yet" }]);
 	});
 
 	test("a fresh session with no plan shows no tasks (#2923)", () => {
-		// The board a new session starts with: nothing seeded, nothing invented.
-		const freshBoard = { inProgress: [], ready: [] };
-		expect(deriveActiveTasks(freshBoard, null, false)).toEqual([]);
-		// Still nothing while the model is thinking but no tool is running.
-		expect(deriveActiveTasks(freshBoard, null, true)).toEqual([]);
-		// Ready items alone never render as running.
-		expect(deriveActiveTasks({ inProgress: [], ready: [{ id: "r1" }] }, null, true)).toEqual([]);
+		// Nothing seeded, nothing invented: no plan and no turn is idle.
+		expect(deriveActiveTasks([], false)).toEqual([]);
 	});
 
 	test("planStepsFromText only yields steps the agent wrote in a PLAN block", () => {

@@ -16,40 +16,53 @@ import type {
 	AgentRow as ActivityRailAgentRow,
 } from "../components/ActivityRail.js";
 import type { Message } from "../app.js";
+import type { PlanStep } from "./plan-state.js";
 
 /**
  * Derive the last N tool calls from the message stream.
  *
- * Each onToolStart appends a message with id `tool-start-{callId}` and
- * role `tool`. onToolEnd does NOT push a separate message; instead it
- * sets `toolSuccess` on the same row (best effort - some agents reuse
- * the same id, some overwrite). We treat the absence of `toolSuccess`
- * on a recent tool message as "running".
+ * onToolStart appends `tool-start-{callId}` (content `→ name(args)`) and
+ * onToolEnd appends a separate `tool-end-{callId}` carrying toolSuccess
+ * and the trail entry. The two rows are one call, so they are paired by
+ * call id: a start with an end is finished (ok / fail), a start with no
+ * end is still running, but only while a turn is live. Once the turn is
+ * over nothing is running, whatever the message stream says.
+ *
+ * Counting the start rows as separate "idle" tools is what made the rail
+ * print `queued 2` for the whole session (audit 2026-09-29, #4).
  */
 export function deriveTools(
-	messages: ReadonlyArray<Pick<Message, "role" | "content" | "toolSuccess" | "id">>,
-	activeToolName: string | null,
+	messages: ReadonlyArray<Pick<Message, "role" | "content" | "toolSuccess" | "id" | "toolTrail">>,
+	isProcessing: boolean,
 	limit = 5,
 ): ActivityRailToolStatus[] {
+	const ended = new Map<string, Pick<Message, "toolSuccess" | "toolTrail">>();
+	for (const m of messages) {
+		if (m?.role === "tool" && m.id.startsWith("tool-end-")) ended.set(m.id.slice("tool-end-".length), m);
+	}
 	const tools: ActivityRailToolStatus[] = [];
-	// Walk from newest to oldest, pick tool messages.
 	for (let i = messages.length - 1; i >= 0 && tools.length < limit; i--) {
 		const m = messages[i];
-		if (!m || m.role !== "tool") continue;
-		const name = parseToolName(m.content) ?? "tool";
+		if (!m || m.role !== "tool" || m.id.startsWith("tool-end-")) continue;
+		const callId = m.id.startsWith("tool-start-") ? m.id.slice("tool-start-".length) : null;
+		const end = callId ? ended.get(callId) : undefined;
+		const name = end?.toolTrail?.tool ?? parseToolName(m.content) ?? "tool";
+		const success = end ? end.toolSuccess : m.toolSuccess;
 		let state: ActivityRailToolState;
-		if (typeof m.toolSuccess === "boolean") {
-			state = m.toolSuccess ? "ok" : "fail";
-		} else if (activeToolName && name.toLowerCase() === activeToolName.toLowerCase()) {
-			state = "running";
-		} else {
-			// No success flag and not active: assume running unless older than the
-			// active tool. Default to idle for older entries to keep the rail honest.
-			state = "idle";
-		}
+		if (typeof success === "boolean") state = success ? "ok" : "fail";
+		else state = isProcessing ? "running" : "idle";
 		tools.push({ name, state });
 	}
 	return tools;
+}
+
+/**
+ * Calls the model has issued this turn that are waiting behind the active
+ * one. Zero whenever no turn is live, so it always drains.
+ */
+export function queuedToolCount(tools: ReadonlyArray<ActivityRailToolStatus>, isProcessing: boolean): number {
+	if (!isProcessing) return 0;
+	return Math.max(0, tools.filter((tl) => tl.state === "running").length - 1);
 }
 
 /**
@@ -122,32 +135,33 @@ export function deriveAgents(
 }
 
 /**
- * Derive an active-tasks row from kanban + planning state. Today we
- * surface the in-progress kanban items (one row each) plus a synthetic
- * "tool: {activeTool}" row when the agent is mid-call but kanban is
- * empty. Returns [] when nothing is in flight - ActivityRail renders
- * "idle" in that case.
+ * Derive the TASKS rows from the same plan the PLAN column shows.
+ *
+ * The plan (update_plan events, or the agent's own PLAN: block) is the only
+ * source, so TASKS and PLAN can never disagree:
+ *   - a step the agent marked in progress is the task, with a bar that is
+ *     the real share of steps done (`2/5`), never a guessed percentage;
+ *   - a plan with no step in progress shows its tally;
+ *   - a live turn with no plan says `working`, never `idle`;
+ *   - no turn and no plan is `idle` (an empty list).
+ * The active tool is not a task: it is already in TOOLS › active.
  */
-export interface KanbanLike {
-	inProgress: ReadonlyArray<{ id: string; description: string }>;
-	ready: ReadonlyArray<unknown>;
-}
-
 export function deriveActiveTasks(
-	kanban: KanbanLike | null,
-	activeTool: string | null,
+	plan: ReadonlyArray<Pick<PlanStep, "id" | "text" | "status">>,
 	isProcessing: boolean,
 ): ActivityRailTask[] {
-	const out: ActivityRailTask[] = [];
-	if (kanban && kanban.inProgress.length > 0) {
-		for (const item of kanban.inProgress) {
-			out.push({ id: item.id, label: item.description, progress: 50 });
-		}
+	if (plan.length === 0) {
+		return isProcessing ? [{ id: "working", label: "working, no plan yet" }] : [];
 	}
-	if (out.length === 0 && isProcessing && activeTool) {
-		out.push({ id: "tool-active", label: `tool: ${activeTool}`, progress: 50 });
+	const done = plan.filter((s) => s.status === "done").length;
+	const total = plan.length;
+	const progress = Math.round((done / total) * 100);
+	const detail = `${done}/${total}`;
+	const active = plan.filter((s) => s.status === "active");
+	if (active.length > 0) {
+		return active.map((s) => ({ id: s.id, label: s.text, progress, detail }));
 	}
-	return out;
+	return [{ id: "plan-tally", label: `${done} of ${total} steps done`, progress, detail }];
 }
 
 /**
