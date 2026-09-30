@@ -411,6 +411,9 @@ describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {
 	let backend: CountingBackend;
 	let constructed = 0;
 	const on = { [SYSTEM_ONE_FLAG]: "1" };
+	// The allowlist is on by default under System One (James, 2026-09-30);
+	// `off` is the explicit opt-out.
+	const off = { ...on, [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" };
 	const allow = { ...on, [SYSTEM_ONE_ALLOWLIST_FLAG]: "1" };
 	const allowBun = { ...allow, [SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG]: "1" };
 
@@ -429,15 +432,35 @@ describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {
 	});
 	afterEach(() => _resetSystemOne());
 
-	test("flags are off by default, and the bun test flag needs the allowlist flag", () => {
-		expect(systemOneAllowlist({})).toEqual({ enabled: false, bunTest: false });
-		expect(systemOneAllowlist({ [SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG]: "1" })).toEqual({ enabled: false, bunTest: false });
+	test("the allowlist is on by default, bun test is off by default, and both opt-outs work", () => {
+		expect(systemOneAllowlist({})).toEqual({ enabled: true, bunTest: false });
+		expect(systemOneAllowlist({ [SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG]: "1" })).toEqual({ enabled: true, bunTest: true });
+		for (const v of ["0", "false", "off", "no", " OFF "]) {
+			expect(systemOneAllowlist({ [SYSTEM_ONE_ALLOWLIST_FLAG]: v })).toEqual({ enabled: false, bunTest: false });
+			// bun test never passes without the allowlist itself.
+			expect(
+				systemOneAllowlist({ [SYSTEM_ONE_ALLOWLIST_FLAG]: v, [SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG]: "1" }),
+			).toEqual({ enabled: false, bunTest: false });
+		}
 		expect(systemOneAllowlist(allow)).toEqual({ enabled: true, bunTest: false });
 		expect(systemOneAllowlist(allowBun)).toEqual({ enabled: true, bunTest: true });
 	});
 
-	test("allowlist off: a read-only command still asks the judge (unchanged behaviour)", async () => {
+	test("default (System One on, no allowlist flag): a read-only command skips the judge", async () => {
 		const r = await systemOneGate("ls -la", on);
+		expect(r.run).toBe(true);
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(constructed).toBe(0);
+		expect(backend.asks).toBe(0);
+	});
+
+	test("default: bun test still asks the judge", async () => {
+		await systemOneGate("bun test", on);
+		expect(backend.asks).toBe(1);
+	});
+
+	test("allowlist opted out: a read-only command still asks the judge", async () => {
+		const r = await systemOneGate("ls -la", off);
 		expect(r.run).toBe(true);
 		expect(r.guard?.backend).toBe("stub");
 		expect(backend.asks).toBe(1);
@@ -485,8 +508,8 @@ describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {
 		expect(backend.asks).toBe(1);
 	});
 
-	test("allowlist off: warm-up is unchanged", async () => {
-		const p = startSystemOneWarmup(on);
+	test("allowlist opted out: the judge warms at startup as before", async () => {
+		const p = startSystemOneWarmup(off);
 		expect(p).not.toBeNull();
 		await p;
 		expect(constructed).toBe(1);

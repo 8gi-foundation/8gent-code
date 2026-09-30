@@ -105,27 +105,33 @@ export function systemOneEnabled(env: Record<string, string | undefined> = proce
 }
 
 /**
- * Rules-first allowlist (packages/decide/allowlist.ts, #3131). OFF by
- * default. With it on, a command the rules pass and the allowlist reads as
- * plainly read-only runs without asking the model judge (backend
- * "allowlist"), and the judge is no longer warmed at startup: it loads on the
- * first command that needs it, inside the cold budget. `bun test` needs its
- * own flag on top. Both only matter when EIGHT_SYSTEM_ONE is on.
+ * Rules-first allowlist (packages/decide/allowlist.ts, #3131). ON by default
+ * whenever System One is on (James, 2026-09-30); EIGHT_S1_ALLOWLIST=0 (or
+ * false/off/no) opts out. System One itself stays opt-in: with
+ * EIGHT_SYSTEM_ONE unset, none of this runs.
+ *
+ * With it on, a command the rules pass and the allowlist reads as plainly
+ * read-only runs without asking the model judge (backend "allowlist"), and
+ * the judge is no longer warmed at startup: it loads on the first command
+ * that needs it, inside the cold budget. The rules always run first and win.
+ *
+ * `bun test` runs the repo's own test code, so skipping the judge for it is a
+ * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
  */
 export const SYSTEM_ONE_ALLOWLIST_FLAG = "EIGHT_S1_ALLOWLIST";
 export const SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG = "EIGHT_S1_ALLOWLIST_BUN_TEST";
 
-function flagOn(env: Record<string, string | undefined>, name: string): boolean {
-	const v = (env[name] || "").trim().toLowerCase();
-	return v === "1" || v === "true";
+function flagValue(env: Record<string, string | undefined>, name: string): string {
+	return (env[name] || "").trim().toLowerCase();
 }
 
 export function systemOneAllowlist(env: Record<string, string | undefined> = process.env): {
 	enabled: boolean;
 	bunTest: boolean;
 } {
-	const enabled = flagOn(env, SYSTEM_ONE_ALLOWLIST_FLAG);
-	return { enabled, bunTest: enabled && flagOn(env, SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG) };
+	const enabled = !["0", "false", "off", "no"].includes(flagValue(env, SYSTEM_ONE_ALLOWLIST_FLAG));
+	const bun = flagValue(env, SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG);
+	return { enabled, bunTest: enabled && (bun === "1" || bun === "true") };
 }
 
 export type SystemOneThresholds = "default" | `calibrated(${string})`;

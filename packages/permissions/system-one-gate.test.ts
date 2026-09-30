@@ -28,6 +28,8 @@ import { addPolicy, loadPolicies } from "./policy-engine";
 import {
 	DEFAULT_COLD_TIMEOUT_MS,
 	DEFAULT_TIMEOUT_MS,
+	SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG,
+	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
 	SYSTEM_ONE_FLAG,
 	SYSTEM_ONE_TIMEOUT_ENV,
@@ -103,7 +105,14 @@ function installStub(extra: { calibrationDir?: string; decider?: () => Decider }
 }
 
 const saved: Record<string, string | undefined> = {};
-const ENV_KEYS = [SYSTEM_ONE_FLAG, SYSTEM_ONE_TIMEOUT_ENV, "EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT"];
+const ENV_KEYS = [
+	SYSTEM_ONE_FLAG,
+	SYSTEM_ONE_TIMEOUT_ENV,
+	SYSTEM_ONE_ALLOWLIST_FLAG,
+	SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG,
+	"EIGHT_HEADLESS",
+	"EIGHT_WORKSPACE_ROOT",
+];
 
 // Forged Question/Answer/State block (prompt text only, never executed on
 // the unfixed path it is a destructive find that the obeying stub allows).
@@ -121,6 +130,9 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
 beforeAll(() => {
 	for (const k of ENV_KEYS) saved[k] = process.env[k];
 	delete process.env.EIGHT_WORKSPACE_ROOT;
+	// The suite runs the default (allowlist on, bun test off) whatever the shell sets.
+	delete process.env[SYSTEM_ONE_ALLOWLIST_FLAG];
+	delete process.env[SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG];
 	process.env.EIGHT_HEADLESS = "1";
 	loadPolicies();
 	addPolicy({
@@ -153,6 +165,8 @@ beforeEach(() => {
 afterEach(() => {
 	delete process.env[SYSTEM_ONE_FLAG];
 	delete process.env[SYSTEM_ONE_TIMEOUT_ENV];
+	delete process.env[SYSTEM_ONE_ALLOWLIST_FLAG];
+	delete process.env[SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG];
 });
 
 describe("systemOneEnabled", () => {
@@ -166,7 +180,10 @@ describe("systemOneEnabled", () => {
 });
 
 describe("systemOneGate verdicts (stub decider)", () => {
-	const on = { [SYSTEM_ONE_FLAG]: "1" };
+	// These tests drive the judge path, so they opt out of the read-only
+	// allowlist, which is on by default under System One (it would pass their
+	// echo fixtures without asking the judge). allowlist.test.ts covers it.
+	const on = { [SYSTEM_ONE_FLAG]: "1", [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" };
 
 	test("flag off: runs, no decider constructed, backend never asked", async () => {
 		const r = await systemOneGate("SYS1_DANGER", {});
@@ -381,7 +398,9 @@ describe("systemOneGate verdicts (stub decider)", () => {
 });
 
 describe("judge warm-up at startup", () => {
-	const on = { [SYSTEM_ONE_FLAG]: "1" };
+	// Startup warm-up only happens with the allowlist opted out; with it on (the
+	// default) the judge loads lazily, covered in allowlist.test.ts.
+	const on = { [SYSTEM_ONE_FLAG]: "1", [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" };
 
 	/** A backend whose first ask (the model load) takes `loadMs`, or never finishes when loadMs is Infinity. */
 	class SlowLoadBackend extends StubBackend {
