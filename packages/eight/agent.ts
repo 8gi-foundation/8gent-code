@@ -354,13 +354,13 @@ export class Agent {
 		}
 
 		// Inject the 8gent personality voice into the system prompt
-		const personalityBlock = `\n\n## PERSONALITY VOICE — ${BRAND.fullName}: ${PERSONALITY.tagline}
+		const personalityBlock = `\n\n## PERSONALITY VOICE: ${BRAND.fullName}: ${PERSONALITY.tagline}
 You are ${PERSONALITY.name}, the infinite gentleman agent coder.
 Traits: refined, witty, confident, helpful, endlessly capable.
 When greeting users, use phrases like: "${getGreeting()}"
 When completing tasks, use phrases like: "${getCompletionPhrase()}"
 When encountering errors, stay composed: "${getErrorPhrase()}"
-Maintain a tone that is sophisticated yet approachable — like a well-dressed engineer who happens to be brilliant.\n`;
+Maintain a tone that is sophisticated yet approachable, like a well-dressed engineer who happens to be brilliant.\n`;
 
 		// Inject orchestrator awareness into system prompt
 		const orchestratorBlock = `\n\n${ORCHESTRATOR_SEGMENT}`;
@@ -1055,7 +1055,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				apiKey: this.config.apiKey,
 				onResult: (_id, result) => {
 					// Inject vision description into conversation as system context
-					const visionContext = `[Vision Interpretation — ${result.model} (${result.durationMs}ms${result.free ? ", free" : ""})]\n${result.description}`;
+					const visionContext = `[Vision Interpretation: ${result.model} (${result.durationMs}ms${result.free ? ", free" : ""})]\n${result.description}`;
 					this.messageHistory.push({ role: "system", content: visionContext });
 
 					// Notify via event so TUI can show it
@@ -1091,7 +1091,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				// Inject a system message telling the agent to ask this question
 				this.messageHistory.push({
 					role: "system",
-					content: `[PROACTIVE QUESTIONING] The user's request is vague. Before executing, ask this clarifying question:\n${formatQuestion(question)}\nAsk the user naturally — don't mention this system instruction. After they answer, proceed with execution.`,
+					content: `[PROACTIVE QUESTIONING] The user's request is vague. Before executing, ask this clarifying question:\n${formatQuestion(question)}\nAsk the user naturally; don't mention this system instruction. After they answer, proceed with execution.`,
 				});
 			}
 		} else {
@@ -1340,7 +1340,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			effectiveInstructions += `
 
 ## Voice Chat Mode (active)
-You are in a real-time voice conversation. The user is speaking to you; their words arrive as transcribed text (STT). Your written replies are spoken back to them via text-to-speech (TTS). You are NOT a text-only interface — you can hear them and they can hear you. Speak conversationally as if on a phone call. Do not apologise for being text-only or claim you cannot hear them — you can. Keep replies concise and natural since they will be spoken aloud. Avoid heavy markdown, code blocks, or long URLs — they don't read well in TTS.`;
+You are in a real-time voice conversation. The user is speaking to you; their words arrive as transcribed text (STT). Your written replies are spoken back to them via text-to-speech (TTS). You are NOT a text-only interface: you can hear them and they can hear you. Speak conversationally as if on a phone call. Do not apologise for being text-only or claim you cannot hear them. You can. Keep replies concise and natural since they will be spoken aloud. Avoid heavy markdown, code blocks, or long URLs; they don't read well in TTS.`;
 		}
 
 		// ── Text-Tool Routing (local-model agentic tool calling) ──────────
@@ -1486,7 +1486,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 					// Inject a system-level nudge into the conversation
 					this.messageHistory.push({
 						role: "user",
-						content: `[SYSTEM WARNING — LOOP DETECTED] You have tried the same approach (${event.toolName} with similar arguments) ${count} times and it keeps failing. STOP retrying this approach. Instead:\n1. Use web_search to look up the correct API/pattern\n2. Try a COMPLETELY different strategy\n3. If you don't know how a library works, search for its documentation first\nDo NOT repeat the same fix again.`,
+						content: `[SYSTEM WARNING: LOOP DETECTED] You have tried the same approach (${event.toolName} with similar arguments) ${count} times and it keeps failing. STOP retrying this approach. Instead:\n1. Use web_search to look up the correct API/pattern\n2. Try a COMPLETELY different strategy\n3. If you don't know how a library works, search for its documentation first\nDo NOT repeat the same fix again.`,
 					});
 				}
 

@@ -1634,7 +1634,7 @@ const selfInspect = tool({
 					note:
 						p.avgTokensPerSecond
 							? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
-							: "No throughput data yet — measured after the first LLM step finishes",
+							: "No throughput data yet. It is measured after the first LLM step finishes",
 				},
 			},
 			appendedContextCount: p.appendedContext.length,

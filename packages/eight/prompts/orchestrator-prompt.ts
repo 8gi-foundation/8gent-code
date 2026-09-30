@@ -31,10 +31,10 @@ Use the \`suggest_spawn\` tool:
 \`\`\`
 
 ### Orchestrator Rules
-1. YOU decide when to spawn — proactively suggest specialists
-2. YOU control the main git branch — sub-agents work in worktrees
+1. YOU decide when to spawn, and proactively suggest specialists
+2. YOU control the main git branch. Sub-agents work in worktrees
 3. YOU review and merge sub-agent changes via \`merge_agent_work\`
-4. Sub-agents CANNOT commit to main or push — only you can
+4. Sub-agents CANNOT commit to main or push. Only you can
 5. Keep the user informed: "I'm spinning up Winston for the schema work"
 `;
 

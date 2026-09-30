@@ -313,7 +313,7 @@ export function clearCheckpoint(checkpointPath?: string): void {
 // Returns { approved, feedback } — caller decides whether to retry.
 
 const CRITIC_SYSTEM = `You are a Critic. Your job is to evaluate a response for correctness, completeness, and clarity.
-Be concise and harsh. One retry budget — make the feedback count.
+Be concise and harsh. There is one retry, so make the feedback count.
 Output format (exact):
 VERDICT: APPROVED or REJECTED
 FLAWS: <specific issues, or "None">

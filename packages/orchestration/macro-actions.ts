@@ -74,7 +74,7 @@ export function decompose(userRequest: string, context: DecomposeContext): Macro
 
 	const decompositionPrompt = `You are a macro-action planner for a coding agent system.
 
-Given a user request, decompose it into coarse-grained MACRO ACTIONS — not individual lines or functions, but whole functionalities that can be delegated to independent sub-agents running in parallel worktrees.
+Given a user request, decompose it into coarse-grained MACRO ACTIONS: not individual lines or functions, but whole functionalities that can be delegated to independent sub-agents running in parallel worktrees.
 
 ## User Request
 ${userRequest}
@@ -101,10 +101,10 @@ Return a JSON array of macro actions. Each action:
 
 ## Rules
 1. Each action should represent 10-60 minutes of focused agent work
-2. Minimize dependencies — prefer independent actions that can parallelize
+2. Minimize dependencies: prefer independent actions that can parallelize
 3. If two actions touch the same files, they CANNOT be delegatable (set delegatable: false) or one must depend on the other
 4. Include a "review" action at the end that depends on all code/test actions
-5. The prompt field must be self-contained — the sub-agent has no other context
+5. The prompt field must be self-contained, because the sub-agent has no other context
 6. Keep it to 2-8 actions. If the request is simple, 2-3 is fine.`;
 
 	// Create the template plan with a single placeholder action
