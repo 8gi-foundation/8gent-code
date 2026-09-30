@@ -109,17 +109,35 @@ function walkUp(startDir: string): string[] {
  * if no instruction files found.
  */
 export function loadInstructions(cwd: string): string {
+	return loadInstructionParts(cwd).join("\n\n---\n\n");
+}
+
+/**
+ * The instruction files loadInstructions merges, one entry per file, lowest
+ * priority first.
+ *
+ * `includeUserGlobal: false` keeps only the project's files. User-global means
+ * the operator's own files: the standing rules, ~/.8gent, and any walk-up
+ * directory at or above $HOME (a ~/AGENTS.md is the operator's, not the
+ * repo's). Those may go to an on-box model but never to a cloud provider.
+ */
+export function loadInstructionParts(
+	cwd: string,
+	opts: { includeUserGlobal?: boolean } = {},
+): string[] {
+	const includeUserGlobal = opts.includeUserGlobal ?? true;
 	const parts: string[] = [];
+	const homeDir = resolve(home());
 
 	// 1. Operator standing rules (always on, lowest priority)
-	const standing = findStandingRules();
+	const standing = includeUserGlobal ? findStandingRules() : null;
 	if (standing) {
 		parts.push(`# STANDING RULES (always on, every surface)\n\n${standing}`);
 	}
 
 	// 2. Global instructions
-	const globalDir = join(home(), ".8gent");
-	const globalContent = findInstructionFile(globalDir);
+	const globalDir = join(homeDir, ".8gent");
+	const globalContent = includeUserGlobal ? findInstructionFile(globalDir) : null;
 	if (globalContent) {
 		parts.push(globalContent.trim());
 	}
@@ -127,15 +145,60 @@ export function loadInstructions(cwd: string): string {
 	// 3. Walk up from cwd, collecting project instructions
 	const projectDirs = walkUp(cwd);
 	for (const dir of projectDirs) {
+		// Avoid duplicating global if ~/.8gent happens to be in the walk-up path
+		if (dir === globalDir) continue;
+		const atOrAboveHome = dir === homeDir || homeDir.startsWith(`${dir}/`) || dir === "/";
+		if (!includeUserGlobal && atOrAboveHome) continue;
 		const content = findInstructionFile(dir);
-		if (content) {
-			// Avoid duplicating global if ~/.8gent happens to be in the walk-up path
-			if (dir === globalDir) continue;
-			parts.push(content.trim());
-		}
+		if (content) parts.push(content.trim());
 	}
 
+	return parts;
+}
+
+/**
+ * Character cap on the instructions section of the live system prompt (#3236).
+ * About 2,000 tokens, which a 32k local model can carry.
+ */
+export const PROJECT_INSTRUCTIONS_CAP = 8000;
+
+const SEPARATOR = "\n\n---\n\n";
+
+/**
+ * The loaded instructions as a trailing system-prompt section, or "" when
+ * there are none. Project files only unless `includeUserGlobal` is set, which
+ * the agent does for on-box providers alone. It goes LAST so the stable prompt prefix before it stays
+ * byte-identical (#3222).
+ *
+ * Over the cap, files are kept from the most specific down (the project's own
+ * file wins, so it is never the one dropped) and lower-priority files are
+ * left out. A single file larger than the cap keeps its beginning.
+ */
+export function projectInstructionsSection(
+	cwd: string,
+	opts: { includeUserGlobal?: boolean; cap?: number } = {},
+): string {
+	const cap = opts.cap ?? PROJECT_INSTRUCTIONS_CAP;
+	const parts = loadInstructionParts(cwd, { includeUserGlobal: opts.includeUserGlobal ?? false });
 	if (parts.length === 0) return "";
 
-	return parts.join("\n\n---\n\n");
+	const kept: string[] = [];
+	let budget = cap;
+	for (let i = parts.length - 1; i >= 0; i--) {
+		const part = parts[i];
+		if (part.length <= budget) {
+			kept.unshift(part);
+			budget -= part.length + SEPARATOR.length;
+			continue;
+		}
+		if (kept.length === 0) {
+			const head = part.slice(0, budget).replace(/\n[^\n]*$/, "");
+			kept.unshift(`${head}\n... (truncated; read the full file for more)`);
+		}
+		break;
+	}
+	const omitted = parts.length - kept.length;
+	const note =
+		omitted > 0 ? `(${omitted} lower-priority instruction file(s) left out to fit)\n\n` : "";
+	return `\n\n## PROJECT INSTRUCTIONS (AGENTS.md / 8GENT.md / CLAUDE.md)\n\n${note}${kept.join(SEPARATOR)}`;
 }

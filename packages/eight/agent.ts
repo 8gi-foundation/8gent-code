@@ -58,6 +58,8 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { projectInstructionsSection } from "./instruction-loader";
+import { isLocalProvider } from "./registry";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -418,12 +420,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// pushing them to fabricate, and private-memory leakage into an
 		// untrusted channel. Table sessions bypass it.
 		const isTableScope = config.agentScope === "__table__";
+		// Project instructions (AGENTS.md / 8GENT.md / CLAUDE.md) reach the model
+		// on both coding paths (#3236), as the trailing section so the prefix
+		// before it stays stable (#3222). Table officers keep their supplied
+		// prompt verbatim, for the reasons above.
+		// The operator's user-global files (~/.claude/CLAUDE.md, ~/.8gent, a
+		// ~/AGENTS.md) go only to an on-box model; a cloud provider gets the
+		// project's files alone (8SO, #3236).
+		const projectInstructionsBlock = isTableScope
+			? ""
+			: projectInstructionsSection(config.workingDirectory || process.cwd(), {
+					includeUserGlobal: runsOnBox(runtimeName, config.baseUrl),
+				});
 		this.messageHistory.push({
 			role: "system",
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-				? compactLocalPrompt
+				? compactLocalPrompt + projectInstructionsBlock
 				: basePrompt +
 					vesselContext +
 					userContextBlock +
@@ -432,7 +446,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					deferredToolBlock +
 					globalMemoriesBlock +
 					priorSessionsBlock +
-					languageInstruction,
+					languageInstruction +
+					projectInstructionsBlock,
 		});
 
 		// Initialize session persistence (v2)
@@ -2874,5 +2889,21 @@ function readSettingsFileSync(): Settings | null {
 		return null;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * True when the model runs on this machine: a local provider (the registry's
+ * LOCAL_PROVIDERS, plus llama-server) with no base URL, or one on loopback.
+ * Decides whether the operator's user-global instructions may be sent (#3236).
+ */
+export function runsOnBox(runtime: string, baseUrl?: string): boolean {
+	if (!isLocalProvider(runtime) && runtime !== "llama-server") return false;
+	if (!baseUrl) return true;
+	try {
+		const host = new URL(baseUrl).hostname;
+		return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+	} catch {
+		return false;
 	}
 }
