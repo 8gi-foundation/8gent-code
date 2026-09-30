@@ -5,7 +5,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { getAuditPath } from "../permissions/toolg8";
 import { defaultBanditStorePath } from "../providers/router-bandit";
 import { CREATIVE_DIR, HUDDLES_DIR } from "../table/bake";
@@ -30,8 +30,11 @@ const paths: Record<string, () => string> = {
 };
 
 for (const [name, path] of Object.entries(paths)) {
-	test(`${name} resolves under the temp $HOME, never the real home`, () => {
+	test(`${name} resolves to a temp dir, never the real home`, () => {
 		expect(underRealHome(path())).toBe(false);
-		expect(path().startsWith(process.env.HOME as string)).toBe(true);
+		// Under the temp $HOME, or under another test's temp EIGHT_DATA_DIR: tests
+		// set that at module level, and which one a module sees first depends on
+		// file order (Linux CI differs from macOS). Either way, a temp dir.
+		expect(path().startsWith(tmpdir())).toBe(true);
 	});
 }

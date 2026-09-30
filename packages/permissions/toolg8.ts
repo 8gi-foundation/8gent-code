@@ -8,8 +8,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home.js";
 import { type BashGateResult, gateBashCommand } from "../tools/bash-tool.js";
 import { evaluatePolicy } from "./policy-engine.js";
 import type { PolicyActionType, PolicyContext, PolicyDecision } from "./types.js";
@@ -66,7 +66,7 @@ interface AuditEntry {
 // ============================================
 
 const AUDIT_DIR = path.join(
-	process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+	process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
 	"audit",
 );
 const AUDIT_PATH = path.join(AUDIT_DIR, "toolg8.jsonl");

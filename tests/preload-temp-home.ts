@@ -25,6 +25,10 @@ process.env.EIGHT_HOME = testHome;
 process.env.EIGHT_DATA_DIR = join(testHome, ".8gent");
 // A preload-level afterAll runs once, after every test file. process "exit"
 // does not fire under bun test, so it cannot do the cleanup.
+// Best effort: a cleanup error (seen as EIO on a full CI disk) must not fail
+// the run it follows.
 afterAll(() => {
-	rmSync(testHome, { recursive: true, force: true });
+	try {
+		rmSync(testHome, { recursive: true, force: true });
+	} catch {}
 });
