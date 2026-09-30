@@ -34,6 +34,7 @@ import {
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
 	startSystemOneWarmup,
+	systemOneJudgeWarm,
 	systemOneEnabled,
 	systemOneGate,
 	systemOneTimeoutMs,
@@ -458,9 +459,12 @@ describe("judge warm-up at startup", () => {
 			},
 		});
 		await expect(startSystemOneWarmup(on) as Promise<void>).rejects.toThrow("module failed to load");
+		expect(systemOneJudgeWarm()).toBe(false);
 		const r = await systemOneGate("ls", on);
 		expect(r.run).toBe(true);
 		expect(n).toBe(2);
+		// The status reader sees the recovery, so a "failed" footer can clear.
+		expect(systemOneJudgeWarm()).toBe(true);
 	});
 });
 

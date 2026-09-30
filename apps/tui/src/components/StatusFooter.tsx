@@ -13,7 +13,11 @@
  * - A value that is not known is not shown. No "—", no "?", no "Guest".
  * - The ^Y mode is labelled MODE: it is the manual prompt mode the user
  *   picks, not a pipeline phase, so it is never dressed up as progress.
- * - Orange means "look here": only the infinite approval state uses it.
+ * - Orange means "look here": the infinite approval state, and a System
+ *   One judge that failed to load (shell commands fail closed).
+ * - The judge's warm-up is status, so it shows here, never as a chat line
+ *   (#3090): "judge loading", then "judge ready". Loading and failed are
+ *   kept when space is short; ready is the quiet state and drops first.
  */
 
 import { Box, Text, useStdout } from "ink";
@@ -42,6 +46,9 @@ export interface FooterSegment {
 	priority: number;
 }
 
+/** The System One judge's warm-up. Undefined: System One is off. */
+export type JudgeState = "loading" | "ready" | "failed";
+
 export interface FooterData {
 	mode: string;
 	model?: string;
@@ -55,6 +62,7 @@ export interface FooterData {
 	providersLive?: number;
 	providersTotal?: number;
 	user?: string;
+	judge?: JudgeState;
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -108,6 +116,15 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			color: infinite ? ui.orange : ui.cream,
 			// Running without asking is the state a person must not miss.
 			priority: infinite ? 1 : 5,
+		});
+	}
+	if (d.judge) {
+		out.push({
+			key: "judge",
+			label: "judge",
+			value: d.judge,
+			color: d.judge === "failed" ? ui.orange : d.judge === "loading" ? ui.muted : ui.cream,
+			priority: d.judge === "ready" ? 6 : 1,
 		});
 	}
 	if (d.providersTotal != null && d.providersTotal > 0 && d.providersLive != null) {

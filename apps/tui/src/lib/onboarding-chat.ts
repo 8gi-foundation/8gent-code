@@ -81,3 +81,60 @@ export function providerCheckLine(name: string, live: boolean, installHint?: str
 	if (live) return `${name} is running.`;
 	return installHint ? `${name} is not running. ${installHint}` : `${name} is not running.`;
 }
+
+/**
+ * Setup is over: nothing in the transcript may still ask for setup input
+ * (#3090). The transcript keeps conversation; a prompt nobody can answer
+ * any more is stale status.
+ */
+
+/** The quiet hint under the welcome card. */
+export const SETUP_SKIP_HINT = "/skip skips a question. /skip all skips the setup.";
+/** The welcome's call to action. Pinned to the real copy by a test. */
+export const SETUP_WELCOME_PROMPT = "A short setup follows, so I can serve you properly. Press Enter to begin.";
+/** Id prefix of the welcome card, so it can be told from later questions. */
+export const SETUP_WELCOME_ID = "setup-q-welcome-";
+const SETUP_CARD_ID = "setup-q-";
+
+/** A setup card's text without the call to action and the skip hint. */
+export function settledSetupCard(content: string): string {
+	return content
+		.split(SETUP_SKIP_HINT)
+		.join("")
+		.split(SETUP_WELCOME_PROMPT)
+		.join("")
+		.replace(/\s+$/, "");
+}
+
+/**
+ * The transcript once setup has ended. Every setup card loses its call to
+ * action and skip hint; the greeting and what was found on the machine stay.
+ * When setup ended on a /skip, the card that was still waiting for an answer
+ * is an unanswered question, so it goes, unless it is the welcome, whose
+ * greeting is conversation.
+ */
+export function settleSetupTranscript<M extends { id: string; content: string }>(
+	messages: M[],
+	endedBySkip: boolean,
+): M[] {
+	let pending = -1;
+	if (endedBySkip) {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].id.startsWith(SETUP_CARD_ID)) {
+				pending = messages[i].id.startsWith(SETUP_WELCOME_ID) ? -1 : i;
+				break;
+			}
+		}
+	}
+	const out: M[] = [];
+	messages.forEach((m, i) => {
+		if (i === pending) return;
+		if (!m.id.startsWith(SETUP_CARD_ID)) {
+			out.push(m);
+			return;
+		}
+		const content = settledSetupCard(m.content);
+		out.push(content === m.content ? m : { ...m, content });
+	});
+	return out;
+}

@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-test("/skip all at the first setup step lands on the normal input", async () => {
+async function runHarness(skipMode: "all" | "each") {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-first-run-"));
 	try {
 		const proc = Bun.spawn(
@@ -27,7 +27,13 @@ test("/skip all at the first setup step lands on the normal input", async () => 
 				path.join(import.meta.dir, "first-run-skip-all.harness.tsx"),
 			],
 			{
-				env: { ...process.env, HOME: home, "8GENT_NO_INTRO": "1", "8GENT_REDUCED_MOTION": "1" },
+				env: {
+					...process.env,
+					HOME: home,
+					"8GENT_NO_INTRO": "1",
+					"8GENT_REDUCED_MOTION": "1",
+					SKIP_MODE: skipMode,
+				},
 				stdout: "pipe",
 				stderr: "ignore",
 			},
@@ -40,9 +46,17 @@ test("/skip all at the first setup step lands on the normal input", async () => 
 				.split("\n")
 				.filter((l) => l.startsWith("{"))
 				.at(-1) ?? "{}";
-		const result = JSON.parse(last);
-		expect(result).toEqual({ ok: true, onboardingComplete: true, name: null });
+		return JSON.parse(last);
 	} finally {
 		fs.rmSync(home, { recursive: true, force: true });
 	}
+}
+
+test("/skip all at the first setup step lands on the normal input, no setup prompt left", async () => {
+	expect(await runHarness("all")).toEqual({ ok: true, onboardingComplete: true, name: null });
 }, 90000);
+
+test("/skip at every question ends setup the same way: no line, no setup prompt left", async () => {
+	// Complete, too: the next launch must not reopen a setup with nothing left to ask.
+	expect(await runHarness("each")).toMatchObject({ ok: true, onboardingComplete: true });
+}, 120000);

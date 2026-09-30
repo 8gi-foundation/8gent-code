@@ -277,8 +277,10 @@ default thresholds.
 - **Warm-up:** with the flag on, `startSystemOneWarmup` runs at TUI startup
   and in the `Agent` constructor. It builds the decider and asks the judge
   one throwaway question (`echo warmup`, never run) in the background, so the
-  model load does not land on the user's first command. The TUI shows
-  "System One judge loading..." then "System One judge ready.". A gate call
+  model load does not land on the user's first command. The TUI footer
+  shows `judge loading`, then `judge ready` (or `judge failed`, in orange,
+  cleared once a later gate call loads the judge); it is status, so it never
+  goes in the chat (#3090). A gate call
   that arrives during warm-up waits for it inside its own budget. If the
   budget runs out first, the block says the judge is still loading and to
   retry in a few seconds. A failed warm-up does not stick. Flag off: no
