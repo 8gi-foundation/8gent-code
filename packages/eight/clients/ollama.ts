@@ -4,13 +4,14 @@
 
 import type { LLMClient, LLMResponse, Message, MessageContentPart } from "../types";
 import { modelFetch } from "../../ai/model-fetch";
+import { resolveOllamaBaseUrl } from "../../ai/text-tool-endpoint";
 
 /**
  * Resolve the Ollama base URL, checking for training proxy override.
  * When the training proxy is running, requests route through it for
  * skill injection and RL training signal collection.
  */
-function resolveBaseUrl(explicit?: string): string {
+export function resolveBaseUrl(explicit?: string): string {
 	if (explicit) return explicit;
 	if (process.env.TRAINING_PROXY_URL) return process.env.TRAINING_PROXY_URL;
 
@@ -25,7 +26,8 @@ function resolveBaseUrl(explicit?: string): string {
 		// Config not found or invalid — fall through
 	}
 
-	return "http://localhost:11434";
+	// OLLAMA_BASE_URL, then OLLAMA_HOST, then localhost:11434 (#3076).
+	return resolveOllamaBaseUrl();
 }
 
 /**

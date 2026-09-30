@@ -24,12 +24,16 @@ import {
 	NATIVE_TOOL_MARKUP_REMINDER,
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
+	normaliseOllamaHost,
 	renderQwenChatML,
 	resolveMaxOutputTokens,
+	resolveOllamaBaseUrl,
+	resolveTextToolEndpoint,
 	shouldDeclareTools,
 	type TextToolUsage,
 	toolCallsFromMessage,
 } from "./text-tool-endpoint";
+import { resolveBaseUrl as resolveOllamaClientBaseUrl } from "../eight/clients/ollama";
 import { runTextToolAgent } from "./text-tool-loop";
 
 const realFetch = globalThis.fetch;
@@ -870,5 +874,91 @@ describe("resolveMaxOutputTokens (#3074)", () => {
 	it("uses a positive override, floored to an integer", () => {
 		expect(resolveMaxOutputTokens({ EIGHT_MAX_OUTPUT_TOKENS: "16384" })).toBe(16384);
 		expect(resolveMaxOutputTokens({ EIGHT_MAX_OUTPUT_TOKENS: "300.7" })).toBe(300);
+	});
+});
+
+// #3076: the pilot's "-m5" scenarios set OLLAMA_HOST and OLLAMA_BASE_URL to an
+// SSH tunnel, yet every text-tool step landed on this machine's ollama: the
+// endpoint fell back to a hardcoded localhost:11434 and read neither variable.
+describe("Ollama base URL honours OLLAMA_BASE_URL / OLLAMA_HOST (#3076)", () => {
+	const KEYS = ["OLLAMA_BASE_URL", "OLLAMA_HOST", "TRAINING_PROXY_URL"] as const;
+	function withEnv(vars: Partial<Record<(typeof KEYS)[number], string>>, fn: () => void): void {
+		const prev = KEYS.map((k) => [k, process.env[k]] as const);
+		for (const k of KEYS) Reflect.deleteProperty(process.env, k);
+		Object.assign(process.env, vars);
+		try {
+			fn();
+		} finally {
+			for (const [k, v] of prev) {
+				if (v === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = v;
+			}
+		}
+	}
+
+	it("the text-tool endpoint follows OLLAMA_BASE_URL", () => {
+		withEnv({ OLLAMA_BASE_URL: "http://127.0.0.1:21434" }, () => {
+			expect(resolveTextToolEndpoint("ollama")).toBe("http://127.0.0.1:21434/v1/chat/completions");
+		});
+	});
+
+	it("falls back to OLLAMA_HOST, normalising a bare host:port", () => {
+		withEnv({ OLLAMA_HOST: "127.0.0.1:21434" }, () => {
+			expect(resolveTextToolEndpoint("ollama")).toBe("http://127.0.0.1:21434/v1/chat/completions");
+		});
+	});
+
+	it("OLLAMA_BASE_URL wins over OLLAMA_HOST", () => {
+		withEnv({ OLLAMA_BASE_URL: "http://a:1/v1", OLLAMA_HOST: "b:2" }, () => {
+			expect(resolveTextToolEndpoint("ollama")).toBe("http://a:1/v1/chat/completions");
+		});
+	});
+
+	it("uses localhost only when neither is set, and a per-session baseUrl still wins", () => {
+		withEnv({}, () => {
+			expect(resolveTextToolEndpoint("ollama")).toBe("http://localhost:11434/v1/chat/completions");
+		});
+		withEnv({ OLLAMA_HOST: "b:2" }, () => {
+			expect(resolveTextToolEndpoint("ollama", "http://pinned:9")).toBe("http://pinned:9/v1/chat/completions");
+			// Other providers are untouched by Ollama's variables.
+			expect(resolveTextToolEndpoint("lmstudio")).toBe("http://localhost:1234/v1/chat/completions");
+		});
+	});
+
+	it("a real buildTextToolCall request goes to the env host", async () => {
+		const urls: string[] = [];
+		globalThis.fetch = (async (input: unknown) => {
+			urls.push(String(input));
+			return Response.json({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] });
+		}) as unknown as typeof fetch;
+		let call: ReturnType<typeof buildTextToolCall> | undefined;
+		withEnv({ OLLAMA_HOST: "127.0.0.1:21434" }, () => {
+			call = buildTextToolCall({ provider: "ollama", model: "m" });
+		});
+		expect(await call?.([{ role: "user", content: "hi" }])).toBe("ok");
+		expect(urls).toEqual(["http://127.0.0.1:21434/v1/chat/completions"]);
+	});
+
+	it("the native ollama client resolves the same root", () => {
+		withEnv({ OLLAMA_HOST: "127.0.0.1:21434" }, () => {
+			expect(resolveOllamaClientBaseUrl()).toBe("http://127.0.0.1:21434");
+		});
+		withEnv({ OLLAMA_BASE_URL: "http://127.0.0.1:21434/v1" }, () => {
+			expect(resolveOllamaClientBaseUrl()).toBe("http://127.0.0.1:21434");
+		});
+		withEnv({}, () => {
+			expect(resolveOllamaClientBaseUrl()).toBe("http://localhost:11434");
+			expect(resolveOllamaClientBaseUrl("http://explicit:1")).toBe("http://explicit:1");
+		});
+	});
+
+	it("normaliseOllamaHost and resolveOllamaBaseUrl", () => {
+		expect(normaliseOllamaHost("127.0.0.1:21434")).toBe("http://127.0.0.1:21434");
+		expect(normaliseOllamaHost("gpu-box")).toBe("http://gpu-box:11434");
+		expect(normaliseOllamaHost("https://h.example/v1/")).toBe("https://h.example");
+		expect(normaliseOllamaHost("  ")).toBeNull();
+		expect(normaliseOllamaHost(undefined)).toBeNull();
+		expect(resolveOllamaBaseUrl({ OLLAMA_BASE_URL: "", OLLAMA_HOST: "x:1" })).toBe("http://x:1");
+		expect(resolveOllamaBaseUrl({})).toBe("http://localhost:11434");
 	});
 });
