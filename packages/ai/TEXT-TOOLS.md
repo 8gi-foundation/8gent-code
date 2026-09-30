@@ -81,9 +81,27 @@ root README.") comes back 200, and the loop reads a reply with no call: a stall.
 Seen on qwen3.8:27b-mlx, Ollama 0.34.4, 2026-09-30. So for provider `ollama`,
 `buildTextToolCall` declares the registered tools (`opts.tools`), reads
 `message.tool_calls` back, and resolves to `{ content, toolCalls }`.
-`runTextToolTurn` keeps only registered names and dedupes them against calls
-written in the text. A model that 400s with "does not support tools" is sent
-again without them. `EIGHT_TEXT_TOOLS_DECLARE=0` turns the declaration off.
+`runTextToolTurn` dedupes them against calls written in the text. A model
+that 400s with "does not support tools" is sent again without them.
+`EIGHT_TEXT_TOOLS_DECLARE=0` turns the declaration off.
+
+Once any tool is declared, the parser also returns calls to names that were
+NOT declared: qwen3.8 answered "call spawn_agent" with a structured
+`spawn_agent` call and empty `content` while only the 20 local tools were
+declared (#3091, 2026-09-30). Such a call is kept, never run, and answered with
+`Error: no tool named "spawn_agent" is available. Available tools: ...`, so
+the model learns it does not exist. It used to be dropped: the model was told
+its reply "had no tool_call block", retried the same call, and the turn ended
+with an empty answer recorded as ok.
+
+## Empty final reply
+
+A reply with no text and no call, after the turn has run tools, is never a
+finished turn. It gets the completion check inside the same budget as any
+other stall. If the budget is spent (or the round cap ends a tool-calls-only
+turn), the answer is a `[harness]` line saying the turn ended without a reply,
+and the same line is returned in `unverified`, so the run log never records a
+silent empty turn as clean.
 
 ## The gate
 

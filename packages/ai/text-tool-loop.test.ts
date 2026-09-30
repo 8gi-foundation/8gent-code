@@ -14,7 +14,10 @@ import {
 	blockedCheckMessage,
 	blockedStopNote,
 	blockReason,
+	emptyReplyNote,
+	emptyReplyStall,
 	overCapCallResult,
+	unknownToolResult,
 	isShellFileWrite,
 	runTextToolAgent,
 	stripDoneMarker,
@@ -1165,8 +1168,11 @@ describe("runTextToolAgent - claim check", () => {
 			maxRounds: 3,
 		});
 		expect(model.calls()).toBe(3);
-		expect(result.unverified).toEqual(["'ls deck' was requested but never ran"]);
-		expect(result.content).toBe("[harness] Not verified: 'ls deck' was requested but never ran.");
+		// The last round was tool calls only, so there is no answer at all (#3091).
+		expect(result.unverified).toEqual([emptyReplyStall(3), "'ls deck' was requested but never ran"]);
+		expect(result.content).toBe(
+			`${emptyReplyNote(3)}\n\n[harness] Not verified: 'ls deck' was requested but never ran.`,
+		);
 	});
 
 	test("no loop: a model that answers every follow-up with more false prose gets exactly one", async () => {
@@ -1833,5 +1839,90 @@ describe("runTextToolAgent - check after an all-blocked round", () => {
 		});
 		expect(model.calls()).toBe(2);
 		expect(result.content).toBe("The path guard blocks /dev/null. May I approve that command?");
+	});
+});
+
+// #3091: pilot run 2026-09-30_055542/l4-spawn-parallel-m5. After 8 read-only
+// tool calls, qwen3.8 answered three times in a row with a call the harness
+// never ran (structured spawn_agent, dropped as unregistered) and no text.
+// The first two got completion checks; the third, with the check budget
+// spent, was returned as the turn's answer: "" with status ok, and the TUI
+// showed "No reply.". An empty reply after tool work is never a finished turn.
+describe("runTextToolAgent - empty final reply after tool work (#3091)", () => {
+	test("an empty reply after a tool round is checked, and a spent budget ends with a harness note, not an empty answer", async () => {
+		const model = scriptedModel([tc("read_file", { path: "README.md" }), "", "", "", "UNREACHED"]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Fix both modules with sub-agents." }],
+			tools: [READ_FILE_TOOL],
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS);
+		expect(result.content.trim()).not.toBe("");
+		expect(result.content).toBe(emptyReplyNote(1));
+		expect(result.unverified).toEqual([emptyReplyStall(1)]);
+	});
+
+	test("an empty reply after a cut-off call is not accepted either: it gets the check", async () => {
+		const model = scriptedModel([
+			tc("read_file", { path: "README.md" }),
+			'```tool_call\n{"name": "read_file", "arguments": {"path": "a.md", "limit',
+			"",
+			"DONE: Read the README.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Read the README." }],
+			tools: [READ_FILE_TOOL],
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(4);
+		expect(model.seen[3][model.seen[3].length - 1].content).toBe(COMPLETION_CHECK_MESSAGE);
+		expect(result.content).toBe("Read the README.");
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("the round cap on a tool-calls-only last round says so instead of returning nothing", async () => {
+		const model = scriptedModel([tc("read_file", { path: "/loop" })]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "go" }],
+			tools: [READ_FILE_TOOL],
+			call: model.call,
+			maxRounds: 2,
+		});
+		expect(result.content).toBe(emptyReplyNote(2));
+		expect(result.unverified).toEqual([emptyReplyStall(2)]);
+	});
+
+	test("an empty reply with no tool work in the turn is left as it was", async () => {
+		const model = scriptedModel(["", "UNREACHED"]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "hi" }],
+			tools: [READ_FILE_TOOL],
+			call: model.call,
+		});
+		expect(model.calls()).toBe(1);
+		expect(result.content).toBe("");
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("a call to a tool that does not exist gets an error naming the tools that do", async () => {
+		const model = scriptedModel([
+			tc("read_file", { path: "README.md" }),
+			tc("spawn_agent", { runtime: "8gent", model: "llama3.2:3b", task: "fix src/clamp.ts" }),
+			"DONE: spawn_agent is not available here.",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Fix it with a sub-agent." }],
+			tools: [READ_FILE_TOOL],
+			call: model.call,
+			maxRounds: 50,
+		});
+		const spawn = result.toolLog.find((e) => e.name === "spawn_agent");
+		expect(spawn?.result).toBe(unknownToolResult("spawn_agent", ["read_file"]));
+		const fedBack = model.seen[2][model.seen[2].length - 1].content;
+		expect(fedBack).toContain('no tool named "spawn_agent"');
+		expect(fedBack).toContain("Available tools: read_file.");
 	});
 });

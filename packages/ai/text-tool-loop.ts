@@ -395,6 +395,31 @@ export function blockedStopNote(reasons: string[]): string {
 }
 
 /**
+ * The result for a call to a tool that is not registered this turn. Names the
+ * tools that are, so the model can pick one or say it cannot do the step
+ * (#3091: qwen3.8 kept calling spawn_agent, which the local tool set lacks).
+ * Starts with "Error" so it is never counted as progress.
+ */
+export function unknownToolResult(name: string, available: string[]): string {
+	const list = available.length > 0 ? available.join(", ") : "none";
+	return `Error: no tool named "${name}" is available. Available tools: ${list}.`;
+}
+
+/**
+ * The `unverified` line for a turn that ran tools and then ended with no
+ * answer at all (#3091: "" recorded as status ok, the TUI showed "No reply.").
+ */
+export function emptyReplyStall(toolCalls: number): string {
+	const calls = toolCalls === 1 ? "1 tool call" : `${toolCalls} tool calls`;
+	return `the model ended the turn without an answer after ${calls}, so the task may be unfinished`;
+}
+
+/** The answer shown in place of an empty reply after tool work. */
+export function emptyReplyNote(toolCalls: number): string {
+	return `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
+}
+
+/**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
  * throwing `run` is captured as a short error string so the loop can feed it
  * back to the model instead of aborting.
@@ -406,7 +431,7 @@ async function executeTool(
 ): Promise<string> {
 	const tool = tools.find((t) => t.spec.name === name);
 	if (!tool) {
-		return `Error: no tool named "${name}" is available.`;
+		return unknownToolResult(name, tools.map((t) => t.spec.name));
 	}
 	try {
 		return await tool.run(args);
@@ -477,15 +502,20 @@ export async function runTextToolAgent(
 	const finish = (raw: string, rounds: number): TextToolAgentResult => {
 		// Repeated junk never reaches the user, whichever exit this is.
 		const content = cleanDegenerateReply(raw).clean;
+		// No answer after tool work is not a finished turn (#3091): say so in
+		// the answer and in `unverified`, whichever exit this is.
+		const empty = content.trim() === "" && toolLog.length > 0;
 		const unfulfilled = claimsAgainstLog(content);
-		if (unfulfilled.length === 0) return { content, rounds, toolLog, unverified: [] };
-		const note = formatHarnessNote(unfulfilled);
-		return {
-			content: content.trim() ? `${content.trimEnd()}\n\n${note}` : note,
-			rounds,
-			toolLog,
-			unverified: unfulfilled.map((u) => u.note),
-		};
+		const unverified = [
+			...(empty ? [emptyReplyStall(toolLog.length)] : []),
+			...unfulfilled.map((u) => u.note),
+		];
+		if (unverified.length === 0) return { content, rounds, toolLog, unverified: [] };
+		const notes = [
+			empty ? emptyReplyNote(toolLog.length) : content.trimEnd(),
+			unfulfilled.length > 0 ? formatHarnessNote(unfulfilled) : "",
+		].filter((n) => n.trim() !== "");
+		return { content: notes.join("\n\n"), rounds, toolLog, unverified };
 	};
 
 	for (let round = 1; round <= maxRounds; round++) {
@@ -570,8 +600,11 @@ export async function runTextToolAgent(
 			// reply after later tool rounds is taken at its word.
 			// A round whose tools all failed or were blocked is a stall trigger
 			// too (run 014230): the prose after it is not a final answer either.
+			// An empty reply after tool work is a stall too, whatever the round
+			// before it was (#3091): it is never the turn's answer.
+			const emptyAfterWork = replyText.trim() === "" && toolLog.length > 0;
 			const freshStall =
-				(prevRoundHadSuccess || prevRoundAllRefused) &&
+				(prevRoundHadSuccess || prevRoundAllRefused || emptyAfterWork) &&
 				!(checksSent > 0 && hasDoneMarker(replyText));
 			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
 			const stalled = (freshStall || unansweredCheck) && !isQuestionToUser(replyText);
@@ -588,7 +621,7 @@ export async function runTextToolAgent(
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
-				if (freshStall) preCheckContent = replyText;
+				if (freshStall && replyText.trim() !== "") preCheckContent = replyText;
 				prevRoundHadSuccess = false;
 				prevRoundAllRefused = false;
 				messages = [
