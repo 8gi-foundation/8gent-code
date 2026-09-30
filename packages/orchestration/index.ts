@@ -54,6 +54,12 @@ export interface SpawnedAgent {
 	completedAt?: Date;
 	messages: AgentMessage[];
 	tokenCount: number;
+	/**
+	 * Files this agent changed: every successful write_file / edit_file (and
+	 * other scoped write) it ran, relative to its working directory. check_agent
+	 * reports it, so an agent that ended having changed nothing is visible.
+	 */
+	filesChanged: string[];
 }
 
 export interface AgentMessage {
@@ -127,6 +133,7 @@ export class AgentPool extends EventEmitter {
 			startedAt: new Date(),
 			messages: [],
 			tokenCount: 0,
+			filesChanged: [],
 		};
 
 		this.agents.set(agentId, spawnedAgent);
@@ -157,6 +164,8 @@ export class AgentPool extends EventEmitter {
 		try {
 			// Import the Agent class dynamically to avoid circular deps
 			const { Agent } = await import("../eight");
+			const { SCOPED_WRITE_TOOLS } = await import("../permissions/edit-guards");
+			const { relativeTo } = await import("./agent-outcome");
 
 			const agent = new Agent({
 				model: spawnedAgent.config.model,
@@ -167,6 +176,15 @@ export class AgentPool extends EventEmitter {
 				allowedPaths: spawnedAgent.config.allowedPaths,
 				// A sub-agent never opens windows on the user's screen (#3107).
 				openOnWrite: false,
+				events: {
+					onToolEnd: (e) => {
+						const file = e.args?.path;
+						if (!e.success || !SCOPED_WRITE_TOOLS.has(e.toolName) || typeof file !== "string")
+							return;
+						const rel = relativeTo(spawnedAgent.config.workingDirectory, file);
+						if (!spawnedAgent.filesChanged.includes(rel)) spawnedAgent.filesChanged.push(rel);
+					},
+				},
 			});
 
 			// Check if Ollama is available
@@ -236,6 +254,30 @@ export class AgentPool extends EventEmitter {
 	 */
 	listCompletedAgents(): SpawnedAgent[] {
 		return this.listAgents().filter((a) => a.status === "completed");
+	}
+
+	/**
+	 * Resolve when any agent in the pool finishes or fails, or after `timeoutMs`,
+	 * whichever comes first; at once when `agentId` is not running. check_agent
+	 * waits here instead of the Orchestrator guessing a sleep, so a sibling that
+	 * ends early is reported while the others still run.
+	 */
+	waitForAnyFinish(agentId: string, timeoutMs: number): Promise<void> {
+		const agent = this.agents.get(agentId);
+		if (!agent || timeoutMs <= 0 || (agent.status !== "running" && agent.status !== "idle")) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			const done = () => {
+				clearTimeout(timer);
+				this.off("agent:completed", done);
+				this.off("agent:failed", done);
+				resolve();
+			};
+			const timer = setTimeout(done, timeoutMs);
+			this.on("agent:completed", done);
+			this.on("agent:failed", done);
+		});
 	}
 
 	/**

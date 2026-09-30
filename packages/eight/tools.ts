@@ -123,6 +123,16 @@ import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
 /**
+ * How long check_agent waits on a running 8gent agent for it or a sibling to
+ * finish (ms). EIGHT_CHECK_AGENT_WAIT_MS overrides; 0 answers at once.
+ */
+export function checkAgentWaitMs(): number {
+	const raw = process.env.EIGHT_CHECK_AGENT_WAIT_MS?.trim();
+	const ms = raw ? Number(raw) : Number.NaN;
+	return Number.isFinite(ms) && ms >= 0 ? ms : 20_000;
+}
+
+/**
  * Validate that a user-provided path stays within the working directory.
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
@@ -591,7 +601,7 @@ export class ToolExecutor {
 				function: {
 					name: "spawn_agent",
 					description:
-						"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
+						"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -629,7 +639,7 @@ export class ToolExecutor {
 				function: {
 					name: "check_agent",
 					description:
-						"[SHELL] Returns the current status (running/completed/failed) and output of a background agent. Use this to poll a previously spawned agent by its ID. If status is 'running', wait and check again. Typically used after spawn_agent to collect results.",
+						"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 20s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2447,7 +2457,12 @@ export class ToolExecutor {
 					runtime: "8gent",
 					status: agent.status,
 					task: task.slice(0, 100),
-					...(allowedPaths ? { allowedPaths } : {}),
+					...(allowedPaths
+						? { allowedPaths }
+						: {
+								scope:
+									"none: this agent may write any file. If the task names the file(s) it may edit, pass them as allowedPaths.",
+							}),
 					message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
 				},
 				null,
@@ -2487,18 +2502,30 @@ export class ToolExecutor {
 
 			// Default: check 8gent agent pool
 			const { getAgentPool } = await import("../orchestration");
+			const { agentOutcome, pendingRespawns } = await import("../orchestration/agent-outcome");
 			const pool = getAgentPool();
 			const agent = pool.getAgent(agentId);
 			if (!agent) return `Agent not found: ${agentId}`;
+
+			// A running agent: wait (bounded) for it or any sibling to finish, so a
+			// sibling that ends early is reported while the others still run. Skip
+			// the wait when a sibling already needs a re-spawn.
+			if (pendingRespawns(pool.listAgents(), agent.id).length === 0) {
+				await pool.waitForAnyFinish(agent.id, checkAgentWaitMs());
+			}
 
 			const elapsed = agent.completedAt
 				? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
 				: `${((Date.now() - agent.startedAt.getTime()) / 1000).toFixed(1)}s (running)`;
 
+			// Outcome first: whether the task is done, not only the agent's own claim.
 			const result: Record<string, unknown> = {
 				agentId: agent.id,
 				runtime: "8gent",
 				status: agent.status,
+				outcome: agentOutcome(agent),
+				filesChanged: agent.filesChanged,
+				...(agent.config.allowedPaths ? { allowedPaths: agent.config.allowedPaths } : {}),
 				task: agent.task.description,
 				elapsed,
 			};
@@ -2511,6 +2538,14 @@ export class ToolExecutor {
 			}
 			if (agent.status === "failed" && agent.task.error) {
 				result.error = agent.task.error;
+			}
+			const respawn = pendingRespawns(pool.listAgents(), agent.id);
+			if (respawn.length > 0) {
+				result.respawnNow = respawn.map((a) => ({
+					agentId: a.id,
+					...(a.config.allowedPaths ? { allowedPaths: a.config.allowedPaths } : {}),
+					outcome: agentOutcome(a),
+				}));
 			}
 
 			return JSON.stringify(result, null, 2);

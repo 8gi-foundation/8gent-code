@@ -8,6 +8,7 @@
 import { test, expect, describe } from "bun:test";
 import {
 	buildToolSystemPrompt,
+	escapeInvalidBackslashesInStrings,
 	findUnterminatedToolCall,
 	needsTextTools,
 	parseToolCalls,
@@ -616,5 +617,60 @@ describe("native <tool_call> markup", () => {
 		const reply =
 			'```tool_call\n{"name": "read_file", "arguments": {"path": "fenced"}}\n```\n<tool_call>\n{"name": "read_file", "arguments": {"path": "native"}}\n</tool_call>';
 		expect(parseToolCalls(reply, known)).toEqual([{ name: "read_file", arguments: { path: "fenced" } }]);
+	});
+});
+
+// Pilot l4-spawn-parallel-m5, 2026-09-30: llama3.2:3b sub-agents wrote the
+// wordCount fix with a regex's \s unescaped inside the JSON string. Strict JSON
+// rejects \s, so the call was dropped and the agent ended with the fix unrun.
+describe("parseToolCalls - invalid JSON escapes from small local models", () => {
+	const opts = { knownTools: ["read_file", "write_file", "edit_file", "run_command"] };
+
+	// Verbatim final replies of sub-agent sessions 2c28ao and ilq4st (run 070309).
+	const EDIT_WITH_BARE_S =
+		'{"name": "edit_file", "parameters": {"path": "src/wordcount.ts", "oldText": "", "newText": "return text.trim().split(/\\s+/).filter(Boolean).length;"}}';
+	const WRITE_WITH_BARE_S =
+		'{"name": "write_file", "arguments": {"path": "src/wordcount.ts", "content": "export function wordCount(text: string): number {\\n  return text.trim().split(/\\s+/).filter(Boolean).length;\\n}"}}';
+
+	test("the pilot's edit_file call parses, and keeps \\s as a literal backslash-s", () => {
+		expect(EDIT_WITH_BARE_S).toContain("/\\s+/");
+		const calls = parseToolCalls(EDIT_WITH_BARE_S, opts);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].name).toBe("edit_file");
+		expect(calls[0].arguments.newText).toBe("return text.trim().split(/\\s+/).filter(Boolean).length;");
+	});
+
+	test("the pilot's write_file call parses into runnable source", () => {
+		const calls = parseToolCalls(WRITE_WITH_BARE_S, opts);
+		expect(calls).toHaveLength(1);
+		const content = String(calls[0].arguments.content);
+		expect(content).toBe(
+			"export function wordCount(text: string): number {\n  return text.trim().split(/\\s+/).filter(Boolean).length;\n}",
+		);
+		// The recovered source is the fix the model meant.
+		const wordCount = new Function("text", content.split("\n")[1]) as (t: string) => number;
+		expect(wordCount("  hello   world\n")).toBe(2);
+	});
+
+	test("valid escapes are kept as JSON defines them", () => {
+		const text = '{"name": "write_file", "arguments": {"path": "a.txt", "content": "q\\"x\\\\y\\n\\u00e9 \\d"}}';
+		const calls = parseToolCalls(text, opts);
+		expect(calls[0].arguments.content).toBe('q"x\\y\n\u00e9 \\d');
+	});
+
+	test("a bad \\u escape is kept literally too", () => {
+		const text = '{"name": "write_file", "arguments": {"path": "a.txt", "content": "C:\\users\\new"}}';
+		expect(parseToolCalls(text, opts)[0].arguments.content).toBe("C:\\users\new");
+	});
+
+	test("the gates still hold: an invalid escape does not make an inline example run", () => {
+		const text = `Send ${WRITE_WITH_BARE_S} to the harness.`;
+		expect(parseToolCalls(text, opts)).toEqual([]);
+		const other = ["```ts", WRITE_WITH_BARE_S, "```"].join("\n");
+		expect(parseToolCalls(other, opts)).toEqual([]);
+	});
+
+	test("escapeInvalidBackslashesInStrings touches only string contents", () => {
+		expect(escapeInvalidBackslashesInStrings('{"a": "\\s\\n\\"", "b": 1}')).toBe('{"a": "\\\\s\\n\\"", "b": 1}');
 	});
 });
