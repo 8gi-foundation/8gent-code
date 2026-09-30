@@ -156,7 +156,10 @@ export function shouldUseTextTools(providerName: string, scoped = false): boolea
 	const override = (process.env.EIGHT_TEXT_TOOLS || "").trim().toLowerCase();
 	if (override === "1" || override === "true") return true;
 	if (override === "0" || override === "false") return false;
-	const supportsNativeTools = providerName !== "lmstudio" && providerName !== "ollama";
+	// llama-server (#3149) is a local server like the other two: the harness's
+	// text-tool protocol, not the SDK's native tool loop.
+	const supportsNativeTools =
+		providerName !== "lmstudio" && providerName !== "ollama" && providerName !== "llama-server";
 	return needsTextTools({ supportsNativeTools });
 }
 

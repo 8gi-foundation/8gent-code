@@ -24,6 +24,7 @@ import {
 	normaliseOllamaHost,
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
+import { resolveLlamaServerUrl } from "../local-model-server/select";
 import { modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
 import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
@@ -87,6 +88,7 @@ export function resolveTextToolEndpoint(provider: string, baseUrl?: string): str
 	// Ollama honours the standard env vars (#3076). Without this the TUI sent
 	// every step to localhost:11434 even with OLLAMA_HOST pointing elsewhere.
 	if (provider === "ollama") return toChatCompletionsEndpoint(resolveOllamaBaseUrl());
+	if (provider === "llama-server") return toChatCompletionsEndpoint(resolveLlamaServerUrl());
 	return TEXT_TOOL_ENDPOINTS[provider] || TEXT_TOOL_ENDPOINTS.lmstudio;
 }
 

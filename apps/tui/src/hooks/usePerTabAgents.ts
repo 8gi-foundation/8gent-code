@@ -40,7 +40,7 @@ import { providerToRuntime } from "../lib/model-selection.js";
 // Types
 // ============================================
 
-export type TabAgentRuntime = "ollama" | "lmstudio" | "openrouter";
+export type TabAgentRuntime = "ollama" | "lmstudio" | "llama-server" | "openrouter";
 
 export interface TabAgentSpec {
 	/** Provider id as used by the TUI (e.g. "ollama", "lmstudio", "apfel", "openrouter-free"). */

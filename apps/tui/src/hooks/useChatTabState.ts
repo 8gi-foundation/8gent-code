@@ -25,7 +25,7 @@ import type {
 	AgentToolStartEvent,
 } from "../../../../packages/eight/index.js";
 import type { Message } from "../app.js";
-import { providerToRuntime } from "../lib/model-selection.js";
+import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
 // Types
@@ -105,7 +105,7 @@ function loadPersistedMessages(tabId: string): Message[] | null {
 // Delegates to the single shared authority (lib/model-selection) so this hook
 // resolves runtime identically to every other agent-construction site.
 
-function mapProviderToRuntime(provider: string): "ollama" | "lmstudio" | "openrouter" {
+function mapProviderToRuntime(provider: string): AgentRuntime {
 	return providerToRuntime(provider);
 }
 

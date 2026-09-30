@@ -11,6 +11,10 @@
  * The adapter takes the base URL it is given verbatim; host resolution stays
  * with each caller for now, so nothing that used to reach a host stops
  * reaching it. Design and later phases: #3149.
+ *
+ * Phase 2 (llama-server.ts + select.ts): the llama-server adapter, and
+ * EIGHT_LOCAL_SERVER=llama-server, which makes llama-server the local server
+ * and turns Ollama off for the process (see select.ts).
  */
 
 export type LocalServerKind = "ollama" | "llama-server" | "lmstudio";

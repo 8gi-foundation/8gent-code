@@ -12,9 +12,10 @@
  * unavailable. The binding is loaded with `build: "never"`, so a missing
  * prebuilt binary fails instead of compiling from source.
  *
- * The GGUF comes from env EIGHT_DECIDE_GGUF, else from the Ollama blob
- * store (`$OLLAMA_MODELS` or `$HOME/.ollama/models`) via the manifest of
- * the chosen model. The model and context are loaded once per path (lazy
+ * The GGUF comes from env EIGHT_DECIDE_GGUF, else from the documented
+ * default folder `$HOME/.8gent/models/decide/*.gguf` (no Ollama needed,
+ * #3149), else from the Ollama blob store (`$OLLAMA_MODELS` or
+ * `$HOME/.ollama/models`) via the manifest of the chosen model. The model and context are loaded once per path (lazy
  * singleton), reused across calls, and disposed on process exit.
  */
 
@@ -96,9 +97,37 @@ export interface GgufModel extends InstalledModel {
 }
 
 export type GgufResolution =
-	| { path: string; model: string; source: "env" | "ollama"; note?: undefined }
+	| { path: string; model: string; source: "env" | "local" | "ollama"; note?: undefined }
 	/** `note` is null when there is nowhere to look (no EIGHT_DECIDE_GGUF, OLLAMA_MODELS or HOME). */
 	| { path: null; model: null; note: string | null };
+
+/** System One's own GGUF folder, $HOME/.8gent/models/decide, from the given env only. */
+export function decideModelsDir(env: Env): string | null {
+	return env.HOME?.trim() ? path.join(env.HOME.trim(), ".8gent", "models", "decide") : null;
+}
+
+/**
+ * Every `*.gguf` file directly in `dir` that really is a GGUF, named by its
+ * file name without the extension. The Ollama-free way to give System One a
+ * model: drop a GGUF in ~/.8gent/models/decide (#3149).
+ */
+export function listLocalGgufs(dir: string): GgufModel[] {
+	let names: string[] = [];
+	try {
+		names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".gguf")).sort();
+	} catch {
+		return [];
+	}
+	return names.flatMap((n) => {
+		const file = path.join(dir, n);
+		if (!isGguf(file)) return [];
+		let size: number | undefined;
+		try {
+			size = fs.statSync(file).size;
+		} catch {}
+		return [{ name: n.replace(/\.gguf$/i, ""), size, path: file }];
+	});
+}
 
 /** Ollama models dir from the given env only (never the real home dir, so tests stay hermetic). */
 export function ollamaModelsDir(env: Env): string | null {
@@ -193,19 +222,26 @@ export function resolveGguf(env: Env, modelOverride?: string): GgufResolution {
 		if (!isGguf(explicit)) return { path: null, model: null, note: `EIGHT_DECIDE_GGUF is not a readable GGUF file: ${explicit}` };
 		return { path: explicit, model: requested || path.basename(explicit), source: "env" };
 	}
+	// The documented folder first, then the Ollama store. Reading the store is
+	// file access only; it never needs Ollama running.
+	const localDir = decideModelsDir(env);
+	const local = localDir ? listLocalGgufs(localDir) : [];
 	const dir = ollamaModelsDir(env);
-	if (!dir) return { path: null, model: null, note: null };
-	const installed = listOllamaGgufs(dir);
+	if (!dir && local.length === 0) return { path: null, model: null, note: null };
+	const fromOllama = dir ? listOllamaGgufs(dir) : [];
+	const installed = [...local, ...fromOllama];
+	const where = [localDir, dir && `the Ollama store at ${dir}`].filter(Boolean).join(" or ");
+	const source = (m: GgufModel): "local" | "ollama" => (local.includes(m) ? "local" : "ollama");
 	if (requested) {
 		const name = pickModel(installed, requested);
 		const hit = installed.find((m) => m.name === name && (name === requested || name === `${requested}:latest`));
-		if (!hit) return { path: null, model: null, note: `${requested} is not installed as a GGUF in the Ollama store at ${dir}` };
-		return { path: hit.path, model: hit.name, source: "ollama" };
+		if (!hit) return { path: null, model: null, note: `${requested} is not installed as a GGUF in ${where}` };
+		return { path: hit.path, model: hit.name, source: source(hit) };
 	}
 	const name = pickModel(installed);
 	const hit = name ? installed.find((m) => m.name === name) : undefined;
-	if (!hit) return { path: null, model: null, note: `no GGUF model in the Ollama store at ${dir}` };
-	return { path: hit.path, model: hit.name, source: "ollama" };
+	if (!hit) return { path: null, model: null, note: `no GGUF model in ${where}` };
+	return { path: hit.path, model: hit.name, source: source(hit) };
 }
 
 /** Why the optional package cannot be used, or null when it loads. */

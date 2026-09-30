@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { modelFetch } from "../ai/model-fetch";
 import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
+import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { AuthRotator } from "./auth-rotation";
 import {
 	type ProviderCompat,
@@ -43,6 +44,7 @@ export type BuiltinProviderName =
 	| "8gent"
 	| "ollama"
 	| "lmstudio"
+	| "llama-server"
 	| "apple-foundation"
 	| "apfel"
 	| "deepseek"
@@ -282,6 +284,24 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		// If the LM Studio server is not running, role calls fail over per
 		// the failover chain rather than blocking startup.
 		enabled: true,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	// llama.cpp's OpenAI-compatible server (#3149). On only when
+	// EIGHT_LOCAL_SERVER=llama-server, which also turns Ollama off for the
+	// process. LLAMA_SERVER_URL names the server root.
+	"llama-server": {
+		name: "llama-server",
+		displayName: "llama-server (Local)",
+		baseUrl: `${resolveLlamaServerUrl()}/v1`,
+		apiKeyEnv: "",
+		// A single-model llama-server answers whatever `model` says; the TUI
+		// replaces this with the id the server lists.
+		defaultModel: "default",
+		models: [],
+		enabled: isLlamaServerSelected(),
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
@@ -1355,6 +1375,7 @@ export const PROVIDER_NAMES: BuiltinProviderName[] = [
 	"8gent",
 	"ollama",
 	"lmstudio",
+	"llama-server",
 	"openrouter",
 	"groq",
 	"grok",

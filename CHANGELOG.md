@@ -12,6 +12,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed - one Ollama host resolver (#3149)
 - System One (`packages/decide`) and the rest of the harness resolved `OLLAMA_HOST` differently: a bare host with no port (`gpu-box`, which the ollama CLI accepts) got `:11434` for chat and no port (so port 80) for System One. Both now use one resolver, `packages/local-model-server/ollama-host.ts`.
 
+### Added - llama-server as a local server, phase 2 of #3149
+- `EIGHT_LOCAL_SERVER=llama-server` runs 8gent Code on llama.cpp's `llama-server` with no Ollama at all: a `llama-server` provider on the text-tool path (`LLAMA_SERVER_URL`, default `http://127.0.0.1:8080`), and nothing in the process probes, lists or calls Ollama (onboarding, health, readiness, task routing, System One). Unset, today's Ollama behaviour is unchanged.
+- The llama-server adapter (`packages/local-model-server/llama-server.ts`) passes the same contract suite as the Ollama adapter.
+- System One finds its GGUF in `~/.8gent/models/decide/*.gguf` before the Ollama store, so a machine with no Ollama can still run it (or set `EIGHT_DECIDE_GGUF`).
+
 ### Added
 - Local model server layer, phase 1 of #3149 (`packages/local-model-server/`): a `LocalModelServer` interface with capability flags and an Ollama adapter, so Ollama becomes one server among equals rather than the assumed default. Eight model-list and health call sites (`/api/tags`) now go through it with no behaviour change, proven by a snapshot of their requests and results taken before the move. A contract suite holds every adapter to the same rules.
 
