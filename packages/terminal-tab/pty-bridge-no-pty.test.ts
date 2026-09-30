@@ -25,7 +25,8 @@ describe("pty-bridge without node-pty", () => {
 			const r = spawnSync(nodeBin as string, [bridge, "/bin/sh"], {
 				cwd: dir,
 				encoding: "utf-8",
-				env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir },
+				// Minimal env on purpose: no NODE_PATH that could resolve node-pty.
+				env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir } as NodeJS.ProcessEnv,
 				timeout: 15_000,
 			});
 			expect(r.status).toBe(66);
