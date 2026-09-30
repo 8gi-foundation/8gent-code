@@ -10,7 +10,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { getProviderManager } from "../../../../packages/providers/index.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { ProviderManager, getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	type ModelSpec,
 	declaredModels,
@@ -139,5 +142,53 @@ describe("declaredModels: the registry, never a placeholder id", () => {
 	test("a name the registry does not know yields no models", () => {
 		expect(declaredModels(getProviderManager(), "not-a-provider")).toEqual([]);
 		expect(declaredModels(getProviderManager(), "")).toEqual([]);
+	});
+});
+
+// #3081: normalizeProviderId was a hand-kept list of eight names. Every other
+// registry provider, starting with `8gent` (the out-of-box active provider),
+// was silently dropped and the TUI fell back to the saved/default provider.
+describe("normalizeProviderId validates against the provider registry (#3081)", () => {
+	test("--provider 8gent is kept, not dropped", () => {
+		expect(normalizeProviderId("8gent")).toBe("8gent");
+	});
+
+	test("every compiled registry provider survives normalisation", () => {
+		for (const p of getProviderManager().listProviders()) {
+			if (p.name === "lmstudio") continue; // alias-normalised, asserted below
+			expect(normalizeProviderId(p.name)).toBe(p.name);
+		}
+	});
+
+	test("underscores and case normalise to the registry id", () => {
+		expect(normalizeProviderId("Host_CLI_Primary")).toBe("host-cli-primary");
+		expect(normalizeProviderId("APFEL")).toBe("apfel");
+		expect(normalizeProviderId("DeepSeek")).toBe("deepseek");
+	});
+
+	test("the TUI's own aliases still resolve", () => {
+		expect(normalizeProviderId("lm_studio")).toBe("lmstudio");
+		expect(normalizeProviderId("LM-Studio")).toBe("lmstudio");
+		expect(normalizeProviderId("OpenRouter_Free")).toBe("openrouter-free");
+	});
+
+	test("a genuinely unknown provider is still rejected", () => {
+		expect(normalizeProviderId("not-a-provider")).toBeUndefined();
+		expect(normalizeProviderId("   ")).toBeUndefined();
+	});
+
+	test("a provider declared in providers.json is accepted, via the real registry", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "norm-provider-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({ providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } } }),
+		);
+		const pm = new ProviderManager(file);
+		const isKnown = (n: string) => pm.isKnownProvider(n);
+		expect(normalizeProviderId("myrig", isKnown)).toBe("myrig");
+		expect(normalizeProviderId("8gent", isKnown)).toBe("8gent");
+		expect(normalizeProviderId("nope", isKnown)).toBeUndefined();
+		fs.rmSync(dir, { recursive: true, force: true });
 	});
 });

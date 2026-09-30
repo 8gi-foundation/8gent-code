@@ -1,3 +1,5 @@
+import { getProviderManager } from "../../../../packages/providers/index.js";
+
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
  */
@@ -99,19 +101,28 @@ export function providerToRuntime(provider?: string): AgentRuntime {
 	return "ollama";
 }
 
-/** Map CLI / saved provider strings to internal provider ids. */
-export function normalizeProviderId(raw?: string): string | undefined {
+/**
+ * Map a CLI / saved provider string to a provider id, validated against the
+ * LOADED provider registry (built-ins plus providers.json declarations), not a
+ * second hand-kept list: that list silently dropped `--provider 8gent` and every
+ * other registry provider it did not name (#3081). Only the TUI's own spellings
+ * are handled here: `lm-studio` / `lm_studio` for lmstudio, and the TUI-only
+ * `openrouter-free`. An unknown name returns undefined. `isKnown` is injectable
+ * for tests; by default it asks the provider manager.
+ */
+export function normalizeProviderId(
+	raw?: string,
+	isKnown: (name: string) => boolean = (name) => getProviderManager().isKnownProvider(name),
+): string | undefined {
 	if (!raw?.trim()) return undefined;
 	const x = raw.trim().toLowerCase().replace(/_/g, "-");
 	const compact = x.replace(/-/g, "");
-	if (x === "lmstudio" || x === "lm-studio" || compact === "lmstudio") return "lmstudio";
-	if (x === "ollama") return "ollama";
-	if (x === "openrouter-free" || compact === "openrouterfree") return "openrouter-free";
-	if (x === "openrouter") return "openrouter";
-	if (x === "groq") return "groq";
-	if (x === "openai") return "openai";
-	if (x === "anthropic") return "anthropic";
-	if (x === "mistral") return "mistral";
+	if (compact === "lmstudio") return "lmstudio";
+	if (compact === "openrouterfree") return "openrouter-free";
+	if (isKnown(x)) return x;
+	// A provider declared in providers.json keeps the case its author typed.
+	const asTyped = raw.trim();
+	if (asTyped !== x && isKnown(asTyped)) return asTyped;
 	return undefined;
 }
 
