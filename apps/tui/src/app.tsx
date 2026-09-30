@@ -128,7 +128,12 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	lmstudio: "LM Studio",
 	apfel: "apfel (Apple Foundation Model)",
 };
-import { PROBE_TIMEOUT_MS, createReadinessCache, withTimeout } from "./lib/provider-readiness.js";
+import {
+	PROBE_TIMEOUT_MS,
+	READINESS_RETRY_MS,
+	createReadinessCache,
+	withTimeout,
+} from "./lib/provider-readiness.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
@@ -1061,6 +1066,10 @@ export function App({
 
 	// Auto-populating kanban from real agent events
 	const autoKanban = useAutoKanban();
+	// The hook returns a fresh object every render; only these two callbacks
+	// are stable. buildEventsForTab must depend on them, not on the object,
+	// or the agent-init effect re-runs on every render (#3087).
+	const { onTaskStart: kanbanTaskStart, onTaskComplete: kanbanTaskComplete } = autoKanban;
 	// No real source produces avenues yet (packages/planning AvenueTracker is
 	// keyword triggers with invented probabilities). Stays empty until one does;
 	// /avenues says so in one line instead of showing placeholder paths.
@@ -2071,7 +2080,7 @@ export function App({
 				}
 				logToolStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
 
-				autoKanban.onTaskStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
+				kanbanTaskStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
 
 				if (isActive) {
 					setKanbanBoard((prev) => {
@@ -2116,7 +2125,7 @@ export function App({
 					event.resultPreview,
 				);
 
-				autoKanban.onTaskComplete(
+				kanbanTaskComplete(
 					event.toolCallId,
 					event.success !== false,
 					event.durationMs || 0,
@@ -2307,7 +2316,7 @@ export function App({
 				}
 			},
 		}),
-		[activeTabId, appendToTab, autoKanban, markBodyPartStart, markBodyPartEnd],
+		[activeTabId, appendToTab, kanbanTaskStart, kanbanTaskComplete, markBodyPartStart, markBodyPartEnd],
 	);
 
 	// One shared readiness probe per provider/model (see createReadinessCache)
@@ -2318,6 +2327,10 @@ export function App({
 	// config.model can self-correct after a reroute; reuse compares against this.
 	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
 	const lastReadinessNoticeRef = useRef("");
+	// Bumped to retry agent init after an attempt ended not ready, so a
+	// provider started after launch is still picked up. Until #3087 that
+	// happened by accident: the effect re-ran on every render.
+	const [initRetry, setInitRetry] = useState(0);
 
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
 	// instance; the active-tab agent is mirrored into local `agent`/`agentReady`
@@ -2327,6 +2340,11 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		let cancelled = false;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		const retryLater = () => {
+			if (cancelled) return;
+			retryTimer = setTimeout(() => setInitRetry((n) => n + 1), READINESS_RETRY_MS);
+		};
 		const notify = (tabId: string, content: string) => {
 			if (lastReadinessNoticeRef.current === content) return;
 			lastReadinessNoticeRef.current = content;
@@ -2358,6 +2376,7 @@ export function App({
 				if (decision.kind === "none") {
 					setAgentReady(false);
 					notify(_gateTabId, decision.notice);
+					retryLater();
 					return;
 				}
 
@@ -2449,6 +2468,7 @@ export function App({
 					} catch {}
 				} else {
 					setAgentReady(false);
+					retryLater();
 					notify(
 						_initTabId,
 						`Provider ${currentProvider} (${currentModel}) did not report ready within ${(PROBE_TIMEOUT_MS * 2) / 1000}s. Nothing will run until it does. Check it, or pick another with /provider.`,
@@ -2457,13 +2477,15 @@ export function App({
 			} catch (err) {
 				setAgentReady(false);
 				console.error("Agent init error:", err);
+				retryLater();
 			}
 		};
 		initAgent();
 		return () => {
 			cancelled = true;
+			clearTimeout(retryTimer);
 		};
-	}, [currentModel, currentProvider, activeTabId, buildEventsForTab]);
+	}, [currentModel, currentProvider, activeTabId, buildEventsForTab, initRetry]);
 
 	// When the active tab changes, surface its existing Agent (if any) into
 	// the foreground `agent` ref so ESC / voice-chat / status reads stay
