@@ -146,6 +146,12 @@ export interface AgentConfig {
 	 * keeps the lean set and is not told about them (#3095).
 	 */
 	role?: "orchestrator" | "engineer" | "qa";
+	/**
+	 * Files (or directories) this agent may write and edit, set by spawn_agent's
+	 * `allowedPaths`. Writes and edits elsewhere are refused and never run.
+	 * Undefined means no limit (#3101).
+	 */
+	allowedPaths?: string[];
 }
 
 export interface LLMResponse {

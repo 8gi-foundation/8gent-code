@@ -41,6 +41,8 @@ export interface AgentConfig {
 	maxTurns?: number;
 	workingDirectory: string;
 	capabilities?: string[];
+	/** Files (or directories) the agent may write or edit; undefined = no limit (#3101). */
+	allowedPaths?: string[];
 }
 
 export interface SpawnedAgent {
@@ -106,6 +108,7 @@ export class AgentPool extends EventEmitter {
 			maxTurns: config?.maxTurns || 20,
 			workingDirectory: config?.workingDirectory || process.cwd(),
 			capabilities: config?.capabilities || [],
+			allowedPaths: config?.allowedPaths,
 		};
 
 		const task: AgentTask = {
@@ -161,6 +164,7 @@ export class AgentPool extends EventEmitter {
 				systemPrompt: spawnedAgent.config.systemPrompt,
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
+				allowedPaths: spawnedAgent.config.allowedPaths,
 			});
 
 			// Check if Ollama is available

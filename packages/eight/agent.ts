@@ -235,6 +235,7 @@ export class Agent {
 			undefined,
 			{
 				unattended: config.unattended ?? false,
+				allowedPaths: config.allowedPaths,
 			},
 		);
 		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
