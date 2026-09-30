@@ -11,6 +11,13 @@
  * title to the new one in four frames (lib/motion.ts). The labels never
  * move. With animations off (Ctrl+A) or reduced motion, the bar jumps.
  *
+ * Permission modes (#3174): a tab whose mode is not Ask carries it after
+ * its title, in the mode's colour, outside the underline:
+ *
+ *   1] Orchestrator · Guarded   2] Engineer   3] QA · Plan
+ *
+ * At 120 columns or more the tag is the word; below, one glyph (P, G, ∞).
+ *
  * Pane grouping support: tabs in the same group carry a "+", and a grabbed
  * tab (Ctrl+G drag mode) is wrapped in [ ]. The drop hint shows only while
  * a tab is actually grabbed.
@@ -21,6 +28,13 @@ import React, { useEffect, useRef, useState } from "react";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
 import type { WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
 import { SWEEP_FRAME_MS, type Span, motionEnabled, sweepFrames } from "../lib/motion.js";
+import {
+	PERM_LOOK,
+	type PermView,
+	TAB_TAG_WIDE_COLS,
+	permColour,
+	permTabTag,
+} from "../lib/perm-modes-design.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 
@@ -53,6 +67,10 @@ interface TabBarProps {
 	onDropOntoTab?: (targetTabId: string) => void;
 	/** False (Ctrl+A) draws the underline in its final place, no sweep. */
 	animate?: boolean;
+	/** Each tab's permission mode (#3174); undefined for tabs that run no agent. */
+	permFor?: (tabId: string) => PermView | undefined;
+	/** Columns to lay out in; defaults to the terminal's. */
+	width?: number;
 }
 
 export const GRAB_HINT = "[G] drop on another tab to group | [Esc] cancel";
@@ -64,6 +82,10 @@ export interface TabCell {
 	title: string;
 	active: boolean;
 	grabbed?: boolean;
+	/** Permission tag after the title, e.g. " · Guarded". Never underlined. */
+	tag?: string;
+	tagColor?: string;
+	tagBold?: boolean;
 }
 
 export interface TabLine {
@@ -83,6 +105,7 @@ export function layoutTabs(cells: TabCell[]): TabLine {
 		text += cell.num;
 		spans.push({ x: text.length, width: cell.title.length });
 		text += cell.title;
+		if (cell.tag) text += cell.tag;
 		if (cell.grabbed) text += "]";
 	});
 	return { text, spans };
@@ -107,9 +130,11 @@ export function TabBar({
 	groups = [],
 	grabbedTabId = null,
 	animate = true,
+	permFor,
+	width: widthProp,
 }: TabBarProps) {
 	const { stdout } = useStdout();
-	const width = stdout?.columns ?? 80;
+	const width = widthProp ?? stdout?.columns ?? 80;
 	const visibleTabs = tabs.filter((tab) => tab.type !== "kanban" || tab.active);
 	const dragging = grabbedTabId !== null && grabbedTabId !== undefined;
 
@@ -117,11 +142,16 @@ export function TabBar({
 		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
 		const busy = isTabProcessing?.(tab.id) ? " *" : "";
 		const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
+		const perm = permFor?.(tab.id);
+		const tag = perm ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
 		return {
 			num: `${i + 1}] `,
 			title: `${sanitizeTabTitle(tab.title)}${badge}${busy}${grouped}`,
 			active: tab.active,
 			grabbed: dragging && grabbedTabId === tab.id,
+			...(perm && tag
+				? { tag, tagColor: permColour(perm.mode), tagBold: PERM_LOOK[perm.mode].bold }
+				: {}),
 		};
 	});
 	const line = layoutTabs(cells);
@@ -177,6 +207,11 @@ export function TabBar({
 								<Text color={cell.active ? t.orange : t.muted} bold={cell.active}>
 									{cell.title}
 								</Text>
+								{cell.tag ? (
+									<Text color={cell.tagColor} bold={cell.tagBold}>
+										{cell.tag}
+									</Text>
+								) : null}
 								{cell.grabbed ? <Text color={t.orange}>]</Text> : null}
 							</React.Fragment>
 						))}

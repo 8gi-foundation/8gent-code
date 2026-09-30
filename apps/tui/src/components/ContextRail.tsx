@@ -28,6 +28,8 @@ interface ContextRailProps {
 	permissions: string;
 	contextPct: number;
 	adhdMode: boolean;
+	/** A parent agent holds this tab below the mode that was set (#3174). */
+	permHeld?: boolean;
 }
 
 export function ContextRail({
@@ -35,6 +37,7 @@ export function ContextRail({
 	permissions,
 	contextPct,
 	adhdMode,
+	permHeld,
 }: ContextRailProps) {
 	// A permission mode (#3170) reads "perm <MODE>" in its colour.
 	const permMode = isPermissionMode(permissions) ? permissions : undefined;
@@ -57,7 +60,11 @@ export function ContextRail({
 		>
 			<Text color={t.heading} bold>STATE</Text>
 			{permMode ? (
-				<MetricRow label="perm" value={PERM_LOOK[permMode].name.toUpperCase()} color={permColour(permMode)} />
+				<>
+					<MetricRow label="perm" value={PERM_LOOK[permMode].name.toUpperCase()} color={permColour(permMode)} />
+					{/* A parent agent holds this one below the mode that was set (#3174). */}
+					{permHeld ? <MetricRow label="" value="held by parent" color={t.textSecondary} /> : null}
+				</>
 			) : (
 				<MetricRow
 					label="approval"
