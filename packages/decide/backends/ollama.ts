@@ -19,6 +19,7 @@ import {
 	type ChoiceQuestion,
 	type DecideBackend,
 	DecideError,
+	DecideUnavailableError,
 	type FetchLike,
 	type Question,
 	type ScoreQuestion,
@@ -218,8 +219,33 @@ export class OllamaBackend implements DecideBackend {
 		return answerFromDistribution(question, distributionFromLogprobs(question.kind, labels, top));
 	}
 
+	/**
+	 * A server that cannot answer (refused, timed out, or a non-2xx status) is
+	 * DecideUnavailableError, so the decider can fail over from a lost shared
+	 * judge (#3162 bar 4). An answer the model gave but we cannot read stays a
+	 * plain DecideError: another backend would not fix it.
+	 */
 	private async topLogprobs(prompt: string): Promise<TopLogprob[]> {
-		const res = await this.fetchImpl(`${this.host}/api/generate`, {
+		const res = await this.post(prompt).catch((err: Error) => {
+			throw new DecideUnavailableError(`ollama unreachable at ${this.host}: ${err?.message ?? String(err)}`);
+		});
+		if (!res.ok) {
+			const body = await res.text().catch(() => "");
+			throw new DecideUnavailableError(`ollama /api/generate ${res.status}: ${body.slice(0, 200)}`);
+		}
+		// A body cut off mid-read is the server going away, not a bad answer.
+		const json = (await res.json().catch((err: Error) => {
+			throw new DecideUnavailableError(`ollama /api/generate body unreadable: ${err?.message ?? String(err)}`);
+		})) as { logprobs?: Array<{ top_logprobs?: TopLogprob[] }> };
+		const top = json?.logprobs?.[0]?.top_logprobs;
+		if (!Array.isArray(top) || top.length === 0) {
+			throw new DecideError(`ollama returned no logprobs for model "${this.model}" (does this Ollama build support logprobs?)`);
+		}
+		return top;
+	}
+
+	private post(prompt: string): Promise<Response> {
+		return this.fetchImpl(`${this.host}/api/generate`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({
@@ -233,15 +259,5 @@ export class OllamaBackend implements DecideBackend {
 			}),
 			signal: AbortSignal.timeout(this.timeoutMs),
 		});
-		if (!res.ok) {
-			const body = await res.text().catch(() => "");
-			throw new DecideError(`ollama /api/generate ${res.status}: ${body.slice(0, 200)}`);
-		}
-		const json = (await res.json()) as { logprobs?: Array<{ top_logprobs?: TopLogprob[] }> };
-		const top = json.logprobs?.[0]?.top_logprobs;
-		if (!Array.isArray(top) || top.length === 0) {
-			throw new DecideError(`ollama returned no logprobs for model "${this.model}" (does this Ollama build support logprobs?)`);
-		}
-		return top;
 	}
 }

@@ -117,6 +117,16 @@ the model once for every agent, child and tab on the machine.
   in-process (3 x ~5.6 GB) vs 5,693 MB shared (one 5,544 MB server + 3 x 50 MB
   clients); warm judge p50/p95 616/738 ms vs 166/218 ms; first judged
   command 7.1 s vs 1.1 s; 0 of 120 verdicts differ.
+- Lost mid-session (bar 4): when the shared server stops answering (refused,
+  timed out, non-2xx: `DecideUnavailableError`), the decider re-probes once
+  and retries that verdict, trying the in-process judge first. Concurrent
+  failures share one re-probe; a re-probe that finds nothing, or lands on the
+  shared server again, is not repeated for 2 s, doubling to 60 s
+  (`FAILOVER_BACKOFF_MS`). The session then stays in-process; new sessions
+  probe fresh and use the shared server again once it is back. An answer the
+  model gave but that cannot be read never fails over. The gate's budget is
+  unchanged, so a strict gate call that runs out while the fallback loads
+  blocks, and the load carries on for the next call.
 
 ## Bash guard
 
