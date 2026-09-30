@@ -7,6 +7,8 @@
  * tests for that, see apps/tui/src/__tests__/smoke.test.ts.
  */
 import { describe, expect, test } from "bun:test";
+import { renderToString } from "ink";
+import type React from "react";
 
 import { LiveFocalStrip, meter } from "../LiveFocalStrip.js";
 
@@ -79,5 +81,36 @@ describe("LiveFocalStrip exports", () => {
 			approvalPending: true,
 		});
 		expect(element.props.borderColor).toBe("#E8610A");
+	});
+});
+
+describe("the NOW strip shows the state, not the ^Y mode (#3123)", () => {
+	const base = {
+		activeStep: "thinking...",
+		route: "qwen3.8:27b-mlx",
+		tokens: "6.3K tok",
+		contextPct: 5,
+		animate: false,
+		width: 92,
+	};
+	const draw = (props: Partial<React.ComponentProps<typeof LiveFocalStrip>>) =>
+		renderToString(<LiveFocalStrip mode="Planning" {...base} {...props} />, { columns: 92 });
+
+	test("running, done and idle never print the mode word", () => {
+		const running = draw({ isProcessing: true });
+		expect(running).toContain("NOW");
+		expect(running).toContain("thinking...");
+		const done = draw({ lastTurnEndedAt: Date.now() - 60_000, lastTurnSuccess: true });
+		expect(done).toContain("DONE");
+		expect(done).toContain("finished");
+		expect(draw({})).toContain("READY");
+		for (const out of [running, done, draw({})]) expect(out).not.toContain("Planning");
+	});
+
+	test("autonomous still says so, beside the state", () => {
+		const out = draw({ isProcessing: true, autonomous: true });
+		expect(out).toContain("NOW");
+		expect(out).toContain("Autonomous");
+		expect(out).not.toContain("Planning");
 	});
 });

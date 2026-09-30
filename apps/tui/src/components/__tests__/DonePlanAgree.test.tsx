@@ -123,7 +123,7 @@ describe("the DONE block and the PLAN column count the same steps", () => {
 		expect(stepsInDone(out, written)).toBe(3);
 	});
 
-	test("a turn that wrote a plan and called nothing still gets its DONE block (#3096)", () => {
+	test("a turn that wrote a plan and called nothing shows the plan once (#3096, #3123)", () => {
 		const reply =
 			"PLAN:\n1. Read the failing test\n2. Fix the slice start\n3. Run bun test again\n\nShall I go ahead?";
 		// The column has not caught up yet: the stamp takes the reply's own lines.
@@ -138,17 +138,40 @@ describe("the DONE block and the PLAN column count the same steps", () => {
 			{ id: "a1", role: "assistant", content: reply, timestamp: at, plan: stamped },
 		];
 		const out = doneBlock(messages, 20);
+		// The column still holds the plan.
 		expect(stepsInColumn(stamped)).toBe(3);
-		expect(stepsInDone(out, stamped)).toBe(3);
-		// The steps are rows of the block, with the pending mark, not only
-		// the numbered list inside the reply.
+		// The chat holds it once: the reply's own numbered list. Before #3123
+		// the block repeated every step as a row above it, cut to one line.
 		for (const step of ["Read the failing test", "Fix the slice start", "Run bun test again"]) {
-			expect(out).toMatch(new RegExp(`[○o] ${step}`));
+			expect(out.split(step).length - 1).toBe(1);
+			expect(out).not.toMatch(new RegExp(`[○o] ${step}`));
 		}
 		// Nothing ran, so nothing is ticked and no action rows are invented.
 		expect(out).not.toContain("✓");
 		expect(out).not.toMatch(/more actions?\b/);
 		expect(out).not.toContain("No reply.");
+	});
+
+	test("with calls, a written untouched plan still shows once and the calls keep their rows", () => {
+		const reply = "PLAN:\n1. Read the failing test\n2. Fix the slice start\n\nI read the test first.";
+		const stamped = replyPlan([], planStepsFromText(reply));
+		const out = doneBlock(turn(stamped, pilotCalls.slice(1, 2)).map((m) => (m.id === "a1" ? { ...m, content: reply } : m)), 20);
+		for (const step of ["Read the failing test", "Fix the slice start"]) {
+			expect(out.split(step).length - 1).toBe(1);
+		}
+		expect(out).toContain("paginate.test.ts");
+		expect(out).toContain("✓");
+	});
+
+	test("a plan with ticked steps keeps its rows even when the reply lists it", () => {
+		const reply = "PLAN:\n1. Read the failing test\n2. Fix the slice start\n\nDone with the first step.";
+		const ticked: PlanStep[] = [
+			{ id: "s0", text: "Read the failing test", status: "done" },
+			{ id: "s1", text: "Fix the slice start", status: "pending" },
+		];
+		const out = doneBlock(turn(ticked, pilotCalls.slice(1, 2)).map((m) => (m.id === "a1" ? { ...m, content: reply } : m)), 20);
+		expect(out).toMatch(/[✓] Read/);
+		expect(stepsInDone(out, ticked)).toBe(2);
 	});
 
 	test("a plain reply with no plan and no calls has no DONE block", () => {
