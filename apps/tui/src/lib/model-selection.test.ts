@@ -10,9 +10,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { getProviderManager } from "../../../../packages/providers/index.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { ProviderManager, getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	type ModelSpec,
+	autoSelectModel,
+	canReuseTabAgent,
 	declaredModels,
 	normalizeProviderId,
 	providerToRuntime,
@@ -139,5 +144,107 @@ describe("declaredModels: the registry, never a placeholder id", () => {
 	test("a name the registry does not know yields no models", () => {
 		expect(declaredModels(getProviderManager(), "not-a-provider")).toEqual([]);
 		expect(declaredModels(getProviderManager(), "")).toEqual([]);
+	});
+});
+
+// #3081: normalizeProviderId was a hand-kept list of eight names. Every other
+// registry provider, starting with `8gent` (the out-of-box active provider),
+// was silently dropped and the TUI fell back to the saved/default provider.
+describe("normalizeProviderId validates against the provider registry (#3081)", () => {
+	test("--provider 8gent is kept, not dropped", () => {
+		expect(normalizeProviderId("8gent")).toBe("8gent");
+	});
+
+	test("every compiled registry provider survives normalisation", () => {
+		for (const p of getProviderManager().listProviders()) {
+			if (p.name === "lmstudio") continue; // alias-normalised, asserted below
+			expect(normalizeProviderId(p.name)).toBe(p.name);
+		}
+	});
+
+	test("underscores and case normalise to the registry id", () => {
+		expect(normalizeProviderId("Host_CLI_Primary")).toBe("host-cli-primary");
+		expect(normalizeProviderId("APFEL")).toBe("apfel");
+		expect(normalizeProviderId("DeepSeek")).toBe("deepseek");
+	});
+
+	test("the TUI's own aliases still resolve", () => {
+		expect(normalizeProviderId("lm_studio")).toBe("lmstudio");
+		expect(normalizeProviderId("LM-Studio")).toBe("lmstudio");
+		expect(normalizeProviderId("OpenRouter_Free")).toBe("openrouter-free");
+	});
+
+	test("a genuinely unknown provider is still rejected", () => {
+		expect(normalizeProviderId("not-a-provider")).toBeUndefined();
+		expect(normalizeProviderId("   ")).toBeUndefined();
+	});
+
+	test("a provider declared in providers.json is accepted, via the real registry", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "norm-provider-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({ providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } } }),
+		);
+		const pm = new ProviderManager(file);
+		const isKnown = (n: string) => pm.isKnownProvider(n);
+		expect(normalizeProviderId("myrig", isKnown)).toBe("myrig");
+		expect(normalizeProviderId("8gent", isKnown)).toBe("8gent");
+		expect(normalizeProviderId("nope", isKnown)).toBeUndefined();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+// #3084: `--provider 8gent --model qwen3.8:27b-mlx`. The 8gent registry entry
+// DECLARES eight-1.0-q3:14b; the validity check swapped the explicit model for
+// it, that model was not installed, the agent rerouted to qwen3.8 and
+// self-corrected config.model, and the TUI then dropped the "stale" agent as
+// the turn finished, discarding the reply ("No reply.").
+describe("an explicit --model is never overridden (#3084)", () => {
+	const declared8gent = ["eight-1.0-q3:14b"];
+	const pin: ModelSpec = { provider: "8gent", model: "qwen3.8:27b-mlx" };
+
+	test("--provider 8gent --model X keeps X even though X is not in 8gent's declared list", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: pin }),
+		).toBeNull();
+	});
+
+	test("without an explicit choice, a model missing from the list is still auto-replaced", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: null }),
+		).toBe("eight-1.0-q3:14b");
+	});
+
+	test("the pin only protects its own provider: after switching provider the check runs", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "lmstudio", available: ["m-a"], explicit: pin }),
+		).toBe("m-a");
+	});
+
+	test("no model, an embedding model, or an empty list behave as before", () => {
+		expect(autoSelectModel({ current: "", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null })).toBe(
+			"llama3.2:3b",
+		);
+		expect(
+			autoSelectModel({
+				current: "nomic-embed-text:latest",
+				currentProvider: "ollama",
+				available: ["nomic-embed-text:latest", "llama3.2:3b"],
+				explicit: null,
+			}),
+		).toBe("llama3.2:3b");
+		expect(autoSelectModel({ current: "x", currentProvider: "ollama", available: [], explicit: null })).toBeNull();
+		expect(
+			autoSelectModel({ current: "llama3.2:3b", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null }),
+		).toBeNull();
+	});
+
+	test("a rerouted agent (live config.model changed) is still reused for the spec it was built for", () => {
+		const built = { model: "eight-1.0-q3:14b", runtime: "ollama" };
+		// The live config would now say qwen3.8 after the reroute; reuse keys on the build spec.
+		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "ollama" })).toBe(true);
+		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "lmstudio" })).toBe(false);
+		expect(canReuseTabAgent(built, { model: "qwen3.8:27b-mlx", runtime: "ollama" })).toBe(false);
 	});
 });

@@ -1,3 +1,5 @@
+import { getProviderManager } from "../../../../packages/providers/index.js";
+
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
  */
@@ -99,19 +101,28 @@ export function providerToRuntime(provider?: string): AgentRuntime {
 	return "ollama";
 }
 
-/** Map CLI / saved provider strings to internal provider ids. */
-export function normalizeProviderId(raw?: string): string | undefined {
+/**
+ * Map a CLI / saved provider string to a provider id, validated against the
+ * LOADED provider registry (built-ins plus providers.json declarations), not a
+ * second hand-kept list: that list silently dropped `--provider 8gent` and every
+ * other registry provider it did not name (#3081). Only the TUI's own spellings
+ * are handled here: `lm-studio` / `lm_studio` for lmstudio, and the TUI-only
+ * `openrouter-free`. An unknown name returns undefined. `isKnown` is injectable
+ * for tests; by default it asks the provider manager.
+ */
+export function normalizeProviderId(
+	raw?: string,
+	isKnown: (name: string) => boolean = (name) => getProviderManager().isKnownProvider(name),
+): string | undefined {
 	if (!raw?.trim()) return undefined;
 	const x = raw.trim().toLowerCase().replace(/_/g, "-");
 	const compact = x.replace(/-/g, "");
-	if (x === "lmstudio" || x === "lm-studio" || compact === "lmstudio") return "lmstudio";
-	if (x === "ollama") return "ollama";
-	if (x === "openrouter-free" || compact === "openrouterfree") return "openrouter-free";
-	if (x === "openrouter") return "openrouter";
-	if (x === "groq") return "groq";
-	if (x === "openai") return "openai";
-	if (x === "anthropic") return "anthropic";
-	if (x === "mistral") return "mistral";
+	if (compact === "lmstudio") return "lmstudio";
+	if (compact === "openrouterfree") return "openrouter-free";
+	if (isKnown(x)) return x;
+	// A provider declared in providers.json keeps the case its author typed.
+	const asTyped = raw.trim();
+	if (asTyped !== x && isKnown(asTyped)) return asTyped;
 	return undefined;
 }
 
@@ -119,6 +130,46 @@ export function normalizeProviderId(raw?: string): string | undefined {
 export interface ModelSpec {
 	provider: string;
 	model: string;
+}
+
+
+/**
+ * The model the validity check should switch to once a provider's model list
+ * has loaded, or null to keep the current one.
+ *
+ * An explicit launch choice is never overridden (#3084): `--provider 8gent
+ * --model qwen3.8:27b-mlx` loads the registry's DECLARED list for 8gent
+ * (`eight-1.0-q3:14b`), the requested model is not on it, and the old check
+ * swapped in the declared default. That model was not installed, so the agent
+ * silently rerouted, the header showed a model that never ran, and the rebuilt
+ * agent dropped the reply. A model the user named is the user's call; if it is
+ * wrong the turn says so.
+ */
+export function autoSelectModel(opts: {
+	current: string;
+	currentProvider: string;
+	available: string[];
+	/** The launch --provider/--model pin, if the user passed one. */
+	explicit: ModelSpec | null;
+}): string | null {
+	const { current, currentProvider, available, explicit } = opts;
+	if (available.length === 0) return null;
+	if (explicit && current && explicit.model === current && explicit.provider === currentProvider) return null;
+	const inList = Boolean(current && available.includes(current));
+	if (current && inList && !isLikelyEmbeddingModelId(current)) return null;
+	const next = pickBestChatModel(available, { preference: explicit?.model || undefined });
+	return next && next !== current ? next : null;
+}
+
+/**
+ * Whether a tab's existing agent can keep serving the active spec. Compare the
+ * spec the agent was BUILT for, not its live config: the agent self-corrects
+ * `config.model` after a reroute, and comparing the live value made the TUI
+ * drop and rebuild the agent the moment the rerouted turn finished, which
+ * discarded that turn's in-flight reply ("No reply.", #3084).
+ */
+export function canReuseTabAgent(built: { model?: string; runtime?: string }, want: { model: string; runtime: string }): boolean {
+	return built.model === want.model && built.runtime === want.runtime;
 }
 
 /** The tab a CLI --provider/--model override was pinned to at launch, with that spec. */

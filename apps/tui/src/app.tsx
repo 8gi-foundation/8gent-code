@@ -277,6 +277,9 @@ import * as fs from "node:fs";
 import * as pathMod from "node:path";
 import {
 	type CliTabPin,
+	type ModelSpec,
+	autoSelectModel,
+	canReuseTabAgent,
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	declaredModels,
@@ -1355,18 +1358,20 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (modelsLoading || availableModels.length === 0) return;
-
-		const inList = Boolean(currentModel && availableModels.includes(currentModel));
-		const bad = !currentModel || !inList || isLikelyEmbeddingModelId(currentModel);
-
-		if (!bad) return;
-
-		const next = pickBestChatModel(availableModels, {
-			preference: cliModelRequestedRef.current || undefined,
+		// An explicit --provider/--model launch choice is never swapped for the
+		// provider's declared default (#3084).
+		const explicit: ModelSpec | null =
+			cliPinRef.current?.spec ??
+			(cliModelRequestedRef.current
+				? { provider: cliProviderRequestedRef.current ?? currentProvider, model: cliModelRequestedRef.current }
+				: null);
+		const next = autoSelectModel({
+			current: currentModel,
+			currentProvider,
+			available: availableModels,
+			explicit,
 		});
-		if (next && next !== currentModel) {
-			setCurrentModel(next);
-		}
+		if (next) setCurrentModel(next);
 	}, [modelsLoading, availableModels, currentProvider, currentModel]);
 
 	// If models have loaded and there's still no valid chat model, show provider selector
@@ -2300,6 +2305,9 @@ export function App({
 	// and the last readiness notice shown, so a re-running effect neither
 	// starves the probe nor repeats the same line.
 	const readinessCacheRef = useRef(createReadinessCache());
+	// The model/runtime each tab agent was BUILT for (#3084). The agent's own
+	// config.model can self-correct after a reroute; reuse compares against this.
+	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
 	const lastReadinessNoticeRef = useRef("");
 
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
@@ -2373,7 +2381,11 @@ export function App({
 					const _cfg = (_existing as unknown as {
 						config?: { model?: string; runtime?: string };
 					}).config;
-					if (_cfg?.model === currentModel && _cfg?.runtime === _wantRuntime) {
+					// Compare the spec the agent was built for, not its live config: a
+					// reroute self-corrects config.model, and dropping the agent then
+					// discarded the finished turn's reply (#3084).
+					const _built = builtSpecRef.current.get(_existing) ?? { model: _cfg?.model, runtime: _cfg?.runtime };
+					if (canReuseTabAgent(_built, { model: currentModel, runtime: _wantRuntime })) {
 						setAgent(_existing);
 						setAgentReady(true);
 						return;
@@ -2394,6 +2406,7 @@ export function App({
 					apiKey: process.env.OPENROUTER_API_KEY,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 				});
+				builtSpecRef.current.set(newAgent, { model: currentModel, runtime });
 				// Belt and braces: the client's own check has no bound, so cap it.
 				const _readyOuter = await withTimeout(newAgent.isReady(), PROBE_TIMEOUT_MS * 2, false);
 				if (cancelled) return;
