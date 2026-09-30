@@ -204,9 +204,25 @@ export class AgentPool extends EventEmitter {
 			// Evidence before "completed": did the scoped files change, and do their tests pass?
 			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {
 				try {
+					// Run the test the way the sub-agent's own run_command would: an
+					// executor built exactly as the Agent builds its own, so every gate
+					// (maker-checker, ToolG8, permissions, sanitizer, System One) applies.
+					const { ToolExecutor } = await import("../eight/tools");
+					const gated = new ToolExecutor(
+						spawnedAgent.config.workingDirectory,
+						"primary",
+						undefined,
+						{
+							unattended: false,
+							allowedPaths: spawnedAgent.config.allowedPaths,
+							openOnWrite: false,
+						},
+					);
 					spawnedAgent.verification = await verifyScope(
 						spawnedAgent.config.workingDirectory,
 						spawnedAgent.scopeBaseline,
+						(command, timeoutMs) =>
+							gated.execute("run_command", { command, timeout: timeoutMs / 1000 }),
 					);
 				} catch {
 					// No verdict is better than a wrong one: the outcome falls back to "not verified".

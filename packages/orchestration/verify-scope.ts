@@ -9,9 +9,10 @@
  *
  * So the pool hashes every file in an agent's scope when it spawns, and when
  * the agent ends it compares hashes and, for a changed file with a sibling
- * test (`<name>.test.ts`), runs that test: bounded by a timeout, inside the
- * working directory. The verdict is evidence or it is "not verified"; nothing
- * here ever says fixed without a passing test.
+ * test (`<name>.test.ts`), runs that test through the same gated run_command
+ * a sub-agent uses: bounded by a timeout, inside the working directory. The
+ * verdict is evidence or it is "not verified"; nothing here ever says fixed
+ * without a passing test, and a gate that says no is reported, not bypassed.
  */
 
 import { createHash } from "node:crypto";
@@ -23,6 +24,7 @@ export type FileVerdict =
 	| { file: string; state: "fixed"; test: string }
 	| { file: string; state: "test-fails"; test: string; firstFailure: string }
 	| { file: string; state: "test-timeout"; test: string; timeoutMs: number }
+	| { file: string; state: "blocked"; test: string; reason: string }
 	| { file: string; state: "unverified" };
 
 /** File path (relative to the working directory) -> sha256 of its content, or null when absent. */
@@ -80,36 +82,55 @@ export function verifyTestTimeoutMs(): number {
 	return Number.isFinite(ms) && ms > 0 ? ms : 60_000;
 }
 
-async function runTest(
-	wd: string,
-	test: string,
-	timeoutMs: number,
-): Promise<{ ok: boolean; output: string } | "timeout"> {
-	const proc = Bun.spawn([process.execPath, "test", `./${test}`], {
-		cwd: wd,
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	let timedOut = false;
-	const timer = setTimeout(() => {
-		timedOut = true;
-		proc.kill();
-	}, timeoutMs);
-	const [out, err, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	clearTimeout(timer);
-	if (timedOut) return "timeout";
-	return { ok: code === 0, output: `${out}\n${err}` };
+/**
+ * Runs one command the way the agent's own run_command does, gates included,
+ * and returns run_command's output. The pool passes a ToolExecutor's
+ * execute("run_command"), so a verify run goes through the same maker-checker,
+ * ToolG8 policy, permission manager, shell sanitizer and System One gates as
+ * any command a sub-agent asks for (#3126 review). This module never spawns a
+ * process itself.
+ */
+export type GatedRunner = (command: string, timeoutMs: number) => Promise<string>;
+
+/**
+ * Read run_command's output. It returns the command's stdout unchanged only on
+ * exit 0, "Exit code N:" on a failure, "TIMEOUT after" on a timeout, and a
+ * marker ([PERMISSION DENIED], [BLOCKED], [SYSTEM ONE BLOCKED], ...) when a gate
+ * stopped it. FIXED needs positive evidence: bun test's own header on a clean
+ * exit. Anything unrecognised is treated as blocked, never as a pass.
+ */
+export function classifyRun(
+	output: string,
+):
+	| { kind: "pass" }
+	| { kind: "fail"; firstFailure: string }
+	| { kind: "timeout" }
+	| { kind: "blocked"; reason: string } {
+	const text = output.trimStart();
+	if (/^Exit code -?\d+:/.test(text))
+		return { kind: "fail", firstFailure: firstFailure(text.replace(/^Exit code -?\d+:/, "")) };
+	if (text.startsWith("TIMEOUT after")) return { kind: "timeout" };
+	if (/^bun test v\d/.test(text)) return { kind: "pass" };
+	const first =
+		text
+			.split("\n")
+			.find((l) => l.trim() !== "")
+			?.trim() ?? "no output";
+	return { kind: "blocked", reason: first.length > 200 ? `${first.slice(0, 197)}...` : first };
 }
 
-/** Compare against the spawn-time hashes and run each changed file's sibling test. */
+// A test path safe to put on a command line: no quoting, no shell syntax.
+const SAFE_PATH = /^[\w./-]+$/;
+
+/**
+ * Compare against the spawn-time hashes and run each changed file's sibling
+ * test through `run` (the gated run_command). Only a clean, recognised bun test
+ * run yields "fixed".
+ */
 export async function verifyScope(
 	workingDirectory: string,
 	baseline: ScopeBaseline,
+	run: GatedRunner,
 	timeoutMs = verifyTestTimeoutMs(),
 ): Promise<FileVerdict[]> {
 	const wd = path.resolve(workingDirectory);
@@ -121,17 +142,25 @@ export async function verifyScope(
 		}
 		const test = siblingTest(file);
 		const testAbs = test ? path.resolve(wd, test) : "";
-		if (!test || !inside(wd, testAbs) || !existsSync(testAbs)) {
+		if (!test || !SAFE_PATH.test(test) || !inside(wd, testAbs) || !existsSync(testAbs)) {
 			verdicts.push({ file, state: "unverified" });
 			continue;
 		}
 		try {
-			const r = await runTest(wd, test, timeoutMs);
-			if (r === "timeout") verdicts.push({ file, state: "test-timeout", test, timeoutMs });
-			else if (r.ok) verdicts.push({ file, state: "fixed", test });
-			else verdicts.push({ file, state: "test-fails", test, firstFailure: firstFailure(r.output) });
-		} catch {
-			verdicts.push({ file, state: "unverified" });
+			const r = classifyRun(await run(`bun test ./${test}`, timeoutMs));
+			if (r.kind === "pass") verdicts.push({ file, state: "fixed", test });
+			else if (r.kind === "fail")
+				verdicts.push({ file, state: "test-fails", test, firstFailure: r.firstFailure });
+			else if (r.kind === "timeout")
+				verdicts.push({ file, state: "test-timeout", test, timeoutMs });
+			else verdicts.push({ file, state: "blocked", test, reason: r.reason });
+		} catch (err) {
+			verdicts.push({
+				file,
+				state: "blocked",
+				test,
+				reason: err instanceof Error ? err.message : String(err),
+			});
 		}
 	}
 	return verdicts;

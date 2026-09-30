@@ -7,13 +7,17 @@
  *   BUGGY   rewrites src/clamp.ts with a different bug
  *   NOTEST  writes src/extra.ts, which has no sibling test
  *   HANG    writes src/hang.ts, whose sibling test outlasts the timeout
+ *   GOOD    writes the correct src/clamp.ts fix
+ *
+ * With "deny", the permission policy denies `bun test *` first and only GOOD
+ * runs: its verify run must be blocked by the same gate run_command obeys.
  *
  * Prints one @@PROBE@@ JSON line. Run with HOME in a temp dir.
- *   bun fixed-probe.ts <workdir>
+ *   bun fixed-probe.ts <workdir> [deny]
  */
 export {};
 
-const [workdir] = process.argv.slice(2);
+const [workdir, mode] = process.argv.slice(2);
 const fs = await import("node:fs");
 const path = await import("node:path");
 const read = (rel: string) => fs.readFileSync(path.join(workdir, rel), "utf-8");
@@ -45,6 +49,12 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			});
 		else if (!followUp && all.includes("NOTEST"))
 			content = fence("write_file", { path: "src/extra.ts", content: "export const extra = 2;\n" });
+		else if (!followUp && all.includes("GOOD"))
+			content = fence("write_file", {
+				path: "src/clamp.ts",
+				content:
+					"export function clamp(n: number, min: number, max: number): number {\n\treturn Math.min(Math.max(n, min), max);\n}\n",
+			});
 		else if (!followUp && all.includes("HANG"))
 			content = fence("write_file", { path: "src/hang.ts", content: "export const hang = 2;\n" });
 		return Response.json({
@@ -77,12 +87,19 @@ const settle = async (id: string) => {
 const check = async (id: string) =>
 	JSON.parse(await orchestrator.execute("check_agent", { agentId: id }));
 
-const ids = {
-	same: (await spawn("SAME: fix src/wordcount.ts.", ["src/wordcount.ts"])).agentId,
-	buggy: (await spawn("BUGGY: fix src/clamp.ts.", ["src/clamp.ts"])).agentId,
-	notest: (await spawn("NOTEST: write src/extra.ts.", ["src/extra.ts"])).agentId,
-	hang: (await spawn("HANG: write src/hang.ts.", ["src/hang.ts"])).agentId,
-};
+if (mode === "deny") {
+	const { getPermissionManager } = await import("../../../permissions");
+	getPermissionManager().denyPattern("bun test *");
+}
+const ids: Record<string, string> =
+	mode === "deny"
+		? { good: (await spawn("GOOD: fix src/clamp.ts.", ["src/clamp.ts"])).agentId }
+		: {
+				same: (await spawn("SAME: fix src/wordcount.ts.", ["src/wordcount.ts"])).agentId,
+				buggy: (await spawn("BUGGY: fix src/clamp.ts.", ["src/clamp.ts"])).agentId,
+				notest: (await spawn("NOTEST: write src/extra.ts.", ["src/extra.ts"])).agentId,
+				hang: (await spawn("HANG: write src/hang.ts.", ["src/hang.ts"])).agentId,
+			};
 for (const id of Object.values(ids)) await settle(id);
 const out: Record<string, unknown> = {};
 for (const [k, id] of Object.entries(ids)) out[k] = await check(id);

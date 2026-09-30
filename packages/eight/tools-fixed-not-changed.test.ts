@@ -29,7 +29,7 @@ type Check = {
 	respawnNow?: Array<{ agentId: string }>;
 };
 
-function runProbe() {
+function runProbe(mode?: "deny") {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fixed-not-changed-"));
 	fs.mkdirSync(path.join(dir, "src"));
 	fs.writeFileSync(path.join(dir, "src", "wordcount.ts"), WORDCOUNT);
@@ -39,7 +39,12 @@ function runProbe() {
 	fs.writeFileSync(path.join(dir, "src", "hang.test.ts"), HANG_TEST);
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "fixed-not-changed-home-"));
 	const r = Bun.spawnSync(
-		["bun", path.join(import.meta.dir, "__tests__", "fixtures", "fixed-probe.ts"), dir],
+		[
+			"bun",
+			path.join(import.meta.dir, "__tests__", "fixtures", "fixed-probe.ts"),
+			dir,
+			...(mode ? [mode] : []),
+		],
 		{
 			env: {
 				...process.env,
@@ -59,10 +64,7 @@ function runProbe() {
 		throw new Error(
 			`probe printed no result (exit ${r.exitCode}): ${r.stderr.toString().slice(-800)}`,
 		);
-	return JSON.parse(line.slice("@@PROBE@@".length)) as Record<
-		"same" | "buggy" | "notest" | "hang",
-		Check
-	>;
+	return JSON.parse(line.slice("@@PROBE@@".length)) as Record<string, Check>;
 }
 
 describe("check_agent says FIXED only with a passing test (#3126)", () => {
@@ -101,4 +103,19 @@ describe("check_agent says FIXED only with a passing test (#3126)", () => {
 	test("nothing says FIXED without a passing test", () => {
 		for (const c of Object.values(out)) expect(c.outcome).not.toContain("FIXED");
 	});
+});
+
+// #3126 review: the verify run executes code a sub-agent just wrote, so it goes
+// through the same gates as the agent's own run_command. A gate that says no
+// is reported; it never turns into FIXED.
+describe("the verify run obeys the run_command gates", () => {
+	test("permission policy denies bun test: a correct fix reads as blocked, never FIXED", () => {
+		const out = runProbe("deny");
+		expect(out.good.status).toBe("completed");
+		expect(out.good.filesChanged).toEqual(["src/clamp.ts"]);
+		expect(out.good.outcome).toStartWith(
+			"changed src/clamp.ts, not verified (verification blocked by [PERMISSION DENIED] Command blocked by security policy: bun test ./src/clamp.test.ts)",
+		);
+		expect(out.good.outcome).not.toContain("FIXED");
+	}, 90_000);
 });

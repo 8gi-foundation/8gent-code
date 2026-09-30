@@ -104,6 +104,8 @@ export function fileVerdictText(v: FileVerdict): string {
 			return `CHANGED BUT ITS TEST FAILS: ${v.file} (${v.test}: ${v.firstFailure})`;
 		case "test-timeout":
 			return `changed ${v.file}, not verified (${v.test} did not finish in ${Math.round(v.timeoutMs / 1000)}s)`;
+		case "blocked":
+			return `changed ${v.file}, not verified (verification blocked by ${v.reason})`;
 		case "unverified":
 			return `changed ${v.file}, not verified (no test)`;
 		case "unchanged":
