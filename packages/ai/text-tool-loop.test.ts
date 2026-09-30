@@ -5,6 +5,7 @@ import {
 	hasDoneMarker,
 	isQuestionToUser,
 	MAX_COMPLETION_CHECKS,
+	MAX_CONSECUTIVE_CHECKS,
 	isShellFileWrite,
 	runTextToolAgent,
 	stripDoneMarker,
@@ -335,13 +336,13 @@ describe("runTextToolAgent - continue until every step is done", () => {
 			maxRounds: 50,
 		});
 
-		// MAX_COMPLETION_CHECKS checks, then one claim follow-up (ls deck and wc
+		// MAX_CONSECUTIVE_CHECKS checks, then one claim follow-up (ls deck and wc
 		// never ran), then the turn ends with both contradictions noted.
 		expect(model.seen.filter((m) => lastUserMessage(m) === COMPLETION_CHECK_MESSAGE)).toHaveLength(
-			MAX_COMPLETION_CHECKS,
+			MAX_CONSECUTIVE_CHECKS,
 		);
-		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS + 1);
-		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS + 1);
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS + 1);
+		expect(result.rounds).toBe(2 + MAX_CONSECUTIVE_CHECKS + 1);
 		expect(result.content).toBe(
 			"Now let me write the deck:\n\n[harness] Not verified: 'ls deck' was requested but never ran.\n[harness] Not verified: 'wc -l deck/deck.md' was requested but never ran.",
 		);
@@ -663,10 +664,10 @@ describe("runTextToolAgent - completion check", () => {
 			maxRounds: 50,
 		});
 
-		// MAX_COMPLETION_CHECKS checks, one claim follow-up, then the turn ends noted.
-		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS + 1);
-		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS + 1);
-		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
+		// MAX_CONSECUTIVE_CHECKS checks, one claim follow-up, then the turn ends noted.
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS + 1);
+		expect(result.rounds).toBe(2 + MAX_CONSECUTIVE_CHECKS + 1);
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_CONSECUTIVE_CHECKS);
 		expect(result.content).toStartWith("Now creating the Marp deck from the outline.\n\n[harness] Not verified:");
 		expect(result.unverified).toHaveLength(2);
 		expect(ws.files.has("deck/deck.md")).toBe(false);
@@ -766,13 +767,15 @@ describe("runTextToolAgent - re-check until DONE", () => {
 			call: model.call,
 			maxRounds: 50,
 		});
-		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
-		expect(model.calls()).toBe(2 + MAX_COMPLETION_CHECKS);
-		expect(result.rounds).toBe(2 + MAX_COMPLETION_CHECKS);
+		// Two checks in a row with no tool work between them, then the turn ends.
+		expect(MAX_CONSECUTIVE_CHECKS).toBe(2);
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_CONSECUTIVE_CHECKS);
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS);
+		expect(result.rounds).toBe(2 + MAX_CONSECUTIVE_CHECKS);
 		expect(result.content).toBe(RUN_225823_STALL);
 	});
 
-	test("the cap is per turn: re-armed stalls share it", async () => {
+	test("progress resets the cap: a stall after real tool work is checked again, past three checks", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("write_file", { path: "a.md", content: "a" }),
@@ -782,18 +785,89 @@ describe("runTextToolAgent - re-check until DONE", () => {
 			tc("write_file", { path: "c.md", content: "c" }),
 			"Next.",
 			tc("write_file", { path: "d.md", content: "d" }),
-			"Stopping here.",
+			"Next.",
+			tc("write_file", { path: "e.md", content: "e" }),
+			"DONE: Wrote five files.",
 			"UNREACHED",
 		]);
 		const result = await runTextToolAgent({
-			messages: [{ role: "user", content: "write four files" }],
+			messages: [{ role: "user", content: "write five files" }],
 			tools: ws.tools,
 			call: model.call,
 			maxRounds: 50,
 		});
+		expect(model.seen.filter(isCheck)).toHaveLength(4);
+		expect(model.calls()).toBe(10);
+		expect(ws.files.get("e.md")).toBe("e");
+		expect(result.content).toBe("Wrote five files.");
+	});
+
+	test("a never-complies model stops after two checks in a row, even after earlier progress", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "a.md", content: "a" }),
+			"Next.",
+			tc("write_file", { path: "b.md", content: "b" }),
+			"Next.",
+			"Doing that now.",
+			"Doing that now.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write three files" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		// One check after the first stall; after b.md, two in a row, then it ends.
+		expect(model.seen.filter(isCheck)).toHaveLength(1 + MAX_CONSECUTIVE_CHECKS);
+		expect(model.calls()).toBe(6);
+		expect(result.content).toBe("Doing that now.");
+	});
+
+	test("an erroring tool round is not progress: it does not reset the consecutive cap", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "a.md", content: "a" }),
+			"Next.",
+			tc("no_such_tool", {}),
+			"Next.",
+			"Next.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write two files" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		// Check 1 after the first "Next."; the erroring call is not progress, so
+		// the stall after it is not a fresh one and ends the turn with one check.
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(model.calls()).toBe(4);
+		expect(result.content).toBe("Next.");
+	});
+
+	test("the per-turn ceiling still bounds a model that alternates work and stalls forever", async () => {
+		const ws = fakeWorkspace();
+		let n = 0;
+		const model = scriptedModel([
+			() => {
+				n++;
+				return n % 2 === 1 ? tc("write_file", { path: `f${n}.md`, content: "x" }) : "Next.";
+			},
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write files until told to stop" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 500,
+		});
+		expect(MAX_COMPLETION_CHECKS).toBe(10);
 		expect(model.seen.filter(isCheck)).toHaveLength(MAX_COMPLETION_CHECKS);
-		expect(model.calls()).toBe(8);
-		expect(result.content).toBe("Stopping here.");
+		// Ten work/stall/check cycles, then one more work round and a final stall.
+		expect(model.calls()).toBe(2 * MAX_COMPLETION_CHECKS + 2);
+		expect(result.content).toBe("Next.");
 	});
 
 	test("a question to the user after a check ends the turn at once", async () => {
@@ -1013,8 +1087,8 @@ describe("runTextToolAgent - claim check", () => {
 			maxRounds: 50,
 		});
 
-		// 3 tool rounds, the stall, MAX_COMPLETION_CHECKS answers, one claim follow-up.
-		expect(model.calls()).toBe(4 + MAX_COMPLETION_CHECKS + 1);
+		// 3 tool rounds, the stall, MAX_CONSECUTIVE_CHECKS answers, one claim follow-up.
+		expect(model.calls()).toBe(4 + MAX_CONSECUTIVE_CHECKS + 1);
 		expect(result.unverified).toEqual([
 			"'ls deck' was requested but never ran",
 			"'wc -l deck/deck.md' was requested but never ran",
@@ -1183,5 +1257,91 @@ describe("runTextToolAgent - bare JSON calls (llama3.2:3b, rishi-pilot l2-split-
 		});
 		expect(result.toolLog).toEqual([]);
 		expect(result.content).toBe(answer);
+	});
+});
+
+// ── Progress resets the check cap (Rishi pilot l4-deck-plus-m5 run 2026-09-30_005300) ──
+//
+// qwen3.8 27B on a six-part deck task explored for 13 rounds. Three times it
+// replied with prose and no tool call straight after a successful tool round;
+// each got a completion check and each time the model resumed real tool work.
+// The fourth such reply, "The root has no README.md yet and no `deck/` folder.
+// Let me check git status, then start building.", found the per-turn cap of 3
+// spent, became the final answer, and no file was ever written.
+
+const RUN_005300_FINAL_STALL =
+	"The root has no README.md yet and no `deck/` folder. Let me check git status, then start building.";
+
+describe("runTextToolAgent - progress resets the check cap", () => {
+	test("run 005300 replay: four announce/check/resume cycles, and the fourth announcement is checked, not final", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			"I have what I need from the package. Let me check the tools available.",
+			tc("run_command", { command: "which ffmpeg ffprobe git" }),
+			"ffmpeg is there. Let me look at the root.",
+			tc("run_command", { command: "pwd" }),
+			"Now let me see what is in the root.",
+			tc("run_command", { command: "ls -la" }),
+			RUN_005300_FINAL_STALL,
+			// The fourth check lands; the model builds.
+			tc("write_file", { path: "deck/outline.md", content: "1. What\n2. Why" }),
+			tc("write_file", { path: "deck/deck.md", content: "# What\n---\n# Why" }),
+			tc("run_command", { command: "ls deck" }),
+			tc("run_command", { command: "wc -l deck/deck.md" }),
+			"DONE: Researched the package, wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: FIVE_STEP_TASK }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		// Past the old per-turn cap of 3: every stall followed real tool work.
+		expect(model.seen.filter(isCheck)).toHaveLength(4);
+		expect(model.seen[8][model.seen[8].length - 2]).toEqual({
+			role: "assistant",
+			content: RUN_005300_FINAL_STALL,
+		});
+		expect(isCheck(model.seen[8])).toBe(true);
+		expect(ws.files.get("deck/outline.md")).toBe("1. What\n2. Why");
+		expect(ws.files.get("deck/deck.md")).toBe("# What\n---\n# Why");
+		expect(ws.commands).toEqual(["which ffmpeg ffprobe git", "pwd", "ls -la", "ls deck", "wc -l deck/deck.md"]);
+		expect(model.calls()).toBe(13);
+		expect(result.rounds).toBe(13);
+		expect(result.content).toBe(
+			"Researched the package, wrote deck/outline.md and deck/deck.md, ran ls deck and wc -l.",
+		);
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("run 005300 shape with a model that then never complies: two checks in a row, then the turn ends", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("read_file", { path: "packages/decide/README.md" }),
+			"Let me check the tools available.",
+			tc("run_command", { command: "pwd" }),
+			"Now let me see what is in the root.",
+			tc("run_command", { command: "ls -la" }),
+			RUN_005300_FINAL_STALL,
+			"Starting now.",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Research packages/decide, then write deck/outline.md." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		// One check each for the first two stalls (each resumed with tools), then
+		// the final stall gets two checks in a row and the turn ends.
+		expect(model.seen.filter(isCheck)).toHaveLength(2 + MAX_CONSECUTIVE_CHECKS);
+		expect(model.calls()).toBe(6 + MAX_CONSECUTIVE_CHECKS);
+		expect(result.content).toBe("Starting now.");
+		expect(ws.files.has("deck/outline.md")).toBe(false);
 	});
 });
