@@ -2,6 +2,8 @@
 
 The permission system provides security controls for command execution in 8gent Code.
 
+To change how much 8gent may do without asking, press Shift+Tab. See [permission-modes.md](permission-modes.md).
+
 ## Configuration
 
 Permissions are stored in `~/.8gent/permissions.json`:

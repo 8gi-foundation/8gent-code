@@ -9,11 +9,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - permission modes on Shift+Tab (#3170, #3174)
+- Shift+Tab cycles the focused tab through Plan (reads and plans, changes nothing), Ask (the default, unchanged), Guarded (System One checks every shell command; safe steps run, risky ones still ask) and Infinite (never asks, except the always-blocked list; back to Ask after 30 minutes). Each tab keeps its own mode. A child agent gets the stricter of its parent's mode and the one it asked for. The footer, tab tags, header chip and a one-line chat note show the mode. Shift+Tab no longer moves to the previous tab; Ctrl+1 to Ctrl+9 still do. Guide: `docs/guides/permission-modes.md`.
+
+### Added - one shared System One judge per machine (#3162)
+- `EIGHT_S1_SHARED_JUDGE=1` lets every 8gent process on a machine use one copy of System One's model on the local Ollama server (`EIGHT_DECIDE_OLLAMA_HOST`, default `http://localhost:11434`) instead of loading one each. Same model, same verdicts. If the shared server stops answering mid-session, that session loads its own copy and carries on; it never falls back to another server or model. Off by default. Guide: `docs/guides/system-one-shared-judge.md`.
+
+### Fixed - NO_COLOR is honoured across the whole interface (#3171)
+- `NO_COLOR=1` now turns colour off everywhere, keeping bold, dim and inverse so the cursor stays visible. `FORCE_COLOR` still wins over it. The dark theme's danger red is brighter so it meets contrast guidelines. Guide: `docs/guides/no-color.md`.
+
+### Fixed - Ctrl+letter shortcuts no longer type their letter (#3166)
+- Pressing a shortcut such as Ctrl+P also typed `p` into the chat box, hidden until the palette closed. The chat box now ignores Ctrl+letter as text.
+
 ### Fixed - one Ollama host resolver (#3149)
 - System One (`packages/decide`) and the rest of the harness resolved `OLLAMA_HOST` differently: a bare host with no port (`gpu-box`, which the ollama CLI accepts) got `:11434` for chat and no port (so port 80) for System One. Both now use one resolver, `packages/local-model-server/ollama-host.ts`.
 
 ### Added - llama-server as a local server, phase 2 of #3149
-- `EIGHT_LOCAL_SERVER=llama-server` runs 8gent Code on llama.cpp's `llama-server` with no Ollama at all: a `llama-server` provider on the text-tool path (`LLAMA_SERVER_URL`, default `http://127.0.0.1:8080`), and nothing in the process probes, lists or calls Ollama (onboarding, health, readiness, task routing, System One). Unset, today's Ollama behaviour is unchanged.
+- `EIGHT_LOCAL_SERVER=llama-server` runs 8gent Code on llama.cpp's `llama-server` with no Ollama at all: a `llama-server` provider on the text-tool path (`LLAMA_SERVER_URL`, default `http://127.0.0.1:8080`), and nothing in the process probes, lists or calls Ollama (onboarding, health, readiness, task routing, System One). Unset, today's Ollama behaviour is unchanged. Guide: `docs/guides/llama-server.md`.
 - The llama-server adapter (`packages/local-model-server/llama-server.ts`) passes the same contract suite as the Ollama adapter.
 - System One finds its GGUF in `~/.8gent/models/decide/*.gguf` before the Ollama store, so a machine with no Ollama can still run it (or set `EIGHT_DECIDE_GGUF`).
 
