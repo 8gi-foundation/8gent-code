@@ -11,8 +11,9 @@ import * as path from "node:path";
 import { toolDefsToSpecs } from "../ai/text-tool-endpoint";
 import { buildToolSystemPrompt } from "../ai/text-tools";
 import { agentTools } from "../ai/tools";
-import { parsePlan, updatePlan } from "../ai/update-plan";
+import { PLAN_STATUSES, parsePlan, updatePlan } from "../ai/update-plan";
 import { enforceAgenticHonesty } from "./honesty";
+import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { TOOL_CATEGORIES } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 
@@ -123,5 +124,36 @@ describe("update_plan", () => {
 			],
 		});
 		expect(gate.violated).toBe(true);
+	});
+});
+
+/**
+ * #3082: the PLAN column only ticks when the agent calls update_plan, and the
+ * agent was never told to. These pin the instruction that tells it.
+ */
+describe("the agent is told to report plan progress", () => {
+	test("the planning gate asks for the plan, execution, and update_plan reports", () => {
+		expect(PLANNING_GATE_INSTRUCTION).toStartWith("[PLANNING]");
+		expect(PLANNING_GATE_INSTRUCTION).toContain("PLAN: 1.");
+		expect(PLANNING_GATE_INSTRUCTION).toContain("Do not stop after planning - execute.");
+		expect(PLANNING_GATE_INSTRUCTION).toContain("call update_plan with every step");
+		expect(PLANNING_GATE_INSTRUCTION).toContain("before your final answer");
+	});
+
+	test("every status the gate names is one update_plan accepts", () => {
+		for (const status of PLAN_STATUSES) expect(PLANNING_GATE_INSTRUCTION).toContain(status);
+		const plan = PLAN_STATUSES.map((status, i) => ({ step: `Step ${i + 1}`, status }));
+		expect(parsePlan(plan).ok).toBe(true);
+	});
+
+	test("the BMAD rules say reporting progress is not re-planning", () => {
+		expect(DEFAULT_SYSTEM_PROMPT).toContain("Reporting progress is not re-planning");
+		expect(DEFAULT_SYSTEM_PROMPT.match(/update_plan/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+	});
+
+	test("agent.ts injects the shared constant, not its own copy", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf8");
+		expect(src).toContain("content: PLANNING_GATE_INSTRUCTION,");
+		expect(src).not.toContain('"[PLANNING] ');
 	});
 });

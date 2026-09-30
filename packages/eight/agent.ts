@@ -58,7 +58,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
-import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
+import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
@@ -1141,8 +1141,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			// it's the last user-turn content before generation starts.
 			this.messageHistory.push({
 				role: "user",
-				content:
-					"[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute.",
+				content: PLANNING_GATE_INSTRUCTION,
 			});
 		} else {
 			// Simple / short messages go through without a planning gate
