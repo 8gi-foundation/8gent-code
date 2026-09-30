@@ -104,6 +104,30 @@ export function systemOneEnabled(env: Record<string, string | undefined> = proce
 	return v === "1" || v === "true";
 }
 
+/**
+ * Rules-first allowlist (packages/decide/allowlist.ts, #3131). OFF by
+ * default. With it on, a command the rules pass and the allowlist reads as
+ * plainly read-only runs without asking the model judge (backend
+ * "allowlist"), and the judge is no longer warmed at startup: it loads on the
+ * first command that needs it, inside the cold budget. `bun test` needs its
+ * own flag on top. Both only matter when EIGHT_SYSTEM_ONE is on.
+ */
+export const SYSTEM_ONE_ALLOWLIST_FLAG = "EIGHT_S1_ALLOWLIST";
+export const SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG = "EIGHT_S1_ALLOWLIST_BUN_TEST";
+
+function flagOn(env: Record<string, string | undefined>, name: string): boolean {
+	const v = (env[name] || "").trim().toLowerCase();
+	return v === "1" || v === "true";
+}
+
+export function systemOneAllowlist(env: Record<string, string | undefined> = process.env): {
+	enabled: boolean;
+	bunTest: boolean;
+} {
+	const enabled = flagOn(env, SYSTEM_ONE_ALLOWLIST_FLAG);
+	return { enabled, bunTest: enabled && flagOn(env, SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG) };
+}
+
 export type SystemOneThresholds = "default" | `calibrated(${string})`;
 
 export interface SystemOneGateResult {
@@ -193,7 +217,7 @@ async function thresholdsFor(
 }
 
 function isModelVerdict(g: BashGuardResult): boolean {
-	return g.backend !== "unavailable" && g.backend !== "rule" && g.backend !== "rules";
+	return g.backend !== "unavailable" && g.backend !== "rule" && g.backend !== "rules" && g.backend !== "allowlist";
 }
 
 /** The command the warm-up asks about. Harmless and never run. */
@@ -211,6 +235,8 @@ export function startSystemOneWarmup(
 	env: Record<string, string | undefined> = process.env,
 ): Promise<void> | null {
 	if (!systemOneEnabled(env)) return null;
+	// Allowlist on: most commands never reach the judge, so load it lazily.
+	if (systemOneAllowlist(env).enabled) return null;
 	if (warmupPromise) return warmupPromise;
 	const gen = generation;
 	warmupLoading = true;
@@ -287,6 +313,21 @@ export async function systemOneGate(
 	env: Record<string, string | undefined> = process.env,
 ): Promise<SystemOneGateResult> {
 	if (!systemOneEnabled(env)) return { run: true };
+	const allow = systemOneAllowlist(env);
+	if (allow.enabled) {
+		try {
+			const { readOnlyAllowlist } = await import("../decide/allowlist");
+			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
+			if (a.verdict === "pass-without-model") {
+				return {
+					run: true,
+					guard: { verdict: "allow", pYes: Number.NaN, backend: "allowlist", model: "allowlist", reason: a.reason },
+				};
+			}
+		} catch {
+			// The allowlist failing is "no opinion": fall through to the judge.
+		}
+	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";
 	const ms = systemOneTimeoutMs(env);
