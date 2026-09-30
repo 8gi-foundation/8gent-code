@@ -5,12 +5,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { type PlanStep, applyPlanUpdate, mergePlanText, settlePlan } from "./plan-state";
+import { type PlanStep, applyPlanUpdate, mergePlanText, replyPlan, settlePlan } from "./plan-state";
 import { type ToolTrailEntry, toTrailEntry } from "./tool-trail";
 import {
 	MAX_RESULT_ROWS,
 	buildTurnResults,
 	fitResultRow,
+	hasTurnResults,
 	stepsShown,
 	turnPlan,
 } from "./turn-results";
@@ -275,5 +276,40 @@ describe("fitResultRow", () => {
 	test("a very narrow column keeps the verb", () => {
 		const fit = fitResultRow({ kind: "tool", status: "ok", verb: "Wrote", chip: "deck/outline.md", count: 1 }, 10);
 		expect(fit.verb).toBe("Wrote");
+	});
+});
+
+describe("a turn with a plan and no calls (#3096)", () => {
+	const plan = [
+		{ id: "a", text: "Read the failing test", status: "pending" as const },
+		{ id: "b", text: "Fix the slice start", status: "pending" as const },
+	];
+	test("has a result block, and it is the plan, untouched", () => {
+		expect(hasTurnResults([], plan)).toBe(true);
+		const rows = buildTurnResults([], MAX_RESULT_ROWS, plan);
+		expect(rows.map((r) => [r.kind, r.status, r.verb])).toEqual([
+			["plan", "pending", "Read"],
+			["plan", "pending", "Fix"],
+		]);
+		expect(stepsShown(rows)).toBe(2);
+	});
+	test("no plan and no calls: no block", () => {
+		expect(hasTurnResults([], [])).toBe(false);
+		expect(hasTurnResults([], undefined)).toBe(false);
+	});
+});
+
+describe("replyPlan", () => {
+	test("keeps the status the column held, adds the reply's new lines as pending", () => {
+		const held = [{ id: "s1", text: "Read the failing test", status: "done" as const }];
+		const out = replyPlan(held, ["Read the failing test", "Fix the slice start"]);
+		expect(out.map((s) => [s.text, s.status])).toEqual([
+			["Read the failing test", "done"],
+			["Fix the slice start", "pending"],
+		]);
+	});
+	test("settles an active step to pending, as the column does", () => {
+		const out = replyPlan([{ id: "s1", text: "Fix it", status: "active" as const }], []);
+		expect(out[0].status).toBe("pending");
 	});
 });

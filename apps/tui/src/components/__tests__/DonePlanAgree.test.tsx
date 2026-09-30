@@ -11,7 +11,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "ink";
 import type { Message } from "../../app.js";
-import { type PlanStep, mergePlanText, settlePlan } from "../../lib/plan-state.js";
+import { planStepsFromText } from "../../lib/activity-rail-derivation.js";
+import { type PlanStep, mergePlanText, replyPlan, settlePlan } from "../../lib/plan-state.js";
 import type { ToolTrailEntry } from "../../lib/tool-trail.js";
 import { PlanPanel } from "../PlanPanel.js";
 import { MessageList } from "../message-list.js";
@@ -120,5 +121,44 @@ describe("the DONE block and the PLAN column count the same steps", () => {
 		const out = doneBlock(turn(written, pilotCalls.slice(4)), 20);
 		expect(stepsInColumn(written)).toBe(3);
 		expect(stepsInDone(out, written)).toBe(3);
+	});
+
+	test("a turn that wrote a plan and called nothing still gets its DONE block (#3096)", () => {
+		const reply =
+			"PLAN:\n1. Read the failing test\n2. Fix the slice start\n3. Run bun test again\n\nShall I go ahead?";
+		// The column has not caught up yet: the stamp takes the reply's own lines.
+		const stamped = replyPlan([], planStepsFromText(reply));
+		const messages: Message[] = [
+			{
+				id: "u1",
+				role: "user",
+				content: "Plan the fix first, do not change anything.",
+				timestamp: at,
+			},
+			{ id: "a1", role: "assistant", content: reply, timestamp: at, plan: stamped },
+		];
+		const out = doneBlock(messages, 20);
+		expect(stepsInColumn(stamped)).toBe(3);
+		expect(stepsInDone(out, stamped)).toBe(3);
+		// The steps are rows of the block, with the pending mark, not only
+		// the numbered list inside the reply.
+		for (const step of ["Read the failing test", "Fix the slice start", "Run bun test again"]) {
+			expect(out).toMatch(new RegExp(`[○o] ${step}`));
+		}
+		// Nothing ran, so nothing is ticked and no action rows are invented.
+		expect(out).not.toContain("✓");
+		expect(out).not.toMatch(/more actions?\b/);
+		expect(out).not.toContain("No reply.");
+	});
+
+	test("a plain reply with no plan and no calls has no DONE block", () => {
+		const out = doneBlock(
+			[
+				{ id: "u1", role: "user", content: "hi", timestamp: at },
+				{ id: "a1", role: "assistant", content: "Good day.", timestamp: at },
+			],
+			20,
+		);
+		expect(out).not.toMatch(/[✓○✗]/);
 	});
 });

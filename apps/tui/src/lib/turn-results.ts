@@ -360,6 +360,16 @@ export function fitResultRow(row: ResultRow, width: number): FittedRow {
 	return out;
 }
 
+/**
+ * Whether a finished turn has a result block at all: it made calls, or it
+ * held a plan (#3096). A turn that wrote PLAN: steps and called nothing
+ * still shows them, in the status the PLAN column settled them to, so the
+ * chat and the column never tell two stories about one turn.
+ */
+export function hasTurnResults(trail: ToolTrailEntry[], plan?: ReadonlyArray<PlanStep>): boolean {
+	return trail.length > 0 || (plan?.length ?? 0) > 0;
+}
+
 /** Rows a result block occupies, for MessageList's row-budget math. */
 export function turnResultRows(
 	trail: ToolTrailEntry[],

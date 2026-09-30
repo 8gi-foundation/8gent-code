@@ -101,6 +101,18 @@ export function applyPlanUpdate(prev: ReadonlyArray<PlanStep>, items: ReadonlyAr
 
 /** When the turn ends, nothing is still in progress: an active step that
  *  was never reported done goes back to pending, it is not ticked. */
+/**
+ * The plan stamped on a turn's reply (#3089): the plan the PLAN column holds,
+ * plus any steps the reply itself writes, settled. The column's copy can lag
+ * a render behind when the plan and the reply arrive in the same step (a
+ * turn that writes a plan and calls nothing, #3096), so the reply's own
+ * PLAN: lines are merged in. Steps already held keep their status; text
+ * never marks a step done.
+ */
+export function replyPlan(held: ReadonlyArray<PlanStep>, replyPlanLines: ReadonlyArray<string>): PlanStep[] {
+	return settlePlan(mergePlanText(held, replyPlanLines));
+}
+
 export function settlePlan(steps: ReadonlyArray<PlanStep>): PlanStep[] {
 	return steps.map((s) => (s.status === "active" ? { ...s, status: "pending" } : s));
 }
