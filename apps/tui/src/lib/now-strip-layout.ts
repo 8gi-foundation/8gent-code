@@ -3,8 +3,13 @@
  *
  * Pure functions, no React or Ink. The strip is one row:
  *
- *   ● DONE Planning   finished 2:06 AM        qwen3.8:27b-mlx ctx ███░░░ 41K tok
- *   └ state (fixed) ┘ └ what is happening ┘   └ route ┘ └ meter ┘ └ tokens ┘
+ *   ● DONE   finished 2:06 AM        qwen3.8:27b-mlx ctx ███░░░ 41K tok
+ *   └state┘ └ what is happening ┘   └ route ┘ └ meter ┘ └ tokens ┘
+ *
+ * The state column holds only the state word (NOW, WAIT, DONE, READY). The
+ * ^Y mode used to sit beside it ("DONE Planning") and read as a phase the
+ * model was in; the footer shows it, with its key (#3123). "Autonomous" stays,
+ * because it changes what the person has to watch, and widens the column.
  *
  * The old layout gave the right cluster a fixed 42 columns, so on an 80
  * column terminal the state text in the middle was the thing that got cut:
@@ -23,8 +28,10 @@
 import { cellWidth, truncateMiddle } from "./header-layout.js";
 import { askedNote } from "./model-truth.js";
 
-/** Columns the state label and the mode take on the left. */
-export const NOW_LABEL_WIDTH = 22;
+/** Columns the state label takes on the left: "◆ READY " is the widest. */
+export const NOW_LABEL_WIDTH = 8;
+/** The same column with "Autonomous" after the state word. */
+export const AUTONOMOUS_LABEL_WIDTH = NOW_LABEL_WIDTH + "Autonomous".length + 1;
 /** Round or single border (2) plus paddingX={1} (2). */
 const STRIP_CHROME = 4;
 /** paddingX={1} around the middle text. */
@@ -39,6 +46,8 @@ export const METER_CELLS = 10;
 export interface NowStripInput {
 	/** Strip width in columns, borders included. */
 	width: number;
+	/** Columns the state column takes; NOW_LABEL_WIDTH unless autonomous. */
+	labelWidth?: number;
 	/** The middle text, e.g. "finished 2:06 AM", "idle", or the active step. */
 	middle: string;
 	/** Columns of the middle text that must never be cut ("finished", "idle"). */
@@ -74,7 +83,8 @@ function rightWidth(route: string, meter: boolean, tokens: string, asked = ""): 
 export function fitNowStrip(input: NowStripInput): NowStripFit {
 	const { width, middle, middleMin, middleShort, tokens } = input;
 	const route = input.route && input.route !== "-" && input.route !== "\u2014" ? input.route : "";
-	const room = Math.max(0, width - STRIP_CHROME - NOW_LABEL_WIDTH - MIDDLE_PADDING);
+	const labelWidth = input.labelWidth ?? NOW_LABEL_WIDTH;
+	const room = Math.max(0, width - STRIP_CHROME - labelWidth - MIDDLE_PADDING);
 	const need = Math.max(middleMin, 0);
 	const want = cellWidth(middle);
 

@@ -24,7 +24,8 @@
  * agent's own words.
  */
 
-import { type Span, clipSpans, parseInline } from "./inline-markdown.js";
+import { planStepsFromText } from "./activity-rail-derivation.js";
+import { type Span, clipSpans, parseInline, plainInline } from "./inline-markdown.js";
 import { type PlanStep, applyPlanUpdate, settlePlan } from "./plan-state.js";
 import type { ToolTrailEntry, TrailStatus } from "./tool-trail.js";
 
@@ -395,6 +396,32 @@ export function fitResultRow(row: ResultRow, width: number): FittedRow {
 		out.noteGap = gap;
 	}
 	return out;
+}
+
+/** A step's words for comparison: inline markers out, case and spacing folded. */
+function stepKey(text: string): string {
+	return plainInline(text).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The plan a reply's result block shows (#3123). When the reply text already
+ * lists every step and none has been ticked, the text is the one list: the
+ * block would only repeat it, each step cut to a row (Mockup A shows one
+ * list). The rows stay when any step is done, active or failed, because the
+ * ticks say something the text does not. Returns [] to show no plan rows,
+ * which also keeps the block from falling back to the update_plan steps.
+ */
+export function bubblePlan(
+	content: string,
+	plan: ReadonlyArray<PlanStep> | undefined,
+	trail: ToolTrailEntry[],
+): ReadonlyArray<PlanStep> {
+	const steps = plan ?? turnPlan(trail);
+	if (steps.length === 0) return steps;
+	if (steps.some((s) => s.status !== "pending")) return steps;
+	const written = new Set(planStepsFromText(content).map(stepKey));
+	if (written.size === 0) return steps;
+	return steps.every((s) => written.has(stepKey(s.text))) ? [] : steps;
 }
 
 /**

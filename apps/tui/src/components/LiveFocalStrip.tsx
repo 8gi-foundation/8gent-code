@@ -2,7 +2,7 @@
  * LiveFocalStrip - single horizontal strip above the message list that
  * always answers "what is happening NOW?"
  *
- * One canonical pulse: mode + active step on the left, route + context
+ * One canonical pulse: state + active step on the left, route + context
  * meter + token count on the right. Border is teal by default and flips
  * to orange when an approval is pending so the eye lands on it without
  * a second glance.
@@ -41,7 +41,7 @@ import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
-import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
+import { AUTONOMOUS_LABEL_WIDTH, METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
@@ -49,6 +49,8 @@ import { t } from "../theme.js";
 type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
 interface LiveFocalStripProps {
+	/** The ^Y mode. Not drawn in the strip (#3123): the footer shows it with
+	 *  its key. Kept so callers and the goal wrapper need no change. */
 	mode: Mode;
 	activeStep: string;
 	route: string;
@@ -59,7 +61,7 @@ interface LiveFocalStripProps {
 	contextPct: number;
 	approvalPending?: boolean;
 	/** When the agent is running unattended (auto-approve all), the focal
-	 *  strip swaps the mode label for "Autonomous" so the operator instantly
+	 *  strip shows "Autonomous" after the state word so the operator instantly
 	 *  knows manual approvals are off. Border also stays teal regardless of
 	 *  approvalPending because nothing is actually waiting on the user. */
 	autonomous?: boolean;
@@ -87,7 +89,6 @@ export function meter(percent: number, width = 10): string {
 }
 
 export function LiveFocalStrip({
-	mode,
 	activeStep,
 	route,
 	routeAsked,
@@ -101,7 +102,10 @@ export function LiveFocalStrip({
 	animate = true,
 	width,
 }: LiveFocalStripProps) {
-	const displayMode = autonomous ? "Autonomous" : mode;
+	// The ^Y mode is not shown here: beside the state it read as a phase the
+	// model was in ("DONE Planning"). The footer carries it with its key
+	// (#3123). Autonomous is shown, because it changes what to watch.
+	const labelWidth = autonomous ? AUTONOMOUS_LABEL_WIDTH : NOW_LABEL_WIDTH;
 	const showApprovalBorder = approvalPending && !autonomous;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	const finished = done && lastTurnEndedAt;
@@ -127,6 +131,7 @@ export function LiveFocalStrip({
 				}
 			: fitNowStrip({
 					width,
+					labelWidth,
 					middle,
 					middleMin,
 					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
@@ -145,7 +150,7 @@ export function LiveFocalStrip({
 			flexShrink={0}
 			overflow="hidden"
 		>
-			<Box width={NOW_LABEL_WIDTH} flexShrink={0}>
+			<Box width={labelWidth} flexShrink={0}>
 				<TurnStateLabel
 					waiting={showApprovalBorder}
 					isProcessing={isProcessing}
@@ -153,9 +158,11 @@ export function LiveFocalStrip({
 					done={done}
 					animate={animate}
 				/>
-				<Text color={t.textPrimary} bold wrap="truncate-end">
-					{displayMode}
-				</Text>
+				{autonomous ? (
+					<Text color={t.textPrimary} bold wrap="truncate-end">
+						Autonomous
+					</Text>
+				) : null}
 			</Box>
 
 			<Box flexGrow={1} flexShrink={1} minWidth={Math.min(middleMin, fit.middle.length) + 2} paddingX={1}>
