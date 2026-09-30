@@ -76,6 +76,20 @@ const SYSTEM_PATH_RE =
 const HOME_TOP_RE = /^((~|\$HOME|\$\{HOME\})\/[^/]+\/?|\/Users\/[^/]+\/?(\*)?)$/;
 const SENSITIVE_FILE_RE =
 	/(^|\/)(\.zshrc|\.bashrc|\.bash_profile|\.zprofile|\.profile|\.gitconfig|\.npmrc|\.netrc|authorized_keys|known_hosts|id_rsa|id_ed25519|config\.toml|settings\.json|\.env(\.[\w.-]+)?|hosts|sudoers|passwd|crontab)$|^\/etc\/|^~\/\.ssh\/|^\/dev\/(disk|rdisk|sd)/;
+/**
+ * Project manifests, lockfiles and build config. Truncating one (`>`, `>|`,
+ * `tee` without -a, `cp /dev/null`) escalates (overwrite_project_manifest):
+ * writing a whole new one is sometimes a real scaffold step, so a human
+ * confirms it rather than the guard blocking it. Matches the basename exactly,
+ * so package.json.bak does not fire.
+ */
+const MANIFEST_RE =
+	/(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|bun\.lockb?|yarn\.lock|pnpm-lock\.yaml|tsconfig(\.[\w-]+)?\.json|jsconfig\.json|deno\.jsonc?|Cargo\.(toml|lock)|go\.(mod|sum)|pyproject\.toml|setup\.(py|cfg)|requirements[\w.-]*\.txt|Pipfile(\.lock)?|poetry\.lock|uv\.lock|Gemfile(\.lock)?|composer\.(json|lock)|pom\.xml|build\.gradle(\.kts)?|Makefile|CMakeLists\.txt|Dockerfile|docker-compose[\w.-]*\.ya?ml|compose\.ya?ml|\.gitignore|\.gitattributes|\.gitmodules|\.github\/workflows\/[^/]+\.ya?ml)$/;
+/**
+ * Dotfiles SENSITIVE_FILE_RE does not list. Truncating one escalates
+ * (truncate_dotfile); the SENSITIVE_FILE_RE set keeps its block.
+ */
+const DOTFILE_EXTRA_RE = /(^|\/)(\.zshenv|\.zlogin|\.bash_login|\.bash_logout|\.inputrc|\.vimrc|\.tmux\.conf|\.ssh\/config)$/;
 const NET_SINK =
 	/(?:^|[\s|;&(])(?:curl\b[^|;&\n]*(?:\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH))|nc\b|ncat\b|netcat\b|scp\b|sftp\b|ftp\b|telnet\b|wget\b[^|;&\n]*--post|rsync\b[^|;&\n]*\S+:\S*)/;
 const SECRET_READ = new RegExp(
@@ -634,9 +648,30 @@ function ruleKill(b: string, args: string[], r: Collector): void {
 		r.d("kill_system_process");
 }
 
+/**
+ * True when the segment's command writes nothing to stdout, so a `>` on it
+ * only empties the target: a bare `> f`, `:`, `true`, `echo` with no text
+ * (flags only, or ''), `printf ''`, `cat /dev/null`.
+ */
+function writesNothing(seg: string): boolean {
+	const t = stripWrappers(tokens(stripRedirects(seg)));
+	if (t.length === 0) return true;
+	const [b, ...rest] = t;
+	if ((b === ":" || b === "true") && rest.length === 0) return true;
+	if (b === "echo") return rest.every((a) => a === "" || /^-[neE]+$/.test(a));
+	if (b === "printf") return rest.length > 0 && rest.every((a) => a === "");
+	return b === "cat" && rest.length === 1 && rest[0] === "/dev/null";
+}
+
 function ruleRedirects(seg: string, r: Collector): void {
+	let empty: boolean | null = null;
 	for (const { op, target } of redirects(seg)) {
-		if (!isTemp(target) && op === ">" && SENSITIVE_FILE_RE.test(target)) r.d("truncate_sensitive_file");
+		if (isTemp(target) || op !== ">") continue;
+		if (SENSITIVE_FILE_RE.test(target)) r.d("truncate_sensitive_file");
+		if (MANIFEST_RE.test(target)) r.d("overwrite_project_manifest");
+		if (DOTFILE_EXTRA_RE.test(target)) r.d("truncate_dotfile");
+		empty ??= writesNothing(seg);
+		if (empty) r.d("empty_write_truncation");
 	}
 }
 
@@ -772,10 +807,18 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 			(b === "mv" && dest.includes("/.Trash")) ||
 			(b === "cp" && !hasFlag(args, "f", ["--force"]) && dest.endsWith("/"));
 		if (!safeCase && (SENSITIVE_FILE_RE.test(dest) || pos.some((p) => SYSTEM_PATH_RE.test(p)))) r.d(`${b}_overwrites_sensitive_or_system`);
+		if (b === "cp" && pos.length === 2 && pos[0] === "/dev/null" && dest && !isTemp(dest)) {
+			r.d("empty_write_truncation");
+			if (MANIFEST_RE.test(dest)) r.d("overwrite_project_manifest");
+			if (DOTFILE_EXTRA_RE.test(dest)) r.d("truncate_dotfile");
+		}
 	} else if (b === "tee") {
 		const files = positional(args);
-		if (files.length && !files.every(isTemp) && files.some((f) => SENSITIVE_FILE_RE.test(f)) && !hasFlag(args, "a", ["--append"]))
+		const truncating = !hasFlag(args, "a", ["--append"]);
+		if (files.length && !files.every(isTemp) && files.some((f) => SENSITIVE_FILE_RE.test(f)) && truncating)
 			r.d("truncate_sensitive_file");
+		if (truncating && files.some((f) => !isTemp(f) && MANIFEST_RE.test(f))) r.d("overwrite_project_manifest");
+		if (truncating && files.some((f) => !isTemp(f) && DOTFILE_EXTRA_RE.test(f))) r.d("truncate_dotfile");
 	} else if (b === "launchctl") {
 		if (["bootout", "unload", "remove", "disable"].includes(positional(args)[0] ?? "")) r.d("launchctl_bootout_unload");
 	} else if (b === "crontab") {
