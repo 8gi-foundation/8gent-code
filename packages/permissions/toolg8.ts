@@ -22,6 +22,8 @@ export interface GateResult {
 	allowed: boolean;
 	reason?: string;
 	alternative?: string;
+	/** The policy asks the person rather than refusing outright. */
+	requiresApproval?: boolean;
 }
 
 /**
@@ -130,6 +132,7 @@ export class ToolG8 {
 		if (!allowed) {
 			if (!decision.allowed && "reason" in decision) {
 				result.reason = decision.reason;
+				if (decision.requiresApproval && !bash?.denied) result.requiresApproval = true;
 			} else if (bash?.denied) {
 				result.reason = `[bash-segment] ${bash.reason ?? "denied by per-segment policy"}`;
 			}

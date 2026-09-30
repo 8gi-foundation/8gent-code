@@ -631,7 +631,15 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
 	"agent_mail_send",
 	"peers_send",
 	"computer_use",
+	"desktop_use",
 ]);
+
+/**
+ * Action classes whose default, when no rule matches, is "ask the person"
+ * rather than allow (#3213). Desktop control reaches every app the person
+ * has open, so an unlisted desktop action must never run silently.
+ */
+const ASK_BY_DEFAULT_ACTIONS = new Set<string>(["desktop_use"]);
 
 /**
  * Shadow hard-deny gate. If the context agent is the shadow scope and the
@@ -664,7 +672,8 @@ function shadowGate(action: string, context: PolicyContext): PolicyDecision | nu
  *   2. "block" rules checked first - if matched, hard deny (no override possible)
  *   3. "require_approval" rules checked - if matched, soft deny
  *   4. "allow" rules checked - if matched, explicitly allowed
- *   5. Default: allowed
+ *   5. Default: allowed, EXCEPT the action classes in ASK_BY_DEFAULT_ACTIONS,
+ *      which require the person's approval when no rule matched (#3213)
  */
 export function evaluatePolicy(
 	action: PolicyActionType | string,
@@ -728,7 +737,16 @@ export function evaluatePolicy(
 		}
 	}
 
-	// Default: allow
+	// Default: allow - except for action classes that act on the person's
+	// machine outside the workspace. A desktop tool no rule speaks for (a new
+	// tool, a policy file without the desktop rules) asks, never runs.
+	if (ASK_BY_DEFAULT_ACTIONS.has(action)) {
+		return {
+			allowed: false,
+			reason: `[${action}-default-ask] No policy rule covers this ${action} action, so it needs the person's approval.`,
+			requiresApproval: true,
+		};
+	}
 	return { allowed: true };
 }
 

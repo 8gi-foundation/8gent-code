@@ -225,6 +225,10 @@ describe("F3 - term_* and computer/desktop tools are gated for __table__", () =>
 	it("blocks the new action classes for __table__ but not for other scopes", () => {
 		expect(evaluatePolicy("term_orchestration", { agentId: "__table__" }).allowed).toBe(false);
 		expect(evaluatePolicy("computer_use", { agentId: "__table__" }).allowed).toBe(false);
+		// Desktop tools are gated as desktop_use (#3213); it is blocked too.
+		expect(
+			evaluatePolicy("desktop_use", { agentId: "__table__", action: "screenshot" }).allowed,
+		).toBe(false);
 		// Scope isolation: an ordinary agent is unaffected (no default rule).
 		expect(evaluatePolicy("term_orchestration", { agentId: "agent:normal" }).allowed).toBe(true);
 		expect(evaluatePolicy("computer_use", { agentId: "agent:normal" }).allowed).toBe(true);
