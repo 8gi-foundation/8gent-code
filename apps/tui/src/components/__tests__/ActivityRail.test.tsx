@@ -210,6 +210,52 @@ describe("ActivityRail", () => {
 		expect(rows.props.flexDirection).toBe("column");
 	});
 
+	test("MEMORY renders only rows a source reports, and not at all without one (#3070)", () => {
+		const titles = (props: ActivityRailProps) =>
+			flatten(expand(render(props)))
+				.filter((el) => el.type === Text)
+				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		const without = titles({ ...baseProps, memory: undefined });
+		expect(without).not.toContain("MEMORY");
+		expect(without).not.toContain("hits");
+		const empty = titles({ ...baseProps, memory: {} });
+		expect(empty).not.toContain("MEMORY");
+		const partial = titles({ ...baseProps, memory: { hits: 4 } });
+		expect(partial).toContain("MEMORY");
+		expect(partial).toContain("hits");
+		expect(partial).not.toContain("misses");
+		expect(partial).not.toContain("cache");
+	});
+
+	test("a provider with no measured latency draws no trailing glyph (#3070)", () => {
+		const texts = flatten(
+			expand(render({ ...baseProps, providers: [{ name: "lmstudio:ornith", state: "local" }] })),
+		)
+			.filter((el) => el.type === Text)
+			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		expect(texts).not.toContain("\u2014");
+		expect(texts).not.toContain("-");
+	});
+
+	test("a fallback route says so in words, not by colour alone (#3070)", () => {
+		const texts = flatten(
+			expand(
+				render({
+					...baseProps,
+					providers: [
+						{ name: "lmstudio:ornith-1.0-9b", state: "local" },
+						{ name: "apfel:MiniMax-M2.7", state: "fallback" },
+					],
+				}),
+			),
+		)
+			.filter((el) => el.type === Text)
+			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		expect(texts).toContain("● local:lm");
+		expect(texts).toContain("○ local:apfel");
+		expect(texts).toContain("fallback");
+	});
+
 	test("snapshot of full rail is stable", () => {
 		const rendered = render(baseProps);
 		const top = rendered.props as {

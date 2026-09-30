@@ -142,12 +142,15 @@ describe("fitHeaderMiddle without a branch (audit #10)", () => {
 		expect(fitHeaderMiddle("/tmp/work", "", "", 80)).toEqual({ path: "/tmp/work", branch: "", sync: "" });
 	});
 
-	test("tight: the path is cut in the middle, then the note goes, never past the room", () => {
+	test("tight: the path is cut in the middle, then the path goes and the note stays, never past the room", () => {
 		for (let room = 0; room <= 90; room++) {
 			const m = fitHeaderMiddle(PATH, "", "no repo", room);
 			expect(headerMiddleWidth(m)).toBeLessThanOrEqual(room);
 			expect(m.branch).toBe("");
 		}
-		expect(fitHeaderMiddle(PATH, "", "no repo", PATH_MIN + 2)).toMatchObject({ sync: "" });
+		// The note holds the branch's slot: too little room for both keeps the note.
+		expect(fitHeaderMiddle(PATH, "", "no repo", PATH_MIN + 2)).toEqual({ path: "", branch: "", sync: "no repo" });
+		// Before the first git check there is no note, so the path keeps the room.
+		expect(fitHeaderMiddle(PATH, "", "", PATH_MIN + 2).path).not.toBe("");
 	});
 });

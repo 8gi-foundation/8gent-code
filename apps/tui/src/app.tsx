@@ -201,10 +201,30 @@ import {
 	deriveProviders,
 	deriveAgents,
 	deriveActiveTasks,
+	fallbackFromChain,
 	planStepsFromText,
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
+import { ModelFailover } from "../../../packages/providers/failover.js";
+
+// The rail's fallback row, per configured route. The chain is read the way
+// the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
+// wins over the built-ins), once per provider/model rather than every render.
+const railFallbackCache = new Map<string, { name: string } | null>();
+function railFallback(provider: string, model: string): { name: string } | null {
+	const key = `${provider}::${model}`;
+	if (!railFallbackCache.has(key)) {
+		let hop: { name: string } | null = null;
+		try {
+			hop = fallbackFromChain(new ModelFailover(), provider, model);
+		} catch {
+			// An unreadable chain means no known fallback, so no row.
+		}
+		railFallbackCache.set(key, hop);
+	}
+	return railFallbackCache.get(key) ?? null;
+}
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -5822,19 +5842,19 @@ export function App({
 	void renderMainContent;
 	void tokenMeterColWidth;
 
-	// Derived ActivityRail data. Memory store doesn't expose counters yet
-	// (#TODO upstream), so memory tile shows zeros + em-dash cache. Provider
-	// tile shows the active model as `local` and the env-driven fallback as
-	// `fallback` - latency is unknown until vision-router exposes it.
+	// Derived ActivityRail data. Every row traces to real state or is absent:
+	// the fallback row is the next hop in the real failover chain for the
+	// configured model (none when the chain has no entry), no latency is shown
+	// because none is measured, and MEMORY is not passed because the memory
+	// store exposes no hit/miss/cache counter yet (#3070).
 	// TASKS reads the same plan as the PLAN column, so the two never disagree.
 	const activeTasks = deriveActiveTasks(planSteps, isProcessing);
 	const recentTools = deriveTools(messages, isProcessing, 5);
 	const providerRows = deriveProviders({
 		primary: { name: `${currentProvider}:${currentModel || "—"}` },
-		fallback: { name: "openrouter:free" },
+		fallback: railFallback(currentProvider, currentModel),
 		offline: null,
 	});
-	const memoryStats = { hits: 0, misses: 0, cache: "—" };
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
 		id: a.id,
 		name: a.name,
@@ -6020,7 +6040,6 @@ export function App({
 								tasks={activeTasks}
 								tools={recentTools}
 								providers={providerRows}
-								memory={memoryStats}
 								agents={agentRows}
 								isProcessing={isProcessing}
 								activeTool={activeTool || (isProcessing ? "reasoning" : null)}

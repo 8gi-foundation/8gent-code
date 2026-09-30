@@ -8,7 +8,8 @@
  * survives when it does not all fit.
  *
  * Priority inside the middle segment (highest first):
- *   1. the git branch name (up to BRANCH_MAX columns)
+ *   1. the git branch name (up to BRANCH_MAX columns), or outside a
+ *      repo the "no repo" note that stands in the branch's place
  *   2. a usable slice of the workspace path (at least PATH_MIN columns)
  *   3. the sync status ("in sync", "ahead 1")
  *   4. the rest of the path
@@ -122,8 +123,11 @@ export function fitHeaderMiddle(
 		if (path && available - noteCost >= PATH_MIN) {
 			return { path: truncateMiddle(path, available - noteCost), branch: "", sync };
 		}
-		if (path && available >= PATH_MIN) return { path: truncateMiddle(path, available), branch: "", sync: "" };
+		// The note holds the branch's slot, so like a branch it outranks a
+		// path too short to read: 80 columns shows "no repo", not
+		// "/Users/j…/work".
 		if (sync && syncW <= available) return { path: "", branch: "", sync };
+		if (path && available >= PATH_MIN) return { path: truncateMiddle(path, available), branch: "", sync: "" };
 		return empty;
 	}
 
