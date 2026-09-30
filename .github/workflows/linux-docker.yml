@@ -13,7 +13,8 @@
 # runner's workspace is never written to and no host node_modules is used.
 #
 # GATES: install, typecheck (baseline-gated: fails only on tsc errors not in
-# .github/docker/linux-ci/typecheck-baseline.txt), full test suite, build.
+# .github/docker/linux-ci/typecheck-baseline.txt), full test suite, build,
+# npm pack, then a bare-machine `npm install -g` of that tarball (#3256).
 # Every stage runs and the job fails if any stage failed.
 #
 # Reproduce locally on any machine with Docker:
@@ -65,15 +66,30 @@ jobs:
       - name: Install, typecheck, test, build (in Docker)
         timeout-minutes: 35
         run: |
+          PACK_DIR="$RUNNER_TEMP/8gent-pack-${{ github.run_id }}"
+          echo "PACK_DIR=$PACK_DIR" >> "$GITHUB_ENV"
+          rm -rf "$PACK_DIR" && mkdir -p "$PACK_DIR" && chmod 777 "$PACK_DIR"
           nice -n 10 docker run --rm --init \
             --name "$CONTAINER" \
             --cpus 6 --memory 6g --memory-swap 6g --pids-limit 4096 \
             -v "$GITHUB_WORKSPACE":/src:ro \
+            -v "$PACK_DIR":/out \
             -v 8gent-linux-ci-bun-cache:/home/ci/.bun/install/cache \
             "$IMAGE" bash /src/.github/docker/linux-ci/run.sh
+
+      # #3256: install the packed tarball the way a stranger does, install
+      # scripts on, in a clean node:22-bookworm-slim with no Python and no
+      # compiler. pack-smoke skips install scripts, so it missed a native
+      # dependency that failed `npm install -g` outright.
+      - name: Bare-machine npm install (in Docker)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: sh scripts/bare-install-smoke.sh "$(ls "$PACK_DIR"/*.tgz | head -1)"
 
       # Runs on success, failure and cancellation, so a cancelled run never
       # leaves a container holding CPU on the runner.
       - name: Remove container
         if: always()
-        run: docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+        run: |
+          docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+          [ -n "${PACK_DIR:-}" ] && rm -rf "$PACK_DIR" || true

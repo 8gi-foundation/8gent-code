@@ -17,6 +17,11 @@
  * Exits non-zero if any check fails. Nothing is published.
  * Dependency install scripts are skipped (--ignore-scripts) so the smoke does
  * not compile native modules; the user's npm cache is reused to save a download.
+ * That is why it missed #3256 (node-pty failing to build on a bare Linux box).
+ * --bare-linux adds the stranger's install too: the same tarball, install
+ * scripts ON, in a clean node:22-bookworm-slim container with no Python or
+ * compiler (scripts/bare-install-smoke.sh; needs Docker). The Linux CI job
+ * runs that script on every pull request.
  *
  * Disk: an install is about 1 GB. The smoke uses ONE fixed folder,
  * $TMPDIR/8gent-pack-smoke, wipes it at the start, and removes it at the end
@@ -24,7 +29,7 @@
  * any 8gent-pack-smoke* folder is left in $TMPDIR. --keep leaves the folder
  * for debugging (and skips the leftover check); the next run wipes it.
  *
- *   bun scripts/pack-smoke.ts [--skip-build] [--keep] [--tui-seconds N]
+ *   bun scripts/pack-smoke.ts [--skip-build] [--keep] [--tui-seconds N] [--bare-linux]
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
@@ -120,8 +125,16 @@ async function main(): Promise<void> {
 		!check(existsSync(tarball), "npm pack produced a tarball", tarball ? "" : pack.out.slice(-800))
 	)
 		return;
-	for (const f of ["bin/8gent-run.js", "dist/cli.js", "dist/tui.js"]) {
+	for (const f of ["bin/8gent-run.js", "dist/cli.js", "dist/tui.js", "dist/pty-bridge.cjs"]) {
 		check(packed.includes(f), `tarball contains ${f}`);
+	}
+
+	// 2b. Optional: install the same tarball on a bare Linux machine (#3256).
+	if (args.includes("--bare-linux")) {
+		const bare = spawnSync("sh", [join(ROOT, "scripts", "bare-install-smoke.sh"), tarball], {
+			stdio: "inherit",
+		});
+		check(bare.status === 0, "bare-machine Linux install (scripts/bare-install-smoke.sh)");
 	}
 
 	// 3. Scan the packed bundles for build-machine paths

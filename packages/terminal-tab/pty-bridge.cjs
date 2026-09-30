@@ -29,7 +29,36 @@
 
 "use strict";
 
-const pty = require("node-pty");
+// node-pty is an optionalDependency (#3256): it compiles from source on Linux,
+// and a machine without Python and a C++ toolchain skips it rather than
+// failing `npm install -g`. Without it, terminal tabs cannot open a shell.
+// Say so inside the tab, then exit with a code of its own (66), instead of
+// dying on a stack trace the TUI never shows.
+const NO_PTY_EXIT = 66;
+const NO_PTY_MESSAGE =
+	"Terminal tabs are unavailable: the node-pty module is not installed.\r\n" +
+	"It needs build tools on this machine. On Debian or Ubuntu:\r\n" +
+	"  sudo apt install python3 make g++\r\n" +
+	"  npm install -g @8gi-foundation/8gent-code\r\n" +
+	"Everything else in 8gent works without it.\r\n";
+
+let pty;
+try {
+	pty = require("node-pty");
+} catch (err) {
+	const lines = [
+		{ type: "data", data: NO_PTY_MESSAGE },
+		{
+			type: "exit",
+			code: NO_PTY_EXIT,
+			signal: null,
+			error: String(err?.message ?? err).split("\n")[0],
+		},
+	];
+	// Synchronous write: process.exit must not drop the message.
+	require("node:fs").writeSync(1, lines.map((m) => `${JSON.stringify(m)}\n`).join(""));
+	process.exit(NO_PTY_EXIT);
+}
 
 // bun install skips node-pty's lifecycle scripts and writes the prebuilt
 // `spawn-helper` binary without its execute bit, which makes every

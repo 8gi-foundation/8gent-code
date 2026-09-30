@@ -11,8 +11,9 @@
 # build all happen in /work, so the host's node_modules, dist and git state
 # are never touched, and the container's Linux node_modules never leak out.
 #
-# Stages: install, typecheck (baseline-gated), test, build. Every stage after
-# install runs even if an earlier one failed, so one run reports everything.
+# Stages: install, typecheck (baseline-gated), test, build, and pack (only
+# when /out is mounted). Every stage after install runs even if an earlier one
+# failed, so one run reports everything.
 # Exit is non-zero if any stage failed.
 set -uo pipefail
 
@@ -86,9 +87,22 @@ else
   echo "::error::build failed"; RESULT[build]=FAIL
 fi
 
+echo "== pack"
+# #3256: when the workflow mounts /out, pack the npm tarball there so the host
+# can install it in a bare container (scripts/bare-install-smoke.sh). Packed
+# from the dist this stage just built, with --ignore-scripts so prepublishOnly
+# does not rebuild it.
+if [ ! -d /out ]; then
+  echo "no /out mounted: skipped"; RESULT[pack]=pass
+elif [ "${RESULT[build]}" = pass ] && npm pack --ignore-scripts --pack-destination /out >/tmp/pack.out 2>&1; then
+  echo "Packed: $(ls /out)"; RESULT[pack]=pass
+else
+  cat /tmp/pack.out 2>/dev/null; echo "::error::npm pack failed"; RESULT[pack]=FAIL
+fi
+
 echo "== summary"
 STATUS=0
-for s in install typecheck test build; do
+for s in install typecheck test build pack; do
   echo "$s=${RESULT[$s]}"
   [ "${RESULT[$s]}" = pass ] || STATUS=1
 done

@@ -87,3 +87,13 @@ if (existsSync(soundsSrc)) {
 	}
 	console.log(`[copy-bundled-sounds] copied ${copied} files to dist/sounds/`);
 }
+
+// Terminal tabs (#3256): the bundled TUI spawns `pty-bridge.cjs` from next to
+// itself (dist/), under Node. Bundling cannot inline it (it is a separate
+// process), so ship it beside the bundle. Without this copy every terminal
+// tab in an npm install died on "Cannot find module .../dist/pty-bridge.cjs".
+const bridgeSrc = join(ROOT, "packages", "terminal-tab", "pty-bridge.cjs");
+if (existsSync(bridgeSrc)) {
+	copyFileSync(bridgeSrc, join(ROOT, "dist", "pty-bridge.cjs"));
+	console.log("[copy-pty-bridge] copied pty-bridge.cjs to dist/");
+}

@@ -250,6 +250,8 @@ The floor is zero cost. The ceiling is what a self-improving local agent can lea
 
 Try it: `npm install -g @8gi-foundation/8gent-code && 8gent`
 
+No build tools are needed. On Linux, terminal tabs use node-pty, which compiles at install time: without Python and a C++ compiler npm skips it, 8gent still installs and runs, and a terminal tab says how to enable it (`sudo apt install python3 make g++`, then reinstall).
+
 ### From source (contributors)
 
 ```bash
