@@ -17,6 +17,7 @@
  */
 
 import * as path from "node:path";
+import type { FileVerdict } from "./verify-scope";
 
 /** The slice of a pooled agent this module reads. */
 export interface AgentOutcomeInput {
@@ -26,6 +27,8 @@ export interface AgentOutcomeInput {
 	task: { description: string; error?: string };
 	config: { allowedPaths?: string[]; workingDirectory: string };
 	filesChanged?: string[];
+	/** Per scoped file, set by the pool when the agent ends: hash compare plus its sibling test. */
+	verification?: FileVerdict[];
 }
 
 /** A file path relative to the agent's working directory, for display and matching. */
@@ -46,6 +49,9 @@ export function needsRespawn(agent: AgentOutcomeInput): boolean {
 	const changed = agent.filesChanged ?? [];
 	const scope = agent.config.allowedPaths;
 	if (!scope || scope.length === 0) return false;
+	const v = agent.verification;
+	if (v && v.length > 0)
+		return v.some((x) => x.state === "test-fails") || v.every((x) => x.state === "unchanged");
 	const wd = agent.config.workingDirectory;
 	return !changed.some((f) => {
 		const abs = path.resolve(wd, f);
@@ -72,9 +78,37 @@ export function agentOutcome(agent: AgentOutcomeInput): string {
 	if (changed.length === 0 && scope.length === 0) {
 		return "ended without changing any file. If its task needed a file change, it is NOT done, whatever its result says: re-spawn it now; do not wait for the other agents.";
 	}
-	if (!needsRespawn(agent)) return `changed ${changed.join(", ")}`;
-	const also = changed.length ? ` (it changed only ${changed.join(", ")})` : "";
+	const v = agent.verification;
+	if (scope.length > 0 && v && v.length > 0 && !v.every((x) => x.state === "unchanged")) {
+		const said = v.map(fileVerdictText).join("; ");
+		return needsRespawn(agent)
+			? `${said}. Its task is NOT done, whatever its result says. Re-spawn it now with the same task and allowedPaths; do not wait for the other agents.`
+			: said;
+	}
+	if (!needsRespawn(agent)) return `changed ${changed.join(", ")}, not verified`;
+	const wroteScope = v?.length ? changed.filter((f) => v.some((x) => x.file === f)) : [];
+	const also = wroteScope.length
+		? ` (it wrote ${wroteScope.join(", ")} but left the content as it was)`
+		: changed.length
+			? ` (it changed only ${changed.join(", ")})`
+			: "";
 	return `ENDED WITHOUT CHANGING ${scope.join(", ")}${also}. Its task is NOT done, whatever its result says. Re-spawn it now with the same task and allowedPaths; do not wait for the other agents.`;
+}
+
+/** One scoped file's verdict, in words. Never "fixed" without a passing test. */
+export function fileVerdictText(v: FileVerdict): string {
+	switch (v.state) {
+		case "fixed":
+			return `FIXED ${v.file} (${v.test} passes)`;
+		case "test-fails":
+			return `CHANGED BUT ITS TEST FAILS: ${v.file} (${v.test}: ${v.firstFailure})`;
+		case "test-timeout":
+			return `changed ${v.file}, not verified (${v.test} did not finish in ${Math.round(v.timeoutMs / 1000)}s)`;
+		case "unverified":
+			return `changed ${v.file}, not verified (no test)`;
+		case "unchanged":
+			return `did not change ${v.file}`;
+	}
 }
 
 /** Two agents doing the same job: same scope when both have one, else the same task. */

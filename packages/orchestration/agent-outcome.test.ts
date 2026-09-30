@@ -50,10 +50,38 @@ describe("agentOutcome", () => {
 		expect(out).toContain("Re-spawn it now with the same task and allowedPaths");
 	});
 
-	test("names what a finished agent changed", () => {
+	test("a write with no verification is named as not verified, never as fixed", () => {
 		expect(agentOutcome(agent({ scope: ["src/a.ts"], filesChanged: ["src/a.ts"] }))).toBe(
-			"changed src/a.ts",
+			"changed src/a.ts, not verified",
 		);
+	});
+
+	test("verified outcomes (#3126)", () => {
+		const fixed = agent({ scope: ["src/a.ts"], filesChanged: ["src/a.ts"] });
+		fixed.verification = [{ file: "src/a.ts", state: "fixed", test: "src/a.test.ts" }];
+		expect(agentOutcome(fixed)).toBe("FIXED src/a.ts (src/a.test.ts passes)");
+		expect(needsRespawn(fixed)).toBe(false);
+
+		const failing = agent({ scope: ["src/a.ts"], filesChanged: ["src/a.ts"] });
+		failing.verification = [
+			{ file: "src/a.ts", state: "test-fails", test: "src/a.test.ts", firstFailure: "(fail) adds" },
+		];
+		expect(agentOutcome(failing)).toStartWith(
+			"CHANGED BUT ITS TEST FAILS: src/a.ts (src/a.test.ts: (fail) adds). Its task is NOT done",
+		);
+		expect(needsRespawn(failing)).toBe(true);
+
+		const same = agent({ scope: ["src/a.ts"], filesChanged: ["src/a.ts"] });
+		same.verification = [{ file: "src/a.ts", state: "unchanged" }];
+		expect(agentOutcome(same)).toStartWith(
+			"ENDED WITHOUT CHANGING src/a.ts (it wrote src/a.ts but left the content as it was).",
+		);
+		expect(needsRespawn(same)).toBe(true);
+
+		const untested = agent({ scope: ["src/a.ts"], filesChanged: ["src/a.ts"] });
+		untested.verification = [{ file: "src/a.ts", state: "unverified" }];
+		expect(agentOutcome(untested)).toBe("changed src/a.ts, not verified (no test)");
+		expect(needsRespawn(untested)).toBe(false);
 	});
 
 	test("an unscoped agent that changed nothing gets a conditional line", () => {
