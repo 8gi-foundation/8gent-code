@@ -7,6 +7,8 @@
  *
  *   bun local-turn-probe.ts <role|-> <workdir>
  */
+export {};
+
 const [roleArg, workdir] = process.argv.slice(2);
 const role = roleArg === "-" ? undefined : (roleArg as "orchestrator" | "engineer" | "qa");
 
