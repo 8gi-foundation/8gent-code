@@ -115,6 +115,27 @@ export function resolveMaxOutputTokens(
 	return Math.floor(parsed);
 }
 
+/**
+ * Ollama models that must answer with thinking OFF, from EIGHT_OLLAMA_NO_THINK
+ * (comma-separated model names, e.g. "qwen3.5:9b"). A helper that thinks
+ * before every tool call is slower and can burn the output cap on reasoning.
+ * Ollama 0.34.4 ignores `think:false` on /v1/chat/completions but honours
+ * `reasoning_effort: "none"` (qwen3.5:9b: 0 reasoning chars, measured).
+ * Unset means no model is changed. Pure.
+ */
+export function isOllamaNoThink(
+	provider: string,
+	model: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	if (provider !== "ollama") return false;
+	const list = (env.EIGHT_OLLAMA_NO_THINK ?? "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	return list.includes(model);
+}
+
 /** The error a step gets when the model hit the output cap without finishing. */
 export function outputCapMessage(label: string, maxTokens: number): string {
 	return `${label} hit the ${maxTokens}-token output cap without finishing its reply (likely a runaway repetition loop). Raise EIGHT_MAX_OUTPUT_TOKENS if the reply was genuinely that long.`;
@@ -320,7 +341,11 @@ const QWEN38_DEFAULT_REASONING =
  * that skips the model's built-in output parser. `tool` messages render as
  * `<tool_response>` user turns, as the renderer does. Pure.
  */
-export function renderQwenChatML(messages: ChatMessage[], variant: QwenChatMLVariant): string {
+export function renderQwenChatML(
+	messages: ChatMessage[],
+	variant: QwenChatMLVariant,
+	noThink = false,
+): string {
 	// Fold every system message into one leading system turn (qwen3.8 accepts
 	// exactly one; our conversations only ever carry one anyway).
 	const system = messages
@@ -360,7 +385,11 @@ export function renderQwenChatML(messages: ChatMessage[], variant: QwenChatMLVar
 			if (i === rest.length - 1 || rest[i + 1].role !== "tool") out += "<|im_end|>\n";
 		}
 	}
-	return `${out}<|im_start|>assistant\n<think>\n`;
+	// Thinking off: pre-close the think block, as the template does for
+	// enable_thinking=false, so the completion is the answer itself.
+	return noThink
+		? `${out}<|im_start|>assistant\n<think>\n\n</think>\n\n`
+		: `${out}<|im_start|>assistant\n<think>\n`;
 }
 
 /**
@@ -522,6 +551,7 @@ export function buildTextToolCall(opts: {
 	const temperature = opts.temperature ?? 0.2;
 	const maxTokens = opts.maxTokens ?? resolveMaxOutputTokens();
 	const label = `${opts.provider}/${opts.model}`;
+	const noThink = isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",
@@ -540,6 +570,7 @@ export function buildTextToolCall(opts: {
 					temperature,
 					max_tokens: maxTokens,
 					stream: false,
+					...(noThink ? { reasoning_effort: "none" } : {}),
 					...(withTools ? { tools: declared } : {}),
 				}),
 				signal: opts.signal,
@@ -613,7 +644,7 @@ export function buildTextToolCall(opts: {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					model: opts.model,
-					prompt: renderQwenChatML(messages, variant),
+					prompt: renderQwenChatML(messages, variant, noThink),
 					raw: true,
 					stream: false,
 					options: { temperature, num_predict: maxTokens },
@@ -640,7 +671,11 @@ export function buildTextToolCall(opts: {
 		if (data?.done_reason === "length") {
 			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens) };
 		}
-		const content = answerFromRawQwen(typeof data?.response === "string" ? data.response : "");
+		const rawText = typeof data?.response === "string" ? data.response : "";
+		// With thinking off the prompt already closed the think block.
+		const content = noThink
+			? rawText.replace(/<\|im_end\|>\s*$/, "").trim()
+			: answerFromRawQwen(rawText);
 		if (content === "") {
 			return { ok: false, why: "raw generate returned no answer after the think block" };
 		}

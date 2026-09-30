@@ -20,6 +20,7 @@ import {
 	DEFAULT_MAX_OUTPUT_TOKENS,
 	extractUsage,
 	isNativeToolParserFailure,
+	isOllamaNoThink,
 	isToolsUnsupported,
 	NATIVE_TOOL_MARKUP_REMINDER,
 	ollamaRootFromEndpoint,
@@ -1004,5 +1005,47 @@ describe("Ollama base URL honours OLLAMA_BASE_URL / OLLAMA_HOST (#3076)", () => 
 		expect(normaliseOllamaHost(undefined)).toBeNull();
 		expect(resolveOllamaBaseUrl({ OLLAMA_BASE_URL: "", OLLAMA_HOST: "x:1" })).toBe("http://x:1");
 		expect(resolveOllamaBaseUrl({})).toBe("http://localhost:11434");
+	});
+});
+
+describe("EIGHT_OLLAMA_NO_THINK turns thinking off per Ollama model", () => {
+	const env = { EIGHT_OLLAMA_NO_THINK: " qwen3.5:9b , other:1b" };
+
+	it("matches only listed models on the ollama provider", () => {
+		expect(isOllamaNoThink("ollama", "qwen3.5:9b", env)).toBe(true);
+		expect(isOllamaNoThink("ollama", "other:1b", env)).toBe(true);
+		expect(isOllamaNoThink("ollama", "qwen3.8:27b-mlx", env)).toBe(false);
+		expect(isOllamaNoThink("lmstudio", "qwen3.5:9b", env)).toBe(false);
+		expect(isOllamaNoThink("ollama", "qwen3.5:9b", {})).toBe(false);
+	});
+
+	function captureBodies(): Array<Record<string, unknown>> {
+		const bodies: Array<Record<string, unknown>> = [];
+		globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => {
+			bodies.push(JSON.parse(init?.body ?? "{}"));
+			return Response.json({ choices: [{ message: { content: "ok" } }] });
+		}) as unknown as typeof fetch;
+		return bodies;
+	}
+
+	it("sends reasoning_effort none for a listed model, and nothing for any other", async () => {
+		const prev = process.env.EIGHT_OLLAMA_NO_THINK;
+		process.env.EIGHT_OLLAMA_NO_THINK = "qwen3.5:9b";
+		try {
+			const bodies = captureBodies();
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" })([{ role: "user", content: "hi" }]);
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx" })([{ role: "user", content: "hi" }]);
+			expect(bodies[0].reasoning_effort).toBe("none");
+			expect("reasoning_effort" in bodies[1]).toBe(false);
+		} finally {
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_OLLAMA_NO_THINK");
+			else process.env.EIGHT_OLLAMA_NO_THINK = prev;
+		}
+	});
+
+	it("renderQwenChatML with thinking off pre-closes the think block", () => {
+		expect(renderQwenChatML([{ role: "user", content: "q" }], "qwen3.5", true)).toBe(
+			"<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+		);
 	});
 });
