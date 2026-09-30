@@ -15,6 +15,7 @@ import { z } from "zod";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { emptyOldTextError } from "../permissions/edit-guards";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 
@@ -322,6 +323,9 @@ const editFile = tool({
 		newText: z.string().describe("Replacement text"),
 	}),
 	execute: async ({ path: filePath, oldText, newText }) => {
+		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
+		const noAnchor = emptyOldTextError(oldText, filePath);
+		if (noAnchor) return noAnchor;
 		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
 		if (blocked) return blocked;
 		const absolutePath = resolvePath(filePath);

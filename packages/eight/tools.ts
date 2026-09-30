@@ -89,6 +89,7 @@ import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
+import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
@@ -236,16 +237,22 @@ export class ToolExecutor {
 	 * are never blocked. See packages/permissions/maker-checker-enforcer.ts.
 	 */
 	private unattended: boolean;
+	/**
+	 * Files (or directories) this agent may write and edit, from spawn_agent's
+	 * `allowedPaths` (#3101). Undefined means no limit (the default).
+	 */
+	private allowedPaths: string[] | undefined;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
 		agentId = "primary",
 		sessionId?: string,
-		options: { unattended?: boolean } = {},
+		options: { unattended?: boolean; allowedPaths?: string[] } = {},
 	) {
 		this.workingDirectory = workingDirectory;
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
+		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
@@ -570,7 +577,7 @@ export class ToolExecutor {
 				function: {
 					name: "spawn_agent",
 					description:
-						"[SHELL] Launches a background agent and returns an agentId for tracking. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
+						"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -591,6 +598,12 @@ export class ToolExecutor {
 							timeout: {
 								type: "number",
 								description: "Timeout in ms (default: 5 min, only for claude/shell)",
+							},
+							allowedPaths: {
+								type: "array",
+								items: { type: "string" },
+								description:
+									"Only for 8gent runtime: the files (or directories) this agent may write or edit. Writes and edits anywhere else are refused and never run. Omit for no limit.",
 							},
 						},
 						required: ["task"],
@@ -1181,6 +1194,11 @@ export class ToolExecutor {
 			throw err;
 		}
 
+		// Edit scope (#3101): an agent spawned with allowedPaths writes and edits
+		// only those files. Checked before anything else can touch the disk.
+		const outOfScope = editScopeViolation(toolName, args, this.workingDirectory, this.allowedPaths);
+		if (outOfScope) return outOfScope;
+
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
@@ -1380,6 +1398,7 @@ export class ToolExecutor {
 					args.runtime as "8gent" | "claude" | "shell" | undefined,
 					args.model as string | undefined,
 					args.timeout as number | undefined,
+					normaliseAllowedPaths(args.allowedPaths),
 				);
 			case "check_agent":
 				return this.handleCheckAgent(args.agentId as string);
@@ -1892,6 +1911,10 @@ export class ToolExecutor {
 	}
 
 	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
+		// No anchor, no edit (#3101): indexOf("") is 0, so an empty oldText
+		// used to prepend newText to the file.
+		const noAnchor = emptyOldTextError(oldText, filePath);
+		if (noAnchor) return noAnchor;
 		const absolutePath = path.isAbsolute(filePath)
 			? filePath
 			: path.join(this.workingDirectory, filePath);
@@ -2349,6 +2372,7 @@ export class ToolExecutor {
 		runtime?: "8gent" | "claude" | "shell",
 		model?: string,
 		timeout?: number,
+		allowedPaths?: string[],
 	): Promise<string> {
 		try {
 			const effectiveRuntime = runtime || "8gent";
@@ -2396,6 +2420,7 @@ export class ToolExecutor {
 			const agent = await pool.spawnAgent(task, {
 				model: resolvedModel || undefined,
 				workingDirectory: this.workingDirectory,
+				allowedPaths,
 			});
 			return JSON.stringify(
 				{
@@ -2403,6 +2428,7 @@ export class ToolExecutor {
 					runtime: "8gent",
 					status: agent.status,
 					task: task.slice(0, 100),
+					...(allowedPaths ? { allowedPaths } : {}),
 					message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
 				},
 				null,
