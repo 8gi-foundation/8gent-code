@@ -229,6 +229,17 @@ describe("ActivityRail", () => {
 		expect(partial).not.toContain("cache");
 	});
 
+	test("a task's tone sets its colour: waiting is orange, a plan at rest is quiet (#3152)", () => {
+		const colourOf = (label: string, tone?: "waiting" | "quiet") =>
+			flatten(expand(render({ ...baseProps, tasks: [{ id: "x", label, tone }] })))
+				.filter((el) => el.type === Text)
+				.find((el) => React.Children.toArray(el.props.children as React.ReactNode).join("") === label)?.props
+				.color;
+		expect(colourOf("waiting for your answer", "waiting")).toBe(t.orange);
+		expect(colourOf("3 steps planned", "quiet")).toBe(t.textSecondary);
+		expect(colourOf("working, no plan yet")).toBe(t.teal);
+	});
+
 	test("a provider with no measured latency draws no trailing glyph (#3070)", () => {
 		const texts = flatten(
 			expand(render({ ...baseProps, providers: [{ name: "lmstudio:ornith", state: "primary" }] })),

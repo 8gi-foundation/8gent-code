@@ -173,14 +173,24 @@ export function deriveAgents(
  *   - a step the agent marked in progress is the task, with a bar that is
  *     the real share of steps done (`2/5`), never a guessed percentage;
  *   - a plan with no step in progress shows its tally;
+ *   - while the approval card waits and no step is in progress, it says
+ *     `waiting for your answer`, like every other surface (audit
+ *     2026-09-30 re-audit; one source of truth, #3118);
  *   - a live turn with no plan says `working`, never `idle`;
+ *   - a plan nothing has started, outside a live turn, says `N steps
+ *     planned` (the PLAN column's words), not an empty `0 of N` bar;
  *   - no turn and no plan is `idle` (an empty list).
  * The active tool is not a task: it is already in TOOLS › active.
  */
 export function deriveActiveTasks(
 	plan: ReadonlyArray<Pick<PlanStep, "id" | "text" | "status">>,
 	isProcessing: boolean,
+	waiting = false,
 ): ActivityRailTask[] {
+	const active = plan.filter((s) => s.status === "active");
+	if (waiting && active.length === 0) {
+		return [{ id: "waiting", label: "waiting for your answer", tone: "waiting" }];
+	}
 	if (plan.length === 0) {
 		return isProcessing ? [{ id: "working", label: "working, no plan yet" }] : [];
 	}
@@ -188,10 +198,12 @@ export function deriveActiveTasks(
 	const total = plan.length;
 	const progress = Math.round((done / total) * 100);
 	const detail = `${done}/${total}`;
-	const active = plan.filter((s) => s.status === "active");
 	if (active.length > 0) {
 		// The rail has no room for a chip, so inline markers come out.
 		return active.map((s) => ({ id: s.id, label: plainInline(s.text), progress, detail }));
+	}
+	if (done === 0 && !isProcessing) {
+		return [{ id: "plan-tally", label: `${total} ${total === 1 ? "step" : "steps"} planned`, tone: "quiet" }];
 	}
 	return [{ id: "plan-tally", label: `${done} of ${total} steps done`, progress, detail }];
 }
