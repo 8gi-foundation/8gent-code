@@ -85,3 +85,18 @@ describe("ollama default base URL follows the env (#3080)", () => {
 		expect(urls).toEqual(["http://127.0.0.1:21434/api/tags"]);
 	});
 });
+
+// The TUI's launch-time local detection and its model picker fetched
+// localhost:11434/api/tags directly: with ollama remote, the first thing a
+// launch did was probe this machine, and the picker listed this machine's
+// models. app.tsx renders Ink at import, so guard the source instead.
+describe("the TUI never hardcodes the ollama host (#3080)", () => {
+	it("apps/tui/src/app.tsx has no literal localhost/127.0.0.1:11434 URL", async () => {
+		const src = await Bun.file(new URL("../../apps/tui/src/app.tsx", import.meta.url)).text();
+		const hits = src
+			.split("\n")
+			.map((line, i) => ({ line: line.trim(), n: i + 1 }))
+			.filter(({ line }) => /https?:\/\/(localhost|127\.0\.0\.1):11434/.test(line) && !line.startsWith("//"));
+		expect(hits).toEqual([]);
+	});
+});
