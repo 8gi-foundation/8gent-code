@@ -37,9 +37,18 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { isPermissionMode } from "../../../../packages/permissions/permission-mode.js";
+import {
+	type PermissionMode,
+	isPermissionMode,
+} from "../../../../packages/permissions/permission-mode.js";
 import { askedNote } from "../lib/model-truth.js";
-import { PERM_KEY, PERM_LOOK, permColour } from "../lib/perm-modes-design.js";
+import {
+	PERM_KEY,
+	PERM_LOOK,
+	permColour,
+	permHeldNote,
+	permToastForms,
+} from "../lib/perm-modes-design.js";
 import { theme } from "../theme.js";
 
 const ui = {
@@ -59,6 +68,8 @@ export interface FooterSegment {
 	value: string;
 	/** Optional dim suffix after the value, e.g. the "^Y" key hint. */
 	hint?: string;
+	/** Optional dim note between the value and the hint, e.g. "(held by parent)". */
+	note?: string;
 	bold?: boolean;
 	color: string;
 	/** 0 is kept longest. Higher numbers drop first when space runs out. */
@@ -85,6 +96,10 @@ export interface FooterData {
 	 * "approval" segment, as before.
 	 */
 	permissions?: string;
+	/** True when a parent agent holds this one below the mode that was set (#3174). */
+	permHeld?: boolean;
+	/** Terminal columns, so the held note can shorten below 120. */
+	columns?: number;
 	/** Live providers out of configured providers. */
 	providersLive?: number;
 	providersTotal?: number;
@@ -100,7 +115,12 @@ function known(value: string | undefined): value is string {
 }
 
 export function segmentWidth(s: FooterSegment): number {
-	return (s.label ? s.label.length + 1 : 0) + s.value.length + (s.hint ? s.hint.length + 1 : 0);
+	return (
+		(s.label ? s.label.length + 1 : 0) +
+		s.value.length +
+		(s.note ? s.note.length + 1 : 0) +
+		(s.hint ? s.hint.length + 1 : 0)
+	);
 }
 
 function truncateMiddle(value: string, max: number): string {
@@ -123,11 +143,13 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 		{ key: "mode", label: "mode", value: d.mode, hint: "^Y", color: ui.teal, priority: 0 },
 	];
 	const perm = isPermissionMode(d.permissions) ? d.permissions : undefined;
-	if (perm && perm !== "ask") {
+	// Ask shows no segment, unless a parent holds the tab there: then it says so.
+	if (perm && (perm !== "ask" || d.permHeld)) {
 		out.push({
 			key: "perm",
 			label: "perm",
 			value: PERM_LOOK[perm].name,
+			note: d.permHeld ? permHeldNote(d.columns ?? 160) : undefined,
 			hint: PERM_KEY,
 			bold: PERM_LOOK[perm].bold,
 			color: permColour(perm),
@@ -262,12 +284,57 @@ export function fitFooterHints(width: number, permShown = false): string[] {
 	return out;
 }
 
-export function StatusSegments({ data, width }: { data: FooterData; width: number }) {
-	const segments = fitFooterSegments(buildFooterSegments(data), width);
-	const hints = fitFooterHints(
-		Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN),
-		segments.some((s) => s.key === "perm"),
-	);
+/** A permission switch the footer is announcing (#3174). */
+export interface FooterToast {
+	mode: PermissionMode;
+	held: boolean;
+}
+
+/**
+ * Fit the toast into the hints slot: the longest of full / short / tiny that
+ * fits. Full and short keep every priority 0-1 segment that shows without
+ * the toast; tiny keeps priority 0 (mode and perm), which at 80 columns
+ * always leaves room for it. Lower segments step aside while it shows. Null
+ * when nothing fits: the perm segment already names the mode.
+ */
+export function fitFooterToast(
+	all: FooterSegment[],
+	width: number,
+	toast: FooterToast,
+): { text: string; segments: FooterSegment[] } | null {
+	const forms = permToastForms(toast.mode, toast.held);
+	const plain = fitFooterSegments(all, width);
+	const mustKeep = (s: FooterSegment[], max: number) =>
+		plain.filter((p) => p.priority <= max).every((p) => s.includes(p));
+	for (const [text, keepUpTo] of [
+		[forms.full, 1],
+		[forms.short, 1],
+		[forms.tiny, 0],
+	] as const) {
+		const room = width - text.length - HINTS_MARGIN;
+		if (room <= 0) continue;
+		const fitted = fitFooterSegments(all, room);
+		if (segmentsWidth(fitted) <= room && mustKeep(fitted, keepUpTo)) {
+			return { text, segments: fitted };
+		}
+	}
+	return null;
+}
+
+export function StatusSegments({
+	data,
+	width,
+	toast,
+}: { data: FooterData; width: number; toast?: FooterToast | null }) {
+	const all = buildFooterSegments(data);
+	const toastFit = toast ? fitFooterToast(all, width, toast) : null;
+	const segments = toastFit ? toastFit.segments : fitFooterSegments(all, width);
+	const hints = toastFit
+		? []
+		: fitFooterHints(
+				Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN),
+				segments.some((s) => s.key === "perm"),
+			);
 	return (
 		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between">
 			<Text wrap="truncate-end">
@@ -278,10 +345,18 @@ export function StatusSegments({ data, width }: { data: FooterData; width: numbe
 						<Text color={s.color} bold={s.bold}>
 							{s.value}
 						</Text>
+						{s.note ? <Text color={ui.muted}> {s.note}</Text> : null}
 						{s.hint ? <Text color={ui.muted}> {s.hint}</Text> : null}
 					</React.Fragment>
 				))}
 			</Text>
+			{toastFit && toast ? (
+				<Box flexShrink={0}>
+					<Text color={permColour(toast.mode)} bold={PERM_LOOK[toast.mode].bold}>
+						{toastFit.text}
+					</Text>
+				</Box>
+			) : null}
 			{hints.length > 0 ? (
 				<Box flexShrink={0}>
 					<Text color={ui.dim}>{hints.join(HINT_GAP)}</Text>

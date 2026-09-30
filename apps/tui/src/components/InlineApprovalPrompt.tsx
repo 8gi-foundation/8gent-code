@@ -5,6 +5,8 @@ import { t } from "../theme.js";
 interface InlineApprovalPromptProps {
 	/** Plain-language description of the action awaiting approval. */
 	target: string;
+	/** Why this card came up, e.g. "risky step" in Guarded (#3174). */
+	reason?: string;
 }
 
 /**
@@ -16,7 +18,7 @@ interface InlineApprovalPromptProps {
  *
  * Keys offered: Y approve / N deny / E edit / S skip.
  */
-export function InlineApprovalPrompt({ target }: InlineApprovalPromptProps) {
+export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptProps) {
 	return (
 		<Box
 			borderStyle="round"
@@ -34,6 +36,11 @@ export function InlineApprovalPrompt({ target }: InlineApprovalPromptProps) {
 						ASK
 					</Text>
 				</Box>
+				{reason ? (
+					<Box flexShrink={0} marginRight={1}>
+						<Text color={t.muted}>{reason}</Text>
+					</Box>
+				) : null}
 				<Text color={t.textSecondary} wrap="truncate-end">
 					{target}
 				</Text>

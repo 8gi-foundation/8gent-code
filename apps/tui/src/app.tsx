@@ -278,12 +278,17 @@ import {
 	type PermissionMode,
 	type PermissionModeHolder,
 	createPermissionHolder,
-	effectivePermissionMode,
 	nextPermissionMode,
 	setHolderMode,
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
-import { isPermissionCycleKey, permSwitchLine } from "./lib/perm-modes-design.js";
+import {
+	type PermView,
+	isPermissionCycleKey,
+	permSwitchLine,
+	permView,
+} from "./lib/perm-modes-design.js";
+import { usePermToast } from "./hooks/usePermToast.js";
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
@@ -1300,8 +1305,23 @@ export function App({
 		},
 		[permHolderFor],
 	);
-	// The true mode of the focused tab (an expired Infinite reads as Ask).
-	const activePermMode = effectivePermissionMode(permHolderFor(activeTabId));
+	// The true mode of the focused tab (an expired Infinite reads as Ask), and
+	// whether a parent agent holds it below the mode that was set (#3174).
+	const activePermView = permView(permHolderFor(activeTabId));
+	const activePermMode = activePermView.mode;
+	// The footer toast after a switch: 3 s, Infinite 5 s, one self-clearing timer (#3174).
+	const [permToast, showPermToast] = usePermToast(activeTabId);
+	// Each chat tab's mode for its tab tag. A tab never focused yet has no
+	// holder; it starts in the launch mode, so that is what it shows.
+	const tabPermView = useCallback(
+		(tabId: string): PermView | undefined => {
+			const tab = workspaceTabs.tabs.find((tb) => tb.id === tabId);
+			if (tab?.type !== "chat") return undefined;
+			const holder = permHoldersRef.current.get(tabId);
+			return holder ? permView(holder) : { mode: launchPermMode, held: false };
+		},
+		[workspaceTabs.tabs, launchPermMode],
+	);
 	const infiniteModeActive = activePermMode === "infinite";
 
 	// Model/Provider state (must be before agent init)
@@ -2043,7 +2063,10 @@ export function App({
 		if (isPermissionCycleKey(key)) {
 			const next = nextPermissionMode(activePermMode);
 			setTabPermMode(activeTabId, next);
-			addSystemMessage(permSwitchLine(next));
+			// What is shown is the mode the tab really has: a parent may hold it lower.
+			const shown = permView(permHolderFor(activeTabId));
+			addSystemMessage(permSwitchLine(shown.mode, shown.held));
+			showPermToast({ tabId: activeTabId, ...shown });
 			return;
 		}
 
@@ -3193,7 +3216,9 @@ export function App({
 					// Other tabs keep theirs.
 					const next: PermissionMode = infiniteModeActive ? "ask" : "infinite";
 					setTabPermMode(activeTabId, next);
-					addSystemMessage(permSwitchLine(next));
+					const shown = permView(permHolderFor(activeTabId));
+					addSystemMessage(permSwitchLine(shown.mode, shown.held));
+					showPermToast({ tabId: activeTabId, ...shown });
 					break;
 				}
 
@@ -6027,7 +6052,10 @@ export function App({
 	// The left rail steps aside while it would only repeat the header and
 	// the defaults; infinite approval or ADHD mode brings it back.
 	const showContextRail =
-		wideShell && contextRailHasNews({ infinite: activePermMode !== "ask", adhdMode });
+		wideShell && contextRailHasNews({
+			infinite: activePermMode !== "ask" || activePermView.held,
+			adhdMode,
+		});
 	// The PLAN column shows on wide terminals, rail or not, and only while it
 	// is open (Ctrl+X, or a plan exists).
 	const showPlanColumn =
@@ -6117,6 +6145,7 @@ export function App({
 						lilEightState={lilEightState}
 						width={cols}
 						living={headerMarkLiving}
+						permMode={activePermMode}
 					/>
 				</Box>
 
@@ -6126,6 +6155,7 @@ export function App({
 						onSwitch={workspaceTabs.switchTab}
 						isTabProcessing={perTabAgents.isTabProcessing}
 						animate={showAnimations}
+						permFor={tabPermView}
 					/>
 				</Box>
 
@@ -6141,6 +6171,7 @@ export function App({
 							<ContextRail
 								risk={infiniteModeActive ? "high" : activePermMode === "guarded" ? "medium" : "low"}
 								permissions={activePermMode}
+								permHeld={activePermView.held}
 								contextPct={contextPct}
 								adhdMode={adhdMode}
 							/>
@@ -6222,7 +6253,10 @@ export function App({
 						)}
 
 						{approvalPending && (
-							<InlineApprovalPrompt target={approvalPending.target} />
+							<InlineApprovalPrompt
+								target={approvalPending.target}
+								reason={approvalPending.reason}
+							/>
 						)}
 
 						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
@@ -6298,6 +6332,8 @@ export function App({
 					branch={git.branch || undefined}
 					user={authUser?.displayName}
 					permissions={activePermMode}
+					permHeld={activePermView.held}
+					permToast={permToast}
 					sessionTime={sessionTime}
 					mode={agentMode}
 					isProcessing={isProcessing}

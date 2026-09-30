@@ -27,9 +27,13 @@ import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
 } from "../../../../packages/permissions/tui-approval-channel.js";
+import { currentPermissionMode } from "../../../../packages/permissions/permission-mode.js";
+import { approvalReason } from "../lib/perm-modes-design.js";
 
 export interface PendingApproval {
 	target: string;
+	/** Why the card came up, from the asking call's own permission mode (#3174). */
+	reason?: string;
 	resolve: (decision: TuiApprovalDecision) => void;
 }
 
@@ -89,8 +93,12 @@ export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 			new Promise<TuiApprovalDecision>((resolvePromise) => {
 				const target = request.command || request.action || "pending tool call";
 				let settled = false;
+				// The request arrives inside the asking tool call, so its
+				// permission mode is the call's own, not the focused tab's.
+				const reason = approvalReason(currentPermissionMode());
 				const card: PendingApproval = {
 					target,
+					...(reason ? { reason } : {}),
 					resolve: (decision) => {
 						if (settled) return;
 						settled = true;

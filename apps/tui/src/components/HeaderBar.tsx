@@ -61,6 +61,8 @@ const PALETTE_HINT_FULL = " palette";
 const MIC_ON = "● MIC";
 const MIC_OFF = "○ MIC";
 const ASK_CHIP = "[ASK]";
+/** Running without asking is the one permission mode that earns a header chip (#3174). */
+const INFINITE_CHIP = "INFINITE";
 const LOCAL_CHIP = "LOCAL";
 const BRAND_TAGLINE = " The Infinite Gentleman";
 
@@ -87,6 +89,11 @@ interface HeaderBarProps {
 	living?: boolean;
 	/** Draw the braille 8 beside the pill when it fits. Defaults to true where braille draws. */
 	mark?: boolean;
+	/**
+	 * The focused tab's permission mode (#3174). Only Infinite changes the
+	 * header: an INFINITE chip beside [ASK]. The living 8 never changes with it.
+	 */
+	permMode?: string;
 }
 
 /**
@@ -109,12 +116,17 @@ export function brandPillWidth(
 
 /** Columns the right-hand status cluster occupies, badge included. */
 export function statusClusterWidth(
-	props: Pick<HeaderBarProps, "micOn" | "approvalPending" | "sessionTime" | "lilEightState">,
+	props: Pick<
+		HeaderBarProps,
+		"micOn" | "approvalPending" | "sessionTime" | "lilEightState" | "permMode"
+	>,
 	compactHint: boolean,
 ): number {
 	const hint = "^P" + (compactHint ? "" : PALETTE_HINT_FULL);
 	const mic = props.micOn ? MIC_ON : MIC_OFF;
-	const ask = props.approvalPending ? `${ASK_CHIP} ` : "";
+	const ask =
+		(props.approvalPending ? `${ASK_CHIP} ` : "") +
+		(props.permMode === "infinite" ? `${INFINITE_CHIP} ` : "");
 	const text = `${hint}  ${mic}  ${ask}${LOCAL_CHIP} ${props.sessionTime} `;
 	const badge = cellWidth(`8▣ ${props.lilEightState}`) + BORDER_AND_PADDING;
 	return cellWidth(text) + badge;
@@ -257,6 +269,14 @@ export function HeaderBar(props: HeaderBarProps) {
 				{approvalPending ? (
 					<>
 						<Text color={t.orange} bold>{ASK_CHIP}</Text>
+						<Text color={ui.dim}> </Text>
+					</>
+				) : null}
+				{props.permMode === "infinite" ? (
+					<>
+						<Text color={t.orange} bold>
+							{INFINITE_CHIP}
+						</Text>
 						<Text color={ui.dim}> </Text>
 					</>
 				) : null}

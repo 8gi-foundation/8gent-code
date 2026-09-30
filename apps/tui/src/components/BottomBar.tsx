@@ -15,7 +15,12 @@
 import { Box, useStdout } from "ink";
 import React from "react";
 import { DjDeck } from "./DjDeck.js";
-import { type JudgeState, StatusSegments, fmSegmentWidth } from "./StatusFooter.js";
+import {
+	type FooterToast,
+	type JudgeState,
+	StatusSegments,
+	fmSegmentWidth,
+} from "./StatusFooter.js";
 
 export type FooterMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
@@ -32,6 +37,10 @@ interface BottomBarProps {
 	/** The signed-in display name, when there is one (#2366). */
 	user?: string;
 	permissions: string;
+	/** A parent agent holds this tab below the mode that was set (#3174). */
+	permHeld?: boolean;
+	/** The permission switch being announced in the hints slot, if any (#3174). */
+	permToast?: FooterToast | null;
 	sessionTime: string;
 	mode: FooterMode;
 	/** When true, the FM segment says "agent pulse" instead of "idle" so the
@@ -64,6 +73,7 @@ export function BottomBar(props: BottomBarProps) {
 				footer={
 					<StatusSegments
 						width={segmentsWidth}
+						toast={props.permToast}
 						data={{
 							mode: props.mode,
 							model: props.model,
@@ -73,6 +83,8 @@ export function BottomBar(props: BottomBarProps) {
 							branch: props.branch,
 							sessionTime: props.sessionTime,
 							permissions: props.permissions,
+							permHeld: props.permHeld,
+							columns,
 							providersLive: props.ready,
 							providersTotal: props.total,
 							user: resolveUser(props.user),
