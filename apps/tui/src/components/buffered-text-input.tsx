@@ -15,6 +15,7 @@
 
 import { Text, useInput } from "ink";
 import React, { useRef, useState } from "react";
+import { isApprovalKeyClaimed } from "../hooks/useApprovalCard.js";
 
 export interface BufferedTextInputProps {
 	value: string;
@@ -48,6 +49,8 @@ export function BufferedTextInput({
 	useInput(
 		(input, key) => {
 			if (key.upArrow || key.downArrow || key.tab || (key.ctrl && input === "c")) return;
+			// Y/N/E/S answer a pending approval card; they are not text (#3055).
+			if (isApprovalKeyClaimed(input, key)) return;
 
 			const current = valueRef.current;
 			const cursor = Math.min(cursorRef.current, current.length);

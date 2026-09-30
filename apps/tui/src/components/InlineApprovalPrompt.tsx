@@ -27,9 +27,13 @@ export function InlineApprovalPrompt({ target }: InlineApprovalPromptProps) {
 			justifyContent="space-between"
 		>
 			<Box minWidth={0}>
-				<Text color={t.orange} bold>
-					ASK{" "}
-				</Text>
+				{/* Margin, not a trailing space: Ink trims trailing whitespace when
+				    the truncated target squeezes the row, which rendered "ASKcd". */}
+				<Box flexShrink={0} marginRight={1}>
+					<Text color={t.orange} bold>
+						ASK
+					</Text>
+				</Box>
 				<Text color={t.textSecondary} wrap="truncate-end">
 					{target}
 				</Text>

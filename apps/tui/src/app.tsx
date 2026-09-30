@@ -178,6 +178,7 @@ import { type PlanStep, applyPlanUpdate, mergePlanText, settlePlan } from "./lib
 import { getTaskManager } from "../../../packages/tasks/index.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
+import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError, useLilEightState } from "./hooks/useLilEightState.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
@@ -191,11 +192,6 @@ import {
 	planStepsFromText,
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
-import {
-	registerTuiApprovalHandler,
-	type TuiApprovalDecision,
-	type TuiApprovalRequest,
-} from "../../../packages/permissions/tui-approval-channel.js";
 import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
 
 // Import auth + DB systems (lazy, non-blocking)
@@ -1465,33 +1461,10 @@ export function App({
 
 	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
 	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
-	// and lights the [ASK] chip in HeaderBar. The keypress handler in
-	// `useInput` intercepts Y/N/E/S to settle the resolve callback.
-	const [approvalPending, setApprovalPending] = useState<{
-		target: string;
-		resolve: (decision: TuiApprovalDecision) => void;
-	} | null>(null);
-
-	// V2 approval handler registration. Headless callers see no handler and
-	// PermissionManager falls back to its existing stdin flow.
-	useEffect(() => {
-		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
-			return new Promise<TuiApprovalDecision>((resolve) => {
-				const target = request.command || request.action || "pending tool call";
-				setApprovalPending({
-					target,
-					resolve: (decision) => {
-						setApprovalPending(null);
-						resolve(decision);
-					},
-				});
-			});
-		};
-		registerTuiApprovalHandler(handler);
-		return () => {
-			registerTuiApprovalHandler(null);
-		};
-	}, []);
+	// and lights the [ASK] chip in HeaderBar. The hook registers the approval
+	// handler and routes Y/N/E/S to the card, never to the chat input (#3055).
+	// Headless callers see no handler and PermissionManager falls back to stdin.
+	const approvalPending = useApprovalCard(() => setLastActivityAt(Date.now()));
 
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
@@ -1666,32 +1639,8 @@ export function App({
 
 	// Handle keyboard shortcuts
 	useInput((input, key) => {
-		// V2 approval intercept: when an inline approval is pending, Y/N/E/S
-		// settle it. Anything else falls through to normal input handling so
-		// the user can keep typing if they want to ignore the prompt.
-		if (approvalPending && !key.ctrl && !key.meta) {
-			const ch = (input || "").toLowerCase();
-			if (ch === "y") {
-				approvalPending.resolve("approve");
-				setLastActivityAt(Date.now());
-				return;
-			}
-			if (ch === "n") {
-				approvalPending.resolve("deny");
-				setLastActivityAt(Date.now());
-				return;
-			}
-			if (ch === "e") {
-				approvalPending.resolve("edit");
-				setLastActivityAt(Date.now());
-				return;
-			}
-			if (ch === "s") {
-				approvalPending.resolve("skip");
-				setLastActivityAt(Date.now());
-				return;
-			}
-		}
+		// A pending approval card owns Y/N/E/S; useApprovalCard settles it.
+		if (isApprovalKeyClaimed(input, key)) return;
 
 		// Touch the activity timestamp on any keypress so LilEightBadge wakes
 		// from sleep promptly. Cheap; no React state when value is unchanged.
