@@ -43,10 +43,10 @@ export interface OllamaBackendOptions {
 	/** Per-question request timeout. */
 	timeoutMs?: number;
 	/**
-	 * Context window to ask the server for (Ollama `num_ctx`). Unset leaves the
-	 * server's default. The shared judge sets it: Ollama 0.34 otherwise sizes the
-	 * context to free memory (131072 for Selene on a 96 GB Mac, 21.9 GB
-	 * resident), which costs more than the private copies it replaces.
+	 * Context window to ask the server for (Ollama `num_ctx`). Default
+	 * JUDGE_NUM_CTX (4096) on every path (#3212): left unset, Ollama 0.34 sizes
+	 * the context to free memory (131072 for Selene on a 96 GB Mac, 21.3 GB
+	 * resident), for a prompt of a few hundred tokens.
 	 */
 	numCtx?: number;
 	fetch?: FetchLike;
@@ -170,6 +170,14 @@ export function hasLabelMass(kind: Question["kind"], labels: string[], top: TopL
 
 // ----- Backend -----------------------------------------------------------------
 
+/**
+ * Context window every Ollama judge asks for: the 4096 the in-process backend
+ * loads with (llamacpp DEFAULT_CONTEXT_SIZE). A guard prompt is a few hundred
+ * tokens, and every client must ask for the same value or the server reloads
+ * the model between them.
+ */
+export const JUDGE_NUM_CTX = 4096;
+
 export class OllamaBackend implements DecideBackend {
 	readonly name = "ollama";
 	readonly model: string;
@@ -183,7 +191,7 @@ export class OllamaBackend implements DecideBackend {
 		this.model = opts.model;
 		this.host = (opts.host ?? resolveOllamaHost(opts.env)).replace(/\/+$/, "");
 		this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-		this.numCtx = opts.numCtx;
+		this.numCtx = opts.numCtx ?? JUDGE_NUM_CTX;
 		this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
 	}
 
