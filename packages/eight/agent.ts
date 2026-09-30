@@ -58,6 +58,7 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { projectInstructionsSection } from "./instruction-loader";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -414,12 +415,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// pushing them to fabricate, and private-memory leakage into an
 		// untrusted channel. Table sessions bypass it.
 		const isTableScope = config.agentScope === "__table__";
+		// Project instructions (AGENTS.md / 8GENT.md / CLAUDE.md) reach the model
+		// on both coding paths (#3236), as the trailing section so the prefix
+		// before it stays stable (#3222). Table officers keep their supplied
+		// prompt verbatim, for the reasons above.
+		const projectInstructionsBlock = isTableScope
+			? ""
+			: projectInstructionsSection(config.workingDirectory || process.cwd());
 		this.messageHistory.push({
 			role: "system",
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-				? compactLocalPrompt
+				? compactLocalPrompt + projectInstructionsBlock
 				: basePrompt +
 					vesselContext +
 					userContextBlock +
@@ -428,7 +436,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					deferredToolBlock +
 					globalMemoriesBlock +
 					priorSessionsBlock +
-					languageInstruction,
+					languageInstruction +
+					projectInstructionsBlock,
 		});
 
 		// Initialize session persistence (v2)
