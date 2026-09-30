@@ -19,14 +19,18 @@ import {
 import { shouldUseTextTools } from "./agent";
 import { ToolExecutor } from "./tools";
 
-function textDef(name: string) {
-	const def = new ToolExecutor(os.tmpdir())
-		.getToolDefinitions()
-		.find((d: { function: { name: string } }) => d.function.name === name);
-	return def?.function as {
+type TextDef = {
+	function: {
+		name: string;
 		description: string;
 		parameters: { properties: Record<string, unknown> };
 	};
+};
+function textDef(name: string) {
+	const defs = new ToolExecutor(os.tmpdir()).getToolDefinitions() as TextDef[];
+	const def = defs.find((d) => d.function.name === name);
+	if (!def) throw new Error(`no text-path definition for ${name}`);
+	return def.function;
 }
 
 describe("one source for the delegation tools", () => {
@@ -40,7 +44,9 @@ describe("one source for the delegation tools", () => {
 	});
 
 	test("the native spawn_agent schema offers allowedPaths", () => {
-		const shape = (agentTools.spawn_agent.inputSchema as { shape: Record<string, unknown> }).shape;
+		const shape = (
+			agentTools.spawn_agent.inputSchema as unknown as { shape: Record<string, unknown> }
+		).shape;
 		expect(Object.keys(shape)).toContain("allowedPaths");
 		expect(Object.keys(textDef("spawn_agent").parameters.properties)).toContain("allowedPaths");
 	});
