@@ -20,6 +20,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, join, posix, win32 } from "node:path";
+import { type KeyJob, detectKey } from "./key-detect.js";
+import { type TrackInfo, trackInfoFromMetadata } from "./track-info.js";
 
 // ---- Platform ----
 const PLATFORM = platform();
@@ -219,6 +221,172 @@ let isPlaying = false;
 let isPaused = false;
 let isLooping = false;
 let trackQueue: { title: string; url: string }[] = [];
+/** How the current source reaches mpv: through yt-dlp (a web page) or as a direct stream/file. */
+let sourceKind: "ytdl" | "direct" = "direct";
+
+// ---- Track info and key (#3192) ----
+export interface KeyState {
+	state: "tag" | "detecting" | "estimated" | "unknown";
+	key: string | null;
+}
+
+/** The deck's and np's wording for a key state. Never a key the source or the audio did not give. */
+export function keyLabel(k: KeyState | undefined | null): string {
+	if (!k) return "";
+	if (k.state === "tag") return `Key: ${k.key}`;
+	if (k.state === "estimated") return `Key: ${k.key} (est.)`;
+	if (k.state === "detecting") return "Key: detecting...";
+	return "Key: unknown";
+}
+
+const EMPTY_INFO: TrackInfo = { name: "", artists: [], keyTag: null };
+/** url|icy-title the info below was read for, whether the metadata had arrived, and the key's id. */
+let infoSig = "";
+let infoLoaded = false;
+let infoKeyId = "";
+let info: TrackInfo = EMPTY_INFO;
+const keyCache = new Map<string, KeyState>();
+let keyJob: KeyJob | null = null;
+/** Seconds of playback before the key estimate starts its own download. */
+const KEY_START_AFTER_SEC = 3;
+/** A key shown as detecting while it waits for playback to start. */
+let keyPending = "";
+/** Bumped whenever estimates are abandoned; a finishing estimate from an older generation is dropped. */
+let keyGen = 0;
+
+/** yt-dlp resolves a page to a direct audio URL, off the event loop. */
+function resolveAudioUrl(ytdlp: string, url: string): Promise<string | null> {
+	return new Promise((resolve) => {
+		let out = "";
+		let child: ChildProcess;
+		try {
+			child = spawn(ytdlp, ["-f", "bestaudio", "-g", "--no-playlist", url], {
+				stdio: ["ignore", "pipe", "ignore"],
+				windowsHide: true,
+			});
+		} catch {
+			resolve(null);
+			return;
+		}
+		const timer = setTimeout(() => {
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+		}, 20000);
+		child.stdout?.on("data", (d) => {
+			out += d;
+		});
+		child.on("error", () => {
+			clearTimeout(timer);
+			resolve(null);
+		});
+		child.on("close", () => {
+			clearTimeout(timer);
+			resolve(out.split(/\r?\n/).find((l) => l.startsWith("http")) ?? null);
+		});
+	});
+}
+
+/** Stop the running estimate and forget unfinished ones, so a cut-short sample never names a key. */
+function abandonDetections(): void {
+	keyGen++;
+	keyJob?.cancel();
+	keyJob = null;
+	for (const [id, k] of keyCache) if (k.state === "detecting") keyCache.delete(id);
+}
+
+/** A live stream: a direct source with no finite length. A yt-dlp page is always a track. */
+function isLive(duration: number | null): boolean {
+	return (
+		sourceKind === "direct" && !(duration != null && Number.isFinite(duration) && duration > 0)
+	);
+}
+
+/** The id a key belongs to: the source for a track, source + song for a live stream whose songs change. */
+function keyId(url: string, song: string, live: boolean): string {
+	return live ? `${url}|${song}` : url;
+}
+
+/** Start one local key estimate for the playing source, unless one is known or running. */
+function ensureKey(id: string, url: string, duration: number | null): void {
+	if (keyCache.has(id)) return;
+	const t = detectTools();
+	if (!t.ffmpeg || (sourceKind === "ytdl" && !t.ytdlp)) {
+		keyCache.set(id, { state: "unknown", key: null });
+		return;
+	}
+	abandonDetections();
+	keyCache.set(id, { state: "detecting", key: null });
+	// A track: 20 s from a quarter in (past any intro), capped at a minute; 30 s in
+	// while its length is not known yet. A live stream: from now.
+	const known = duration != null && Number.isFinite(duration) && duration > 0;
+	const offsetSec = isLive(duration) ? 0 : known ? Math.min(60, Math.floor(duration * 0.25)) : 30;
+	const ffmpeg = t.ffmpeg;
+	const gen = keyGen;
+	const stillWanted = () => gen === keyGen && keyCache.get(id)?.state === "detecting";
+	const kind = sourceKind;
+	(async () => {
+		// Two tries: a freshly resolved media URL now and then refuses its first read.
+		let est = null;
+		for (let attempt = 0; attempt < 2 && !est; attempt++) {
+			const src = kind === "ytdl" ? await resolveAudioUrl(t.ytdlp!, url) : url;
+			if (!stillWanted()) return;
+			if (!src) continue;
+			const job = detectKey(src, { ffmpeg, offsetSec, seconds: 20, timeoutMs: 30000 });
+			keyJob = job;
+			est = await job.promise;
+			if (!stillWanted()) return;
+			keyJob = null;
+		}
+		keyCache.set(id, est ? { state: "estimated", key: est.key } : { state: "unknown", key: null });
+	})().catch(() => {
+		if (stillWanted()) keyCache.set(id, { state: "unknown", key: null });
+	});
+}
+
+/**
+ * Refresh the track info while something plays. mpv's media-title is the
+ * --title the DJ passed, so it never changes; what changes is the metadata
+ * (it arrives a moment after load) and, on radio, icy-title per song. The
+ * full metadata map is read until it has arrived and again on each new song;
+ * otherwise a poll costs one small IPC on radio and none on a track.
+ */
+async function refreshTrackInfo(duration: number | null, position: number | null): Promise<void> {
+	if (!currentTrack.url) return;
+	const icy = sourceKind === "direct" ? ((await mpvGet("metadata/by-key/icy-title")) ?? "") : "";
+	const sig = `${currentTrack.url}|${icy}`;
+	if (sig !== infoSig || !infoLoaded) {
+		const meta = await mpvIpc({ command: ["get_property", "metadata"] });
+		const loaded = !!meta && typeof meta === "object" && Object.keys(meta).length > 0;
+		info = trackInfoFromMetadata(loaded ? meta : null, currentTrack.title);
+		infoSig = sig;
+		infoLoaded = loaded;
+		// A track's key waits for its metadata (it may carry a key tag).
+		if (!loaded && sourceKind === "ytdl") return;
+	}
+	const id = keyId(currentTrack.url, icy, isLive(duration));
+	infoKeyId = id;
+	if (info.keyTag) {
+		keyCache.set(id, { state: "tag", key: info.keyTag });
+		return;
+	}
+	// The estimate downloads its own sample; starting it while mpv is still
+	// buffering the same track competes with playback. Wait for sound.
+	if (!keyCache.has(id) && (position ?? 0) < KEY_START_AFTER_SEC) {
+		keyCache.set(id, { state: "detecting", key: null });
+		keyPending = id;
+		return;
+	}
+	if (keyPending === id) {
+		keyPending = "";
+		keyCache.delete(id);
+	}
+	ensureKey(id, currentTrack.url, duration);
+}
+
+function currentKey(): KeyState | null {
+	return infoKeyId ? (keyCache.get(infoKeyId) ?? null) : null;
+}
 const history: { title: string; url: string; playedAt: number }[] = [];
 
 // ---- Resume State ----
@@ -342,6 +510,7 @@ export class DJ {
 		ipcReady = true;
 
 		currentTrack = { title, url };
+		sourceKind = "ytdl";
 		isPlaying = true;
 		isPaused = false;
 		history.push({ title, url, playedAt: Date.now() });
@@ -365,6 +534,7 @@ export class DJ {
 			await new Promise((r) => setTimeout(r, 1500));
 			ipcReady = true;
 			isPlaying = true;
+			sourceKind = "direct";
 			currentTrack = { title: `Radio: ${query}`, url: query };
 			return `Radio streaming: ${query}`;
 		}
@@ -393,6 +563,7 @@ export class DJ {
 			await new Promise((r) => setTimeout(r, 1500));
 			ipcReady = true;
 			isPlaying = true;
+			sourceKind = "direct";
 			currentTrack = { title: station.name, url: streamUrl };
 
 			const alternatives = stations
@@ -428,7 +599,11 @@ export class DJ {
 		const icon = isPaused ? "Paused" : isLooping ? "Looping" : "Playing";
 		const time = pos && dur ? ` [${this.fmt(+pos)}/${this.fmt(+dur)}]` : "";
 		const q = trackQueue.length ? ` (+${trackQueue.length} queued)` : "";
-		return `${icon}: ${currentTrack.title}${time}${q}`;
+		if (ipcReady) await refreshTrackInfo(dur ? +dur : null, pos ? +pos : null);
+		const name = info.name || currentTrack.title;
+		const by = info.artists.length ? ` by ${info.artists.join(", ")}` : "";
+		const key = keyLabel(currentKey());
+		return `${icon}: ${name}${by}${key ? ` | ${key}` : ""}${time}${q}`;
 	}
 
 	/** Set volume (0-100) */
@@ -577,10 +752,19 @@ export class DJ {
 		duration: number | null;
 		volume: number | null;
 		queueSize: number;
+		/** The track's name from its metadata (falls back to title). */
+		name: string;
+		/** Every artist the source names; empty when it names none. */
+		artists: string[];
+		/** "Key: A minor (est.)", "Key: detecting...", "Key: unknown", or "" when nothing plays. */
+		keyLabel: string;
 	}> {
 		const [pos, dur, vol] = ipcReady
 			? await Promise.all([mpvGet("time-pos"), mpvGet("duration"), mpvGet("volume")])
 			: [null, null, null];
+		const durN = dur ? Number.parseFloat(dur) : null;
+		if (ipcReady && isPlaying) await refreshTrackInfo(durN, pos ? Number.parseFloat(pos) : null);
+		const playingInfo = isPlaying && infoSig !== "";
 		return {
 			playing: isPlaying,
 			paused: isPaused,
@@ -591,12 +775,21 @@ export class DJ {
 			duration: dur ? Number.parseFloat(dur) : null,
 			volume: vol ? Number.parseFloat(vol) : null,
 			queueSize: trackQueue.length,
+			name: playingInfo ? info.name : "",
+			artists: playingInfo ? info.artists : [],
+			keyLabel: playingInfo ? keyLabel(currentKey()) : "",
 		};
 	}
 
 	// ---- Private ----
 	private killMpv(): void {
 		ipcReady = false;
+		abandonDetections();
+		info = EMPTY_INFO;
+		infoSig = "";
+		infoLoaded = false;
+		infoKeyId = "";
+		keyPending = "";
 		if (mpvProcess) {
 			// Save resume state before killing
 			if (currentTrack.url) {

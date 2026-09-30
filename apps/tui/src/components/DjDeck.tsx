@@ -55,11 +55,16 @@ interface DjStatus {
 	duration: number | null;
 	volume: number | null;
 	queueSize: number;
+	/** From the source's metadata (#3192); empty when it carries none. */
+	name?: string;
+	artists?: string[];
+	keyLabel?: string;
 }
 
 const EMPTY: DjStatus = {
 	playing: false, paused: false, looping: false,
 	title: "", url: "", position: null, duration: null, volume: null, queueSize: 0,
+	name: "", artists: [], keyLabel: "",
 };
 
 let setOpenExternal: ((v: boolean) => void) | null = null;
@@ -121,6 +126,8 @@ export function StereoDisplay(props: {
 	tick: number;
 	termWidth: number;
 	hasTrack?: boolean;
+	/** "Key: A minor (est.)", "Key: detecting...", "Key: unknown"; empty hides it (#3192). */
+	keyLabel?: string;
 }) {
 	// hasTrack defaults true for backwards compatibility with prior call sites.
 	const hasTrack = props.hasTrack !== false;
@@ -141,20 +148,32 @@ export function StereoDisplay(props: {
 			paddingX={1}
 			flexDirection="column"
 		>
-			{/* Row 1: track name + clock icon */}
+			{/* Row 1: track name + key (or the clock icon when no key is known) */}
 			<Box justifyContent="space-between" width="100%">
-				<Box minWidth={0} flexGrow={1}>
+				<Box minWidth={0} flexGrow={1} flexShrink={1}>
 					<Text color={t.orange}>{props.playing ? "◴ " : "○ "}</Text>
 					<Text color={trackColor} wrap="truncate-end">{trackText}</Text>
 				</Box>
-				<Text color={t.orange}>{props.playing ? " ◷" : " ○"}</Text>
+				{hasTrack && props.keyLabel ? (
+					<Box flexShrink={0}>
+						<Text color={t.textPrimary}> {props.keyLabel}</Text>
+					</Box>
+				) : (
+					<Text color={t.orange}>{props.playing ? " ◷" : " ○"}</Text>
+				)}
 			</Box>
 
 			{/* Row 2: artist | waveform (centered) | elapsed / duration */}
 			<Box justifyContent="space-between" width="100%">
-				<Text color={artistColor}>{artistText}</Text>
-				<Text color={props.playing && hasTrack ? t.orangeAlt : t.textDim}>{wave}</Text>
-				<Text color={t.orangeDim}>{props.elapsed} / {props.duration}</Text>
+				<Box minWidth={0} flexGrow={1} flexShrink={1} flexBasis={0}>
+					<Text color={artistColor} wrap="truncate-end">{artistText}</Text>
+				</Box>
+				<Box flexShrink={0} paddingX={1}>
+					<Text color={props.playing && hasTrack ? t.orangeAlt : t.textDim}>{wave}</Text>
+				</Box>
+				<Box flexGrow={1} flexShrink={0} flexBasis={0} justifyContent="flex-end">
+					<Text color={t.orangeDim}>{props.elapsed} / {props.duration}</Text>
+				</Box>
 			</Box>
 
 			{/* Row 3: volume slider — stays visible even with no track */}
@@ -436,8 +455,10 @@ export function DjDeck({
 	// A track exists when status.title is non-empty OR audio is actively playing.
 	const hasTrack = status.title.length > 0 || status.playing;
 	const track = hasTrack
-		? truncateEnd(sanitizeTrack(status.title || "(loading)"), 82)
+		? truncateEnd(sanitizeTrack(status.name || status.title || "(loading)"), 82)
 		: "";
+	// Only what the source names (#3192); never a placeholder artist.
+	const artists = (status.artists ?? []).map(sanitizeTrack).filter(Boolean).join(", ");
 
 	// Always-on stereo: collapsed mode renders a one-line strip, never zero
 	// height. Auto-toggling is forbidden — only ^D / setDjDeckOpen flip this.
@@ -522,7 +543,8 @@ export function DjDeck({
 				<StereoDisplay
 					playing={playing}
 					track={track}
-					artist={hasTrack ? "Instrumental" : ""}
+					artist={hasTrack ? artists : ""}
+					keyLabel={hasTrack ? status.keyLabel : ""}
 					elapsed={hasTrack ? fmt(localPos) : "0:00"}
 					duration={hasTrack ? fmt(status.duration) : "0:00"}
 					volume={volume}

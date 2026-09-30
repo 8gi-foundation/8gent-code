@@ -4149,8 +4149,9 @@ export function App({
 									result =
 										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools\n  /dj close|open - Toggle deck";
 							}
-							// Transient playback feedback now lives in the DjDeck.
-							const playbackSubs = new Set(["play","radio","pause","stop","skip","np","vol","volume","loop","repeat","queue","resume","produce","gen"]);
+							// Transient playback feedback now lives in the DjDeck. `np` is not
+							// transient: it is the text readout of what plays (#3192).
+							const playbackSubs = new Set(["play","radio","pause","stop","skip","vol","volume","loop","repeat","queue","resume","produce","gen"]);
 							const looksLikeFailure =
 								/^(mpv|yt-dlp|ffmpeg|sox)\b.*(not installed|missing)/i.test(result) ||
 								/^No (results|radio stations) found/i.test(result) ||
