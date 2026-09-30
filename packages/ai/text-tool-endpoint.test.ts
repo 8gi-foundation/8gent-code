@@ -19,11 +19,14 @@ import {
 	buildTextToolCall,
 	extractUsage,
 	isNativeToolParserFailure,
+	isToolsUnsupported,
 	NATIVE_TOOL_MARKUP_REMINDER,
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
 	renderQwenChatML,
+	shouldDeclareTools,
 	type TextToolUsage,
+	toolCallsFromMessage,
 } from "./text-tool-endpoint";
 import { runTextToolAgent } from "./text-tool-loop";
 
@@ -591,5 +594,176 @@ describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never
 		expect(failure.message).toStartWith("The local model turn could not complete:");
 		expect(failure.message).toContain("built-in tool-call parser");
 		expect(isLocalTurnFailureReply(failure.message)).toBe(true);
+	});
+});
+
+// Ollama's qwen PARSER succeeds on native <tool_call> markup: it strips the call
+// from `content` and returns it in `message.tool_calls` (only when the request
+// declared the tool; without `tools` it is dropped). Captured shape from
+// qwen3.8:27b-mlx on Ollama 0.34.4, 2026-09-30.
+const structuredReply = (content: string, calls: Array<{ name: string; arguments: unknown }>) => () =>
+	Response.json({
+		choices: [
+			{
+				index: 0,
+				message: {
+					role: "assistant",
+					content,
+					tool_calls: calls.map((c, i) => ({
+						id: `call_${i}`,
+						index: i,
+						type: "function",
+						function: { name: c.name, arguments: c.arguments },
+					})),
+				},
+				finish_reason: "tool_calls",
+			},
+		],
+		usage: { prompt_tokens: 462, completion_tokens: 51, total_tokens: 513 },
+	});
+
+describe("toolCallsFromMessage (Ollama/OpenAI message.tool_calls)", () => {
+	it("reads string and object arguments, in order", () => {
+		expect(
+			toolCallsFromMessage({
+				tool_calls: [
+					{ function: { name: "read_file", arguments: '{"path":"README.md"}' } },
+					{ function: { name: "list_files", arguments: { path: "." } } },
+					{ function: { name: "git_status" } },
+				],
+			}),
+		).toEqual([
+			{ name: "read_file", arguments: { path: "README.md" } },
+			{ name: "list_files", arguments: { path: "." } },
+			{ name: "git_status", arguments: {} },
+		]);
+	});
+
+	it("skips entries with no name or arguments that are not an object", () => {
+		expect(
+			toolCallsFromMessage({
+				tool_calls: [
+					{ function: { arguments: "{}" } },
+					{ function: { name: "a", arguments: "not json" } },
+					{ function: { name: "b", arguments: "[1,2]" } },
+					null,
+				],
+			}),
+		).toEqual([]);
+		expect(toolCallsFromMessage({ content: "hi" })).toEqual([]);
+		expect(toolCallsFromMessage(undefined)).toEqual([]);
+	});
+});
+
+describe("shouldDeclareTools / isToolsUnsupported", () => {
+	const spec = { name: "read_file", description: "", parameters: {} };
+	it("declares only for ollama with tools, unless switched off", () => {
+		expect(shouldDeclareTools("ollama", [spec], {})).toBe(true);
+		expect(shouldDeclareTools("ollama", [], {})).toBe(false);
+		expect(shouldDeclareTools("ollama", undefined, {})).toBe(false);
+		expect(shouldDeclareTools("lmstudio", [spec], {})).toBe(false);
+		expect(shouldDeclareTools("ollama", [spec], { EIGHT_TEXT_TOOLS_DECLARE: "0" })).toBe(false);
+	});
+	it("recognises Ollama's no-tool-support 400 only", () => {
+		expect(isToolsUnsupported(400, '{"error":"registry.ollama.ai/library/gemma:2b does not support tools"}')).toBe(true);
+		expect(isToolsUnsupported(500, "does not support tools")).toBe(false);
+		expect(isToolsUnsupported(400, '{"error":"bad request"}')).toBe(false);
+	});
+});
+
+describe("buildTextToolCall returns structured tool_calls instead of losing them", () => {
+	const specs = [
+		{ name: "read_file", description: "read", parameters: { type: "object", properties: { path: { type: "string" } } } },
+	];
+
+	it("declares the registered tools to ollama and returns prose plus the structured call", async () => {
+		const seen = stubSequence([
+			structuredReply("Let me check the root README.", [{ name: "read_file", arguments: '{"path":"README.md"}' }]),
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: specs });
+		const reply = await call([{ role: "user", content: "read it" }]);
+		expect(reply).toEqual({
+			content: "Let me check the root README.",
+			toolCalls: [{ name: "read_file", arguments: { path: "README.md" } }],
+		});
+		const body = seen[0] as unknown as { tools?: Array<{ function: { name: string } }> };
+		expect(body.tools?.map((t) => t.function.name)).toEqual(["read_file"]);
+	});
+
+	it("an empty content with tool_calls is a call, not a swallowed reply (no recovery request)", async () => {
+		const seen = stubSequence([structuredReply("", [{ name: "read_file", arguments: { path: "a.ts" } }])]);
+		const call = buildTextToolCall({ provider: "ollama", model: "m", tools: specs });
+		const reply = await call([{ role: "user", content: "x" }]);
+		expect(reply).toEqual({ content: "", toolCalls: [{ name: "read_file", arguments: { path: "a.ts" } }] });
+		expect(seen.length).toBe(1);
+	});
+
+	it("never declares tools to other providers, and a plain reply stays a string", async () => {
+		const seen = stubSequence([ok("hello")]);
+		const call = buildTextToolCall({ provider: "lmstudio", model: "m", tools: specs });
+		expect(await call([{ role: "user", content: "x" }])).toBe("hello");
+		expect("tools" in (seen[0] as object)).toBe(false);
+	});
+
+	it("resends without tools when the model does not support them, and stops declaring", async () => {
+		const seen = stubSequence([
+			() => Response.json({ error: "registry.ollama.ai/library/g:2b does not support tools" }, { status: 400 }),
+			ok("first"),
+			ok("second"),
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "g:2b", tools: specs });
+		expect(await call([{ role: "user", content: "x" }])).toBe("first");
+		expect(await call([{ role: "user", content: "y" }])).toBe("second");
+		expect(seen.map((b) => "tools" in (b as object))).toEqual([true, false, false]);
+	});
+});
+
+describe("a text-tool turn whose call came back as structured tool_calls runs it", () => {
+	const ran: string[] = [];
+	const tools = [
+		{
+			spec: { name: "read_file", description: "read", parameters: { type: "object", properties: {} } },
+			run: async (args: Record<string, unknown>) => {
+				ran.push(String(args.path));
+				return `# contents of ${String(args.path)}`;
+			},
+		},
+	];
+
+	it("runs the structured call (was: prose-only reply, turn ended, nothing written)", async () => {
+		ran.length = 0;
+		stubSequence([
+			structuredReply("Let me check tooling and the root README.", [
+				{ name: "read_file", arguments: '{"path":"README.md"}' },
+			]),
+			ok("DONE: The README has a Deck section."),
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: tools.map((t) => t.spec) });
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "check the README" }],
+			tools,
+			call,
+			maxRounds: 4,
+		});
+		expect(ran).toEqual(["README.md"]);
+		expect(result.toolLog.map((t) => t.name)).toEqual(["read_file"]);
+		expect(result.content).toContain("Deck section");
+	});
+
+	it("ignores a structured call to an unregistered tool", async () => {
+		ran.length = 0;
+		stubSequence([
+			structuredReply("On it.", [{ name: "delete_everything", arguments: "{}" }]),
+			ok("DONE: nothing to do."),
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "m", tools: tools.map((t) => t.spec) });
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "x" }],
+			tools,
+			call,
+			maxRounds: 2,
+		});
+		expect(result.toolLog).toEqual([]);
+		expect(ran).toEqual([]);
 	});
 });
