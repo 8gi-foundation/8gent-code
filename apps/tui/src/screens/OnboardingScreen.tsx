@@ -18,6 +18,7 @@
 import { Box, Text, useInput, useStdout } from "ink";
 import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
 import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
 import { useTypewriter } from "../hooks/useTypewriter.js";
 
@@ -164,14 +165,16 @@ function shouldShowInstallHint(
  * IDs (filtering obvious embedding models). Used by the providerCheck step
  * so the user can see what's actually loaded, not just "live".
  */
-async function fetchProviderModels(
+export async function fetchProviderModels(
 	provider: OnboardingProviderId,
 ): Promise<string[]> {
 	const isEmbed = (id: string): boolean =>
 		/embed|embedding|nomic|bge-/i.test(id);
 	try {
 		if (provider === "ollama") {
-			const host = process.env.OLLAMA_HOST || "http://localhost:11434";
+			// OLLAMA_BASE_URL, then OLLAMA_HOST, normalised, like the rest of the
+			// app: a bare host:port OLLAMA_HOST used to be an invalid URL here.
+			const host = resolveOllamaBaseUrl();
 			const ctrl = new AbortController();
 			const t = setTimeout(() => ctrl.abort(), 1500);
 			const res = await fetch(`${host}/api/tags`, { signal: ctrl.signal });

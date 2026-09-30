@@ -53,3 +53,61 @@ describe("apfel default port", () => {
 		expect(seen.some((u) => u.includes("11500"))).toBe(false);
 	});
 });
+
+/**
+ * The Ollama probes resolve the host like the rest of the app: OLLAMA_BASE_URL
+ * first, then OLLAMA_HOST, normalised. Both used to read the raw OLLAMA_HOST,
+ * so a bare "host:port" (what the ollama CLI takes) became an invalid URL and
+ * OLLAMA_BASE_URL was ignored.
+ */
+describe("ollama host resolution in the TUI probes", () => {
+	const saved = { host: process.env.OLLAMA_HOST, base: process.env.OLLAMA_BASE_URL };
+	afterEach(() => {
+		for (const [k, v] of [
+			["OLLAMA_HOST", saved.host],
+			["OLLAMA_BASE_URL", saved.base],
+		] as const) {
+			if (v === undefined) Reflect.deleteProperty(process.env, k);
+			else process.env[k] = v;
+		}
+	});
+	const recordFetch = (): string[] => {
+		const seen: string[] = [];
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			seen.push(String(input instanceof Request ? input.url : input));
+			return new Response(JSON.stringify({ models: [{ name: "m" }] }), { status: 200 });
+		}) as typeof fetch;
+		return seen;
+	};
+
+	test("provider health: a bare host:port OLLAMA_HOST is probed as a real URL", async () => {
+		Reflect.deleteProperty(process.env, "OLLAMA_BASE_URL");
+		process.env.OLLAMA_HOST = "10.0.0.5:11434";
+		const seen = recordFetch();
+		await probeProviders();
+		expect(seen).toContain("http://10.0.0.5:11434/api/tags");
+	});
+
+	test("provider health: OLLAMA_BASE_URL wins over OLLAMA_HOST", async () => {
+		process.env.OLLAMA_BASE_URL = "http://gpu:21434";
+		process.env.OLLAMA_HOST = "other:1";
+		const seen = recordFetch();
+		await probeProviders();
+		expect(seen).toContain("http://gpu:21434/api/tags");
+		expect(seen.some((u) => u.includes("other:1"))).toBe(false);
+	});
+
+	test("setup provider check: same resolution for the model list", async () => {
+		const { fetchProviderModels } = await import("../screens/OnboardingScreen.js");
+		process.env.OLLAMA_BASE_URL = "http://gpu:21434";
+		process.env.OLLAMA_HOST = "other:1";
+		let seen = recordFetch();
+		expect(await fetchProviderModels("ollama")).toEqual(["m"]);
+		expect(seen).toEqual(["http://gpu:21434/api/tags"]);
+		Reflect.deleteProperty(process.env, "OLLAMA_BASE_URL");
+		process.env.OLLAMA_HOST = "10.0.0.5:11434";
+		seen = recordFetch();
+		await fetchProviderModels("ollama");
+		expect(seen).toEqual(["http://10.0.0.5:11434/api/tags"]);
+	});
+});

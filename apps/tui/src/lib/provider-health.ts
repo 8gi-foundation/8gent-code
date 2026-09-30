@@ -11,6 +11,8 @@
  * user can see at a glance which engines are warmed up.
  */
 
+import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
+
 export interface ProviderStatus {
 	name: "apfel" | "lmstudio" | "ollama";
 	live: boolean;
@@ -71,7 +73,10 @@ export async function probeProviders(): Promise<{
 	const lmStudioHost = process.env.LM_STUDIO_HOST || "http://localhost:1234";
 	const lmStudioLive = await probeUrl(`${lmStudioHost}/v1/models`);
 
-	const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
+	// The configured Ollama, resolved like everywhere else (OLLAMA_BASE_URL,
+	// then OLLAMA_HOST, normalised). A bare host:port OLLAMA_HOST, which the
+	// ollama CLI accepts, used to be an invalid URL here and read as down.
+	const ollamaHost = resolveOllamaBaseUrl();
 	const ollamaLive = await probeUrl(`${ollamaHost}/api/tags`);
 
 	const statuses: ProviderStatus[] = [

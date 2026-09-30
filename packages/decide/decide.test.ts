@@ -165,6 +165,14 @@ describe("ollama backend", () => {
 		expect(resolveOllamaHost({ OLLAMA_HOST: "http://box:1/" })).toBe("http://box:1");
 	});
 
+	it("prefers OLLAMA_BASE_URL, like the rest of the harness, and cuts an OpenAI /v1 base", () => {
+		expect(resolveOllamaHost({ OLLAMA_BASE_URL: "http://127.0.0.1:21434", OLLAMA_HOST: "other:1" })).toBe(
+			"http://127.0.0.1:21434",
+		);
+		expect(resolveOllamaHost({ OLLAMA_BASE_URL: "http://gpu:11434/v1/" })).toBe("http://gpu:11434");
+		expect(resolveOllamaHost({ OLLAMA_BASE_URL: "  ", OLLAMA_HOST: "box:2" })).toBe("http://box:2");
+	});
+
 	it("sends pinned deterministic settings and returns the contract shape", async () => {
 		const calls: Call[] = [];
 		const fetch = fakeFetch(
