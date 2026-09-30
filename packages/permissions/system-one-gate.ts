@@ -115,6 +115,10 @@ export function systemOneEnabled(env: Record<string, string | undefined> = proce
  * the judge is no longer warmed at startup: it loads on the first command
  * that needs it, inside the cold budget. The rules always run first and win.
  *
+ * Also under this flag (#3168): an `rm` whose every target does not exist
+ * inside the caller's working directory passes without the judge, since it
+ * deletes nothing (see s1-rm-nothing.ts for the exact conditions).
+ *
  * `bun test` runs the repo's own test code, so skipping the judge for it is a
  * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
  */
@@ -317,6 +321,7 @@ export const defaultAskHuman: AskHuman = async (request) => {
 export async function systemOneGate(
 	command: string,
 	env: Record<string, string | undefined> = process.env,
+	cwd?: string,
 ): Promise<SystemOneGateResult> {
 	if (!systemOneEnabled(env)) return { run: true };
 	const allow = systemOneAllowlist(env);
@@ -332,6 +337,26 @@ export async function systemOneGate(
 			}
 		} catch {
 			// The allowlist failing is "no opinion": fall through to the judge.
+		}
+		// An rm whose every target is absent inside the workspace deletes
+		// nothing (#3168). Needs the caller's working directory; without it,
+		// today's behaviour.
+		try {
+			const { rmOfNothing } = await import("./s1-rm-nothing");
+			if (rmOfNothing(command, cwd)) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: "rm of paths that do not exist in the workspace: nothing to delete",
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
 		}
 	}
 	let guard: BashGuardResult;

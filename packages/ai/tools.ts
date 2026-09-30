@@ -1178,7 +1178,7 @@ async function runShellCommand(command: string): Promise<string> {
 	// ToolExecutor.runCommand: a block is final and never follows a Y, and an
 	// escalate's own question is the card. One command, at most one card.
 	const { systemOneGate } = await import("../permissions/system-one-gate");
-	const systemOne = await systemOneGate(command);
+	const systemOne = await systemOneGate(command, process.env, ctx.workingDirectory);
 	if (!systemOne.run) return systemOne.message as string;
 
 	if (permissionCheck === "ask" && systemOne.humanApproved !== true) {

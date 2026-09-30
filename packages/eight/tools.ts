@@ -2000,7 +2000,7 @@ export class ToolExecutor {
 		// System One block is final and must not follow a Y the person gave,
 		// and when it escalates it asks the person itself, so that answer is
 		// the card. One command, at most one card.
-		const systemOne = await systemOneGate(command);
+		const systemOne = await systemOneGate(command, process.env, this.workingDirectory);
 		if (!systemOne.run) return systemOne.message as string;
 
 		if (permissionCheck === "ask" && systemOne.humanApproved !== true) {
