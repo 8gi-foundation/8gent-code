@@ -113,10 +113,12 @@ async function capture(run: () => Promise<unknown>, env: Record<string, string |
 	} catch (err) {
 		const e = err as Error;
 		// Our messages mention the endpoint; runtime messages (refused, JSON parse) vary by Bun
-		// version, and so does a refused connection's error name (Error on macOS, not on Linux).
+		// version. A refused connection's error name varies by platform too (Error on macOS,
+		// TypeError on Linux), so under "refused" the name is the runtime's, whatever it is.
 		const ours = /api\/tags|answered HTTP/.test(e?.message ?? "");
+		const stableName = ours || (scenario !== "refused" && STABLE_ERROR_NAMES.has(e?.name));
 		result = {
-			threw: ours || STABLE_ERROR_NAMES.has(e?.name) ? e?.name : "<runtime>",
+			threw: stableName ? e?.name : "<runtime>",
 			message: ours ? e.message : "<runtime>",
 		};
 	} finally {
