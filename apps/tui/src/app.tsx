@@ -34,6 +34,7 @@ import {
 import { TabBar } from "./components/TabBar.js";
 import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
+import { motionEnabled } from "./lib/motion.js";
 import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
@@ -6020,6 +6021,20 @@ export function App({
 		status: a.status,
 	}));
 	const agentRows = deriveAgents(orchestrationAgents);
+	// The header's braille 8 lives only on the plain HUD: motion on, the chat
+	// view up, nothing over it. Anything that asks for attention (the palette,
+	// an approval card, setup) gets a still mark. A scrolled chat holds it from
+	// MessageList; the terminal's own limits are checked in lib/living-mark.ts.
+	const headerMarkLiving =
+		motionEnabled(showAnimations) &&
+		viewMode === "chat" &&
+		activeTabType === "chat" &&
+		!paletteOpen &&
+		!isApprovalPending &&
+		!showOnboarding &&
+		!nameQuestionOpen &&
+		!isBubbleNavMode &&
+		!bgPanelOpen;
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
@@ -6036,6 +6051,7 @@ export function App({
 						sessionTime={sessionTime}
 						lilEightState={lilEightState}
 						width={cols}
+						living={headerMarkLiving}
 					/>
 				</Box>
 

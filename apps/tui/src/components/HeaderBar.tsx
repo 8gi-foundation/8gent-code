@@ -17,13 +17,22 @@
  * Pure presentational. Theme tokens only. No inline hex.
  */
 
-import { Box, Text } from "ink";
-import React from "react";
+import { Box, Text, useStdout } from "ink";
+import React, { useEffect } from "react";
 import {
 	cellWidth,
 	fitHeaderMiddle,
 	type HeaderMiddle,
 } from "../lib/header-layout.js";
+import { INTRO_PALETTE } from "../lib/intro-converge.js";
+import {
+	MARK_COLUMNS,
+	MIN_COLS,
+	type MarkStream,
+	headerMarkFrame,
+	livingMarkWriter,
+} from "../lib/living-mark.js";
+import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 import { LilEightBadge, type LilEightState } from "./LilEightBadge.js";
 
@@ -70,6 +79,14 @@ interface HeaderBarProps {
 	lilEightState: LilEightState;
 	/** Terminal columns the header may use. Defaults to 80 when omitted. */
 	width?: number;
+	/**
+	 * The HUD wants the braille 8 alive: the main view is up, nothing sits
+	 * over it, motion is on. The mark still holds still for the terminal's
+	 * own reasons (lib/living-mark.ts). Off by default.
+	 */
+	living?: boolean;
+	/** Draw the braille 8 beside the pill when it fits. Defaults to true where braille draws. */
+	mark?: boolean;
 }
 
 /**
@@ -113,13 +130,40 @@ const MIDDLE_MIN = 6;
  * tagline, and finally the whole workspace segment with its padding.
  * Exported so tests can pin the layout without rendering.
  */
-export function planHeader(props: HeaderBarProps): {
+export interface HeaderPlan {
 	compactHint: boolean;
 	compactBrand: boolean;
 	middle: HeaderMiddle;
 	middleAvailable: number;
-} {
+	/** The braille 8 sits left of the pill, in the header's first MARK_COLUMNS columns. */
+	mark: boolean;
+}
+
+/**
+ * The braille 8 takes MARK_COLUMNS only when it costs nothing that carries
+ * information: the same pill and hint, the whole branch, and the sync state
+ * whenever it would show without it. Only the tail of an already-shortened path may give way. When
+ * columns run out it is the first thing to go. Never on a terminal that
+ * cannot draw braille.
+ */
+export function planHeader(props: HeaderBarProps): HeaderPlan {
 	const width = props.width ?? DEFAULT_WIDTH;
+	const plain = planRow(props, width);
+	const wantMark = (props.mark ?? glyphs().eight === null) && width >= MIN_COLS;
+	if (wantMark) {
+		const withMark = planRow(props, width - MARK_COLUMNS);
+		const free =
+			withMark.compactBrand === plain.compactBrand &&
+			withMark.compactHint === plain.compactHint &&
+			withMark.middle.branch === plain.middle.branch &&
+			(plain.middle.sync === "" || withMark.middle.sync === plain.middle.sync) &&
+			(withMark.middle.branch !== "" || withMark.middle.path !== "");
+		if (free) return { ...withMark, mark: true };
+	}
+	return { ...plain, mark: false };
+}
+
+function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark"> {
 	const steps: Array<[compactBrand: boolean, compactHint: boolean]> = [
 		[false, false],
 		[false, true],
@@ -161,11 +205,12 @@ export function HeaderBar(props: HeaderBarProps) {
 		sessionTime,
 		lilEightState,
 	} = props;
-	const { compactHint, compactBrand, middle } = planHeader(props);
+	const { compactHint, compactBrand, middle, mark } = planHeader(props);
 
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
 			<Box flexShrink={0}>
+				{mark ? <HeaderMark living={Boolean(props.living)} /> : null}
 				<BrandPill updateAvailable={updateAvailable} version={version} compact={compactBrand} />
 			</Box>
 
@@ -258,6 +303,43 @@ function BrandPill({
 					<Text color={ui.orange}>↑ v{updateAvailable.latest}</Text>
 				</>
 			) : null}
+		</Box>
+	);
+}
+
+const MARK_STILL = headerMarkFrame(0, false);
+
+/**
+ * The braille 8, three rows beside the three-row pill, drawn still by Ink.
+ * While `living`, the writer in lib/living-mark.ts keeps its cells alive
+ * without a single Ink render. Under NO_COLOR it is shape only.
+ */
+export function HeaderMark({ living }: { living: boolean }) {
+	const { stdout } = useStdout();
+	// Declared first so it runs first on unmount: the header is leaving, so
+	// the writer stops without painting the still mark over whatever follows.
+	useEffect(() => {
+		if (!stdout) return;
+		return () => livingMarkWriter(stdout as unknown as MarkStream).setActive(false, false);
+	}, [stdout]);
+	useEffect(() => {
+		if (!living || !stdout) return;
+		const writer = livingMarkWriter(stdout as unknown as MarkStream);
+		writer.setActive(true);
+		return () => writer.setActive(false);
+	}, [living, stdout]);
+	const colour = drawsColour();
+	return (
+		<Box flexDirection="column" flexShrink={0} marginRight={MARK_COLUMNS - MARK_STILL[0].length}>
+			{MARK_STILL.map((row, r) => (
+				<Text key={r}>
+					{row.map((cell, k) => (
+						<Text key={k} color={colour && cell.colour ? INTRO_PALETTE[cell.colour] : undefined}>
+							{cell.ch}
+						</Text>
+					))}
+				</Text>
+			))}
 		</Box>
 	);
 }
