@@ -1168,7 +1168,6 @@ async function runShellCommand(command: string): Promise<string> {
 	const ctx = getToolContext();
 	const permissionManager = getPermissionManager();
 	const hookManager = getHookManager();
-	hookManager.setWorkingDirectory(ctx.workingDirectory);
 
 	const permissionCheck = permissionManager.checkPermission(command);
 	if (permissionCheck === "denied") {

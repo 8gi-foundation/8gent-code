@@ -364,7 +364,7 @@ export class HookManager {
 				hook.command,
 				payload,
 				hook.timeout ?? DEFAULT_YAML_TIMEOUT,
-				this.workingDirectory,
+				this.directoryFor(payload.workingDirectory),
 			);
 
 			hookResults.push({
@@ -429,8 +429,8 @@ export class HookManager {
 		const fullContext: HookContext = {
 			sessionId: this.sessionId,
 			timestamp: new Date(),
-			workingDirectory: this.workingDirectory,
 			...context,
+			workingDirectory: this.directoryFor(context.workingDirectory),
 		};
 
 		for (const hook of hooks) {
@@ -502,7 +502,7 @@ export class HookManager {
 
 		return new Promise((resolve, reject) => {
 			const proc = spawnShell(command, {
-				cwd: this.workingDirectory,
+				cwd: context.workingDirectory,
 				env: {
 					...process.env,
 					EIGHGENT_SESSION_ID: context.sessionId,
@@ -595,7 +595,7 @@ export class HookManager {
 
 		return new Promise((resolve, reject) => {
 			const proc = spawn(interpreter, [scriptPath], {
-				cwd: this.workingDirectory,
+				cwd: context.workingDirectory,
 				env: {
 					...process.env,
 					EIGHGENT_CONTEXT: JSON.stringify(context),
@@ -780,10 +780,20 @@ export class HookManager {
 	}
 
 	/**
-	 * Set working directory
+	 * Set the default working directory, used only by a call that names none.
+	 *
+	 * The manager is one per process (it holds the registered hooks), so its
+	 * directory must not be an agent's: each agent passes its own
+	 * `workingDirectory` with every executeHooks() and fire() call (#3147).
+	 * Setting it here from an agent would move every other agent's hooks.
 	 */
 	setWorkingDirectory(dir: string): void {
 		this.workingDirectory = dir;
+	}
+
+	/** The directory a call names, else the default. */
+	private directoryFor(dir: unknown): string {
+		return typeof dir === "string" && dir.length > 0 ? dir : this.workingDirectory;
 	}
 
 	/**

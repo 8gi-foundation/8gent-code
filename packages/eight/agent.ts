@@ -271,9 +271,6 @@ export class Agent {
 					? false
 					: true;
 
-		// Set working directory for hooks
-		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
-
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
 		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
@@ -1406,6 +1403,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 					tool: event.toolName,
 					args: event.args,
 					sessionId: this.sessionId,
+					workingDirectory: this.config.workingDirectory || process.cwd(),
 				});
 				if (preResult.blocked) {
 					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
@@ -1634,6 +1632,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				// Fire YAML PostToolUse hooks (non-blocking, best-effort)
 				this.hookManager
 					.fire("PostToolUse", {
+						workingDirectory: this.config.workingDirectory || process.cwd(),
 						tool: event.toolName,
 						args: event.args,
 						result: resultStr.slice(0, 2000),
@@ -2342,6 +2341,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// Fire YAML OnError hooks (best-effort)
 			this.hookManager
 				.fire("OnError", {
+					workingDirectory: this.config.workingDirectory || process.cwd(),
 					error: errMsg,
 					stack: err instanceof Error ? err.stack : undefined,
 					sessionId: this.sessionId,
