@@ -129,17 +129,25 @@ export async function resolveReadyProvider(
 }
 
 /**
+ * How long the TUI waits before retrying agent init after it ended not ready,
+ * so a provider started after launch is picked up. Equal to the readiness
+ * cache TTL, so each retry probes afresh.
+ */
+export const READINESS_RETRY_MS = 10_000;
+
+/**
  * Share one probe per provider/model across callers for `ttlMs`.
  *
- * The TUI's agent-init effect re-runs many times a second while the app
- * settles, cancelling the previous run each time. Without sharing, every run
- * starts its own 3s probe and is cancelled before it finishes, so no run ever
- * acts on a result. With sharing, every run awaits the same probe and the run
- * that is current when it lands acts on it. The TTL lets a provider that comes
- * back be noticed again.
+ * The TUI's agent-init effect can re-run several times while the app settles
+ * (provider, model and tab resolve one after another), cancelling the previous
+ * run each time. Without sharing, every run starts its own 3s probe and is
+ * cancelled before it finishes, so no run ever acts on a result. With sharing,
+ * every run awaits the same probe and the run that is current when it lands
+ * acts on it. The TTL lets a provider that comes back be noticed again on the
+ * next retry (READINESS_RETRY_MS).
  */
 export function createReadinessCache(
-	ttlMs = 10_000,
+	ttlMs = READINESS_RETRY_MS,
 	resolve: typeof resolveReadyProvider = resolveReadyProvider,
 	now: () => number = Date.now,
 ): (want: { provider: string; model: string }) => Promise<ReadinessDecision> {
