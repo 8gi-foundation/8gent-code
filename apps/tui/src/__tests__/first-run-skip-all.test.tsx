@@ -18,7 +18,14 @@ test("/skip all at the first setup step lands on the normal input", async () => 
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-first-run-"));
 	try {
 		const proc = Bun.spawn(
-			[process.execPath, path.join(import.meta.dir, "first-run-skip-all.harness.tsx")],
+			[
+				process.execPath,
+				// Same Ink preload as bun test (bunfig.toml): with CI set, Ink would
+				// otherwise write only its final frame and the harness sees nothing.
+				"--preload",
+				path.join(import.meta.dir, "../../../../tests/preload-ink-interactive.ts"),
+				path.join(import.meta.dir, "first-run-skip-all.harness.tsx"),
+			],
 			{
 				env: { ...process.env, HOME: home, "8GENT_NO_INTRO": "1", "8GENT_REDUCED_MOTION": "1" },
 				stdout: "pipe",
