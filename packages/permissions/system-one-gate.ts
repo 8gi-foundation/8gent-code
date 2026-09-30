@@ -10,10 +10,13 @@
  *                            unreachable, invalid answer, timeout), commands are
  *                            checked by the deterministic rules and the
  *                            read-only allowlist alone, and it says so once.
- *   1 / true              -> "strict": the explicit opt-in, unchanged from
- *                            before default-on. Any judge the probe finds is
- *                            asked, and a judge that cannot answer blocks
- *                            (fail closed). Guarded mode (#3170) sets this.
+ *   1 / true              -> "strict": the explicit opt-in. Any judge the
+ *                            probe finds is asked. When it cannot answer, the
+ *                            rules still run (a block rule is final) and
+ *                            everything else goes to a person through the
+ *                            card, never an allow (#3193); with no person
+ *                            (headless, pilot) that is a block, fail closed.
+ *                            Guarded mode (#3170) sets this.
  *   0 / false / off / no  -> "off": `systemOneGate` returns { run: true }
  *                            without importing @8gent/decide or constructing a
  *                            decider, so the shell path is unchanged.
@@ -35,7 +38,8 @@
  *   escalate -> ask a human through the TUI approval channel, else an
  *               interactive stdin prompt (default No); no human available
  *               (headless, daemon, CI) -> treated as block
- *   error    -> strict: block (fail closed). default: rules only (block
+ *   error    -> strict: rules, then a person decides; headless: block
+ *               (fail closed). default: rules only (block
  *               rule -> block, escalate rule -> escalate, no rule -> run),
  *               with a one-time notice. Covers decider missing, backend
  *               unreachable, invalid probability, anything that throws.
@@ -81,7 +85,7 @@
 import * as readline from "node:readline";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
-import { requestTuiApproval } from "./tui-approval-channel";
+import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
 export const SYSTEM_ONE_BLOCK_MARKER = "[SYSTEM ONE BLOCKED]";
@@ -142,6 +146,10 @@ export function systemOneEnabled(env: Record<string, string | undefined> = proce
 export function systemOneRulesOnlyNotice(reason: string): string {
 	return `System One: no judge (${reason}); shell commands are checked by the safety rules and the read-only allowlist only. ${SYSTEM_ONE_FLAG}=0 turns System One off.`;
 }
+
+/** Shown once per process when strict mode (Guarded, EIGHT_SYSTEM_ONE=1) has no checker and asks the person instead. */
+export const SYSTEM_ONE_ASK_INSTEAD_NOTICE =
+	"Safety check: the full checker isn't available, so you will be asked before each command it would have checked.";
 
 /** Shown once per process before the first judge load, so a multi-GB load is never silent. */
 export function systemOneJudgeLoadNotice(
@@ -461,6 +469,10 @@ function fmtP(p: number): string {
 	return Number.isFinite(p) ? p.toFixed(4) : "NaN";
 }
 
+/** In every refusal, so the model stops instead of retrying the same command (#3193). */
+export const SYSTEM_ONE_NO_RETRY =
+	"Do not run this command again: it will be refused the same way. Use a different approach, or tell the user what you need.";
+
 function blockMessage(
 	g: BashGuardResult,
 	thresholds: SystemOneThresholds | "unknown",
@@ -472,7 +484,7 @@ function blockMessage(
 	// so the reply never tells the person their approval is what is missing (#3124).
 	const final =
 		g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} Command: ${command}`;
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -571,24 +583,46 @@ export async function systemOneGate(
 					: detail;
 			return decide(command, await rulesOnly(command, reason), RULES_ONLY);
 		}
-		guard = { verdict: "block", pYes: Number.NaN, backend: "unavailable", model: "unavailable" };
-		const why =
+		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
+		// a person decides through the normal card, never an allow (#3193).
+		// With no person (headless, pilot) that escalate is a block: fail closed.
+		const reason =
 			err instanceof SystemOneTimeoutError
-				? warmupLoading
-					? `the System One judge is still loading (warm-up in progress, not ready within ${ms} ms), failing closed; retry in a few seconds`
-					: `System One ${detail}`
-				: `System One unavailable, failing closed: ${detail}`;
-		return { run: false, guard, message: blockMessage(guard, thresholds, why, command) };
+				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
+				: `System One unavailable: ${detail}`;
+		return decide(command, await askInstead(command, reason), RULES_ONLY);
 	}
 	if (isModelVerdict(guard)) warmed = true;
-	if (mode === "default" && judgeFailed(guard)) {
+	if (judgeFailed(guard)) {
+		const reason = guard.reason ?? "the judge gave no valid answer";
 		return decide(
 			command,
-			await rulesOnly(command, guard.reason ?? "the judge gave no valid answer"),
+			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
 			RULES_ONLY,
 		);
 	}
 	return decide(command, guard, thresholds as SystemOneThresholds);
+}
+
+/** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
+function personCanBeAsked(): boolean {
+	return hasTuiApprovalHandler() || (!!process.stdin.isTTY && !process.env.EIGHT_HEADLESS);
+}
+
+/**
+ * Strict mode without a checker: the rules still run first, and a block rule
+ * is still final. Everything else goes to a person as an escalate, never an
+ * allow. One plain line says so, once, when there is a person to ask.
+ */
+async function askInstead(command: string, reason: string): Promise<BashGuardResult> {
+	if (personCanBeAsked()) noticeOnce("ask-instead", SYSTEM_ONE_ASK_INSTEAD_NOTICE);
+	const g = await rulesOnlyGuard(command, reason);
+	if (g.verdict !== "allow") return g;
+	return {
+		...g,
+		verdict: "escalate",
+		reason: `the safety checker is not available (${reason}), so a person decides`,
+	};
 }
 
 /** The notice's short form of why there is no judge; the full reason stays on the verdict. */
@@ -623,17 +657,20 @@ async function decide(
 			action: "System One escalation",
 			details: guard.rule
 				? `A System One safety rule (${guard.rule}) matched this command (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`
-				: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
+				: guard.backend === RULES_ONLY
+					? "The full safety checker isn't available, so you decide whether this runs. Approve only if you meant it."
+					: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
 			command,
 		});
 	} catch {
 		humanApproved = null;
 	}
 	if (humanApproved === true) return { run: true, guard, thresholds: t, humanApproved };
-	const why =
+	const base =
 		humanApproved === false
 			? "escalated and the user declined"
-			: "escalated but no approval channel is available, so escalate is treated as block";
+			: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
+	const why = guard.backend === RULES_ONLY && guard.reason ? `${base} (${guard.reason})` : base;
 	return {
 		run: false,
 		guard,

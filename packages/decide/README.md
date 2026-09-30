@@ -266,9 +266,12 @@ and replaces Selene.
     allowlist alone: a block rule blocks, an escalate rule asks a person (and
     is a block when headless), anything else runs. It never blocks
     everything and never waits past the budget.
-  - `EIGHT_SYSTEM_ONE=1` (or `true`): strict, exactly as before default-on.
-    Any judge the probe finds is asked, and one that cannot answer blocks
-    (fail closed). Guarded mode (#3170) sets this for its calls.
+  - `EIGHT_SYSTEM_ONE=1` (or `true`): strict. Any judge the probe finds is
+    asked. When it cannot answer, the rules still run (a block rule is
+    final) and everything else escalates to a person on the normal card,
+    never an allow (#3193); with no person (headless, daemon, CI) that
+    escalate is a block, fail closed as before. Guarded mode (#3170) sets
+    this for its calls.
   - `EIGHT_SYSTEM_ONE=0` (or `false`/`off`/`no`): off. See "Flag off" below.
 - **Notices.** Two one-line notices, each once per process: `System One: no
   judge (<why>); shell commands are checked by the safety rules and the
@@ -332,18 +335,20 @@ and replaces Selene.
     infinite mode, with `autoApprove`, for allow-listed commands, and for any
     non-dangerous command when headless. Those rules would quietly turn
     escalate into allow.
-  - Any error blocks in strict mode (fail closed): the decider or module
-    fails to load, no backend, an unreachable backend, or an invalid
-    probability. In default mode it falls back to the rules, as above.
-  - A timeout blocks in strict mode (fail closed), and falls back to the
-    rules in default mode. Decider construction, the calibration
+  - Any error (the decider or module fails to load, no backend, an
+    unreachable backend, an invalid probability) and any timeout: default
+    mode falls back to the rules, as above; strict mode asks a person
+    instead, and blocks when no person can be asked (fail closed). Decider construction, the calibration
     lookup and the guard question share one budget: 30 s until the decider
     has answered once in the process (that includes the model load; the
     first gate call took 5.9 to 6.7 s here with the GGUF in the disk cache,
     and a first ever llamacpp run took 47 s), then 10 s. Env
     `EIGHT_SYSTEM_ONE_TIMEOUT_MS` (a positive number) overrides both. The
-    message says `timed out after N ms, failing closed`. A load that overruns
-    blocks that one command and carries on, and the next call uses it. The
+    reason says `timed out after N ms`. A load that overruns affects that
+    one command and carries on, and the next call uses it.
+  - Every refusal ends with a line telling the model not to run the same
+    command again (`SYSTEM_ONE_NO_RETRY`), so a final block does not start
+    a retry loop (#3193). The
     escalate prompt to a human is outside the budget.
 - **Warm-up:** with System One on and the allowlist opted out, `startSystemOneWarmup` runs at TUI startup
   and in the `Agent` constructor. It builds the decider and asks the judge

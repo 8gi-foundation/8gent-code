@@ -25,6 +25,7 @@ import { type Decider, createDecider } from "../decide/index";
 import { decideRules } from "../decide/rules";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
+import { createPermissionHolder } from "./permission-mode";
 import { addPolicy, loadPolicies } from "./policy-engine";
 import {
 	DEFAULT_COLD_TIMEOUT_MS,
@@ -33,6 +34,8 @@ import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
 	SYSTEM_ONE_FLAG,
+	SYSTEM_ONE_ASK_INSTEAD_NOTICE,
+	SYSTEM_ONE_NO_RETRY,
 	SYSTEM_ONE_TIMEOUT_ENV,
 	RULES_ONLY,
 	_resetSystemOne,
@@ -111,6 +114,7 @@ function installStub(extra: { calibrationDir?: string; decider?: () => Decider }
 const saved: Record<string, string | undefined> = {};
 const ENV_KEYS = [
 	SYSTEM_ONE_FLAG,
+	SYSTEM_ONE_NO_RETRY,
 	SYSTEM_ONE_TIMEOUT_ENV,
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG,
@@ -280,7 +284,7 @@ describe("systemOneGate verdicts (stub decider)", () => {
 	test("backend throws -> block (fail closed)", async () => {
 		const r = await systemOneGate("echo SYS1_THROW", on);
 		expect(r.run).toBe(false);
-		expect(r.message).toContain("verdict=block");
+		expect(r.message).toContain("no approval channel is available");
 		expect(r.message).toContain("pYes=NaN");
 		expect(r.message).toContain("failing closed");
 	});
@@ -302,10 +306,8 @@ describe("systemOneGate verdicts (stub decider)", () => {
 		});
 		const r = await systemOneGate("ls", on);
 		expect(r.run).toBe(false);
-		expect(r.message).toContain("backend=unavailable");
-		expect(r.message).toContain(
-			"System One unavailable, failing closed: no decide backend available",
-		);
+		expect(r.message).toContain("backend=rules-only");
+		expect(r.message).toContain("System One unavailable: no decide backend available");
 	});
 
 	test("decider factory throws -> block, and a later call retries construction", async () => {
@@ -346,8 +348,8 @@ describe("systemOneGate verdicts (stub decider)", () => {
 		expect(Date.now() - t0).toBeLessThan(3000);
 		expect(r.run).toBe(false);
 		expect(r.message).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
-		expect(r.message).toContain("verdict=block");
-		expect(r.message).toContain("timed out after 200 ms, failing closed");
+		expect(r.message).toContain("no approval channel is available");
+		expect(r.message).toContain("timed out after 200 ms");
 	});
 
 	test("a hung backend resolution times out and blocks", async () => {
@@ -474,9 +476,9 @@ describe("judge warm-up at startup", () => {
 		const r = await systemOneGate("ls", { ...on, [SYSTEM_ONE_TIMEOUT_ENV]: "200" });
 		expect(r.run).toBe(false);
 		expect(r.message).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
-		expect(r.message).toContain("verdict=block");
-		expect(r.message).toContain("judge is still loading");
-		expect(r.message).toContain("retry in a few seconds");
+		expect(r.message).toContain("no approval channel is available");
+		expect(r.message).toContain("while still loading");
+		expect(r.message).toContain(SYSTEM_ONE_NO_RETRY);
 		expect(r.message).not.toContain("timed out after 200 ms, failing closed");
 	});
 
@@ -889,7 +891,7 @@ describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
 		sink();
 		const r = await systemOneGate("touch made.txt", { ...def, [SYSTEM_ONE_FLAG]: "1" });
 		expect(r.run).toBe(false);
-		expect(r.guard?.backend).toBe("unavailable");
+		expect(r.guard?.backend).toBe(RULES_ONLY);
 		expect(r.message).toContain("failing closed");
 		expect(notes).toEqual([]);
 	});
@@ -981,5 +983,135 @@ describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+/**
+ * #3193: Guarded (strict System One) with no checker installed refused every
+ * checked command with "(blocked)", no card, and the agent retried for 16
+ * steps. Now a person decides through the normal card (never an allow), one
+ * plain line says why, a block rule is still final, headless still fails
+ * closed, and every refusal tells the model not to run the command again.
+ * All through the REAL tool entry points in Guarded mode.
+ */
+describe("Guarded with no checker installed asks the person (#3193)", () => {
+	let dir: string;
+	let cards: string[];
+	let answer: "approve" | "deny";
+	let notes: string[];
+	let ttyWas: PropertyDescriptor | undefined;
+	let headlessWas: string | undefined;
+	const refused = async (url: string): Promise<Response> => {
+		throw new TypeError(`fetch failed: ${url}`);
+	};
+	const noJudgeMachine = () =>
+		createDecider({
+			fetch: refused,
+			env: { OLLAMA_MODELS: mkdtempSync(join(tmpdir(), "sys1-3193-store-")) },
+			llamacppLoader: null,
+		});
+	const guarded = () =>
+		new ToolExecutor(dir, "sys1-3193", undefined, {
+			permission: createPermissionHolder("guarded"),
+			openOnWrite: false,
+		});
+	const nativeGuarded = (command: string) => {
+		setToolContext({ workingDirectory: dir, permission: createPermissionHolder("guarded") });
+		return (
+			agentTools.run_command as unknown as { execute: (i: unknown, o: unknown) => Promise<string> }
+		).execute({ command }, { toolCallId: "sys1-3193", messages: [] });
+	};
+	const interactive = () => {
+		Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+	};
+
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "sys1-3193-"));
+		// System One's own question goes through the real default: the TUI channel.
+		_setSystemOneOverridesForTests({ createDecider: noJudgeMachine });
+		notes = [];
+		setSystemOneNoticeSink((line) => notes.push(line));
+		cards = [];
+		answer = "approve";
+		registerTuiApprovalHandler(async (req) => {
+			cards.push(req.command ?? "");
+			return answer;
+		});
+		headlessWas = process.env.EIGHT_HEADLESS;
+		ttyWas = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+		// Guarded sets EIGHT_SYSTEM_ONE=1 for its calls whatever the env says.
+		process.env[SYSTEM_ONE_FLAG] = "0";
+		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
+	});
+
+	afterEach(() => {
+		registerTuiApprovalHandler(null);
+		setSystemOneNoticeSink(null);
+		if (ttyWas) Object.defineProperty(process.stdin, "isTTY", ttyWas);
+		else Reflect.deleteProperty(process.stdin, "isTTY");
+		if (headlessWas === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		else process.env.EIGHT_HEADLESS = headlessWas;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("interactive: one card, the command runs on approve, one plain line says why", async () => {
+		interactive();
+		const out = await guarded().execute("run_command", { command: "touch made.txt" });
+		expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+		expect(existsSync(join(dir, "made.txt"))).toBe(true);
+		// One card for one command: the checker's stand-in, and no second permission card.
+		expect(cards).toEqual(["touch made.txt"]);
+		expect(notes).toEqual([SYSTEM_ONE_ASK_INSTEAD_NOTICE]);
+		expect(notes[0]).not.toMatch(/System One|judge|allowlist|EIGHT_/);
+
+		// Native loop, same answer; the line is not repeated.
+		const nat = await nativeGuarded("touch made2.txt");
+		expect(nat).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+		expect(existsSync(join(dir, "made2.txt"))).toBe(true);
+		expect(cards).toEqual(["touch made.txt", "touch made2.txt"]);
+		expect(notes.length).toBe(1);
+	});
+
+	test("interactive: declined is not run, and the model is told not to retry it", async () => {
+		interactive();
+		answer = "deny";
+		const out = await guarded().execute("run_command", { command: "touch made.txt" });
+		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(out).toContain("the user declined");
+		expect(out).toContain(SYSTEM_ONE_NO_RETRY);
+		expect(existsSync(join(dir, "made.txt"))).toBe(false);
+		expect(cards).toEqual(["touch made.txt"]);
+	});
+
+	test("interactive: a block rule is still final, with no card", async () => {
+		interactive();
+		const cmd = "chmod 644 /etc/hosts";
+		expect(decideRules(cmd).verdict).toBe("block");
+		const out = await guarded().execute("run_command", { command: cmd });
+		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(out).toContain(SYSTEM_ONE_NO_RETRY);
+		expect(cards).toEqual([]);
+	});
+
+	test("headless (pilot): still fail-closed, exactly as EIGHT_SYSTEM_ONE=1 with no checker, and no card", async () => {
+		// Headless: no TUI approval channel and no interactive terminal, so no person.
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const out = await guarded().execute("run_command", { command: "touch made.txt" });
+		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(out).toContain("failing closed");
+		expect(out).toContain(SYSTEM_ONE_NO_RETRY);
+		expect(existsSync(join(dir, "made.txt"))).toBe(false);
+		// The env flag path decides the same way.
+		process.env[SYSTEM_ONE_FLAG] = "1";
+		const flag = await new ToolExecutor(dir, "sys1-3193-flag").execute("run_command", {
+			command: "touch made.txt",
+		});
+		expect(flag).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(existsSync(join(dir, "made.txt"))).toBe(false);
+		expect(cards).toEqual([]);
+		// No person to ask, so no line claiming one will be asked.
+		expect(notes).toEqual([]);
 	});
 });

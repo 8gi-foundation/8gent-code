@@ -836,11 +836,12 @@ describe("shared judge failover: a lost shared judge recovers", () => {
 		const before = await systemOneGate("ls -la", gateEnv);
 		expect([before.run, before.guard?.backend]).toEqual([true, "ollama"]);
 		srv.state.up = false;
-		// The shared judge is gone and the in-process one is still loading: every verdict fails closed.
+		// The shared judge is gone and the in-process one is still loading: nothing
+		// is allowed. Strict asks a person instead (#3193); with none, it is refused.
 		for (const cmd of ["ls -la src", "git status", "cat README.md"]) {
 			const r = await systemOneGate(cmd, gateEnv);
 			expect(r.run).toBe(false);
-			expect(r.guard?.backend).toBe("unavailable");
+			expect([r.guard?.backend, r.guard?.verdict, r.humanApproved]).toEqual(["rules-only", "escalate", null]);
 		}
 		release();
 		const after = await systemOneGate("ls -la docs", gateEnv);

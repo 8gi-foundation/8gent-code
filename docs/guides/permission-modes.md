@@ -30,10 +30,10 @@ There is nothing to install. Permission modes are always there:
 - **Shift+Tab** changes the focused tab's mode. Other tabs keep theirs.
 - `8gent --infinite` starts every tab in Infinite.
 - System One checks shell commands in every mode by default. With no judge model installed it checks with the safety rules and the read-only allowlist only, and says so once.
-- `EIGHT_SYSTEM_ONE=1` makes it strict, as before: if its model cannot answer, the command is blocked. Guarded always works this way.
+- `EIGHT_SYSTEM_ONE=1` makes it strict, and Guarded always works this way: every command it would check is either judged by its model or, if the model is not available, put to you on the normal card.
 - `EIGHT_SYSTEM_ONE=0` turns System One off outside Guarded.
 
-Guarded needs System One's local model to judge commands. If it cannot load, the command is blocked rather than run, so Guarded never becomes less safe than Ask by accident.
+Guarded uses System One's local model to judge commands. If the model is not installed or cannot answer, Guarded asks you on the normal card instead, and says so once in the chat; it never lets a command through unasked, so it never becomes less safe than Ask. Commands the built-in safety rules block stay blocked. With no one to ask (a headless run), the command is refused.
 
 ## Agents that start other agents
 

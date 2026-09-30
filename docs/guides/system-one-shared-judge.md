@@ -26,7 +26,7 @@ If no judge model is installed at all, nothing loads: 8gent says once that shell
 
 If the shared server stops answering mid-session, 8gent loads a private copy of the judge in that process and carries on. It never falls back to a different server or a different model.
 
-While the private copy loads, a command that needs a verdict waits within its time limit. If the limit runs out, that command is checked by the safety rules alone (with `EIGHT_SYSTEM_ONE=1`, and in Guarded, it is blocked instead), and the next one uses the loaded judge. New sessions use the shared server again once it is back.
+While the private copy loads, a command that needs a verdict waits within its time limit. If the limit runs out, that command is checked by the safety rules alone (with `EIGHT_SYSTEM_ONE=1`, and in Guarded, you are asked instead, or it is refused when nobody can be asked), and the next one uses the loaded judge. New sessions use the shared server again once it is back.
 
 ## When it does not apply
 
