@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Local model server layer, phase 1 of #3149 (`packages/local-model-server/`): a `LocalModelServer` interface with capability flags and an Ollama adapter, so Ollama becomes one server among equals rather than the assumed default. Eight model-list and health call sites (`/api/tags`) now go through it with no behaviour change, proven by a snapshot of their requests and results taken before the move. A contract suite holds every adapter to the same rules.
+
 ### Changed
 - Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
 
