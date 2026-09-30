@@ -56,7 +56,7 @@ export function getTermToolDefs(): object[] {
 					properties: {
 						command: {
 							type: "string",
-							description: "Binary on $PATH — e.g. 'claude', 'openclaw', 'pi'.",
+							description: "Binary on $PATH, for example 'claude', 'openclaw' or 'pi'.",
 						},
 						args: {
 							type: "array",

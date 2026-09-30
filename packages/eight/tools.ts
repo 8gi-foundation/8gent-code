@@ -2780,7 +2780,7 @@ export class ToolExecutor {
 			const memory = getMemoryManager(this.workingDirectory);
 			const id = await memory.remember(fact, layer, { source: "user:remember" });
 			const stats = await memory.getStats();
-			return `Remembered (${layer}): "${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}"\nID: ${id}\nMemory stats — session: ${stats.session}, project: ${stats.project}, global: ${stats.global}`;
+			return `Remembered (${layer}): "${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}"\nID: ${id}\nMemory stats: session: ${stats.session}, project: ${stats.project}, global: ${stats.global}`;
 		} catch (err) {
 			return `Failed to remember: ${err}`;
 		}

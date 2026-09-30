@@ -387,7 +387,7 @@ export class ProactiveCompression extends CompactionEngine {
 
 		const summaryMsg: Message = {
 			role: "system",
-			content: `[Proactive Compression — Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+			content: `[Proactive Compression: Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
 		};
 
 		const compacted = [systemMsg, summaryMsg, ...recent];
