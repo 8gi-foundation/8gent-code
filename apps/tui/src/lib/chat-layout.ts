@@ -34,6 +34,19 @@ export function chatColumnWidth(cols: number, shell: ShellColumns, min = 24): nu
 	return Math.max(min, width);
 }
 
+/**
+ * Whether the left ContextRail has anything the rest of the HUD does not
+ * already say. The header carries the workspace path and the branch (or
+ * "no repo"); the NOW strip carries the context meter. What is left is the
+ * approval mode and ADHD mode, and in their defaults (ask, off) the rail is
+ * 29 columns of "nothing has changed" taken from the chat (audit 2026-09-30,
+ * #5). Both change only on an explicit user action, so the chat never
+ * reflows mid-turn.
+ */
+export function contextRailHasNews(state: { infinite: boolean; adhdMode: boolean }): boolean {
+	return state.infinite || state.adhdMode;
+}
+
 /** Share of the column a user bubble takes; the rest is the reply side's margin. */
 export const USER_BUBBLE_SHARE = 0.78;
 

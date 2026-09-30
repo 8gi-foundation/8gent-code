@@ -203,7 +203,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError, useLilEightState } from "./hooks/useLilEightState.js";
-import { chatColumnWidth } from "./lib/chat-layout.js";
+import { chatColumnWidth, contextRailHasNews } from "./lib/chat-layout.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
 import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
@@ -5957,11 +5957,15 @@ export function App({
 	// During first-run setup the chat is the whole width: no rails, no PLAN
 	// column. A new user meets one question, not forty labels (intro audit #12).
 	const inSetup = showOnboarding;
-	const showContextRail = cols >= 120 && !inSetup;
-	// The PLAN column sits beside the context rail on wide terminals, and
-	// only while it is open (Ctrl+X, or a plan exists).
+	const wideShell = cols >= 120 && !inSetup;
+	// The left rail steps aside while it would only repeat the header and
+	// the defaults; infinite approval or ADHD mode brings it back.
+	const showContextRail =
+		wideShell && contextRailHasNews({ infinite: infiniteModeActive, adhdMode });
+	// The PLAN column shows on wide terminals, rail or not, and only while it
+	// is open (Ctrl+X, or a plan exists).
 	const showPlanColumn =
-		showContextRail && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
+		wideShell && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
 	const showActivityRail = cols >= 90 && !inSetup;
 	// The chat column's real width: the NOW strip and every bubble size from it.
 	const chatWidth = chatColumnWidth(viewport.width, {
@@ -6057,9 +6061,6 @@ export function App({
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showContextRail && (
 							<ContextRail
-								branch={git.branch}
-								noRepo={git.noRepo}
-								workspaceName={pathMod.basename(process.cwd())}
 								risk={infiniteModeActive ? "high" : "low"}
 								permissions={infiniteModeActive ? "infinite" : "ask"}
 								contextPct={contextPct}

@@ -1,14 +1,16 @@
 /**
  * ContextRail - fixed-width left column for the three-zone TUI shell.
  *
- * Surfaces workspace, branch, approval state, risk level, context pressure,
- * and ADHD mode. Pure presentational: no internal state, no side effects,
+ * Surfaces approval state, risk level, context pressure and ADHD mode. It
+ * does not repeat the workspace or the branch: the header carries both
+ * (audit 2026-09-30, #5). The shell mounts it only while approval or ADHD
+ * mode is off its default (`contextRailHasNews`). Pure presentational: no internal state, no side effects,
  * no data fetching. Used by the wide-width shell layout and rendered to the
  * left of the message area + right inspector.
  *
  * Theme tokens only. No inline hex.
  *
- * Layout: section headings (WORKSPACE / STATE / CONTEXT / ACCESS) sit on their
+ * Layout: section headings (STATE / CONTEXT / ACCESS) sit on their
  * own line in the calm heading tone, bold; orange is kept for state and focus. Data rows use the shared MetricRow helper so labels
  * and values can never collide at narrow widths (the bug that produced
  * `mainch` and `ASKroval`).
@@ -20,26 +22,17 @@ import { t } from "../theme.js";
 import { MetricRow } from "./RailRow.js";
 
 interface ContextRailProps {
-	/** Checked-out branch; "" when there is none or it is not known yet. */
-	branch: string;
-	/** True once a check found no repository: the rail says "no repo". */
-	noRepo?: boolean;
 	risk: "low" | "medium" | "high";
 	permissions: string;
 	contextPct: number;
 	adhdMode: boolean;
-	/** The workspace folder's name. Omitted means not known: no row. */
-	workspaceName?: string;
 }
 
 export function ContextRail({
-	branch,
-	noRepo = false,
 	risk,
 	permissions,
 	contextPct,
 	adhdMode,
-	workspaceName,
 }: ContextRailProps) {
 	const riskColor =
 		risk === "high" ? t.red : risk === "medium" ? t.orange : t.green;
@@ -58,17 +51,6 @@ export function ContextRail({
 			flexDirection="column"
 			overflow="hidden"
 		>
-			<Text color={t.heading} bold>WORKSPACE</Text>
-			{workspaceName ? (
-				<Text color={t.textPrimary} wrap="truncate-end">{workspaceName}</Text>
-			) : null}
-			{branch ? (
-				<MetricRow label="branch" value={branch} color={t.textPrimary} />
-			) : noRepo ? (
-				<Text color={t.textTertiary}>no repo</Text>
-			) : null}
-
-			<Text color={t.dim}> </Text>
 			<Text color={t.heading} bold>STATE</Text>
 			<MetricRow
 				label="approval"
