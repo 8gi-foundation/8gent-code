@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { keepIfSame } from "../lib/keep-if-same.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -188,7 +189,7 @@ export function useGitSync(
 		const run = async () => {
 			try {
 				const r = await computeGitSync(cwd);
-				if (!cancelled) setResult(r);
+				if (!cancelled) setResult(keepIfSame(r));
 			} catch {
 				/* swallow - keep last good label */
 			}

@@ -11,8 +11,8 @@
  *   error:    last turn ended with error within the last 5 seconds
  *   sleep:    no input, no agent activity for >5 minutes
  *
- * Pure derivation - no side effects, no internal state beyond a tick to
- * re-evaluate sleep/done/error windows over time.
+ * Pure derivation - no side effects, no internal state beyond a tick that
+ * fires once, at the moment a done/error/sleep window would flip the badge.
  */
 
 import { useEffect, useState } from "react";
@@ -78,6 +78,26 @@ export function deriveLilEightState(input: LilEightInputs): LilEightState {
 }
 
 /**
+ * When, from `input.now`, the badge would next change with no new input:
+ * the end of the done or error window, or the moment the sleep window
+ * engages. Null when time alone cannot change it (a turn is running, or
+ * the badge is already asleep). Pure, so the schedule is testable.
+ */
+export function nextLilEightChangeAt(input: LilEightInputs): number | null {
+	const { isProcessing, lastTurnEndedAt, lastTurnSuccess, now, idleSinceMs } = input;
+	if (isProcessing) return null;
+	const at: number[] = [];
+	if (lastTurnEndedAt != null) {
+		const window = lastTurnSuccess === false ? ERROR_WINDOW_MS : DONE_WINDOW_MS;
+		const end = lastTurnEndedAt + window;
+		if (end > now) at.push(end);
+	}
+	// deriveLilEightState sleeps when idleSinceMs > SLEEP_AFTER_MS.
+	if (idleSinceMs <= SLEEP_AFTER_MS) at.push(now - idleSinceMs + SLEEP_AFTER_MS + 1);
+	return at.length ? Math.min(...at) : null;
+}
+
+/**
  * Did the turn that just ended fail? Judged by how the turn ended, not by
  * whether anything inside it went wrong.
  *
@@ -108,21 +128,25 @@ export function turnEndedInError(
 }
 
 /**
- * React hook wrapper. Re-evaluates every second so the done/error windows
- * decay back to idle and the sleep window can engage on a quiet TUI.
+ * React hook wrapper. Sleeps until the next moment time alone would change
+ * the badge (a done/error window closing, the sleep window opening) and
+ * re-renders once then. The caller is the whole App, and the old 1 s
+ * interval redrew the entire idle TUI every second to show the same badge.
  */
 export function useLilEightState(
 	input: Omit<LilEightInputs, "now">,
 	enabled = true,
 ): LilEightState {
 	const [tick, setTick] = useState(0);
+	const snapshot = { ...input, now: Date.now() };
+	const state = deriveLilEightState(snapshot);
+	const changeAt = nextLilEightChangeAt(snapshot);
 	useEffect(() => {
-		if (!enabled) return;
-		const id = setInterval(() => setTick((n) => n + 1), 1_000);
-		return () => clearInterval(id);
-	}, [enabled]);
-	void tick;
-	return deriveLilEightState({ ...input, now: Date.now() });
+		if (!enabled || changeAt == null) return;
+		const id = setTimeout(() => setTick((n) => n + 1), Math.max(0, changeAt - Date.now()));
+		return () => clearTimeout(id);
+	}, [enabled, changeAt, tick]);
+	return state;
 }
 
 export const _testing = {

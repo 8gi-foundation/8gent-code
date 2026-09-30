@@ -3,7 +3,7 @@
  *
  * Features:
  * - Animated spinner with status text
- * - Pulsing prompt when idle
+ * - A still prompt chevron (an idle prompt never redraws the screen)
  * - Step indicator for multi-step operations
  * - Ghost text suggestions (Tab to accept)
  * - Slash command support (/kanban, /predict, /avenues)
@@ -145,7 +145,6 @@ export function CommandInput({
 	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
 	const [historyIndex, setHistoryIndex] = useState(-1);
 	const draftRef = useRef("");
-	const [promptPulse, setPromptPulse] = useState(true);
 	const [showSlashHelp, setShowSlashHelp] = useState(false);
 	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>([]);
 	const [slashByToken, setSlashByToken] = useState<Map<string, SlashRegistryEntry>>(new Map());
@@ -201,17 +200,6 @@ export function CommandInput({
 		recentCommands,
 		extraContextSuggestions: extraSlashContext,
 	});
-
-	// Pulsing prompt animation when idle
-	useEffect(() => {
-		if (isProcessing) return;
-
-		const interval = setInterval(() => {
-			setPromptPulse((prev) => !prev);
-		}, 800);
-
-		return () => clearInterval(interval);
-	}, [isProcessing]);
 
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
@@ -375,7 +363,7 @@ export function CommandInput({
 			{/* Main input row — ALWAYS visible */}
 			<Box>
 				{/* Animated prompt */}
-				<PromptIndicator pulse={promptPulse && showAnimations} />
+				<PromptIndicator />
 				<Text> </Text>
 
 				{/* Text input with ghost overlay */}
@@ -543,28 +531,14 @@ export function handleGoCommand(
 // Sub-Components
 // ============================================
 
-// Animated prompt indicator
-interface PromptIndicatorProps {
-	pulse: boolean;
-}
-
-function PromptIndicator({ pulse }: PromptIndicatorProps) {
-	const [colorIndex, setColorIndex] = useState(0);
-	// Warm pulse (was cyan/blue/magenta — magenta violated the brand
-	// prohibition on hues 270-350, and the whole cycle bled cool into
-	// the always-on prompt). Now: orange brand pulse with a dim ember.
-	const colors = [t.orange, t.orangeAlt, t.orangeDim, t.orange];
-
-	useEffect(() => {
-		const interval = setInterval(() => {
-			setColorIndex((prev) => (prev + 1) % colors.length);
-		}, 300);
-
-		return () => clearInterval(interval);
-	}, []);
-
+// Prompt chevron. It holds still: the HUD motion language (lib/motion.ts)
+// says nothing loops, and every React commit makes Ink lay out and rewrite
+// the whole screen. The old 300 ms colour cycle (plus an 800 ms pulse
+// toggle that changed nothing on screen) was 4.6 full-screen redraws a
+// second on an idle TUI, most of its idle CPU.
+function PromptIndicator() {
 	return (
-		<Text color={colors[colorIndex] as any} bold>
+		<Text color={t.orange as any} bold>
 			{"\u276F"}
 		</Text>
 	);

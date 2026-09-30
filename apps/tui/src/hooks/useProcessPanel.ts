@@ -7,6 +7,7 @@ import {
 	isAgentProcessTaskId,
 } from "../components/ActivityMonitor.js";
 import { useSelection } from "./useSelection.js";
+import { keepIfSame } from "../lib/keep-if-same.js";
 
 function mergeTasksByRecency(shell: TaskInfo[], agent: TaskInfo[]): TaskInfo[] {
 	const all = [...shell, ...agent];
@@ -68,22 +69,26 @@ export function useProcessPanel(): ProcessPanelState {
 			const shellTasks = manager.listTasks({ limit: 40 });
 			const agentTasks = getActivityLogAsTaskInfos();
 			const merged = mergeTasksByRecency(shellTasks, agentTasks).slice(0, 60);
-			setTasks(merged);
+			// keepIfSame: the poll runs every 1.5 s in App; a fresh array each
+			// time re-rendered the whole idle TUI with nothing new to show.
+			setTasks(keepIfSame(merged));
 
 			const base = manager.getTaskCounts();
 			const agentRunning = agentTasks.filter((t) => t.status === "running").length;
-			setTaskCounts({
-				...base,
-				running: base.running + agentRunning,
-			});
+			setTaskCounts(
+				keepIfSame({
+					...base,
+					running: base.running + agentRunning,
+				}),
+			);
 
 			if (detailTaskId) {
 				if (isAgentProcessTaskId(detailTaskId)) {
 					const out = getAgentTaskOutput(detailTaskId);
-					if (out) setDetailOutput(out);
+					if (out) setDetailOutput(keepIfSame<TaskOutput | null>(out));
 				} else {
 					const output = manager.getTaskOutput(detailTaskId, { tail: 200 });
-					if (output) setDetailOutput(output);
+					if (output) setDetailOutput(keepIfSame<TaskOutput | null>(output));
 				}
 			}
 		} catch {
