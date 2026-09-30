@@ -1,5 +1,5 @@
 /**
- * LilEightBadge tests - structural snapshot across all 6 states.
+ * LilEightBadge tests - structural snapshot across all 7 states.
  *
  * Follows the existing TUI test pattern in apps/tui/src/__tests__/smoke.test.ts:
  * we use bun:test (no ink-testing-library available in the workspace) and
@@ -14,12 +14,13 @@ import React from "react";
 import { LilEightBadge, type LilEightState } from "../LilEightBadge";
 import { t } from "../../theme.js";
 
-const STATES: LilEightState[] = ["idle", "thinking", "working", "done", "error", "sleep"];
+const STATES: LilEightState[] = ["idle", "thinking", "working", "waiting", "done", "error", "sleep"];
 
 const expectedColor: Record<LilEightState, string> = {
 	idle:     t.muted,
 	thinking: t.teal,
 	working:  t.orange,
+	waiting:  t.orange,
 	done:     t.green,
 	error:    t.red,
 	sleep:    t.dim,
@@ -50,7 +51,7 @@ describe("LilEightBadge", () => {
 		});
 	}
 
-	test("snapshot of all 6 states is stable", () => {
+	test("snapshot of all 7 states is stable", () => {
 		const tree = STATES.map((state) => {
 			const rendered = (LilEightBadge as (p: { state: LilEightState }) => React.ReactElement)({
 				state,

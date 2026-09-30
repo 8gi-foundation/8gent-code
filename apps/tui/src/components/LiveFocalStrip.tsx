@@ -105,10 +105,18 @@ export function LiveFocalStrip({
 	const showApprovalBorder = approvalPending && !autonomous;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	const finished = done && lastTurnEndedAt;
-	const middle = isProcessing ? activeStep : finished ? `finished ${clock(lastTurnEndedAt)}` : "idle";
-	// The state word ("finished", "idle") is never cut; an active step may be,
-	// past its first 12 columns.
-	const middleMin = isProcessing ? Math.min(12, middle.length) : middle.length;
+	// A pending card stops the turn on the person: the strip holds still and
+	// says so, instead of naming the gated tool as if it were running (#3118).
+	const middle = showApprovalBorder
+		? WAITING_STEP
+		: isProcessing
+			? activeStep
+			: finished
+				? `finished ${clock(lastTurnEndedAt)}`
+				: "idle";
+	// The state word ("finished", "idle", "waiting") is never cut; an active
+	// step may be, past its first 12 columns.
+	const middleMin = isProcessing && !showApprovalBorder ? Math.min(12, middle.length) : middle.length;
 	const fit =
 		width === undefined
 			? {
@@ -121,7 +129,7 @@ export function LiveFocalStrip({
 					width,
 					middle,
 					middleMin,
-					middleShort: finished ? "finished" : undefined,
+					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
 					route,
 					asked: routeAsked,
 					tokens,
@@ -139,6 +147,7 @@ export function LiveFocalStrip({
 		>
 			<Box width={NOW_LABEL_WIDTH} flexShrink={0}>
 				<TurnStateLabel
+					waiting={showApprovalBorder}
 					isProcessing={isProcessing}
 					lastTurnEndedAt={lastTurnEndedAt}
 					done={done}
@@ -170,6 +179,9 @@ export function LiveFocalStrip({
 	);
 }
 
+/** What the NOW strip says while an approval card waits on the person. */
+export const WAITING_STEP = "waiting for your answer";
+
 /** A turn is DONE when nothing runs and the last one ended cleanly. */
 export function isTurnDone(
 	isProcessing: boolean,
@@ -190,11 +202,14 @@ function clock(ms: number): string {
  * here, not in the strip, so the settle re-renders only this label.
  */
 export function TurnStateLabel({
+	waiting = false,
 	isProcessing,
 	lastTurnEndedAt,
 	done,
 	animate,
 }: {
+	/** An approval card is pending: a still mark and WAIT, never the spinner. */
+	waiting?: boolean;
 	isProcessing: boolean;
 	lastTurnEndedAt: number | null;
 	done: boolean;
@@ -216,6 +231,16 @@ export function TurnStateLabel({
 	const g = glyphs();
 	// Without braille the figure-8 is a plain, still "8".
 	const eight = g.eight;
+	if (waiting) {
+		return (
+			<Text>
+				<Text color={t.orange}>{eight ?? FIGURE_EIGHT_STILL}</Text>
+				<Text color={t.orange} bold>
+					{" WAIT "}
+				</Text>
+			</Text>
+		);
+	}
 	if (isProcessing) {
 		return (
 			<Text>

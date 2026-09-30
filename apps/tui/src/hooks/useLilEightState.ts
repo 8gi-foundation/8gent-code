@@ -1,8 +1,8 @@
 /**
  * useLilEightState - state machine for the LilEightBadge in the V2 chrome.
  *
- * Maps three real signals (messages, isProcessing, lastTurnEndedAt) to the
- * six-state alphabet the badge renders:
+ * Maps real signals (messages, isProcessing, lastTurnEndedAt, a pending
+ * approval card) to the seven-state alphabet the badge renders:
  *
  *   idle:     no active turn, no recent error, no recent done
  *   thinking: tool call started but no streaming output yet
@@ -10,6 +10,7 @@
  *   done:     last turn ended ok within the last 3 seconds
  *   error:    last turn ended with error within the last 5 seconds
  *   sleep:    no input, no agent activity for >5 minutes
+ *   waiting:  an approval card is up; nothing runs until the person answers
  *
  * Pure derivation - no side effects, no internal state beyond a tick that
  * fires once, at the moment a done/error/sleep window would flip the badge.
@@ -28,6 +29,9 @@ export interface LilEightInputs {
 	now: number;
 	/** ms since last user input or agent activity. */
 	idleSinceMs: number;
+	/** An approval card is pending. The turn is stopped on the person, so the
+	 *  badge says so instead of "thinking" (#3118). */
+	approvalPending?: boolean;
 }
 
 const DONE_WINDOW_MS = 3_000;
@@ -46,7 +50,10 @@ export function deriveLilEightState(input: LilEightInputs): LilEightState {
 		lastTurnSuccess,
 		now,
 		idleSinceMs,
+		approvalPending,
 	} = input;
+
+	if (approvalPending) return "waiting";
 
 	if (isProcessing) {
 		// Distinguish thinking (tool call started, no streaming output yet) from
@@ -85,7 +92,7 @@ export function deriveLilEightState(input: LilEightInputs): LilEightState {
  */
 export function nextLilEightChangeAt(input: LilEightInputs): number | null {
 	const { isProcessing, lastTurnEndedAt, lastTurnSuccess, now, idleSinceMs } = input;
-	if (isProcessing) return null;
+	if (isProcessing || input.approvalPending) return null;
 	const at: number[] = [];
 	if (lastTurnEndedAt != null) {
 		const window = lastTurnSuccess === false ? ERROR_WINDOW_MS : DONE_WINDOW_MS;
