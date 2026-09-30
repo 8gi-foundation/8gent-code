@@ -321,6 +321,14 @@ export function introFrame(
 		const row: Run[] = [];
 		const push = (text: string, colour: ColourKey | null, bold?: boolean) => {
 			const last = row[row.length - 1];
+			// A blank cell's colour is invisible (no background is set), so it joins
+			// whatever run it follows. A row then breaks only at a real colour
+			// change: a handful of Ink nodes per row instead of one per dot, which
+			// keeps each frame's layout cheap while hundreds of dots are in flight.
+			if (last && colour === null && !bold && text.trim() === "") {
+				last.text += text;
+				return;
+			}
 			if (last && last.colour === colour && Boolean(last.bold) === Boolean(bold)) last.text += text;
 			else row.push(bold ? { text, colour, bold } : { text, colour });
 		};
@@ -337,7 +345,7 @@ export function introFrame(
 		}
 		// Trailing blanks are not drawn.
 		const last = row[row.length - 1];
-		if (last && last.colour === null) {
+		if (last) {
 			last.text = last.text.trimEnd();
 			if (!last.text) row.pop();
 		}
