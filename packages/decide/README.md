@@ -221,6 +221,15 @@ default thresholds.
 - **Flag:** env `EIGHT_SYSTEM_ONE=1` (or `true`). `packages/settings` has no
   section for feature flags (its keys are voice, performance, models,
   providers, ui, agents), so the flag is env only, like `EIGHT_TEXT_TOOLS`.
+- **Read-only allowlist (on by default under System One).** With
+  `EIGHT_SYSTEM_ONE` on, commands the rules pass and `allowlist.ts` reads as
+  plainly read-only (or additive: `mkdir` inside the work dir, a dev tool's
+  `--version`/`--help`) run without asking the model judge, and the judge
+  loads on the first command that needs it instead of at startup. The rules
+  always run first and win. `EIGHT_S1_ALLOWLIST=0` (or `false`/`off`/`no`)
+  opts out and restores startup warm-up. `bun test` runs the repo's own test
+  code, so it skips the judge only with `EIGHT_S1_ALLOWLIST_BUN_TEST=1`, off
+  by default. Decided by James on 2026-09-30 (#3131).
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.
