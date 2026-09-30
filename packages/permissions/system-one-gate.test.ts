@@ -657,3 +657,103 @@ describe("integration: real agent shell tool entry points", () => {
 		expect(stub.asks.length).toBe(0);
 	});
 });
+
+/**
+ * #3124: one card, and only when an answer can change the outcome. Moira
+ * pressed Y on the approval card for `rm -f old.log`, then System One, which
+ * ran after the card, blocked it anyway and the reply said deletes need human
+ * approval. Here the person is a TUI approval handler, reached by both the
+ * permission layer and System One exactly as in the TUI (interactive, not
+ * headless), so every card that would be drawn is counted.
+ */
+describe("integration: the approval card and System One agree (#3124)", () => {
+	let dir: string;
+	let executor: ToolExecutor;
+	let cards: string[];
+	let answer: "approve" | "deny";
+	let ttyWas: PropertyDescriptor | undefined;
+	let headlessWas: string | undefined;
+
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "sys1-card-"));
+		writeFileSync(join(dir, "victim.txt"), "keep me");
+		executor = new ToolExecutor(dir, "sys1-card-test");
+		setToolContext({ workingDirectory: dir });
+		// System One's own human prompt goes through the real default: the TUI channel.
+		_setSystemOneOverridesForTests({
+			createDecider: () => createDecider({ backend: stub, cacheSize: 0 }),
+			calibrationDir: mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+		});
+		cards = [];
+		answer = "approve";
+		registerTuiApprovalHandler(async (req) => {
+			cards.push(req.command ?? "");
+			return answer;
+		});
+		// Interactive, as in the TUI, so the permission layer draws its card too.
+		headlessWas = process.env.EIGHT_HEADLESS;
+		Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		ttyWas = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+		process.env[SYSTEM_ONE_FLAG] = "1";
+	});
+
+	afterEach(() => {
+		registerTuiApprovalHandler(null);
+		if (ttyWas) Object.defineProperty(process.stdin, "isTTY", ttyWas);
+		else Reflect.deleteProperty(process.stdin, "isTTY");
+		if (headlessWas === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		else process.env.EIGHT_HEADLESS = headlessWas;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	const callSdk = (input: Record<string, unknown>) =>
+		(agentTools.run_command as unknown as { execute: (i: unknown, o: unknown) => Promise<string> }).execute(
+			input,
+			{ toolCallId: "sys1-card", messages: [] },
+		);
+	// Each path gets its own command text: the permission layer remembers a
+	// declined command for the session, and that memory must not leak across.
+	const paths: Array<[string, string, (command: string) => Promise<string>]> = [
+		["ToolExecutor run_command", "te", (command) => executor.execute("run_command", { command })],
+		["AI SDK run_command", "sdk", (command) => callSdk({ command })],
+	];
+
+	for (const [name, tag, run] of paths) {
+		test(`${name}: a System One block draws no card, and the reply says no approval can run it`, async () => {
+			// rm_non_temp escalates; the judge raises it to block (Moira's case).
+			const out = await run(`rm -f victim.txt # SYS1_DANGER ${tag}`);
+			expect(cards).toEqual([]);
+			expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+			expect(out).toContain("verdict=block");
+			expect(out).toContain("No approval can run it");
+			expect(out).not.toContain("needs a human");
+			expect(existsSync(join(dir, "victim.txt"))).toBe(true);
+		});
+
+		test(`${name}: a System One escalate draws exactly one card, and Y runs the command`, async () => {
+			// rm_non_temp escalates; the judge is calm, so escalate stands.
+			const out = await run(`rm -f victim.txt # SYS1_LOW ${tag}`);
+			expect(cards).toEqual([`rm -f victim.txt # SYS1_LOW ${tag}`]);
+			expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(dir, "victim.txt"))).toBe(false);
+		});
+
+		test(`${name}: N on that one card declines, and the reply says the person declined`, async () => {
+			answer = "deny";
+			const out = await run(`rm -f victim.txt # SYS1_LOW ${tag} decline`);
+			expect(cards.length).toBe(1);
+			expect(out).toContain("declined");
+			expect(existsSync(join(dir, "victim.txt"))).toBe(true);
+		});
+
+		test(`${name}: System One allows, the permission card still asks once, as before`, async () => {
+			const out = await run(`touch card-sentinel # ${tag}`);
+			// touch is not dangerous; whether it asks depends on the allow list. At
+			// most one card, and the command runs on approve.
+			expect(cards.length).toBeLessThanOrEqual(1);
+			expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(dir, "card-sentinel"))).toBe(true);
+		});
+	}
+});

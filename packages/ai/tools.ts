@@ -1122,7 +1122,15 @@ async function runShellCommand(command: string): Promise<string> {
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
-	if (permissionCheck === "ask") {
+	// System One (EIGHT_SYSTEM_ONE=1, off by default): it can only stop a
+	// command, never allow one. It runs BEFORE the approval card (#3124), as in
+	// ToolExecutor.runCommand: a block is final and never follows a Y, and an
+	// escalate's own question is the card. One command, at most one card.
+	const { systemOneGate } = await import("../permissions/system-one-gate");
+	const systemOne = await systemOneGate(command);
+	if (!systemOne.run) return systemOne.message as string;
+
+	if (permissionCheck === "ask" && systemOne.humanApproved !== true) {
 		const allowed = await permissionManager.requestPermission(
 			"Execute Shell Command",
 			isCommandDangerous(command)
@@ -1132,12 +1140,6 @@ async function runShellCommand(command: string): Promise<string> {
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
-
-	// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after the
-	// permission check. It can only stop a command, never allow one.
-	const { systemOneGate } = await import("../permissions/system-one-gate");
-	const systemOne = await systemOneGate(command);
-	if (!systemOne.run) return systemOne.message as string;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {

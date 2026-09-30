@@ -176,7 +176,13 @@ export async function bashGuard(
 	const judged = await modelGuard(command, decider, opts);
 	if (rules.verdict === "pass") return judged;
 	const verdict = stricterVerdict("escalate", judged.verdict);
-	const ruleNote = `deterministic rule ${rules.rule} matched (${rules.rules.join(", ")}), needs a human`;
+	// Say only what is true of the final verdict: an escalate goes to a person,
+	// a block does not. "needs a human" on a block told the person their
+	// approval was missing when no approval could pass it (#3124).
+	const ruleNote =
+		verdict === "block"
+			? `deterministic rule ${rules.rule} matched (${rules.rules.join(", ")}), and the judge blocked it`
+			: `deterministic rule ${rules.rule} matched (${rules.rules.join(", ")}), needs a human`;
 	return {
 		...judged,
 		verdict,

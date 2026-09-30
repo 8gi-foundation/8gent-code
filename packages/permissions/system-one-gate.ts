@@ -6,10 +6,16 @@
  * constructing a decider, so the shell path is unchanged.
  *
  * With the flag on, every model-proposed shell command is sent to
- * `bashGuard` (packages/decide/guard.ts) AFTER the existing layers (ToolG8 /
- * policy engine, PermissionManager, shell sanitiser) have passed it and
- * BEFORE it is spawned. It can only take a command away, never give one back:
- * a command an earlier layer denied never reaches this function.
+ * `bashGuard` (packages/decide/guard.ts) after the deny layers (ToolG8 /
+ * policy engine, the permission deny list, shell sanitiser) have passed it,
+ * BEFORE the permission approval card, and before it is spawned. It can only
+ * take a command away, never give one back: a command an earlier layer denied
+ * never reaches this function.
+ *
+ * Why before the card (#3124): a block is final, so it must never follow a Y
+ * the person was asked for; and an escalate asks the person itself, so that
+ * one answer is the card. Callers skip the permission card when
+ * `humanApproved === true`: one command, one card.
  *
  *   allow    -> run
  *   block    -> not run; the tool returns a [SYSTEM ONE BLOCKED] error
@@ -250,7 +256,10 @@ function blockMessage(
 	command: string,
 ): string {
 	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (${SYSTEM_ONE_FLAG}=1): ${why}. The command was not run. Command: ${command}`;
+	// A block is final: no card was shown and no approval can pass it. Say so,
+	// so the reply never tells the person their approval is what is missing (#3124).
+	const final = g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (${SYSTEM_ONE_FLAG}=1): ${why}. The command was not run.${final} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
