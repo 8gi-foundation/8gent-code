@@ -10,6 +10,7 @@ import React from "react";
 import {
 	HeaderBar,
 	brandPillWidth,
+	headerChips,
 	planHeader,
 	statusClusterWidth,
 	type HeaderBarProps,
@@ -32,9 +33,6 @@ const base: HeaderBarProps = {
 	syncStatus: "in sync",
 	micOn: false,
 	approvalPending: false,
-	localFirst: true,
-	sessionTime: "1m 02",
-	lilEightState: "idle",
 };
 
 // The live shape from the issue frame: a worktree path, a long branch,
@@ -45,7 +43,6 @@ const live: HeaderBarProps = {
 	workspacePath: "/Users/operator/8gent-code/.claude/worktrees/agent-a8b0f5de5b64292c6",
 	branch: "fix/header-rail-100-cols",
 	syncStatus: "up to date",
-	sessionTime: "2m 21s",
 };
 
 /** Columns the three header zones need side by side for a given plan. */
@@ -56,7 +53,7 @@ function occupied(props: HeaderBarProps): number {
 		brandPillWidth(props.version, props.updateAvailable, plan.compactBrand) +
 		// The middle's paddingX={1} is only rendered when the middle is.
 		(plan.middle.branch ? headerMiddleWidth(plan.middle) + 2 : 0) +
-		statusClusterWidth(props, plan.compactHint)
+		statusClusterWidth(props)
 	);
 }
 
@@ -73,9 +70,9 @@ describe("HeaderBar", () => {
 		expect(props.justifyContent).toBe("space-between");
 	});
 
-	test("pill and status cluster never shrink and carry no fixed width", () => {
+	test("pill and chips never shrink and carry no fixed width", () => {
 		type BoxProps = { flexShrink?: number; width?: number | string; children?: React.ReactNode };
-		const rendered = render(live) as React.ReactElement<BoxProps>;
+		const rendered = render({ ...live, approvalPending: true }) as React.ReactElement<BoxProps>;
 		const children = React.Children.toArray(rendered.props.children) as React.ReactElement<BoxProps>[];
 		const [pill, , cluster] = children;
 		expect(pill.props.flexShrink).toBe(0);
@@ -121,8 +118,6 @@ describe("HeaderBar", () => {
 	test("at 100 columns nothing wraps and the branch survives", () => {
 		const props = { ...live, width: 100 };
 		const plan = planHeader(props);
-		expect(plan.compactHint).toBe(true);
-		expect(plan.middle.path).toBe("");
 		expect(plan.middle.branch.startsWith("fix/header")).toBe(true);
 		expect(occupied(props)).toBeLessThanOrEqual(100);
 	});
@@ -130,7 +125,6 @@ describe("HeaderBar", () => {
 	test("at 120 columns the whole branch beats the tail of the path", () => {
 		const props = { ...live, width: 120 };
 		const plan = planHeader(props);
-		expect(plan.compactHint).toBe(false);
 		expect(plan.middle.branch).toBe("fix/header-rail-100-cols");
 		expect(occupied(props)).toBeLessThanOrEqual(120);
 	});
@@ -138,7 +132,6 @@ describe("HeaderBar", () => {
 	test("at 120 columns a short branch leaves room for a path slice", () => {
 		const props = { ...live, branch: "main", width: 120 };
 		const plan = planHeader(props);
-		expect(plan.compactHint).toBe(false);
 		expect(plan.middle.branch).toBe("main");
 		expect(plan.middle.path.length).toBeGreaterThanOrEqual(12);
 		expect(occupied(props)).toBeLessThanOrEqual(120);
@@ -158,22 +151,22 @@ describe("HeaderBar", () => {
 		expect(occupied(props)).toBeLessThanOrEqual(90);
 	});
 
-	test("the status badge is never clipped, 70 to 200 columns, every state (audit #2)", () => {
-		const states = ["idle", "thinking", "working", "done", "error", "sleep"] as const;
-		for (const lilEightState of states) {
-			for (const busy of [false, true]) {
-				const props0 = { ...live, lilEightState, micOn: busy, approvalPending: busy };
-				// 70 is the floor: the compact pill plus the busiest cluster
-				// ("[ASK]", mic on, "thinking") is 66 columns.
-				for (let width = 70; width <= 200; width++) {
-					expect(occupied({ ...props0, width })).toBeLessThanOrEqual(width);
+	test("the chips are never clipped, 50 to 200 columns, every combination (audit #2)", () => {
+		for (const approvalPending of [false, true]) {
+			for (const micOn of [false, true]) {
+				for (const permMode of ["ask", "infinite"]) {
+					const props0 = { ...live, approvalPending, micOn, permMode };
+					// 50 is the floor: the compact pill (22) plus every chip
+					// ("ASK  INFINITE  ● MIC" and the margin, 26) is 48 columns.
+					for (let width = 50; width <= 200; width++) {
+						expect(occupied({ ...props0, width })).toBeLessThanOrEqual(width);
+					}
 				}
 			}
 		}
 	});
 
-	test("at 80 columns the tagline gives way before the badge, and the branch stays", () => {
-		// The pilot frame: `│ 8▣ idle` lost its right border off-screen at 80.
+	test("at 80 columns the tagline gives way before the chips, and the branch stays", () => {
 		const props = { ...live, branch: "main", width: 80 };
 		const plan = planHeader(props);
 		expect(plan.compactBrand).toBe(true);
@@ -182,14 +175,14 @@ describe("HeaderBar", () => {
 	});
 
 	test("at 80 columns outside a repo the header says 'no repo' (#3070)", () => {
-		const props = { ...live, branch: "", syncStatus: "no repo", sessionTime: "7s", width: 80 };
+		const props = { ...live, branch: "", syncStatus: "no repo", width: 80 };
 		const plan = planHeader(props);
 		expect(plan.middle.sync).toBe("no repo");
 		expect(
 			brandPillWidth(props.version, props.updateAvailable, plan.compactBrand) +
 				headerMiddleWidth(plan.middle) +
 				2 +
-				statusClusterWidth(props, plan.compactHint),
+				statusClusterWidth(props),
 		).toBeLessThanOrEqual(80);
 	});
 
@@ -200,7 +193,7 @@ describe("HeaderBar", () => {
 			) as React.ReactElement<Record<string, unknown>>[];
 			return kids[1];
 		};
-		const noRepo = middleBox({ ...live, branch: "", syncStatus: "no repo", sessionTime: "7s", width: 80 });
+		const noRepo = middleBox({ ...live, branch: "", syncStatus: "no repo", width: 80 });
 		const branchOnly = middleBox({ ...live, branch: "main", width: 80 });
 		const wide = middleBox({ ...live, width: 160 });
 		for (const box of [noRepo, branchOnly, wide]) {
@@ -214,28 +207,50 @@ describe("HeaderBar", () => {
 		expect(occupied(live)).toBeLessThanOrEqual(80);
 	});
 
-	test("snapshot across mic / ask / state matrix is stable", () => {
-		const matrix = [
-			{ ...base },
-			{ ...base, micOn: true },
-			{ ...base, approvalPending: true },
-			{ ...base, localFirst: false },
-			{ ...base, lilEightState: "working" as const },
-			{ ...base, lilEightState: "error" as const },
-		].map((cfg, idx) => {
-			const rendered = render(cfg);
-			const top = rendered.props as { width: string; justifyContent: string };
-			return {
-				idx,
-				width: top.width,
-				justifyContent: top.justifyContent,
-				micOn: cfg.micOn,
-				approvalPending: cfg.approvalPending,
-				localFirst: cfg.localFirst,
-				lilEightState: cfg.lilEightState,
-			};
+	test("a quiet header draws no chips, no palette hint, no LOCAL, no clock, no badge (#3238)", () => {
+		const out = stripVTControlCharacters(renderToString(<HeaderBar {...live} width={160} />, { columns: 160 }));
+		for (const gone of ["^P", "palette", "LOCAL", "MIC", "ASK", "INFINITE", "8▣", "idle"]) {
+			expect(out).not.toContain(gone);
+		}
+		expect(statusClusterWidth(live)).toBe(0);
+	});
+
+	test("chips show only while they apply, in priority order ASK > INFINITE > MIC (#3238)", () => {
+		expect(headerChips({ micOn: false, approvalPending: false, permMode: "ask" })).toEqual([]);
+		expect(headerChips({ micOn: false, approvalPending: false, permMode: "guarded" })).toEqual([]);
+		expect(headerChips({ micOn: true, approvalPending: true, permMode: "infinite" })).toEqual([
+			"ASK",
+			"INFINITE",
+			"● MIC",
+		]);
+	});
+
+	for (const width of [80, 120, 160]) {
+		test(`${width} columns: every chip sits on the pill's text row, not its border (#3238)`, () => {
+			const p = { ...live, width, mark: true, approvalPending: true, micOn: true, permMode: "infinite" };
+			const lines = stripVTControlCharacters(renderToString(<HeaderBar {...p} />, { columns: width })).split(
+				"\n",
+			);
+			expect(lines.length).toBe(3);
+			for (const chip of ["ASK", "INFINITE", "● MIC"]) {
+				expect(lines[1]).toContain(chip);
+				expect(lines[0]).not.toContain(chip);
+				expect(lines[2]).not.toContain(chip);
+			}
+			// The chips end two columns in from the edge, like the pill's text starts.
+			expect(lines[1].trimEnd().endsWith("● MIC")).toBe(true);
+			expect(cellWidth(lines[1].trimEnd())).toBe(width - 2);
 		});
-		expect(matrix).toMatchSnapshot();
+	}
+
+	test("at 80 columns switching to Infinite never moves the living 8 or the pill (#3238)", () => {
+		const short = { ...base, workspacePath: "/Users/operator/8gent-code", branch: "main", width: 80, mark: true };
+		const ask = planHeader({ ...short, permMode: "ask" });
+		const infinite = planHeader({ ...short, permMode: "infinite" });
+		expect(ask.mark).toBe(true);
+		expect(infinite.mark).toBe(ask.mark);
+		expect(infinite.compactBrand).toBe(ask.compactBrand);
+		expect(infinite.middle.branch).toBe("main");
 	});
 });
 
@@ -275,7 +290,7 @@ describe("HeaderBar braille mark geometry", () => {
 		for (const width of [40, MIN_COLS - 1]) expect(planHeader({ ...short, width, mark: true }).mark).toBe(false);
 	});
 
-	test("the mark never costs the branch, the sync state, the tagline or the hint", () => {
+	test("the mark never costs the branch, the sync state or the tagline", () => {
 		for (const props of [live, base, { ...live, branch: "main" }]) {
 			for (let width = 40; width <= 240; width++) {
 				const withMark = planHeader({ ...props, width, mark: true });
@@ -283,7 +298,6 @@ describe("HeaderBar braille mark geometry", () => {
 				expect(withMark.middle.branch).toBe(without.middle.branch);
 				if (without.middle.sync) expect(withMark.middle.sync).toBe(without.middle.sync);
 				expect(withMark.compactBrand).toBe(without.compactBrand);
-				expect(withMark.compactHint).toBe(without.compactHint);
 				if (!withMark.mark) expect(withMark).toEqual(without);
 			}
 		}

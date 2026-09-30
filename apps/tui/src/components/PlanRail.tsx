@@ -3,7 +3,7 @@
  *
  * Two exports:
  *  - `PlanRail`     : pure presentation. Receives the task array as a prop.
- *                     Matches ActivityRail/ContextRail pattern, fully unit
+ *                     Matches ActivityRail pattern, fully unit
  *                     testable by calling the component as a function.
  *  - `LivePlanRail` : wrapper that subscribes to a TaskManager EventEmitter
  *                     and re-renders on every task mutation. App-side mount

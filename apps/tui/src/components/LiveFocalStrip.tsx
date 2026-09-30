@@ -41,7 +41,7 @@ import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
-import { AUTONOMOUS_LABEL_WIDTH, METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
+import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
@@ -60,10 +60,9 @@ interface LiveFocalStripProps {
 	tokens: string;
 	contextPct: number;
 	approvalPending?: boolean;
-	/** When the agent is running unattended (auto-approve all), the focal
-	 *  strip shows "Autonomous" after the state word so the operator instantly
-	 *  knows manual approvals are off. Border also stays teal regardless of
-	 *  approvalPending because nothing is actually waiting on the user. */
+	/** The agent runs unattended (Infinite): no card can wait on the person,
+	 *  so the border never turns orange. The word is not repeated here: the
+	 *  header chip and the footer perm segment name it (#3238). */
 	autonomous?: boolean;
 	/** True when the agent is actively processing. Drives the NOW vs READY
 	 *  state label - we don't shout "NOW" at an idle TUI. */
@@ -104,8 +103,9 @@ export function LiveFocalStrip({
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
-	// (#3123). Autonomous is shown, because it changes what to watch.
-	const labelWidth = autonomous ? AUTONOMOUS_LABEL_WIDTH : NOW_LABEL_WIDTH;
+	// (#3123). Infinite is not repeated here either (#3238): the header chip,
+	// the tab tag and the footer perm segment already name it.
+	const labelWidth = NOW_LABEL_WIDTH;
 	const showApprovalBorder = approvalPending && !autonomous;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	const finished = done && lastTurnEndedAt;
@@ -117,8 +117,9 @@ export function LiveFocalStrip({
 			? activeStep
 			: finished
 				? `finished ${clock(lastTurnEndedAt)}`
-				: "idle";
-	// The state word ("finished", "idle", "waiting") is never cut; an active
+				: "";
+	// At rest READY says it all: no "idle" beside it (#3238).
+	// The state word ("finished", "waiting") is never cut; an active
 	// step may be, past its first 12 columns.
 	const middleMin = isProcessing && !showApprovalBorder ? Math.min(12, middle.length) : middle.length;
 	const fit =
@@ -143,8 +144,10 @@ export function LiveFocalStrip({
 		<Box
 			width="100%"
 			minHeight={isProcessing ? 3 : 1}
-			borderStyle={isProcessing ? "round" : "single"}
-			borderColor={showApprovalBorder ? t.orange : isProcessing ? t.teal : t.border}
+			// One border style in every state (#3238): colour says running or
+			// waiting, the corners never change.
+			borderStyle="single"
+			borderColor={showApprovalBorder ? t.orange : isProcessing ? t.teal : t.frame}
 			paddingX={1}
 			justifyContent="space-between"
 			flexShrink={0}
@@ -158,11 +161,6 @@ export function LiveFocalStrip({
 					done={done}
 					animate={animate}
 				/>
-				{autonomous ? (
-					<Text color={t.textPrimary} bold wrap="truncate-end">
-						Autonomous
-					</Text>
-				) : null}
 			</Box>
 
 			<Box flexGrow={1} flexShrink={1} minWidth={Math.min(middleMin, fit.middle.length) + 2} paddingX={1}>

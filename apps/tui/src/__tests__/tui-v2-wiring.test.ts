@@ -1,18 +1,13 @@
 /**
  * Tests for the V2 wiring helpers shipped in #2345 + #2346:
- *   - useLilEightState pure derivation
+ *   - turnEndedInError (how a turn ended)
  *   - useGitSync.computeGitSync with an injected runner
  *   - activity-rail-derivation pure helpers
  *   - tui-approval-channel + a simulated keypress-driven approval flow
  */
 import { describe, expect, test, beforeEach } from "bun:test";
 
-import {
-	deriveLilEightState,
-	nextLilEightChangeAt,
-	turnEndedInError,
-	_testing,
-} from "../hooks/useLilEightState";
+import { turnEndedInError } from "../lib/turn-outcome";
 import { computeGitSync, gitView, type GitRunner } from "../hooks/useGitSync";
 import {
 	deriveTools,
@@ -59,70 +54,7 @@ function call(id: string, name: string, ok?: boolean) {
 	];
 }
 
-describe("deriveLilEightState", () => {
-	const baseInput = {
-		messages: [] as any[],
-		isProcessing: false,
-		lastTurnEndedAt: null,
-		lastTurnSuccess: null,
-		now: 1_000_000,
-		idleSinceMs: 0,
-	};
-
-	test("idle when nothing is happening", () => {
-		expect(deriveLilEightState(baseInput)).toBe("idle");
-	});
-
-	test("working while processing with assistant output", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				isProcessing: true,
-				messages: [msg({ role: "assistant", content: "thinking..." })],
-			}),
-		).toBe("working");
-	});
-
-	test("thinking when processing but only a tool start exists", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				isProcessing: true,
-				messages: [msg({ role: "tool", content: "→ read_file({})" })],
-			}),
-		).toBe("thinking");
-	});
-
-	test("done when last turn ended ok within window", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				lastTurnEndedAt: baseInput.now - 1_000,
-				lastTurnSuccess: true,
-			}),
-		).toBe("done");
-	});
-
-	test("done decays to idle outside the window", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				lastTurnEndedAt: baseInput.now - _testing.DONE_WINDOW_MS - 100,
-				lastTurnSuccess: true,
-			}),
-		).toBe("idle");
-	});
-
-	test("error when last turn failed within window", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				lastTurnEndedAt: baseInput.now - 2_000,
-				lastTurnSuccess: false,
-			}),
-		).toBe("error");
-	});
-
+describe("turnEndedInError", () => {
 	test("a recovered blocked or failed tool is not a failed turn (pilot l3-bugfix-m5)", () => {
 		// The run's real tail: two blocked calls mid-turn, then green tests
 		// and the root-cause reply. The header showed `error` for 5 s here.
@@ -150,60 +82,6 @@ describe("deriveLilEightState", () => {
 				msg({ role: "assistant", content: 'The local model turn could not complete: ollama chat completions 500: {"error":{"message":"EOF"}}' }),
 			] as any),
 		).toBe(true);
-	});
-
-	test("sleep after long idle window", () => {
-		expect(
-			deriveLilEightState({
-				...baseInput,
-				idleSinceMs: _testing.SLEEP_AFTER_MS + 1_000,
-			}),
-		).toBe("sleep");
-	});
-});
-
-// The hook sleeps until nextLilEightChangeAt instead of ticking every
-// second (#3099). Each case checks the badge really flips at that moment
-// and not a millisecond before.
-describe("nextLilEightChangeAt", () => {
-	const base = {
-		messages: [] as any[],
-		isProcessing: false,
-		lastTurnEndedAt: null as number | null,
-		lastTurnSuccess: null as boolean | null,
-		now: 1_000_000,
-		idleSinceMs: 0,
-	};
-	const at = (input: typeof base, t: number) =>
-		deriveLilEightState({ ...input, now: t, idleSinceMs: input.idleSinceMs + (t - input.now) });
-
-	test("idle: wakes exactly when the sleep window opens", () => {
-		const input = { ...base, idleSinceMs: 10_000 };
-		const next = nextLilEightChangeAt(input);
-		expect(next).not.toBeNull();
-		expect(at(input, next! - 1)).toBe("idle");
-		expect(at(input, next!)).toBe("sleep");
-	});
-
-	test("done: wakes when the done window closes", () => {
-		const input = { ...base, lastTurnEndedAt: base.now - 1_000, lastTurnSuccess: true };
-		const next = nextLilEightChangeAt(input)!;
-		expect(next).toBe(input.lastTurnEndedAt + _testing.DONE_WINDOW_MS);
-		expect(at(input, next - 1)).toBe("done");
-		expect(at(input, next)).toBe("idle");
-	});
-
-	test("error: wakes when the error window closes", () => {
-		const input = { ...base, lastTurnEndedAt: base.now - 1_000, lastTurnSuccess: false };
-		const next = nextLilEightChangeAt(input)!;
-		expect(next).toBe(input.lastTurnEndedAt + _testing.ERROR_WINDOW_MS);
-		expect(at(input, next - 1)).toBe("error");
-		expect(at(input, next)).toBe("idle");
-	});
-
-	test("nothing to wait for while a turn runs or once asleep", () => {
-		expect(nextLilEightChangeAt({ ...base, isProcessing: true })).toBeNull();
-		expect(nextLilEightChangeAt({ ...base, idleSinceMs: _testing.SLEEP_AFTER_MS + 1 })).toBeNull();
 	});
 });
 

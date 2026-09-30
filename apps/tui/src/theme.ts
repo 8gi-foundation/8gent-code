@@ -90,6 +90,9 @@ const dark = {
 	// Border
 	border:     "#2E2A26",
 	cardBorder: "#2E2A26",
+	// Frame: the one structural border and the key-cap brackets (HUD system,
+	// #3238). 3.46:1 on bg, so an edge that means something clears 3:1.
+	frame:      "#6B655F",
 
 	// Section labels (WORKSPACE, AGENT ACTIVITY...): text-secondary, so
 	// orange stays for state and focus (the active tab, DONE, the input,
@@ -132,6 +135,7 @@ const light = {
 
 	border:     "#C8C2BA",
 	cardBorder: "#8A8078",
+	frame:      "#8A8078",  // 3.62:1 on cream
 
 	heading:  "#2E2A26",   // text-secondary, 13.3:1 on cream
 

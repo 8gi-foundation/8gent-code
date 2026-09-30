@@ -1,7 +1,7 @@
 /**
  * ActivityRail tests - structural snapshot for the right-column inspector.
  *
- * Pattern matches ContextRail.test.tsx and LilEightBadge.test.tsx: bun:test,
+ * Pattern matches PlanRail.test.tsx: bun:test,
  * direct React-element-tree inspection, pure function of props.
  */
 
@@ -112,7 +112,7 @@ describe("ActivityRail", () => {
 		expect(props.width).toBe(34);
 		expect(props.flexShrink).toBe(0);
 		expect(props.borderStyle).toBe("single");
-		expect(props.borderColor).toBe(t.border);
+		expect(props.borderColor).toBe(t.frame);
 		expect(props.paddingX).toBe(1);
 		expect(props.flexDirection).toBe("column");
 		expect(props.overflow).toBe("hidden");

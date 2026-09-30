@@ -199,7 +199,6 @@ import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
-import { ContextRail } from "./components/ContextRail.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
 import { type PlanStep, applyPlanUpdate, mergePlanText, replyPlan, settlePlan } from "./lib/plan-state.js";
@@ -208,8 +207,8 @@ import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalSt
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
-import { turnEndedInError, useLilEightState } from "./hooks/useLilEightState.js";
-import { chatColumnWidth, contextRailHasNews } from "./lib/chat-layout.js";
+import { turnEndedInError } from "./lib/turn-outcome.js";
+import { chatColumnWidth } from "./lib/chat-layout.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
 import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
@@ -1603,20 +1602,18 @@ export function App({
 		}
 	}, [isProcessing, processPanel.sidebarOpen]);
 
-	// V2 chrome: track turn boundaries + the last user/agent activity tick so
-	// LilEightBadge can transition idle/done/error/sleep without polling app
-	// internals from the badge itself. Both update only on real transitions
-	// (true -> false for done/error, any user/agent event for activity).
+	// Turn boundaries for the NOW strip's DONE state. Both update only on
+	// real transitions (true -> false). The Lil Eight badge and its activity
+	// clock left the header in #3238.
 	const [lastTurnEndedAt, setLastTurnEndedAt] = useState<number | null>(null);
 	const [lastTurnSuccess, setLastTurnSuccess] = useState<boolean | null>(null);
-	const [lastActivityAt, setLastActivityAt] = useState<number>(() => Date.now());
 
 	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
 	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
-	// and lights the [ASK] chip in HeaderBar. The hook registers the approval
+	// and lights the ASK chip in HeaderBar. The hook registers the approval
 	// handler and routes Y/N/E/S to the card, never to the chat input (#3055).
 	// Headless callers see no handler and PermissionManager falls back to stdin.
-	const approvalPending = useApprovalCard(() => setLastActivityAt(Date.now()));
+	const approvalPending = useApprovalCard();
 
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
@@ -1632,14 +1629,10 @@ export function App({
 			// or was blocked mid-turn, then recovered from, is not an error.
 			const hadError = turnEndedInError(messages);
 			setLastTurnSuccess(!hadError);
-			setLastActivityAt(Date.now());
 			// The plan settles: nothing is still in progress, and the turn's
 			// wall time goes into the summary line.
 			setPlanSteps((prev) => (prev.length > 0 ? settlePlan(prev) : prev));
 			if (planStartedAtRef.current != null) setPlanElapsedMs(Date.now() - planStartedAtRef.current);
-		}
-		if (isProcessing) {
-			setLastActivityAt(Date.now());
 		}
 		if (!justFinished) return;
 		if (process.platform !== "darwin") return;
@@ -1678,20 +1671,12 @@ export function App({
 	// Multi-agent orchestration
 	const orchestration = useAgentOrchestration();
 
-	// V2 chrome data sources powering HeaderBar + LilEightBadge.
+	// V2 chrome data sources powering HeaderBar.
 	const gitSync = useGitSync(process.cwd(), 30_000);
 	const isGitRepo = gitSync.status !== "no-repo";
 	const currentBranch = gitSync.branch || null;
 	// One view of git for the header, the rail and the footer (audit #10).
 	const git = gitView(gitSync);
-	const lilEightStateValue = useLilEightState({
-		messages,
-		isProcessing,
-		lastTurnEndedAt,
-		lastTurnSuccess,
-		idleSinceMs: Date.now() - lastActivityAt,
-		approvalPending: approvalPending !== null,
-	});
 
 	// Onboarding system
 	const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
@@ -1846,11 +1831,6 @@ export function App({
 		// A pending approval card owns Y/N/E/S; useApprovalCard settles it.
 		if (isApprovalKeyClaimed(input, key)) return;
 
-		// Touch the activity timestamp on any keypress so LilEightBadge wakes
-		// from sleep promptly. Cheap; no React state when value is unchanged.
-		if (input || key.return || key.upArrow || key.downArrow || key.escape) {
-			setLastActivityAt(Date.now());
-		}
 
 		// Ctrl+P: toggle the command palette overlay.
 		// Palette has its own useInput listener so we early-return for
@@ -6080,13 +6060,9 @@ export function App({
 	// column. A new user meets one question, not forty labels (intro audit #12).
 	const inSetup = showOnboarding;
 	const wideShell = cols >= 120 && !inSetup;
-	// The left rail steps aside while it would only repeat the header and
-	// the defaults; infinite approval or ADHD mode brings it back.
-	const showContextRail =
-		wideShell && contextRailHasNews({
-			infinite: activePermMode !== "ask" || activePermView.held,
-			adhdMode,
-		});
+	// No left rail (#3238): its rows each have a home already. perm is the
+	// footer segment and the tab tag, risk restated the perm mode, context is
+	// the NOW strip meter, and ADHD mode is a footer segment while on.
 	// The PLAN column shows on wide terminals, rail or not, and only while it
 	// is open (Ctrl+X, or a plan exists).
 	const showPlanColumn =
@@ -6094,7 +6070,6 @@ export function App({
 	const showActivityRail = cols >= 90 && !inSetup;
 	// The chat column's real width: the NOW strip and every bubble size from it.
 	const chatWidth = chatColumnWidth(viewport.width, {
-		context: showContextRail,
 		planWidth: showPlanColumn ? PLAN_COLUMN_WIDTH : 0,
 		activity: showActivityRail,
 	});
@@ -6107,7 +6082,6 @@ export function App({
 		Boolean(voice?.isAvailable) &&
 		(voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
-	const lilEightState = lilEightStateValue;
 	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
 	void sessionTick;
 	void renderMainContent;
@@ -6171,9 +6145,6 @@ export function App({
 						syncStatus={git.noRepo ? "no repo" : git.sync}
 						micOn={Boolean(micOn)}
 						approvalPending={isApprovalPending}
-						localFirst={true}
-						sessionTime={sessionTime}
-						lilEightState={lilEightState}
 						width={cols}
 						living={headerMarkLiving}
 						permMode={activePermMode}
@@ -6192,21 +6163,12 @@ export function App({
 
 				<Box
 					borderStyle="single"
-					borderColor={t.textTertiary}
+					borderColor={t.frame}
 					paddingX={1}
 					flexGrow={1}
 					minHeight={0}
 				>
 					<Box flexGrow={1} minHeight={0} gap={1}>
-						{showContextRail && (
-							<ContextRail
-								risk={infiniteModeActive ? "high" : activePermMode === "guarded" ? "medium" : "low"}
-								permissions={activePermMode}
-								permHeld={activePermView.held}
-								contextPct={contextPct}
-								adhdMode={adhdMode}
-							/>
-						)}
 						{showPlanColumn &&
 							(planSteps.length > 0 ? (
 								<PlanPanel
@@ -6357,19 +6319,15 @@ export function App({
 				</Box>
 
 				<BottomBar
-					model={shownModel.ran || "—"}
-					modelAsked={shownModel.asked}
 					ready={providerHealth.live}
 					total={providerHealth.total}
-					tokens={tokenStr}
-					branch={git.branch || undefined}
 					user={authUser?.displayName}
 					permissions={activePermMode}
 					permHeld={activePermView.held}
 					permToast={permToast}
 					sessionTime={sessionTime}
 					mode={agentMode}
-					isProcessing={isProcessing}
+					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
 					djKeys={djKeys}

@@ -2,7 +2,7 @@
  * PlanRail tests - pure presentation. Walks the React element tree
  * returned by calling the component as a function.
  *
- * Pattern matches ActivityRail.test.tsx + ContextRail.test.tsx.
+ * Pattern matches ActivityRail.test.tsx.
  */
 
 import { describe, expect, test } from "bun:test";

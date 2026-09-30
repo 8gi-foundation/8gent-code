@@ -19,7 +19,8 @@
  *   position as text. Nothing loops, and there is no waveform: the deck does
  *   not draw audio it does not read.
  * - Under reduced motion or NO_COLOR the clock moves in 15 s steps.
- * - Nothing loaded: no deck row, and the footer's 8GENT FM segment is still.
+ * - Nothing loaded: no deck row and no footer segment; the quiet state draws
+ *   nothing (#3238).
  *
  * Words carry every state, so it reads the same under NO_COLOR, and each row
  * has an aria-label for screen readers. `/dj close` hides the row (the footer
@@ -33,6 +34,7 @@ import { colourPolicy } from "../lib/colour-policy.js";
 import { keepIfSame } from "../lib/keep-if-same.js";
 import { reducedMotionFromEnv } from "../lib/motion.js";
 import { t } from "../theme.js";
+import { KeyCap } from "./KeyCap.js";
 
 // ── Persistence helpers ───────────────────────────────────────────────
 // Lazy + best-effort: never let a DB error crash the deck. If the workspace
@@ -191,17 +193,6 @@ export function djControl(
 	}
 }
 
-function KeyCap({ cap, verb }: { cap: string; verb: string }) {
-	return (
-		<Text>
-			<Text color={t.textTertiary}>[</Text>
-			<Text color={t.textSecondary}>{cap}</Text>
-			<Text color={t.textTertiary}>]</Text>
-			{verb ? <Text color={t.textTertiary}> {verb}</Text> : null}
-		</Text>
-	);
-}
-
 /** The second row, only while the deck has the keyboard. It sits under the track, past "DJ ▶ ". */
 export function DjKeysRow({ volume = null }: { volume?: number | null } = {}) {
 	const groups = [DJ_KEYS.slice(0, 4), DJ_KEYS.slice(4, 6), DJ_KEYS.slice(6, 7), DJ_KEYS.slice(7)];
@@ -303,38 +294,26 @@ export function DjRow(props: {
 	);
 }
 
-/** The station segment at the start of the one-row footer. It takes its
- *  natural width up to `width`, the columns the status segments after it
- *  budget for it, so the row never overflows. While a track is loaded it is
- *  the DJ: "▶ DJ", plus the track when the deck row is closed. */
+/** The station segment at the start of the one-row footer, only while a
+ *  track is loaded and the DJ row is closed (/dj close): "▶ DJ" and the
+ *  track. Nothing loaded draws nothing (#3238). It takes its natural width
+ *  up to `width`, the columns the status segments after it budget for it. */
 export function FmFooterSegment(props: {
 	width: number;
 	playing: boolean;
 	paused?: boolean;
 	track: string;
-	label: string;
-	labelColor: string;
-	/** A track is loaded: the segment reads DJ, not 8GENT FM. */
-	dj?: boolean;
 }) {
-	const wide = props.width >= 20;
-	const station = props.dj ? "DJ" : "8GENT FM";
-	const glyph = props.paused ? "❚❚ " : props.playing ? "▶ " : "● ";
-	const showLabel = !props.track && wide && props.label.length > 0;
-	const natural =
-		glyph.length +
-		station.length +
-		(props.track ? props.track.length + 1 : showLabel ? props.label.length + 1 : 0);
+	const glyph = props.paused ? "❚❚ " : "▶ ";
+	const natural = glyph.length + 2 + (props.track ? props.track.length + 1 : 0);
 	return (
 		<Box width={Math.min(natural, props.width)} flexShrink={0} overflow="hidden">
 			<Text wrap="truncate-end">
 				<Text color={props.playing && !props.paused ? t.teal : t.textTertiary}>{glyph}</Text>
-				<Text color={t.textSecondary}>{station}</Text>
-				{props.track ? (
-					<Text color={t.textPrimary}> {props.track}</Text>
-				) : showLabel ? (
-					<Text color={props.labelColor}> {props.label}</Text>
-				) : null}
+				<Text color={t.orange} bold>
+					DJ
+				</Text>
+				{props.track ? <Text color={t.textPrimary}> {props.track}</Text> : null}
 			</Text>
 		</Box>
 	);
@@ -343,18 +322,17 @@ export function FmFooterSegment(props: {
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 export function DjDeck({
-	isProcessing = false,
 	footer,
 	fmWidth = 14,
 	columns = 80,
 	keysActive = false,
 	onKeysDone,
 }: {
-	isProcessing?: boolean;
 	/** When set, the deck renders as the first segment of a one-row footer
-	 *  and `footer` fills the rest of that row. The DJ row opens above it
+	 *  and `footer` fills the rest of that row. As a function it is told
+	 *  whether the station segment is drawn before it (#3238). The DJ row opens above it
 	 *  while a track is loaded. */
-	footer?: React.ReactNode;
+	footer?: React.ReactNode | ((station: boolean) => React.ReactNode);
 	fmWidth?: number;
 	/** Terminal columns: below 110 the row leaves the volume to the key-cap row. */
 	columns?: number;
@@ -538,20 +516,15 @@ export function DjDeck({
 		) : null;
 	const keysRow = hasTrack && keysActive ? <DjKeysRow volume={volume} /> : null;
 
-	// Nothing loaded: only the footer segment. When the agent is mid-turn the
-	// segment says "agent pulse" so the bottom row does not look dead.
-	const idleLabel = isProcessing ? "agent pulse" : "idle";
-	const segment = (
-		<FmFooterSegment
-			width={fmWidth}
-			playing={playing}
-			paused={hasTrack && status.paused}
-			dj={hasTrack}
-			track={hasTrack && !open ? track : ""}
-			label={hasTrack ? "" : idleLabel}
-			labelColor={isProcessing ? t.teal : t.textTertiary}
-		/>
-	);
+	// One home per fact (#3238): the DJ row names the track while it is open,
+	// so the footer carries the station only when a track is loaded and the
+	// row is closed (/dj close). Nothing loaded draws nothing: the NOW strip
+	// already says whether the agent is working, so no "idle" or "agent pulse".
+	const station = hasTrack && !open;
+	const segment = station ? (
+		<FmFooterSegment width={fmWidth} playing={playing} paused={status.paused} track={track} />
+	) : null;
+	const footerNode = typeof footer === "function" ? footer(station) : footer;
 
 	return (
 		<Box width="100%" flexDirection="column" flexShrink={0}>
@@ -560,7 +533,7 @@ export function DjDeck({
 			{footer === undefined && (row || keysRow) ? null : (
 				<Box width="100%" flexShrink={0} height={1}>
 					{segment}
-					{footer}
+					{footerNode}
 				</Box>
 			)}
 		</Box>

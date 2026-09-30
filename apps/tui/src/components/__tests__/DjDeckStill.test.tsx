@@ -94,7 +94,7 @@ describe("the playing deck is cheap and still (#3184)", () => {
 		const seg = strip(
 			renderToString(
 				<Box width={80}>
-					<FmFooterSegment width={22} playing dj track="No Agreement" label="" labelColor="" />
+					<FmFooterSegment width={22} playing track="No Agreement" />
 				</Box>,
 				{ columns: 80 },
 			),

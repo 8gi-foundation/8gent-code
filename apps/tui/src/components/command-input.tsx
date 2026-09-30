@@ -602,12 +602,14 @@ function SlashCommandHelp({
 	if (combined.length === 0) return null;
 
 	return (
-		<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} marginTop={1}>
-			<MutedText>Commands:</MutedText>
+		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
+			<Text color={t.heading} bold>
+				COMMANDS
+			</Text>
 			{combined.slice(0, 14).map((row) => (
 				<Box key={row.key}>
-					<AppText color="cyan">/{row.label}</AppText>
-					<MutedText> - {row.description}</MutedText>
+					<Text color={t.textPrimary}>/{row.label}</Text>
+					<Text color={t.textTertiary}> {row.description}</Text>
 				</Box>
 			))}
 		</Box>

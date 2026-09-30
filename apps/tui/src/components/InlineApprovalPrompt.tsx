@@ -1,6 +1,15 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
+import { KEY_CAP_GAP, KeyCap } from "./KeyCap.js";
+
+/** The card's keys, as key caps (#3238): one format for every key in the HUD. */
+export const APPROVAL_KEYS: ReadonlyArray<readonly [string, string]> = [
+	["Y", "approve"],
+	["N", "deny"],
+	["E", "edit"],
+	["S", "skip"],
+];
 
 interface InlineApprovalPromptProps {
 	/** Plain-language description of the action awaiting approval. */
@@ -16,7 +25,7 @@ interface InlineApprovalPromptProps {
  * Presentational only. Wiring into NemoClaw's approve callback is a
  * separate follow-up issue.
  *
- * Keys offered: Y approve / N deny / E edit / S skip.
+ * Keys offered: [Y] approve  [N] deny  [E] edit  [S] skip.
  */
 export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptProps) {
 	return (
@@ -46,13 +55,14 @@ export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptPro
 				</Text>
 			</Box>
 			<Box flexShrink={0}>
-				<Text color={t.green}>Y approve</Text>
-				<Text color={t.dim}> / </Text>
-				<Text color={t.red}>N deny</Text>
-				<Text color={t.dim}> / </Text>
-				<Text color={t.orange}>E edit</Text>
-				<Text color={t.dim}> / </Text>
-				<Text color={t.muted}>S skip</Text>
+				<Text>
+					{APPROVAL_KEYS.map(([cap, verb], i) => (
+						<Text key={cap}>
+							{i > 0 ? KEY_CAP_GAP : ""}
+							<KeyCap cap={cap} verb={verb} />
+						</Text>
+					))}
+				</Text>
 			</Box>
 		</Box>
 	);

@@ -132,13 +132,11 @@ describe("the key caps (car stereo)", () => {
 });
 
 describe("the footer segment", () => {
-	test("reads DJ while a track is loaded, 8GENT FM when nothing is", () => {
-		const dj = frame(<FmFooterSegment width={22} playing dj track="" label="" labelColor="" />, 22);
-		expect(dj.trim()).toBe("▶ DJ");
-		const idle = frame(
-			<FmFooterSegment width={22} playing={false} track="" label="idle" labelColor="" />,
-			22,
-		);
-		expect(idle.trim()).toBe("● 8GENT FM idle");
+	test("reads DJ and the track, the deck's own name and colour (#3238)", () => {
+		const dj = frame(<FmFooterSegment width={40} playing track="No Agreement" />, 40);
+		expect(dj.trim()).toBe("▶ DJ No Agreement");
+		const paused = frame(<FmFooterSegment width={40} playing paused track="" />, 40);
+		expect(paused.trim()).toBe("❚❚ DJ");
+		expect(dj).not.toContain("8GENT FM");
 	});
 });

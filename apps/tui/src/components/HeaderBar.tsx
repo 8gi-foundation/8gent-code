@@ -1,18 +1,18 @@
 /**
- * HeaderBar - top-of-frame brand row.
+ * HeaderBar - top-of-frame brand row (HUD system, #3238).
  *
- * V2 chrome only: BrandPill on the left; workspace path + branch + sync
- * in the middle; ^P palette hint, MIC indicator, [ASK] chip,
- * LOCAL-FIRST chip, session clock, and LilEightBadge on the right.
+ * The living braille 8 and the brand pill on the left; workspace path,
+ * branch and sync in the middle; on the right only the state chips that
+ * ask for the person, and only while they apply: ASK (an approval card is
+ * up), INFINITE (the tab runs without asking), ● MIC (recording). A quiet
+ * header is the default. The clock is in the footer, the palette key is the
+ * footer's first key cap, and the Lil Eight badge is gone: the living 8 is
+ * the pet, and the NOW strip says what the agent is doing.
  *
- * The row must never wrap. The pill and the right-hand cluster are sized
- * by their content and never shrink; the middle segment is fitted to the
- * columns left over by `fitHeaderMiddle`, which gives the branch name
- * priority over the tail of the workspace path. When the middle would be
- * squeezed below HINT_COMPACT_BELOW columns the "palette" word is dropped
- * from the ^P hint to hand those columns to the workspace segment. Tighter
- * still, the pill drops its tagline, then the middle goes entirely, so the
- * status badge on the right edge is never the part that gets clipped.
+ * Every piece of text sits on the pill's text row, the middle of the three
+ * rows. The row never wraps: the pill and the chips never shrink; the
+ * middle is fitted by `fitHeaderMiddle`, branch before the tail of the
+ * path. Tighter still, the pill drops its tagline, then the middle goes.
  *
  * Pure presentational. Theme tokens only. No inline hex.
  */
@@ -34,7 +34,6 @@ import {
 } from "../lib/living-mark.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
-import { LilEightBadge, type LilEightState } from "./LilEightBadge.js";
 
 const ui = {
 	cream:      t.textPrimary,
@@ -43,27 +42,24 @@ const ui = {
 	// Brand mark and the update notice only.
 	orange:     t.orange,
 	teal:       t.teal,
-	// The brand pill is chrome, not state: orange stays for the active tab,
-	// DONE, the input and the selection.
-	pillBorder: t.border,
+	// The brand pill is a Surface (#3238): the frame token, like every edge.
+	pillBorder: t.frame,
 } as const;
 
 /** Width assumed when the caller does not report the terminal width. */
 const DEFAULT_WIDTH = 80;
-/** Below this many middle columns the ^P hint drops its "palette" label. */
-const HINT_COMPACT_BELOW = 20;
 /** Horizontal padding either side of the middle segment. */
 const MIDDLE_PADDING = 2;
-/** Round border (2) plus paddingX={1} (2) around pill and badge content. */
+/** Round border (2) plus paddingX={1} (2) around the pill content. */
 const BORDER_AND_PADDING = 4;
+/** Columns between two chips, and between the last chip and the right edge. */
+const CHIP_GAP = 2;
 
-const PALETTE_HINT_FULL = " palette";
-const MIC_ON = "● MIC";
-const MIC_OFF = "○ MIC";
-const ASK_CHIP = "[ASK]";
+/** An approval card is up. The card itself says ASK too; the chip is its echo where the eye lands first. */
+const ASK_CHIP = "ASK";
 /** Running without asking is the one permission mode that earns a header chip (#3174). */
 const INFINITE_CHIP = "INFINITE";
-const LOCAL_CHIP = "LOCAL";
+const MIC_CHIP = "● MIC";
 const BRAND_TAGLINE = " The Infinite Gentleman";
 
 interface HeaderBarProps {
@@ -74,11 +70,9 @@ interface HeaderBarProps {
 	branch: string;
 	/** "ahead 1", "behind 2", "in sync", etc. */
 	syncStatus: string;
+	/** Voice is recording. Off draws nothing (#3238). */
 	micOn: boolean;
 	approvalPending: boolean;
-	localFirst: boolean;
-	sessionTime: string;
-	lilEightState: LilEightState;
 	/** Terminal columns the header may use. Defaults to 80 when omitted. */
 	width?: number;
 	/**
@@ -91,7 +85,7 @@ interface HeaderBarProps {
 	mark?: boolean;
 	/**
 	 * The focused tab's permission mode (#3174). Only Infinite changes the
-	 * header: an INFINITE chip beside [ASK]. The living 8 never changes with it.
+	 * header: an INFINITE chip beside ASK. The living 8 never changes with it.
 	 */
 	permMode?: string;
 }
@@ -114,36 +108,41 @@ export function brandPillWidth(
 	return cellWidth(text) + BORDER_AND_PADDING;
 }
 
-/** Columns the right-hand status cluster occupies, badge included. */
+/** The chips the header shows right now, in priority order (#3238). */
+export function headerChips(
+	props: Pick<HeaderBarProps, "micOn" | "approvalPending" | "permMode">,
+): string[] {
+	const chips: string[] = [];
+	if (props.approvalPending) chips.push(ASK_CHIP);
+	if (props.permMode === "infinite") chips.push(INFINITE_CHIP);
+	if (props.micOn) chips.push(MIC_CHIP);
+	return chips;
+}
+
+/** Columns the right-hand chips occupy, gaps and the right margin included. */
 export function statusClusterWidth(
-	props: Pick<
-		HeaderBarProps,
-		"micOn" | "approvalPending" | "sessionTime" | "lilEightState" | "permMode"
-	>,
-	compactHint: boolean,
+	props: Pick<HeaderBarProps, "micOn" | "approvalPending" | "permMode">,
 ): number {
-	const hint = "^P" + (compactHint ? "" : PALETTE_HINT_FULL);
-	const mic = props.micOn ? MIC_ON : MIC_OFF;
-	const ask =
-		(props.approvalPending ? `${ASK_CHIP} ` : "") +
-		(props.permMode === "infinite" ? `${INFINITE_CHIP} ` : "");
-	const text = `${hint}  ${mic}  ${ask}${LOCAL_CHIP} ${props.sessionTime} `;
-	const badge = cellWidth(`8▣ ${props.lilEightState}`) + BORDER_AND_PADDING;
-	return cellWidth(text) + badge;
+	const chips = headerChips(props);
+	if (chips.length === 0) return 0;
+	// Each chip and the gap after it, plus one column clear of the middle.
+	return 1 + chips.reduce((sum, c) => sum + cellWidth(c) + CHIP_GAP, 0);
 }
 
 /** Fewest middle columns worth rendering: the branch glyph and a 4-cell slice. */
 const MIDDLE_MIN = 6;
+/** The tagline stays only while the middle keeps at least this many columns. */
+const TAGLINE_MIDDLE_MIN = 20;
+/** Narrower than this, the pill is always compact. */
+const TAGLINE_MIN_COLS = 100;
 
 /**
- * Decide the pill form, the hint form and the fitted middle segment for a
- * given width. The status badge is never the thing that gets cut: when the
- * row is tight the header gives up, in order, the "palette" word, the
- * tagline, and finally the whole workspace segment with its padding.
+ * Decide the pill form and the fitted middle segment for a given width. The
+ * chips are never cut: when the row is tight the header gives up, in order,
+ * the tagline and then the whole workspace segment with its padding.
  * Exported so tests can pin the layout without rendering.
  */
 export interface HeaderPlan {
-	compactHint: boolean;
 	compactBrand: boolean;
 	middle: HeaderMiddle;
 	middleAvailable: number;
@@ -153,10 +152,10 @@ export interface HeaderPlan {
 
 /**
  * The braille 8 takes MARK_COLUMNS only when it costs nothing that carries
- * information: the same pill and hint, the whole branch, and the sync state
- * whenever it would show without it. Only the tail of an already-shortened path may give way. When
- * columns run out it is the first thing to go. Never on a terminal that
- * cannot draw braille.
+ * information: the same pill, the whole branch, and the sync state whenever
+ * it would show without it. Only the tail of an already-shortened path may
+ * give way. When columns run out it is the first thing to go. Never on a
+ * terminal that cannot draw braille.
  */
 export function planHeader(props: HeaderBarProps): HeaderPlan {
 	const width = props.width ?? DEFAULT_WIDTH;
@@ -166,7 +165,6 @@ export function planHeader(props: HeaderBarProps): HeaderPlan {
 		const withMark = planRow(props, width - MARK_COLUMNS);
 		const free =
 			withMark.compactBrand === plain.compactBrand &&
-			withMark.compactHint === plain.compactHint &&
 			withMark.middle.branch === plain.middle.branch &&
 			(plain.middle.sync === "" || withMark.middle.sync === plain.middle.sync) &&
 			(withMark.middle.branch !== "" || withMark.middle.path !== "");
@@ -176,31 +174,26 @@ export function planHeader(props: HeaderBarProps): HeaderPlan {
 }
 
 function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark"> {
-	const steps: Array<[compactBrand: boolean, compactHint: boolean]> = [
-		[false, false],
-		[false, true],
-		[true, false],
-		[true, true],
-	];
-	for (const [compactBrand, compactHint] of steps) {
+	// Below TAGLINE_MIN_COLS the tagline always steps aside (#3238): at 80
+	// columns the living 8 and the branch say more than the brand line, and
+	// a chip appearing must never be what pushes the 8 out.
+	for (const compactBrand of (props.width ?? DEFAULT_WIDTH) < TAGLINE_MIN_COLS ? [true] : [false, true]) {
 		const available =
 			width -
 			brandPillWidth(props.version, props.updateAvailable, compactBrand) -
-			statusClusterWidth(props, compactHint) -
+			statusClusterWidth(props) -
 			MIDDLE_PADDING;
-		// The first two steps keep the old rule: the full hint needs a roomy
-		// middle, so a merely-fitting branch still trades the word away.
-		const floor = !compactHint && !compactBrand ? HINT_COMPACT_BELOW : MIDDLE_MIN;
+		// The tagline needs a roomy middle: a merely-fitting branch still trades it away.
+		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
 			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
 			if (middle.branch || middle.path || middle.sync) {
-				return { compactHint, compactBrand, middle, middleAvailable: available };
+				return { compactBrand, middle, middleAvailable: available };
 			}
 		}
 	}
-	// No room for a branch at all: compact pill, compact hint, no middle.
+	// No room for a branch at all: compact pill, no middle.
 	return {
-		compactHint: true,
 		compactBrand: true,
 		middleAvailable: 0,
 		middle: { path: "", branch: "", sync: "" },
@@ -208,16 +201,9 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 }
 
 export function HeaderBar(props: HeaderBarProps) {
-	const {
-		updateAvailable,
-		version,
-		micOn,
-		approvalPending,
-		localFirst,
-		sessionTime,
-		lilEightState,
-	} = props;
-	const { compactHint, compactBrand, middle, mark } = planHeader(props);
+	const { updateAvailable, version } = props;
+	const { compactBrand, middle, mark } = planHeader(props);
+	const chips = headerChips(props);
 
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
@@ -256,36 +242,27 @@ export function HeaderBar(props: HeaderBarProps) {
 				</Box>
 			) : (
 				// Nothing fits in the middle: an unpadded spacer, so the row
-				// never spends columns the status badge needs.
+				// never spends columns the chips need.
 				<Box flexGrow={1} flexShrink={1} minWidth={0} />
 			)}
 
-			<Box flexShrink={0} justifyContent="flex-end">
-				<Text color={ui.dim}>^P</Text>
-				<Text color={ui.muted}>{compactHint ? "" : PALETTE_HINT_FULL}</Text>
-				<Text color={ui.dim}>  </Text>
-				<Text color={micOn ? t.red : ui.dim}>{micOn ? MIC_ON : MIC_OFF}</Text>
-				<Text color={ui.dim}>  </Text>
-				{approvalPending ? (
-					<>
-						<Text color={t.orange} bold>{ASK_CHIP}</Text>
-						<Text color={ui.dim}> </Text>
-					</>
-				) : null}
-				{props.permMode === "infinite" ? (
-					<>
-						<Text color={t.orange} bold>
-							{INFINITE_CHIP}
-						</Text>
-						<Text color={ui.dim}> </Text>
-					</>
-				) : null}
-				<Text color={localFirst ? t.green : ui.dim}>{LOCAL_CHIP}</Text>
-				<Text color={ui.dim}> </Text>
-				<Text color={ui.muted}>{sessionTime}</Text>
-				<Text color={ui.dim}> </Text>
-				<LilEightBadge state={lilEightState} />
-			</Box>
+			{chips.length > 0 ? (
+				// One row, centred on the pill's text row by the header's
+				// alignItems (the chips were on the pill's top edge before #3238).
+				// The right margin mirrors the pill's border and padding on the left.
+				<Box flexShrink={0} marginLeft={1} marginRight={CHIP_GAP}>
+					<Text>
+						{chips.map((chip, i) => (
+							<Text key={chip}>
+								{i > 0 ? "  " : ""}
+								<Text color={chip === MIC_CHIP ? t.red : t.orange} bold>
+									{chip}
+								</Text>
+							</Text>
+						))}
+					</Text>
+				</Box>
+			) : null}
 		</Box>
 	);
 }

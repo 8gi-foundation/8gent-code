@@ -73,7 +73,7 @@ interface TabBarProps {
 	width?: number;
 }
 
-export const GRAB_HINT = "[G] drop on another tab to group | [Esc] cancel";
+export const GRAB_HINT = "[^G] drop on another tab to group  [Esc] cancel";
 const GAP = "   ";
 
 export interface TabCell {
@@ -203,7 +203,7 @@ export function TabBar({
 							<React.Fragment key={visibleTabs[i]?.id ?? i}>
 								{i > 0 ? GAP : ""}
 								{cell.grabbed ? <Text color={t.orange}>[</Text> : null}
-								<Text color={t.dim}>{cell.num}</Text>
+								<Text color={t.textTertiary}>{cell.num}</Text>
 								<Text color={cell.active ? t.orange : t.muted} bold={cell.active}>
 									{cell.title}
 								</Text>

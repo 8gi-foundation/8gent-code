@@ -1,3 +1,6 @@
+import { describe, expect, test } from "bun:test";
+import { renderToString } from "ink";
+import type React from "react";
 /**
  * LiveFocalStrip tests
  *
@@ -6,9 +9,7 @@
  * Ink is intentionally not exercised here - the repo uses launch smoke
  * tests for that, see apps/tui/src/__tests__/smoke.test.ts.
  */
-import { describe, expect, test } from "bun:test";
-import { renderToString } from "ink";
-import type React from "react";
+import { t } from "../../theme.js";
 
 import { LiveFocalStrip, meter } from "../LiveFocalStrip.js";
 
@@ -55,8 +56,10 @@ describe("LiveFocalStrip exports", () => {
 			contextPct: 35,
 		});
 		expect(element).toBeDefined();
-		// When not processing, border uses page-level border tone (subtle).
-		expect(element.props.borderColor).toBe("#2E2A26");
+		// At rest the strip's edge is the frame token, like every edge (#3238).
+		expect(element.props.borderColor).toBe(t.frame);
+		// One border style in every state: only the colour changes.
+		expect(element.props.borderStyle).toBe("single");
 	});
 
 	test("processing flips border to teal", () => {
@@ -107,10 +110,16 @@ describe("the NOW strip shows the state, not the ^Y mode (#3123)", () => {
 		for (const out of [running, done, draw({})]) expect(out).not.toContain("Planning");
 	});
 
-	test("autonomous still says so, beside the state", () => {
+	test("Infinite is named once, in the header and footer, not beside the state (#3238)", () => {
 		const out = draw({ isProcessing: true, autonomous: true });
 		expect(out).toContain("NOW");
-		expect(out).toContain("Autonomous");
+		expect(out).not.toContain("Autonomous");
 		expect(out).not.toContain("Planning");
+	});
+
+	test("at rest the strip says READY once, with no idle word beside it (#3238)", () => {
+		const out = draw({});
+		expect(out).toContain("READY");
+		expect(out).not.toContain("idle");
 	});
 });
