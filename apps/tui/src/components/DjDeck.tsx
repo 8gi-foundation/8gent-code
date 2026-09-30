@@ -1,25 +1,43 @@
 /**
- * DjDeck — premium terminal audio deck.
- * - Timer ticks locally between polls so seconds advance smoothly
- * - Animated pseudo-waveform centered on the artist row when playing
- * - Volume slider updates in real time via Ctrl+Up/Down
+ * DjDeck: the DJ, one row above the footer while a track is loaded.
  *
- * Stereo behaviour (#2341):
- * - Default = expanded on first run.
- * - User collapses via ^D to a single thin line (track + tiny waveform + play icon).
- * - Never auto-hides, never auto-expands, never collapses to zero height.
- * - Choice persists in workspace DB at app_state(`tui`, `djDeckExpanded`).
+ *   DJ ▶ No Agreement (LP)  Fela Kuti  Key: F minor (est.)   1:15 / 31:05  vol 60%  [^D] keys
+ *
+ * [^D] gives the deck the keyboard, like the buttons on a car stereo, and a
+ * second row shows the key caps that work right then (#3188):
+ *
+ *      [B ◀◀] [Space ▶❚] [N ▶▶] [S ■]  [-] [+] vol 60%  [M] mute  [Esc] chat
+ *
+ * Plain keys only reach the deck while it has the keyboard, so they never type
+ * into the chat and never fight the app's Ctrl shortcuts. Esc or ^D hands the
+ * keyboard back (app.tsx); so does stopping.
+ *
+ * Cost and motion (#3184):
+ * - One 1 s poll of the player. The deck repaints only when what it draws
+ *   changes. Every repaint is a full Ink frame (about 50 ms of CPU on a
+ *   160x48 screen), so the clock moves in 5 s steps; /dj np reads the exact
+ *   position as text. Nothing loops, and there is no waveform: the deck does
+ *   not draw audio it does not read.
+ * - Under reduced motion or NO_COLOR the clock moves in 15 s steps.
+ * - Nothing loaded: no deck row, and the footer's 8GENT FM segment is still.
+ *
+ * Words carry every state, so it reads the same under NO_COLOR, and each row
+ * has an aria-label for screen readers. `/dj close` hides the row (the footer
+ * then names the track), `/dj open` brings it back; the choice persists in the
+ * workspace DB at app_state(`tui`, `djDeckExpanded`) (#2341).
  */
 
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useRef, useState } from "react";
-import { t } from "../theme.js";
+import { colourPolicy } from "../lib/colour-policy.js";
 import { keepIfSame } from "../lib/keep-if-same.js";
+import { reducedMotionFromEnv } from "../lib/motion.js";
+import { t } from "../theme.js";
 
 // ── Persistence helpers ───────────────────────────────────────────────
 // Lazy + best-effort: never let a DB error crash the deck. If the workspace
 // DB is unavailable (e.g. tests, sandboxed CI), we silently fall back to the
-// in-memory default (expanded).
+// in-memory default (shown).
 
 const PERSIST_APP_ID = "tui";
 const PERSIST_KEY = "djDeckExpanded";
@@ -45,7 +63,7 @@ async function persistExpanded(value: boolean): Promise<void> {
 	}
 }
 
-interface DjStatus {
+export interface DjStatus {
 	playing: boolean;
 	paused: boolean;
 	looping: boolean;
@@ -62,18 +80,54 @@ interface DjStatus {
 }
 
 const EMPTY: DjStatus = {
-	playing: false, paused: false, looping: false,
-	title: "", url: "", position: null, duration: null, volume: null, queueSize: 0,
-	name: "", artists: [], keyLabel: "",
+	playing: false,
+	paused: false,
+	looping: false,
+	title: "",
+	url: "",
+	position: null,
+	duration: null,
+	volume: null,
+	queueSize: 0,
+	name: "",
+	artists: [],
+	keyLabel: "",
 };
 
 let setOpenExternal: ((v: boolean) => void) | null = null;
-let toggleOpenExternal: (() => void) | null = null;
 export function setDjDeckOpen(open: boolean): void {
 	setOpenExternal?.(open);
 }
-export function toggleDjDeckOpen(): void {
-	toggleOpenExternal?.();
+
+/** Whether a track is loaded right now; ^D only gives the deck the keyboard then. */
+let trackLoaded = false;
+export function djHasTrack(): boolean {
+	return trackLoaded;
+}
+
+/** Whether the deck holds still: reduced motion asked for, or NO_COLOR (#3184). */
+export function deckStill(env: Record<string, string | undefined> = process.env): boolean {
+	return reducedMotionFromEnv(env) || colourPolicy(env) === "none";
+}
+
+/** Seconds per clock step: 5 normally, 15 when the deck holds still. */
+export function clockStep(still: boolean): number {
+	return still ? 15 : 5;
+}
+
+/**
+ * What the deck shows from one poll, reduced to what it can draw. The
+ * position is floored to the clock step, so two polls inside the same step
+ * are equal and keepIfSame skips the render.
+ */
+export function deckView(s: DjStatus, step: number): DjStatus {
+	const pos = s.position;
+	return {
+		...s,
+		position: pos == null || !Number.isFinite(pos) ? null : Math.floor(pos / step) * step,
+		duration: s.duration == null || !Number.isFinite(s.duration) ? null : Math.floor(s.duration),
+		volume: s.volume == null ? null : Math.round(s.volume),
+	};
 }
 
 function fmt(s: number | null): string {
@@ -83,195 +137,204 @@ function fmt(s: number | null): string {
 	return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
-function truncateEnd(value: string, max: number): string {
-	if (value.length <= max) return value;
-	return `${value.slice(0, Math.max(0, max - 1))}…`;
+function sanitizeTrack(value: string): string {
+	return value
+		.replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+		.replace(/\s+/g, " ")
+		.trim();
 }
 
-// Waveform chars — deterministic pseudo-random animation driven by tick
-const WAVE = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-const WAVE_IDLE = "▁▁▁▁▁▁▁▁▁▁▁▁";
+// ── Key caps (HUD system role "key cap": the cap is its own border) ──
 
-function waveFrame(tick: number, bars = 12): string {
-	return Array.from({ length: bars }, (_, i) => {
-		const idx = Math.abs((tick * 3 + i * 7 + i * i * 2) % WAVE.length);
-		return WAVE[idx];
-	}).join("");
+/**
+ * The deck's controls, in car-stereo order. Every symbol draws in one cell in
+ * Menlo; ⏯ ⏭ ⏮ fall back to two-cell emoji and would shift the row.
+ */
+export const DJ_KEYS: readonly { cap: string; verb: string; spoken: string }[] = [
+	{ cap: "B ◀◀", verb: "", spoken: "B previous" },
+	{ cap: "Space ▶❚", verb: "", spoken: "Space play or pause" },
+	{ cap: "N ▶▶", verb: "", spoken: "N next" },
+	{ cap: "S ■", verb: "", spoken: "S stop" },
+	{ cap: "-", verb: "", spoken: "minus volume down" },
+	{ cap: "+", verb: "vol", spoken: "plus volume up" },
+	{ cap: "M", verb: "mute", spoken: "M mute" },
+	{ cap: "Esc", verb: "chat", spoken: "Escape back to chat" },
+];
+
+/** Which deck control a key press is, or null. Plain keys: they only arrive while the deck has the keyboard. */
+export function djControl(
+	input: string | undefined,
+): "prev" | "pause" | "next" | "stop" | "down" | "up" | "mute" | null {
+	switch (input) {
+		case "b":
+		case "B":
+			return "prev";
+		case " ":
+			return "pause";
+		case "n":
+		case "N":
+			return "next";
+		case "s":
+		case "S":
+			return "stop";
+		case "-":
+		case "_":
+			return "down";
+		case "+":
+		case "=":
+			return "up";
+		case "m":
+		case "M":
+			return "mute";
+		default:
+			return null;
+	}
 }
 
-function VolumeSlider({ volume, muted, width }: { volume: number | null; muted: boolean; width: number }) {
-	if (muted) return <Text color={t.textDim}>muted</Text>;
-	if (volume == null) return <Text color={t.textDim}>vol --</Text>;
-	const pct = Math.min(150, Math.max(0, volume));
-	// Slider tracks 0-100 visually; over 100% shows fully filled + label
-	const displayPct = Math.min(100, pct);
-	const filled = Math.round((displayPct / 100) * width);
-	const bar = "█".repeat(filled) + "░".repeat(Math.max(0, width - filled));
+function KeyCap({ cap, verb }: { cap: string; verb: string }) {
 	return (
-		<Box>
-			<Text color={t.orange}>{bar}</Text>
-			<Text color={t.orangeDim}> {pct}%</Text>
-		</Box>
+		<Text>
+			<Text color={t.textTertiary}>[</Text>
+			<Text color={t.textSecondary}>{cap}</Text>
+			<Text color={t.textTertiary}>]</Text>
+			{verb ? <Text color={t.textTertiary}> {verb}</Text> : null}
+		</Text>
 	);
 }
 
-export function StereoDisplay(props: {
-	playing: boolean;
-	track: string;
-	artist: string;
-	elapsed: string;
-	duration: string;
-	volume: number | null;
-	muted: boolean;
-	tick: number;
-	termWidth: number;
-	hasTrack?: boolean;
-	/** "Key: A minor (est.)", "Key: detecting...", "Key: unknown"; empty hides it (#3192). */
-	keyLabel?: string;
-}) {
-	// hasTrack defaults true for backwards compatibility with prior call sites.
-	const hasTrack = props.hasTrack !== false;
-	const wave = !hasTrack ? WAVE_IDLE : props.playing ? waveFrame(props.tick) : WAVE_IDLE;
-	// Vol slider gets ~40% of available width minus label/padding
-	const sliderWidth = Math.max(8, Math.floor(props.termWidth * 0.3));
-
-	const trackText = hasTrack ? props.track : "(no track)";
-	const artistText = hasTrack ? props.artist : "";
-	const trackColor = hasTrack ? t.textPrimary : t.textDim;
-	const artistColor = hasTrack ? t.orange : t.textDim;
-
+/** The second row, only while the deck has the keyboard. It sits under the track, past "DJ ▶ ". */
+export function DjKeysRow({ volume = null }: { volume?: number | null } = {}) {
+	const groups = [DJ_KEYS.slice(0, 4), DJ_KEYS.slice(4, 6), DJ_KEYS.slice(6, 7), DJ_KEYS.slice(7)];
 	return (
 		<Box
 			width="100%"
-			borderStyle="single"
-			borderColor={t.orangeDim}
-			paddingX={1}
-			flexDirection="column"
+			flexShrink={0}
+			height={1}
+			overflow="hidden"
+			aria-label={`DJ keys: ${DJ_KEYS.map((k) => k.spoken).join(", ")}.`}
 		>
-			{/* Row 1: track name + key (or the clock icon when no key is known) */}
-			<Box justifyContent="space-between" width="100%">
-				<Box minWidth={0} flexGrow={1} flexShrink={1}>
-					<Text color={t.orange}>{props.playing ? "◴ " : "○ "}</Text>
-					<Text color={trackColor} wrap="truncate-end">{trackText}</Text>
-				</Box>
-				{hasTrack && props.keyLabel ? (
-					<Box flexShrink={0}>
-						<Text color={t.textPrimary}> {props.keyLabel}</Text>
-					</Box>
-				) : (
-					<Text color={t.orange}>{props.playing ? " ◷" : " ○"}</Text>
-				)}
-			</Box>
-
-			{/* Row 2: artist | waveform (centered) | elapsed / duration */}
-			<Box justifyContent="space-between" width="100%">
-				<Box minWidth={0} flexGrow={1} flexShrink={1} flexBasis={0}>
-					<Text color={artistColor} wrap="truncate-end">{artistText}</Text>
-				</Box>
-				<Box flexShrink={0} paddingX={1}>
-					<Text color={props.playing && hasTrack ? t.orangeAlt : t.textDim}>{wave}</Text>
-				</Box>
-				<Box flexGrow={1} flexShrink={0} flexBasis={0} justifyContent="flex-end">
-					<Text color={t.orangeDim}>{props.elapsed} / {props.duration}</Text>
-				</Box>
-			</Box>
-
-			{/* Row 3: volume slider — stays visible even with no track */}
-			<Box width="100%">
-				<VolumeSlider volume={props.volume} muted={props.muted} width={sliderWidth} />
-			</Box>
+			<Text wrap="truncate-end">
+				{"     "}
+				{groups.map((g, gi) => (
+					<Text key={g[0].cap}>
+						{gi > 0 ? "  " : ""}
+						{g.map((k, i) => (
+							<Text key={k.cap}>
+								{i > 0 ? " " : ""}
+								<KeyCap
+									cap={k.cap}
+									verb={
+										k.verb === "vol" && volume != null
+											? `vol ${volume === 0 ? "muted" : `${volume}%`}`
+											: k.verb
+									}
+								/>
+							</Text>
+						))}
+					</Text>
+				))}
+			</Text>
 		</Box>
 	);
 }
 
-/**
- * Single-line stereo strip. Height 1, full width. Stays in chrome so the
- * deck never auto-hides — even when no track is loaded we still render the
- * placeholder strip so the user sees their stereo is on.
- *
- * Layout:  ▶ Track Name (truncate-end)        ▁▂▃▂   ◷
- *          [---------- track region ---------][wave][play]
- */
-export function CollapsedDjDeckStrip(props: {
-	playing: boolean;
+/** The one row a loaded track takes. */
+export function DjRow(props: {
+	paused: boolean;
 	track: string;
-	tick: number;
+	artist: string;
+	keyLabel: string;
+	elapsed: string;
+	duration: string;
+	volume: number | null;
+	/** The deck has the keyboard: the second row shows the caps, so this row drops its [^D] hint. */
+	keysActive: boolean;
+	/**
+	 * Room for the volume on this row. Below 110 columns it gives way so the
+	 * track, the artist and the key fit 80; the key-cap row shows it instead.
+	 */
+	showVolume?: boolean;
 }) {
-	const playIcon = props.playing ? "▶" : "■";
-	const wave = props.playing
-		? miniWaveFrame(props.tick)
-		: "▁▁▁▁";
-	const trackLabel = props.track || "8GENT FM idle";
+	const showVolume = props.showVolume !== false;
+	const muted = props.volume === 0;
+	const vol = props.volume == null ? "vol --" : muted ? "muted" : `vol ${props.volume}%`;
+	const state = props.paused ? "paused" : "playing";
+	const spoken = [
+		`DJ ${state}: ${props.track}`,
+		props.artist ? `by ${props.artist}` : "",
+		props.keyLabel,
+		`${props.elapsed} of ${props.duration}`,
+		muted ? "muted" : props.volume == null ? "" : `volume ${props.volume}`,
+		props.keysActive ? "" : "Control D for DJ keys",
+	]
+		.filter(Boolean)
+		.join(", ");
 	return (
-		<Box width="100%" flexShrink={0} height={1}>
-			<Box flexGrow={1} minWidth={0}>
-				<Text color={t.orange}>{playIcon} </Text>
-				<Text color={t.textPrimary} wrap="truncate-end">
-					{trackLabel}
+		<Box width="100%" flexShrink={0} height={1} aria-label={`${spoken}.`}>
+			<Box flexShrink={0}>
+				<Text bold color={t.orange}>
+					DJ
+				</Text>
+				<Text color={props.paused ? t.textTertiary : t.teal}>{props.paused ? " ❚❚ " : " ▶ "}</Text>
+			</Box>
+			<Box flexGrow={1} flexShrink={1} minWidth={0}>
+				<Text wrap="truncate-end">
+					<Text color={t.textPrimary}>{props.track}</Text>
+					{props.artist ? <Text color={t.textTertiary}>{`  ${props.artist}`}</Text> : null}
 				</Text>
 			</Box>
-			<Text color={props.playing ? t.orangeAlt : t.textDim}>{wave}</Text>
-			<Text color={t.orange}> {props.playing ? "◷" : "○"}</Text>
+			{props.keyLabel ? (
+				<Box flexShrink={0}>
+					<Text color={t.textSecondary}>{`  ${props.keyLabel}`}</Text>
+				</Box>
+			) : null}
+			<Box flexShrink={0}>
+				<Text color={t.textTertiary}>
+					{`  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
+				</Text>
+				{props.keysActive ? null : (
+					<Text>
+						{"  "}
+						<KeyCap cap="^D" verb="keys" />
+					</Text>
+				)}
+			</Box>
 		</Box>
 	);
 }
 
-// 4-bar mini waveform for the collapsed strip
-function miniWaveFrame(tick: number): string {
-	return Array.from({ length: 4 }, (_, i) => {
-		const idx = Math.abs((tick * 3 + i * 7 + i * i * 2) % WAVE.length);
-		return WAVE[idx];
-	}).join("");
-}
-
-/** The DJ command for a Ctrl+Shift+letter, or null for anything else. */
-export function djKey(input: string | undefined): "p" | "n" | "b" | "m" | null {
-	return input === "P" || input === "N" || input === "B" || input === "M"
-		? (input.toLowerCase() as "p" | "n" | "b" | "m")
-		: null;
-}
-
-function ShortcutHintRow({ playing }: { playing: boolean }) {
-	return (
-		<Box justifyContent="space-between" width="100%" overflow="hidden">
-			<Text color={t.muted}>^⇧B prev</Text>
-			<Text color={t.muted}>^⇧P {playing ? "pause" : "play"}</Text>
-			<Text color={t.muted}>^⇧N next</Text>
-			<Text color={t.muted}>^⇧↑↓ vol</Text>
-			<Text color={t.muted}>^⇧M mute</Text>
-		</Box>
-	);
-}
-
-function sanitizeTrack(value: string): string {
-	return value.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/\s+/g, " ").trim();
-}
-
-/** The 8GENT FM segment at the start of the one-row footer. It takes its
+/** The station segment at the start of the one-row footer. It takes its
  *  natural width up to `width`, the columns the status segments after it
- *  budget for it, so the row never overflows. */
+ *  budget for it, so the row never overflows. While a track is loaded it is
+ *  the DJ: "▶ DJ", plus the track when the deck row is closed. */
 export function FmFooterSegment(props: {
 	width: number;
 	playing: boolean;
+	paused?: boolean;
 	track: string;
 	label: string;
 	labelColor: string;
+	/** A track is loaded: the segment reads DJ, not 8GENT FM. */
+	dj?: boolean;
 }) {
 	const wide = props.width >= 20;
+	const station = props.dj ? "DJ" : "8GENT FM";
+	const glyph = props.paused ? "❚❚ " : props.playing ? "▶ " : "● ";
 	const showLabel = !props.track && wide && props.label.length > 0;
-	const natural = 2 + (props.track ? props.track.length : 8 + (showLabel ? props.label.length + 1 : 0));
+	const natural =
+		glyph.length +
+		station.length +
+		(props.track ? props.track.length + 1 : showLabel ? props.label.length + 1 : 0);
 	return (
 		<Box width={Math.min(natural, props.width)} flexShrink={0} overflow="hidden">
 			<Text wrap="truncate-end">
-				<Text color={props.playing ? t.teal : t.textTertiary}>{props.playing ? "▶ " : "● "}</Text>
+				<Text color={props.playing && !props.paused ? t.teal : t.textTertiary}>{glyph}</Text>
+				<Text color={t.textSecondary}>{station}</Text>
 				{props.track ? (
-					<Text color={t.textPrimary}>{props.track}</Text>
-				) : (
-					<>
-						<Text color={t.textSecondary}>8GENT FM</Text>
-						{showLabel ? <Text color={props.labelColor}> {props.label}</Text> : null}
-					</>
-				)}
+					<Text color={t.textPrimary}> {props.track}</Text>
+				) : showLabel ? (
+					<Text color={props.labelColor}> {props.label}</Text>
+				) : null}
 			</Text>
 		</Box>
 	);
@@ -283,37 +346,42 @@ export function DjDeck({
 	isProcessing = false,
 	footer,
 	fmWidth = 14,
+	columns = 80,
+	keysActive = false,
+	onKeysDone,
 }: {
 	isProcessing?: boolean;
 	/** When set, the deck renders as the first segment of a one-row footer
-	 *  and `footer` fills the rest of that row. The full stereo still opens
-	 *  above the row while a track is actually playing. */
+	 *  and `footer` fills the rest of that row. The DJ row opens above it
+	 *  while a track is loaded. */
 	footer?: React.ReactNode;
 	fmWidth?: number;
+	/** Terminal columns: below 110 the row leaves the volume to the key-cap row. */
+	columns?: number;
+	/** The deck has the keyboard (^D): plain keys drive it and a key-cap row shows. */
+	keysActive?: boolean;
+	/** Hand the keyboard back to the chat (after stop, or when nothing is loaded). */
+	onKeysDone?: () => void;
 } = {}) {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [open, setOpen] = useState(true);
-	const [localPos, setLocalPos] = useState<number | null>(null);
-	const [tick, setTick] = useState(0);
 	// displayVolume: updates immediately for visual feedback; actual dj.volume() is debounced 1s
 	const [displayVolume, setDisplayVolume] = useState<number | null>(null);
-	const lastVolumeRef = useRef<number>(50);
+	const lastVolumeRef = useRef<number>(60);
 	const pendingVolumeRef = useRef<number | null>(null);
 	const volumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const djRef = useRef<{ instance: any; ready: boolean }>({ instance: null, ready: false });
 
 	useEffect(() => {
 		setOpenExternal = setOpen;
-		toggleOpenExternal = () => setOpen(prev => !prev);
 		return () => {
 			setOpenExternal = null;
-			toggleOpenExternal = null;
 		};
 	}, []);
 
-	// Hydrate from workspace DB once on mount. Default = expanded if absent.
+	// Hydrate from workspace DB once on mount. Default = shown if absent.
 	const hydratedRef = useRef(false);
 	useEffect(() => {
 		(async () => {
@@ -336,61 +404,61 @@ export function DjDeck({
 			try {
 				const mod = await import("../../../../packages/music/dj.js");
 				if (cancelled) return;
-				djRef.current = { instance: new mod.DJ(), ready: true };
-				// Start at 50% volume on open
-				try { await djRef.current.instance.volume(50); } catch {}
-				setDisplayVolume(50);
-			} catch { /* DJ unavailable */ }
+				const dj = new mod.DJ();
+				djRef.current = { instance: dj, ready: true };
+				// Show the remembered volume the next track starts at (#3190). Setting
+				// it here would do nothing: mpv takes it at spawn, from the same store.
+				const v = dj.preferredVolume();
+				lastVolumeRef.current = v;
+				setDisplayVolume(v);
+			} catch {
+				/* DJ unavailable */
+			}
 		})();
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, []);
 
-	// Poll real status every second
+	// Poll real status every second. The only timer the deck runs (#3184):
+	// no local clock and no animation tick. What it shows is reduced to the
+	// clock step first, so a poll that changes nothing visible renders nothing.
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
+		const step = clockStep(deckStill());
 		const id = setInterval(async () => {
 			const dj = djRef.current.instance;
 			if (!dj || !djRef.current.ready) return;
 			try {
-				const s: DjStatus = await dj.status();
-				// Same status keeps the same object: this poll runs every second
-				// while the deck is mounted, playing or not.
+				const s: DjStatus = deckView(await dj.status(), step);
 				setStatus(keepIfSame(s));
-				if (s.position != null) setLocalPos(s.position);
 				if (s.volume != null && s.volume > 0) {
 					lastVolumeRef.current = s.volume;
 					// Only sync display volume if not currently scrubbing
 					if (pendingVolumeRef.current == null) setDisplayVolume(s.volume);
 				}
-			} catch { /* keep last known status */ }
+			} catch {
+				/* keep last known status */
+			}
 		}, 1000);
 		return () => clearInterval(id);
 	}, []);
 
-	// Local 1-second ticker so time advances between polls
-	const playing = status.playing && !status.paused;
-	useEffect(() => {
-		if (!playing) return;
-		const id = setInterval(() => {
-			setLocalPos(prev => (prev == null ? null : prev + 1));
-		}, 1000);
-		return () => clearInterval(id);
-	}, [playing]);
+	const hasTrack = status.playing;
 
-	// Waveform animation tick (250ms for smooth animation)
+	// ^D asks djHasTrack(); the keyboard goes back to the chat as soon as nothing is loaded.
 	useEffect(() => {
-		if (!playing) return;
-		const id = setInterval(() => setTick(v => v + 1), 250);
-		return () => clearInterval(id);
-	}, [playing]);
+		trackLoaded = hasTrack;
+		if (keysActive && !hasTrack) onKeysDone?.();
+	}, [keysActive, hasTrack, onKeysDone]);
 
 	// Adjust display volume immediately; debounce actual dj.volume() by 1s
 	const scrubVolume = (delta: number) => {
-		const base = displayVolume ?? status.volume ?? 50;
+		const base = displayVolume ?? status.volume ?? lastVolumeRef.current;
 		const next = Math.max(0, Math.min(150, base + delta));
 		setDisplayVolume(next);
 		pendingVolumeRef.current = next;
-		if (lastVolumeRef.current > 0) lastVolumeRef.current = next;
+		if (next > 0) lastVolumeRef.current = next;
 		if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
 		volumeTimerRef.current = setTimeout(async () => {
 			const dj = djRef.current.instance;
@@ -398,7 +466,7 @@ export function DjDeck({
 			if (!dj || vol == null) return;
 			try {
 				await dj.volume(vol);
-				setStatus(s => ({ ...s, volume: vol }));
+				setStatus((s) => ({ ...s, volume: vol }));
 			} catch {}
 			pendingVolumeRef.current = null;
 		}, 1000);
@@ -406,169 +474,95 @@ export function DjDeck({
 
 	useInput(
 		async (input, key) => {
-			if (!key.ctrl) return;
+			if (key.ctrl || key.meta) return;
 			const dj = djRef.current.instance;
 			if (!dj) return;
-			// Ctrl+P, Ctrl+N, Ctrl+B and Ctrl+M already belong to the app (palette,
-			// Notes, process panel, model picker), and Ink hands every key to every
-			// active useInput, so a plain Ctrl+letter here fired both. The DJ takes
-			// Ctrl+Shift instead. Match the upper-case letter, not key.shift: some
-			// macOS terminals drop the shift flag on ctrl combos but still deliver
-			// the upper-case character.
-			const k = djKey(input);
+			const c = djControl(input);
 			try {
-				if (k === "p") {
+				if (c === "pause") {
 					await dj.pause();
-				} else if (k === "n") {
+					setStatus((s) => ({ ...s, paused: !s.paused }));
+				} else if (c === "next") {
 					await dj.skip();
-				} else if (k === "b") {
+				} else if (c === "prev") {
 					const hist: { title: string; url: string }[] = dj.getHistory?.() ?? [];
 					const prev = hist[hist.length - 2];
 					if (prev?.url) await dj.play(prev.url);
-				} else if (k === "m") {
-					const cur = displayVolume ?? status.volume ?? 50;
+				} else if (c === "stop") {
+					dj.stop();
+					setStatus(EMPTY);
+					onKeysDone?.();
+				} else if (c === "down") {
+					scrubVolume(-5);
+				} else if (c === "up") {
+					scrubVolume(5);
+				} else if (c === "mute") {
+					const cur = displayVolume ?? status.volume ?? lastVolumeRef.current;
 					if (cur > 0) {
 						lastVolumeRef.current = cur;
 						setDisplayVolume(0);
 						await dj.volume(0);
 					} else {
-						const restore = lastVolumeRef.current || 50;
+						const restore = lastVolumeRef.current || 60;
 						setDisplayVolume(restore);
 						await dj.volume(restore);
 					}
-				} else if (key.shift && key.upArrow) {
-					// Shift+Ctrl+Up: volume +1% with 1s debounced send
-					scrubVolume(1);
-				} else if (key.shift && key.downArrow) {
-					// Shift+Ctrl+Down: volume -1% with 1s debounced send
-					scrubVolume(-1);
 				}
-			} catch { /* never crash the TUI */ }
+			} catch {
+				/* never crash the TUI */
+			}
 		},
-		{ isActive: status.playing || status.title.length > 0 },
+		{ isActive: keysActive && hasTrack },
 	);
 
 	const effectiveVolume = displayVolume ?? status.volume;
-	const muted = effectiveVolume != null && effectiveVolume === 0;
 	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
-	// Distinguish "no track ever loaded" from "track loaded / loading a real track".
-	// A track exists when status.title is non-empty OR audio is actively playing.
-	const hasTrack = status.title.length > 0 || status.playing;
-	const track = hasTrack
-		? truncateEnd(sanitizeTrack(status.name || status.title || "(loading)"), 82)
-		: "";
+	const playing = status.playing && !status.paused;
+	const track = hasTrack ? sanitizeTrack(status.name || status.title || "(loading)") : "";
 	// Only what the source names (#3192); never a placeholder artist.
 	const artists = (status.artists ?? []).map(sanitizeTrack).filter(Boolean).join(", ");
 
-	// Always-on stereo: collapsed mode renders a one-line strip, never zero
-	// height. Auto-toggling is forbidden — only ^D / setDjDeckOpen flip this.
-	if (!open) {
-		const stripTrack = status.title
-			? sanitizeTrack(status.title)
-			: "";
-		if (footer !== undefined) {
-			return (
-				<Box width="100%" flexShrink={0} height={1}>
-					<FmFooterSegment
-						width={fmWidth}
-						playing={playing}
-						track={stripTrack}
-						label={playing ? "" : "idle"}
-						labelColor={t.textTertiary}
-					/>
-					{footer}
-				</Box>
-			);
-		}
-		return <CollapsedDjDeckStrip playing={playing} track={stripTrack} tick={tick} />;
-	}
+	const row =
+		hasTrack && open ? (
+			<DjRow
+				paused={status.paused}
+				track={track}
+				artist={artists}
+				keyLabel={status.keyLabel ?? ""}
+				elapsed={fmt(status.position)}
+				duration={fmt(status.duration)}
+				volume={volume}
+				keysActive={keysActive}
+				showVolume={columns >= 110}
+			/>
+		) : null;
+	const keysRow = hasTrack && keysActive ? <DjKeysRow volume={volume} /> : null;
 
-	// Idle heartbeat: the full deck only appears when audio is ACTIVELY playing.
-	// Loading / paused / no-track all collapse to a one-line strip — five rows
-	// of stereo chrome for a track that isn't playing was eating the viewport.
-	if (!status.playing) {
-		// When the agent is mid-turn but no music is playing, show "agent pulse"
-		// so the bottom heartbeat reflects the active turn instead of looking dead.
-		const idleLabel = status.title
-			? "loading"
-			: isProcessing
-				? "agent pulse"
-				: "idle";
-		const idleColor = isProcessing ? t.teal : t.textTertiary;
-		if (footer !== undefined) {
-			return (
-				<Box width="100%" flexShrink={0} height={1}>
-					<FmFooterSegment
-						width={fmWidth}
-						playing={false}
-						track=""
-						label={idleLabel}
-						labelColor={idleColor}
-					/>
-					{footer}
-				</Box>
-			);
-		}
-		return (
-			<Box
-				width="100%"
-				borderStyle="round"
-				borderColor={t.orangeDim}
-				paddingX={1}
-				justifyContent="space-between"
-				flexShrink={0}
-			>
-				<Text color={t.orange}>● 8GENT FM</Text>
-				<Text color={idleColor}>{idleLabel}</Text>
-				<Text color={t.muted}>/dj open</Text>
-			</Box>
-		);
-	}
-
-	const fullDeck = (
-		<Box
-			width="100%"
-			borderStyle="round"
-			borderColor={t.orangeDim}
-			paddingX={1}
-			flexDirection="column"
-			flexShrink={0}
-		>
-			<Box justifyContent="space-between" width="100%">
-				<Text color={t.orange}>● 8GENT FM</Text>
-				<Text color={t.muted}>/dj close</Text>
-			</Box>
-
-			<Box marginTop={1}>
-				<StereoDisplay
-					playing={playing}
-					track={track}
-					artist={hasTrack ? artists : ""}
-					keyLabel={hasTrack ? status.keyLabel : ""}
-					elapsed={hasTrack ? fmt(localPos) : "0:00"}
-					duration={hasTrack ? fmt(status.duration) : "0:00"}
-					volume={volume}
-					muted={muted}
-					tick={tick}
-					termWidth={80}
-					hasTrack={hasTrack}
-				/>
-			</Box>
-
-			<Box marginTop={1}>
-				<ShortcutHintRow playing={playing} />
-			</Box>
-		</Box>
+	// Nothing loaded: only the footer segment. When the agent is mid-turn the
+	// segment says "agent pulse" so the bottom row does not look dead.
+	const idleLabel = isProcessing ? "agent pulse" : "idle";
+	const segment = (
+		<FmFooterSegment
+			width={fmWidth}
+			playing={playing}
+			paused={hasTrack && status.paused}
+			dj={hasTrack}
+			track={hasTrack && !open ? track : ""}
+			label={hasTrack ? "" : idleLabel}
+			labelColor={isProcessing ? t.teal : t.textTertiary}
+		/>
 	);
 
-	if (footer === undefined) return fullDeck;
 	return (
 		<Box width="100%" flexDirection="column" flexShrink={0}>
-			{fullDeck}
-			<Box width="100%" flexShrink={0} height={1}>
-				<FmFooterSegment width={fmWidth} playing track="" label="playing" labelColor={t.teal} />
-				{footer}
-			</Box>
+			{row}
+			{keysRow}
+			{footer === undefined && (row || keysRow) ? null : (
+				<Box width="100%" flexShrink={0} height={1}>
+					{segment}
+					{footer}
+				</Box>
+			)}
 		</Box>
 	);
 }

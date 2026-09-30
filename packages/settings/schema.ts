@@ -120,6 +120,14 @@ export interface AgentsSettings {
 	names: AgentNames;
 }
 
+export interface MusicSettings {
+	/**
+	 * The DJ's volume (0-150, mpv's scale), remembered across tracks and
+	 * sessions (#3190). A new track starts here. Mute is never stored.
+	 */
+	volume: number;
+}
+
 export interface Settings {
 	version: 1;
 	voice: VoiceSettings;
@@ -128,6 +136,7 @@ export interface Settings {
 	providers: ProvidersSettings;
 	ui: UISettings;
 	agents: AgentsSettings;
+	music: MusicSettings;
 }
 
 export type SettingsKey = keyof Settings;

@@ -8,28 +8,27 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, renderToString } from "ink";
 import React from "react";
-import { StereoDisplay } from "../DjDeck";
+import { DjRow } from "../DjDeck";
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const strip = (s: string) => s.replace(SGR, "");
 
-function deck(props: Partial<Parameters<typeof StereoDisplay>[0]>, width = 80) {
+function deck(props: Partial<Parameters<typeof DjRow>[0]>, width = 80) {
 	const base = {
-		playing: true,
+		paused: false,
 		track: "No Agreement (LP)",
 		artist: "Fela Kuti",
 		elapsed: "0:28",
 		duration: "31:05",
 		volume: 60,
-		muted: false,
-		tick: 0,
-		termWidth: width,
+		keysActive: false,
+		showVolume: width >= 110,
 		keyLabel: "Key: F minor (est.)",
 	};
 	return strip(
 		renderToString(
 			<Box width={width}>
-				<StereoDisplay {...base} {...props} />
+				<DjRow {...base} {...props} />
 			</Box>,
 			{ columns: width },
 		),
@@ -44,8 +43,9 @@ describe("DjDeck track info (#3192)", () => {
 		expect(f).toContain("Key: F minor (est.)");
 	});
 
-	test("every artist is shown", () => {
-		expect(deck({ artist: "Fela Kuti, Roy Ayers" })).toContain("Fela Kuti, Roy Ayers");
+	test("every artist is shown where there is room; at 80 columns the list ends in an ellipsis", () => {
+		expect(deck({ artist: "Fela Kuti, Roy Ayers" }, 120)).toContain("Fela Kuti, Roy Ayers");
+		expect(deck({ artist: "Fela Kuti, Roy Ayers" })).toContain("Fela Kuti…");
 	});
 
 	test("while the key is being worked out it says so", () => {

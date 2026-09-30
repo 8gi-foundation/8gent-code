@@ -25,6 +25,10 @@ import {
 export type FooterMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
 interface BottomBarProps {
+	/** The DJ deck has the keyboard (^D). */
+	djKeys?: boolean;
+	/** The deck hands the keyboard back (stop, or nothing loaded). */
+	onDjKeysDone?: () => void;
 	/** The model that ran the turn. */
 	model: string;
 	/** The configured model, only when a reroute ran the turn on `model`. */
@@ -69,7 +73,10 @@ export function BottomBar(props: BottomBarProps) {
 		<Box flexDirection="column" width="100%" flexShrink={0}>
 			<DjDeck
 				isProcessing={props.isProcessing}
+				keysActive={props.djKeys}
+				onKeysDone={props.onDjKeysDone}
 				fmWidth={fmWidth}
+				columns={columns}
 				footer={
 					<StatusSegments
 						width={segmentsWidth}
