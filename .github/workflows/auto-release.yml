@@ -9,6 +9,13 @@ permissions:
   contents: write
   pull-requests: read
 
+# Security (#3214): this job holds a contents:write token. Nothing from the
+# event payload (PR title, labels, author) or from step outputs is ever
+# expanded with ${{ }} inside a run: script, where it would be pasted into the
+# shell source before bash parses it. Every such value reaches the script
+# through env: and is read as a quoted shell variable. Actions are pinned to
+# commit SHAs.
+
 jobs:
   release:
     name: Create Release
@@ -16,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -25,11 +32,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
 
       - name: Get latest tag version
         id: latest_tag
@@ -42,10 +44,10 @@ jobs:
 
       - name: Determine version bump
         id: bump_type
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_LABELS="${{ join(github.event.pull_request.labels.*.name, ',') }}"
-
           # Check PR labels first (highest priority)
           if [[ "$PR_LABELS" == *"major"* ]] || [[ "$PR_LABELS" == *"breaking"* ]]; then
             echo "bump=major" >> $GITHUB_OUTPUT
@@ -71,10 +73,10 @@ jobs:
 
       - name: Calculate new version
         id: new_version
+        env:
+          CURRENT: ${{ steps.latest_tag.outputs.version }}
+          BUMP: ${{ steps.bump_type.outputs.bump }}
         run: |
-          CURRENT="${{ steps.latest_tag.outputs.version }}"
-          BUMP="${{ steps.bump_type.outputs.bump }}"
-
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
           case "$BUMP" in
@@ -93,9 +95,9 @@ jobs:
           echo "New version: v$NEW_VERSION (was v$CURRENT, bump: $BUMP)"
 
       - name: Update version in package.json and bin/8gent.ts
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
         run: |
-          NEW_VERSION="${{ steps.new_version.outputs.version }}"
-
           # Update package.json version (no git tag, we handle that ourselves)
           npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
 
@@ -123,21 +125,22 @@ jobs:
           fi
 
       - name: Create and push tag
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
         run: |
-          NEW_VERSION="${{ steps.new_version.outputs.version }}"
           git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
           git push origin "v${NEW_VERSION}"
 
       - name: Generate release notes
         id: release_notes
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+          PREVIOUS_TAG: ${{ steps.latest_tag.outputs.tag }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REPO: ${{ github.repository }}
         run: |
-          NEW_VERSION="${{ steps.new_version.outputs.version }}"
-          PREVIOUS_TAG="${{ steps.latest_tag.outputs.tag }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          PR_URL="${{ github.event.pull_request.html_url }}"
-          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-          PR_TITLE="${{ github.event.pull_request.title }}"
-
           # Categorize commits since last release
           FEATURES=""
           FIXES=""
@@ -162,7 +165,7 @@ jobs:
               elif [[ ! "$COMMIT_MSG" =~ ^Merge ]] && [[ ! "$COMMIT_MSG" =~ ^chore\(release\) ]]; then
                 OTHER="${OTHER}- ${COMMIT_MSG}"$'\n'
               fi
-            done < <(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"%s" --no-merges)
+            done < <(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"%s" --no-merges)
           fi
 
           # Build release notes
@@ -203,14 +206,14 @@ jobs:
           echo "**Merged by:** @${PR_AUTHOR}" >> release_notes.md
 
           if [ "$PREVIOUS_TAG" != "v0.0.0" ]; then
-            echo "**Full Changelog:** https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...v${NEW_VERSION}" >> release_notes.md
+            echo "**Full Changelog:** https://github.com/${REPO}/compare/${PREVIOUS_TAG}...v${NEW_VERSION}" >> release_notes.md
           fi
 
           echo "--- Release Notes ---"
           cat release_notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.new_version.outputs.version }}
           name: v${{ steps.new_version.outputs.version }}
@@ -221,13 +224,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
+        env:
+          PREVIOUS_TAG: ${{ steps.latest_tag.outputs.tag }}
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+          BUMP: ${{ steps.bump_type.outputs.bump }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "## Release Created" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Previous Version | ${{ steps.latest_tag.outputs.tag }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| New Version | v${{ steps.new_version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Bump Type | ${{ steps.bump_type.outputs.bump }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| PR | #${{ github.event.pull_request.number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| npm | \`npm install -g @8gi-foundation/8gent-code@${{ steps.new_version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Previous Version | ${PREVIOUS_TAG} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| New Version | v${NEW_VERSION} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bump Type | ${BUMP} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| PR | #${PR_NUMBER} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| npm | \`npm install -g @8gi-foundation/8gent-code@${NEW_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
