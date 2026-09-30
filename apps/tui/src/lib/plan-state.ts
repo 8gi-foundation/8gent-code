@@ -104,3 +104,18 @@ export function applyPlanUpdate(prev: ReadonlyArray<PlanStep>, items: ReadonlyAr
 export function settlePlan(steps: ReadonlyArray<PlanStep>): PlanStep[] {
 	return steps.map((s) => (s.status === "active" ? { ...s, status: "pending" } : s));
 }
+
+/**
+ * The plan stamped on a turn's reply (#3089): the plan the PLAN column holds,
+ * plus any steps the reply itself writes, settled. The text-tool path reports
+ * steps with no text, so a plan written in the reply reaches neither surface
+ * any other way (#3096); app.tsx merges the same lines into the column, so the
+ * two agree. Steps already held keep their status; text never marks a step
+ * done.
+ */
+export function replyPlan(
+	held: ReadonlyArray<PlanStep>,
+	replyPlanLines: ReadonlyArray<string>,
+): PlanStep[] {
+	return settlePlan(mergePlanText(held, replyPlanLines));
+}

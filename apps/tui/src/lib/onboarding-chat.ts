@@ -109,26 +109,33 @@ export function settledSetupCard(content: string): string {
 /**
  * The transcript once setup has ended. Every setup card loses its call to
  * action and skip hint; the greeting and what was found on the machine stay.
- * When setup ended on a /skip, the card that was still waiting for an answer
- * is an unanswered question, so it goes, unless it is the welcome, whose
- * greeting is conversation.
+ *
+ * A question nobody answered is not conversation (#3096). A setup card with
+ * no reply from the person before the next setup card, or before the end,
+ * was skipped with /skip (which echoes nothing), so it goes: the one still
+ * waiting when setup ended on a skip, and every one skipped on the way. The
+ * welcome is the exception, since its greeting is conversation and Enter
+ * there echoes nothing by design. Every other question echoes its answer
+ * (an empty Enter echoes the default or "(skipped)"), so a reply is always
+ * there when the question was answered.
  */
-export function settleSetupTranscript<M extends { id: string; content: string }>(
+export function settleSetupTranscript<M extends { id: string; content: string; role?: string }>(
 	messages: M[],
-	endedBySkip: boolean,
 ): M[] {
-	let pending = -1;
-	if (endedBySkip) {
-		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i].id.startsWith(SETUP_CARD_ID)) {
-				pending = messages[i].id.startsWith(SETUP_WELCOME_ID) ? -1 : i;
-				break;
-			}
+	const unanswered = new Set<number>();
+	let open = -1;
+	messages.forEach((m, i) => {
+		if (m.id.startsWith(SETUP_CARD_ID)) {
+			if (open >= 0) unanswered.add(open);
+			open = m.id.startsWith(SETUP_WELCOME_ID) ? -1 : i;
+		} else if (m.role === "user") {
+			open = -1;
 		}
-	}
+	});
+	if (open >= 0) unanswered.add(open);
 	const out: M[] = [];
 	messages.forEach((m, i) => {
-		if (i === pending) return;
+		if (unanswered.has(i)) return;
 		if (!m.id.startsWith(SETUP_CARD_ID)) {
 			out.push(m);
 			return;

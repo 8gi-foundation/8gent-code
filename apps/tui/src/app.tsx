@@ -196,7 +196,7 @@ import { MessageViewer } from "./components/MessageViewer.js";
 import { ContextRail } from "./components/ContextRail.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
-import { type PlanStep, applyPlanUpdate, mergePlanText, settlePlan } from "./lib/plan-state.js";
+import { type PlanStep, applyPlanUpdate, mergePlanText, replyPlan, settlePlan } from "./lib/plan-state.js";
 import { getTaskManager } from "../../../packages/tasks/index.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
@@ -3131,7 +3131,7 @@ export function App({
 							// the answer. The old line promised "I'll ask again later", but
 							// skipAll marks setup complete and nothing ever asks again.
 							// Nor may a setup card still ask for Enter (#3090).
-							setMessages((prev) => settleSetupTranscript(prev, true));
+							setMessages((prev) => settleSetupTranscript(prev));
 						} else {
 							const skipped = onboardingManager.skipQuestion();
 							const nextQ = skipped ? await resolveSetupChecks(skipped) : null;
@@ -3150,7 +3150,7 @@ export function App({
 								setViewMode("chat");
 								// Same as /skip all (#3090): the input coming back is the
 								// answer, and no setup card is left asking for one.
-								setMessages((prev) => settleSetupTranscript(prev, true));
+								setMessages((prev) => settleSetupTranscript(prev));
 							}
 						}
 					}
@@ -5053,7 +5053,7 @@ export function App({
 					setOnboardingProviderCheck(null);
 					setOnboardingAgentDefault(null);
 					setViewMode("chat");
-					setMessages((prev) => settleSetupTranscript(prev, false));
+					setMessages((prev) => settleSetupTranscript(prev));
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
 					addSystemMessage(
@@ -5306,13 +5306,20 @@ export function App({
 					const trimmed = (reply ?? "").trim();
 					if (trimmed) {
 						// The plan column is the active tab's; a background turn has none.
-						const turnPlanSteps = tabId === activeTabId ? planStepsRef.current : [];
+						// A plan written in the reply joins the column and the stamp alike
+						// (#3096): the text-tool path reports steps with no text, so a
+						// turn that only wrote a plan never reached the column before,
+						// and the column can be a render behind the reply in any case.
+						const replyPlanLines = tabId === activeTabId ? planStepsFromText(trimmed) : [];
+						if (replyPlanLines.length > 0) setPlanSteps((prev) => mergePlanText(prev, replyPlanLines));
+						const turnPlanSteps =
+							tabId === activeTabId ? replyPlan(planStepsRef.current, replyPlanLines) : [];
 						appendToTab(tabId, {
 							id: `assistant-${Date.now()}`,
 							role: "assistant" as const,
 							content: trimmed,
 							timestamp: new Date(),
-							...(turnPlanSteps.length > 0 ? { plan: settlePlan(turnPlanSteps) } : {}),
+							...(turnPlanSteps.length > 0 ? { plan: turnPlanSteps } : {}),
 						});
 						{
 							const targetTabRole = (

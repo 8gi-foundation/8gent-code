@@ -39,7 +39,7 @@ import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Stack } from "./primitives/Stack.js";
 import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
 import { TurnResults } from "./TurnResults.js";
-import { turnResultRows } from "../lib/turn-results.js";
+import { hasTurnResults, turnResultRows } from "../lib/turn-results.js";
 import {
 	type MarkdownOptions,
 	type Span,
@@ -165,11 +165,11 @@ interface MessageListProps {
  * item), the results block once the reply has landed (an assistant item).
  */
 function callRows(message: Message, trail: ToolTrailEntry[], maxRows?: number): number {
-	if (trail.length === 0) return 0;
 	// Results carry one blank row between them and the reply (mockup A).
-	return message.role === "assistant"
-		? turnResultRows(trail, maxRows, message.plan) + 1
-		: toolTrailRows(trail, maxRows);
+	if (message.role === "assistant") {
+		return hasTurnResults(trail, message.plan) ? turnResultRows(trail, maxRows, message.plan) + 1 : 0;
+	}
+	return trail.length === 0 ? 0 : toolTrailRows(trail, maxRows);
 }
 
 function estimateMessageRows(
@@ -658,8 +658,9 @@ function MessageItem({
 			</Box>
 
 			{/* The finished turn's work as checked steps, above the reply text.
-			    While the turn ran, the same calls showed as the live trail. */}
-			{!isUser && trail.length > 0 && (
+			    While the turn ran, the same calls showed as the live trail.
+			    A turn that only wrote a plan shows the plan (#3096). */}
+			{!isUser && hasTurnResults(trail, message.plan) && (
 				<Box flexDirection="column" flexShrink={0} marginBottom={message.content.trim() ? 1 : 0}>
 					<TurnResults
 						trail={trail}
