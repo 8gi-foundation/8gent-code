@@ -112,19 +112,32 @@ export function loadInstructions(cwd: string): string {
 	return loadInstructionParts(cwd).join("\n\n---\n\n");
 }
 
-/** The instruction files loadInstructions merges, one entry per file, lowest priority first. */
-export function loadInstructionParts(cwd: string): string[] {
+/**
+ * The instruction files loadInstructions merges, one entry per file, lowest
+ * priority first.
+ *
+ * `includeUserGlobal: false` keeps only the project's files. User-global means
+ * the operator's own files: the standing rules, ~/.8gent, and any walk-up
+ * directory at or above $HOME (a ~/AGENTS.md is the operator's, not the
+ * repo's). Those may go to an on-box model but never to a cloud provider.
+ */
+export function loadInstructionParts(
+	cwd: string,
+	opts: { includeUserGlobal?: boolean } = {},
+): string[] {
+	const includeUserGlobal = opts.includeUserGlobal ?? true;
 	const parts: string[] = [];
+	const homeDir = resolve(home());
 
 	// 1. Operator standing rules (always on, lowest priority)
-	const standing = findStandingRules();
+	const standing = includeUserGlobal ? findStandingRules() : null;
 	if (standing) {
 		parts.push(`# STANDING RULES (always on, every surface)\n\n${standing}`);
 	}
 
 	// 2. Global instructions
-	const globalDir = join(home(), ".8gent");
-	const globalContent = findInstructionFile(globalDir);
+	const globalDir = join(homeDir, ".8gent");
+	const globalContent = includeUserGlobal ? findInstructionFile(globalDir) : null;
 	if (globalContent) {
 		parts.push(globalContent.trim());
 	}
@@ -132,12 +145,12 @@ export function loadInstructionParts(cwd: string): string[] {
 	// 3. Walk up from cwd, collecting project instructions
 	const projectDirs = walkUp(cwd);
 	for (const dir of projectDirs) {
+		// Avoid duplicating global if ~/.8gent happens to be in the walk-up path
+		if (dir === globalDir) continue;
+		const atOrAboveHome = dir === homeDir || homeDir.startsWith(`${dir}/`) || dir === "/";
+		if (!includeUserGlobal && atOrAboveHome) continue;
 		const content = findInstructionFile(dir);
-		if (content) {
-			// Avoid duplicating global if ~/.8gent happens to be in the walk-up path
-			if (dir === globalDir) continue;
-			parts.push(content.trim());
-		}
+		if (content) parts.push(content.trim());
 	}
 
 	return parts;
@@ -153,15 +166,20 @@ const SEPARATOR = "\n\n---\n\n";
 
 /**
  * The loaded instructions as a trailing system-prompt section, or "" when
- * there are none. It goes LAST so the stable prompt prefix before it stays
+ * there are none. Project files only unless `includeUserGlobal` is set, which
+ * the agent does for on-box providers alone. It goes LAST so the stable prompt prefix before it stays
  * byte-identical (#3222).
  *
  * Over the cap, files are kept from the most specific down (the project's own
  * file wins, so it is never the one dropped) and lower-priority files are
  * left out. A single file larger than the cap keeps its beginning.
  */
-export function projectInstructionsSection(cwd: string, cap = PROJECT_INSTRUCTIONS_CAP): string {
-	const parts = loadInstructionParts(cwd);
+export function projectInstructionsSection(
+	cwd: string,
+	opts: { includeUserGlobal?: boolean; cap?: number } = {},
+): string {
+	const cap = opts.cap ?? PROJECT_INSTRUCTIONS_CAP;
+	const parts = loadInstructionParts(cwd, { includeUserGlobal: opts.includeUserGlobal ?? false });
 	if (parts.length === 0) return "";
 
 	const kept: string[] = [];

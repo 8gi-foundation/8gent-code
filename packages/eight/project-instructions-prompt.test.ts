@@ -52,7 +52,9 @@ describe("project AGENTS.md in the live system prompt", () => {
 		const prompt = systemPrompt("ollama");
 		expect(prompt.startsWith("You are 8gent, an autonomous coding agent.")).toBe(true);
 		expect(prompt).toContain(SENTINEL);
-		expect(prompt.endsWith(projectInstructionsSection(repo))).toBe(true);
+		expect(prompt.endsWith(projectInstructionsSection(repo, { includeUserGlobal: true }))).toBe(
+			true,
+		);
 	});
 
 	test("native path (full prompt) carries it as the trailing section", () => {
@@ -77,7 +79,7 @@ describe("projectInstructionsSection cap", () => {
 		mkdirSync(globalDir, { recursive: true });
 		writeFileSync(join(globalDir, "AGENTS.md"), "global rule\n".repeat(2000));
 		try {
-			const section = projectInstructionsSection(repo);
+			const section = projectInstructionsSection(repo, { includeUserGlobal: true });
 			expect(section.length).toBeLessThan(PROJECT_INSTRUCTIONS_CAP + 200);
 			expect(section).toContain(SENTINEL);
 			expect(section).not.toContain("global rule");
