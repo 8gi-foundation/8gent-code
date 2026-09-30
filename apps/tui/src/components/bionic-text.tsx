@@ -246,19 +246,19 @@ function SmartText({ children, color }: SmartTextProps) {
 // ============================================
 
 export const ADHD_MODE_SUGGESTION = `
-💡 Hey — try /adhd if you want help locking in.
+💡 Hey, try /adhd if you want help locking in.
 Bolds the key parts of words so your brain grabs them faster.
 `;
 
 export const ADHD_MODE_ENABLED_MSG = `
 ✦ ADHD Mode On
 
-Nice. This'll help your mind lock in — words hit different now.
+Nice. This'll help your mind lock in. Words hit different now.
 Don't worry about it, just focus. I got you.
 
-/adhd stop — pause music
-/adhd off  — turn everything off
-/music     — generate a custom focus track
+/adhd stop  pause music
+/adhd off   turn everything off
+/music      generate a custom focus track
 `;
 
 export const ADHD_MODE_DISABLED_MSG = `

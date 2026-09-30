@@ -405,7 +405,7 @@ export function useChatTabState(
 			// Queue if already processing
 			if (e.agentRunningRef) {
 				e.messageQueueRef.push(message);
-				addSystemMessage("Queued \u2014 will send after current task completes.");
+				addSystemMessage("Queued. It sends when the current task finishes.");
 				return;
 			}
 

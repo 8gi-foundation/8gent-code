@@ -108,6 +108,53 @@ export function spanText(spans: Span[]): string {
 	return spans.map((s) => s.text).join("");
 }
 
+/** The words a span stands for: a chip without its padding. */
+function wordsOf(span: Span): string {
+	return span.code ? span.text.slice(1, -1) : span.text;
+}
+
+/**
+ * A line of agent text with its inline markers taken out: `code` becomes
+ * code, **bold** becomes bold. For places too narrow for a chip (the PLAN
+ * column, the TASKS rail), where a literal backtick is noise, not meaning.
+ */
+export function plainInline(text: string): string {
+	return parseInline(text, { chips: true })
+		.map(wordsOf)
+		.join("")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+/**
+ * Cut a run of spans to `width` columns, counting a chip's padding. The cut
+ * lands inside the span that overflows and ends in "…"; a chip keeps its
+ * padding either side, so a cut path still reads as a chip.
+ */
+export function clipSpans(spans: ReadonlyArray<Span>, width: number): Span[] {
+	const out: Span[] = [];
+	let room = Math.max(0, width);
+	for (const span of spans) {
+		const chars = [...span.text];
+		if (chars.length <= room) {
+			out.push({ ...span });
+			room -= chars.length;
+			continue;
+		}
+		if (room <= 0) break;
+		if (span.code && room >= 4) {
+			const inner = [...wordsOf(span)].slice(0, room - 3).join("");
+			out.push({ ...span, text: ` ${inner}… ` });
+		} else if (span.code) {
+			out.push({ text: "…" });
+		} else {
+			out.push({ ...span, text: `${chars.slice(0, room - 1).join("")}…` });
+		}
+		break;
+	}
+	return out;
+}
+
 /** Split a reply into blocks. */
 export function parseBlocks(content: string, opts: MarkdownOptions = {}): Block[] {
 	const bullet = opts.bullet ?? "•";

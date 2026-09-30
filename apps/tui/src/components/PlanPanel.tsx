@@ -22,6 +22,7 @@
 import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useState } from "react";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
+import { plainInline } from "../lib/inline-markdown.js";
 import { motionEnabled } from "../lib/motion.js";
 import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
@@ -71,9 +72,15 @@ export function planSummary(steps: ReadonlyArray<PlanStep>, elapsedMs?: number |
 	return lines;
 }
 
+/**
+ * A step as the column draws it: the agent's words with inline markers
+ * taken out (a 24-column rail has no room for a chip, and a literal
+ * backtick is noise), cut to `max` with "…".
+ */
 function clip(text: string, max: number): string {
-	if (max <= 1) return text.slice(0, Math.max(0, max));
-	return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+	const plain = plainInline(text);
+	if (max <= 1) return plain.slice(0, Math.max(0, max));
+	return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
 }
 
 export function PlanPanel({

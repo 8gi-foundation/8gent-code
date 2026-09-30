@@ -274,7 +274,7 @@ export function ProjectsView({
 						setSelectedIndex(updated.length - 1);
 						setStatusMsg(`Added: ${trimmed}`);
 					} else {
-						setStatusMsg("Path not found — nothing added.");
+						setStatusMsg("Path not found. Nothing added.");
 					}
 					setAddMode(false);
 					setAddInput("");

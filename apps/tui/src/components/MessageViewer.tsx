@@ -109,7 +109,7 @@ export function MessageViewer({
 	});
 	const visibleLines = lines.slice(scrollLine, scrollLine + bodyHeight);
 	const scrollInfo =
-		maxScroll > 0 ? `  ${scrollLine + 1}–${Math.min(scrollLine + bodyHeight, lines.length)}/${lines.length}` : "";
+		maxScroll > 0 ? `  ${scrollLine + 1}-${Math.min(scrollLine + bodyHeight, lines.length)}/${lines.length}` : "";
 
 	return (
 		<Box flexDirection="column" height={height}>

@@ -313,3 +313,43 @@ describe("replyPlan", () => {
 		expect(out[0].status).toBe("pending");
 	});
 });
+
+describe("plan steps with inline code (#3109)", () => {
+	const step = (text: string, status: PlanStep["status"] = "done"): PlanStep => ({ id: text, text, status });
+
+	test("code in a step is a chip span, never a literal backtick", () => {
+		const [row] = buildTurnResults([], MAX_RESULT_ROWS, [step("Read `packages/decide/index.ts` first")]);
+		expect(row.verb).toBe("Read");
+		expect(row.text).toBe("packages/decide/index.ts first");
+		expect(row.spans?.map((s) => [s.text, Boolean(s.code)])).toEqual([
+			[" packages/decide/index.ts ", true],
+			[" first", false],
+		]);
+		const fit = fitResultRow(row, 80);
+		const drawn = `${fit.verb} ${fit.spans?.map((s) => s.text).join("")}`;
+		expect(drawn).not.toContain("`");
+	});
+
+	test("a step that opens with code has no verb, and no stray space", () => {
+		const [row] = buildTurnResults([], MAX_RESULT_ROWS, [step("`bun test` passes")]);
+		expect(row.verb).toBe("");
+		const fit = fitResultRow(row, 80);
+		expect(fit.spans?.map((s) => s.text).join("")).toBe(" bun test  passes");
+	});
+
+	test("stars come out of a plain step; the row stays one string", () => {
+		const [row] = buildTurnResults([], MAX_RESULT_ROWS, [step("Fix the **auth** bug")]);
+		expect([row.verb, row.text, row.spans]).toEqual(["Fix", "the auth bug", undefined]);
+	});
+
+	test("fits 80 and 160 columns: icon plus row never passes the width", () => {
+		const long = step("Edit `apps/tui/src/components/very/deep/path/to/TurnResults.tsx` and `bun test apps/tui`");
+		for (const width of [24, 40, 80, 160]) {
+			const [row] = buildTurnResults([], MAX_RESULT_ROWS, [long]);
+			const fit = fitResultRow(row, width);
+			const drawn = `✓ ${fit.verb}${fit.verb ? " " : ""}${(fit.spans ?? []).map((s) => s.text).join("")}`;
+			expect([...drawn].length).toBeLessThanOrEqual(width);
+			expect(drawn).not.toContain("`");
+		}
+	});
+});
