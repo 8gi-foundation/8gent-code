@@ -22,6 +22,11 @@
  * judges: when a GGUF resolves for llama.cpp, the shared server is used only
  * if it serves that same model. Anything short of that falls back to the
  * in-process path unchanged.
+ *
+ * Lost shared judge (#3162 bar 4): createDecider re-probes with avoidShared
+ * when the shared server stops answering, so the in-process judge takes over
+ * for the rest of that session. New sessions probe fresh and use the shared
+ * server again once it is back.
  */
 
 import { resolveLayaUrl } from "./backends/laya";
@@ -71,6 +76,13 @@ export interface ProbeOptions {
 	timeoutMs?: number;
 	/** How to load the optional node-llama-cpp package; null skips the llamacpp probe. */
 	llamacppLoader?: LlamaCppLoader | null;
+	/**
+	 * Re-probe after the shared judge was lost mid-session (#3162 bar 4): try the
+	 * in-process judge before the shared server, so a session does not keep
+	 * leaning on a server that just failed it. The shared server is still asked
+	 * when no in-process judge loads (it may be back). Nothing else is tried.
+	 */
+	avoidShared?: boolean;
 }
 
 export function pickModel(installed: InstalledModel[], override?: string): string | null {
@@ -173,6 +185,25 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	// GGUF first: a cheap file check, so the package is only imported when there is a model to load.
 	const gguf = loader ? resolveGguf(env) : null;
 
+	const inProcess = async (): Promise<ProbeResult | null> => {
+		if (!loader || !gguf) return null;
+		if (gguf.path) {
+			const missing = await llamaCppUnavailable(loader);
+			if (missing === null) return { ...base, backend: "llamacpp", model: gguf.model, url: null, path: gguf.path, notes };
+			notes.push(missing);
+		} else if (gguf.note) {
+			notes.push(`llamacpp: ${gguf.note}`);
+		}
+		return null;
+	};
+
+	// After losing the shared judge, the in-process judge goes first (the note says why).
+	if (opts.avoidShared) {
+		notes.push("shared judge lost mid-session: trying the in-process judge first");
+		const local = await inProcess();
+		if (local) return local;
+	}
+
 	// An explicit EIGHT_DECIDE_GGUF names a file, not a served model: it stays in-process.
 	// The shared server is Ollama: with another local server selected (#3149), Ollama is off and not asked.
 	if (sharedJudgeEnabled(env) && isOllamaEnabled(env) && !env.EIGHT_DECIDE_GGUF?.trim()) {
@@ -182,15 +213,14 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 		notes.push(shared.note);
 	}
 
-	if (loader && gguf) {
-		if (gguf.path) {
-			const missing = await llamaCppUnavailable(loader);
-			if (missing === null) return { ...base, backend: "llamacpp", model: gguf.model, url: null, path: gguf.path, notes };
-			notes.push(missing);
-		} else if (gguf.note) {
-			notes.push(`llamacpp: ${gguf.note}`);
-		}
+	if (opts.avoidShared) {
+		// A failover never changes which model judges or where the chat model lives:
+		// no laya, no OLLAMA_HOST path (that one sends no num_ctx, 21.4 GB measured).
+		notes.push("failover: no in-process judge and the shared server is not back");
+		return { ...base, backend: "none", model: null, url: null, notes };
 	}
+	const local = await inProcess();
+	if (local) return local;
 
 	const layaUrl = resolveLayaUrl(env);
 	const layaNote = await layaUp(fetchImpl, layaUrl, timeoutMs);

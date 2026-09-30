@@ -4,10 +4,12 @@
  * tiny vocabulary, and GGUF resolution runs against a temp Ollama store.
  */
 
-import { afterAll, afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, setSystemTime } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { _resetSystemOne, _setSystemOneOverridesForTests, systemOneGate } from "../../permissions/system-one-gate";
+import * as decideIndex from "../index";
 import { DecideError, DecideUnavailableError, createDecider, detectBackend } from "../index";
 import { SHARED_JUDGE_NUM_CTX } from "../probe";
 import {
@@ -628,5 +630,210 @@ describe("shared judge: one judge per machine", () => {
 		const plain = createDecider({ fetch: m.fetch, env: { OLLAMA_MODELS: store }, llamacppLoader: missingLoader });
 		await plain.noul("state", "p");
 		expect(m.generated[0].options).toEqual({ temperature: 0, num_predict: 1, seed: 1 });
+	});
+});
+
+// ----- lost shared judge (#3162 bar 4) -----------------------------------------
+
+describe("shared judge failover: a lost shared judge recovers", () => {
+	const LOCAL = "http://localhost:11434";
+	const SAFE = logitsFrom({ " No": 0.95, " Yes": 0.05 });
+	/** A local Ollama that can be taken away mid-test. Counts /api/tags (a probe) and /api/generate. */
+	function server(models: string[]) {
+		const state = { up: true, tags: 0, generate: 0, logprobs: true, probes: 0 };
+		const fetchImpl = async (url: string): Promise<Response> => {
+			if (!url.startsWith(LOCAL)) throw new TypeError(`fetch failed: ${url}`);
+			// With no in-process judge, a (re-)probe lists the shared server exactly once, up or down.
+			if (url === `${LOCAL}/api/tags`) state.probes++;
+			if (!state.up) throw new TypeError("fetch failed: ECONNREFUSED");
+			if (url === `${LOCAL}/api/tags`) {
+				state.tags++;
+				return Response.json({ models: models.map((name, i) => ({ name, size: 1_000 + i })) });
+			}
+			state.generate++;
+			if (!state.logprobs) return Response.json({ response: "x" });
+			return Response.json({ logprobs: [{ top_logprobs: [{ token: " No", logprob: Math.log(0.8) }, { token: " Yes", logprob: Math.log(0.2) }] }] });
+		};
+		return { fetch: fetchImpl, state };
+	}
+	/** A fake node-llama-cpp that counts imports (one per probe, one per engine load). */
+	function countingLoader(release?: Promise<void>) {
+		const stats = newStats();
+		const counts = { imports: 0 };
+		const loader: LlamaCppLoader = async () => {
+			counts.imports++;
+			const mod = fakeModule(() => SAFE, stats);
+			if (!release) return mod;
+			// Model load waits for `release`, so a test can act while the fallback is still loading.
+			return {
+				...mod,
+				async getLlama(o) {
+					const llama = await mod.getLlama(o);
+					return {
+						...llama,
+						loadModel: async (a) => {
+							await release;
+							return llama.loadModel(a);
+						},
+					};
+				},
+			};
+		};
+		return { loader, stats, counts };
+	}
+	const env = (store: string) => ({ OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: "1" });
+	// Read through the namespace so this file still loads against a tree without failover.
+	const FAILOVER_BACKOFF_MS = decideIndex.FAILOVER_BACKOFF_MS ?? 2_000;
+
+	afterEach(() => {
+		setSystemTime();
+		_resetSystemOne();
+	});
+
+	it("server down mid-session: the next verdict comes from the in-process judge", async () => {
+		const store = makeStore([SELENE]);
+		const srv = server([SELENE_NAME]);
+		const { loader, stats } = countingLoader();
+		const d = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		const before = await d.noul("state one", "p");
+		expect(before.backend).toBe("ollama");
+		expect(stats.loadModel).toBe(0);
+		srv.state.up = false;
+		const after = await d.noul("state two", "p");
+		expect([after.backend, after.model]).toEqual(["llamacpp", SELENE_NAME]);
+		close(after.probabilities.yes, 0.05, 1e-3);
+		expect((await d.backend()).name).toBe("llamacpp");
+		// It stays in-process for this session: no further shared calls.
+		const generated = srv.state.generate;
+		srv.state.up = true;
+		expect((await d.noul("state three", "p")).backend).toBe("llamacpp");
+		expect(srv.state.generate).toBe(generated);
+	});
+
+	it("a burst of concurrent verdicts during the outage triggers exactly one re-probe", async () => {
+		const store = makeStore([SELENE]);
+		const srv = server([SELENE_NAME]);
+		const { loader, stats, counts } = countingLoader();
+		const d = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		expect((await d.noul("warm", "p")).backend).toBe("ollama");
+		srv.state.up = false;
+		const imports = counts.imports;
+		const tags = srv.state.tags;
+		const burst = await Promise.all(Array.from({ length: 8 }, (_, i) => d.noul(`burst ${i}`, "p")));
+		expect(burst.map((a) => a.backend)).toEqual(Array(8).fill("llamacpp"));
+		// One re-probe (one node-llama-cpp import) plus one model load, not eight of either.
+		expect(counts.imports - imports).toBe(2);
+		expect(stats.loadModel).toBe(1);
+		// In-process goes first after a loss, so the dead server is not even listed again.
+		expect(srv.state.tags - tags).toBe(0);
+	});
+
+	it("with nothing to fail over to: one re-probe per burst, backed off, and the shared server is used again when it is back", async () => {
+		const srv = server([SELENE_NAME]);
+		const d = createDecider({ fetch: srv.fetch, env: { OLLAMA_MODELS: path.join(tmp, "none"), EIGHT_S1_SHARED_JUDGE: "1" }, llamacppLoader: missingLoader });
+		expect((await d.noul("warm", "p")).backend).toBe("ollama");
+		const probes = srv.state.probes;
+		srv.state.up = false;
+		const t0 = Date.now();
+		setSystemTime(new Date(t0));
+		const burst = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => d.noul(`down ${i}`, "p")));
+		// Every verdict fails (the gate fails closed on it), and the machine is probed once, not eight times.
+		expect(burst.every((r) => r.status === "rejected" && r.reason instanceof DecideUnavailableError)).toBe(true);
+		expect(srv.state.probes - probes).toBe(1);
+		// Inside the backoff window: no probe.
+		setSystemTime(new Date(t0 + FAILOVER_BACKOFF_MS - 1));
+		await expect(d.noul("backing off", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(srv.state.probes - probes).toBe(1);
+		// After it: one more probe, and the window doubles.
+		setSystemTime(new Date(t0 + FAILOVER_BACKOFF_MS + 1));
+		await expect(d.noul("after window", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(srv.state.probes - probes).toBe(2);
+		setSystemTime(new Date(t0 + FAILOVER_BACKOFF_MS + 1 + FAILOVER_BACKOFF_MS * 2 - 2));
+		await expect(d.noul("doubled window", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(srv.state.probes - probes).toBe(2);
+		// The shared server comes back: the session judges on it again.
+		srv.state.up = true;
+		expect((await d.noul("back again", "p")).backend).toBe("ollama");
+	});
+
+	it("a failover never falls through to the chat model's OLLAMA_HOST or laya (no num_ctx there: 21.4 GB measured)", async () => {
+		const srv = server([SELENE_NAME]);
+		const remote = "http://127.0.0.1:21434";
+		const asked: string[] = [];
+		const fetchImpl = async (url: string): Promise<Response> => {
+			if (url.startsWith(remote)) {
+				asked.push(url);
+				if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: SELENE_NAME, size: 1 }] });
+				return Response.json({ logprobs: [{ top_logprobs: [{ token: " No", logprob: Math.log(0.9) }] }] });
+			}
+			return srv.fetch(url);
+		};
+		const e = { OLLAMA_MODELS: path.join(tmp, "none"), EIGHT_S1_SHARED_JUDGE: "1", OLLAMA_HOST: remote };
+		const d = createDecider({ fetch: fetchImpl, env: e, llamacppLoader: missingLoader });
+		expect((await d.noul("warm", "p")).backend).toBe("ollama");
+		srv.state.up = false;
+		await expect(d.noul("lost", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(asked).toEqual([]);
+	});
+
+	it("a later session uses the shared server again once it is back", async () => {
+		const store = makeStore([SELENE]);
+		const srv = server([SELENE_NAME]);
+		const { loader } = countingLoader();
+		const first = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		await first.noul("a", "p");
+		srv.state.up = false;
+		expect((await first.noul("b", "p")).backend).toBe("llamacpp");
+		srv.state.up = true;
+		const later = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		expect((await later.noul("c", "p")).backend).toBe("ollama");
+	});
+
+	it("an answer the model gave but we cannot read never fails over", async () => {
+		const store = makeStore([SELENE]);
+		const srv = server([SELENE_NAME]);
+		const { loader, counts } = countingLoader();
+		const d = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		srv.state.logprobs = false;
+		const err = await d.noul("s", "p").catch((e) => e);
+		expect(err).toBeInstanceOf(DecideError);
+		expect(err).not.toBeInstanceOf(DecideUnavailableError);
+		expect(counts.imports).toBe(0);
+		expect((await d.backend()).name).toBe("ollama");
+	});
+
+	it("without the flag nothing fails over: a private Ollama judge that dies stays failed", async () => {
+		const srv = server([SELENE_NAME]);
+		const { loader, counts } = countingLoader();
+		const d = createDecider({ fetch: srv.fetch, env: { OLLAMA_MODELS: path.join(tmp, "none") }, llamacppLoader: loader });
+		expect((await d.noul("a", "p")).backend).toBe("ollama");
+		srv.state.up = false;
+		await expect(d.noul("b", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(counts.imports).toBe(0);
+	});
+
+	it("strict gate: never allows while no judge is loaded, then judges in-process once the fallback is up", async () => {
+		const store = makeStore([SELENE]);
+		const srv = server([SELENE_NAME]);
+		let release = () => {};
+		const loaded = new Promise<void>((r) => {
+			release = r;
+		});
+		const { loader } = countingLoader(loaded);
+		const d = createDecider({ fetch: srv.fetch, env: env(store), llamacppLoader: loader });
+		_setSystemOneOverridesForTests({ createDecider: () => d, askHuman: async () => null });
+		const gateEnv = { EIGHT_SYSTEM_ONE: "1", EIGHT_S1_ALLOWLIST: "0", EIGHT_SYSTEM_ONE_TIMEOUT_MS: "150" };
+		const before = await systemOneGate("ls -la", gateEnv);
+		expect([before.run, before.guard?.backend]).toEqual([true, "ollama"]);
+		srv.state.up = false;
+		// The shared judge is gone and the in-process one is still loading: every verdict fails closed.
+		for (const cmd of ["ls -la src", "git status", "cat README.md"]) {
+			const r = await systemOneGate(cmd, gateEnv);
+			expect(r.run).toBe(false);
+			expect(r.guard?.backend).toBe("unavailable");
+		}
+		release();
+		const after = await systemOneGate("ls -la docs", gateEnv);
+		expect([after.run, after.guard?.backend, after.guard?.verdict]).toEqual([true, "llamacpp", "allow"]);
 	});
 });
