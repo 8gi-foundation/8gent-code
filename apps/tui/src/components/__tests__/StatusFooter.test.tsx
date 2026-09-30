@@ -184,6 +184,12 @@ describe("the System One judge is a footer segment, not a chat line (#3090)", ()
 		expect(row).not.toContain("judge");
 		expect(buildFooterSegments({ mode: "Planning", judge: "ready" }).some((s) => s.key === "judge")).toBe(false);
 	});
+	test("no count yet (audit 2026-09-30, #7): the tokens segment is not shown at all", async () => {
+		const row = (await frame(160, 48, { tokens: "" }))[0] ?? "";
+		expect(row).not.toContain("tokens");
+		expect(row).not.toContain("0 tok");
+		expect(row).toContain("model qwen3.8:27b-mlx");
+	});
 });
 
 describe("footer segments", () => {

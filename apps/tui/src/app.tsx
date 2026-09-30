@@ -139,7 +139,7 @@ import {
 } from "./lib/provider-readiness.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatSessionTime, formatTokens, msUntilSessionTimeChanges } from "./lib/format.js";
+import { formatSessionTime, formatTokens, hudTokens, msUntilSessionTimeChanges } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import {
@@ -5977,10 +5977,7 @@ export function App({
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
 	const sessionTime = formatSessionTime(Date.now() - startTime.getTime());
-	const tokenStr =
-		totalTokens >= 1000
-			? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
-			: `${totalTokens} tok`;
+	const tokenStr = hudTokens(totalTokens);
 	const micOn =
 		Boolean(voice?.isAvailable) &&
 		(voice?.state === "recording" || voiceChat?.isActive);

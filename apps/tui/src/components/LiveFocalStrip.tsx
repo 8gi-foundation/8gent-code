@@ -180,7 +180,7 @@ export function LiveFocalStrip({
 						<Text color={t.steel}>{meter(contextPct, METER_CELLS)}</Text>
 					</>
 				) : null}
-				<Text color={t.textTertiary}> {tokens}</Text>
+				{tokens ? <Text color={t.textTertiary}> {tokens}</Text> : null}
 			</Box>
 		</Box>
 	);
