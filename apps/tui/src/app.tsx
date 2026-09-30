@@ -5937,6 +5937,7 @@ export function App({
 						>
 							<MessageList
 								messages={messages}
+								turnRunning={isProcessing}
 								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 								contentWidth={chatColumnWidth(viewport.width, {
 									context: showContextRail,

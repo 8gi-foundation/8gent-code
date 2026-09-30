@@ -127,6 +127,10 @@ interface MessageListProps {
 	 *  rendered tree never exceeds the container — which is what was causing
 	 *  the streaming overlap artifacts. */
 	rowBudget?: number;
+	/** True while the agent's turn is still running. A trail of calls with no
+	 *  reply is live only while its turn runs; once the turn ends without a
+	 *  reply, it settles into results like any finished turn. */
+	turnRunning?: boolean;
 	/** When false, skip bubble fade-in delays (matches ^A global anim toggle). */
 	showAnimations?: boolean;
 	/** Disable mouse-wheel + keyboard scroll capture (e.g. another modal owns input). */
@@ -189,6 +193,7 @@ export function MessageList({
 	rowBudget,
 	showAnimations = true,
 	scrollEnabled = true,
+	turnRunning = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
@@ -208,7 +213,15 @@ export function MessageList({
 	// Raw tool messages never render in chat. Each finished call's trail entry
 	// attaches to its turn's assistant reply; calls with no reply yet become a
 	// standalone trail item.
-	const chatItems: ChatItem<Message>[] = buildChatItems(messages);
+	// A turn that ended with calls but no reply text still gets its results:
+	// its trail item becomes a reply-less 8gent turn ("No reply." below the
+	// results). Only the newest trail, while its turn runs, stays live.
+	const grouped: ChatItem<Message>[] = buildChatItems(messages);
+	const chatItems: ChatItem<Message>[] = grouped.map((it, idx) =>
+		it.message.role === "tool" && !(turnRunning && idx === grouped.length - 1)
+			? { ...it, message: { ...it.message, role: "assistant" as const, content: "" } }
+			: it,
+	);
 	const chatMessages = chatItems.map((i) => i.message);
 	const trailById = new Map(chatItems.map((i) => [i.message.id, i.trail]));
 
@@ -629,18 +642,25 @@ function MessageItem({
 				</Box>
 			)}
 
+			{/* A turn that ended with calls and no words says so, quietly. */}
+			{!isUser && !message.content.trim() && trail.length > 0 ? (
+				<MutedText>No reply.</MutedText>
+			) : null}
+
 			{/* Message body — left-bar carries the visual frame, strict width */}
-			<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
-				<MessageContent
-					content={safeContent}
-					role={message.role}
-					isNew={isNew}
-					animate={animate}
-					onTypingComplete={() => setTypingComplete(true)}
-					wrapWidth={textWrapWidth}
-					accentColor={isUser ? "yellow" : "cyan"}
-				/>
-			</Box>
+			{message.content.trim() || trail.length === 0 ? (
+				<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
+					<MessageContent
+						content={safeContent}
+						role={message.role}
+						isNew={isNew}
+						animate={animate}
+						onTypingComplete={() => setTypingComplete(true)}
+						wrapWidth={textWrapWidth}
+						accentColor={isUser ? "yellow" : "cyan"}
+					/>
+				</Box>
+			) : null}
 
 			{/* Footer (assistant + metadata present): "Xs · N tok" */}
 			{showFooter && (

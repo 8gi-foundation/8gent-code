@@ -151,6 +151,40 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		expect(out).not.toContain("waiting with you");
 	});
 
+	test("a turn that ended with calls but no reply settles into results", () => {
+		const turn = pilotTurn.slice(0, 4);
+		const out = render80(
+			<MessageList
+				messages={turn}
+				animateTyping={false}
+				showAnimations={false}
+				scrollEnabled={false}
+				contentWidth={72}
+				rowBudget={40}
+				turnRunning={false}
+			/>,
+		);
+		expect(out).toContain("◆ 8gent");
+		expect(out).toContain("✓ Wrote  deck/outline.md");
+		expect(out).toContain("⊘ Run blocked  ls deck && wc -l deck/deck.md");
+		expect(out).toContain("No reply.");
+		expect(out).not.toContain("✓ write_file");
+		// While the turn still runs, the same calls are the live trail.
+		const live = render80(
+			<MessageList
+				messages={turn}
+				animateTyping={false}
+				showAnimations={false}
+				scrollEnabled={false}
+				contentWidth={72}
+				rowBudget={40}
+				turnRunning
+			/>,
+		);
+		expect(live).toContain("✓ write_file deck/outline.md");
+		expect(live).not.toContain("No reply.");
+	});
+
 	test("a turn taller than the chat window caps its trail to fit", () => {
 		// Real layout while processing at 80x45: about 10 chat rows. The
 		// trail must not push the reply past the window, or Ink leaves stale
