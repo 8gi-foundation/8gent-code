@@ -1,8 +1,9 @@
 /**
  * BottomBar - single-render wrapper for the bottom of the chat screen.
  *
- * One footer row (8GENT FM | mode | model | tokens | branch | session ...)
- * plus the keyboard hint row, following the chat-first design (mockup A).
+ * One footer row (8GENT FM | mode | model | tokens | branch | session ...,
+ * then the key hints that fit), following the chat-first design (mockup A).
+ * The hints had a row of their own until #3130.
  * It replaced the bordered FM bar, the seven bordered status tiles and the
  * bordered mode strip, which took 11 rows before the hint row.
  *
@@ -14,7 +15,7 @@
 import { Box, useStdout } from "ink";
 import React from "react";
 import { DjDeck } from "./DjDeck.js";
-import { FooterHints, type JudgeState, StatusSegments, fmSegmentWidth } from "./StatusFooter.js";
+import { type JudgeState, StatusSegments, fmSegmentWidth } from "./StatusFooter.js";
 
 export type FooterMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
@@ -28,7 +29,7 @@ interface BottomBarProps {
 	total: number;
 	tokens: string;
 	branch?: string;
-	/** Optional auth display-name override; falls back to the OS user. (#2366) */
+	/** The signed-in display name, when there is one (#2366). */
 	user?: string;
 	permissions: string;
 	sessionTime: string;
@@ -43,10 +44,10 @@ interface BottomBarProps {
 	judge?: JudgeState;
 }
 
+/** The signed-in display name (#2366). The OS login is not shown: it is the
+ *  person at the keyboard, so it says nothing they act on (#3130). */
 function resolveUser(override?: string): string | undefined {
-	if (override && override.trim().length > 0) return override;
-	const fromEnv = process.env.USER || process.env.LOGNAME;
-	return fromEnv && fromEnv.trim().length > 0 ? fromEnv : undefined;
+	return override && override.trim().length > 0 ? override : undefined;
 }
 
 export function BottomBar(props: BottomBarProps) {
@@ -80,7 +81,6 @@ export function BottomBar(props: BottomBarProps) {
 					/>
 				}
 			/>
-			<FooterHints />
 		</Box>
 	);
 }

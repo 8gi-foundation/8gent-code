@@ -19,11 +19,19 @@
  * - Orange means "look here": the infinite approval state, and a System
  *   One judge that failed to load (shell commands fail closed).
  * - The judge's warm-up is status, so it shows here, never as a chat line
- *   (#3090): "judge loading", then "judge ready". Loading and failed are
- *   kept when space is short; ready is the quiet state and drops first.
+ *   (#3090): "judge loading", or "judge failed".
+ * - A quiet, expected state is not a segment (#3130). "approval ask" is the
+ *   default (the left rail and the header's [ASK] chip already cover it),
+ *   "judge ready" is the warm-up's end, and "providers 3/3" means all is
+ *   well. Each shows only when it says something to act on: approval when
+ *   it is not "ask", the judge while loading or failed, providers when one
+ *   is down.
+ * - The key hints share the row, on the right, fitted to the columns the
+ *   status leaves. Hints that do not fit drop, most used last; the header's
+ *   ^P palette lists every command.
  */
 
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 import React from "react";
 import { askedNote } from "../lib/model-truth.js";
 import { theme } from "../theme.js";
@@ -122,7 +130,7 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	if (known(d.branch)) {
 		out.push({ key: "branch", label: "branch", value: d.branch, color: ui.cream, priority: 3 });
 	}
-	if (known(d.permissions)) {
+	if (known(d.permissions) && d.permissions !== "ask") {
 		const infinite = d.permissions === "infinite";
 		out.push({
 			key: "approval",
@@ -133,22 +141,27 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			priority: infinite ? 1 : 5,
 		});
 	}
-	if (d.judge) {
+	if (d.judge && d.judge !== "ready") {
 		out.push({
 			key: "judge",
 			label: "judge",
 			value: d.judge,
-			color: d.judge === "failed" ? ui.orange : d.judge === "loading" ? ui.muted : ui.cream,
-			priority: d.judge === "ready" ? 6 : 1,
+			color: d.judge === "failed" ? ui.orange : ui.muted,
+			priority: 1,
 		});
 	}
-	if (d.providersTotal != null && d.providersTotal > 0 && d.providersLive != null) {
+	if (
+		d.providersTotal != null &&
+		d.providersTotal > 0 &&
+		d.providersLive != null &&
+		d.providersLive < d.providersTotal
+	) {
 		out.push({
 			key: "providers",
 			label: "providers",
 			value: `${d.providersLive}/${d.providersTotal}`,
 			color: ui.cream,
-			priority: 6,
+			priority: 5,
 		});
 	}
 	if (known(d.user)) {
@@ -189,10 +202,44 @@ export function fmSegmentWidth(columns: number): number {
 	return columns >= 120 ? 22 : 10;
 }
 
+/** The key hints, most used first. Display order is the same. */
+export const FOOTER_HINTS = [
+	"^X plan",
+	"^O expand",
+	"^C clear",
+	"^K kanban",
+	"^B processes",
+	"^D deck",
+	"^A anim",
+	"^S sound",
+] as const;
+const HINT_GAP = "  ";
+/** Columns kept between the last status segment and the first hint. */
+const HINTS_MARGIN = 3;
+
+/** Columns the fitted segments take, separators included. */
+export function segmentsWidth(segments: FooterSegment[]): number {
+	return segments.reduce((sum, s) => sum + segmentWidth(s) + FOOTER_SEPARATOR.length, 0);
+}
+
+/** The hints that fit in `width` columns, most used first, never cut. */
+export function fitFooterHints(width: number): string[] {
+	const out: string[] = [];
+	let used = 0;
+	for (const hint of FOOTER_HINTS) {
+		const cost = hint.length + (out.length > 0 ? HINT_GAP.length : 0);
+		if (used + cost > width) break;
+		out.push(hint);
+		used += cost;
+	}
+	return out;
+}
+
 export function StatusSegments({ data, width }: { data: FooterData; width: number }) {
 	const segments = fitFooterSegments(buildFooterSegments(data), width);
+	const hints = fitFooterHints(Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN));
 	return (
-		<Box flexGrow={1} minWidth={0} overflow="hidden">
+		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between">
 			<Text wrap="truncate-end">
 				{segments.map((s) => (
 					<React.Fragment key={s.key}>
@@ -203,20 +250,11 @@ export function StatusSegments({ data, width }: { data: FooterData; width: numbe
 					</React.Fragment>
 				))}
 			</Text>
-		</Box>
-	);
-}
-
-/** The keyboard hint row that used to sit under the mode strip. Dropped on
- *  short terminals, where it is the first row to clip. */
-export function FooterHints() {
-	const { stdout } = useStdout();
-	const rows = stdout?.rows ?? 40;
-	if (rows < 42) return null;
-	return (
-		<Box justifyContent="space-between" overflow="hidden" flexShrink={0}>
-			<Text color={ui.muted}>^O expand  ^B processes  ^K kanban  ^D deck  ^X plan</Text>
-			<Text color={ui.muted}>^A anim  ^S sound  ^C clear</Text>
+			{hints.length > 0 ? (
+				<Box flexShrink={0}>
+					<Text color={ui.dim}>{hints.join(HINT_GAP)}</Text>
+				</Box>
+			) : null}
 		</Box>
 	);
 }
