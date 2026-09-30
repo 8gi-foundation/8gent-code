@@ -300,7 +300,7 @@ import {
 	providerToRuntime,
 	specForActivatedTab,
 } from "./lib/model-selection.js";
-import { modelOnScreen } from "./lib/model-truth.js";
+import { routeOnScreen } from "./lib/model-truth.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -2086,7 +2086,7 @@ export function App({
 	// the reroute event lands before the agent's config.model self-corrects,
 	// so this is what names the right model during the rerouted turn. Keyed
 	// by agent, so an agent rebuilt for another model starts clean.
-	const routedModelRef = useRef(new WeakMap<object, string>());
+	const routedModelRef = useRef(new WeakMap<object, { model: string; provider: string }>());
 	const [, setRoutedTick] = useState(0);
 	const getTabAgent = perTabAgents.getAgent;
 	const buildEventsForTab = useCallback(
@@ -2094,7 +2094,7 @@ export function App({
 			onModelRouted: (event) => {
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
-				routedModelRef.current.set(routedAgent, event.used);
+				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
 				setRoutedTick((n) => n + 1);
 			},
 			onToolStart: (event: AgentToolStartEvent) => {
@@ -5962,17 +5962,20 @@ export function App({
 	const recentTools = deriveTools(messages, isProcessing, 5);
 	// The model that ran the turn, not only the one asked for (#3102). Read
 	// from the active agent's reroute event and live config, for display only.
-	const shownModel = modelOnScreen({
+	// The provider follows the route that ran, like the model does.
+	const shownModel = routeOnScreen({
 		asked: currentModel,
+		askedProvider: currentProvider,
 		built: agent ? builtSpecRef.current.get(agent)?.model : undefined,
 		live: agent ? (agent as unknown as { config?: { model?: string } }).config?.model : undefined,
 		routed: agent ? routedModelRef.current.get(agent) : undefined,
 	});
+	const shownProvider = shownModel.provider;
 	const providerRows = deriveProviders({
 		primary: currentModel
-			? { name: `${currentProvider}:${shownModel.ran}`, asked: shownModel.asked }
+			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
 			: { name: currentProvider },
-		fallback: railFallback(currentProvider, shownModel.ran),
+		fallback: railFallback(shownProvider, shownModel.ran),
 		offline: null,
 	});
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
