@@ -6,6 +6,9 @@
  * Built with Ink (React for CLI).
  */
 
+// First, before anything heavy loads: keys pressed before the first frame
+// must reach the splash, not the line buffer (lib/early-input.ts).
+import "./lib/early-input.js";
 import { render } from "ink";
 import React from "react";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
