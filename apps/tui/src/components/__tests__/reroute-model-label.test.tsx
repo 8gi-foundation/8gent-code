@@ -1,25 +1,23 @@
 /**
- * #3102: the three places the TUI names a model say which model ran the turn
- * after a reroute, and mark the one asked for as asked.
+ * #3102: the places the TUI names a model say which model ran the turn after
+ * a reroute, and mark the one asked for as asked.
  *
  *   NOW strip   qwen3.8:27b-mlx (asked eight-1.0-q3:14b) ctx ████░░ 51K tok
- *   status bar  model qwen3.8:27b-mlx (asked eight-1.0-q3:14b)
  *   PROVIDERS   ● ollama qwen3.8:27b-mlx   (the provider that served it, #3106 review)
  *                 (asked eight-1.0-q3:14b)
  *
- * The note takes the existing dim tones; no colour or layout is new.
+ * The footer no longer names the model (#3238): the NOW strip is its home.
+ * The note takes the existing muted tone; no colour or layout is new.
  */
 
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { Text, render } from "ink";
+import { Text } from "ink";
 import React from "react";
 import { deriveProviders } from "../../lib/activity-rail-derivation.js";
 import { cellWidth } from "../../lib/header-layout.js";
 import { NOW_LABEL_WIDTH, fitNowStrip } from "../../lib/now-strip-layout.js";
 import { t } from "../../theme.js";
 import { ActivityRail, type ActivityRailProps } from "../ActivityRail";
-import { BottomBar } from "../BottomBar.js";
 import { buildFooterSegments } from "../StatusFooter.js";
 
 const ASKED = "eight-1.0-q3:14b";
@@ -56,68 +54,10 @@ describe("NOW strip", () => {
 	});
 });
 
-function fakeStdout(cols: number, rows: number) {
-	const out = new EventEmitter() as EventEmitter & {
-		columns: number;
-		rows: number;
-		isTTY: boolean;
-		frames: string[];
-		write: (s: string) => boolean;
-	};
-	out.columns = cols;
-	out.rows = rows;
-	out.isTTY = false;
-	out.frames = [];
-	out.write = (s: string) => {
-		out.frames.push(s);
-		return true;
-	};
-	return out;
-}
-
-async function footer(cols: number, extra: { model: string; modelAsked?: string }): Promise<string> {
-	const stdout = fakeStdout(cols, 45);
-	const app = render(
-		<BottomBar
-			ready={3}
-			total={3}
-			tokens="51K tok"
-			user="james"
-			permissions="ask"
-			sessionTime="31s"
-			mode="Planning"
-			{...extra}
-		/>,
-		{ stdout: stdout as unknown as NodeJS.WriteStream, debug: true, patchConsole: false, exitOnCtrlC: false },
-	);
-	await new Promise((r) => setTimeout(r, 30));
-	app.unmount();
-	const last = stdout.frames.filter((f) => f.includes("8GENT FM")).at(-1) ?? "";
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
-	return (last.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n")[0] ?? "");
-}
-
 describe("status bar", () => {
-	test("names the model that ran and marks the asked one", async () => {
-		const row = await footer(160, { model: RAN, modelAsked: ASKED });
-		expect(row).toContain(`│ model ${RAN} (asked ${ASKED}) │`);
-	});
-
-	test("80 columns: still both, still one row", async () => {
-		const row = await footer(80, { model: RAN, modelAsked: ASKED });
-		expect(row).toContain(`model ${RAN} (asked ${ASKED})`);
-		expect(row.length).toBeLessThanOrEqual(80);
-	});
-
-	test("no reroute: no note", async () => {
-		const row = await footer(160, { model: ASKED });
-		expect(row).toContain(`│ model ${ASKED} │`);
-		expect(row).not.toContain("asked");
-	});
-
-	test("the note is the dim hint slot, not a new colour", () => {
-		const seg = buildFooterSegments({ mode: "Planning", model: RAN, modelAsked: ASKED }).find((s) => s.key === "model");
-		expect(seg).toMatchObject({ value: RAN, hint: `(asked ${ASKED})` });
+	test("the footer does not repeat the model (#3238): the NOW strip is its home", () => {
+		const segs = buildFooterSegments({ mode: "Planning" });
+		expect(segs.some((s) => s.key === "model")).toBe(false);
 	});
 });
 
@@ -146,7 +86,7 @@ function rail(providers: ActivityRailProps["providers"]): AnyElement[] {
 }
 
 describe("PROVIDERS row", () => {
-	test("the primary row names the model that ran; the asked one follows, dim", () => {
+	test("the primary row names the model that ran; the asked one follows, muted", () => {
 		const rows = deriveProviders({ primary: { name: `8gent:${RAN}`, asked: ASKED }, fallback: null, offline: null });
 		const els = rail(rows);
 		const names = els.map(str);
@@ -154,7 +94,7 @@ describe("PROVIDERS row", () => {
 		expect(names).not.toContain(`● 8gent ${ASKED}`);
 		const note = els.find((el) => str(el).includes(`(asked ${ASKED})`));
 		expect(note).toBeDefined();
-		expect(note?.props.color).toBe(t.dim);
+		expect(note?.props.color).toBe(t.textTertiary);
 	});
 
 	test("no reroute: one row, no note", () => {

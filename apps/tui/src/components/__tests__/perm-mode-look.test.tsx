@@ -37,7 +37,6 @@ import {
 	permToastMs,
 	permView,
 } from "../../lib/perm-modes-design.js";
-import { ContextRail } from "../ContextRail.js";
 import { HeaderBar } from "../HeaderBar.js";
 import { InlineApprovalPrompt } from "../InlineApprovalPrompt.js";
 import {
@@ -114,9 +113,6 @@ function footerWidth(columns: number): number {
 
 const FOOTER: FooterData = {
 	mode: "Implementing",
-	model: "eight-1.0-q3:14b",
-	tokens: "12.4k",
-	branch: "main",
 	sessionTime: "00:14:02",
 };
 
@@ -134,7 +130,7 @@ function Footer({
 }
 
 describe("footer toast (#3174)", () => {
-	test("160 columns: the full line, beside mode, perm and model, in place of the hints", async () => {
+	test("160 columns: the full line, beside mode, perm and session, in place of the hints", async () => {
 		const { frame } = mount(
 			<Footer
 				columns={160}
@@ -146,11 +142,11 @@ describe("footer toast (#3174)", () => {
 		await tick();
 		const f = frame();
 		expect(f).toContain("Guarded: safe steps run, risky ones still ask");
-		expect(f).toContain("mode Implementing ^Y");
-		expect(f).toContain(`perm Guarded ${PERM_KEY}`);
-		expect(f).toContain("model eight-1.0-q3:14b");
+		expect(f).toContain("mode Implementing [^Y]");
+		expect(f).toContain(`perm Guarded [${PERM_KEY}]`);
+		expect(f).toContain("session 00:14:02");
 		// The toast takes the hints slot: no second row, no hints beside it.
-		expect(f).not.toContain("^X plan");
+		expect(f).not.toContain("[^X] plan");
 		expect(f.trim().split("\n")).toHaveLength(1);
 	});
 
@@ -166,8 +162,8 @@ describe("footer toast (#3174)", () => {
 		await tick();
 		const f = frame();
 		expect(f).toContain("never asks");
-		expect(f).toContain("mode Implementing ^Y");
-		expect(f).toContain(`perm Infinite ${PERM_KEY}`);
+		expect(f).toContain("mode Implementing [^Y]");
+		expect(f).toContain(`perm Infinite [${PERM_KEY}]`);
 	});
 
 	test("the toast clears itself, and the hints come back", async () => {
@@ -188,7 +184,7 @@ describe("footer toast (#3174)", () => {
 		}
 		const { frame } = mount(<Probe />, 160);
 		await waitFor(() => frame().includes("Plan: reads and plans, changes nothing"), "toast up");
-		await waitFor(() => frame().includes("^X plan"), "hints back", 2000);
+		await waitFor(() => frame().includes("[^X] plan"), "hints back", 2000);
 		expect(frame()).not.toContain("changes nothing");
 		expect(shown.at(-1)).toBe("none");
 	});
@@ -295,9 +291,6 @@ describe("header chip (#3174)", () => {
 			syncStatus="in sync"
 			micOn={false}
 			approvalPending={false}
-			localFirst
-			sessionTime="00:14"
-			lilEightState="idle"
 			width={width}
 			mark={false}
 			permMode={permMode}
@@ -319,13 +312,12 @@ describe("header chip (#3174)", () => {
 		}
 	});
 
-	test("80 columns: the chip fits and the status badge is never the thing cut", async () => {
+	test("80 columns: the chip fits beside the branch, on the text row (#3238)", async () => {
 		const { frame } = mount(header("infinite", 80), 80);
 		await tick();
-		const f = frame();
-		expect(f).toContain("INFINITE");
-		expect(f).toContain("LOCAL");
-		expect(f).toContain("idle");
+		const lines = frame().split("\n");
+		expect(lines[1]).toContain("INFINITE");
+		expect(lines[1]).toContain("main");
 	});
 });
 
@@ -379,14 +371,14 @@ describe("held by parent (#3174)", () => {
 			160,
 		);
 		await tick();
-		expect(wide.frame()).toContain(`perm Plan (held by parent) ${PERM_KEY}`);
+		expect(wide.frame()).toContain(`perm Plan (held by parent) [${PERM_KEY}]`);
 		instance?.unmount();
 		const narrow = mount(
 			<Footer columns={80} data={{ ...FOOTER, permissions: "plan", permHeld: true }} />,
 			80,
 		);
 		await tick();
-		expect(narrow.frame()).toContain(`perm Plan (held) ${PERM_KEY}`);
+		expect(narrow.frame()).toContain(`perm Plan (held) [${PERM_KEY}]`);
 	});
 
 	test("tab: '· Plan, held' when wide, the glyph when narrow", async () => {
@@ -405,17 +397,6 @@ describe("held by parent (#3174)", () => {
 		);
 		await tick();
 		expect(narrow.frame()).toContain("2] Engineer P");
-	});
-
-	test("rail: perm PLAN, then held by parent", async () => {
-		const { frame } = mount(
-			<ContextRail risk="low" permissions="plan" permHeld contextPct={10} adhdMode={false} />,
-			40,
-		);
-		await tick();
-		const f = frame();
-		expect(f).toContain("PLAN");
-		expect(f).toContain("held by parent");
 	});
 
 	test("toast and chat line say the parent held it", async () => {

@@ -13,13 +13,10 @@
 const SHELL_CHROME = 4;
 /** Ink `gap={1}` between neighbouring columns. */
 const COLUMN_GAP = 1;
-/** ContextRail's fixed width. */
-export const CONTEXT_RAIL_WIDTH = 28;
 /** ActivityRail's fixed width. */
 export const ACTIVITY_RAIL_WIDTH = 34;
 
 export interface ShellColumns {
-	context: boolean;
 	/** Width of the PLAN column when it is showing, else 0 / undefined. */
 	planWidth?: number;
 	activity: boolean;
@@ -28,23 +25,9 @@ export interface ShellColumns {
 /** Columns the chat column really gets, never below `min`. */
 export function chatColumnWidth(cols: number, shell: ShellColumns, min = 24): number {
 	let width = cols - SHELL_CHROME;
-	if (shell.context) width -= CONTEXT_RAIL_WIDTH + COLUMN_GAP;
 	if (shell.planWidth && shell.planWidth > 0) width -= shell.planWidth + COLUMN_GAP;
 	if (shell.activity) width -= ACTIVITY_RAIL_WIDTH + COLUMN_GAP;
 	return Math.max(min, width);
-}
-
-/**
- * Whether the left ContextRail has anything the rest of the HUD does not
- * already say. The header carries the workspace path and the branch (or
- * "no repo"); the NOW strip carries the context meter. What is left is the
- * approval mode and ADHD mode, and in their defaults (ask, off) the rail is
- * 29 columns of "nothing has changed" taken from the chat (audit 2026-09-30,
- * #5). Both change only on an explicit user action, so the chat never
- * reflows mid-turn.
- */
-export function contextRailHasNews(state: { infinite: boolean; adhdMode: boolean }): boolean {
-	return state.infinite || state.adhdMode;
 }
 
 /** Share of the column a user bubble takes; the rest is the reply side's margin. */

@@ -1,22 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { bubbleWidths, chatColumnWidth, contextRailHasNews } from "./chat-layout";
+import { bubbleWidths, chatColumnWidth } from "./chat-layout";
 
 describe("chatColumnWidth", () => {
-	test("160 columns, context and activity rails, no plan: the 92 the pilot frame measured", () => {
-		// Frame 00107 of pilot run l3-bugfix-m5: the chat column spans cols 31..122.
-		expect(chatColumnWidth(160, { context: true, activity: true })).toBe(92);
+	test("160 columns, activity rail, no plan: the chat gets the old context rail's 29 columns (#3238)", () => {
+		// With the context rail it was 92 (pilot frame 00107, l3-bugfix-m5).
+		expect(chatColumnWidth(160, { activity: true })).toBe(121);
 	});
 
 	test("an open PLAN column takes its width and one gap", () => {
-		expect(chatColumnWidth(160, { context: true, planWidth: 24, activity: true })).toBe(67);
+		expect(chatColumnWidth(160, { planWidth: 24, activity: true })).toBe(96);
 	});
 
 	test("80 columns, no rails: the whole frame less its border and padding", () => {
-		expect(chatColumnWidth(80, { context: false, activity: false })).toBe(76);
+		expect(chatColumnWidth(80, { activity: false })).toBe(76);
 	});
 
 	test("never goes below the floor", () => {
-		expect(chatColumnWidth(40, { context: true, planWidth: 24, activity: true })).toBe(24);
+		expect(chatColumnWidth(40, { planWidth: 24, activity: true })).toBe(24);
 	});
 });
 
@@ -32,26 +32,5 @@ describe("bubbleWidths", () => {
 	test("narrow columns keep the minimum bubble", () => {
 		expect(bubbleWidths(10, "assistant")).toEqual({ bubble: 16, wrap: 14 });
 		expect(bubbleWidths(10, "user")).toEqual({ bubble: 16, wrap: 14 });
-	});
-});
-
-describe("contextRailHasNews (audit 2026-09-30, #5)", () => {
-	test("defaults (approval ask, ADHD off): the rail steps aside", () => {
-		expect(contextRailHasNews({ infinite: false, adhdMode: false })).toBe(false);
-	});
-
-	test("infinite approval brings the rail back", () => {
-		expect(contextRailHasNews({ infinite: true, adhdMode: false })).toBe(true);
-	});
-
-	test("ADHD mode brings the rail back", () => {
-		expect(contextRailHasNews({ infinite: false, adhdMode: true })).toBe(true);
-	});
-
-	test("at 160 with the PLAN column open, the chat gets the rail's 29 columns back", () => {
-		const withRail = chatColumnWidth(160, { context: true, planWidth: 24, activity: true });
-		const without = chatColumnWidth(160, { context: false, planWidth: 24, activity: true });
-		expect(without - withRail).toBe(29);
-		expect(without).toBe(96);
 	});
 });

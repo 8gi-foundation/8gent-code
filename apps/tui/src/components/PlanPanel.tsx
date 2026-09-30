@@ -27,6 +27,7 @@ import { motionEnabled } from "../lib/motion.js";
 import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
+import { KeyCap } from "./KeyCap.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { useLandingRows } from "./ToolTrail.js";
 
@@ -145,7 +146,7 @@ export function PlanPanel({
 					}
 					return (
 						<Text key={step.id} wrap="truncate-end">
-							<Text color={t.dim}>{g.pending} </Text>
+							<Text color={t.textTertiary}>{g.pending} </Text>
 							<Text color={t.textSecondary}>{clip(step.text, textMax)}</Text>
 						</Text>
 					);
@@ -162,7 +163,7 @@ export function PlanPanel({
 			) : null}
 			{toggleHint ? (
 				<Box marginTop={1}>
-					<Text color={t.dim}>{toggleHint} hide</Text>
+					<KeyCap cap={toggleHint} verb="hide" />
 				</Box>
 			) : null}
 		</Box>
@@ -177,7 +178,7 @@ export function PlanEmpty({ width = 24 }: { width?: number }) {
 				PLAN
 			</Text>
 			<Box marginTop={1}>
-				<Text color={t.textDim}>No plan this turn.</Text>
+				<Text color={t.textTertiary}>No plan this turn.</Text>
 			</Box>
 		</Box>
 	);

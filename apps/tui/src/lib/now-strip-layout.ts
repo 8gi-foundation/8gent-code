@@ -8,8 +8,8 @@
  *
  * The state column holds only the state word (NOW, WAIT, DONE, READY). The
  * ^Y mode used to sit beside it ("DONE Planning") and read as a phase the
- * model was in; the footer shows it, with its key (#3123). "Autonomous" stays,
- * because it changes what the person has to watch, and widens the column.
+ * model was in; the footer shows it, with its key (#3123). "Autonomous" went
+ * too (#3238): the header chip and the footer perm segment name Infinite.
  *
  * The old layout gave the right cluster a fixed 42 columns, so on an 80
  * column terminal the state text in the middle was the thing that got cut:
@@ -30,8 +30,6 @@ import { askedNote } from "./model-truth.js";
 
 /** Columns the state label takes on the left: "◆ READY " is the widest. */
 export const NOW_LABEL_WIDTH = 8;
-/** The same column with "Autonomous" after the state word. */
-export const AUTONOMOUS_LABEL_WIDTH = NOW_LABEL_WIDTH + "Autonomous".length + 1;
 /** Round or single border (2) plus paddingX={1} (2). */
 const STRIP_CHROME = 4;
 /** paddingX={1} around the middle text. */

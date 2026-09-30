@@ -1,38 +1,24 @@
 /**
- * StatusFooter - the one-row footer from the chat-first design (mockup A):
+ * StatusFooter - the one-row footer (HUD system, #3238):
  *
- *   ● 8GENT FM idle │ mode Planning ^Y │ model qwen3.8:27b │ tokens 179K tok │ branch main │ session 8m 12s
- *
- * After a reroute the model segment names the model that ran, and the one
- * asked for follows as a dim hint: "model qwen3.8:27b (asked eight-1.0-q3:14b)".
- *
- * It replaces three stacked blocks that took 11 rows between them: the
- * bordered 8GENT FM bar, the seven bordered MODEL/AGENTS/TOKENS/... tiles
- * and the bordered PLANNING/RESEARCH/... mode strip.
+ *   mode Planning [^Y] │ perm Guarded [⇧Tab] │ session 8m 12s      [^P] palette  [^X] plan  ...
  *
  * Rules:
- * - Segments drop by priority when the row is too narrow, never wrap. The
- *   mode segment never drops, because it is where ^Y is discoverable.
- * - A value that is not known is not shown. No "—", no "?", no "Guest".
- * - The permission mode (#3170) is "perm <Mode> ⇧Tab", right after mode, and
- *   never drops either: it is where Shift+Tab is discoverable and it is the
- *   one fact a person must always be able to read. Ask, the default, shows
- *   no segment (#3130); the "⇧Tab perm" hint teaches the key instead.
- * - The ^Y mode is labelled MODE: it is the manual prompt mode the user
- *   picks, not a pipeline phase, so it is never dressed up as progress.
- * - Orange means "look here": the infinite approval state, and a System
- *   One judge that failed to load (shell commands fail closed).
- * - The judge's warm-up is status, so it shows here, never as a chat line
- *   (#3090): "judge loading", or "judge failed".
- * - A quiet, expected state is not a segment (#3130). "approval ask" is the
- *   default (the left rail and the header's [ASK] chip already cover it),
- *   "judge ready" is the warm-up's end, and "providers 3/3" means all is
- *   well. Each shows only when it says something to act on: approval when
- *   it is not "ask", the judge while loading or failed, providers when one
- *   is down.
- * - The key hints share the row, on the right, fitted to the columns the
- *   status leaves. Hints that do not fit drop, most used last; the header's
- *   ^P palette lists every command.
+ * - One home per fact. The footer holds what you set (the ^Y mode, the
+ *   permission mode) and the session. The model, tokens and context live in
+ *   the NOW strip; the branch lives in the header. None repeats here.
+ * - A quiet, expected state is not a segment (#3130): Ask shows no perm
+ *   segment, "judge ready" and "providers 3/3" show nothing, ADHD mode shows
+ *   only when on, and the DJ station shows only when a track is loaded and
+ *   its row is closed.
+ * - Segments drop by priority when the row is too narrow, never wrap. mode
+ *   and perm never drop: they are where ^Y and Shift+Tab are discoverable.
+ * - Every key is a key cap: "[^Y]" after the value it changes, "[^P] palette"
+ *   in the hint row. The hints fill the columns the status leaves, right-
+ *   aligned, most used first; [^P] palette leads because the palette lists
+ *   every command.
+ * - Orange means "look here": Infinite, and a System One judge that failed
+ *   to load (shell commands fail closed).
  */
 
 import { Box, Text } from "ink";
@@ -41,7 +27,6 @@ import {
 	type PermissionMode,
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
-import { askedNote } from "../lib/model-truth.js";
 import {
 	PERM_KEY,
 	PERM_LOOK,
@@ -50,6 +35,7 @@ import {
 	permToastForms,
 } from "../lib/perm-modes-design.js";
 import { theme } from "../theme.js";
+import { KEY_CAP_GAP, KeyCap, keyCapText, splitHint } from "./KeyCap.js";
 
 const ui = {
 	muted: theme.color.muted,
@@ -81,14 +67,7 @@ export type JudgeState = "loading" | "ready" | "failed";
 
 export interface FooterData {
 	mode: string;
-	/** The model that ran the turn. */
-	model?: string;
-	/** The configured model, only when a reroute ran the turn on `model`
-	 *  instead. Shown after it as a dim "(asked ...)" hint (#3102). */
-	modelAsked?: string;
-	tokens?: string;
 	tokensPerSecond?: number;
-	branch?: string;
 	sessionTime?: string;
 	/**
 	 * The focused tab's permission mode (#3170): plan, ask, guarded or
@@ -105,6 +84,8 @@ export interface FooterData {
 	providersTotal?: number;
 	user?: string;
 	judge?: JudgeState;
+	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
+	adhd?: boolean;
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -119,17 +100,10 @@ export function segmentWidth(s: FooterSegment): number {
 		(s.label ? s.label.length + 1 : 0) +
 		s.value.length +
 		(s.note ? s.note.length + 1 : 0) +
-		(s.hint ? s.hint.length + 1 : 0)
+		(s.hint ? keyCapText(s.hint).length + 1 : 0)
 	);
 }
 
-function truncateMiddle(value: string, max: number): string {
-	if (value.length <= max) return value;
-	const keep = max - 1;
-	const left = Math.ceil(keep * 0.55);
-	const right = Math.floor(keep * 0.45);
-	return `${value.slice(0, left)}…${value.slice(value.length - right)}`;
-}
 
 function formatTps(tps: number): string {
 	if (tps >= 100) return `${Math.round(tps)} t/s`;
@@ -156,24 +130,8 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			priority: 0,
 		});
 	}
-	if (known(d.model)) {
-		out.push({
-			key: "model",
-			label: "model",
-			value: truncateMiddle(d.model, 24),
-			hint: known(d.modelAsked) ? askedNote(truncateMiddle(d.modelAsked, 24)) : undefined,
-			color: ui.cream,
-			priority: 1,
-		});
-	}
-	if (known(d.tokens)) {
-		out.push({ key: "tokens", label: "tokens", value: d.tokens, color: ui.cream, priority: 2 });
-	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
 		out.push({ key: "rate", value: formatTps(d.tokensPerSecond), color: ui.teal, priority: 6 });
-	}
-	if (known(d.branch)) {
-		out.push({ key: "branch", label: "branch", value: d.branch, color: ui.cream, priority: 3 });
 	}
 	if (!perm && known(d.permissions) && d.permissions !== "ask") {
 		const infinite = d.permissions === "infinite";
@@ -209,6 +167,9 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			priority: 5,
 		});
 	}
+	if (d.adhd) {
+		out.push({ key: "adhd", label: "adhd", value: "on", color: ui.teal, priority: 3 });
+	}
 	if (known(d.user)) {
 		out.push({ key: "user", label: "user", value: d.user, color: ui.cream, priority: 7 });
 	}
@@ -219,17 +180,29 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 }
 
 /**
- * Keep as many segments as fit in `width` columns, dropping the highest
- * priority number first. Every segment is drawn after a separator, because
- * the row starts with the 8GENT FM segment. Display order is preserved. The
- * priority-0 segment is always kept, even if it alone overflows (Ink
- * truncates the row).
+ * Columns a row of segments takes. Segments are joined by the separator;
+ * `leading` adds one before the first, for when the DJ station segment is
+ * drawn ahead of them.
  */
-export function fitFooterSegments(segments: FooterSegment[], width: number): FooterSegment[] {
+export function segmentsWidth(segments: FooterSegment[], leading = false): number {
+	if (segments.length === 0) return 0;
+	const seps = segments.length - 1 + (leading ? 1 : 0);
+	return segments.reduce((sum, s) => sum + segmentWidth(s), 0) + seps * FOOTER_SEPARATOR.length;
+}
+
+/**
+ * Keep as many segments as fit in `width` columns, dropping the highest
+ * priority number first. Display order is preserved. The priority-0
+ * segments are always kept, even if they alone overflow (Ink truncates the
+ * row).
+ */
+export function fitFooterSegments(
+	segments: FooterSegment[],
+	width: number,
+	leading = false,
+): FooterSegment[] {
 	const kept = [...segments];
-	const total = () =>
-		kept.reduce((sum, s) => sum + segmentWidth(s) + FOOTER_SEPARATOR.length, 0);
-	while (total() > width) {
+	while (segmentsWidth(kept, leading) > width) {
 		let dropAt = -1;
 		for (let i = 0; i < kept.length; i++) {
 			const s = kept[i];
@@ -241,32 +214,38 @@ export function fitFooterSegments(segments: FooterSegment[], width: number): Foo
 	return kept;
 }
 
-/** Columns reserved on the left for the 8GENT FM segment rendered by DjDeck.
- *  22 fits "● 8GENT FM agent pulse"; below 120 columns only "● 8GENT FM". */
+/** Columns kept on the left for the DJ station segment, when DjDeck draws
+ *  one (a track is loaded and its row is closed). */
 export function fmSegmentWidth(columns: number): number {
 	return columns >= 120 ? 22 : 10;
 }
 
-/** The key hints, most used first. Display order is the same. */
+/**
+ * The key hints, most used first; display order is the same. [^P] palette
+ * leads: the palette lists every command, so at 80 columns it is the one
+ * hint that stays. Ctrl+C saves the session and quits (app.tsx), so it says
+ * quit, not clear.
+ */
 export const FOOTER_HINTS = [
+	"^P palette",
 	"^X plan",
 	// Ask has no perm segment, so the switch key is taught here instead.
 	`${PERM_KEY} perm`,
 	"^O expand",
-	"^C clear",
 	"^K kanban",
 	"^B processes",
 	"^D DJ",
 	"^A anim",
 	"^S sound",
+	"^C quit",
 ];
-const HINT_GAP = "  ";
 /** Columns kept between the last status segment and the first hint. */
 const HINTS_MARGIN = 3;
 
-/** Columns the fitted segments take, separators included. */
-export function segmentsWidth(segments: FooterSegment[]): number {
-	return segments.reduce((sum, s) => sum + segmentWidth(s) + FOOTER_SEPARATOR.length, 0);
+/** Columns one hint takes as a key cap: "[^X] plan". */
+export function hintWidth(hint: string): number {
+	const { cap, verb } = splitHint(hint);
+	return keyCapText(cap, verb).length;
 }
 
 /** The hints that fit in `width` columns, most used first, never cut. */
@@ -276,7 +255,7 @@ export function fitFooterHints(width: number, permShown = false): string[] {
 	for (const hint of FOOTER_HINTS) {
 		// The perm segment already shows the key.
 		if (permShown && hint.endsWith(" perm")) continue;
-		const cost = hint.length + (out.length > 0 ? HINT_GAP.length : 0);
+		const cost = hintWidth(hint) + (out.length > 0 ? KEY_CAP_GAP.length : 0);
 		if (used + cost > width) break;
 		out.push(hint);
 		used += cost;
@@ -301,9 +280,10 @@ export function fitFooterToast(
 	all: FooterSegment[],
 	width: number,
 	toast: FooterToast,
+	leading = false,
 ): { text: string; segments: FooterSegment[] } | null {
 	const forms = permToastForms(toast.mode, toast.held);
-	const plain = fitFooterSegments(all, width);
+	const plain = fitFooterSegments(all, width, leading);
 	const mustKeep = (s: FooterSegment[], max: number) =>
 		plain.filter((p) => p.priority <= max).every((p) => s.includes(p));
 	for (const [text, keepUpTo] of [
@@ -313,8 +293,8 @@ export function fitFooterToast(
 	] as const) {
 		const room = width - text.length - HINTS_MARGIN;
 		if (room <= 0) continue;
-		const fitted = fitFooterSegments(all, room);
-		if (segmentsWidth(fitted) <= room && mustKeep(fitted, keepUpTo)) {
+		const fitted = fitFooterSegments(all, room, leading);
+		if (segmentsWidth(fitted, leading) <= room && mustKeep(fitted, keepUpTo)) {
 			return { text, segments: fitted };
 		}
 	}
@@ -325,28 +305,41 @@ export function StatusSegments({
 	data,
 	width,
 	toast,
-}: { data: FooterData; width: number; toast?: FooterToast | null }) {
+	leading = false,
+}: {
+	data: FooterData;
+	width: number;
+	toast?: FooterToast | null;
+	/** The DJ station segment is drawn before this row: start with a separator. */
+	leading?: boolean;
+}) {
 	const all = buildFooterSegments(data);
-	const toastFit = toast ? fitFooterToast(all, width, toast) : null;
-	const segments = toastFit ? toastFit.segments : fitFooterSegments(all, width);
+	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
+	const segments = toastFit ? toastFit.segments : fitFooterSegments(all, width, leading);
 	const hints = toastFit
 		? []
 		: fitFooterHints(
-				Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN),
+				Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
 				segments.some((s) => s.key === "perm"),
 			);
 	return (
-		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between">
+		// One column clear of the right edge, like the chips in the header (#3238).
+		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between" marginRight={1}>
 			<Text wrap="truncate-end">
-				{segments.map((s) => (
+				{segments.map((s, i) => (
 					<React.Fragment key={s.key}>
-						<Text color={ui.dim}>{FOOTER_SEPARATOR}</Text>
+						{i > 0 || leading ? <Text color={ui.dim}>{FOOTER_SEPARATOR}</Text> : null}
 						{s.label ? <Text color={ui.muted}>{s.label} </Text> : null}
 						<Text color={s.color} bold={s.bold}>
 							{s.value}
 						</Text>
 						{s.note ? <Text color={ui.muted}> {s.note}</Text> : null}
-						{s.hint ? <Text color={ui.muted}> {s.hint}</Text> : null}
+						{s.hint ? (
+							<Text>
+								{" "}
+								<KeyCap cap={s.hint} />
+							</Text>
+						) : null}
 					</React.Fragment>
 				))}
 			</Text>
@@ -359,7 +352,17 @@ export function StatusSegments({
 			) : null}
 			{hints.length > 0 ? (
 				<Box flexShrink={0}>
-					<Text color={ui.dim}>{hints.join(HINT_GAP)}</Text>
+					<Text>
+						{hints.map((h, i) => {
+							const { cap, verb } = splitHint(h);
+							return (
+								<Text key={h}>
+									{i > 0 ? KEY_CAP_GAP : ""}
+									<KeyCap cap={cap} verb={verb} />
+								</Text>
+							);
+						})}
+					</Text>
 				</Box>
 			) : null}
 		</Box>

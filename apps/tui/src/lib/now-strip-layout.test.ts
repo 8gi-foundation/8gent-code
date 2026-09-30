@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { cellWidth } from "./header-layout.js";
-import { AUTONOMOUS_LABEL_WIDTH, NOW_LABEL_WIDTH, fitNowStrip } from "./now-strip-layout.js";
+import { NOW_LABEL_WIDTH, fitNowStrip } from "./now-strip-layout.js";
 
 const done = { middle: "finished 2:06 AM", middleMin: 16, middleShort: "finished" };
 const model = "qwen3.8:27b-mlx";
@@ -28,12 +28,6 @@ describe("fitNowStrip (audit #9: 'finis…')", () => {
 		expect(fit.route).not.toBe(model);
 		expect(fit.route === "" || fit.route.includes("…")).toBe(true);
 		expect(drawn(64, fit)).toBeLessThanOrEqual(64);
-	});
-
-	test("autonomous widens the state column and the budget follows it", () => {
-		const fit = fitNowStrip({ width: 76, labelWidth: AUTONOMOUS_LABEL_WIDTH, ...done, route: model, tokens: "5.7K tok" });
-		expect(fit.middle).toBe("finished 2:06 AM");
-		expect(4 + AUTONOMOUS_LABEL_WIDTH + 2 + cellWidth(fit.middle) + fit.rightWidth).toBeLessThanOrEqual(76);
 	});
 
 	test("then the meter goes, then the clock; the word 'finished' and the tokens stay", () => {

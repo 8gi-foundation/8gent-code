@@ -27,7 +27,8 @@ export const text = {
 	danger: color.red,
 	accent: color.cyan,
 	info: color.blue,
-	brand: color.magenta,
+	// Nearest ANSI to brand orange; magenta sits in the banned hue range (#3238).
+	brand: color.yellow,
 } as const;
 
 export type TextRole = keyof typeof text;
@@ -43,7 +44,7 @@ export const borderSemantic = {
 export const borderColor = {
 	default: color.cyan,
 	subtle: undefined,
-	accent: color.magenta,
+	accent: color.yellow,
 	danger: color.red,
 	success: color.green,
 } as const;
@@ -52,7 +53,7 @@ export type BorderRole = keyof typeof borderSemantic;
 
 export const status = {
 	idle: color.cyan,
-	thinking: color.magenta,
+	thinking: color.cyan,
 	executing: color.yellow,
 	success: color.green,
 	error: color.red,

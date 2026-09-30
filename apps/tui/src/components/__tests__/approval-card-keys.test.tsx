@@ -138,11 +138,11 @@ async function mount() {
 async function answerCard(keyPress: string) {
 	const { stdin, frame, ask, inputValues, appKeys } = await mount();
 	const decision = ask("printf ok > approved.txt");
-	await waitFor(() => frame().includes("Y approve"), "card shown");
+	await waitFor(() => frame().includes("[Y] approve"), "card shown");
 	await tick(20); // let the render's effects re-bind input handlers
 	stdin.feed(keyPress);
 	const result = await decision;
-	await waitFor(() => !frame().includes("Y approve"), "card gone");
+	await waitFor(() => !frame().includes("[Y] approve"), "card gone");
 	await tick(30);
 	return { result, frame: frame(), inputValues, appKeys };
 }
@@ -153,7 +153,7 @@ describe("approval card key routing", () => {
 		expect(result).toBe(true);
 		expect(inputValues).toEqual([]);
 		expect(appKeys).toEqual([]);
-		expect(frame).not.toContain("Y approve");
+		expect(frame).not.toContain("[Y] approve");
 		expect(frame).toContain("Type a command");
 	});
 
@@ -168,7 +168,7 @@ describe("approval card key routing", () => {
 		expect(result).toBe(false);
 		expect(inputValues).toEqual([]);
 		expect(appKeys).toEqual([]);
-		expect(frame).not.toContain("Y approve");
+		expect(frame).not.toContain("[Y] approve");
 	});
 
 	test("e and s settle the card without typing into the input", async () => {
@@ -191,16 +191,16 @@ describe("approval card key routing", () => {
 		expect(await decision).toBe(true);
 		await tick(60);
 		expect(inputValues).toEqual([]);
-		expect(frame()).not.toContain("Y approve");
+		expect(frame()).not.toContain("[Y] approve");
 	});
 
 	test("a card key reaches the card once: a second y after it settles is typing again", async () => {
 		const { stdin, frame, ask, inputValues } = await mount();
 		const decision = ask("printf ok > approved.txt");
-		await waitFor(() => frame().includes("Y approve"), "card shown");
+		await waitFor(() => frame().includes("[Y] approve"), "card shown");
 		stdin.feed("y");
 		expect(await decision).toBe(true);
-		await waitFor(() => !frame().includes("Y approve"), "card gone");
+		await waitFor(() => !frame().includes("[Y] approve"), "card gone");
 		await tick(30);
 		stdin.feed("y");
 		await waitFor(() => inputValues.includes("y"), "second y typed");
@@ -210,11 +210,11 @@ describe("approval card key routing", () => {
 	test("other keys still type while a card is pending", async () => {
 		const { stdin, frame, ask, inputValues } = await mount();
 		const decision = ask("printf ok > approved.txt");
-		await waitFor(() => frame().includes("Y approve"), "card shown");
+		await waitFor(() => frame().includes("[Y] approve"), "card shown");
 		await tick(20);
 		stdin.feed("h");
 		await waitFor(() => inputValues.includes("h"), "h typed");
-		expect(frame()).toContain("Y approve");
+		expect(frame()).toContain("[Y] approve");
 		stdin.feed("y");
 		expect(await decision).toBe(true);
 	});
@@ -245,7 +245,7 @@ describe("InlineApprovalPrompt label spacing", () => {
 				patchConsole: false,
 			},
 		);
-		await waitFor(() => stripAnsi(stdout.written).includes("S skip"), "card frame");
+		await waitFor(() => stripAnsi(stdout.written).includes("[S] skip"), "card frame");
 		const f = stripAnsi(stdout.last);
 		expect(f).toContain("ASK cd /home");
 		expect(f).not.toContain("ASKcd");

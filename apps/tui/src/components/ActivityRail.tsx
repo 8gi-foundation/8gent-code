@@ -74,7 +74,7 @@ function NamedRow({
 	name,
 	color,
 	trailing,
-	trailingColor = t.dim,
+	trailingColor = t.textTertiary,
 }: {
 	name: string;
 	color: string;
@@ -225,6 +225,13 @@ const PROVIDER_ROLE: Record<ProviderState, string | undefined> = {
 	offline:  "offline",
 };
 
+// Each state has its own glyph, so the rows never differ by colour alone (#3238).
+const AGENT_GLYPH: Record<AgentState, string> = {
+	idle:    "○",
+	active:  "●",
+	blocked: "■",
+};
+
 const AGENT_COLOR: Record<AgentState, string> = {
 	idle:    t.muted,
 	active:  t.green,
@@ -282,9 +289,16 @@ export function ActivityRail({
 		<Box
 			width={34}
 			flexShrink={0}
+			// One frame level (#3238): the shell is the box; the rail is set off
+			// by a single rule on its left, not a box inside the box.
 			borderStyle="single"
-			borderColor={t.border}
+			borderTop={false}
+			borderRight={false}
+			borderBottom={false}
+			borderColor={t.frame}
 			paddingX={1}
+			// The heading sits on the NOW strip's text row, not its top edge.
+			paddingTop={1}
 			flexDirection="column"
 			overflow="hidden"
 		>
@@ -295,7 +309,7 @@ export function ActivityRail({
 			<RailSection title="TASKS">
 				{tasks.length === 0 ? (
 					<Box flexShrink={0}>
-						<Text color={t.muted}>idle</Text>
+						<Text color={t.muted}>no tasks</Text>
 					</Box>
 				) : (
 					tasks.map((task) => (
@@ -341,13 +355,13 @@ export function ActivityRail({
 							<MetricRow
 								label="active"
 								value={active ?? "none"}
-								color={active ? t.teal : t.dim}
+								color={active ? t.teal : t.textTertiary}
 							/>
 							<MetricRow label="done" value={String(done)} color={t.textSecondary} />
 							<MetricRow
 								label="queued"
 								value={String(queued)}
-								color={queued > 0 ? t.textPrimary : t.dim}
+								color={queued > 0 ? t.textPrimary : t.textTertiary}
 							/>
 						</>
 					);
@@ -362,7 +376,7 @@ export function ActivityRail({
 							color={PROVIDER_COLOR[provider.state]}
 							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
 						/>
-						{provider.asked ? <NamedRow name={`  ${askedNote(provider.asked)}`} color={t.dim} /> : null}
+						{provider.asked ? <NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} /> : null}
 					</React.Fragment>
 				))}
 			</RailSection>
@@ -385,7 +399,7 @@ export function ActivityRail({
 				{agents.map((agent) => (
 					<NamedRow
 						key={agent.name}
-						name={`● ${agent.name}`}
+						name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
 						color={AGENT_COLOR[agent.state]}
 					/>
 				))}

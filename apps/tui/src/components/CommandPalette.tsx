@@ -20,6 +20,7 @@
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
 import { t } from "../theme.js";
+import { KEY_CAP_GAP, KeyCap } from "./KeyCap.js";
 
 export interface CommandPaletteCommand {
 	name: string;
@@ -173,19 +174,19 @@ export function CommandPaletteView({
 			<Box>
 				<Text color={t.orange}>» </Text>
 				<Text color={t.cream}>{query || ""}</Text>
-				<Text color={t.dim}>{query ? "" : "type to filter…"}</Text>
+				<Text color={t.textTertiary}>{query ? "" : "type to filter…"}</Text>
 			</Box>
 			<Box>
 				<Text color={t.border}>──────────────────────────────────────────</Text>
 			</Box>
 			{hiddenAbove > 0 ? (
 				<Box>
-					<Text color={t.dim}>  ↑ {hiddenAbove} more</Text>
+					<Text color={t.textTertiary}>  ↑ {hiddenAbove} more</Text>
 				</Box>
 			) : null}
 			{visible.length === 0 ? (
 				<Box>
-					<Text color={t.dim}>no matches</Text>
+					<Text color={t.textTertiary}>no matches</Text>
 				</Box>
 			) : (
 				visible.map((cmd, i) => {
@@ -209,11 +210,21 @@ export function CommandPaletteView({
 			)}
 			{hiddenBelow > 0 ? (
 				<Box>
-					<Text color={t.dim}>  ↓ {hiddenBelow} more</Text>
+					<Text color={t.textTertiary}>  ↓ {hiddenBelow} more</Text>
 				</Box>
 			) : null}
 			<Box>
-				<Text color={t.dim}>↑↓ move · Enter run · Esc close</Text>
+				<Text>
+					<KeyCap cap="↑↓" verb="move" />
+					{KEY_CAP_GAP}
+					<KeyCap cap="Enter" verb="run" />
+					{KEY_CAP_GAP}
+					<KeyCap cap="Esc" verb="close" />
+				</Text>
+			</Box>
+			<Box>
+				{/* The modifier legend, once, where every command is listed (#3238). */}
+				<Text color={t.textTertiary}>^ Ctrl  ⇧ Shift</Text>
 			</Box>
 		</Box>
 	);

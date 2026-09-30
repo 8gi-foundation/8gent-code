@@ -131,7 +131,16 @@ describe("DJ keys (#3188)", () => {
 		stdin.feed("s");
 		await waitFor(() => (mpv?.signals.length ?? 0) > 0, "stop");
 		expect(mpv?.signals).toEqual(["SIGTERM"]);
-		await waitFor(() => stripAnsi(stdout.written.slice(mark)).includes("8GENT FM"), "idle footer");
+		// Stopped: the DJ row goes and nothing takes its place (#3238: no
+		// "8GENT FM idle"); the last frame is the footer alone.
+		const lastFrame = () => {
+			const s = stdout.written.slice(mark);
+			return stripAnsi(s.slice(s.lastIndexOf("\u001B[G") + 1));
+		};
+		await waitFor(
+			() => lastFrame().includes("footer") && !lastFrame().includes("DJ"),
+			"the DJ row gone",
+		);
 		expect(done()).toBeGreaterThan(0);
 	}, 20000);
 

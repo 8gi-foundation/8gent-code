@@ -1,5 +1,5 @@
 /**
- * MetricRow - shared label/value row for ContextRail and ActivityRail.
+ * MetricRow - shared label/value row for the rails.
  *
  * Fixed-width label column + flex-grow value column. Eliminates the wrong-side
  * clipping (e.g. `ranch`, `isk`) that the old space-between layout produced

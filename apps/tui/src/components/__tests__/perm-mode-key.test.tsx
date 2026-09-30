@@ -27,7 +27,6 @@ import {
 	permSwitchLine,
 } from "../../lib/perm-modes-design.js";
 import { theme } from "../../theme.js";
-import { ContextRail } from "../ContextRail.js";
 import {
 	FOOTER_HINTS,
 	buildFooterSegments,
@@ -175,8 +174,6 @@ describe("the footer shows the true mode", () => {
 		for (const m of PERMISSION_MODES) {
 			const segs = buildFooterSegments({
 				mode: "Planning",
-				model: "m",
-				tokens: "1 tok",
 				permissions: m,
 			});
 			const perm = segs.find((s) => s.key === "perm");
@@ -202,26 +199,6 @@ describe("the footer shows the true mode", () => {
 		expect(FOOTER_HINTS).toContain(`${PERM_KEY} perm`);
 		expect(fitFooterHints(999, false)).toContain(`${PERM_KEY} perm`);
 		expect(fitFooterHints(999, true)).not.toContain(`${PERM_KEY} perm`);
-	});
-
-	test("the rail reads perm <MODE> for a mode, approval for anything else", async () => {
-		const frame = async (permissions: string) => {
-			const stdout = makeStdout(40);
-			const inst = render(
-				<ContextRail risk="low" permissions={permissions} contextPct={10} adhdMode={false} />,
-				{
-					stdout: stdout as unknown as NodeJS.WriteStream,
-					debug: false,
-					patchConsole: false,
-				},
-			);
-			await tick(30);
-			inst.unmount();
-			return stripAnsi(stdout.written);
-		};
-		expect(await frame("guarded")).toContain("GUARDED");
-		expect(await frame("guarded")).toContain("perm");
-		expect(await frame("custom")).toContain("approval");
 	});
 
 	test("a switch is one plain chat line naming the mode, for a screen reader", () => {

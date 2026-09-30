@@ -35,7 +35,7 @@ exports[`ActivityRail snapshot of full rail is stable 1`] = `
       "marginTop": 1,
     },
   ],
-  "borderColor": "#2E2A26",
+  "borderColor": "#6B655F",
   "borderStyle": "single",
   "flexDirection": "column",
   "flexShrink": 0,
