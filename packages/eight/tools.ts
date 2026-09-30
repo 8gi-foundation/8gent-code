@@ -2001,7 +2001,15 @@ export class ToolExecutor {
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}
 
-		if (permissionCheck === "ask") {
+		// System One (EIGHT_SYSTEM_ONE=1, off by default): it can only stop a
+		// command, never allow one. It runs BEFORE the approval card (#3124): a
+		// System One block is final and must not follow a Y the person gave,
+		// and when it escalates it asks the person itself, so that answer is
+		// the card. One command, at most one card.
+		const systemOne = await systemOneGate(command);
+		if (!systemOne.run) return systemOne.message as string;
+
+		if (permissionCheck === "ask" && systemOne.humanApproved !== true) {
 			const allowed = await this.permissionManager.requestPermission(
 				"Execute Shell Command",
 				isCommandDangerous(command)
@@ -2014,11 +2022,6 @@ export class ToolExecutor {
 				return `[PERMISSION DENIED] User declined to execute: ${command}`;
 			}
 		}
-
-		// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after
-		// every existing check. It can only stop a command, never allow one.
-		const systemOne = await systemOneGate(command);
-		if (!systemOne.run) return systemOne.message as string;
 
 		const startTime = Date.now();
 		await this.hookManager.executeHooks("beforeCommand", {
