@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - an agent can remove its own scratch files without the System One judge (#3177)
+- A plain `rm -f` of files the same agent created this session (with `write_file`, or a `>` / `>>` redirect in `run_command`), untracked by git and inside the workspace, no longer goes to the judge. The pilot's `bun test > bunout.txt` then `rm -f bunout.txt` now passes System One. Files it only modified, files another tab made, tracked files, `rm -r` and globs are judged as before. The record is in memory, per agent.
+
 ### Changed - System One on by default, one shared judge per machine (#3048)
 - System One now checks every agent shell command unless `EIGHT_SYSTEM_ONE=0`. Unset, it asks only a calibrated judge (Selene today) and, when there is none or it cannot answer in time, checks with the safety rules and the read-only allowlist alone, saying so once. `EIGHT_SYSTEM_ONE=1` (and Guarded) is strict: any judge found is asked; when none can answer, a block rule still blocks and everything else goes to the person on the normal card, never an allow (#3193). Headless, with no person, that stays a refusal. Every refusal now tells the agent not to run the same command again, which stops the retry loop.
 - The shared judge (`EIGHT_S1_SHARED_JUDGE`) is on by default, so a machine loads Selene once in its local Ollama rather than once per tab; `EIGHT_S1_SHARED_JUDGE=0` opts out. Before the first judge load, one line names the model, where it loads and its size.

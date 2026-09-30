@@ -92,6 +92,7 @@ import {
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
@@ -269,6 +270,13 @@ export class ToolExecutor {
 	private openOnWrite: boolean;
 	/** Paths write_file opened this turn: each opens at most once per turn. */
 	private openedThisTurn = new Set<string>();
+	/**
+	 * Files this agent created (write_file, run_command redirects), in memory
+	 * only (#3177). System One lets it rm them without the judge. The Agent
+	 * hands the same record to its native tool context, so both tool paths
+	 * share it; another agent or tab has its own.
+	 */
+	readonly createdFiles = new CreatedFiles();
 	/**
 	 * This agent's permission mode (#3170), shared with its Agent and, in the
 	 * TUI, with its tab. Undefined: no mode, today's behaviour.
@@ -1944,7 +1952,9 @@ export class ToolExecutor {
 			fs.mkdirSync(dir, { recursive: true });
 		}
 
+		const recordWrite = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, content);
+		recordWrite();
 
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
@@ -1991,7 +2001,9 @@ export class ToolExecutor {
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		}
 
+		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, newContent);
+		recordEdit();
 
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
@@ -2042,7 +2054,12 @@ export class ToolExecutor {
 		// the card. One command, at most one card.
 		// Guarded mode (#3170) turns System One on for this call whatever the
 		// env says; the env flag stays on in every mode.
-		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), this.workingDirectory);
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(mode),
+			this.workingDirectory,
+			this.createdFiles,
+		);
 		if (!systemOne.run) return systemOne.message as string;
 
 		if (
@@ -2080,10 +2097,13 @@ export class ToolExecutor {
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
 		return new Promise((resolve) => {
+			// Redirect targets this command creates are this agent's own files (#3177).
+			const recordRedirects = watchRedirects(finalCommand, this.workingDirectory, this.createdFiles);
 			let resolved = false;
 			const safeResolve = (value: string) => {
 				if (resolved) return;
 				resolved = true;
+				recordRedirects();
 				resolve(value);
 			};
 

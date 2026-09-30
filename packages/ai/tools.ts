@@ -36,6 +36,7 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 
 // Execution context passed to tools
@@ -47,6 +48,8 @@ export interface ToolContext {
 	runtime?: RuntimeParams;
 	/** This agent's permission mode (#3170); undefined: no mode, today's behaviour. */
 	permission?: PermissionModeHolder;
+	/** Files this agent created, shared with its ToolExecutor (#3177); undefined: none recorded. */
+	createdFiles?: CreatedFiles;
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -393,7 +396,9 @@ const writeFile = tool({
 		const absolutePath = resolvePath(filePath);
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		const recordWrite = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, content);
+		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
 		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
@@ -419,7 +424,9 @@ const editFile = tool({
 		const edited = applyEdit(content, oldText, newText);
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
+		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, edited);
+		recordEdit();
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	},
 });
@@ -1207,7 +1214,12 @@ async function runShellCommand(command: string): Promise<string> {
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
-	const systemOne = await systemOneGate(command, systemOneEnvFor(mode), ctx.workingDirectory);
+	const systemOne = await systemOneGate(
+		command,
+		systemOneEnvFor(mode),
+		ctx.workingDirectory,
+		ctx.createdFiles,
+	);
 	if (!systemOne.run) return systemOne.message as string;
 
 	if (
@@ -1239,7 +1251,13 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
-	return new Promise((resolve) => {
+	return new Promise((settle) => {
+		// Redirect targets this command creates are this agent's own files (#3177).
+		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
+		const resolve = (value: string) => {
+			recordRedirects();
+			settle(value);
+		};
 		const proc = spawnShell(finalCommand, {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],

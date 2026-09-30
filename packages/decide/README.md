@@ -293,6 +293,19 @@ and replaces Selene.
   opts out and restores startup warm-up. `bun test` runs the repo's own test
   code, so it skips the judge only with `EIGHT_S1_ALLOWLIST_BUN_TEST=1`, off
   by default. Decided by James on 2026-09-30 (#3131).
+- **rm of nothing, and of the session's own scratch (#3168, #3177).** Under
+  the same flag, a plain `rm` / `rm -f` (no `-r`, no glob, quotes or `$`,
+  relative paths without `..`) skips the judge when every path is either
+  absent inside the workspace, or a file this agent created in this session
+  that git does not track and whose real parent is inside the workspace
+  (`packages/permissions/s1-rm-nothing.ts`). "Created" is recorded in memory
+  per agent (`s1-created-files.ts`, one record per `ToolExecutor`, shared
+  with the agent's native tool context): `write_file` writing a path that did
+  not exist, or a `run_command` redirect (`>`, `>>`) into a plain relative
+  path that did not exist. A file the session only modified, one another
+  tab created, a tracked one, or one since replaced (device and inode
+  changed) still goes to the judge. The permission layer's own card for a
+  dangerous `rm` is unchanged.
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.
