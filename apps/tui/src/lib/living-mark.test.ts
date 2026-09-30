@@ -15,6 +15,7 @@ import {
 	type MarkStream,
 	type Paint,
 	RESIZE_SETTLE_MS,
+	type Timers,
 	frameKey,
 	headerMarkFrame,
 	overlaySequence,
@@ -43,6 +44,29 @@ class FakeTty extends EventEmitter implements MarkStream {
 	};
 	marks(): string[] {
 		return this.chunks.filter((c) => c.includes("\x1b7"));
+	}
+}
+
+/** A hand-driven clock for the writer's beat: timers run only when a test says so. */
+class ManualTimers implements Timers {
+	private nextId = 1;
+	private readonly pending = new Map<number, () => void>();
+	setTimeout(fn: () => void, _ms: number): unknown {
+		const id = this.nextId++;
+		this.pending.set(id, fn);
+		return id;
+	}
+	clearTimeout(handle: unknown): void {
+		this.pending.delete(handle as number);
+	}
+	/** Run the timers pending now (not the ones they schedule). */
+	runPending(): void {
+		const due = [...this.pending.values()];
+		this.pending.clear();
+		for (const fn of due) fn();
+	}
+	get size(): number {
+		return this.pending.size;
 	}
 }
 
@@ -234,23 +258,37 @@ describe("LivingMarkWriter", () => {
 	});
 
 	test("Ink's frame gets the living cells inside its own synchronized block", async () => {
+		// Deterministic (#3191): the beat runs by hand, never on a real timer,
+		// so a loaded runner cannot slip a beat between Ink's writes and the check.
 		const tty = new FakeTty();
-		const w = writer(tty);
+		const timers = new ManualTimers();
+		const w = new LivingMarkWriter(tty, {
+			env: TTY_ENV,
+			platform: "darwin",
+			paint: () => PAINT,
+			now: () => 0,
+			timers,
+		});
 		w.setActive(true);
-		await wait(BEAT_MS * 2);
+		timers.runPending(); // one beat: the writer knows the frame
+		expect(w.writes).toBe(1);
 		tty.chunks.length = 0;
 		// What Ink writes for one frame: begin, the frame, end, in one tick.
 		tty.write(BSU);
 		tty.write("\x1b[2K\x1b[1A\x1b[2K\x1b[Gframe");
 		tty.write(ESU);
-		await wait(0);
+		// Flush the microtask a plain write would repaint on; nothing else can run.
+		await Promise.resolve();
 		expect(tty.chunks[0]).toBe(BSU);
 		expect(tty.chunks[1]).toBe("\x1b[2K\x1b[1A\x1b[2K\x1b[Gframe");
 		expect(tty.chunks[2].startsWith("\x1b7")).toBe(true);
 		expect(tty.chunks[2].endsWith(`\x1b8${ESU}`)).toBe(true);
 		// No second repaint after the frame: it already went out inside it.
 		expect(tty.chunks.length).toBe(3);
+		// The next beat is scheduled, and never fired by this test.
+		expect(timers.size).toBe(1);
 		w.dispose();
+		expect(timers.size).toBe(0);
 	});
 
 	test("any other write gets the mark back on the next microtask, once", async () => {

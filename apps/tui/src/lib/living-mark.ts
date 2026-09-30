@@ -213,7 +213,20 @@ export interface WriterDeps {
 	now?: () => number;
 	/** Colour escapes; defaults to inkPaint(), read once on first start. */
 	paint?: () => Paint | null;
+	/** Timers for the beat and the resize settle; defaults to the global ones. Tests pass a manual clock. */
+	timers?: Timers;
 }
+
+/** The two timer calls the writer makes, so a test can drive the beat by hand. */
+export interface Timers {
+	setTimeout(fn: () => void, ms: number): unknown;
+	clearTimeout(handle: unknown): void;
+}
+
+const GLOBAL_TIMERS: Timers = {
+	setTimeout: (fn, ms) => setTimeout(fn, ms),
+	clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+};
 
 /**
  * Drives the living mark on one stream. `setActive` says the HUD wants it
@@ -226,8 +239,8 @@ export class LivingMarkWriter {
 	private readonly holds = new Set<string>();
 	private resizing = false;
 	private disposed = false;
-	private timer: ReturnType<typeof setTimeout> | null = null;
-	private settleTimer: ReturnType<typeof setTimeout> | null = null;
+	private timer: unknown = null;
+	private settleTimer: unknown = null;
 	private running = false;
 	private frame: MarkCell[][] | null = null;
 	private lastKey = "";
@@ -275,8 +288,12 @@ export class LivingMarkWriter {
 	dispose(): void {
 		this.disposed = true;
 		this.update(false);
-		if (this.settleTimer) clearTimeout(this.settleTimer);
+		if (this.settleTimer) this.timers.clearTimeout(this.settleTimer);
 		this.stream.off?.("resize", this.onResize);
+	}
+
+	private get timers(): Timers {
+		return this.deps.timers ?? GLOBAL_TIMERS;
 	}
 
 	private now(): number {
@@ -318,13 +335,13 @@ export class LivingMarkWriter {
 	}
 
 	private schedule(): void {
-		this.timer = setTimeout(this.beat, BEAT_MS - (this.now() % BEAT_MS));
+		this.timer = this.timers.setTimeout(this.beat, BEAT_MS - (this.now() % BEAT_MS));
 		(this.timer as { unref?: () => void }).unref?.();
 	}
 
 	private stop(rest: boolean): void {
 		this.running = false;
-		if (this.timer) clearTimeout(this.timer);
+		if (this.timer) this.timers.clearTimeout(this.timer);
 		this.timer = null;
 		this.removeWrap();
 		const paint = this.paintCache;
@@ -426,8 +443,8 @@ export class LivingMarkWriter {
 	private onResize = (): void => {
 		this.resizing = true;
 		this.update(false);
-		if (this.settleTimer) clearTimeout(this.settleTimer);
-		this.settleTimer = setTimeout(() => {
+		if (this.settleTimer) this.timers.clearTimeout(this.settleTimer);
+		this.settleTimer = this.timers.setTimeout(() => {
 			this.settleTimer = null;
 			this.resizing = false;
 			this.update(false);
