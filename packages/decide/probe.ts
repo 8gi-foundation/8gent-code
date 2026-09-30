@@ -80,7 +80,7 @@ export interface ProbeOptions {
 	 * Re-probe after the shared judge was lost mid-session (#3162 bar 4): try the
 	 * in-process judge before the shared server, so a session does not keep
 	 * leaning on a server that just failed it. The shared server is still asked
-	 * when no in-process judge loads (it may be back).
+	 * when no in-process judge loads (it may be back). Nothing else is tried.
 	 */
 	avoidShared?: boolean;
 }
@@ -213,10 +213,14 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 		notes.push(shared.note);
 	}
 
-	if (!opts.avoidShared) {
-		const local = await inProcess();
-		if (local) return local;
+	if (opts.avoidShared) {
+		// A failover never changes which model judges or where the chat model lives:
+		// no laya, no OLLAMA_HOST path (that one sends no num_ctx, 21.4 GB measured).
+		notes.push("failover: no in-process judge and the shared server is not back");
+		return { ...base, backend: "none", model: null, url: null, notes };
 	}
+	const local = await inProcess();
+	if (local) return local;
 
 	const layaUrl = resolveLayaUrl(env);
 	const layaNote = await layaUp(fetchImpl, layaUrl, timeoutMs);

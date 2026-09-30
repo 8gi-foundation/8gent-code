@@ -642,9 +642,9 @@ describe("shared judge failover: a lost shared judge recovers", () => {
 	function server(models: string[]) {
 		const state = { up: true, tags: 0, generate: 0, logprobs: true, probes: 0 };
 		const fetchImpl = async (url: string): Promise<Response> => {
-			// detectBackend asks laya's /health exactly once per probe (nothing listens there).
-			if (url.endsWith("/health")) state.probes++;
 			if (!url.startsWith(LOCAL)) throw new TypeError(`fetch failed: ${url}`);
+			// With no in-process judge, a (re-)probe lists the shared server exactly once, up or down.
+			if (url === `${LOCAL}/api/tags`) state.probes++;
 			if (!state.up) throw new TypeError("fetch failed: ECONNREFUSED");
 			if (url === `${LOCAL}/api/tags`) {
 				state.tags++;
@@ -754,6 +754,26 @@ describe("shared judge failover: a lost shared judge recovers", () => {
 		// The shared server comes back: the session judges on it again.
 		srv.state.up = true;
 		expect((await d.noul("back again", "p")).backend).toBe("ollama");
+	});
+
+	it("a failover never falls through to the chat model's OLLAMA_HOST or laya (no num_ctx there: 21.4 GB measured)", async () => {
+		const srv = server([SELENE_NAME]);
+		const remote = "http://127.0.0.1:21434";
+		const asked: string[] = [];
+		const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+			if (url.startsWith(remote)) {
+				asked.push(url);
+				if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: SELENE_NAME, size: 1 }] });
+				return Response.json({ logprobs: [{ top_logprobs: [{ token: " No", logprob: Math.log(0.9) }] }] });
+			}
+			return srv.fetch(url);
+		};
+		const e = { OLLAMA_MODELS: path.join(tmp, "none"), EIGHT_S1_SHARED_JUDGE: "1", OLLAMA_HOST: remote };
+		const d = createDecider({ fetch: fetchImpl, env: e, llamacppLoader: missingLoader });
+		expect((await d.noul("warm", "p")).backend).toBe("ollama");
+		srv.state.up = false;
+		await expect(d.noul("lost", "p")).rejects.toThrow(DecideUnavailableError);
+		expect(asked).toEqual([]);
 	});
 
 	it("a later session uses the shared server again once it is back", async () => {

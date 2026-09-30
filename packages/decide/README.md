@@ -122,7 +122,10 @@ the model once for every agent, child and tab on the machine.
   and retries that verdict, trying the in-process judge first. Concurrent
   failures share one re-probe; a re-probe that finds nothing, or lands on the
   shared server again, is not repeated for 2 s, doubling to 60 s
-  (`FAILOVER_BACKOFF_MS`). The session then stays in-process; new sessions
+  (`FAILOVER_BACKOFF_MS`). A failover only goes in-process or back to the
+  shared server, never to laya or the chat model's `OLLAMA_HOST` (that path
+  sends no `num_ctx`: Selene loaded at 21.4 GB when it was allowed, first live
+  run). The session then stays in-process; new sessions
   probe fresh and use the shared server again once it is back. An answer the
   model gave but that cannot be read never fails over. The gate's budget is
   unchanged, so a strict gate call that runs out while the fallback loads
