@@ -15,8 +15,13 @@
  * for a step it has not done, or confirms with a summary that starts with
  * DONE_MARKER. Once a check is sent, a reply with no tool call ends the turn
  * only if it carries DONE_MARKER or is a question to the user; anything else
- * ("Doing that now.") is checked again. Checks are capped at
- * MAX_COMPLETION_CHECKS per turn, so a model that never complies cannot loop.
+ * ("Doing that now.") is checked again. A model that never complies cannot
+ * loop: at most MAX_CONSECUTIVE_CHECKS checks in a row may go without a
+ * successful tool round between them. Real tool work after a check resets that
+ * count, so a long task that stalls, resumes, and stalls again keeps going
+ * (Rishi pilot run 2026-09-30_005300 died on its fourth stall when the cap
+ * was per turn). MAX_COMPLETION_CHECKS is a generous per-turn ceiling on top,
+ * and maxRounds still bounds the turn.
  * The check never reads the reply's wording or punctuation, except for the
  * marker and to leave a question to the user alone.
  *
@@ -146,8 +151,14 @@ export const FOLLOW_UP_INSTRUCTION = [
 /** The explicit marker a model puts at the start of its final summary. */
 export const DONE_MARKER = "DONE:";
 
-/** The most completion checks one turn may receive. */
-export const MAX_COMPLETION_CHECKS = 3;
+/**
+ * The most completion checks in a row with no successful tool round between
+ * them. A check the model answers with real tool work resets the count.
+ */
+export const MAX_CONSECUTIVE_CHECKS = 2;
+
+/** The most completion checks one turn may receive, however much work ran. */
+export const MAX_COMPLETION_CHECKS = 10;
 
 /**
  * Does this reply start with the done marker (plain or in markdown bold)?
@@ -241,6 +252,9 @@ export async function runTextToolAgent(
 	let prevRoundHadSuccess = false;
 	// Completion checks sent this turn (capped at MAX_COMPLETION_CHECKS).
 	let checksSent = 0;
+	// Checks sent since the last round that ran a tool successfully (capped at
+	// MAX_CONSECUTIVE_CHECKS). Progress, not the check count, keeps a turn alive.
+	let checksWithoutProgress = 0;
 	// Was the last message we sent a completion check the model has not yet
 	// answered with a tool call? Then prose without DONE_MARKER is not final.
 	let awaitingCheckAnswer = false;
@@ -321,18 +335,21 @@ export async function runTextToolAgent(
 			// outline."). Its wording and punctuation cannot tell those apart, so
 			// ask the model while a round remains. After a check, only a reply
 			// carrying DONE_MARKER (or a question to the user) is final; more
-			// prose ("Doing that now.") is checked again, up to the cap.
+			// prose ("Doing that now.") is checked again, up to the caps: two in
+			// a row without tool work between them, ten in the whole turn.
 			// Once the model has been told the protocol this turn, a DONE-marked
 			// reply after later tool rounds is taken at its word.
 			const freshStall = prevRoundHadSuccess && !(checksSent > 0 && hasDoneMarker(turn.content));
 			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(turn.content);
 			if (
 				(freshStall || unansweredCheck) &&
+				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
 				checksSent < MAX_COMPLETION_CHECKS &&
 				round < maxRounds &&
 				!isQuestionToUser(turn.content)
 			) {
 				checksSent++;
+				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
 				if (freshStall) preCheckContent = turn.content;
 				prevRoundHadSuccess = false;
@@ -372,7 +389,11 @@ export async function runTextToolAgent(
 		for (const tc of turn.toolCalls) {
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
-			if (!isErrorResult(result)) prevRoundHadSuccess = true;
+			if (!isErrorResult(result)) {
+				prevRoundHadSuccess = true;
+				// Real tool work: the next stall starts a fresh run of checks.
+				checksWithoutProgress = 0;
+			}
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
 			// this result so the next round is steered back to the right tool.
