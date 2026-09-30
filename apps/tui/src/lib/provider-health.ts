@@ -12,6 +12,7 @@
  */
 
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
+import { createOllamaServer } from "../../../../packages/local-model-server/index.js";
 
 export interface ProviderStatus {
 	name: "apfel" | "lmstudio" | "ollama";
@@ -77,7 +78,7 @@ export async function probeProviders(): Promise<{
 	// then OLLAMA_HOST, normalised). A bare host:port OLLAMA_HOST, which the
 	// ollama CLI accepts, used to be an invalid URL here and read as down.
 	const ollamaHost = resolveOllamaBaseUrl();
-	const ollamaLive = await probeUrl(`${ollamaHost}/api/tags`);
+	const ollamaLive = await probeUrl(createOllamaServer({ baseUrl: ollamaHost }).healthUrl);
 
 	const statuses: ProviderStatus[] = [
 		{ name: "apfel", live: apfelOk },

@@ -5,6 +5,7 @@
 import type { LLMClient, LLMResponse, Message, MessageContentPart } from "../types";
 import { modelFetch } from "../../ai/model-fetch";
 import { resolveOllamaBaseUrl } from "../../ai/text-tool-endpoint";
+import { createOllamaServer } from "../../local-model-server";
 
 /**
  * Resolve the Ollama base URL, checking for training proxy override.
@@ -135,11 +136,6 @@ export class OllamaClient implements LLMClient {
 	}
 
 	async isAvailable(): Promise<boolean> {
-		try {
-			const response = await fetch(`${this.baseUrl}/api/tags`);
-			return response.ok;
-		} catch {
-			return false;
-		}
+		return createOllamaServer({ baseUrl: this.baseUrl }).isHealthy();
 	}
 }

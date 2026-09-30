@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
+import { LocalServerHttpError, createOllamaServer } from "../local-model-server";
 import { getVault } from "../secrets";
 import {
 	loadSettings,
@@ -256,17 +257,18 @@ export async function probeOllama(
 	const host = resolveOllamaBaseUrl(env);
 	const configured = Boolean(env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim());
 	try {
-		const res = await fetchImpl(`${host}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
-		if (!res.ok) {
-			return { status: "unreachable", host, reason: `answered HTTP ${res.status}`, configured, timedOut: false };
-		}
-		const data = (await res.json()) as { models?: Array<{ name?: string }> };
-		const models = (data.models ?? []).flatMap((m) => {
+		const listed = await createOllamaServer({ baseUrl: host, fetch: fetchImpl }).listModels({
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		const models = listed.flatMap((m) => {
 			const name = String(m?.name ?? "").trim();
 			return name ? [name] : [];
 		});
 		return { status: "found", host, models };
 	} catch (err) {
+		if (err instanceof LocalServerHttpError) {
+			return { status: "unreachable", host, reason: `answered HTTP ${err.status}`, configured, timedOut: false };
+		}
 		const name = (err as Error)?.name;
 		const timedOut = name === "TimeoutError" || name === "AbortError";
 		return {

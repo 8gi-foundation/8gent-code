@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { type ProviderConfig, type ProviderName, createModel } from "./providers";
+import { createOllamaServer } from "../local-model-server";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 // ============================================
@@ -321,16 +322,11 @@ export class TaskRouter {
 		const changes: string[] = [];
 
 		try {
-			// The configured ollama, not a hardcoded localhost (#3080).
-			const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
+			// The configured ollama, not a hardcoded localhost (#3080). A non-2xx
+			// answer rejects, and the catch below returns no changes, as before.
+			const models = (await createOllamaServer({ baseUrl: resolveOllamaBaseUrl() }).listModels({
 				signal: AbortSignal.timeout(3000),
-			});
-			if (!res.ok) return changes;
-
-			const data = (await res.json()) as {
-				models?: Array<{ name: string; size: number }>;
-			};
-			const models = data.models ?? [];
+			})) as Array<{ name: string; size: number }>;
 
 			// Find the best Eight model (largest/newest)
 			const eightModels = models
