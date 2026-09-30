@@ -153,6 +153,18 @@ npm install -g @8gi-foundation/8gent-code
 
 That's it. 8gent uses an adaptive 11-provider router. Two run locally and are on by default: `8gent` (model `eight-1.0-q3:14b`) and `ollama`. The other nine are hosted providers, each opt-in with your own API key; the registry in `packages/providers/` is the list. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
+**Ollama is optional.** To run on llama.cpp's `llama-server` instead, set `EIGHT_LOCAL_SERVER=llama-server` and start with `8gent --provider=llama-server`. 8gent then never contacts Ollama. See [docs/guides/llama-server.md](docs/guides/llama-server.md).
+
+**First keys to know:**
+
+| Key | What it does |
+|:----|:-------------|
+| `Shift+Tab` | Change how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask), Infinite (never asks, back to Ask after 30 minutes). Per tab. See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). |
+| `Ctrl+1` to `Ctrl+9` | Jump to a tab |
+| `Ctrl+Y` | Cycle the task mode label (Planning, Researching, Implementing, Testing, Debugging). This does not change permissions. |
+
+Prefer no colour? `NO_COLOR=1 8gent`. See [docs/guides/no-color.md](docs/guides/no-color.md).
+
 ## Install
 
 Two ways to install. The **npm** path is smallest but needs [Bun](https://bun.sh) on your machine. The **standalone binary** embeds the Bun runtime, so it needs nothing else.
@@ -212,7 +224,7 @@ bun install
 bun run tui
 ```
 
-If no local model is available, 8gent will guide you through interactive onboarding on first run. The adaptive provider router tries local 8gent, then Ollama, then OpenRouter free tier.
+If no local model is available, 8gent will guide you through interactive onboarding on first run. The adaptive provider router tries local 8gent, then Ollama, then OpenRouter free tier. Ollama is optional: see [docs/guides/llama-server.md](docs/guides/llama-server.md).
 
 <br />
 
@@ -740,12 +752,15 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 | [AGENTS.md](AGENTS.md) | Dev conventions, design system, repo rules (also served as `8GENT.md`) |
 | [docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md) | HyperAgent metacognitive self-modification spec |
 | [docs/MODEL-SHOOTOUT.md](docs/MODEL-SHOOTOUT.md) | Local vs cloud model comparison results |
-| [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
-| [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md) | RL fine-tuning pipeline |
+| [docs/specs/MEMORY-SPEC.md](docs/specs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
+| [docs/specs/KERNEL-FINETUNING.md](docs/specs/KERNEL-FINETUNING.md) | RL fine-tuning pipeline |
 | [docs/PERSONALIZATION.md](docs/PERSONALIZATION.md) | 5-layer personalization system |
-| [docs/TOOLSHED.md](docs/TOOLSHED.md) | Capability discovery and skill registry |
-| [docs/permissions.md](docs/permissions.md) | Policy engine and approval gates |
-| [docs/BRANCH-DECISIONS.md](docs/BRANCH-DECISIONS.md) | Architecture decision log |
+| [docs/guides/TOOLSHED.md](docs/guides/TOOLSHED.md) | Capability discovery and skill registry |
+| [docs/guides/permissions.md](docs/guides/permissions.md) | Policy engine and approval gates |
+| [docs/guides/permission-modes.md](docs/guides/permission-modes.md) | Plan, Ask, Guarded and Infinite on Shift+Tab |
+| [docs/guides/llama-server.md](docs/guides/llama-server.md) | Running on llama-server with no Ollama |
+| [docs/guides/system-one-shared-judge.md](docs/guides/system-one-shared-judge.md) | One shared System One judge per machine |
+| [docs/guides/no-color.md](docs/guides/no-color.md) | Turning colour off with NO_COLOR |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 </details>
