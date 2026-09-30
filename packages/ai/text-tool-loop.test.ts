@@ -21,6 +21,8 @@ import {
 	isShellFileWrite,
 	runTextToolAgent,
 	stripDoneMarker,
+	openPlanSteps,
+	planCheckMessage,
 	type TextTool,
 } from "./text-tool-loop";
 import type { TextToolMessage } from "./text-tool-client";
@@ -1926,3 +1928,102 @@ describe("runTextToolAgent - empty final reply after tool work (#3091)", () => {
 		expect(fedBack).toContain("Available tools: read_file.");
 	});
 });
+
+describe("runTextToolAgent - plan check at turn end (#3098)", () => {
+	const PLAN_TOOL: TextTool = {
+		spec: { name: "update_plan", description: "Report plan progress", parameters: {} },
+		run: async () => "Plan updated",
+	};
+	const plan = (...statuses: string[]) => ({
+		plan: statuses.map((status, i) => ({ step: `Step ${i + 1}`, status })),
+	});
+	const planChecks = (seen: TextToolMessage[][]) =>
+		seen.filter((m) => lastUserMessage(m).startsWith("Your plan still has steps"));
+
+	test("the pilot shape: last update leaves a step in progress, the check names it, the model ticks it", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("update_plan", plan("in_progress", "pending")),
+			tc("write_file", { path: "deck/outline.md", content: "x" }),
+			tc("update_plan", plan("done", "in_progress")),
+			tc("run_command", { command: "ls deck" }),
+			// The completion check comes first, as it does after any tool round.
+			"DONE: Wrote deck/outline.md and listed deck.",
+			"DONE: Wrote deck/outline.md and listed deck.",
+			tc("update_plan", plan("done", "done")),
+			"DONE: Wrote deck/outline.md and listed deck.",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Write deck/outline.md, then run ls deck." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 20,
+		});
+		const checks = planChecks(model.seen);
+		expect(checks).toHaveLength(1);
+		expect(lastUserMessage(checks[0])).toContain("- Step 2 (in_progress)");
+		expect(lastUserMessage(checks[0])).not.toContain("Step 1");
+		// The harness ticked nothing: the only all-done update is the model's own.
+		const updates = result.toolLog.filter((t) => t.name === "update_plan");
+		expect(updates).toHaveLength(3);
+		expect(openPlanSteps(result.toolLog)).toEqual([]);
+		expect(result.content).toBe("Wrote deck/outline.md and listed deck.");
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("at most once per turn: a model that ignores the check still ends, the plan as it left it", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("update_plan", plan("done", "in_progress")),
+			tc("run_command", { command: "ls deck" }),
+			"DONE: Listed deck.",
+			"DONE: Listed deck.",
+			"DONE: Listed deck.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Run ls deck." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 20,
+		});
+		expect(planChecks(model.seen)).toHaveLength(1);
+		expect(result.content).toBe("Listed deck.");
+		expect(openPlanSteps(result.toolLog).map((s) => s.step)).toEqual(["Step 2"]);
+	});
+
+	test("no check when every step is done or failed, when there is no plan, or for a question", async () => {
+		for (const script of [
+			[tc("update_plan", plan("done", "failed")), tc("run_command", { command: "ls deck" }), "DONE: Listed deck."],
+			[tc("run_command", { command: "ls deck" }), "DONE: Listed deck."],
+			[tc("update_plan", plan("done", "pending")), tc("run_command", { command: "ls deck" }), "Which folder next?"],
+		]) {
+			const ws = fakeWorkspace();
+			const model = scriptedModel([...script, "DONE: Listed deck."]);
+			await runTextToolAgent({
+				messages: [{ role: "user", content: "Run ls deck." }],
+				tools: [...ws.tools, PLAN_TOOL],
+				call: model.call,
+				maxRounds: 20,
+			});
+			expect(planChecks(model.seen)).toHaveLength(0);
+		}
+	});
+
+	test("openPlanSteps reads the last update that parsed, and skips refused ones", () => {
+		const log = [
+			{ name: "update_plan", args: plan("in_progress", "pending"), result: "Plan updated" },
+			{ name: "update_plan", args: { plan: [] }, result: "Error: update_plan: plan must be a non-empty array" },
+		];
+		expect(openPlanSteps(log).map((s) => s.status)).toEqual(["in_progress", "pending"]);
+		expect(openPlanSteps([])).toEqual([]);
+	});
+
+	test("the check never tells the model a step is done, and names the done marker", () => {
+		const msg = planCheckMessage([{ step: "Summarise", status: "in_progress" }]);
+		expect(msg).toContain("- Summarise (in_progress)");
+		expect(msg).toContain(DONE_MARKER);
+		expect(msg).not.toMatch(/\u2014/);
+	});
+});
+
