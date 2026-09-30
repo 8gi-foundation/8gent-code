@@ -12,11 +12,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { KnowledgeGraph } from "./graph.js";
 
-const GLOBAL_DB_PATH = path.join(
-	process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
-	"memory",
-	"memory.db",
-);
+// Resolved per call, not at import: a path fixed at import time outlives a
+// test's temp $HOME, and recall then read the operator's real memories (#3222).
+function globalDbPath(): string {
+	return path.join(
+		process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+		"memory",
+		"memory.db",
+	);
+}
 
 // ── Person extraction ─────────────────────────────────────────────────
 
@@ -97,11 +101,11 @@ export interface SessionKGInput {
 
 export async function writeSessionToKG(input: SessionKGInput): Promise<void> {
 	try {
-		const dir = path.dirname(GLOBAL_DB_PATH);
+		const dir = path.dirname(globalDbPath());
 		const { mkdirSync } = await import("node:fs");
 		mkdirSync(dir, { recursive: true });
 
-		const db = new Database(GLOBAL_DB_PATH, { create: true });
+		const db = new Database(globalDbPath(), { create: true });
 		db.run("PRAGMA journal_mode=WAL");
 		const kg = new KnowledgeGraph(db);
 
@@ -148,9 +152,9 @@ export async function writeSessionToKG(input: SessionKGInput): Promise<void> {
 export function recallGlobalMemoriesSync(limit = 30): string {
 	try {
 		const { existsSync } = require("node:fs") as typeof import("node:fs");
-		if (!existsSync(GLOBAL_DB_PATH)) return "";
+		if (!existsSync(globalDbPath())) return "";
 
-		const db = new Database(GLOBAL_DB_PATH);
+		const db = new Database(globalDbPath());
 		db.run("PRAGMA journal_mode=WAL");
 
 		const rows = db
@@ -178,9 +182,9 @@ export function recallGlobalMemoriesSync(limit = 30): string {
 export function recallPriorSessionsSync(cwd: string, limit = 3): string {
 	try {
 		const { existsSync } = require("node:fs") as typeof import("node:fs");
-		if (!existsSync(GLOBAL_DB_PATH)) return "";
+		if (!existsSync(globalDbPath())) return "";
 
-		const db = new Database(GLOBAL_DB_PATH);
+		const db = new Database(globalDbPath());
 		db.run("PRAGMA journal_mode=WAL");
 
 		const repo = path.basename(cwd);

@@ -99,13 +99,14 @@ import {
 import { BRAND } from "../personality/brand.js";
 // Personality voice — the infinite gentleman
 import {
+	COMPLETION_PHRASES,
+	ERROR_PHRASES,
+	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
-	getCompletionPhrase,
-	getErrorPhrase,
-	getGreeting,
 	voice as personalityVoice,
 } from "../personality/voice.js";
+import { type SentSections, contextNote } from "./context-note";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -187,6 +188,11 @@ export class Agent {
 	private config: AgentConfig;
 	/** This agent's own runtime params: self_tune on another agent never reaches them (#3140). */
 	private runtimeParams = createRuntimeParams();
+	// Session context kept out of the system prompt (#3222): the memories fixed
+	// at build, what was last sent per section, and the notes that carried it.
+	private sessionMemoryContext = "";
+	private contextSent: SentSections = {};
+	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	private hookManager: HookManager;
 	private sessionId: string;
 	private sessionStartTime: number;
@@ -369,13 +375,15 @@ export class Agent {
 			}
 		}
 
-		// Inject the 8gent personality voice into the system prompt
+		// Inject the 8gent personality voice into the system prompt. Fixed phrases,
+		// never a random pick: a different phrase per build changed the prompt at
+		// byte 17,318 and cost the whole prefix cache (#3222).
 		const personalityBlock = `\n\n## PERSONALITY VOICE: ${BRAND.fullName}: ${PERSONALITY.tagline}
 You are ${PERSONALITY.name}, the infinite gentleman agent coder.
 Traits: refined, witty, confident, helpful, endlessly capable.
-When greeting users, use phrases like: "${getGreeting()}"
-When completing tasks, use phrases like: "${getCompletionPhrase()}"
-When encountering errors, stay composed: "${getErrorPhrase()}"
+When greeting users, use phrases like: "${GREETINGS[0]}"
+When completing tasks, use phrases like: "${COMPLETION_PHRASES[0]}"
+When encountering errors, stay composed: "${ERROR_PHRASES[0]}"
 Maintain a tone that is sophisticated yet approachable, like a well-dressed engineer who happens to be brilliant.\n`;
 
 		// Inject orchestrator awareness into system prompt
@@ -389,9 +397,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Inject deferred tool categories when not loading all tools upfront
 		const deferredToolBlock = config.allTools ? "" : `\n\n${getDeferredToolSegment()}`;
 
-		// Inject prior session context and global user memories (best-effort, sync)
+		// Prior session context and global user memories (best-effort, sync).
+		// They differ per session, so they travel as a context message after the
+		// system prompt, never inside it (#3222). Table officers never get them.
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
 		const globalMemoriesBlock = recallGlobalMemoriesSync();
+		this.sessionMemoryContext =
+			config.agentScope === "__table__" ? "" : globalMemoriesBlock + priorSessionsBlock;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -403,7 +415,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const runtimeName = this.config.runtime as string;
 		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role) })}`;
+		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role) })}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -444,8 +456,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					personalityBlock +
 					orchestratorBlock +
 					deferredToolBlock +
-					globalMemoriesBlock +
-					priorSessionsBlock +
 					languageInstruction +
 					projectInstructionsBlock,
 		});
@@ -1060,6 +1070,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return flavoredContent;
 	}
 
+	/**
+	 * Append a context message when memories, self-appended context or voice
+	 * mode differ from what the model last saw (#3222). The system prompt and
+	 * earlier history are never edited, so they stay a cached prefix. When a
+	 * compaction or a history reset dropped an earlier note, everything is sent
+	 * again.
+	 */
+	private appendContextNote(): void {
+		if (this.contextNoteMessages.some((m) => !this.messageHistory.includes(m))) {
+			this.contextSent = {};
+			this.contextNoteMessages = [];
+		}
+		const { note, sent } = contextNote(
+			{
+				memory: this.sessionMemoryContext,
+				appendedContext: this.runtimeParams.appendedContext,
+				voiceChatActive: getRuntimeParams().voiceChatActive,
+			},
+			this.contextSent,
+		);
+		this.contextSent = sent;
+		if (!note) return;
+		const message = { role: "user", content: note };
+		this.messageHistory.push(message);
+		this.contextNoteMessages.push(message);
+	}
+
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
@@ -1164,6 +1201,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const needsPlanningGate =
 			this.config.agentScope !== "__table__" &&
 			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
+
+		// Changed session context goes in before the user's words (#3222).
+		this.appendContextNote();
 
 		if (needsPlanningGate) {
 			this.messageHistory.push({
@@ -1356,21 +1396,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Apply any previously tuned params (this agent's own, #3140)
 		const tunedParams = this.runtimeParams;
 
-		// Inject appended context into instructions
-		let effectiveInstructions = systemPrompt || "";
-		if (tunedParams.appendedContext.length > 0) {
-			effectiveInstructions += `\n\n## Agent Self-Appended Context\n${tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n")}`;
-		}
-
-		// Voice-chat awareness: when the TUI is in voice mode, tell the agent
-		// the modality so it doesn't waste a turn explaining it can't hear.
-		// The user speaks via STT; the agent's text reply is spoken via TTS.
-		if (tunedParams.voiceChatActive) {
-			effectiveInstructions += `
-
-## Voice Chat Mode (active)
-You are in a real-time voice conversation. The user is speaking to you; their words arrive as transcribed text (STT). Your written replies are spoken back to them via text-to-speech (TTS). You are NOT a text-only interface: you can hear them and they can hear you. Speak conversationally as if on a phone call. Do not apologise for being text-only or claim you cannot hear them. You can. Keep replies concise and natural since they will be spoken aloud. Avoid heavy markdown, code blocks, or long URLs; they don't read well in TTS.`;
-		}
+		// The system prompt goes out byte-identical every turn (#3222). Appended
+		// context and voice mode reach the model as a context message in the
+		// history (appendContextNote), so they no longer rewrite it here.
+		const effectiveInstructions = systemPrompt || "";
 
 		// ── Text-Tool Routing (local-model agentic tool calling) ──────────
 		// A tool-incapable local model (whose served chat template 400s on a
