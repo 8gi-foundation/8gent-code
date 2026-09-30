@@ -165,6 +165,8 @@ export class AgentPool extends EventEmitter {
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
 				allowedPaths: spawnedAgent.config.allowedPaths,
+				// A sub-agent never opens windows on the user's screen (#3107).
+				openOnWrite: false,
 			});
 
 			// Check if Ollama is available
