@@ -114,6 +114,19 @@ import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import { probeProviders } from "./lib/provider-health.js";
+import {
+	answerFromInput,
+	placeholderFor,
+	providerCheckLine,
+	questionForChat,
+} from "./lib/onboarding-chat.js";
+
+/** How setup names the local engines it checks. */
+const SETUP_PROVIDER_NAMES: Record<string, string> = {
+	ollama: "Ollama",
+	lmstudio: "LM Studio",
+	apfel: "apfel (Apple Foundation Model)",
+};
 import { PROBE_TIMEOUT_MS, createReadinessCache, withTimeout } from "./lib/provider-readiness.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
@@ -1544,6 +1557,11 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);
+	// What the input says while a question waits for a typed answer: the
+	// onboarding step's own placeholder, or "Your name" while the chat's name
+	// question is open (#3026). Null means the normal placeholder.
+	const [onboardingPlaceholder, setOnboardingPlaceholder] = useState<string | null>(null);
+	const [nameQuestionOpen, setNameQuestionOpen] = useState(false);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [onboardingSteps, setOnboardingSteps] = useState<
@@ -1594,8 +1612,10 @@ export function App({
 			provider?: "ollama" | "lmstudio" | "apfel";
 			installHint?: string;
 			default?: string;
+			placeholder?: string;
 		}) => {
 			setCurrentOnboardingQuestion(q.question);
+			setOnboardingPlaceholder(placeholderFor(q));
 			setOnboardingSelectChoices(
 				q.kind === "select" && q.choices ? q.choices : null,
 			);
@@ -1609,6 +1629,40 @@ export function App({
 			);
 		},
 		[],
+	);
+
+	// Provider checks in setup: probe, say what was found in one line, and
+	// record it, so the chat never asks a question the machine can answer.
+	// Returns the next question that needs a person, or null when done.
+	const resolveSetupChecks = useCallback(
+		async <Q extends { kind?: string; provider?: "ollama" | "lmstudio" | "apfel"; installHint?: string }>(
+			q: Q,
+		): Promise<Q | null> => {
+			let next: Q | null = q;
+			while (next && next.kind === "providerCheck" && next.provider) {
+				let live = false;
+				try {
+					const probe = await probeProviders();
+					live = probe.statuses.find((s) => s.name === next?.provider)?.live ?? false;
+				} catch {
+					live = false;
+				}
+				const name = SETUP_PROVIDER_NAMES[next.provider] ?? next.provider;
+				setMessages((prev) => [
+					...prev,
+					{
+						id: `setup-check-${next?.provider}-${Date.now()}`,
+						role: "system" as const,
+						content: providerCheckLine(name, live, live ? undefined : next?.installHint),
+						timestamp: new Date(),
+					},
+				]);
+				const r = onboardingManager.processAnswer(live ? "live" : "skip");
+				next = (r.nextQuestion as Q | null) ?? null;
+			}
+			return next;
+		},
+		[onboardingManager],
 	);
 
 	// Animation showcase
@@ -1898,6 +1952,14 @@ export function App({
 	});
 
 	// Add system message helper
+	// A setup question, asked by 8gent in the chat (lib/onboarding-chat.ts).
+	const addSetupQuestion = useCallback((content: string) => {
+		setMessages((prev) => [
+			...prev,
+			{ id: `setup-q-${Date.now()}`, role: "assistant" as const, content, timestamp: new Date() },
+		]);
+	}, []);
+
 	const addSystemMessage = useCallback((content: string) => {
 		setMessages((prev) => [
 			...prev,
@@ -2411,13 +2473,18 @@ export function App({
 						question.question,
 						onboardingManager.getUser()?.preferences?.voice,
 					);
-					// Use setMessages directly to avoid stale closure issue
+					// Use setMessages directly to avoid stale closure issue. The
+					// setup greeting replaces the launch greeting: one hello, not two.
 					setMessages((prev) => [
-						...prev,
+						...prev.filter((m) => !m.id.startsWith("welcome")),
 						{
-							id: `onboard-${Date.now()}`,
-							role: "system" as const,
-							content: `∞ Welcome to 8gent.\n\nBefore we begin, I'd like to learn about you.\n(Type /skip to skip any question, /skip all to skip onboarding)\n\n${question.question}`,
+							// 8gent asks: setup questions are its own words, drawn as
+							// its messages, not as dim system notices.
+							id: `setup-q-${Date.now()}`,
+							role: "assistant" as const,
+							// One greeting (the question opens with it), then one quiet
+							// line on how to skip. Intro audit #12: fewer labels first.
+							content: `${question.question}\n\n/skip skips a question. /skip all skips the setup.`,
 							timestamp: new Date(),
 						},
 					]);
@@ -2425,6 +2492,9 @@ export function App({
 			} else if (onboardingManager.shouldAskClarification()) {
 				const clarification = onboardingManager.getClarificationQuestion();
 				if (clarification) {
+					// The next thing typed is the answer: it goes to the profile,
+					// not the model (#3026). See handleSubmit.
+					setNameQuestionOpen(true);
 					setMessages((prev) => [
 						...prev,
 						{
@@ -2965,10 +3035,11 @@ export function App({
 								"Understood. I'll ask again later.\n" + "(The more I know, the better I serve.)",
 							);
 						} else {
-							const nextQ = onboardingManager.skipQuestion();
+							const skipped = onboardingManager.skipQuestion();
+							const nextQ = skipped ? await resolveSetupChecks(skipped) : null;
 							if (nextQ) {
 								applyOnboardingQuestion(nextQ);
-								addSystemMessage(nextQ.question);
+								addSetupQuestion(questionForChat(nextQ));
 							} else {
 								setShowOnboarding(false);
 								setOnboardingSelectChoices(null);
@@ -4744,6 +4815,8 @@ export function App({
 			orchestration,
 			workspaceTabs,
 			toggleBodyPart,
+			resolveSetupChecks,
+			addSetupQuestion,
 		],
 	);
 
@@ -4771,7 +4844,8 @@ export function App({
 		const attached = pastedNow ?? imageInput.getAttachedImage();
 		const input = afterPaths.trim();
 
-		if (!input && !attached) return;
+		// During setup an empty Enter is an answer: it takes the default.
+		if (!input && !attached && !showOnboarding) return;
 
 		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
@@ -4790,8 +4864,39 @@ export function App({
 
 		const bubbleContent = input || (attached ? `[Image: ${attached.filename}]` : "");
 
+		// The chat asked for a name on launch (#3026). The first reply is the
+		// answer if it reads as a name: it is stored and never sent to the
+		// model. Anything else (a request typed instead) goes on as usual, and
+		// the question closes either way.
+		if (nameQuestionOpen && !showOnboarding) {
+			setNameQuestionOpen(false);
+			const name = input && !attached ? onboardingManager.answerNameClarification(input) : null;
+			if (name) {
+				appendToTab(tabId, {
+					id: `user-${Date.now()}`,
+					role: "user" as const,
+					content: bubbleContent,
+					timestamp: new Date(),
+				});
+				addSystemMessage(`Thank you. I'll call you ${name}.`);
+				return;
+			}
+		}
+
 		// Handle onboarding answers first
 		if (showOnboarding && !afterPaths.trim().startsWith("/")) {
+			// The answer as the step reads it (a number picks a choice, an
+			// empty Enter takes the default) and as the chat shows it.
+			const currentQ = onboardingManager.getNextQuestion();
+			const answer = currentQ ? answerFromInput(currentQ, input) : { value: input, echo: input };
+			if (answer.echo) {
+				appendToTab(tabId, {
+					id: `user-onboard-${Date.now()}`,
+					role: "user" as const,
+					content: answer.echo,
+					timestamp: new Date(),
+				});
+			}
 			// Track the answer for display
 			setOnboardingSteps((prev) => {
 				const updated = [...prev];
@@ -4816,22 +4921,26 @@ export function App({
 				);
 			}
 
-			const result = onboardingManager.processAnswer(input);
+			const result = onboardingManager.processAnswer(answer.value);
 			if (result.success) {
-				if (result.nextQuestion) {
-					applyOnboardingQuestion(result.nextQuestion);
+				// Steps the setup can check by itself (is Ollama running?) are
+				// answered here, with one line each, instead of asked.
+				const nextQ = result.nextQuestion ? await resolveSetupChecks(result.nextQuestion) : null;
+				if (nextQ) {
+					applyOnboardingQuestion(nextQ);
+					addSetupQuestion(questionForChat(nextQ));
 					setOnboardingStepIndex((prev) => prev + 1);
 					setOnboardingSteps((prev) => [
 						...prev,
 						{
-							question: result.nextQuestion?.question ?? "",
+							question: nextQ.question,
 							status: "active" as const,
 						},
 					]);
 					// Speak each question aloud during onboarding (gated by voice.outputEnabled)
 					{
 						const voice = onboardingManager.getUser()?.preferences?.voice;
-						speakOnboardingLine(result.nextQuestion.question, voice);
+						speakOnboardingLine(nextQ.question, voice);
 					}
 				} else {
 					// Onboarding complete
@@ -5685,12 +5794,15 @@ export function App({
 
 	// V2 three-zone shell - the only render path.
 	const cols = viewport.width;
-	const showContextRail = cols >= 120;
+	// During first-run setup the chat is the whole width: no rails, no PLAN
+	// column. A new user meets one question, not forty labels (intro audit #12).
+	const inSetup = showOnboarding;
+	const showContextRail = cols >= 120 && !inSetup;
 	// The PLAN column sits beside the context rail on wide terminals, and
 	// only while it is open (Ctrl+X, or a plan exists).
 	const showPlanColumn =
 		showContextRail && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
-	const showActivityRail = cols >= 90;
+	const showActivityRail = cols >= 90 && !inSetup;
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5858,9 +5970,16 @@ export function App({
 							<CommandInput
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
+								placeholder={
+									showOnboarding
+										? (onboardingPlaceholder ?? "Type your answer")
+										: nameQuestionOpen
+											? "Your name"
+											: undefined
+								}
 								focused={
 									((viewMode === "chat" && activeTabType === "chat") ||
-										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
+										viewMode === "onboarding") &&
 									!isBubbleNavMode &&
 									!paletteOpen
 								}
@@ -5877,7 +5996,7 @@ export function App({
 								onSlashCommand={handleSlashCommand}
 								injectedText={voiceTranscript}
 								transformInputValue={transformChatInput}
-								allowEmptySubmit={!!imageInput.currentImage}
+								allowEmptySubmit={!!imageInput.currentImage || showOnboarding}
 								goalClient={goalClient}
 								sessionId="tui"
 								onSystemMessage={(line) => {

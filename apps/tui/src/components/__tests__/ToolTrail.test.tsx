@@ -120,18 +120,18 @@ describe("MessageList with a tool trail at 80 columns", () => {
 			/>,
 		);
 
-	test("the turn's calls sit inside the assistant reply, above the text", () => {
+	test("once the reply lands, the turn's calls read as results above the text", () => {
 		const out = renderList(pilotTurn);
 		const ls = lines(out);
 		const header = ls.findIndex((l) => l.includes("◆ 8gent"));
-		const write = ls.findIndex((l) => l.includes("✓ write_file deck/outline.md"));
+		const write = ls.findIndex((l) => l.includes("✓ Wrote  deck/outline.md"));
 		const body = ls.findIndex((l) => l.includes("The outline is written."));
 		expect(header).toBeGreaterThan(-1);
 		expect(write).toBeGreaterThan(header);
 		expect(body).toBeGreaterThan(write);
-		expect(out).toContain("⊘ run_command ls deck && wc -l deck/deck.md (blocked)");
-		expect(out).toContain("✗ run_command bun test (exit 1)");
-		expect(out).toContain("✓ read_file packages/decide/README.md");
+		expect(out).toContain("⊘ Run blocked  ls deck && wc -l deck/deck.md");
+		expect(out).toContain("✗ Ran  bun test  exit 1");
+		expect(out).toContain("✓ Read  packages/decide/README.md");
 		// Raw tool-start/tool-end strings stay out of chat.
 		expect(out).not.toContain("→ write_file(");
 	});
@@ -180,8 +180,8 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		);
 		// Header + trail + body + margin stays within the 8-row budget.
 		expect(lines(out).length).toBeLessThanOrEqual(8);
-		expect(out).toContain("⊘ run_command ls notes (blocked)");
-		expect(out).toContain("earlier calls");
+		expect(out).toContain("⊘ Run blocked  ls notes");
+		expect(out).toContain("more steps");
 		expect(out).toContain("Done.");
 	});
 

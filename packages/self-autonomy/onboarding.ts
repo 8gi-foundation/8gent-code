@@ -155,6 +155,11 @@ export interface OnboardingQuestion {
 	 */
 	kind?: "text" | "select" | "providerCheck" | "agentName";
 	/**
+	 * What the input shows while this question waits for a typed answer, so
+	 * the box says what to type ("Your name"), not "ask a question".
+	 */
+	placeholder?: string;
+	/**
 	 * Structured choices for kind: "select". When present, the renderer uses
 	 * these to build the list. The free-text {options} array stays around for
 	 * back-compat input validation against typed answers.
@@ -239,15 +244,13 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	// other steps and the user has an obvious affordance.
 	{
 		step: "language",
+		// {found_on_machine} lists only what detection actually found (see
+		// foundOnMachine). A line per miss framed the first minute around
+		// what failed.
 		question:
 			"Good day. I'm 8gent.\n\n" +
-			"Here's what I detected from your environment:\n" +
-			"  Name: {detected_name}\n" +
-			"  Email: {detected_email}\n" +
-			"  GitHub: {detected_github}\n" +
-			"  Provider: {detected_provider}\n" +
-			"  Models: {detected_models}\n\n" +
-			"I'll walk you through a short setup so I can serve you properly.",
+			"{found_on_machine}" +
+			"A short setup follows, so I can serve you properly. Press Enter to begin.",
 		kind: "select",
 		choices: [{ label: "Press Enter to begin", value: "ok" }],
 		options: ["ok", "yes", "y"],
@@ -263,7 +266,8 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	// per-decision steps below.
 	{
 		step: "identity",
-		question: "What should I call you? (default: {detected_name})",
+		question: "What should I call you?{name_default_hint}",
+		placeholder: "Your name",
 		processor: (answer, user) => {
 			const name = answer.trim() || user.identity.name;
 			return {
@@ -300,6 +304,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		step: "projects",
 		question:
 			"What are you working on? (one short line, optional - press Enter to skip)",
+		placeholder: "One short line, or Enter to skip",
 		processor: (answer, user) => {
 			const desc = answer.trim();
 			if (!desc) {
@@ -835,17 +840,40 @@ export class OnboardingManager {
 	 * Get a clarification question for incomplete understanding
 	 */
 	getClarificationQuestion(): string | null {
-		const unclear = this.user.understanding.areasUnclear[0];
-		if (!unclear) return null;
+		return this.getClarificationArea() === "identity"
+			? "I don't have your name on file. What should I call you?"
+			: null;
+	}
 
-		const clarifications: Record<string, string> = {
-			identity: "I don't have your name on file. What should I call you?",
-			projects: "What project are you primarily working on?",
-			preferences: "How would you like me to communicate with you?",
-			integrations: "Are you using local models (Ollama/LM Studio) or cloud?",
-		};
+	/**
+	 * The one clarification the chat may ask, or null. Only questions whose
+	 * answer the TUI routes to the profile are asked in chat (#3026): a
+	 * question asked as a plain message sent its answer to the model. The
+	 * name is the only one routed today, and it is asked only when it is
+	 * really missing (areasUnclear is never pruned, so it cannot be trusted
+	 * alone).
+	 */
+	getClarificationArea(): "identity" | null {
+		if (!this.user.understanding.areasUnclear.includes("identity")) return null;
+		return this.user.identity.name ? null : "identity";
+	}
 
-		return clarifications[unclear] || null;
+	/**
+	 * Store the answer to the chat's name question. Returns the stored name,
+	 * or null when the text does not read as a name (a prompt typed instead,
+	 * which then goes to the model as usual).
+	 */
+	answerNameClarification(answer: string): string | null {
+		const name = asName(answer);
+		if (!name) return null;
+		this.user.identity.name = name;
+		this.user.understanding.areasUnclear = this.user.understanding.areasUnclear.filter(
+			(a) => a !== "identity",
+		);
+		this.user.understanding.confidenceScore = calculateConfidence(this.user);
+		this.user.lastPrompted = new Date().toISOString();
+		this.saveUserConfig();
+		return name;
 	}
 
 	/**
@@ -1074,22 +1102,10 @@ export class OnboardingManager {
 			"{telegram}",
 			getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up",
 		);
-		text = text.replace("{detected_name}", this.user.identity.name || "not detected");
+		text = text.replace("{found_on_machine}", foundOnMachine(this.user));
 		text = text.replace(
-			"{detected_email}",
-			this.user.integrations?.github?.username ? "(via git)" : "not detected",
-		);
-		text = text.replace(
-			"{detected_github}",
-			this.user.integrations.github.username || "not detected",
-		);
-		text = text.replace(
-			"{detected_provider}",
-			this.user.preferences.model.provider || "not detected",
-		);
-		text = text.replace(
-			"{detected_models}",
-			this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found",
+			"{name_default_hint}",
+			this.user.identity.name ? ` Enter keeps ${this.user.identity.name}.` : "",
 		);
 		text = text.replace("{agent_name}", (this.user.preferences.voice as any)?.agentName || "Eight");
 
@@ -1183,6 +1199,49 @@ function getDefaultUserConfig(): UserConfig {
 			lastUpdated: null,
 		},
 	};
+}
+
+/**
+ * A typed reply that reads as a name: one to four words, letters (any
+ * script), spaces, hyphens, apostrophes and dots only, at most 40 characters.
+ * "fix the failing tests" is four words but reads as a request, so common
+ * request verbs at the start disqualify it.
+ */
+export function asName(answer: string): string | null {
+	const text = answer.trim().replace(/\s+/g, " ");
+	if (!text || text.length > 40 || text.startsWith("/")) return null;
+	if (!/^[\p{L}][\p{L}\p{M} .'-]*$/u.test(text)) return null;
+	const words = text.split(" ");
+	if (words.length > 4) return null;
+	const REQUEST =
+		/^(?:fix|add|make|run|write|read|show|find|build|test|check|explain|help|create|update|delete|remove|open|list|what|why|how|where|when|who|can|could|please|hi|hello|hey|yes|no|ok|okay|thanks)$/i;
+	if (REQUEST.test(words[0])) return null;
+	return text;
+}
+
+/** Shorten a model id for one line: drop the registry and org path. */
+export function shortModelName(id: string, max = 28): string {
+	const last = id.split("/").pop() || id;
+	return last.length > max ? `${last.slice(0, max - 1)}…` : last;
+}
+
+/**
+ * "Found on this machine" block for the welcome: only what detection found,
+ * in label/value columns. Models get a hanging indent, one per line, three
+ * at most, then a count. Empty string when nothing was found.
+ */
+export function foundOnMachine(user: UserConfig): string {
+	const rows: Array<[string, string]> = [];
+	if (user.identity.name) rows.push(["Name", user.identity.name]);
+	if (user.integrations.github.username) rows.push(["GitHub", user.integrations.github.username]);
+	if (user.preferences.model.provider) rows.push(["Provider", user.preferences.model.provider]);
+	const models = user.integrations.ollama.models ?? [];
+	models.slice(0, 3).forEach((m, i) => rows.push([i === 0 ? "Models" : "", shortModelName(m)]));
+	if (models.length > 3) rows.push(["", `and ${models.length - 3} more`]);
+	if (rows.length === 0) return "";
+	const pad = 10;
+	const body = rows.map(([label, value]) => `  ${label.padEnd(pad)}${value}`).join("\n");
+	return `Found on this machine:\n${body}\n\n`;
 }
 
 function calculateConfidence(user: UserConfig): number {
