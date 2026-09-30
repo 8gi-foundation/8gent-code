@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
+import { type LocalModelEntry, LocalServerResponseError, createOllamaServer } from "../local-model-server";
 import type { ProviderConfig, ProviderName } from "../providers";
 import type { RoleConfig, RoleModelAssignment } from "./role-config";
 
@@ -208,11 +209,19 @@ async function fetchJson(url: string): Promise<unknown | null> {
 
 /** Probe Ollama. Returns [] if the server is down. */
 export async function detectOllama(): Promise<DetectedModel[]> {
-	const json = (await fetchJson(`${ollamaUrl()}/api/tags`)) as {
-		models?: { name?: string }[];
-	} | null;
-	if (!json?.models) return [];
-	return json.models
+	let models: LocalModelEntry[];
+	try {
+		models = await createOllamaServer({ baseUrl: ollamaUrl() }).listModels({
+			signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+		});
+	} catch (err) {
+		// Pre-layer behaviour, kept on purpose in the no-change move: a 2xx whose
+		// `models` is not a list threw a TypeError out of here (only the message
+		// text differs now). Fix separately (#3149).
+		if (err instanceof LocalServerResponseError) throw new TypeError("Ollama models is not a list");
+		return [];
+	}
+	return models
 		.map((m) => m.name)
 		.filter((n): n is string => typeof n === "string")
 		.map((model) => ({ provider: "ollama" as const, model, score: scoreModel("ollama", model) }))

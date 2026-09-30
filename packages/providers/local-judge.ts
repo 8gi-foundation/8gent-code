@@ -26,6 +26,8 @@
  * fail too. Silence is never approval.
  */
 
+import { createOllamaServer } from "../local-model-server";
+
 /** Where a verdict came from, so callers can tell a real judgment from a fail-closed default. */
 export type VerdictSource = "selene" | "fail-closed";
 
@@ -248,14 +250,7 @@ export class SeleneJudge {
 
 	/** True when the local Ollama server is reachable. */
 	async isAvailable(): Promise<boolean> {
-		try {
-			const res = await fetch(`${this.baseUrl}/api/tags`, {
-				signal: AbortSignal.timeout(5000),
-			});
-			return res.ok;
-		} catch {
-			return false;
-		}
+		return createOllamaServer({ baseUrl: this.baseUrl }).isHealthy({ signal: AbortSignal.timeout(5000) });
 	}
 }
 

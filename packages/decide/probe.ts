@@ -16,6 +16,7 @@
 import { resolveLayaUrl } from "./backends/laya";
 import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { resolveOllamaHost } from "./backends/ollama";
+import { LocalServerHttpError, LocalServerResponseError, createOllamaServer } from "../local-model-server";
 import type { FetchLike } from "./types";
 
 /**
@@ -85,10 +86,14 @@ async function layaUp(fetchImpl: FetchLike, url: string, timeoutMs: number): Pro
 }
 
 export async function listOllamaModels(fetchImpl: FetchLike, host: string, timeoutMs: number): Promise<InstalledModel[]> {
-	const res = await fetchImpl(`${host}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
-	if (!res.ok) throw new Error(`ollama /api/tags ${res.status}`);
-	const json = (await res.json()) as { models?: InstalledModel[] };
-	return Array.isArray(json.models) ? json.models : [];
+	const server = createOllamaServer({ baseUrl: host, fetch: fetchImpl });
+	try {
+		return (await server.listModels({ signal: AbortSignal.timeout(timeoutMs) })) as InstalledModel[];
+	} catch (err) {
+		if (err instanceof LocalServerHttpError) throw new Error(`ollama /api/tags ${err.status}`);
+		if (err instanceof LocalServerResponseError) return [];
+		throw err;
+	}
 }
 
 export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResult> {

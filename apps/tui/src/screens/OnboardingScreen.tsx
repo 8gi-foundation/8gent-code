@@ -19,6 +19,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
+import { createOllamaServer } from "../../../../packages/local-model-server/index.js";
 import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
 import { useTypewriter } from "../hooks/useTypewriter.js";
 
@@ -177,11 +178,9 @@ export async function fetchProviderModels(
 			const host = resolveOllamaBaseUrl();
 			const ctrl = new AbortController();
 			const t = setTimeout(() => ctrl.abort(), 1500);
-			const res = await fetch(`${host}/api/tags`, { signal: ctrl.signal });
+			const listed = await createOllamaServer({ baseUrl: host }).listModels({ signal: ctrl.signal });
 			clearTimeout(t);
-			if (!res.ok) return [];
-			const data = (await res.json()) as { models?: Array<{ name: string }> };
-			return (data.models ?? []).flatMap((m) => (isEmbed(m.name) ? [] : [m.name]));
+			return listed.flatMap((m) => (isEmbed(m.name) ? [] : [m.name]));
 		}
 		// lmstudio + apfel both expose /v1/models (OpenAI-compat)
 		const hostBase =
