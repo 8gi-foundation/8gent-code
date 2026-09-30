@@ -1,9 +1,22 @@
 /**
- * System One harness guard: an extra, opt-in layer on the agent's shell tools.
+ * System One harness guard: an extra layer on the agent's shell tools.
  *
- * Flag: env EIGHT_SYSTEM_ONE=1 (or "true"). OFF by default. With the flag off
- * `systemOneGate` returns { run: true } without importing @8gent/decide or
- * constructing a decider, so the shell path is unchanged.
+ * Flag: env EIGHT_SYSTEM_ONE. ON by default (James, 2026-09-30). Three modes
+ * (`systemOneMode`):
+ *   unset / anything else -> "default": on, and it never blocks everything.
+ *                            It asks only a calibrated judge (a model with a
+ *                            calibration/<backend>-<model>.json). When there is
+ *                            none, or the judge cannot answer (not installed,
+ *                            unreachable, invalid answer, timeout), commands are
+ *                            checked by the deterministic rules and the
+ *                            read-only allowlist alone, and it says so once.
+ *   1 / true              -> "strict": the explicit opt-in, unchanged from
+ *                            before default-on. Any judge the probe finds is
+ *                            asked, and a judge that cannot answer blocks
+ *                            (fail closed). Guarded mode (#3170) sets this.
+ *   0 / false / off / no  -> "off": `systemOneGate` returns { run: true }
+ *                            without importing @8gent/decide or constructing a
+ *                            decider, so the shell path is unchanged.
  *
  * With the flag on, every model-proposed shell command is sent to
  * `bashGuard` (packages/decide/guard.ts) after the deny layers (ToolG8 /
@@ -22,14 +35,21 @@
  *   escalate -> ask a human through the TUI approval channel, else an
  *               interactive stdin prompt (default No); no human available
  *               (headless, daemon, CI) -> treated as block
- *   error    -> block (fail closed): decider missing, backend unreachable,
- *               invalid probability, or anything else that throws
- *   timeout  -> block (fail closed): no verdict within the time budget
+ *   error    -> strict: block (fail closed). default: rules only (block
+ *               rule -> block, escalate rule -> escalate, no rule -> run),
+ *               with a one-time notice. Covers decider missing, backend
+ *               unreachable, invalid probability, anything that throws.
+ *   timeout  -> same split as error: no verdict within the time budget
  *               (30 s until the first answer, then 10 s; env
  *               EIGHT_SYSTEM_ONE_TIMEOUT_MS overrides). The escalate prompt
  *               to a human is outside the budget. If the judge is still
  *               loading (warm-up in flight) when the budget runs out, the
  *               message says so and asks to retry in a few seconds.
+ *
+ * Notices (one line each, once per process) go to the sink set by
+ * `setSystemOneNoticeSink` (the TUI passes its system-message channel), else
+ * to stderr: that there is no judge and why, and, before the first judge
+ * load, which model loads where and how big it is.
  *
  * Warm-up: `startSystemOneWarmup` (called at TUI and Agent startup) builds the
  * decider and asks the judge one throwaway question in the background, so the
@@ -94,21 +114,70 @@ class SystemOneTimeoutError extends Error {}
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const deadline = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new SystemOneTimeoutError(`timed out after ${ms} ms, failing closed`)), ms);
+		timer = setTimeout(
+			() => reject(new SystemOneTimeoutError(`timed out after ${ms} ms, failing closed`)),
+			ms,
+		);
 	});
 	return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
 
+export type SystemOneMode = "off" | "default" | "strict";
+
+/** The mode for this env; see the header. On by default, 0 turns it off, 1 is strict. */
+export function systemOneMode(
+	env: Record<string, string | undefined> = process.env,
+): SystemOneMode {
+	const v = (env[SYSTEM_ONE_FLAG] ?? "").trim().toLowerCase();
+	if (v === "1" || v === "true") return "strict";
+	if (v === "0" || v === "false" || v === "off" || v === "no") return "off";
+	return "default";
+}
+
 export function systemOneEnabled(env: Record<string, string | undefined> = process.env): boolean {
-	const v = (env[SYSTEM_ONE_FLAG] || "").trim().toLowerCase();
-	return v === "1" || v === "true";
+	return systemOneMode(env) !== "off";
+}
+
+/** Shown once per process when default mode checks with the rules and allowlist alone. */
+export function systemOneRulesOnlyNotice(reason: string): string {
+	return `System One: no judge (${reason}); shell commands are checked by the safety rules and the read-only allowlist only. ${SYSTEM_ONE_FLAG}=0 turns System One off.`;
+}
+
+/** Shown once per process before the first judge load, so a multi-GB load is never silent. */
+export function systemOneJudgeLoadNotice(
+	model: string,
+	where: string,
+	bytes: number | null,
+): string {
+	const size = bytes && bytes > 0 ? `, ${(bytes / 1e9).toFixed(1)} GB` : "";
+	return `System One: loading the judge ${model} (${where}${size}) for a command the allowlist does not cover. ${SYSTEM_ONE_FLAG}=0 turns System One off.`;
+}
+
+type NoticeSink = (line: string) => void;
+let noticeSink: NoticeSink | null = null;
+const noticesShown = new Set<string>();
+
+/** Where one-time notices go (the TUI passes its system-message channel). null: stderr. */
+export function setSystemOneNoticeSink(sink: NoticeSink | null): void {
+	noticeSink = sink;
+}
+
+/** Emit `line` once per process under `key`. */
+function noticeOnce(key: string, line: string): void {
+	if (noticesShown.has(key)) return;
+	noticesShown.add(key);
+	try {
+		if (noticeSink) noticeSink(line);
+		else process.stderr.write(`${line}\n`);
+	} catch {
+		// A broken sink must never affect the gate.
+	}
 }
 
 /**
  * Rules-first allowlist (packages/decide/allowlist.ts, #3131). ON by default
  * whenever System One is on (James, 2026-09-30); EIGHT_S1_ALLOWLIST=0 (or
- * false/off/no) opts out. System One itself stays opt-in: with
- * EIGHT_SYSTEM_ONE unset, none of this runs.
+ * false/off/no) opts out. With EIGHT_SYSTEM_ONE=0, none of this runs.
  *
  * With it on, a command the rules pass and the allowlist reads as plainly
  * read-only runs without asking the model judge (backend "allowlist"), and
@@ -138,7 +207,7 @@ export function systemOneAllowlist(env: Record<string, string | undefined> = pro
 	return { enabled, bunTest: enabled && (bun === "1" || bun === "true") };
 }
 
-export type SystemOneThresholds = "default" | `calibrated(${string})`;
+export type SystemOneThresholds = "default" | "rules-only" | `calibrated(${string})`;
 
 export interface SystemOneGateResult {
 	run: boolean;
@@ -183,6 +252,8 @@ export function _setSystemOneOverridesForTests(next: Overrides): void {
 	warmupLoading = false;
 	generation++;
 	thresholdCache.clear();
+	noticesShown.clear();
+	noticeSink = null;
 }
 
 /** Test-only: forget the process decider and any overrides. */
@@ -226,8 +297,110 @@ async function thresholdsFor(
 	return entry;
 }
 
+/** Backend label of a verdict made by the rules alone (default-mode fallback). */
+export const RULES_ONLY = "rules-only" as const;
+
 function isModelVerdict(g: BashGuardResult): boolean {
-	return g.backend !== "unavailable" && g.backend !== "rule" && g.backend !== "rules" && g.backend !== "allowlist";
+	return (
+		g.backend !== "unavailable" &&
+		g.backend !== "rule" &&
+		g.backend !== "rules" &&
+		g.backend !== "allowlist" &&
+		g.backend !== RULES_ONLY
+	);
+}
+
+/** True when the judge did not really answer: it threw, or gave no usable probability. Rule verdicts are not failures. */
+function judgeFailed(g: BashGuardResult): boolean {
+	if (g.backend === "unavailable") return true;
+	return isModelVerdict(g) && !Number.isFinite(g.pYes);
+}
+
+/** Thrown in default mode when the judge the probe found has no calibration: it is never asked. */
+class UncalibratedJudgeError extends Error {}
+
+/**
+ * Default mode asks only a judge whose (backend, model) was calibrated. The
+ * probe falls back to the smallest installed model, which on a machine with
+ * no judge is the chat model: uncalibrated, it would judge at guessed
+ * thresholds (and escalate most commands). Strict mode keeps asking it.
+ */
+function requireCalibrated(
+	mode: SystemOneMode,
+	backend: { name: string; model: string },
+	label: SystemOneThresholds,
+): void {
+	if (mode === "default" && label === "default") {
+		throw new UncalibratedJudgeError(
+			`${backend.model} on ${backend.name} has no calibration, so it is not used as the judge`,
+		);
+	}
+}
+
+/** Name the judge load once, with its size when the GGUF is on disk. Best effort, never throws. */
+async function announceJudgeLoad(
+	decider: Decider,
+	env: Record<string, string | undefined>,
+): Promise<void> {
+	if (warmed || noticesShown.has("load")) return;
+	try {
+		const b = (await decider.backend()) as { name: string; model: string; modelPath?: string };
+		const where = b.name === "llamacpp" ? "in this process" : `in the ${b.name} server`;
+		let bytes: number | null = null;
+		try {
+			const fs = await import("node:fs");
+			let file = b.modelPath ?? null;
+			if (!file) {
+				const { resolveGguf } = await import("../decide/backends/llamacpp");
+				file = resolveGguf(env, b.model).path;
+			}
+			if (file) bytes = fs.statSync(file).size;
+		} catch {
+			bytes = null;
+		}
+		noticeOnce("load", systemOneJudgeLoadNotice(b.model, where, bytes));
+	} catch {
+		// No notice is better than a broken gate.
+	}
+}
+
+/**
+ * The default-mode fallback: prompt-control, then the deterministic rules,
+ * with no model. Rules never allow on their own, so "pass" runs the command
+ * (the allowlist has already run).
+ */
+async function rulesOnlyGuard(command: string, why: string): Promise<BashGuardResult> {
+	const { promptControlText } = await import("../decide/guard");
+	const { decideRules } = await import("../decide/rules");
+	const control = promptControlText(command);
+	if (control !== null) {
+		return {
+			verdict: "block",
+			pYes: Number.NaN,
+			backend: "rule",
+			model: "prompt-control",
+			reason: `the command carries prompt-control text addressed to the judge (${JSON.stringify(control)})`,
+		};
+	}
+	const r = decideRules(command);
+	const base = { pYes: Number.NaN, backend: RULES_ONLY, model: "none" };
+	if (r.verdict === "block") {
+		return {
+			...base,
+			verdict: "block",
+			rule: r.rule,
+			reason: `deterministic rule ${r.rule} matched (${r.rules.join(", ")}); no judge (${why})`,
+		};
+	}
+	if (r.verdict === "escalate") {
+		return {
+			...base,
+			verdict: "escalate",
+			rule: r.rule,
+			reason: `deterministic rule ${r.rule} matched (${r.rules.join(", ")}), needs a human; no judge (${why})`,
+		};
+	}
+	return { ...base, verdict: "allow", reason: `no rule matched; no judge (${why})` };
 }
 
 /** The command the warm-up asks about. Harmless and never run. */
@@ -244,7 +417,8 @@ export const SYSTEM_ONE_WARMUP_COMMAND = "echo warmup";
 export function startSystemOneWarmup(
 	env: Record<string, string | undefined> = process.env,
 ): Promise<void> | null {
-	if (!systemOneEnabled(env)) return null;
+	const mode = systemOneMode(env);
+	if (mode === "off") return null;
 	// Allowlist on: most commands never reach the judge, so load it lazily.
 	if (systemOneAllowlist(env).enabled) return null;
 	if (warmupPromise) return warmupPromise;
@@ -253,6 +427,8 @@ export function startSystemOneWarmup(
 	const p = (async () => {
 		const decider = await getDecider();
 		const t = await thresholdsFor(decider);
+		requireCalibrated(mode, await decider.backend(), t.label);
+		await announceJudgeLoad(decider, env);
 		const { bashGuard } = await import("../decide/guard");
 		const g = await bashGuard(SYSTEM_ONE_WARMUP_COMMAND, decider, t.opts);
 		if (gen === generation && isModelVerdict(g)) warmed = true;
@@ -294,8 +470,9 @@ function blockMessage(
 	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
 	// A block is final: no card was shown and no approval can pass it. Say so,
 	// so the reply never tells the person their approval is what is missing (#3124).
-	const final = g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (${SYSTEM_ONE_FLAG}=1): ${why}. The command was not run.${final} Command: ${command}`;
+	const final =
+		g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -323,7 +500,8 @@ export async function systemOneGate(
 	env: Record<string, string | undefined> = process.env,
 	cwd?: string,
 ): Promise<SystemOneGateResult> {
-	if (!systemOneEnabled(env)) return { run: true };
+	const mode = systemOneMode(env);
+	if (mode === "off") return { run: true };
 	const allow = systemOneAllowlist(env);
 	if (allow.enabled) {
 		try {
@@ -332,7 +510,13 @@ export async function systemOneGate(
 			if (a.verdict === "pass-without-model") {
 				return {
 					run: true,
-					guard: { verdict: "allow", pYes: Number.NaN, backend: "allowlist", model: "allowlist", reason: a.reason },
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: a.reason,
+					},
 				};
 			}
 		} catch {
@@ -371,14 +555,23 @@ export async function systemOneGate(
 				const decider = await getDecider();
 				const t = await thresholdsFor(decider);
 				thresholds = t.label;
+				requireCalibrated(mode, await decider.backend(), t.label);
+				await announceJudgeLoad(decider, env);
 				const { bashGuard } = await import("../decide/guard");
 				return bashGuard(command, decider, t.opts);
 			})(),
 			ms,
 		);
 	} catch (err) {
-		guard = { verdict: "block", pYes: Number.NaN, backend: "unavailable", model: "unavailable" };
 		const detail = (err as Error)?.message ?? String(err);
+		if (mode === "default") {
+			const reason =
+				err instanceof SystemOneTimeoutError
+					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
+					: detail;
+			return decide(command, await rulesOnly(command, reason), RULES_ONLY);
+		}
+		guard = { verdict: "block", pYes: Number.NaN, backend: "unavailable", model: "unavailable" };
 		const why =
 			err instanceof SystemOneTimeoutError
 				? warmupLoading
@@ -388,20 +581,49 @@ export async function systemOneGate(
 		return { run: false, guard, message: blockMessage(guard, thresholds, why, command) };
 	}
 	if (isModelVerdict(guard)) warmed = true;
-	const t = thresholds as SystemOneThresholds;
+	if (mode === "default" && judgeFailed(guard)) {
+		return decide(
+			command,
+			await rulesOnly(command, guard.reason ?? "the judge gave no valid answer"),
+			RULES_ONLY,
+		);
+	}
+	return decide(command, guard, thresholds as SystemOneThresholds);
+}
+
+/** The notice's short form of why there is no judge; the full reason stays on the verdict. */
+function noticeReason(reason: string): string {
+	if (reason.startsWith("no decide backend available"))
+		return "no judge model installed or reachable";
+	return reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
+}
+
+/** Rules-only verdict plus the one-time notice that says so. */
+async function rulesOnly(command: string, reason: string): Promise<BashGuardResult> {
+	noticeOnce("rules-only", systemOneRulesOnlyNotice(noticeReason(reason)));
+	return rulesOnlyGuard(command, reason);
+}
+
+/** Turn a verdict into run / block, asking a human on escalate. */
+async function decide(
+	command: string,
+	guard: BashGuardResult,
+	t: SystemOneThresholds,
+): Promise<SystemOneGateResult> {
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
 		const why = guard.reason ?? "the command was judged dangerous";
 		return { run: false, guard, thresholds: t, message: blockMessage(guard, t, why, command) };
 	}
 	// escalate
+	const pDesc = Number.isFinite(guard.pYes) ? `pYes ${fmtP(guard.pYes)}, ` : "";
 	let humanApproved: boolean | null;
 	try {
 		humanApproved = await (overrides.askHuman ?? defaultAskHuman)({
 			action: "System One escalation",
 			details: guard.rule
-				? `A System One safety rule (${guard.rule}) matched this command (pYes ${fmtP(guard.pYes)}, ${guard.backend}/${guard.model}). Approve only if you meant it.`
-				: `System One is unsure whether this command is safe (pYes ${fmtP(guard.pYes)}, ${guard.backend}/${guard.model}). Approve only if you meant it.`,
+				? `A System One safety rule (${guard.rule}) matched this command (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`
+				: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
 			command,
 		});
 	} catch {

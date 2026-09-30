@@ -15,8 +15,8 @@
  * "block". A command carrying prompt-control text (a forged Question/Answer
  * slot, a note to the judge) is "block" by rule, without asking. The command
  * reaches the judge only fenced and JSON-encoded, see `guardState`. The
- * harness calls it behind EIGHT_SYSTEM_ONE=1, see
- * packages/permissions/system-one-gate.ts.
+ * harness calls it on every shell command (on by default, EIGHT_SYSTEM_ONE=0
+ * turns it off), see packages/permissions/system-one-gate.ts.
  */
 
 import { createHash } from "node:crypto";

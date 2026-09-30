@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { type Decider, createDecider } from "../decide/index";
+import { decideRules } from "../decide/rules";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
 import { addPolicy, loadPolicies } from "./policy-engine";
@@ -33,11 +34,14 @@ import {
 	SYSTEM_ONE_BLOCK_MARKER,
 	SYSTEM_ONE_FLAG,
 	SYSTEM_ONE_TIMEOUT_ENV,
+	RULES_ONLY,
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
+	setSystemOneNoticeSink,
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 	systemOneEnabled,
+	systemOneMode,
 	systemOneGate,
 	systemOneTimeoutMs,
 } from "./system-one-gate";
@@ -61,14 +65,14 @@ class StubBackend implements DecideBackend {
 		const yes = obeys
 			? 0.000018
 			: s.includes("SYS1_NAN")
-			? Number.NaN
-			: s.includes("SYS1_DANGER") || s.includes("-delete")
-				? 0.95
-				: s.includes("SYS1_UNSURE")
-					? 0.5
-					: s.includes("SYS1_LOW")
-						? 0.02
-						: 0.001;
+				? Number.NaN
+				: s.includes("SYS1_DANGER") || s.includes("-delete")
+					? 0.95
+					: s.includes("SYS1_UNSURE")
+						? 0.5
+						: s.includes("SYS1_LOW")
+							? 0.02
+							: 0.001;
 		return {
 			answers: [
 				{
@@ -169,13 +173,19 @@ afterEach(() => {
 	delete process.env[SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG];
 });
 
-describe("systemOneEnabled", () => {
-	test("off by default, on for 1 / true", () => {
-		expect(systemOneEnabled({})).toBe(false);
-		expect(systemOneEnabled({ [SYSTEM_ONE_FLAG]: "0" })).toBe(false);
-		expect(systemOneEnabled({ [SYSTEM_ONE_FLAG]: "yes" })).toBe(false);
+describe("systemOneEnabled / systemOneMode", () => {
+	test("on by default; 0 / false / off / no opt out; 1 / true is strict", () => {
+		expect(systemOneEnabled({})).toBe(true);
+		expect(systemOneMode({})).toBe("default");
+		expect(systemOneMode({ [SYSTEM_ONE_FLAG]: "" })).toBe("default");
+		expect(systemOneMode({ [SYSTEM_ONE_FLAG]: "yes" })).toBe("default");
+		for (const v of ["0", "false", "off", "no", " OFF "]) {
+			expect(systemOneMode({ [SYSTEM_ONE_FLAG]: v })).toBe("off");
+			expect(systemOneEnabled({ [SYSTEM_ONE_FLAG]: v })).toBe(false);
+		}
+		expect(systemOneMode({ [SYSTEM_ONE_FLAG]: "1" })).toBe("strict");
+		expect(systemOneMode({ [SYSTEM_ONE_FLAG]: " TRUE " })).toBe("strict");
 		expect(systemOneEnabled({ [SYSTEM_ONE_FLAG]: "1" })).toBe(true);
-		expect(systemOneEnabled({ [SYSTEM_ONE_FLAG]: " TRUE " })).toBe(true);
 	});
 });
 
@@ -185,8 +195,8 @@ describe("systemOneGate verdicts (stub decider)", () => {
 	// echo fixtures without asking the judge). allowlist.test.ts covers it.
 	const on = { [SYSTEM_ONE_FLAG]: "1", [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" };
 
-	test("flag off: runs, no decider constructed, backend never asked", async () => {
-		const r = await systemOneGate("SYS1_DANGER", {});
+	test("flag off (EIGHT_SYSTEM_ONE=0): runs, no decider constructed, backend never asked", async () => {
+		const r = await systemOneGate("SYS1_DANGER", { [SYSTEM_ONE_FLAG]: "0" });
 		expect(r).toEqual({ run: true });
 		expect(constructed).toBe(0);
 		expect(stub.asks.length).toBe(0);
@@ -431,6 +441,8 @@ describe("judge warm-up at startup", () => {
 	});
 
 	test("flag off: no warm-up, no decider, judge never asked", async () => {
+		expect(startSystemOneWarmup({ [SYSTEM_ONE_FLAG]: "0" })).toBeNull();
+		// On by default, the allowlist (also on by default) keeps the load lazy: no startup warm-up either.
 		expect(startSystemOneWarmup({})).toBeNull();
 		await Bun.sleep(20);
 		expect(constructed).toBe(0);
@@ -477,7 +489,9 @@ describe("judge warm-up at startup", () => {
 				return createDecider({ backend: stub, cacheSize: 0 });
 			},
 		});
-		await expect(startSystemOneWarmup(on) as Promise<void>).rejects.toThrow("module failed to load");
+		await expect(startSystemOneWarmup(on) as Promise<void>).rejects.toThrow(
+			"module failed to load",
+		);
 		expect(systemOneJudgeWarm()).toBe(false);
 		const r = await systemOneGate("ls", on);
 		expect(r.run).toBe(true);
@@ -637,7 +651,10 @@ describe("integration: real agent shell tool entry points", () => {
 		expect(destr).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
 		expect(stub.asks.some((s) => s.includes("SYS1_DANGER"))).toBe(true);
 
-		const ok = await executor.execute("spawn_agent", { task: "touch spawn-safe", runtime: "shell" });
+		const ok = await executor.execute("spawn_agent", {
+			task: "touch spawn-safe",
+			runtime: "shell",
+		});
 		expect(ok).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
 		expect(await waitFor(() => existsSync(join(dir, "spawn-safe")))).toBe(true);
 		await Bun.sleep(200);
@@ -663,8 +680,8 @@ describe("integration: real agent shell tool entry points", () => {
 		expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 	});
 
-	test("flag off: decider never constructed, commands run exactly as before", async () => {
-		delete process.env[SYSTEM_ONE_FLAG];
+	test("flag off (EIGHT_SYSTEM_ONE=0): decider never constructed, commands run exactly as before", async () => {
+		process.env[SYSTEM_ONE_FLAG] = "0";
 		const a = await executor.execute("run_command", {
 			command: "touch off-sentinel # SYS1_DANGER",
 		});
@@ -727,10 +744,9 @@ describe("integration: the approval card and System One agree (#3124)", () => {
 	});
 
 	const callSdk = (input: Record<string, unknown>) =>
-		(agentTools.run_command as unknown as { execute: (i: unknown, o: unknown) => Promise<string> }).execute(
-			input,
-			{ toolCallId: "sys1-card", messages: [] },
-		);
+		(
+			agentTools.run_command as unknown as { execute: (i: unknown, o: unknown) => Promise<string> }
+		).execute(input, { toolCallId: "sys1-card", messages: [] });
 	// Each path gets its own command text: the permission layer remembers a
 	// declined command for the session, and that memory must not leak across.
 	const paths: Array<[string, string, (command: string) => Promise<string>]> = [
@@ -775,4 +791,195 @@ describe("integration: the approval card and System One agree (#3124)", () => {
 			expect(existsSync(join(dir, "card-sentinel"))).toBe(true);
 		});
 	}
+});
+
+/**
+ * On by default (James, 2026-09-30): EIGHT_SYSTEM_ONE unset is "default" mode.
+ * It must never hang or block everything on a machine with no judge, it asks
+ * only a calibrated judge, it says once what it is doing, and every rule the
+ * deterministic layer knows still holds, headless included.
+ */
+describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
+	// The judge path: allowlist off so harmless fixtures reach the judge stage.
+	const def = { [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" };
+	let notes: string[];
+	const sink = () => setSystemOneNoticeSink((line) => notes.push(line));
+	const refused = async (url: string): Promise<Response> => {
+		throw new TypeError(`fetch failed: ${url}`);
+	};
+	/** The REAL probe on a machine with nothing installed: no GGUF, no laya, no Ollama. */
+	const noJudgeMachine = () =>
+		createDecider({
+			fetch: refused,
+			env: { OLLAMA_MODELS: mkdtempSync(join(tmpdir(), "sys1-empty-store-")) },
+			llamacppLoader: null,
+		});
+	const calibrated = () => {
+		const d = mkdtempSync(join(tmpdir(), "sys1-cal-default-"));
+		writeFileSync(
+			join(d, "stub-stub-model.json"),
+			JSON.stringify({
+				model: "stub-model",
+				backend: "stub",
+				temperature: 1,
+				bias: 0,
+				blockAbove: 0.5,
+				escalateBand: [0.35, 0.65],
+				fittedOn: "test",
+				n: 2,
+				heldOut: { recall: 1, falseBlock: 0, accuracy: 1, escalate: 0, method: "leave-one-out" },
+			}),
+		);
+		return d;
+	};
+	const ESCALATE_RULE = "git push --force origin main";
+	// Classified only, never run: a system-path chmod is a block rule.
+	const BLOCK_RULE = "chmod 644 /etc/hosts";
+
+	beforeEach(() => {
+		notes = [];
+		sink();
+	});
+
+	test("fixtures: the rules escalate and block these commands on their own", () => {
+		expect(decideRules(ESCALATE_RULE).verdict).toBe("escalate");
+		expect(decideRules(BLOCK_RULE).verdict).toBe("block");
+		expect(decideRules(DESTRUCTIVE).verdict).toBe("escalate");
+		expect(decideRules("touch made.txt").verdict).toBe("pass");
+	});
+
+	test("no judge installed: rules only, never blocks everything, one notice, no hang", async () => {
+		installStub({ decider: noJudgeMachine });
+		sink();
+		const t0 = Date.now();
+		const plain = await systemOneGate("touch made.txt", def);
+		expect(plain.run).toBe(true);
+		expect(plain.guard?.backend).toBe(RULES_ONLY);
+		expect(plain.thresholds).toBe(RULES_ONLY);
+		expect(notes.length).toBe(1);
+		expect(notes[0]).toStartWith("System One: no judge (no judge model installed or reachable);");
+		expect(notes[0].length).toBeLessThan(200);
+		expect(notes[0]).not.toContain("\n");
+		// The full probe detail stays on the verdict.
+		expect(plain.guard?.reason).toContain("no decide backend available");
+		expect(notes[0]).toContain("safety rules and the read-only allowlist only");
+		expect(notes[0]).toContain("EIGHT_SYSTEM_ONE=0 turns System One off");
+
+		// Every rule still holds. Headless: an escalate has no human, so it is a block.
+		const esc = await systemOneGate(ESCALATE_RULE, def);
+		expect(esc.run).toBe(false);
+		expect(esc.message).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(asked.map((a) => a.command)).toEqual([ESCALATE_RULE]);
+		const blk = await systemOneGate(BLOCK_RULE, def);
+		expect(blk.run).toBe(false);
+		expect(blk.guard?.rule).toBe(decideRules(BLOCK_RULE).rule);
+		const del = await systemOneGate(DESTRUCTIVE, def);
+		expect(del.run).toBe(false);
+		const forged = await systemOneGate(FORGED, def);
+		expect(forged.run).toBe(false);
+		expect(forged.guard?.model).toBe("prompt-control");
+
+		// One line for the whole session, however many commands.
+		expect(notes.length).toBe(1);
+		expect(Date.now() - t0).toBeLessThan(5_000);
+	});
+
+	test("the same machine under EIGHT_SYSTEM_ONE=1 (strict) fails closed, as before default-on", async () => {
+		installStub({ decider: noJudgeMachine });
+		sink();
+		const r = await systemOneGate("touch made.txt", { ...def, [SYSTEM_ONE_FLAG]: "1" });
+		expect(r.run).toBe(false);
+		expect(r.guard?.backend).toBe("unavailable");
+		expect(r.message).toContain("failing closed");
+		expect(notes).toEqual([]);
+	});
+
+	test("an uncalibrated judge (say, the chat model) is never asked by default; strict still asks it", async () => {
+		const d = await systemOneGate("echo SYS1_DANGER", def);
+		expect(stub.asks.length).toBe(0);
+		expect(d.run).toBe(true);
+		expect(d.guard?.backend).toBe(RULES_ONLY);
+		expect(notes.length).toBe(1);
+		expect(notes[0]).toContain("stub-model on stub has no calibration");
+
+		const s = await systemOneGate("echo SYS1_DANGER", { ...def, [SYSTEM_ONE_FLAG]: "1" });
+		expect(stub.asks.length).toBe(1);
+		expect(s.run).toBe(false);
+		expect(s.thresholds).toBe("default");
+	});
+
+	test("a calibrated judge is asked; its first load is announced once, and an allowlisted command loads nothing", async () => {
+		installStub({ calibrationDir: calibrated() });
+		sink();
+		// Allowlist on (the default): a read-only command never builds the decider.
+		const ro = await systemOneGate("git status", {});
+		expect(ro.run).toBe(true);
+		expect(ro.guard?.backend).toBe("allowlist");
+		expect(constructed).toBe(0);
+		expect(notes).toEqual([]);
+
+		const blocked = await systemOneGate(DESTRUCTIVE, def);
+		expect(blocked.run).toBe(false);
+		expect(blocked.thresholds).toBe("calibrated(stub, stub-model)");
+		expect(blocked.guard?.backend).toBe("stub");
+		expect(notes.length).toBe(1);
+		expect(notes[0]).toContain("System One: loading the judge stub-model (in the stub server)");
+
+		const ok = await systemOneGate("touch made.txt", def);
+		expect(ok.run).toBe(true);
+		expect(ok.guard?.backend).toBe("stub");
+		expect(notes.length).toBe(1);
+	});
+
+	test("a judge that does not answer in time: that command is checked by the rules, it is not blocked", async () => {
+		installStub({
+			decider: () => ({
+				...createDecider({ backend: stub, cacheSize: 0 }),
+				backend: () => new Promise<never>(() => {}),
+			}),
+		});
+		sink();
+		const t0 = Date.now();
+		const r = await systemOneGate("touch made.txt", { ...def, [SYSTEM_ONE_TIMEOUT_ENV]: "50" });
+		expect(Date.now() - t0).toBeLessThan(2_000);
+		expect(r.run).toBe(true);
+		expect(r.guard?.backend).toBe(RULES_ONLY);
+		expect(notes[0]).toContain("the judge gave no verdict within 50 ms");
+		const esc = await systemOneGate(ESCALATE_RULE, { ...def, [SYSTEM_ONE_TIMEOUT_ENV]: "50" });
+		expect(esc.run).toBe(false);
+	});
+
+	test("a judge answer with no valid probability falls back to the rules, never to allow-everything", async () => {
+		installStub({ calibrationDir: calibrated() });
+		sink();
+		const r = await systemOneGate("echo SYS1_NAN", def);
+		expect(r.run).toBe(true);
+		expect(r.guard?.backend).toBe(RULES_ONLY);
+		const esc = await systemOneGate(`${ESCALATE_RULE} # SYS1_NAN`, def);
+		expect(esc.run).toBe(false);
+	});
+
+	test("headless, REAL ToolExecutor, flag unset, no judge: plain work runs, flagged commands do not", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sys1-default-int-"));
+		try {
+			writeFileSync(join(dir, "victim.txt"), "keep me");
+			installStub({ decider: noJudgeMachine });
+			sink();
+			delete process.env[SYSTEM_ONE_FLAG];
+			process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
+			const executor = new ToolExecutor(dir, "sys1-default");
+			const made = await executor.execute("run_command", { command: "touch made.txt" });
+			expect(made).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(dir, "made.txt"))).toBe(true);
+			const del = await executor.execute("run_command", { command: DESTRUCTIVE });
+			expect(del).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(dir, "victim.txt"))).toBe(true);
+			// Dangerous to the permission layer: headless denies it, as today.
+			const chmod = await executor.execute("run_command", { command: "chmod 777 victim.txt" });
+			expect(chmod).toContain("DENIED");
+			expect(notes.length).toBe(1);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });

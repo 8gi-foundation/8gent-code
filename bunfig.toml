@@ -1,3 +1,4 @@
 [test]
 # Pin Ink's CI detection off so Ink render tests pass with and without CI=true.
-preload = ["./tests/preload-ink-interactive.ts"]
+# System One is on by default; the suite opts out so no test probes or loads this machine's judge.
+preload = ["./tests/preload-ink-interactive.ts", "./tests/preload-system-one-off.ts"]

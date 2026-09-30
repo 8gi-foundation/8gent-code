@@ -428,7 +428,7 @@ describe("llamacpp probe order", () => {
 
 	it("falls through to laya when the optional package is missing", async () => {
 		const store = makeStore([SELENE]);
-		const r = await detectBackend({ fetch: layaUp, env: { OLLAMA_MODELS: store }, llamacppLoader: missingLoader });
+		const r = await detectBackend({ fetch: layaUp, env: { OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: "0" }, llamacppLoader: missingLoader });
 		expect(r.backend).toBe("laya");
 		expect(r.notes[0]).toContain("node-llama-cpp not installed");
 	});
@@ -439,7 +439,7 @@ describe("llamacpp probe order", () => {
 			imported++;
 			return fakeModule(() => new Map(), newStats());
 		};
-		const r = await detectBackend({ fetch: refused, env: { OLLAMA_MODELS: path.join(tmp, "none") }, llamacppLoader: loader });
+		const r = await detectBackend({ fetch: refused, env: { OLLAMA_MODELS: path.join(tmp, "none"), EIGHT_S1_SHARED_JUDGE: "0" }, llamacppLoader: loader });
 		expect(imported).toBe(0);
 		expect(r.backend).toBe("none");
 		expect(r.notes[0]).toContain("llamacpp: no GGUF model");
@@ -454,7 +454,7 @@ describe("llamacpp probe order", () => {
 	it("an explicit model that is not a GGUF skips llamacpp and is served by name, never substituted", async () => {
 		const store = makeStore([SELENE, MLX]);
 		const { loader } = loaderFor(() => new Map());
-		const env = { OLLAMA_MODELS: store, EIGHT_DECIDE_MODEL: "qwen3.8:27b-mlx" };
+		const env = { OLLAMA_MODELS: store, EIGHT_DECIDE_MODEL: "qwen3.8:27b-mlx", EIGHT_S1_SHARED_JUDGE: "0" };
 		const ollamaUp = async (url: string): Promise<Response> => {
 			if (url.endsWith("/api/tags")) {
 				return Response.json({ models: [{ name: SELENE_NAME, size: 4_900 }, { name: "qwen3.8:27b-mlx", size: 18_000 }] });
@@ -542,15 +542,25 @@ describe("shared judge: one judge per machine", () => {
 		expect(fs.existsSync(path.join(import.meta.dir, "..", "calibration", `ollama-${SELENE_NAME.replace(/[/:]/g, "_")}.json`))).toBe(true);
 	});
 
-	it("without the flag nothing changes: llama.cpp in-process, the shared server is never asked", async () => {
+	it("opted out (0/false/off/no): llama.cpp in-process, the shared server is never asked", async () => {
 		const store = makeStore([SELENE]);
 		const { loader } = loaderFor(() => new Map());
 		const m = machine({ [LOCAL]: [SELENE_NAME] });
-		for (const flag of [undefined, "0", ""]) {
+		for (const flag of ["0", "false", "off", "no", " OFF "]) {
 			const r = await detectBackend({ fetch: m.fetch, env: { OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: flag }, llamacppLoader: loader });
 			expect(r.backend).toBe("llamacpp");
 		}
 		expect(m.seen).toEqual([]);
+	});
+
+	it("on by default: with the flag unset or empty, one shared judge serves the machine", async () => {
+		const store = makeStore([SELENE]);
+		const { loader } = loaderFor(() => new Map());
+		const m = machine({ [LOCAL]: [SELENE_NAME] });
+		for (const flag of [undefined, ""]) {
+			const r = await detectBackend({ fetch: m.fetch, env: { OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: flag }, llamacppLoader: loader });
+			expect([r.backend, r.model, r.shared]).toEqual(["ollama", SELENE_NAME, true]);
+		}
 	});
 
 	it("stays on this machine when the chat model's OLLAMA_HOST points at another box", async () => {
@@ -627,7 +637,7 @@ describe("shared judge: one judge per machine", () => {
 		expect((m.generated[0].options as Record<string, unknown>).num_ctx).toBe(SHARED_JUDGE_NUM_CTX);
 		expect(SHARED_JUDGE_NUM_CTX).toBe(4096);
 		m.generated.length = 0;
-		const plain = createDecider({ fetch: m.fetch, env: { OLLAMA_MODELS: store }, llamacppLoader: missingLoader });
+		const plain = createDecider({ fetch: m.fetch, env: { OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: "0" }, llamacppLoader: missingLoader });
 		await plain.noul("state", "p");
 		expect(m.generated[0].options).toEqual({ temperature: 0, num_predict: 1, seed: 1 });
 	});

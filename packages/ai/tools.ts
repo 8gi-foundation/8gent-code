@@ -1200,7 +1200,7 @@ async function runShellCommand(command: string): Promise<string> {
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
-	// System One (EIGHT_SYSTEM_ONE=1, off by default): it can only stop a
+	// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
 	// command, never allow one. It runs BEFORE the approval card (#3124), as in
 	// ToolExecutor.runCommand: a block is final and never follows a Y, and an
 	// escalate's own question is the card. One command, at most one card.
