@@ -61,7 +61,14 @@ function runProbe() {
 	const r = Bun.spawnSync(
 		["bun", path.join(import.meta.dir, "__tests__", "fixtures", "delegation-probe.ts"), dir],
 		{
-			env: { ...process.env, HOME: home, EIGHT_CHECK_AGENT_WAIT_MS: "10000" },
+			env: {
+				...process.env,
+				HOME: home,
+				// Permission config lives here, not under a HOME that Docker may ignore:
+				// the deny probe must never leak a rule into another test.
+				EIGHT_DATA_DIR: path.join(home, ".8gent"),
+				EIGHT_CHECK_AGENT_WAIT_MS: "10000",
+			},
 			stdout: "pipe",
 			stderr: "pipe",
 		},

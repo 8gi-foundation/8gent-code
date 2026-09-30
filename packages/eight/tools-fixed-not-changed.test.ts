@@ -49,6 +49,9 @@ function runProbe(mode?: "deny") {
 			env: {
 				...process.env,
 				HOME: home,
+				// Permission config lives here, not under a HOME that Docker may ignore:
+				// the deny probe must never leak a rule into another test.
+				EIGHT_DATA_DIR: path.join(home, ".8gent"),
 				EIGHT_CHECK_AGENT_WAIT_MS: "0",
 				EIGHT_VERIFY_TEST_TIMEOUT_MS: "1500",
 			},
