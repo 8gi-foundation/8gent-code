@@ -28,7 +28,7 @@ export interface Span {
 }
 
 export type Block =
-	| { kind: "para"; spans: Span[]; heading?: boolean }
+	| { kind: "para"; spans: Span[]; heading?: boolean; keepSpaces?: boolean }
 	| { kind: "item"; depth: number; marker: string; spans: Span[] }
 	| { kind: "code"; lang: string; lines: string[] }
 	| { kind: "blank" };
@@ -50,6 +50,8 @@ export const CODE_GUTTER = 2;
 const FENCE = /^\s*```\s*([\w+#.-]*)\s*$/;
 const ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
 const HEADING = /^#{1,6}\s+(.*)$/;
+/** Two or more leading spaces (not a list item, not a fence): hand-aligned text. */
+const INDENTED = /^ {2,}\S/;
 // A code span, or a bold run. Code is matched first at any position, so a
 // backtick inside ** ** still becomes a chip (parsed in the bold's own pass).
 const INLINE =
@@ -207,6 +209,12 @@ export function parseBlocks(content: string, opts: MarkdownOptions = {}): Block[
 			open.text += ` ${line.trim()}`;
 			continue;
 		}
+		// A line that starts indented is laid out by hand (label/value
+		// columns, a hanging list of values): it keeps its spaces.
+		if (INDENTED.test(line)) {
+			blocks.push({ kind: "para", keepSpaces: true, spans: parseInline(line, opts) });
+			continue;
+		}
 		blocks.push({ kind: "para", spans: parseInline(line, opts) });
 	}
 	closeItem();
@@ -257,9 +265,14 @@ export function chunkWord(word: string, width: number): string[] {
  * so it is never split across rows unless it is wider than a row itself; a
  * wrapped row never starts with a space (audit #12). Ink then draws each row
  * as it is, so the row count here is the row count on screen.
+ *
+ * `keepSpaces` is for hand-aligned lines (an indented label/value row): the
+ * indent and every run of spaces are kept as written, so columns line up
+ * (audit 2026-09-30, #6). A run that would start a wrapped row is dropped.
  */
-export function layoutLines(spans: Span[], width: number): Span[][] {
+export function layoutLines(spans: Span[], width: number, keepSpaces = false): Span[][] {
 	const w = Math.max(1, width);
+	if (keepSpaces) return layoutKeepingSpaces(spans, w);
 	type Tok = Span & { sp: boolean };
 	const toks: Tok[] = [];
 	let pendingSpace = false;
@@ -328,6 +341,42 @@ export function layoutLines(spans: Span[], width: number): Span[][] {
 	return lines;
 }
 
+/** layoutLines for a hand-aligned line: spaces kept, words never split unless wider than a row. */
+function layoutKeepingSpaces(spans: Span[], w: number): Span[][] {
+	const lines: Span[][] = [[]];
+	let col = 0;
+	for (const span of spans) {
+		const parts = span.code ? [span.text] : span.text.split(/( +)/).filter(Boolean);
+		for (const part of parts) {
+			const space = !span.code && part.startsWith(" ");
+			let len = [...part].length;
+			if (col + len > w && col > 0) {
+				lines.push([]);
+				col = 0;
+				if (space) continue;
+			}
+			const pieces = len > w ? chunkWord(part, w) : [part];
+			pieces.forEach((text, i) => {
+				if (i > 0) {
+					lines.push([]);
+					col = 0;
+				}
+				const piece: Span = { ...span, text };
+				push(lines[lines.length - 1], piece);
+				len = [...text].length;
+				col += len;
+			});
+		}
+	}
+	// A row that wrapped keeps no trailing run of spaces.
+	for (const row of lines) {
+		const last = row[row.length - 1];
+		if (last && !last.code) last.text = last.text.replace(/ +$/, "");
+		if (last && !last.text) row.pop();
+	}
+	return lines;
+}
+
 /** Text width a block's words wrap at, inside a column `width` wide. */
 export function blockWrapWidth(block: Block, width: number): number {
 	if (block.kind === "item") return Math.max(4, width - block.depth * INDENT_STEP - markerWidth(block.marker));
@@ -346,7 +395,8 @@ export function blockRows(block: Block, width: number): number {
 			return body + (block.lang ? 1 : 0);
 		}
 		default:
-			return layoutLines(block.spans, blockWrapWidth(block, width)).length;
+			return layoutLines(block.spans, blockWrapWidth(block, width), block.kind === "para" && block.keepSpaces)
+				.length;
 	}
 }
 
