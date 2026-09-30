@@ -25,6 +25,15 @@
  * The check never reads the reply's wording or punctuation, except for the
  * marker and to leave a question to the user alone.
  *
+ * A round where tools ran but every call failed or was refused counts as a
+ * stall trigger too (Rishi pilot run 2026-09-30_014230: run_command blocked on
+ * /dev/null by the path guard, then on semicolon chaining, then prose). The
+ * prose after it gets the check; when the round's refusals include a gate
+ * block, the check names the block reasons (blockedCheckMessage). A refused
+ * call is never progress, so it does not reset the consecutive count: a model
+ * that keeps getting blocked stops at MAX_CONSECUTIVE_CHECKS, and the answer
+ * gets a "[harness]" line naming the reasons (blockedStopNote).
+ *
  * A degenerate reply (qwen3.8 27B, pilot run 2026-09-30_010512: one line of
  * prose, then "[TOOL_CALL]" 144 times) never reaches the user or the model's
  * own history: the repeated junk is stripped from every reply (see
@@ -54,7 +63,12 @@
  * `run` functions do; this module itself stays glue-only.
  */
 
-import { checkClaims, claimFollowUpMessage, formatHarnessNote } from "./claim-check";
+import {
+	checkClaims,
+	claimFollowUpMessage,
+	formatHarnessNote,
+	isRefusedToolResult,
+} from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
 
@@ -344,9 +358,40 @@ export function overCapCallResult(requested: number): string {
 	);
 }
 
-/** executeTool's own failures, and tools' conventional error results. */
-function isErrorResult(result: string): boolean {
-	return /^\s*error\b/i.test(result);
+/**
+ * The short reason a gate gave for blocking a call, or null when the result is
+ * not a gate block ("[TOOLG8 BLOCKED] ... Reason: X Alternative: ...",
+ * "[BLOCKED] X. Use ... Command: ..."). Structural: reads the gate's own
+ * prefix and fields, never the model's prose.
+ */
+export function blockReason(result: string): string | null {
+	const m = /^\s*\[[^\]\n]*\bBLOCKED\b[^\]\n]*\]\s*([\s\S]*)$/i.exec(result);
+	if (!m) return null;
+	const body = m[1].trim();
+	const field = /\bReason:\s*([\s\S]*?)(?:\s+Alternative:[\s\S]*)?$/.exec(body);
+	let reason = field ? field[1] : body.split(/\s+Command:/)[0];
+	if (!field) reason = reason.split(/\.(?:\s|$)/)[0];
+	reason = reason.replace(/\s+/g, " ").replace(/\.$/, "").trim();
+	if (reason.length > 120) reason = `${reason.slice(0, 117)}...`;
+	return reason || "blocked";
+}
+
+/** The completion check sent after prose that follows an all-blocked round. */
+export function blockedCheckMessage(reasons: string[]): string {
+	return [
+		`Your last tool calls were blocked (${reasons.join("; ")}), so they did not run.`,
+		"Use a different approach (one command per run_command call, no chaining)",
+		`and continue: reply with only the tool_call block(s). Or, if every step is`,
+		`done, reply with your final summary starting with "${DONE_MARKER}".`,
+	].join("\n");
+}
+
+/** Appended when a turn stalls after blocked calls and the check budget is spent. */
+export function blockedStopNote(reasons: string[]): string {
+	return (
+		`[harness] Stopped: tool calls kept being blocked (${reasons.join("; ")}) ` +
+		"and the model neither found another way nor confirmed it was done."
+	);
 }
 
 /**
@@ -395,6 +440,14 @@ export async function runTextToolAgent(
 	let lastContent = "";
 	// Did the previous round run at least one tool that did not error?
 	let prevRoundHadSuccess = false;
+	// Did the previous round run tools that ALL failed or were refused?
+	let prevRoundAllRefused = false;
+	// Gate block reasons from the previous round, and since the last round
+	// that ran a tool successfully (deduped, in order).
+	let prevRoundBlockReasons: string[] = [];
+	let blockReasonsSinceProgress: string[] = [];
+	// Set when a stall after blocked calls ends the turn unchecked.
+	let stoppedOnBlocks = false;
 	// Completion checks sent this turn (capped at MAX_COMPLETION_CHECKS).
 	let checksSent = 0;
 	// Checks sent since the last round that ran a tool successfully (capped at
@@ -471,6 +524,7 @@ export async function runTextToolAgent(
 				// Nothing ran this round, so the next round no longer directly
 				// follows a successful tool round.
 				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
 				messages = [
 					...messages,
 					{ role: "assistant", content: replyText },
@@ -496,6 +550,7 @@ export async function runTextToolAgent(
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
 				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
 				messages = [
 					...messages,
 					{ role: "assistant", content: replyText },
@@ -513,27 +568,39 @@ export async function runTextToolAgent(
 			// a row without tool work between them, ten in the whole turn.
 			// Once the model has been told the protocol this turn, a DONE-marked
 			// reply after later tool rounds is taken at its word.
-			const freshStall = prevRoundHadSuccess && !(checksSent > 0 && hasDoneMarker(replyText));
+			// A round whose tools all failed or were blocked is a stall trigger
+			// too (run 014230): the prose after it is not a final answer either.
+			const freshStall =
+				(prevRoundHadSuccess || prevRoundAllRefused) &&
+				!(checksSent > 0 && hasDoneMarker(replyText));
 			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
+			const stalled = (freshStall || unansweredCheck) && !isQuestionToUser(replyText);
 			if (
-				(freshStall || unansweredCheck) &&
+				stalled &&
 				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
 				checksSent < MAX_COMPLETION_CHECKS &&
-				round < maxRounds &&
-				!isQuestionToUser(replyText)
+				round < maxRounds
 			) {
+				const checkMessage =
+					freshStall && prevRoundAllRefused && prevRoundBlockReasons.length > 0
+						? blockedCheckMessage(prevRoundBlockReasons)
+						: COMPLETION_CHECK_MESSAGE;
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
 				if (freshStall) preCheckContent = replyText;
 				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
 				messages = [
 					...messages,
 					{ role: "assistant", content: replyText },
-					{ role: "user", content: COMPLETION_CHECK_MESSAGE },
+					{ role: "user", content: checkMessage },
 				];
 				continue;
 			}
+			// A stall the budget no longer lets us check, with blocks since the
+			// last real progress: say so in the answer, never end silently.
+			if (stalled && blockReasonsSinceProgress.length > 0) stoppedOnBlocks = true;
 			// Model gave its final answer. Check it against the tool log once; a
 			// contradiction gets one follow-up while a round remains. A question
 			// to the user is left alone here (finish() still notes it).
@@ -544,6 +611,7 @@ export async function runTextToolAgent(
 					claimFollowUpSent = true;
 					awaitingCheckAnswer = false;
 					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
 					messages = [
 						...messages,
 						{ role: "assistant", content: replyText },
@@ -552,12 +620,17 @@ export async function runTextToolAgent(
 					continue;
 				}
 			}
-			return finish(answer, round);
+			const noted = stoppedOnBlocks
+				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)].filter(Boolean).join("\n\n")
+				: answer;
+			return finish(noted, round);
 		}
 
 		// Execute every requested tool and build a single labelled result block.
 		const resultParts: string[] = [];
 		prevRoundHadSuccess = false;
+		prevRoundBlockReasons = [];
+		let ranAny = false;
 		// The model resumed tools: a later stall is a fresh one (re-armed).
 		awaitingCheckAnswer = false;
 		const calls = turn.toolCalls;
@@ -584,10 +657,21 @@ export async function runTextToolAgent(
 			}
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
-			if (!isErrorResult(result)) {
+			ranAny = true;
+			// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
+			// progress, exactly like an "Error..." result.
+			if (!isRefusedToolResult(result)) {
 				prevRoundHadSuccess = true;
 				// Real tool work: the next stall starts a fresh run of checks.
 				checksWithoutProgress = 0;
+				blockReasonsSinceProgress = [];
+				stoppedOnBlocks = false;
+			} else {
+				const reason = blockReason(result);
+				if (reason !== null) {
+					if (!prevRoundBlockReasons.includes(reason)) prevRoundBlockReasons.push(reason);
+					if (!blockReasonsSinceProgress.includes(reason)) blockReasonsSinceProgress.push(reason);
+				}
 			}
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
@@ -598,6 +682,9 @@ export async function runTextToolAgent(
 					: "";
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
+
+		prevRoundAllRefused = ranAny && !prevRoundHadSuccess;
+		if (prevRoundHadSuccess) prevRoundBlockReasons = [];
 
 		if (abortedAt >= 0) {
 			// Aborted mid-round: every call not reached is logged as not run,
