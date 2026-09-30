@@ -46,7 +46,7 @@ export function narrateToolStart(toolName: string, args: Record<string, unknown>
 
 export function narrateToolEnd(toolName: string, success: boolean, durationMs: number): string {
 	const time = durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
-	if (!success) return "Failed — trying another approach...";
+	if (!success) return "Failed. Trying another approach...";
 
 	switch (toolName) {
 		case "run_command":

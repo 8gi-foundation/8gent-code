@@ -24,6 +24,7 @@
  * agent's own words.
  */
 
+import { type Span, clipSpans, parseInline } from "./inline-markdown.js";
 import { type PlanStep, applyPlanUpdate, settlePlan } from "./plan-state.js";
 import type { ToolTrailEntry, TrailStatus } from "./tool-trail.js";
 
@@ -36,6 +37,8 @@ export interface ResultRow {
 	verb: string;
 	/** Plan steps only: the rest of the step text, normal weight. */
 	text?: string;
+	/** Plan steps with inline code: `text` as spans, code spans drawn as chips. */
+	spans?: Span[];
 	/** Path, command or query, drawn as a chip. */
 	chip?: string;
 	/** Quiet trailing note: "5 files", "×3", "exit 1". */
@@ -147,13 +150,40 @@ export function turnPlan(trail: ToolTrailEntry[]) {
 	return [];
 }
 
+/**
+ * One plan step as a row. The step is the agent's own words, read through
+ * the chat's inline markdown (#3069): `code` becomes a chip, like the path
+ * chips on call rows, and **bold** loses its stars. The first plain word is
+ * the bold verb; a step that opens with code has no verb, only its spans.
+ */
+function planRow(step: PlanStep): ResultRow {
+	const status: ResultStatus =
+		step.status === "done" ? "ok" : step.status === "failed" ? "fail" : "pending";
+	const spans = parseInline(step.text.trim().replace(/\s+/g, " "));
+	let verb = "";
+	let rest = spans;
+	const head = spans[0];
+	if (head && !head.code) {
+		const m = head.text.match(/^(\S+)\s*([\s\S]*)$/);
+		if (m) {
+			verb = m[1];
+			rest = m[2] ? [{ ...head, text: m[2] }, ...spans.slice(1)] : spans.slice(1);
+		}
+	}
+	// Plain text when nothing in it is code, so the row stays one string.
+	if (!rest.some((s) => s.code)) {
+		const text = rest
+			.map((s) => s.text)
+			.join("")
+			.trim();
+		return { kind: "plan", status, verb, text: text || undefined, count: 1 };
+	}
+	const text = rest.map((s) => (s.code ? s.text.slice(1, -1) : s.text)).join("");
+	return { kind: "plan", status, verb, text, spans: rest, count: 1 };
+}
+
 function planRows(plan: ReadonlyArray<PlanStep>): ResultRow[] {
-	return plan.map((s) => {
-		const [first, ...rest] = s.text.split(/\s+/);
-		const status: ResultStatus =
-			s.status === "done" ? "ok" : s.status === "failed" ? "fail" : "pending";
-		return { kind: "plan", status, verb: first ?? "", text: rest.join(" ") || undefined, count: 1 };
-	});
+	return plan.map(planRow);
 }
 
 function toolRows(trail: ToolTrailEntry[]): ResultRow[] {
@@ -315,6 +345,8 @@ export function stepsShown(rows: ReadonlyArray<ResultRow>): number {
 export interface FittedRow {
 	verb: string;
 	text?: string;
+	/** The step text as spans, cut to fit, when the step holds inline code. */
+	spans?: Span[];
 	chip?: string;
 	note?: string;
 	/** Spaces before the note: 1 after a chip, 2 otherwise. */
@@ -338,7 +370,12 @@ export function fitResultRow(row: ResultRow, width: number): FittedRow {
 	const verb = clip(row.verb, room);
 	room -= verb.length;
 	const out: FittedRow = { verb };
-	if (row.text && room > 1) {
+	// A step with no verb (it opens with code) needs no space before its text.
+	const sep = verb ? 1 : 0;
+	if (row.spans && room > sep) {
+		out.spans = clipSpans(row.spans, room - sep);
+		room -= sep + out.spans.reduce((n, s) => n + [...s.text].length, 0);
+	} else if (row.text && room > 1) {
 		out.text = clip(row.text, room - 1);
 		room -= 1 + out.text.length;
 	}

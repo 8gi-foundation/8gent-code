@@ -6,7 +6,7 @@
 
 ## Philosophy
 
-A butler who doesn't know your preferences isn't a butler—they're just staff. 8gent won't rest until it understands:
+A butler who doesn't know your preferences isn't a butler. They're just staff. 8gent won't rest until it understands:
 
 - Your projects and priorities
 - Your communication style

@@ -110,7 +110,25 @@ export function TurnResults({
 							<Text bold={!quiet} color={quiet ? t.muted : t.textPrimary}>
 								{fit.verb}
 							</Text>
-							{fit.text ? (
+							{fit.spans ? (
+								<>
+									{fit.verb ? <Text> </Text> : null}
+									{/* spans are positional output of clipSpans; never reordered. */}
+									{fit.spans.map((s, j) =>
+										s.code ? (
+											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+											<Text key={j} color={t.textPrimary} backgroundColor={t.border}>
+												{s.text}
+											</Text>
+										) : (
+											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+											<Text key={j} color={quiet ? t.muted : t.textSecondary}>
+												{s.text}
+											</Text>
+										),
+									)}
+								</>
+							) : fit.text ? (
 								<Text color={quiet ? t.muted : t.textSecondary}>{` ${fit.text}`}</Text>
 							) : null}
 							{fit.chip ? (

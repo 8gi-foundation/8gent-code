@@ -16,6 +16,7 @@ import type {
 	AgentRow as ActivityRailAgentRow,
 } from "../components/ActivityRail.js";
 import type { Message } from "../app.js";
+import { plainInline } from "./inline-markdown.js";
 import type { PlanStep } from "./plan-state.js";
 
 /**
@@ -189,7 +190,8 @@ export function deriveActiveTasks(
 	const detail = `${done}/${total}`;
 	const active = plan.filter((s) => s.status === "active");
 	if (active.length > 0) {
-		return active.map((s) => ({ id: s.id, label: s.text, progress, detail }));
+		// The rail has no room for a chip, so inline markers come out.
+		return active.map((s) => ({ id: s.id, label: plainInline(s.text), progress, detail }));
 	}
 	return [{ id: "plan-tally", label: `${done} of ${total} steps done`, progress, detail }];
 }

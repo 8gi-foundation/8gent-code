@@ -303,7 +303,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "projects",
 		question:
-			"What are you working on? (one short line, optional - press Enter to skip)",
+			"What are you working on? (one short line, optional. Press Enter to skip.)",
 		placeholder: "One short line, or Enter to skip",
 		processor: (answer, user) => {
 			const desc = answer.trim();
@@ -484,7 +484,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		step: "voice",
 		question:
 			"What should your 8gent be called? (default: Eight)\n\n" +
-			"This is your personal AI - name it whatever you want.\n" +
+			"This is your personal AI. Name it whatever you want.\n" +
 			"Press Enter for the default, or type a name:",
 		processor: (answer, user) => {
 			const agentName = answer.trim() || "Eight";
@@ -508,7 +508,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		step: "voice-services",
 		question:
 			"Your 8gent speaks with your computer's own natural voice.\n\n" +
-			"Optionally, you can also install KittenTTS - a small, free, local\n" +
+			"Optionally, you can also install KittenTTS, a small, free, local\n" +
 			"text-to-speech model. No API keys, runs on your machine.\n" +
 			"Download size: ~200MB (model + dependencies)",
 		kind: "select",

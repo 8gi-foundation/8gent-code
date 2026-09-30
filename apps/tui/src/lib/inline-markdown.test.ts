@@ -7,7 +7,9 @@ import {
 	parseInline,
 	spanText,
 	chunkWord,
+	clipSpans,
 	layoutLines,
+	plainInline,
 } from "./inline-markdown.js";
 
 describe("parseInline", () => {
@@ -134,5 +136,30 @@ describe("row counts match the layout", () => {
 	test("markdownRows sums blocks, and never counts less than one row", () => {
 		expect(markdownRows("", 40)).toBe(1);
 		expect(markdownRows("Hi **there**\n\n- a\n- b", 40)).toBe(4);
+	});
+});
+
+describe("plainInline and clipSpans (#3109): plan steps outside the chat", () => {
+	test("plainInline drops the backticks and stars, keeps the words", () => {
+		expect(plainInline("Read `packages/decide/index.ts` and **fix** it")).toBe(
+			"Read packages/decide/index.ts and fix it",
+		);
+		expect(plainInline("`bun test` passes")).toBe("bun test passes");
+		expect(plainInline("no markers here")).toBe("no markers here");
+		// An unmatched backtick is the agent's own text: it stays.
+		expect(plainInline("a lone ` tick")).toBe("a lone ` tick");
+	});
+
+	test("clipSpans fits the width exactly, a cut chip keeps its padding", () => {
+		const spans = parseInline("run `packages/decide/index.ts` now");
+		const whole = spanText(spans).length;
+		expect(spanText(clipSpans(spans, whole))).toBe(spanText(spans));
+		for (const w of [1, 3, 4, 6, 10, 20]) {
+			const cut = clipSpans(spans, w);
+			expect([...spanText(cut)].length).toBeLessThanOrEqual(w);
+		}
+		const cut = clipSpans(spans, 12);
+		expect(cut.at(-1)).toEqual({ text: " packa… ", code: true });
+		expect(spanText(cut)).toBe("run  packa… ");
 	});
 });

@@ -882,7 +882,7 @@ export function App({
 	const voice = useVoiceInput({
 		onTranscript: (text) => {
 			setVoiceTranscript(text);
-			addSystemMessage(`Transcribed: "${text}" — edit or press Enter to send`);
+			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 		},
 	});
 
@@ -2640,7 +2640,7 @@ export function App({
 									)
 									.join("\n")
 							: "  None found locally. Try: ollama pull qwen2.5-vl"
-					}\n\nCommands:\n  /vision model <name>   — Set default vision model\n  /vision ocr <name>     — Set OCR model (or "auto")\n  /vision on|off         — Enable/disable vision\n  /vision pull           — Show recommended models to pull`,
+					}\n\nCommands:\n  /vision model <name>   Set default vision model\n  /vision ocr <name>     Set OCR model (or "auto")\n  /vision on|off         Enable/disable vision\n  /vision pull           Show recommended models to pull`,
 				);
 			} else if (sub === "model" && args[1]) {
 				const model = args.slice(1).join(" ");
@@ -2670,10 +2670,10 @@ export function App({
 				const recommended = getRecommendedOCRModels();
 				addSystemMessage(
 					`Recommended vision/OCR models to pull:\n\n${recommended
-						.map((m: any) => `  ollama pull ${m.model}  — ${m.description} (${m.size})`)
+						.map((m: any) => `  ollama pull ${m.model}  ${m.description} (${m.size})`)
 						.join(
 							"\n",
-						)}\n\nGeneral vision (default):\n  ollama pull qwen2.5-vl     — Best general vision + OCR (~5GB)\n  ollama pull minicpm-v       — Mobile-friendly (~5GB)\n  ollama pull llava           — Classic, widely supported (~4GB)\n  ollama pull moondream       — Tiny and fast (~1.7GB)`,
+						)}\n\nGeneral vision (default):\n  ollama pull qwen2.5-vl     Best general vision + OCR (~5GB)\n  ollama pull minicpm-v      Mobile-friendly (~5GB)\n  ollama pull llava          Classic, widely supported (~4GB)\n  ollama pull moondream      Tiny and fast (~1.7GB)`,
 				);
 			} else {
 				addSystemMessage(
@@ -3214,7 +3214,7 @@ export function App({
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
+						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
 						break;
 					}
 					const convEntries: ConversationEntry[] = localSessions.map((s) => ({
@@ -3263,7 +3263,7 @@ export function App({
 					// Show interactive session picker from local sessions
 					const resumeSessions = sessionMgr.list(50);
 					if (resumeSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
+						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
 						break;
 					}
 					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
@@ -3328,10 +3328,10 @@ export function App({
 							);
 						} else {
 							const lines = orchestration.agents.map(
-								(a) => `  ${a.icon} ${a.name} (${a.role}) — ${a.status}\n    Task: ${a.task}`,
+								(a) => `  ${a.icon} ${a.name} (${a.role}): ${a.status}\n    Task: ${a.task}`,
 							);
 							addSystemMessage(
-								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator) — running\n${lines.join("\n")}`,
+								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
 							);
 						}
 					} else if (agentSub === "spawn") {
@@ -3369,7 +3369,7 @@ export function App({
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
-							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       — Show active agents\n  /agent spawn <p>  — Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  — Kill an agent\n  /agent auto       — Toggle auto-spawn`,
+							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active agents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an agent\n  /agent auto       Toggle auto-spawn`,
 						);
 					}
 					break;
@@ -3492,7 +3492,7 @@ export function App({
 					} else {
 						const cfg = adhdAudio.config;
 						addSystemMessage(
-							`ADHD Mode — your focus toolkit\n\n  /adhd              Toggle text mode\n  /adhd on|off       Enable/disable\n\n  Audio:\n  /adhd lofi         Lofi beats\n  /adhd rainsound    Rain sounds\n  /adhd whitenoise   White noise\n  /adhd ambient      Ambient synths\n  /adhd classical    Soft piano\n  /adhd stop         Stop audio\n\n  Config:\n  /adhd config       Show current settings\n  /adhd set <k> <v>  Change a setting\n  /adhd regen        Clear cache & regenerate\n\nStatus: text=${adhdMode ? "on" : "off"} · audio=${adhdAudio.isPlaying ? adhdAudio.current : "off"} · duration=${cfg.duration}s`,
+							`ADHD Mode: your focus toolkit\n\n  /adhd              Toggle text mode\n  /adhd on|off       Enable/disable\n\n  Audio:\n  /adhd lofi         Lofi beats\n  /adhd rainsound    Rain sounds\n  /adhd whitenoise   White noise\n  /adhd ambient      Ambient synths\n  /adhd classical    Soft piano\n  /adhd stop         Stop audio\n\n  Config:\n  /adhd config       Show current settings\n  /adhd set <k> <v>  Change a setting\n  /adhd regen        Clear cache & regenerate\n\nStatus: text=${adhdMode ? "on" : "off"} · audio=${adhdAudio.isPlaying ? adhdAudio.current : "off"} · duration=${cfg.duration}s`,
 						);
 					}
 					break;
@@ -3505,7 +3505,7 @@ export function App({
 					if (!sub || sub === "status") {
 						const cfg = router.getConfig();
 						const lines = [
-							`Task Router — ${cfg.enabled ? "enabled" : "disabled"}`,
+							`Task Router: ${cfg.enabled ? "enabled" : "disabled"}`,
 							"",
 							"Slot Assignments:",
 							`  code:      ${cfg.slots.code.model} (${cfg.slots.code.provider})`,
@@ -3589,7 +3589,7 @@ export function App({
 						addSystemMessage("Scanning Ollama models...");
 						router.autoAssign().then((changes) => {
 							if (changes.length === 0) {
-								addSystemMessage("No changes — slots already optimal.");
+								addSystemMessage("No changes. Slots are already optimal.");
 							} else {
 								addSystemMessage(`Auto-assigned:\n${changes.map((c) => `  ${c}`).join("\n")}`);
 							}
@@ -3910,7 +3910,7 @@ export function App({
 							} else {
 								musicAudio.setConfig({ [configKey]: numVal } as any);
 								addSystemMessage(
-									`${configKey} set to ${numVal}. Cache cleared — next play regenerates.`,
+									`${configKey} set to ${numVal}. Cache cleared, so the next play regenerates.`,
 								);
 							}
 						}
@@ -4200,7 +4200,7 @@ export function App({
 				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
-						addSystemMessage("No agent active — evidence requires a running session.");
+						addSystemMessage("No agent active. Evidence needs a running session.");
 						break;
 					}
 					const evidence = agent.getSessionEvidence();
@@ -4326,7 +4326,7 @@ export function App({
 							: `\nVoice Chat: Inactive${backendLabel}`;
 						const status = voice.isAvailable
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
-							: `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
+							: `Voice: Not available (${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"})`;
 						addSystemMessage(status);
 					} else if (args[0] === "stop") {
 						if (voiceChat.isActive) {
@@ -4362,11 +4362,11 @@ export function App({
 					} else {
 						addSystemMessage(
 							"Voice commands:\n" +
-								"  /voice chat    — Start/stop voice conversation mode\n" +
-								"  /voice record  — Toggle STT recording (or press Ctrl+R)\n" +
-								"  /voice status  — Check voice system status\n" +
-								"  /voice stop    — Stop voice chat mode\n" +
-								"  /voice on|off  — Toggle TTS output",
+								"  /voice chat    Start/stop voice conversation mode\n" +
+								"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
+								"  /voice status  Check voice system status\n" +
+								"  /voice stop    Stop voice chat mode\n" +
+								"  /voice on|off  Toggle TTS output",
 						);
 					}
 					break;
@@ -4383,14 +4383,14 @@ export function App({
 								return;
 							}
 							const lines = [
-								`${skills.length} skills — type the slash command to run (same as injecting that skill prompt):`,
+								`${skills.length} skills. Type a slash command to run one (same as injecting that skill prompt):`,
 							];
 							for (const skill of skills.slice(0, 45)) {
 								const d =
 									skill.description.length > 85
 										? `${skill.description.slice(0, 82)}…`
 										: skill.description;
-								lines.push(`  /${skill.name} — ${d}`);
+								lines.push(`  /${skill.name}  ${d}`);
 							}
 							if (skills.length > 45) {
 								lines.push(`  … and ${skills.length - 45} more`);
@@ -5130,7 +5130,7 @@ export function App({
 			const q = messageQueuesRef.current.get(tabId) ?? [];
 			q.push(bubbleContent);
 			messageQueuesRef.current.set(tabId, q);
-			addSystemMessage("Queued — will send after current task completes.");
+			addSystemMessage("Queued. It sends when the current task finishes.");
 			return;
 		}
 
@@ -5543,7 +5543,7 @@ export function App({
 							}}
 							onClose={closeTabView}
 							onGenerate={(prompt) => {
-								addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
+								addSystemMessage(`Custom gen: "${prompt}". Use /music gen ${prompt}`);
 								closeTabView();
 							}}
 						/>
@@ -5819,7 +5819,7 @@ export function App({
 						}}
 						onClose={() => setViewMode("chat")}
 						onGenerate={(prompt) => {
-							addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
+							addSystemMessage(`Custom gen: "${prompt}". Use /music gen ${prompt}`);
 							setViewMode("chat");
 						}}
 					/>

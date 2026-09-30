@@ -167,3 +167,17 @@ describe("PlanPanel render", () => {
 		expect(last).not.toContain("done");
 	});
 });
+
+describe("PLAN column: inline markers (#3109)", () => {
+	test("a step with `code` draws its words, not the backticks", async () => {
+		const steps: PlanStep[] = [
+			{ id: "a", text: "Read `src/app.ts`", status: "done" },
+			{ id: "b", text: "Run `bun test` and **fix** it", status: "active" },
+		];
+		const last = (await frames(<PlanPanel steps={steps} running={false} width={30} animate={false} />)).at(-1) ?? "";
+		expect(last).toContain("Read src/app.ts");
+		expect(last).toContain("Run bun test and fix it");
+		expect(last).not.toContain("`");
+		expect(last).not.toContain("**");
+	});
+});

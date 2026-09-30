@@ -156,7 +156,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 			command:
 				"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup --no-venv",
 			notes:
-				"Hermes needs Python ≥ 3.11 (anaconda's default 3.10 won't work — use pyenv or brew install python@3.11). Installer symlinks `hermes` into ~/.local/bin; add it to PATH if needed. After install, run `hermes setup` or `hermes model` outside the TUI to configure a provider — without that, /spawn'd Hermes tabs will fail with auth errors (Bedrock is the default provider).",
+				"Hermes needs Python ≥ 3.11 (anaconda's default 3.10 won't work; use pyenv or brew install python@3.11). Installer symlinks `hermes` into ~/.local/bin; add it to PATH if needed. After install, run `hermes setup` or `hermes model` outside the TUI to configure a provider. Without that, /spawn'd Hermes tabs will fail with auth errors (Bedrock is the default provider).",
 		},
 	},
 	openclaw: {
@@ -200,7 +200,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		install: {
 			command: "npm install -g --prefix=$HOME/.npm-global @mariozechner/pi-coding-agent",
 			notes:
-				"Binary at ~/.npm-global/bin/pi. Add `~/.npm-global/bin` to PATH if needed. Default provider is Google (Gemini) — set GEMINI_API_KEY, or override with --provider/--model and the matching API key env var (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY).",
+				"Binary at ~/.npm-global/bin/pi. Add `~/.npm-global/bin` to PATH if needed. Default provider is Google (Gemini). Set GEMINI_API_KEY, or override with --provider/--model and the matching API key env var (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY).",
 		},
 	},
 	"8gent": {
@@ -361,7 +361,7 @@ export async function ensureInstalled(
 		onLine?.(`${preset.command}: not installed and no auto-install recipe is configured.`, "info");
 		return false;
 	}
-	onLine?.(`${preset.command}: not installed — running ${preset.install.command}`, "info");
+	onLine?.(`${preset.command}: not installed, running ${preset.install.command}`, "info");
 	const result = await installAgent(preset, (line, source) => onLine?.(line, source));
 	if (!result.ok) {
 		onLine?.(`Install failed: ${result.error ?? "unknown error"}`, "info");
