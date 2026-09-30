@@ -13,9 +13,15 @@
  * then the route entirely, then the ctx meter. The token count stays. When
  * even that leaves too little room, the clock after "finished" goes before
  * the word does.
+ *
+ * After a reroute the route is the model that ran, and the model that was
+ * asked for follows it as "(asked eight-1.0-q3:14b)" (#3102). That note is
+ * the first thing to give way, so a cut never leaves half a name that reads
+ * like the model that ran.
  */
 
 import { cellWidth, truncateMiddle } from "./header-layout.js";
+import { askedNote } from "./model-truth.js";
 
 /** Columns the state label and the mode take on the left. */
 export const NOW_LABEL_WIDTH = 22;
@@ -40,6 +46,8 @@ export interface NowStripInput {
 	/** The same state without its clock, used when the clock does not fit. */
 	middleShort?: string;
 	route: string;
+	/** The configured model when a reroute ran the turn on `route` instead. */
+	asked?: string;
 	tokens: string;
 }
 
@@ -47,16 +55,19 @@ export interface NowStripFit {
 	middle: string;
 	/** "" when the route is dropped. */
 	route: string;
+	/** The "(asked ...)" note, "" when absent or dropped. */
+	asked: string;
 	/** False when the meter is dropped. */
 	meter: boolean;
 	/** Columns the right cluster takes. */
 	rightWidth: number;
 }
 
-function rightWidth(route: string, meter: boolean, tokens: string): number {
+function rightWidth(route: string, meter: boolean, tokens: string, asked = ""): number {
 	const routeW = route ? cellWidth(route) : 0;
+	const askedW = asked ? 1 + cellWidth(asked) : 0;
 	const meterW = meter ? CTX_LABEL + METER_CELLS : 0;
-	return routeW + meterW + 1 + cellWidth(tokens);
+	return routeW + askedW + meterW + 1 + cellWidth(tokens);
 }
 
 /** Fit the strip into `width` columns. */
@@ -68,28 +79,33 @@ export function fitNowStrip(input: NowStripInput): NowStripFit {
 	const want = cellWidth(middle);
 
 	const fits = (r: string, m: boolean, mid: number) => rightWidth(r, m, tokens) + mid <= room;
+	const asked = route && input.asked ? askedNote(input.asked) : "";
 
-	// 1. Everything whole.
-	if (fits(route, true, want)) return { middle, route, meter: true, rightWidth: rightWidth(route, true, tokens) };
+	// 1. Everything whole, the asked note included.
+	if (asked && rightWidth(route, true, tokens, asked) + want <= room) {
+		return { middle, route, asked, meter: true, rightWidth: rightWidth(route, true, tokens, asked) };
+	}
+	// 1b. The asked note goes first; from here on the route is the model that ran.
+	if (fits(route, true, want)) return { middle, route, asked: "", meter: true, rightWidth: rightWidth(route, true, tokens) };
 	// 2. The route cut in the middle so the full middle text fits.
 	if (route) {
 		const routeRoom = room - want - rightWidth("", true, tokens);
 		if (routeRoom >= ROUTE_MIN) {
 			const r = truncateMiddle(route, routeRoom);
-			return { middle, route: r, meter: true, rightWidth: rightWidth(r, true, tokens) };
+			return { middle, route: r, asked: "", meter: true, rightWidth: rightWidth(r, true, tokens) };
 		}
 	}
 	// 3. No route, then no meter either, the full middle text kept.
 	for (const meter of [true, false]) {
-		if (fits("", meter, want)) return { middle, route: "", meter, rightWidth: rightWidth("", meter, tokens) };
+		if (fits("", meter, want)) return { middle, route: "", asked: "", meter, rightWidth: rightWidth("", meter, tokens) };
 	}
 	// 4. The middle cut down to its protected head (a long active step).
 	for (const meter of [true, false]) {
 		if (need < want && fits("", meter, need)) {
-			return { middle, route: "", meter, rightWidth: rightWidth("", meter, tokens) };
+			return { middle, route: "", asked: "", meter, rightWidth: rightWidth("", meter, tokens) };
 		}
 	}
 	// 5. Too narrow for the clock: drop it, keep the word.
 	const short = middleShort ?? middle;
-	return { middle: short, route: "", meter: false, rightWidth: rightWidth("", false, tokens) };
+	return { middle: short, route: "", asked: "", meter: false, rightWidth: rightWidth("", false, tokens) };
 }

@@ -31,6 +31,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { queuedToolCount } from "../lib/activity-rail-derivation.js";
 import { t } from "../theme.js";
+import { askedNote } from "../lib/model-truth.js";
 import { MetricRow, TruncatedValue } from "./RailRow.js";
 
 // RailSection wraps a heading and its rows in a discrete column block.
@@ -124,6 +125,9 @@ interface ProviderRow {
 	state: ProviderState;
 	/** Measured round-trip latency, e.g. "42ms". Absent when unmeasured. */
 	latency?: string;
+	/** The configured model, when a reroute ran the turns on `name` instead.
+	 *  Drawn dim on the next line as "(asked ...)" (#3102). */
+	asked?: string;
 }
 
 /**
@@ -339,12 +343,14 @@ export function ActivityRail({
 
 			<RailSection title="PROVIDERS">
 				{providers.map((provider) => (
-					<NamedRow
-						key={provider.name}
-						name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
-						color={PROVIDER_COLOR[provider.state]}
-						trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
-					/>
+					<React.Fragment key={provider.name}>
+						<NamedRow
+							name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
+							color={PROVIDER_COLOR[provider.state]}
+							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
+						/>
+						{provider.asked ? <NamedRow name={`  ${askedNote(provider.asked)}`} color={t.dim} /> : null}
+					</React.Fragment>
 				))}
 			</RailSection>
 

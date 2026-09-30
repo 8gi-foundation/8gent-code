@@ -87,6 +87,13 @@ export interface AgentEventCallbacks {
 	onStepFinish?: (event: AgentStepEvent) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
+	/**
+	 * The turn is being served by a different model from the one asked for:
+	 * it is not installed (model-reroute), or it cannot take tools (Law 2).
+	 * Fires before config.model self-corrects, so a UI can name the model
+	 * that runs the turn while it runs. Display only (#3102).
+	 */
+	onModelRouted?: (event: { requested: string; used: string; provider: string }) => void;
 	onCompaction?: (event: {
 		summary: string;
 		tokensBefore: number;

@@ -19,7 +19,10 @@ import { FooterHints, type JudgeState, StatusSegments, fmSegmentWidth } from "./
 export type FooterMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
 interface BottomBarProps {
+	/** The model that ran the turn. */
 	model: string;
+	/** The configured model, only when a reroute ran the turn on `model`. */
+	modelAsked?: string;
 	/** Live providers out of configured providers. */
 	ready: number;
 	total: number;
@@ -63,6 +66,7 @@ export function BottomBar(props: BottomBarProps) {
 						data={{
 							mode: props.mode,
 							model: props.model,
+							modelAsked: props.modelAsked,
 							tokens: props.tokens,
 							tokensPerSecond: props.tokensPerSecond,
 							branch: props.branch,
