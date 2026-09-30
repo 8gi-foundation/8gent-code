@@ -23,7 +23,6 @@ const expectedRiskColor: Record<Risk, string> = {
 };
 
 const baseProps: ContextRailProps = {
-	branch: "feat/tui-context-rail",
 	risk: "low",
 	permissions: "ask",
 	contextPct: 42,
@@ -76,34 +75,19 @@ describe("ContextRail", () => {
 			| undefined;
 	}
 
-	test("no workspace name is invented when none is passed", () => {
-		// It used to default to "8gent-code" in every folder (hardcoded data).
+	test("does not repeat the header (audit 2026-09-30, #5): no workspace, no branch, no 'no repo'", () => {
 		const texts = rows(baseProps).map(textOf);
-		expect(texts).not.toContain("8gent-code");
-		expect(texts[0]).toBe("WORKSPACE");
-		expect(texts[1]).toBe("");
-	});
-
-	test("workspace name override is honored", () => {
-		expect(rows({ ...baseProps, workspaceName: "8gi-governance" }).map(textOf)).toContain("8gi-governance");
-	});
-
-	test("git truth (audit #10): branch, or 'no repo', or nothing - never '-'", () => {
-		expect(metric(baseProps, "branch")?.props.value).toBe("feat/tui-context-rail");
-		const outside = rows({ ...baseProps, branch: "", noRepo: true }).map(textOf);
-		expect(metric({ ...baseProps, branch: "", noRepo: true }, "branch")).toBeUndefined();
-		expect(outside).toContain("no repo");
-		const unknown = rows({ ...baseProps, branch: "" }).map(textOf);
-		expect(metric({ ...baseProps, branch: "" }, "branch")).toBeUndefined();
-		expect(unknown).not.toContain("no repo");
-		expect(unknown).not.toContain("-");
+		expect(texts[0]).toBe("STATE");
+		expect(texts).not.toContain("WORKSPACE");
+		expect(texts).not.toContain("no repo");
+		expect(metric(baseProps, "branch")).toBeUndefined();
 	});
 
 	test("section labels use the calm heading tone, not orange", () => {
 		const headings = rows(baseProps).filter((el) =>
-			["WORKSPACE", "STATE", "CONTEXT", "ACCESS"].includes(textOf(el)),
+			["STATE", "CONTEXT", "ACCESS"].includes(textOf(el)),
 		);
-		expect(headings).toHaveLength(4);
+		expect(headings).toHaveLength(3);
 		for (const h of headings) expect((h.props as { color: string }).color).toBe(t.heading);
 	});
 
