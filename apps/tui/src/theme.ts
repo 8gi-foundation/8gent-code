@@ -100,7 +100,9 @@ const dark = {
 	teal:     "#7DA8A3",
 	steel:    "#9DB5C8",
 	steelDim: "#334958",
-	red:      "#D63A24",
+	// Danger: risk HIGH, N deny, MIC on, fail/error. 5.25:1 on bg (#3171;
+	// #D63A24 was 4.25:1). Hue 8, same family as before.
+	red:      "#E5503A",
 	green:    "#47A639",
 } as const;
 

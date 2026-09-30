@@ -2,7 +2,8 @@
  * Contrast of the tones this HUD puts text in, in both palettes. WCAG AA
  * for normal text is 4.5:1. Orange is checked because it is the state and
  * focus colour; the heading tone because the rail labels moved to it; the
- * chip because inline code sits on a tint.
+ * chip because inline code sits on a tint; red because it carries the danger
+ * states (risk HIGH, N deny, MIC on) and was 4.25:1 on dark before #3171.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -32,6 +33,7 @@ describe("text contrast, both themes (4.5:1 or better)", () => {
 				["user text (textSecondary)", p.textSecondary, p.bg],
 				["user label (steel)", p.steel, p.bg],
 				["code chip text on its tint", p.textPrimary, p.border],
+				["danger red (risk HIGH, N deny, MIC on, fail) #3171", p.red, p.bg],
 			];
 			for (const [name, fg, bg] of pairs) {
 				const ratio = contrast(fg, bg);
