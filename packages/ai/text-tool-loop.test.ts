@@ -11,6 +11,9 @@ import {
 	MAX_CONSECUTIVE_CHECKS,
 	MAX_CALLS_PER_ROUND,
 	abortedCallResult,
+	blockedCheckMessage,
+	blockedStopNote,
+	blockReason,
 	overCapCallResult,
 	isShellFileWrite,
 	runTextToolAgent,
@@ -452,20 +455,25 @@ describe("runTextToolAgent - continue until every step is done", () => {
 		expect(result.content).toBe("Here are the options:");
 	});
 
-	test("no continuation after a round whose every tool call failed", async () => {
+	test("prose after a round whose every tool call failed gets the completion check", async () => {
 		const ws = fakeWorkspace();
 		const model = scriptedModel([
 			tc("read_file", { path: "missing.md" }),
 			"Let me try another way:",
+			tc("read_file", { path: "packages/decide/README.md" }),
+			"DONE: Read packages/decide/README.md instead.",
 			"UNREACHED",
 		]);
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "read it" }],
 			tools: ws.tools,
 			call: model.call,
+			maxRounds: 50,
 		});
-		expect(model.calls()).toBe(2);
-		expect(result.content).toBe("Let me try another way:");
+		// A failed (not blocked) round gets the plain check.
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(model.calls()).toBe(4);
+		expect(result.content).toBe("Read packages/decide/README.md instead.");
 	});
 
 	test("reply length and ending do not matter: a long report is checked once like any other", async () => {
@@ -847,10 +855,11 @@ describe("runTextToolAgent - re-check until DONE", () => {
 			call: model.call,
 			maxRounds: 50,
 		});
-		// Check 1 after the first "Next."; the erroring call is not progress, so
-		// the stall after it is not a fresh one and ends the turn with one check.
-		expect(model.seen.filter(isCheck)).toHaveLength(1);
-		expect(model.calls()).toBe(4);
+		// Check 1 after the first "Next."; the all-failed round makes the next
+		// "Next." a stall (check 2), but the erroring call is not progress, so the
+		// consecutive count is not reset and the third "Next." ends the turn.
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_CONSECUTIVE_CHECKS);
+		expect(model.calls()).toBe(5);
 		expect(result.content).toBe("Next.");
 	});
 
@@ -1670,5 +1679,159 @@ describe("runTextToolAgent - per-reply call cap", () => {
 		expect(runs()).toBe(MAX_CALLS_PER_ROUND);
 		expect(result.toolLog.every((e) => e.result === "contents")).toBe(true);
 		expect(lastUserMessage(model.seen[1])).not.toContain("not run");
+	});
+});
+
+// ── Blocked tool rounds (Rishi pilot l4-deck-plus-m5 run 2026-09-30_014230) ──
+//
+// qwen3.8 27B had two run_command calls refused in a row: the toolg8 path
+// guard blocked a command touching /dev/null, and the shell sanitizer blocked
+// semicolon chaining. Blocked results do not start with "Error", so the loop
+// counted them as successful work; the model then replied "Let me check
+// tooling and the root README." and the turn ended with status ok, no files
+// written, and nothing saying the calls had been refused.
+
+const RUN_014230_DEVNULL_CMD =
+	'cd "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null; pwd; head -50 README.md 2>/dev/null';
+const RUN_014230_CHAIN_CMD = 'which ffmpeg ffprobe marp 2>&1; echo "---"; ffmpeg -version 2>&1 | head -n 3';
+const RUN_014230_DEVNULL_RESULT =
+	"[TOOLG8 BLOCKED] run_command did NOT run. Nothing was changed. Reason: [bash-segment] [path-guard] device file: /dev/null Alternative: Try a read-only command (git status, ls, cat) or request approval.";
+const RUN_014230_CHAIN_RESULT = `[BLOCKED] Semicolon command chaining is not allowed. Use separate run_command calls instead. Command: ${RUN_014230_CHAIN_CMD}`;
+const RUN_014230_STALL = "Let me check tooling and the root README.";
+const DEVNULL_REASON = "[bash-segment] [path-guard] device file: /dev/null";
+const CHAIN_REASON = "Semicolon command chaining is not allowed";
+
+/** run_command that refuses the two command shapes the 014230 gates refused. */
+function gatedWorkspace() {
+	const commands: string[] = [];
+	const tools: TextTool[] = [
+		{
+			spec: { name: "run_command", description: "Run a command", parameters: {} },
+			run: async (a) => {
+				const cmd = String(a.command);
+				if (cmd.includes("/dev/null")) return RUN_014230_DEVNULL_RESULT;
+				if (cmd.includes(";")) return `[BLOCKED] Semicolon command chaining is not allowed. Use separate run_command calls instead. Command: ${cmd}`;
+				commands.push(cmd);
+				return cmd === "which ffmpeg" ? "/opt/homebrew/bin/ffmpeg" : "ok";
+			},
+		},
+	];
+	return { tools, commands };
+}
+
+describe("blockReason", () => {
+	test("reads the Reason field of a toolg8 block", () => {
+		expect(blockReason(RUN_014230_DEVNULL_RESULT)).toBe(DEVNULL_REASON);
+	});
+	test("reads the first sentence of a sanitizer block, without the command", () => {
+		expect(blockReason(RUN_014230_CHAIN_RESULT)).toBe(CHAIN_REASON);
+	});
+	test("is null for results that are not gate blocks", () => {
+		expect(blockReason("Error: no such file")).toBeNull();
+		expect(blockReason("Exit code 1: nope")).toBeNull();
+		expect(blockReason("ok")).toBeNull();
+	});
+});
+
+describe("runTextToolAgent - check after an all-blocked round", () => {
+	test("run 014230 replay: two blocked calls, prose, a blocked check naming both reasons, then a working call and DONE", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			[tc("run_command", { command: RUN_014230_DEVNULL_CMD }), tc("run_command", { command: RUN_014230_CHAIN_CMD })].join("\n"),
+			RUN_014230_STALL,
+			tc("run_command", { command: "which ffmpeg" }),
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Check which video tools are installed." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		// Round 3 is answered with the tailored check, naming both reasons.
+		const check = lastUserMessage(model.seen[2]);
+		expect(check).toBe(blockedCheckMessage([DEVNULL_REASON, CHAIN_REASON]));
+		expect(check).toContain("one command per run_command call, no chaining");
+		expect(check).toContain(DONE_MARKER);
+		expect(model.seen[2][model.seen[2].length - 2]).toEqual({ role: "assistant", content: RUN_014230_STALL });
+		expect(ws.commands).toEqual(["which ffmpeg"]);
+		expect(model.calls()).toBe(4);
+		expect(result.rounds).toBe(4);
+		expect(result.content).toBe("ffmpeg is at /opt/homebrew/bin/ffmpeg.");
+		expect(result.content).not.toContain("[harness]");
+		expect(result.unverified).toEqual([]);
+	});
+
+	test("an always-blocked model stops at the consecutive cap with a note naming the reasons", async () => {
+		const ws = gatedWorkspace();
+		let n = 0;
+		const model = scriptedModel([
+			() => {
+				n++;
+				// Alternate a blocked call and an announcement, forever.
+				if (n % 2 === 0) return RUN_014230_STALL;
+				return n % 4 === 1
+					? tc("run_command", { command: RUN_014230_DEVNULL_CMD })
+					: tc("run_command", { command: RUN_014230_CHAIN_CMD });
+			},
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Check which video tools are installed." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 500,
+		});
+
+		// blocked, stall, check 1, blocked, stall, check 2, blocked, stall: end.
+		// A blocked call is not progress, so it never resets the cap.
+		expect(MAX_CONSECUTIVE_CHECKS).toBe(2);
+		const checks = model.seen.map(lastUserMessage).filter((m) => m.startsWith("Your last tool calls were blocked"));
+		expect(checks).toHaveLength(MAX_CONSECUTIVE_CHECKS);
+		expect(model.calls()).toBe(2 * MAX_CONSECUTIVE_CHECKS + 2);
+		expect(ws.commands).toEqual([]);
+		expect(result.content).toBe(
+			`${RUN_014230_STALL}\n\n${blockedStopNote([DEVNULL_REASON, CHAIN_REASON])}`,
+		);
+		expect(result.content).toContain(DEVNULL_REASON);
+		expect(result.content).toContain(CHAIN_REASON);
+	});
+
+	test("a model that answers a blocked check with only prose is capped too, with the note", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			tc("run_command", { command: RUN_014230_CHAIN_CMD }),
+			RUN_014230_STALL,
+			"Checking now.",
+			"Still checking.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Check which video tools are installed." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS);
+		expect(result.content).toBe(`Still checking.\n\n${blockedStopNote([CHAIN_REASON])}`);
+	});
+
+	test("a question to the user after an all-blocked round ends the turn unchecked", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			tc("run_command", { command: RUN_014230_DEVNULL_CMD }),
+			"The path guard blocks /dev/null. May I approve that command?",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Check the README." }],
+			tools: ws.tools,
+			call: model.call,
+		});
+		expect(model.calls()).toBe(2);
+		expect(result.content).toBe("The path guard blocks /dev/null. May I approve that command?");
 	});
 });
