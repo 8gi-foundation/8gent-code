@@ -19,11 +19,13 @@ set -uo pipefail
 SRC=/src
 WORK=/work
 BASELINE="$SRC/.github/docker/linux-ci/typecheck-baseline.txt"
-# CI is deliberately NOT set. Ink switches to CI mode when CI is set (its
-# is-in-ci check) and then writes only the final frame, which breaks every
-# Ink render test that inspects intermediate frames (13 tests at 2553c188).
-# `docker run` does not inherit the runner's CI=true, so this is explicit.
-unset CI
+# CI is set, as on any CI runner. Ink's CI mode (its is-in-ci check writes
+# only the final frame) used to break the Ink render tests, so this script
+# unset CI. The test preload tests/preload-ink-interactive.ts (wired in
+# bunfig.toml) now pins Ink's CI detection off inside bun test, so those tests
+# pass either way, and this job proves it. `docker run` does not inherit the
+# runner's CI=true, so this is explicit.
+export CI=true
 
 echo "== environment"
 id

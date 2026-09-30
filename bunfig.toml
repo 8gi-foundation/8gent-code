@@ -1,0 +1,3 @@
+[test]
+# Pin Ink's CI detection off so Ink render tests pass with and without CI=true.
+preload = ["./tests/preload-ink-interactive.ts"]
