@@ -159,7 +159,7 @@ That's it. 8gent uses an adaptive 11-provider router. Two run locally and are on
 
 | Key | What it does |
 |:----|:-------------|
-| `Shift+Tab` | Change how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask), Infinite (never asks, back to Ask after 30 minutes). Per tab. See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). |
+| `Shift+Tab` | Change how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask), Infinite (never asks, back to Ask after 30 minutes). Per tab. System One, the local command checker, is on in every mode (`EIGHT_SYSTEM_ONE=0` turns it off). See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). |
 | `Ctrl+1` to `Ctrl+9` | Jump to a tab |
 | `Ctrl+Y` | Cycle the task mode label (Planning, Researching, Implementing, Testing, Debugging). This does not change permissions. |
 

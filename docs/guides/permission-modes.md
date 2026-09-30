@@ -11,7 +11,7 @@ Shift+Tab steps through them in this order, then wraps round:
 | Mode | What it does | What you see |
 |:-----|:-------------|:-------------|
 | **Plan** | Reads and plans, changes nothing. File writes, edits, new agents, and any shell command that is not plainly read-only are refused with a reason before they run. 8gent can still read, search and propose. | `perm Plan` in the footer, in steel blue. Tab tag `· Plan` (or `P` on narrow terminals). |
-| **Ask** | The default, and how 8gent has always worked. Commands that are not already allowed show an approval card and wait for you. | Nothing extra. Ask is the default, so the footer shows no `perm` segment. |
+| **Ask** | The default. Commands that are not already allowed show an approval card and wait for you. System One checks each shell command first: a command it blocks never reaches the card; one it allows still gets the card. | Nothing extra. Ask is the default, so the footer shows no `perm` segment. |
 | **Guarded** | Safe steps run, risky ones still ask. A local checker (System One) looks at every shell command first. Commands it judges safe run without a card; commands flagged as dangerous still get the card; commands it blocks do not run. | `perm Guarded` in green. The approval card reads `ASK risky step <command>`. |
 | **Infinite** | Runs everything without asking, except the always-blocked list (for example `rm -rf /`). It turns itself back to Ask after 30 minutes. | `perm Infinite` in bold orange, an `INFINITE` chip in the header, and the tab tag `∞` (or `I` on plain ASCII terminals). |
 
@@ -29,7 +29,9 @@ There is nothing to install. Permission modes are always there:
 
 - **Shift+Tab** changes the focused tab's mode. Other tabs keep theirs.
 - `8gent --infinite` starts every tab in Infinite.
-- `EIGHT_SYSTEM_ONE=1` still works as before: tabs start in Ask, with System One checking commands in every mode.
+- System One checks shell commands in every mode by default. With no judge model installed it checks with the safety rules and the read-only allowlist only, and says so once.
+- `EIGHT_SYSTEM_ONE=1` makes it strict, as before: if its model cannot answer, the command is blocked. Guarded always works this way.
+- `EIGHT_SYSTEM_ONE=0` turns System One off outside Guarded.
 
 Guarded needs System One's local model to judge commands. If it cannot load, the command is blocked rather than run, so Guarded never becomes less safe than Ask by accident.
 
