@@ -272,12 +272,18 @@ async function initAuthSystem() {
 	}
 }
 
-// Import permission system for infinite mode
+// The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
+import { isInfiniteMode } from "../../../packages/permissions/index.js";
 import {
-	disableInfiniteMode,
-	enableInfiniteMode,
-	isInfiniteMode,
-} from "../../../packages/permissions/index.js";
+	type PermissionMode,
+	type PermissionModeHolder,
+	createPermissionHolder,
+	effectivePermissionMode,
+	nextPermissionMode,
+	setHolderMode,
+	systemOneEnvFor,
+} from "../../../packages/permissions/permission-mode.js";
+import { isPermissionCycleKey, permSwitchLine } from "./lib/perm-modes-design.js";
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
@@ -1269,8 +1275,34 @@ export function App({
 		[activeTabId],
 	);
 
-	// Infinite mode state (must match packages/permissions, including CLI --infinite)
-	const [infiniteModeActive, setInfiniteModeActive] = useState(() => isInfiniteMode());
+	// Permission modes (#3170). Each tab owns one holder and every Agent the
+	// tab builds shares it, so Shift+Tab changes this tab's next tool call and
+	// never another tab's. Tabs start in the launch mode: Infinite when the
+	// CLI turned the process-wide flag on (--infinite), else Ask.
+	const [launchPermMode] = useState<PermissionMode>(() => (isInfiniteMode() ? "infinite" : "ask"));
+	const permHoldersRef = useRef(new Map<string, PermissionModeHolder>());
+	const permHolderFor = useCallback(
+		(tabId: string): PermissionModeHolder => {
+			let holder = permHoldersRef.current.get(tabId);
+			if (!holder) {
+				holder = createPermissionHolder(launchPermMode);
+				permHoldersRef.current.set(tabId, holder);
+			}
+			return holder;
+		},
+		[launchPermMode],
+	);
+	const [, setPermTick] = useState(0);
+	const setTabPermMode = useCallback(
+		(tabId: string, mode: PermissionMode) => {
+			setHolderMode(permHolderFor(tabId), mode);
+			setPermTick((n) => n + 1);
+		},
+		[permHolderFor],
+	);
+	// The true mode of the focused tab (an expired Infinite reads as Ask).
+	const activePermMode = effectivePermissionMode(permHolderFor(activeTabId));
+	const infiniteModeActive = activePermMode === "infinite";
 
 	// Model/Provider state (must be before agent init)
 	const cliModelRequestedRef = useRef((cliModel ?? "").trim());
@@ -1986,6 +2018,7 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
 		}
@@ -2003,11 +2036,15 @@ export function App({
 			}
 		}
 
-		// Shift+Tab: always cycle workspace tabs backward (direction -1)
-		// Agent cycling was incorrectly hijacking this — agent focus has no dedicated hotkey yet
-		if (key.shift && key.tab) {
-			workspaceTabs.cycleTab(-1, ["kanban"]);
-			setViewMode("chat");
+		// Shift+Tab: cycle this tab's permission mode, Plan -> Ask -> Guarded
+		// -> Infinite -> Plan (#3170). It used to cycle tabs backward; terminals
+		// send Ctrl+Shift+Tab as the same bytes, so tabs keep Ctrl+1-9. The
+		// switch is also one chat line, so a screen reader hears it.
+		if (isPermissionCycleKey(key)) {
+			const next = nextPermissionMode(activePermMode);
+			setTabPermMode(activeTabId, next);
+			addSystemMessage(permSwitchLine(next));
+			return;
 		}
 
 		// Escape: abort generation if processing, otherwise switch to chat tab or close view.
@@ -2077,6 +2114,18 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, []);
+	// Guarded (#3170) puts System One in front of this tab's shell commands
+	// whatever the env says, so entering it warms the judge the same way.
+	useEffect(() => {
+		if (activePermMode !== "guarded") return;
+		const warmup = startSystemOneWarmup(systemOneEnvFor("guarded"));
+		if (!warmup) return;
+		setJudgeState("loading");
+		warmup.then(
+			() => setJudgeState("ready"),
+			() => setJudgeState("failed"),
+		);
+	}, [activePermMode]);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -2508,6 +2557,9 @@ export function App({
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
 					role: tabAgentRole(_activeTab?.data),
+					// The tab's permission mode, shared: Shift+Tab reaches this agent's
+					// next tool call, and a rebuilt agent keeps the tab's mode (#3170).
+					permission: permHolderFor(_initTabId),
 				});
 				builtSpecRef.current.set(newAgent, { model: currentModel, runtime });
 				// Belt and braces: the client's own check has no bound, so cap it.
@@ -2788,7 +2840,7 @@ export function App({
 							"  Ctrl+T - New chat tab\n" +
 							"  Ctrl+W - Close current tab\n" +
 							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Cycle through tabs\n" +
+							"  Shift+Tab - Permission mode: Plan, Ask, Guarded, Infinite\n" +
 							"  Ctrl+A - Toggle animations\n" +
 							"  Ctrl+S - Toggle sound\n" +
 							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
@@ -3136,23 +3188,14 @@ export function App({
 					exit();
 					break;
 
-				case "infinite":
-					// Toggle infinite mode - bypasses ALL permission checks
-					if (infiniteModeActive) {
-						disableInfiniteMode();
-						setInfiniteModeActive(false);
-						addSystemMessage("∞ INFINITE MODE DISABLED\n" + "Permission checks will resume.");
-					} else {
-						enableInfiniteMode();
-						setInfiniteModeActive(true);
-						addSystemMessage(
-							"∞ INFINITE MODE ENABLED\n" +
-								"All permissions bypassed. Autonomous execution until done.\n" +
-								"No questions, no crashes stop me, self-healing errors.\n\n" +
-								"Use /infinite again to disable.",
-						);
-					}
+				case "infinite": {
+					// This tab's permission mode to Infinite, or back to Ask (#3170).
+					// Other tabs keep theirs.
+					const next: PermissionMode = infiniteModeActive ? "ask" : "infinite";
+					setTabPermMode(activeTabId, next);
+					addSystemMessage(permSwitchLine(next));
 					break;
+				}
 
 				case "onboarding": {
 					// Start or restart onboarding
@@ -3372,7 +3415,7 @@ export function App({
 					} else {
 						orchestration.enterChatMode();
 						addSystemMessage(
-							`Chat mode enabled. Background work continues.\nShift+Tab to cycle agents. ESC to exit chat mode.\nCurrently addressing: ${orchestration.activeAgentName}`,
+							`Chat mode enabled. Background work continues.\nESC to exit chat mode.\nCurrently addressing: ${orchestration.activeAgentName}`,
 						);
 					}
 					break;
@@ -5984,7 +6027,7 @@ export function App({
 	// The left rail steps aside while it would only repeat the header and
 	// the defaults; infinite approval or ADHD mode brings it back.
 	const showContextRail =
-		wideShell && contextRailHasNews({ infinite: infiniteModeActive, adhdMode });
+		wideShell && contextRailHasNews({ infinite: activePermMode !== "ask", adhdMode });
 	// The PLAN column shows on wide terminals, rail or not, and only while it
 	// is open (Ctrl+X, or a plan exists).
 	const showPlanColumn =
@@ -6096,8 +6139,8 @@ export function App({
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showContextRail && (
 							<ContextRail
-								risk={infiniteModeActive ? "high" : "low"}
-								permissions={infiniteModeActive ? "infinite" : "ask"}
+								risk={infiniteModeActive ? "high" : activePermMode === "guarded" ? "medium" : "low"}
+								permissions={activePermMode}
 								contextPct={contextPct}
 								adhdMode={adhdMode}
 							/>
@@ -6254,7 +6297,7 @@ export function App({
 					tokens={tokenStr}
 					branch={git.branch || undefined}
 					user={authUser?.displayName}
-					permissions={infiniteModeActive ? "infinite" : "ask"}
+					permissions={activePermMode}
 					sessionTime={sessionTime}
 					mode={agentMode}
 					isProcessing={isProcessing}

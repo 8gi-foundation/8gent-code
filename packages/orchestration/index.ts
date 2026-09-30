@@ -12,6 +12,7 @@
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
@@ -44,6 +45,8 @@ export interface AgentConfig {
 	capabilities?: string[];
 	/** Files (or directories) the agent may write or edit; undefined = no limit (#3101). */
 	allowedPaths?: string[];
+	/** Its permission mode, clamped to and linked with its parent's (#3170); undefined = none. */
+	permission?: PermissionModeHolder;
 }
 
 export interface SpawnedAgent {
@@ -120,6 +123,7 @@ export class AgentPool extends EventEmitter {
 			workingDirectory: config?.workingDirectory || process.cwd(),
 			capabilities: config?.capabilities || [],
 			allowedPaths: config?.allowedPaths,
+			permission: config?.permission,
 		};
 
 		const task: AgentTask = {
@@ -180,6 +184,7 @@ export class AgentPool extends EventEmitter {
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
 				allowedPaths: spawnedAgent.config.allowedPaths,
+				permission: spawnedAgent.config.permission,
 				// A sub-agent never opens windows on the user's screen (#3107).
 				openOnWrite: false,
 				events: {
@@ -216,6 +221,7 @@ export class AgentPool extends EventEmitter {
 							unattended: false,
 							allowedPaths: spawnedAgent.config.allowedPaths,
 							openOnWrite: false,
+							permission: spawnedAgent.config.permission,
 						},
 					);
 					spawnedAgent.verification = await verifyScope(

@@ -95,8 +95,18 @@ import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
+	type PermissionModeHolder,
+	currentPermissionHolder,
+	currentPermissionMode,
+	guardedSkipsCard,
+	planModeRefusal,
+	runWithPermissionHolder,
+	systemOneEnvFor,
+} from "../permissions/permission-mode";
+import {
 	ALLOWED_PATHS_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
+	PERMISSION_MODE_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
 	checkAgentTool,
@@ -259,14 +269,25 @@ export class ToolExecutor {
 	private openOnWrite: boolean;
 	/** Paths write_file opened this turn: each opens at most once per turn. */
 	private openedThisTurn = new Set<string>();
+	/**
+	 * This agent's permission mode (#3170), shared with its Agent and, in the
+	 * TUI, with its tab. Undefined: no mode, today's behaviour.
+	 */
+	private permission: PermissionModeHolder | undefined;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
 		agentId = "primary",
 		sessionId?: string,
-		options: { unattended?: boolean; allowedPaths?: string[]; openOnWrite?: boolean } = {},
+		options: {
+			unattended?: boolean;
+			allowedPaths?: string[];
+			openOnWrite?: boolean;
+			permission?: PermissionModeHolder;
+		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
+		this.permission = options.permission;
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
@@ -624,6 +645,11 @@ export class ToolExecutor {
 								type: "array",
 								items: { type: "string" },
 								description: ALLOWED_PATHS_DESCRIPTION,
+							},
+							permissionMode: {
+								type: "string",
+								enum: ["plan", "ask", "guarded", "infinite"],
+								description: PERMISSION_MODE_DESCRIPTION,
 							},
 						},
 						required: ["task"],
@@ -1169,6 +1195,15 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// Every call runs in this agent's permission mode (#3170), so the
+		// permission layer below answers for this agent and no other.
+		if (this.permission && currentPermissionHolder() !== this.permission) {
+			return runWithPermissionHolder(this.permission, () => this.execute(toolName, args));
+		}
+		if (currentPermissionMode() === "plan") {
+			const refusal = await planModeRefusal(toolName, args);
+			if (refusal) return refusal;
+		}
 		const raw = await this.executeRaw(toolName, args);
 		// Post-tool-execution scrubbing boundary (issue #2464).
 		// Order is contract: SecretScanner -> [Cache lookup, #2462] -> execute
@@ -1417,6 +1452,7 @@ export class ToolExecutor {
 					args.model as string | undefined,
 					args.timeout as number | undefined,
 					normaliseAllowedPaths(args.allowedPaths),
+					args.permissionMode,
 				);
 			case "check_agent":
 				return this.handleCheckAgent(args.agentId as string);
@@ -1981,6 +2017,10 @@ export class ToolExecutor {
 	// ============================================
 
 	async runCommand(command: string, timeoutSec?: number): Promise<string> {
+		if (this.permission && currentPermissionHolder() !== this.permission) {
+			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
+		}
+		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
 		if (permissionCheck === "denied") {
@@ -2000,10 +2040,16 @@ export class ToolExecutor {
 		// System One block is final and must not follow a Y the person gave,
 		// and when it escalates it asks the person itself, so that answer is
 		// the card. One command, at most one card.
-		const systemOne = await systemOneGate(command, process.env, this.workingDirectory);
+		// Guarded mode (#3170) turns System One on for this call whatever the
+		// env says; the env flag stays on in every mode.
+		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), this.workingDirectory);
 		if (!systemOne.run) return systemOne.message as string;
 
-		if (permissionCheck === "ask" && systemOne.humanApproved !== true) {
+		if (
+			permissionCheck === "ask" &&
+			systemOne.humanApproved !== true &&
+			!guardedSkipsCard(mode, systemOne, isCommandDangerous(command))
+		) {
 			const allowed = await this.permissionManager.requestPermission(
 				"Execute Shell Command",
 				isCommandDangerous(command)
@@ -2400,8 +2446,9 @@ export class ToolExecutor {
 		model?: string,
 		timeout?: number,
 		allowedPaths?: string[],
+		permissionMode?: unknown,
 	): Promise<string> {
-		return spawnAgentTool(this.workingDirectory, task, runtime, model, timeout, allowedPaths);
+		return spawnAgentTool(this.workingDirectory, task, runtime, model, timeout, allowedPaths, permissionMode);
 	}
 
 	private handleCheckAgent(agentId: string): Promise<string> {
@@ -2483,7 +2530,7 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
-		const systemOne = await systemOneGate(command);
+		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);

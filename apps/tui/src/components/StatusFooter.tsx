@@ -14,6 +14,10 @@
  * - Segments drop by priority when the row is too narrow, never wrap. The
  *   mode segment never drops, because it is where ^Y is discoverable.
  * - A value that is not known is not shown. No "—", no "?", no "Guest".
+ * - The permission mode (#3170) is "perm <Mode> ⇧Tab", right after mode, and
+ *   never drops either: it is where Shift+Tab is discoverable and it is the
+ *   one fact a person must always be able to read. Ask, the default, shows
+ *   no segment (#3130); the "⇧Tab perm" hint teaches the key instead.
  * - The ^Y mode is labelled MODE: it is the manual prompt mode the user
  *   picks, not a pipeline phase, so it is never dressed up as progress.
  * - Orange means "look here": the infinite approval state, and a System
@@ -33,7 +37,9 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { isPermissionMode } from "../../../../packages/permissions/permission-mode.js";
 import { askedNote } from "../lib/model-truth.js";
+import { PERM_KEY, PERM_LOOK, permColour } from "../lib/perm-modes-design.js";
 import { theme } from "../theme.js";
 
 const ui = {
@@ -53,6 +59,7 @@ export interface FooterSegment {
 	value: string;
 	/** Optional dim suffix after the value, e.g. the "^Y" key hint. */
 	hint?: string;
+	bold?: boolean;
 	color: string;
 	/** 0 is kept longest. Higher numbers drop first when space runs out. */
 	priority: number;
@@ -72,7 +79,11 @@ export interface FooterData {
 	tokensPerSecond?: number;
 	branch?: string;
 	sessionTime?: string;
-	/** "ask" or "infinite" today; any other real mode string prints as is. */
+	/**
+	 * The focused tab's permission mode (#3170): plan, ask, guarded or
+	 * infinite shows as the perm segment; any other real string prints as an
+	 * "approval" segment, as before.
+	 */
 	permissions?: string;
 	/** Live providers out of configured providers. */
 	providersLive?: number;
@@ -111,6 +122,18 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	const out: FooterSegment[] = [
 		{ key: "mode", label: "mode", value: d.mode, hint: "^Y", color: ui.teal, priority: 0 },
 	];
+	const perm = isPermissionMode(d.permissions) ? d.permissions : undefined;
+	if (perm && perm !== "ask") {
+		out.push({
+			key: "perm",
+			label: "perm",
+			value: PERM_LOOK[perm].name,
+			hint: PERM_KEY,
+			bold: PERM_LOOK[perm].bold,
+			color: permColour(perm),
+			priority: 0,
+		});
+	}
 	if (known(d.model)) {
 		out.push({
 			key: "model",
@@ -130,7 +153,7 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	if (known(d.branch)) {
 		out.push({ key: "branch", label: "branch", value: d.branch, color: ui.cream, priority: 3 });
 	}
-	if (known(d.permissions) && d.permissions !== "ask") {
+	if (!perm && known(d.permissions) && d.permissions !== "ask") {
 		const infinite = d.permissions === "infinite";
 		out.push({
 			key: "approval",
@@ -205,6 +228,8 @@ export function fmSegmentWidth(columns: number): number {
 /** The key hints, most used first. Display order is the same. */
 export const FOOTER_HINTS = [
 	"^X plan",
+	// Ask has no perm segment, so the switch key is taught here instead.
+	`${PERM_KEY} perm`,
 	"^O expand",
 	"^C clear",
 	"^K kanban",
@@ -212,7 +237,7 @@ export const FOOTER_HINTS = [
 	"^D deck",
 	"^A anim",
 	"^S sound",
-] as const;
+];
 const HINT_GAP = "  ";
 /** Columns kept between the last status segment and the first hint. */
 const HINTS_MARGIN = 3;
@@ -223,10 +248,12 @@ export function segmentsWidth(segments: FooterSegment[]): number {
 }
 
 /** The hints that fit in `width` columns, most used first, never cut. */
-export function fitFooterHints(width: number): string[] {
+export function fitFooterHints(width: number, permShown = false): string[] {
 	const out: string[] = [];
 	let used = 0;
 	for (const hint of FOOTER_HINTS) {
+		// The perm segment already shows the key.
+		if (permShown && hint.endsWith(" perm")) continue;
 		const cost = hint.length + (out.length > 0 ? HINT_GAP.length : 0);
 		if (used + cost > width) break;
 		out.push(hint);
@@ -237,7 +264,10 @@ export function fitFooterHints(width: number): string[] {
 
 export function StatusSegments({ data, width }: { data: FooterData; width: number }) {
 	const segments = fitFooterSegments(buildFooterSegments(data), width);
-	const hints = fitFooterHints(Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN));
+	const hints = fitFooterHints(
+		Math.max(0, width - segmentsWidth(segments) - HINTS_MARGIN),
+		segments.some((s) => s.key === "perm"),
+	);
 	return (
 		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between">
 			<Text wrap="truncate-end">
@@ -245,7 +275,9 @@ export function StatusSegments({ data, width }: { data: FooterData; width: numbe
 					<React.Fragment key={s.key}>
 						<Text color={ui.dim}>{FOOTER_SEPARATOR}</Text>
 						{s.label ? <Text color={ui.muted}>{s.label} </Text> : null}
-						<Text color={s.color}>{s.value}</Text>
+						<Text color={s.color} bold={s.bold}>
+							{s.value}
+						</Text>
 						{s.hint ? <Text color={ui.muted}> {s.hint}</Text> : null}
 					</React.Fragment>
 				))}

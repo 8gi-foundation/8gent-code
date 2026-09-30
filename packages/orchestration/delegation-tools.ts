@@ -7,11 +7,84 @@
  * (#3112), which a native-path Orchestrator never saw.
  */
 
+import {
+	type PermissionMode,
+	type PermissionModeHolder,
+	clampChildMode,
+	claudeRuntimeRefusal,
+	createChildHolder,
+	createPermissionHolder,
+	currentPermissionHolder,
+	currentPermissionMode,
+	effectivePermissionMode,
+	guardedSkipsCard,
+	isPermissionMode,
+	planModeRefusal,
+	runWithPermissionHolder,
+	systemOneEnvFor,
+} from "../permissions/permission-mode";
+
 export const SPAWN_AGENT_DESCRIPTION =
 	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.";
 
 export const ALLOWED_PATHS_DESCRIPTION =
 	"Only for 8gent runtime: the files (or directories) this agent may write or edit. Writes and edits anywhere else are refused and never run. Omit for no limit.";
+
+export const PERMISSION_MODE_DESCRIPTION =
+	"Optional permission mode for the child: 'plan' (read-only), 'ask', 'guarded' (System One in front of shell commands) or 'infinite'. Omit to inherit yours. A child is never more permissive than you: asking for more gives it your mode.";
+
+/**
+ * The mode a caller with no permission mode bound is treated as when it asks
+ * for a child mode: infinite if the process-wide flag is on, else ask.
+ */
+async function legacyParentMode(): Promise<PermissionMode> {
+	const { getPermissionManager } = await import("../permissions");
+	return getPermissionManager().isInfiniteMode() ? "infinite" : "ask";
+}
+
+/**
+ * A shell-runtime child runs its task through sh -c, so in a permission mode
+ * it passes the same gate run_command does, in the child's (clamped) mode:
+ * the permission check, System One (forced on in guarded), then the card
+ * unless infinite or a guarded allow covers it. Null: may run.
+ */
+async function gateShellChild(
+	command: string,
+	cwd: string,
+	holder: PermissionModeHolder,
+): Promise<string | null> {
+	return runWithPermissionHolder(holder, async () => {
+		const mode = currentPermissionMode();
+		if (mode === "plan") {
+			const refusal = await planModeRefusal("run_command", { command });
+			if (refusal) return refusal;
+		}
+		const { getPermissionManager, isCommandDangerous } = await import("../permissions");
+		const pm = getPermissionManager();
+		const check = pm.checkPermission(command);
+		if (check === "denied")
+			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
+		const { systemOneGate } = await import("../permissions/system-one-gate");
+		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
+		if (!systemOne.run) return systemOne.message as string;
+		const dangerous = isCommandDangerous(command);
+		if (
+			check === "ask" &&
+			systemOne.humanApproved !== true &&
+			!guardedSkipsCard(mode, systemOne, dangerous)
+		) {
+			const allowed = await pm.requestPermission(
+				"Spawn Shell Agent",
+				dangerous
+					? "This command may modify system files or cause data loss."
+					: "The agent wants to run a shell command as a background agent.",
+				command,
+			);
+			if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
+		}
+		return null;
+	});
+}
 
 export const CHECK_AGENT_DESCRIPTION =
 	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 20s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
@@ -36,14 +109,36 @@ export async function spawnAgentTool(
 	model?: string,
 	timeout?: number,
 	allowedPaths?: string[],
+	permissionMode?: unknown,
 ): Promise<string> {
 	try {
 		const effectiveRuntime = runtime || "8gent";
 
+		// Permission modes (#3170). The child inherits the caller's mode and is
+		// never more permissive: a requested mode is clamped to the caller's.
+		// No mode bound and none requested: exactly today's behaviour.
+		const requested = isPermissionMode(permissionMode) ? permissionMode : undefined;
+		const parent = currentPermissionHolder();
+		let child: PermissionModeHolder | undefined;
+		if (parent) {
+			const parentMode = effectivePermissionMode(parent);
+			if (parentMode === "plan") return (await planModeRefusal("spawn_agent", {})) as string;
+			child = createChildHolder(parent, requested);
+		} else if (requested) {
+			child = createPermissionHolder(clampChildMode(await legacyParentMode(), requested));
+		}
+		if (child && effectiveRuntime === "claude") {
+			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
+			if (refusal) return refusal;
+		}
+
 		// CLI runtimes: claude and shell
 		if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
 			// runtime "shell" runs the task through sh -c, so it is a shell command.
-			if (effectiveRuntime === "shell") {
+			if (effectiveRuntime === "shell" && child) {
+				const blocked = await gateShellChild(task, workingDirectory, child);
+				if (blocked) return blocked;
+			} else if (effectiveRuntime === "shell") {
 				const { systemOneGate } = await import("../permissions/system-one-gate");
 				const systemOne = await systemOneGate(task);
 				if (!systemOne.run) return systemOne.message as string;
@@ -85,6 +180,7 @@ export async function spawnAgentTool(
 			model: resolvedModel || undefined,
 			workingDirectory: workingDirectory,
 			allowedPaths,
+			...(child ? { permission: child } : {}),
 		});
 		return JSON.stringify(
 			{
@@ -92,6 +188,7 @@ export async function spawnAgentTool(
 				runtime: "8gent",
 				status: agent.status,
 				task: task.slice(0, 100),
+				...(child ? { permissionMode: effectivePermissionMode(child) } : {}),
 				...(allowedPaths
 					? { allowedPaths }
 					: {

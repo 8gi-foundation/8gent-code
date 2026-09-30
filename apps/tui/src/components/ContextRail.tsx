@@ -18,6 +18,8 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { isPermissionMode } from "../../../../packages/permissions/permission-mode.js";
+import { PERM_LOOK, permColour } from "../lib/perm-modes-design.js";
 import { t } from "../theme.js";
 import { MetricRow } from "./RailRow.js";
 
@@ -34,6 +36,8 @@ export function ContextRail({
 	contextPct,
 	adhdMode,
 }: ContextRailProps) {
+	// A permission mode (#3170) reads "perm <MODE>" in its colour.
+	const permMode = isPermissionMode(permissions) ? permissions : undefined;
 	const riskColor =
 		risk === "high" ? t.red : risk === "medium" ? t.orange : t.green;
 
@@ -52,11 +56,15 @@ export function ContextRail({
 			overflow="hidden"
 		>
 			<Text color={t.heading} bold>STATE</Text>
-			<MetricRow
-				label="approval"
-				value={permissions.toUpperCase()}
-				color={permissions === "ask" ? t.textPrimary : t.textSecondary}
-			/>
+			{permMode ? (
+				<MetricRow label="perm" value={PERM_LOOK[permMode].name.toUpperCase()} color={permColour(permMode)} />
+			) : (
+				<MetricRow
+					label="approval"
+					value={permissions.toUpperCase()}
+					color={permissions === "ask" ? t.textPrimary : t.textSecondary}
+				/>
+			)}
 			<MetricRow label="risk" value={risk.toUpperCase()} color={riskColor} />
 
 			<Text color={t.dim}> </Text>
