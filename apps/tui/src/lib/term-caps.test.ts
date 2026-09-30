@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { glyphs, unicodeRich } from "./term-caps.js";
+import { drawsColour, glyphs, unicodeRich } from "./term-caps.js";
 
 describe("terminal glyph capability", () => {
 	test("modern terminals are unicode-rich", () => {
@@ -23,5 +23,19 @@ describe("terminal glyph capability", () => {
 			expect(/^[\x20-\x7e]$/.test(ascii[key])).toBe(true);
 			expect(ascii[key].length).toBe(rich[key].length);
 		}
+	});
+});
+
+describe("drawsColour (code chips need a tint to read as code)", () => {
+	test("colour unless NO_COLOR is set or TERM is dumb", () => {
+		expect(drawsColour({ TERM: "xterm-256color" })).toBe(true);
+		expect(drawsColour({ NO_COLOR: "1" })).toBe(false);
+		expect(drawsColour({ NO_COLOR: "" })).toBe(true);
+		expect(drawsColour({ TERM: "dumb" })).toBe(false);
+	});
+
+	test("plain terminals get ASCII list bullets and code gutters", () => {
+		expect(glyphs({ TERM: "linux" }, "linux")).toMatchObject({ bullet: "-", gutter: "|" });
+		expect(glyphs({}, "darwin")).toMatchObject({ bullet: "•", gutter: "│" });
 	});
 });

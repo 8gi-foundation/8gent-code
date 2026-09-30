@@ -38,6 +38,10 @@ export interface Glyphs {
 	/** Thin rule and the heavier bar drawn on it. */
 	rule: string;
 	bar: string;
+	/** Unordered list marker in chat replies. */
+	bullet: string;
+	/** The thin rule in front of a code block. */
+	gutter: string;
 }
 
 const RICH: Glyphs = {
@@ -50,6 +54,8 @@ const RICH: Glyphs = {
 	diamond: "◆",
 	rule: "─",
 	bar: "━",
+	bullet: "•",
+	gutter: "│",
 };
 
 const ASCII: Glyphs = {
@@ -62,8 +68,21 @@ const ASCII: Glyphs = {
 	diamond: "*",
 	rule: "-",
 	bar: "=",
+	bullet: "-",
+	gutter: "|",
 };
 
 export function glyphs(env?: Env, platform?: string): Glyphs {
 	return unicodeRich(env, platform) ? RICH : ASCII;
+}
+
+/**
+ * False when the terminal draws no colour at all (NO_COLOR set, or
+ * TERM=dumb). Chalk drops every colour there, backgrounds included, so a
+ * tinted code chip would read as plain text; callers keep the backticks.
+ */
+export function drawsColour(env: Env = process.env): boolean {
+	if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return false;
+	if (env.TERM === "dumb") return false;
+	return true;
 }

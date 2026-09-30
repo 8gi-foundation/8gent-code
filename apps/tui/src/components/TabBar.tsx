@@ -172,17 +172,17 @@ export function TabBar({
 						{cells.map((cell, i) => (
 							<React.Fragment key={visibleTabs[i]?.id ?? i}>
 								{i > 0 ? GAP : ""}
-								{cell.grabbed ? <Text color={t.orangeAlt}>[</Text> : null}
+								{cell.grabbed ? <Text color={t.orange}>[</Text> : null}
 								<Text color={t.dim}>{cell.num}</Text>
 								<Text color={cell.active ? t.orange : t.muted} bold={cell.active}>
 									{cell.title}
 								</Text>
-								{cell.grabbed ? <Text color={t.orangeAlt}>]</Text> : null}
+								{cell.grabbed ? <Text color={t.orange}>]</Text> : null}
 							</React.Fragment>
 						))}
 					</Text>
 				</Box>
-				{hint ? <Text color={t.orangeAlt}>{hint}</Text> : null}
+				{hint ? <Text color={t.orange}>{hint}</Text> : null}
 			</Box>
 			<Text wrap="truncate-end">
 				<Text color={t.dim}>{rule.before}</Text>

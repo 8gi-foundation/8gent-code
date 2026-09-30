@@ -2,7 +2,7 @@
 
 exports[`MessageList with a tool trail at 80 columns 80-column render snapshot 1`] = `
 "│ HH:MM You
-│ Write deck/outline.md, then run \`ls deck\`
+│ Write deck/outline.md, then run  ls deck
 
 │ ◆ 8gent HH:MM
 │ ✓ Wrote  deck/outline.md

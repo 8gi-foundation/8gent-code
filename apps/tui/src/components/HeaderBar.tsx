@@ -31,9 +31,12 @@ const ui = {
 	cream:      t.textPrimary,
 	muted:      t.textTertiary,
 	dim:        t.textDim,
+	// Brand mark and the update notice only.
 	orange:     t.orange,
 	teal:       t.teal,
-	pillBorder: t.orange,
+	// The brand pill is chrome, not state: orange stays for the active tab,
+	// DONE, the input and the selection.
+	pillBorder: t.border,
 } as const;
 
 /** Width assumed when the caller does not report the terminal width. */
@@ -134,7 +137,9 @@ export function planHeader(props: HeaderBarProps): {
 		const floor = !compactHint && !compactBrand ? HINT_COMPACT_BELOW : MIDDLE_MIN;
 		if (available >= floor) {
 			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
-			if (middle.branch) return { compactHint, compactBrand, middle, middleAvailable: available };
+			if (middle.branch || middle.path || middle.sync) {
+				return { compactHint, compactBrand, middle, middleAvailable: available };
+			}
 		}
 	}
 	// No room for a branch at all: compact pill, compact hint, no middle.
@@ -164,7 +169,7 @@ export function HeaderBar(props: HeaderBarProps) {
 				<BrandPill updateAvailable={updateAvailable} version={version} compact={compactBrand} />
 			</Box>
 
-			{middle.branch ? (
+			{middle.branch || middle.path || middle.sync ? (
 				<Box
 					flexGrow={1}
 					flexShrink={1}
@@ -174,16 +179,19 @@ export function HeaderBar(props: HeaderBarProps) {
 					overflow="hidden"
 				>
 					<Text wrap="truncate-end">
-						{middle.path ? (
+						{middle.path ? <Text color={ui.muted}>{middle.path}</Text> : null}
+						{middle.branch ? (
 							<>
-								<Text color={ui.muted}>{middle.path}</Text>
-								<Text color={ui.teal}> ⎇ </Text>
+								<Text color={ui.teal}>{middle.path ? " ⎇ " : "⎇ "}</Text>
+								<Text color={ui.cream}>{middle.branch}</Text>
 							</>
-						) : (
-							<Text color={ui.teal}>⎇ </Text>
-						)}
-						<Text color={ui.orange}>{middle.branch}</Text>
-						{middle.sync ? <Text color={ui.muted}> {middle.sync}</Text> : null}
+						) : null}
+						{middle.sync ? (
+							<Text color={ui.muted}>
+								{middle.path || middle.branch ? " " : ""}
+								{middle.sync}
+							</Text>
+						) : null}
 					</Text>
 				</Box>
 			) : (

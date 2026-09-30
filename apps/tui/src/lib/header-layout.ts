@@ -22,7 +22,7 @@ export const BRANCH_MAX = 32;
 /** Shortest path slice worth showing; below this the path is hidden. */
 export const PATH_MIN = 12;
 /** Longest sync label the header will show. */
-export const SYNC_MAX = 10;
+export const SYNC_MAX = 11;
 /** Width of " ⎇ " between the path and the branch. */
 const PATH_BRANCH_GAP = 3;
 /** Width of "⎇ " in front of the branch when the path is hidden. */
@@ -115,6 +115,18 @@ export function fitHeaderMiddle(
 	const syncW = cellWidth(sync);
 	const syncCost = sync ? 1 + syncW : 0;
 
+	// No branch: the path and the note ("no repo") only, never a "⎇ -".
+	if (!branch) {
+		const noteCost = sync ? (path ? 1 : 0) + syncW : 0;
+		if (cellWidth(path) + noteCost <= available) return { path, branch: "", sync };
+		if (path && available - noteCost >= PATH_MIN) {
+			return { path: truncateMiddle(path, available - noteCost), branch: "", sync };
+		}
+		if (path && available >= PATH_MIN) return { path: truncateMiddle(path, available), branch: "", sync: "" };
+		if (sync && syncW <= available) return { path: "", branch: "", sync };
+		return empty;
+	}
+
 	// 1. Everything as-is.
 	if (cellWidth(path) + PATH_BRANCH_GAP + branchW + syncCost <= available) {
 		return { path, branch, sync };
@@ -150,7 +162,10 @@ export function fitHeaderMiddle(
 
 /** Rendered width of a fitted middle segment, separators included. */
 export function headerMiddleWidth(middle: HeaderMiddle): number {
-	if (!middle.branch) return 0;
+	if (!middle.branch) {
+		const pathW = cellWidth(middle.path);
+		return pathW + (middle.sync ? (pathW ? 1 : 0) + cellWidth(middle.sync) : 0);
+	}
 	const pathPart = middle.path ? cellWidth(middle.path) + PATH_BRANCH_GAP : BRANCH_GLYPH;
 	const syncPart = middle.sync ? 1 + cellWidth(middle.sync) : 0;
 	return pathPart + cellWidth(middle.branch) + syncPart;

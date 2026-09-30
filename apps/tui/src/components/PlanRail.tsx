@@ -105,7 +105,7 @@ export function PlanRail({
 
 	return (
 		<Box flexDirection="column" width={compact ? 18 : 24} flexShrink={0} paddingX={1}>
-			<Text color={t.orange} bold>
+			<Text color={t.heading} bold>
 				PLAN
 			</Text>
 			<Box marginTop={1} flexDirection="column">

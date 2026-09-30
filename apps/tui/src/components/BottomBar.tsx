@@ -24,7 +24,7 @@ interface BottomBarProps {
 	ready: number;
 	total: number;
 	tokens: string;
-	branch: string;
+	branch?: string;
 	/** Optional auth display-name override; falls back to the OS user. (#2366) */
 	user?: string;
 	permissions: string;

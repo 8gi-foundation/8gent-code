@@ -9,7 +9,7 @@
  * Theme tokens only. No inline hex.
  *
  * Layout: section headings (WORKSPACE / STATE / CONTEXT / ACCESS) sit on their
- * own line in orange bold. Data rows use the shared MetricRow helper so labels
+ * own line in the calm heading tone, bold; orange is kept for state and focus. Data rows use the shared MetricRow helper so labels
  * and values can never collide at narrow widths (the bug that produced
  * `mainch` and `ASKroval`).
  */
@@ -20,22 +20,26 @@ import { t } from "../theme.js";
 import { MetricRow } from "./RailRow.js";
 
 interface ContextRailProps {
+	/** Checked-out branch; "" when there is none or it is not known yet. */
 	branch: string;
+	/** True once a check found no repository: the rail says "no repo". */
+	noRepo?: boolean;
 	risk: "low" | "medium" | "high";
 	permissions: string;
 	contextPct: number;
 	adhdMode: boolean;
-	/** Optional override; defaults to "8gent-code" until wired to real workspace. */
+	/** The workspace folder's name. Omitted means not known: no row. */
 	workspaceName?: string;
 }
 
 export function ContextRail({
 	branch,
+	noRepo = false,
 	risk,
 	permissions,
 	contextPct,
 	adhdMode,
-	workspaceName = "8gent-code",
+	workspaceName,
 }: ContextRailProps) {
 	const riskColor =
 		risk === "high" ? t.red : risk === "medium" ? t.orange : t.green;
@@ -54,28 +58,34 @@ export function ContextRail({
 			flexDirection="column"
 			overflow="hidden"
 		>
-			<Text color={t.orange} bold>WORKSPACE</Text>
-			<Text color={t.textPrimary} wrap="truncate-end">{workspaceName}</Text>
-			<MetricRow label="branch" value={branch} color={t.orange} />
+			<Text color={t.heading} bold>WORKSPACE</Text>
+			{workspaceName ? (
+				<Text color={t.textPrimary} wrap="truncate-end">{workspaceName}</Text>
+			) : null}
+			{branch ? (
+				<MetricRow label="branch" value={branch} color={t.textPrimary} />
+			) : noRepo ? (
+				<Text color={t.textTertiary}>no repo</Text>
+			) : null}
 
 			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>STATE</Text>
+			<Text color={t.heading} bold>STATE</Text>
 			<MetricRow
 				label="approval"
 				value={permissions.toUpperCase()}
-				color={permissions === "ask" ? t.orange : t.textSecondary}
+				color={permissions === "ask" ? t.textPrimary : t.textSecondary}
 			/>
 			<MetricRow label="risk" value={risk.toUpperCase()} color={riskColor} />
 
 			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>CONTEXT</Text>
+			<Text color={t.heading} bold>CONTEXT</Text>
 			<Box justifyContent="space-between" width="100%" overflow="hidden">
 				<Text color={t.steel}>{contextBar}</Text>
 				<Text color={t.textSecondary}>{contextPct}%</Text>
 			</Box>
 
 			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>ACCESS</Text>
+			<Text color={t.heading} bold>ACCESS</Text>
 			<MetricRow
 				label="ADHD"
 				value={adhdMode ? "ON" : "OFF"}

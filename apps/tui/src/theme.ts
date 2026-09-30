@@ -91,6 +91,11 @@ const dark = {
 	border:     "#2E2A26",
 	cardBorder: "#2E2A26",
 
+	// Section labels (WORKSPACE, AGENT ACTIVITY...): text-secondary, so
+	// orange stays for state and focus (the active tab, DONE, the input,
+	// the selection). 11.3:1 on bg.
+	heading:  "#C8C2BA",
+
 	// Semantic / UI
 	teal:     "#7DA8A3",
 	steel:    "#9DB5C8",
@@ -125,6 +130,8 @@ const light = {
 
 	border:     "#C8C2BA",
 	cardBorder: "#8A8078",
+
+	heading:  "#2E2A26",   // text-secondary, 13.3:1 on cream
 
 	teal:     "#3F7570",
 	steel:    "#4F6E85",

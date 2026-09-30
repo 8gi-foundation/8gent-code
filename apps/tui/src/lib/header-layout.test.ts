@@ -130,3 +130,24 @@ describe("fitHeaderMiddle", () => {
 		expect(cellWidth(m.branch)).toBe(BRANCH_MAX);
 	});
 });
+
+describe("fitHeaderMiddle without a branch (audit #10)", () => {
+	test("outside a repo: the path and 'no repo', never a '⎇ -'", () => {
+		const m = fitHeaderMiddle("/tmp/work", "", "no repo", 80);
+		expect(m).toEqual({ path: "/tmp/work", branch: "", sync: "no repo" });
+		expect(headerMiddleWidth(m)).toBe(cellWidth("/tmp/work no repo"));
+	});
+
+	test("before the first check: the path alone", () => {
+		expect(fitHeaderMiddle("/tmp/work", "", "", 80)).toEqual({ path: "/tmp/work", branch: "", sync: "" });
+	});
+
+	test("tight: the path is cut in the middle, then the note goes, never past the room", () => {
+		for (let room = 0; room <= 90; room++) {
+			const m = fitHeaderMiddle(PATH, "", "no repo", room);
+			expect(headerMiddleWidth(m)).toBeLessThanOrEqual(room);
+			expect(m.branch).toBe("");
+		}
+		expect(fitHeaderMiddle(PATH, "", "no repo", PATH_MIN + 2)).toMatchObject({ sync: "" });
+	});
+});

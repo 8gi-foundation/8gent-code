@@ -97,7 +97,7 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 		out.push({ key: "rate", value: formatTps(d.tokensPerSecond), color: ui.teal, priority: 6 });
 	}
 	if (known(d.branch)) {
-		out.push({ key: "branch", label: "branch", value: d.branch, color: ui.orange, priority: 3 });
+		out.push({ key: "branch", label: "branch", value: d.branch, color: ui.cream, priority: 3 });
 	}
 	if (known(d.permissions)) {
 		const infinite = d.permissions === "infinite";
