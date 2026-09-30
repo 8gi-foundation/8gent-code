@@ -21,6 +21,7 @@ deciders, the offline `MockBackend`, and a `fetch` that refuses every call.
 | `recall-fail-closed.test.ts` | `SemanticRecall` returned `[]` on any error, indistinguishable from "no memories". A closed or schema-broken store must throw `MemoryRecallError` (also through `recallAsText()`); a healthy empty store must return `[]`. | 2984 | 4 |
 | `decide-guard.test.ts` | `bashGuard()` must fail closed: block when the decider throws, returns nothing, NaN, +/-Infinity, a value outside [0, 1] or a non-number, and when no backend is reachable. Allow only for a valid low probability. The guard is James's code (PR 2995); it is here because it is the same fail-closed rule as PR 2984. | 2995 | 17 |
 | `install-no-network.test.ts` | `postinstall.js` ran `npx bmad-method init`, fetching and executing an unpinned package on every install. Static scan of every root lifecycle script, the files they run, the bridge `build.sh` postinstall shells out to, and its `Package.swift` (no remote dependencies). Comments are stripped, since the postinstall header quotes the removed command as an opt-in hint. | 2969 | 4 |
+| `workflow-injection.test.ts` | `auto-release.yml` and `version-bump-on-main.yml` (both `contents: write`) expanded the PR title, labels, author and head commit message with `${{ }}` inside `run:`, so crafted text ran as shell. Static: no `${{ }}` in any `run:` block of the two files, every `uses:` pinned to a commit SHA. Runtime: the real step scripts run as the runner runs them (expressions substituted as text, `bash -eo pipefail`) with `"; touch`, `$(...)` and backtick payloads; no marker file may appear and the bump level must still be read from the text. | #3214 | 7 |
 | `home-resolver.test.ts` | Direct `os.homedir()` cannot be sandboxed on Windows; `resolveHome()` in `packages/core/home.ts` is the one resolver. See the note below. | 2972, 2981 | 5 |
 
 ### The home resolver is a ratchet, not a zero
@@ -54,6 +55,8 @@ worktree, the test run, the file restored, and the test run again.
 | decide-guard | mutation: decider error returns "allow" | 3 fail (throw, both unavailable-backend tests) | restored |
 | install-no-network | pre-fix `27594d2f` (parent of 2969 merge) | 2 fail; `npx` found in postinstall | main |
 | install-no-network | mutation: postinstall regains an `npx` call | 2 fail | restored |
+| workflow-injection | main `297e56b8` (unfixed workflows) | 7/7 fail; every payload created its marker file | fix branch |
+| workflow-injection | mutation: `MSG="${{ github.event.head_commit.message }}"` back in version-bump | 2 fail (static + runtime) | restored |
 | home-resolver | pre-fix `8c57a585` (parent of 2981 merge) | 2 fail; bridge.ts and system-health route call `homedir()` | main |
 | home-resolver | mutation: bridge.ts back to `os.homedir()` | 2 fail | restored |
 | home-resolver | mutation: a new runtime file calls `homedir()` | 1 fail | restored |
