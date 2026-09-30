@@ -7,6 +7,7 @@
 
 import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
+import { type NetDeps, guardedFetch } from "./net-guard";
 // jsdom is imported on first use: at import time it reads its default stylesheet
 // from its own install path, which does not exist inside a compiled binary.
 
@@ -37,6 +38,8 @@ export interface WebSearchOptions {
 export interface WebFetchOptions {
 	maxLength?: number;
 	extractMain?: boolean;
+	/** DNS and fetch seams for tests. Production uses the system resolver and fetch. */
+	net?: NetDeps;
 }
 
 // ============================================
@@ -138,15 +141,21 @@ export async function webFetch(
 			normalizedUrl = `https://${normalizedUrl}`;
 		}
 
-		const response = await fetch(normalizedUrl, {
-			headers: {
-				"User-Agent":
-					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-				"Accept-Language": "en-US,en;q=0.5",
+		// guardedFetch refuses loopback, private, link-local and metadata
+		// destinations, pins the connection to the checked address, and re-checks
+		// every redirect hop (#3233).
+		const { response, finalUrl } = await guardedFetch(
+			normalizedUrl,
+			{
+				headers: {
+					"User-Agent":
+						"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+					Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+					"Accept-Language": "en-US,en;q=0.5",
+				},
 			},
-			redirect: "follow",
-		});
+			options.net,
+		);
 
 		if (!response.ok) {
 			throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
@@ -159,7 +168,7 @@ export async function webFetch(
 			const text = await response.text();
 			return {
 				title: normalizedUrl,
-				url: response.url,
+				url: finalUrl,
 				content: text.slice(0, maxLength),
 				length: text.length,
 			};
@@ -170,7 +179,7 @@ export async function webFetch(
 		if (extractMain) {
 			// Use Readability for main content extraction
 			const { JSDOM } = await import("jsdom");
-			const dom = new JSDOM(html, { url: response.url });
+			const dom = new JSDOM(html, { url: finalUrl });
 			const reader = new Readability(dom.window.document);
 			const article = reader.parse();
 
@@ -180,7 +189,7 @@ export async function webFetch(
 
 				return {
 					title: article.title || normalizedUrl,
-					url: response.url,
+					url: finalUrl,
 					content: content.slice(0, maxLength),
 					excerpt: article.excerpt || undefined,
 					byline: article.byline || undefined,
@@ -198,7 +207,7 @@ export async function webFetch(
 
 		return {
 			title,
-			url: response.url,
+			url: finalUrl,
 			content: content.slice(0, maxLength),
 			length: content.length,
 		};
