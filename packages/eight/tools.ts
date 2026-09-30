@@ -115,6 +115,7 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
+import { MCP_POLICY_ACTION, askMcpApproval, mcpPolicyContext } from "../permissions/mcp-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
@@ -1202,6 +1203,11 @@ export class ToolExecutor {
 		vercel_get_env: "network_request",
 		vercel_list_domains: "network_request",
 		vercel_get_deployment_logs: "network_request",
+		// A call to any tool on an MCP server (#3230). It had no entry, so the
+		// gate below never ran and every MCP call went straight to the server
+		// in every mode. mcp_list_tools only reads the local list and stays
+		// ungated.
+		mcp_call_tool: MCP_POLICY_ACTION,
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -1296,6 +1302,7 @@ export class ToolExecutor {
 		// has no rules, so every desktop call - quitting apps included - fell
 		// through to the engine's default allow and no card appeared.
 		const isDesktop = toolName.startsWith("desktop_");
+		const isMcpCall = toolName === "mcp_call_tool";
 		const policyAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
@@ -1306,6 +1313,7 @@ export class ToolExecutor {
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
+				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
 				path: args.path as string,
 				// Every write tool is checked on what it actually writes, not
 				// only write_file's `content` (#3011: edit_file's newText was
@@ -1318,9 +1326,18 @@ export class ToolExecutor {
 				url: args.url as string,
 				key: args.key as string,
 			});
-			const askFirst = !gateResult.allowed && gateResult.requiresApproval && isDesktop;
-			if (askFirst) {
+			const askFirst = !gateResult.allowed && gateResult.requiresApproval;
+			if (askFirst && isDesktop) {
 				const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
+				if (refusal) return refusal;
+			} else if (askFirst && isMcpCall) {
+				// Ask in Ask and Guarded; Infinite runs; no card means no call.
+				const refusal = await askMcpApproval(
+					String(args.server),
+					String(args.tool),
+					args.args as Record<string, unknown> | undefined,
+					gateResult.reason,
+				);
 				if (refusal) return refusal;
 			} else if (!gateResult.allowed) {
 				// Say plainly that nothing happened (see blockedToolMessage).
