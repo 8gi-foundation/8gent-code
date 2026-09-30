@@ -674,7 +674,10 @@ function applySettingsToEnv(): void {
 			if (value && !process.env[key]) process.env[key] = value;
 		};
 		setIfMissing("APFEL_BASE_URL", s.providers.apfel.baseURL);
-		setIfMissing("OLLAMA_BASE_URL", s.providers.ollama.baseURL);
+		// OLLAMA_HOST is Ollama's own env var. Seeding OLLAMA_BASE_URL from the
+		// settings default (localhost) would outrank it and silently send every
+		// step to this machine, so a shell OLLAMA_HOST suppresses the seed (#3076).
+		if (!process.env.OLLAMA_HOST) setIfMissing("OLLAMA_BASE_URL", s.providers.ollama.baseURL);
 		setIfMissing("LMSTUDIO_BASE_URL", s.providers.lmstudio.baseURL);
 		setIfMissing("OPENROUTER_BASE_URL", s.providers.openrouter.baseURL);
 	} catch {
