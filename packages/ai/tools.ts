@@ -12,10 +12,19 @@ import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import {
+	ALLOWED_PATHS_DESCRIPTION,
+	CHECK_AGENT_DESCRIPTION,
+	LIST_AGENTS_DESCRIPTION,
+	SPAWN_AGENT_DESCRIPTION,
+	checkAgentTool,
+	listAgentsTool,
+	spawnAgentTool,
+} from "../orchestration/delegation-tools";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { emptyOldTextError } from "../permissions/edit-guards";
+import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 
@@ -1258,218 +1267,42 @@ async function runShellCommand(command: string): Promise<string> {
 // Multi-Agent Orchestration Tools
 // ============================================
 
+// One implementation with the text-tool path: packages/orchestration/delegation-tools.ts.
+// The native path holds a per-agent scope the same way: allowedPaths goes to the
+// shared agent pool, which builds the sub-agent with it.
 const spawnAgent = tool({
-	description:
-		"Spawn a background agent. Use runtime='claude' for complex tasks that need a stronger model, runtime='8gent' for standard tasks, runtime='shell' for simple commands.",
+	description: SPAWN_AGENT_DESCRIPTION,
 	inputSchema: z.object({
 		task: z.string().describe("Task description for the background agent to execute"),
 		runtime: z
 			.enum(["8gent", "claude", "shell"])
 			.optional()
-			.describe(
-				"Runtime to use: '8gent' (default, internal agent), 'claude' (Claude CLI for complex tasks), 'shell' (sh -c for simple commands)",
-			),
-		model: z.string().optional().describe("Model to use (only for 8gent runtime)"),
-		timeout: z
-			.number()
+			.describe("Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)"),
+		model: z
+			.string()
 			.optional()
-			.describe("Timeout in ms (default: 5 min, only for claude/shell runtimes)"),
+			.describe(
+				"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
+			),
+		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
+		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
 	}),
-	execute: async ({ task, runtime, model, timeout }) => {
-		try {
-			const effectiveRuntime = runtime || "8gent";
-
-			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
-				// runtime "shell" runs the task through sh -c, so it is a shell command.
-				if (effectiveRuntime === "shell") {
-					const { systemOneGate } = await import("../permissions/system-one-gate");
-					const systemOne = await systemOneGate(task);
-					if (!systemOne.run) return systemOne.message as string;
-				}
-				const { spawnCLIAgent } = await import("../orchestration");
-				const agent = spawnCLIAgent(effectiveRuntime, task, {
-					workingDirectory: _ctx.workingDirectory,
-					timeout: timeout || undefined,
-				});
-				return JSON.stringify(
-					{
-						agentId: agent.id,
-						runtime: effectiveRuntime,
-						status: "running",
-						task: task.slice(0, 100),
-						message: `CLI agent ${agent.id} (${effectiveRuntime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
-					},
-					null,
-					2,
-				);
-			}
-
-			// Default: 8gent runtime
-			const { getAgentPool } = await import("../orchestration");
-			const pool = getAgentPool();
-			const agent = await pool.spawnAgent(task, {
-				model: model || undefined,
-				workingDirectory: _ctx.workingDirectory,
-			});
-			return JSON.stringify(
-				{
-					agentId: agent.id,
-					runtime: "8gent",
-					status: agent.status,
-					task: task.slice(0, 100),
-					message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
-				},
-				null,
-				2,
-			);
-		} catch (err) {
-			return `Failed to spawn agent: ${err}`;
-		}
-	},
+	execute: async ({ task, runtime, model, timeout, allowedPaths }) =>
+		spawnAgentTool(_ctx.workingDirectory, task, runtime, model, timeout, normaliseAllowedPaths(allowedPaths)),
 });
 
 const checkAgent = tool({
-	description:
-		"Check the status and result of a spawned background agent by ID. Works with all runtimes (8gent, claude, shell). Returns status and result if done.",
+	description: CHECK_AGENT_DESCRIPTION,
 	inputSchema: z.object({
 		agentId: z.string().describe("Agent ID returned from spawn_agent"),
 	}),
-	execute: async ({ agentId }) => {
-		try {
-			// Check CLI agents first (claude/shell runtimes)
-			if (agentId.startsWith("cli-")) {
-				const { getCLIAgentStatus } = await import("../orchestration");
-				const status = getCLIAgentStatus(agentId);
-				if (!status) return `Agent not found: ${agentId}`;
-
-				const result: Record<string, unknown> = {
-					agentId: status.id,
-					runtime: status.runtime,
-					status: status.status,
-					task: status.task,
-					elapsed: status.elapsed,
-				};
-
-				if (status.result) {
-					result.stdout = status.result.stdout.slice(0, 2000);
-					if (status.result.stderr) {
-						result.stderr = status.result.stderr.slice(0, 500);
-					}
-					result.exitCode = status.result.exitCode;
-				}
-
-				return JSON.stringify(result, null, 2);
-			}
-
-			// Default: check 8gent agent pool
-			const { getAgentPool } = await import("../orchestration");
-			const pool = getAgentPool();
-			const agent = pool.getAgent(agentId);
-			if (!agent) return `Agent not found: ${agentId}`;
-
-			const elapsed = agent.completedAt
-				? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
-				: `${((Date.now() - agent.startedAt.getTime()) / 1000).toFixed(1)}s (running)`;
-
-			const result: Record<string, unknown> = {
-				agentId: agent.id,
-				runtime: "8gent",
-				status: agent.status,
-				task: agent.task.description,
-				elapsed,
-			};
-
-			if (agent.status === "completed" && agent.task.result) {
-				result.result =
-					typeof agent.task.result === "string"
-						? agent.task.result.slice(0, 2000)
-						: JSON.stringify(agent.task.result).slice(0, 2000);
-			}
-			if (agent.status === "failed" && agent.task.error) {
-				result.error = agent.task.error;
-			}
-
-			return JSON.stringify(result, null, 2);
-		} catch (err) {
-			return `Failed to check agent: ${err}`;
-		}
-	},
+	execute: async ({ agentId }) => checkAgentTool(agentId),
 });
 
 const listAgents = tool({
-	description:
-		"List all spawned background agents (8gent, claude, shell) with their status. Shows unified overview across all runtimes.",
+	description: LIST_AGENTS_DESCRIPTION,
 	inputSchema: z.object({}),
-	execute: async () => {
-		try {
-			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
-			const pool = getAgentPool();
-			const poolAgents = pool.listAgents();
-			const cliAgentsList = listCLIAgents();
-
-			if (poolAgents.length === 0 && cliAgentsList.length === 0) {
-				return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
-			}
-
-			const stats = pool.getStats();
-
-			// 8gent agents
-			const eightAgentList = poolAgents.map((a) => {
-				const elapsed = a.completedAt
-					? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
-					: `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
-				return {
-					id: a.id,
-					runtime: "8gent" as const,
-					status: a.status,
-					task: a.task.description.slice(0, 80),
-					elapsed,
-					hasResult: a.status === "completed" && !!a.task.result,
-				};
-			});
-
-			// CLI agents (claude/shell)
-			const cliAgentList = cliAgentsList.map((a) => {
-				const status = getCLIAgentStatus(a.id);
-				return {
-					id: a.id,
-					runtime: a.runtime,
-					status: status?.status || "running",
-					task: a.task.slice(0, 80),
-					elapsed: status?.elapsed || "...",
-					hasResult: !!a.result,
-				};
-			});
-
-			const allAgents = [...eightAgentList, ...cliAgentList];
-
-			// Augment stats with CLI agents
-			const cliRunning = cliAgentsList.filter((a) => !a.completedAt).length;
-			const cliCompleted = cliAgentsList.filter(
-				(a) => a.completedAt && a.result?.exitCode === 0,
-			).length;
-			const cliFailed = cliAgentsList.filter(
-				(a) => a.completedAt && a.result?.exitCode !== 0,
-			).length;
-
-			return JSON.stringify(
-				{
-					stats: {
-						...stats,
-						totalAgents: stats.totalAgents + cliAgentsList.length,
-						running: stats.running + cliRunning,
-						completed: stats.completed + cliCompleted,
-						failed: stats.failed + cliFailed,
-					},
-					agents: allAgents,
-				},
-				null,
-				2,
-			);
-		} catch (err) {
-			return `Failed to list agents: ${err}`;
-		}
-	},
+	execute: async () => listAgentsTool(),
 });
 
 // ── Multi-Agent Orchestration Tools ──────────────────────────────
