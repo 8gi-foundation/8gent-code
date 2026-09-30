@@ -1,10 +1,36 @@
 /**
  * Player - Audio playback on macOS using afplay.
  * Supports play, stop, loop, and queue management.
+ *
+ * Every afplay a Player starts is its own child, stopped by its own handle.
+ * Nothing here stops a process by name (#3183): a name pattern also hits the
+ * afplay of other apps, other sessions, TTS and voice notes.
  */
 
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { type ChildProcess, type SpawnOptions, execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+
+type Spawn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
+let spawnImpl: Spawn = spawn;
+
+/** Tests swap the spawner for a stub; call with nothing to restore node's spawn. */
+export function setPlayerSpawn(fn?: Spawn): void {
+	spawnImpl = fn ?? spawn;
+}
+
+/** Players with a child running right now. */
+const live = new Set<Player>();
+
+/**
+ * Stop every Player this process started, and only those, each by its own
+ * child handle. Returns how many were playing. /dj stop uses it for the
+ * producer's afplay.
+ */
+export function stopOwnPlayers(): number {
+	const n = live.size;
+	for (const p of [...live]) p.stop();
+	return n;
+}
 
 export class Player {
 	private process: ChildProcess | null = null;
@@ -46,6 +72,7 @@ export class Player {
 			} catch {}
 			this.process = null;
 		}
+		live.delete(this);
 		this.currentTrack = null;
 	}
 
@@ -88,12 +115,18 @@ export class Player {
 	}
 
 	private startPlayback(path: string): void {
-		this.process = spawn("afplay", [path], { stdio: "ignore" });
-		this.process.on("exit", () => {
+		const child = spawnImpl("afplay", [path], { stdio: "ignore" });
+		this.process = child;
+		live.add(this);
+		child.on("exit", () => {
+			// A child already replaced (stop, then play again) must not clear its successor.
+			if (this.process !== child) return;
 			this.process = null;
 			if (this.looping && this.currentTrack) {
 				// Re-start for loop
 				this.startPlayback(this.currentTrack);
+			} else {
+				live.delete(this);
 			}
 		});
 	}

@@ -27,6 +27,7 @@ export type {
 	ThinkingVisualiserSettings,
 	AgentsSettings,
 	AgentNames,
+	MusicSettings,
 } from "./schema.js";
 
 export { getVoiceForRole } from "./voice.js";

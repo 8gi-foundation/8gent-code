@@ -15,13 +15,148 @@
  * - Resume across sessions
  */
 
-import { type ChildProcess, execFileSync, execSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	type ChildProcess,
+	type SpawnOptions,
+	execFileSync,
+	execSync,
+	spawn,
+} from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { basename, join, posix, win32 } from "node:path";
+import { basename, dirname, join, posix, win32 } from "node:path";
+import { getSettingsFilePath, loadSettings } from "../settings/store.js";
 import { type KeyJob, detectKey } from "./key-detect.js";
+import { stopOwnPlayers } from "./player.js";
 import { type TrackInfo, trackInfoFromMetadata } from "./track-info.js";
+
+// ---- Process and preference seams (tests swap these) ----
+type Spawn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
+let spawnImpl: Spawn = spawn;
+
+/** Tests swap the spawner for mpv and the yt-dlp search; call with nothing to restore it. */
+export function setDjSpawn(fn?: Spawn): void {
+	spawnImpl = fn ?? spawn;
+}
+
+/** Where the DJ keeps the listener's volume between tracks and sessions (#3190). */
+export interface VolumeStore {
+	load(): number | null;
+	save(v: number): void;
+}
+
+/** The volume a first-ever track starts at: audible, well short of loud. */
+export const DEFAULT_VOLUME = 60;
+
+const settingsVolumeStore: VolumeStore = {
+	load() {
+		const v = loadSettings().music?.volume;
+		return typeof v === "number" && Number.isFinite(v) ? v : null;
+	},
+	save(v) {
+		writeVolumeSetting(getSettingsFilePath(), v);
+	},
+};
+
+/**
+ * Set music.volume in a settings file and change nothing else in it.
+ * setSetting is not used: it writes the file back through the typed
+ * defaults, which drops every key they do not know (briefings, connectors).
+ * A file that is not a JSON object is left alone.
+ */
+export function writeVolumeSetting(file: string, v: number): void {
+	let raw: Record<string, unknown> = {};
+	if (existsSync(file)) {
+		const parsed: unknown = JSON.parse(readFileSync(file, "utf-8"));
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+		raw = parsed as Record<string, unknown>;
+	}
+	const music = raw.music && typeof raw.music === "object" ? raw.music : {};
+	raw.music = { ...music, volume: v };
+	mkdirSync(dirname(file), { recursive: true });
+	const tmp = `${file}.${process.pid}.tmp`;
+	writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`);
+	renameSync(tmp, file);
+}
+let volumeStore: VolumeStore = settingsVolumeStore;
+
+/** Tests swap the store for one in memory; call with nothing to restore ~/.8gent/settings.json. */
+export function setVolumeStore(store?: VolumeStore): void {
+	volumeStore = store ?? settingsVolumeStore;
+}
+
+/** mpv takes 0-150; anything else, or nothing stored, is the default. */
+export function clampVolume(v: unknown): number {
+	const n = typeof v === "number" ? v : Number.NaN;
+	return Number.isFinite(n) ? Math.round(Math.max(0, Math.min(150, n))) : DEFAULT_VOLUME;
+}
+
+/** The volume the next track starts at. */
+export function preferredVolume(): number {
+	try {
+		return clampVolume(volumeStore.load() ?? DEFAULT_VOLUME);
+	} catch {
+		return DEFAULT_VOLUME;
+	}
+}
+
+/**
+ * Remember a chosen volume. Mute (0) is not a preference: a muted track
+ * must not make every later track and session start silent.
+ */
+function rememberVolume(v: number): void {
+	if (v <= 0) return;
+	try {
+		volumeStore.save(clampVolume(v));
+	} catch {}
+}
+
+/**
+ * Search YouTube for one result, off the event loop (#3182). Resolves null
+ * when nothing is found, yt-dlp fails, or the search runs past `timeoutMs`
+ * (the child is then ended by its own handle).
+ */
+export function ytSearch(
+	ytdlp: string,
+	query: string,
+	timeoutMs = 15000,
+): Promise<{ title: string; url: string } | null> {
+	return new Promise((resolve) => {
+		let out = "";
+		let child: ChildProcess;
+		try {
+			child = spawnImpl(ytdlp, ["--print", "%(title)s\t%(webpage_url)s", `ytsearch1:${query}`], {
+				stdio: ["ignore", "pipe", "ignore"],
+				windowsHide: true,
+			});
+		} catch {
+			resolve(null);
+			return;
+		}
+		let done = false;
+		const finish = (v: { title: string; url: string } | null) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve(v);
+		};
+		const timer = setTimeout(() => {
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+			finish(null);
+		}, timeoutMs);
+		child.stdout?.on("data", (d) => {
+			out += d;
+		});
+		child.on("error", () => finish(null));
+		child.on("close", (code) => {
+			const [title, url] = out.trim().split("\n")[0]?.split("\t") ?? [];
+			finish(code === 0 && url ? { title: title || query, url: url.trim() } : null);
+		});
+	});
+}
 
 // ---- Platform ----
 const PLATFORM = platform();
@@ -99,6 +234,11 @@ interface Tools {
 }
 
 let tools: Tools | null = null;
+
+/** Tests name the tools instead of looking on PATH; call with nothing to look again. */
+export function setDjTools(t?: Partial<Tools>): void {
+	tools = t ? { mpv: null, ytdlp: null, ffmpeg: null, sox: null, ...t } : null;
+}
 
 function detectTools(): Tools {
 	if (tools) return tools;
@@ -216,6 +356,8 @@ const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] }
 
 // ---- Playback State ----
 let mpvProcess: ChildProcess | null = null;
+/** Bumped by every play, radio and stop; a slower one that finds it moved on gives way. */
+let playGen = 0;
 let currentTrack = { title: "", url: "" };
 let isPlaying = false;
 let isPaused = false;
@@ -472,41 +614,31 @@ export class DJ {
 
 		let url = queryOrUrl;
 		let title = queryOrUrl;
+		// A stop or a newer play while this one searches wins (#3182).
+		const gen = ++playGen;
 
-		// If not a URL, search YouTube
+		// If not a URL, search YouTube, off the event loop so the TUI keeps drawing.
 		if (!queryOrUrl.startsWith("http")) {
-			try {
-				const result = execFileSync(
-					t.ytdlp!,
-					["--print", "%(title)s\t%(webpage_url)s", `ytsearch1:${queryOrUrl}`],
-					{
-						encoding: "utf-8",
-						timeout: 15000,
-						stdio: ["ignore", "pipe", "ignore"],
-						windowsHide: true,
-					},
-				).trim();
-				const [t2, u] = result.split("\t");
-				if (u) {
-					title = t2;
-					url = u;
-				}
-			} catch {
-				return `No results found for: ${queryOrUrl}`;
-			}
+			const found = await ytSearch(t.ytdlp!, queryOrUrl);
+			if (gen !== playGen) return "Stopped.";
+			if (!found) return `No results found for: ${queryOrUrl}`;
+			title = found.title;
+			url = found.url;
 		}
 
 		this.killMpv();
 
-		mpvProcess = spawn(
-			t.mpv,
-			["--no-video", "--idle=yes", `--input-ipc-server=${IPC_PATH}`, `--title=${title}`, url],
-			{ stdio: "ignore", windowsHide: true },
-		);
-		mpvProcess.unref();
+		mpvProcess = this.spawnMpv(t.mpv, [
+			"--no-video",
+			"--idle=yes",
+			`--input-ipc-server=${IPC_PATH}`,
+			`--title=${title}`,
+			url,
+		]);
 
 		// Wait for IPC socket
 		await new Promise((r) => setTimeout(r, 1500));
+		if (gen !== playGen) return "Stopped.";
 		ipcReady = true;
 
 		currentTrack = { title, url };
@@ -526,12 +658,10 @@ export class DJ {
 		// Direct URL
 		if (query.startsWith("http")) {
 			this.killMpv();
-			mpvProcess = spawn(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query], {
-				stdio: "ignore",
-				windowsHide: true,
-			});
-			mpvProcess.unref();
+			const gen = ++playGen;
+			mpvProcess = this.spawnMpv(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query]);
 			await new Promise((r) => setTimeout(r, 1500));
+			if (gen !== playGen) return "Stopped.";
 			ipcReady = true;
 			isPlaying = true;
 			sourceKind = "direct";
@@ -542,25 +672,28 @@ export class DJ {
 		// Preset or search
 		const searchTerm = RADIO_PRESETS[query.toLowerCase()] || query;
 
+		const gen = ++playGen;
 		try {
 			const res = await fetch(
 				`${RADIO_API}/stations/search?name=${encodeURIComponent(searchTerm)}&limit=5&order=votes&reverse=true`,
 			);
 			const stations = (await res.json()) as any[];
 
+			if (gen !== playGen) return "Stopped.";
 			if (!stations || stations.length === 0) return `No radio stations found for: ${query}`;
 
 			const station = stations[0];
 			const streamUrl = station.url_resolved || station.url;
 
 			this.killMpv();
-			mpvProcess = spawn(
-				t.mpv,
-				["--no-video", `--input-ipc-server=${IPC_PATH}`, `--title=${station.name}`, streamUrl],
-				{ stdio: "ignore", windowsHide: true },
-			);
-			mpvProcess.unref();
+			mpvProcess = this.spawnMpv(t.mpv, [
+				"--no-video",
+				`--input-ipc-server=${IPC_PATH}`,
+				`--title=${station.name}`,
+				streamUrl,
+			]);
 			await new Promise((r) => setTimeout(r, 1500));
+			if (gen !== playGen) return "Stopped.";
 			ipcReady = true;
 			isPlaying = true;
 			sourceKind = "direct";
@@ -584,9 +717,15 @@ export class DJ {
 		return isPaused ? "Paused." : "Resumed.";
 	}
 
-	/** Stop playback */
+	/**
+	 * Stop playback: the DJ's own mpv and any afplay its music Player started,
+	 * each by its own child handle. Never a name pattern (#3183). A search
+	 * still in flight is abandoned, so it cannot start a player afterwards.
+	 */
 	stop(): string {
+		playGen++;
 		this.killMpv();
+		stopOwnPlayers();
 		trackQueue = [];
 		return "Stopped.";
 	}
@@ -606,11 +745,21 @@ export class DJ {
 		return `${icon}: ${name}${by}${key ? ` | ${key}` : ""}${time}${q}`;
 	}
 
-	/** Set volume (0-100) */
+	/**
+	 * Set volume (0-150). It is remembered for later tracks and sessions
+	 * (#3190), so it applies even when nothing plays yet. Mute is not remembered.
+	 */
 	async volume(level: number): Promise<string> {
-		if (!isPlaying) return "Nothing playing.";
-		await mpvSet("volume", Math.max(0, Math.min(150, level)));
-		return `Volume: ${level}%`;
+		const v = clampVolume(level);
+		rememberVolume(v);
+		if (!isPlaying) return `Volume: ${v}% (for the next track)`;
+		await mpvSet("volume", v);
+		return `Volume: ${v}%`;
+	}
+
+	/** The volume the next track starts at, for a deck that shows it before anything plays. */
+	preferredVolume(): number {
+		return preferredVolume();
 	}
 
 	/** Skip to next in queue */
@@ -782,6 +931,16 @@ export class DJ {
 	}
 
 	// ---- Private ----
+	/** Start mpv at the remembered volume, as the DJ's own child. */
+	private spawnMpv(mpv: string, args: string[]): ChildProcess {
+		const child = spawnImpl(mpv, [`--volume=${preferredVolume()}`, ...args], {
+			stdio: "ignore",
+			windowsHide: true,
+		});
+		child.unref?.();
+		return child;
+	}
+
 	private killMpv(): void {
 		ipcReady = false;
 		abandonDetections();
