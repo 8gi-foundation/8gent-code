@@ -10,7 +10,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { normalizeProviderId, providerToRuntime } from "./model-selection.js";
+import {
+	type ModelSpec,
+	normalizeProviderId,
+	providerToRuntime,
+	specForActivatedTab,
+} from "./model-selection.js";
 
 describe("providerToRuntime", () => {
 	test("lmstudio maps to lmstudio (NOT ollama) - the reported bug", () => {
@@ -71,5 +76,45 @@ describe("CLI provider flow: normalizeProviderId -> providerToRuntime", () => {
 		const provider = normalizeProviderId(undefined);
 		expect(provider).toBeUndefined();
 		expect(providerToRuntime(provider)).toBe("ollama");
+	});
+});
+
+/**
+ * Regression guard: launched with --provider/--model, the Orchestrator tab is
+ * pinned to that spec. Switching Engineer -> QA -> back to Orchestrator used to
+ * leave the foreground on QA's model, because the pinned-tab branch returned
+ * without restoring anything. Returning to the pinned tab must restore it.
+ */
+describe("specForActivatedTab", () => {
+	const pin = { tabId: "tab-orchestrator", spec: { provider: "ollama", model: "qwen3.8:27b-mlx" } };
+	const small = { provider: "ollama", model: "llama3.2:3b" };
+
+	test("re-entering the pinned tab restores the launch spec, not the previous tab's", () => {
+		expect(specForActivatedTab("tab-orchestrator", pin, small)).toEqual(pin.spec);
+	});
+
+	test("other tabs get their role spec even while a pin exists", () => {
+		expect(specForActivatedTab("tab-qa", pin, small)).toEqual(small);
+	});
+
+	test("without a CLI pin every tab gets its role spec", () => {
+		expect(specForActivatedTab("tab-orchestrator", null, small)).toEqual(small);
+	});
+
+	test("no role spec and no pin leaves the current model alone", () => {
+		expect(specForActivatedTab("tab-engineer", null, null)).toBeNull();
+	});
+
+	test("a full Orchestrator -> Engineer -> QA -> Orchestrator walk ends on the launch model", () => {
+		const roles: Record<string, ModelSpec> = {
+			"tab-orchestrator": { provider: "ollama", model: "role-default:8b" },
+			"tab-engineer": small,
+			"tab-qa": small,
+		};
+		let current: ModelSpec = pin.spec;
+		for (const tab of ["tab-engineer", "tab-qa", "tab-orchestrator"]) {
+			current = specForActivatedTab(tab, pin, roles[tab] ?? null) ?? current;
+		}
+		expect(current.model).toBe("qwen3.8:27b-mlx");
 	});
 });
