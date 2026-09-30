@@ -13,6 +13,7 @@
  * input gives the same output.
  */
 
+import { DEFAULT_OLLAMA_BASE_URL, resolveOllamaBaseUrl } from "../../local-model-server/ollama-host";
 import {
 	type Answer,
 	type ChoiceQuestion,
@@ -28,7 +29,7 @@ import {
 	validateRequest,
 } from "../types";
 
-export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+export const DEFAULT_OLLAMA_HOST = DEFAULT_OLLAMA_BASE_URL;
 /** Letters cap the choice kind on this backend. Two-letter labels are out of scope. */
 export const OLLAMA_MAX_CHOICE_OPTIONS = 26;
 const TOP_LOGPROBS = 20;
@@ -51,16 +52,12 @@ export interface TopLogprob {
 
 /**
  * Resolve the Ollama base URL from env: OLLAMA_BASE_URL, then OLLAMA_HOST, then
- * localhost, the same order as the rest of the harness (resolveOllamaBaseUrl in
- * packages/ai). A bare host:port gets a scheme; an OpenAI-style "/v1" base is
- * cut back to the server root. OLLAMA_BASE_URL used to be ignored here, so a
- * session pointed at a remote Ollama that way still judged on localhost.
+ * localhost. The same resolver as the rest of the harness (#3149): a bare host
+ * with no port gets Ollama's :11434, where this used to leave it portless and
+ * reach port 80.
  */
 export function resolveOllamaHost(env: Record<string, string | undefined> = process.env): string {
-	const raw = env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim();
-	if (!raw) return DEFAULT_OLLAMA_HOST;
-	const withScheme = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
-	return withScheme.replace(/\/+$/, "").replace(/\/v1$/, "");
+	return resolveOllamaBaseUrl(env);
 }
 
 // ----- Prompt templates --------------------------------------------------------

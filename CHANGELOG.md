@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - one Ollama host resolver (#3149)
+- System One (`packages/decide`) and the rest of the harness resolved `OLLAMA_HOST` differently: a bare host with no port (`gpu-box`, which the ollama CLI accepts) got `:11434` for chat and no port (so port 80) for System One. Both now use one resolver, `packages/local-model-server/ollama-host.ts`.
+
 ### Added
 - Local model server layer, phase 1 of #3149 (`packages/local-model-server/`): a `LocalModelServer` interface with capability flags and an Ollama adapter, so Ollama becomes one server among equals rather than the assumed default. Eight model-list and health call sites (`/api/tags`) now go through it with no behaviour change, proven by a snapshot of their requests and results taken before the move. A contract suite holds every adapter to the same rules.
 
