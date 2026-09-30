@@ -113,6 +113,11 @@ interface ActiveTask {
 	progress?: number;
 	/** Right-hand tally beside the bar, e.g. "2/5". Defaults to `${progress}%`. */
 	detail?: string;
+	/**
+	 * How the label reads when there is no bar: "waiting" is the approval
+	 * card's orange, "quiet" is a plan at rest. Omitted is live work (teal).
+	 */
+	tone?: "waiting" | "quiet";
 }
 
 interface ToolStatus {
@@ -296,7 +301,15 @@ export function ActivityRail({
 					tasks.map((task) => (
 						<Box key={task.id} flexDirection="column" flexShrink={0}>
 							<Text
-								color={typeof task.progress === "number" ? t.textPrimary : t.teal}
+								color={
+									typeof task.progress === "number"
+										? t.textPrimary
+										: task.tone === "waiting"
+											? t.orange
+											: task.tone === "quiet"
+												? t.textSecondary
+												: t.teal
+								}
 								wrap="truncate-end"
 							>
 								{task.label}

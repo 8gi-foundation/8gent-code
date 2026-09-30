@@ -5994,7 +5994,7 @@ export function App({
 	// because none is measured, and MEMORY is not passed because the memory
 	// store exposes no hit/miss/cache counter yet (#3070).
 	// TASKS reads the same plan as the PLAN column, so the two never disagree.
-	const activeTasks = deriveActiveTasks(planSteps, isProcessing);
+	const activeTasks = deriveActiveTasks(planSteps, isProcessing, approvalPending !== null);
 	const recentTools = deriveTools(messages, isProcessing, 5);
 	// The model that ran the turn, not only the one asked for (#3102). Read
 	// from the active agent's reroute event and live config, for display only.

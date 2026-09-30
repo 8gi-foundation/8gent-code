@@ -419,6 +419,29 @@ describe("activity-rail-derivation", () => {
 		expect(deriveActiveTasks([], true)).toEqual([{ id: "working", label: "working, no plan yet" }]);
 	});
 
+	test("while the approval card waits, TASKS says waiting like every other surface (#3152)", () => {
+		expect(deriveActiveTasks([], true, true)).toEqual([
+			{ id: "waiting", label: "waiting for your answer", tone: "waiting" },
+		]);
+		const plan = [{ id: "p1", text: "a", status: "pending" as const }];
+		expect(deriveActiveTasks(plan, true, true)[0]).toMatchObject({ id: "waiting", tone: "waiting" });
+		// A step in progress is still the task; the card belongs to it.
+		const running = [{ id: "p1", text: "run the tests", status: "active" as const }];
+		expect(deriveActiveTasks(running, true, true)[0]).toMatchObject({ id: "p1", label: "run the tests" });
+	});
+
+	test("a plan-only reply reads as planned, not as an empty 0 of N bar (#3152)", () => {
+		const plan = [
+			{ id: "p1", text: "a", status: "pending" as const },
+			{ id: "p2", text: "b", status: "pending" as const },
+			{ id: "p3", text: "c", status: "pending" as const },
+		];
+		expect(deriveActiveTasks(plan, false)).toEqual([{ id: "plan-tally", label: "3 steps planned", tone: "quiet" }]);
+		expect(deriveActiveTasks(plan.slice(0, 1), false)[0].label).toBe("1 step planned");
+		// Mid-turn the tally stays: the steps are about to run.
+		expect(deriveActiveTasks(plan, true)[0]).toMatchObject({ label: "0 of 3 steps done", detail: "0/3" });
+	});
+
 	test("a fresh session with no plan shows no tasks (#2923)", () => {
 		// Nothing seeded, nothing invented: no plan and no turn is idle.
 		expect(deriveActiveTasks([], false)).toEqual([]);
