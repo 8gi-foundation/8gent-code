@@ -42,6 +42,9 @@ const MODELS = {
 /** Headers whose value the runtime owns (varies by Bun version or port), not the call site. */
 const RUNTIME_HEADERS = new Set(["user-agent", "host", "accept-encoding"]);
 
+/** Error names the language defines (not the runtime's network layer), kept in the snapshot. */
+const STABLE_ERROR_NAMES = new Set(["SyntaxError", "TypeError", "AbortError", "TimeoutError"]);
+
 type Seen = { method: string; path: string; headers: Record<string, string>; body: string };
 let scenario: Scenario = "models";
 let seen: Seen[] = [];
@@ -109,8 +112,13 @@ async function capture(run: () => Promise<unknown>, env: Record<string, string |
 		result = { returned: await run() };
 	} catch (err) {
 		const e = err as Error;
-		// Our messages mention the endpoint; runtime messages (refused, JSON parse) vary by Bun version.
-		result = { threw: e?.name, message: /api\/tags|answered HTTP/.test(e?.message ?? "") ? e.message : "<runtime>" };
+		// Our messages mention the endpoint; runtime messages (refused, JSON parse) vary by Bun
+		// version, and so does a refused connection's error name (Error on macOS, not on Linux).
+		const ours = /api\/tags|answered HTTP/.test(e?.message ?? "");
+		result = {
+			threw: ours || STABLE_ERROR_NAMES.has(e?.name) ? e?.name : "<runtime>",
+			message: ours ? e.message : "<runtime>",
+		};
 	} finally {
 		for (const k of Object.keys(saved)) {
 			if (saved[k] === undefined) delete process.env[k];

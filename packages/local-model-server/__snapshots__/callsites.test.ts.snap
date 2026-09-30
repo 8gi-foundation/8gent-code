@@ -172,7 +172,7 @@ exports[`phase 1 /api/tags call sites are unchanged by the local model server la
 "{
   "requests": [],
   "result": {
-    "threw": "Error",
+    "threw": "<runtime>",
     "message": "<runtime>"
   }
 }"
