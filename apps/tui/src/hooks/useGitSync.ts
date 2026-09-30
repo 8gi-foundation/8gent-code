@@ -23,7 +23,9 @@ type GitSyncStatus =
 	| "diverged"
 	| "detached"
 	| "no-upstream"
-	| "no-repo";
+	| "no-repo"
+	/** Before the first check lands: nothing is known yet. */
+	| "unknown";
 
 export interface GitSyncResult {
 	status: GitSyncStatus;
@@ -68,6 +70,47 @@ function buildLabel(branch: string, status: GitSyncStatus, ahead: number, behind
 			return `${head}: no upstream`;
 		case "no-repo":
 			return "no repo";
+		case "unknown":
+			return "";
+	}
+}
+
+/**
+ * What the chrome shows for git, from one result, so the header, the
+ * WORKSPACE rail and the footer can never disagree (audit #10: the header
+ * said "⎇ - no repo" while the rail said "branch -").
+ *
+ * - In a repo: the branch, and a short sync note ("in sync", "3 ahead").
+ * - Outside one: no branch, and the one fact "no repo".
+ * - Before the first check: nothing at all. An unknown value is not shown.
+ */
+export interface GitView {
+	/** Branch name; "" when there is none or it is not known yet. */
+	branch: string;
+	/** Short sync note after the branch; "" when there is nothing to say. */
+	sync: string;
+	/** True only once a check has found no repository. */
+	noRepo: boolean;
+}
+
+export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "behind">): GitView {
+	switch (r.status) {
+		case "unknown":
+			return { branch: "", sync: "", noRepo: false };
+		case "no-repo":
+			return { branch: "", sync: "", noRepo: true };
+		case "detached":
+			return { branch: "HEAD", sync: "detached", noRepo: false };
+		case "up-to-date":
+			return { branch: r.branch, sync: "in sync", noRepo: false };
+		case "ahead":
+			return { branch: r.branch, sync: `${r.ahead} ahead`, noRepo: false };
+		case "behind":
+			return { branch: r.branch, sync: `${r.behind} behind`, noRepo: false };
+		case "diverged":
+			return { branch: r.branch, sync: "diverged", noRepo: false };
+		case "no-upstream":
+			return { branch: r.branch, sync: "no upstream", noRepo: false };
 	}
 }
 
@@ -132,10 +175,10 @@ export function useGitSync(
 	enabled = true,
 ): GitSyncResult {
 	const [result, setResult] = useState<GitSyncResult>({
-		status: "up-to-date",
+		status: "unknown",
 		ahead: 0,
 		behind: 0,
-		label: "checking",
+		label: "",
 		branch: "",
 	});
 

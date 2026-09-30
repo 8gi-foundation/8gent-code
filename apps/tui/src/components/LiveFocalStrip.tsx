@@ -40,6 +40,7 @@ import {
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
+import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
@@ -67,6 +68,9 @@ interface LiveFocalStripProps {
 	lastTurnSuccess?: boolean | null;
 	/** False (Ctrl+A) stills the spinner and skips the settle beat. */
 	animate?: boolean;
+	/** Columns the strip takes, borders included. When known, the route and
+	 *  meter give way before the state text is ever cut (audit #9). */
+	width?: number;
 }
 
 /**
@@ -90,10 +94,27 @@ export function LiveFocalStrip({
 	lastTurnEndedAt = null,
 	lastTurnSuccess = null,
 	animate = true,
+	width,
 }: LiveFocalStripProps) {
 	const displayMode = autonomous ? "Autonomous" : mode;
 	const showApprovalBorder = approvalPending && !autonomous;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
+	const finished = done && lastTurnEndedAt;
+	const middle = isProcessing ? activeStep : finished ? `finished ${clock(lastTurnEndedAt)}` : "idle";
+	// The state word ("finished", "idle") is never cut; an active step may be,
+	// past its first 12 columns.
+	const middleMin = isProcessing ? Math.min(12, middle.length) : middle.length;
+	const fit =
+		width === undefined
+			? { middle, route: route === "-" ? "" : route, meter: true }
+			: fitNowStrip({
+					width,
+					middle,
+					middleMin,
+					middleShort: finished ? "finished" : undefined,
+					route,
+					tokens,
+				});
 	return (
 		<Box
 			width="100%"
@@ -105,7 +126,7 @@ export function LiveFocalStrip({
 			flexShrink={0}
 			overflow="hidden"
 		>
-			<Box width={22} flexShrink={0}>
+			<Box width={NOW_LABEL_WIDTH} flexShrink={0}>
 				<TurnStateLabel
 					isProcessing={isProcessing}
 					lastTurnEndedAt={lastTurnEndedAt}
@@ -117,17 +138,21 @@ export function LiveFocalStrip({
 				</Text>
 			</Box>
 
-			<Box flexGrow={1} minWidth={0} paddingX={1}>
+			<Box flexGrow={1} flexShrink={1} minWidth={Math.min(middleMin, fit.middle.length) + 2} paddingX={1}>
 				<Text color={t.textSecondary} wrap="truncate-end">
-					{isProcessing ? activeStep : done && lastTurnEndedAt ? `finished ${clock(lastTurnEndedAt)}` : "idle"}
+					{fit.middle}
 				</Text>
 			</Box>
 
-			<Box width={42} flexShrink={0} justifyContent="flex-end">
-				<Text color={t.steel} wrap="truncate-middle">{route}</Text>
-				<Text color={t.dim}> ctx </Text>
-				<Text color={t.steel}>{meter(contextPct)}</Text>
-				<Text color={t.dim}> {tokens}</Text>
+			<Box flexShrink={0} justifyContent="flex-end">
+				{fit.route ? <Text color={t.steel}>{fit.route}</Text> : null}
+				{fit.meter ? (
+					<>
+						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
+						<Text color={t.steel}>{meter(contextPct, METER_CELLS)}</Text>
+					</>
+				) : null}
+				<Text color={t.textTertiary}> {tokens}</Text>
 			</Box>
 		</Box>
 	);

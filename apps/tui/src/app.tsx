@@ -195,7 +195,7 @@ import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.j
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError, useLilEightState } from "./hooks/useLilEightState.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
-import { useGitSync } from "./hooks/useGitSync.js";
+import { gitView, useGitSync } from "./hooks/useGitSync.js";
 import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
 	deriveTools,
@@ -1543,6 +1543,8 @@ export function App({
 	const gitSync = useGitSync(process.cwd(), 30_000);
 	const isGitRepo = gitSync.status !== "no-repo";
 	const currentBranch = gitSync.branch || null;
+	// One view of git for the header, the rail and the footer (audit #10).
+	const git = gitView(gitSync);
 	const lilEightStateValue = useLilEightState({
 		messages,
 		isProcessing,
@@ -5813,6 +5815,12 @@ export function App({
 	const showPlanColumn =
 		showContextRail && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
 	const showActivityRail = cols >= 90 && !inSetup;
+	// The chat column's real width: the NOW strip and every bubble size from it.
+	const chatWidth = chatColumnWidth(viewport.width, {
+		context: showContextRail,
+		planWidth: showPlanColumn ? PLAN_COLUMN_WIDTH : 0,
+		activity: showActivityRail,
+	});
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
@@ -5858,8 +5866,8 @@ export function App({
 						updateAvailable={updateInfo}
 						version={pkgInfo.version}
 						workspacePath={process.cwd()}
-						branch={currentBranch || "-"}
-						syncStatus={gitSync.label}
+						branch={git.branch}
+						syncStatus={git.noRepo ? "no repo" : git.sync}
 						micOn={Boolean(micOn)}
 						approvalPending={isApprovalPending}
 						localFirst={true}
@@ -5888,7 +5896,9 @@ export function App({
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showContextRail && (
 							<ContextRail
-								branch={currentBranch || "-"}
+								branch={git.branch}
+								noRepo={git.noRepo}
+								workspaceName={pathMod.basename(process.cwd())}
 								risk={infiniteModeActive ? "high" : "low"}
 								permissions={infiniteModeActive ? "infinite" : "ask"}
 								contextPct={contextPct}
@@ -5936,6 +5946,7 @@ export function App({
 							lastTurnEndedAt={lastTurnEndedAt}
 							lastTurnSuccess={lastTurnSuccess}
 							animate={showAnimations}
+							width={chatWidth}
 						/>
 
 						<Box
@@ -5949,11 +5960,7 @@ export function App({
 								messages={messages}
 								turnRunning={isProcessing}
 								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
-								contentWidth={chatColumnWidth(viewport.width, {
-									context: showContextRail,
-									planWidth: showPlanColumn ? PLAN_COLUMN_WIDTH : 0,
-									activity: showActivityRail,
-								})}
+								contentWidth={chatWidth}
 							/>
 						</Box>
 
@@ -6046,7 +6053,7 @@ export function App({
 					ready={providerHealth.live}
 					total={providerHealth.total}
 					tokens={tokenStr}
-					branch={currentBranch || "—"}
+					branch={git.branch || undefined}
 					user={authUser?.displayName}
 					permissions={infiniteModeActive ? "infinite" : "ask"}
 					sessionTime={sessionTime}

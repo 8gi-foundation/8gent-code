@@ -8,7 +8,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 
 import { deriveLilEightState, turnEndedInError, _testing } from "../hooks/useLilEightState";
-import { computeGitSync, type GitRunner } from "../hooks/useGitSync";
+import { computeGitSync, gitView, type GitRunner } from "../hooks/useGitSync";
 import {
 	deriveTools,
 	deriveProviders,
@@ -232,6 +232,27 @@ describe("computeGitSync", () => {
 		const r = await computeGitSync("/tmp/notrepo", runner);
 		expect(r.status).toBe("no-repo");
 		expect(r.branch).toBe("");
+	});
+});
+
+describe("gitView (audit #10: header and rail must agree)", () => {
+	const r = (status: Parameters<typeof gitView>[0]["status"], branch = "", ahead = 0, behind = 0) =>
+		gitView({ status, branch, ahead, behind });
+
+	test("before the first check nothing is shown", () => {
+		expect(r("unknown")).toEqual({ branch: "", sync: "", noRepo: false });
+	});
+
+	test("outside a repo: no branch, one fact", () => {
+		expect(r("no-repo")).toEqual({ branch: "", sync: "", noRepo: true });
+	});
+
+	test("in a repo: the branch and a short note that never repeats it", () => {
+		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "in sync", noRepo: false });
+		expect(r("ahead", "feat/x", 3)).toMatchObject({ branch: "feat/x", sync: "3 ahead" });
+		expect(r("behind", "main", 0, 2)).toMatchObject({ sync: "2 behind" });
+		expect(r("no-upstream", "wip")).toMatchObject({ branch: "wip", sync: "no upstream" });
+		expect(r("detached", "HEAD")).toMatchObject({ branch: "HEAD", sync: "detached" });
 	});
 });
 

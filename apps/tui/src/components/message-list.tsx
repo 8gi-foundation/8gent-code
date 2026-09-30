@@ -40,6 +40,20 @@ import { Stack } from "./primitives/Stack.js";
 import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
 import { TurnResults } from "./TurnResults.js";
 import { turnResultRows } from "../lib/turn-results.js";
+import {
+	type MarkdownOptions,
+	type Span,
+	CODE_GUTTER,
+	INDENT_STEP,
+	blockRows,
+	blockWrapWidth,
+	hasMarkdown,
+	layoutLines,
+	markerWidth,
+	parseBlocks,
+} from "../lib/inline-markdown.js";
+import { motionEnabled } from "../lib/motion.js";
+import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 
@@ -165,15 +179,17 @@ function estimateMessageRows(
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
-	const safe = breakLongTokens(message.content, w);
-	let rows = 0;
-	for (const line of safe.split("\n")) {
-		rows += Math.max(1, Math.ceil(line.length / w));
-	}
 	if (message.role === "system") {
+		const safe = breakLongTokens(message.content, w);
+		let rows = 0;
+		for (const line of safe.split("\n")) {
+			rows += Math.max(1, Math.ceil(line.length / w));
+		}
 		// Multi-line system messages get top/bottom ─── separators (2 extra rows).
 		return rows + (message.content.includes("\n") ? 2 : 0) + 1;
 	}
+	// The body as MarkdownBody draws it: same blocks, same widths.
+	const rows = message.content.trim() || trail.length === 0 ? bodyRows(message.content, w) : 1;
 	// 1 header + 1 marginBottom; assistant with metadata = 1 footer too.
 	const overhead =
 		message.role === "assistant" &&
@@ -182,6 +198,19 @@ function estimateMessageRows(
 			? 3
 			: 2;
 	return rows + overhead + trailRows;
+}
+
+/** The row estimate, exposed so tests can hold it to what Ink draws. */
+export const estimateMessageRowsForTest = (message: Message, wrapWidth: number): number =>
+	estimateMessageRows(message, wrapWidth);
+
+/** Rows a message body draws at wrap width `w`, laid out as MarkdownBody draws it. */
+function bodyRows(content: string, w: number): number {
+	const blocks = parseBlocks(content, markdownOptions());
+	if (blocks.length === 0) return 1;
+	let rows = 0;
+	for (const block of blocks) rows += blockRows(block, w);
+	return rows;
 }
 
 export function MessageList({
@@ -578,12 +607,10 @@ function MessageItem({
 		);
 	}
 
-	// Pre-break long unbreakable tokens so Ink's wrap can't escape the column
-	const safeContent = breakLongTokens(message.content, textWrapWidth);
-
-	// Bar color: orange for user, teal for the latest assistant, muted for
-	// older assistant turns (echoes the existing label-color contract).
-	const barColor = isUser ? t.orange : isLatestAssistant ? t.teal : t.muted;
+	// Bar color: steel for the user, teal for the latest assistant, muted for
+	// older assistant turns. Orange is kept for state and focus (the active
+	// tab, DONE, the input, the selection), so the user's voice is not it.
+	const barColor = isUser ? t.steel : isLatestAssistant ? t.teal : t.muted;
 
 	// Footer renders only on assistant turns and only when the data exists.
 	// Phase 2 will plumb latencyMs+tokens from the agent's onStepFinish event
@@ -618,7 +645,7 @@ function MessageItem({
 				{isUser ? (
 					<>
 						<MutedText>{formatTime(message.timestamp)} </MutedText>
-						<Label color={t.orange}>You</Label>
+						<Label color={t.steel}>You</Label>
 					</>
 				) : (
 					<>
@@ -651,13 +678,13 @@ function MessageItem({
 			{message.content.trim() || trail.length === 0 ? (
 				<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
 					<MessageContent
-						content={safeContent}
+						content={message.content}
 						role={message.role}
 						isNew={isNew}
 						animate={animate}
 						onTypingComplete={() => setTypingComplete(true)}
 						wrapWidth={textWrapWidth}
-						accentColor={isUser ? "yellow" : "cyan"}
+						color={isUser ? t.textSecondary : t.prose}
 					/>
 				</Box>
 			) : null}
@@ -687,7 +714,8 @@ interface MessageContentProps {
 	animate: boolean;
 	onTypingComplete: () => void;
 	wrapWidth: number;
-	accentColor?: "yellow" | "cyan";
+	/** Body text colour; a theme token. */
+	color: string;
 }
 
 function MessageContent({
@@ -697,12 +725,23 @@ function MessageContent({
 	animate,
 	onTypingComplete,
 	wrapWidth,
-	accentColor,
+	color,
 }: MessageContentProps) {
 	const { enabled: adhdMode } = useADHDMode();
 
-	// Only animate typing for new assistant messages
-	const shouldAnimate = isNew && animate && role === "assistant";
+	// The typewriter runs only for plain prose. Over markdown it would type
+	// the raw ** and backticks and then jump to the drawn form; a reply with
+	// markup lands drawn, at once. Reduced motion skips it too.
+	const shouldAnimate =
+		isNew && motionEnabled(animate) && role === "assistant" && !hasMarkdown(content);
+
+	// The typewriter never runs for this reply; report it done so the
+	// completion sound still plays once.
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
+	useEffect(() => {
+		if (!shouldAnimate) onTypingComplete();
+		// Once, on mount: the reply either typed or it did not.
+	}, []);
 
 	if (shouldAnimate) {
 		// Use word-by-word for longer content, character for shorter
@@ -720,97 +759,116 @@ function MessageContent({
 		);
 	}
 
-	// Check for code blocks and format accordingly
-	if (content.includes("```")) {
-		return <FormattedContent content={content} adhdMode={adhdMode} wrapWidth={wrapWidth} />;
-	}
-
-	// Apply bionic reading if ADHD mode is enabled
-	if (adhdMode) {
-		return (
-			<Box width={wrapWidth}>
-				<BionicText>{content}</BionicText>
-			</Box>
-		);
-	}
-
-	// Tint text in the accent color so user vs assistant reads at a glance,
-	// even without a border. Falls back to theme default when unset.
-	return (
-		<Box width={wrapWidth}>
-			{accentColor ? (
-				<Text color={accentColor} wrap="wrap">
-					{content}
-				</Text>
-			) : (
-				<AppText wrap="wrap">{content}</AppText>
-			)}
-		</Box>
-	);
+	return <MarkdownBody content={content} wrapWidth={wrapWidth} color={color} adhdMode={adhdMode} />;
 }
 
-// Format content with code blocks
-function FormattedContent({
+/** Parse options for this terminal: chips need colour, bullets need Unicode. */
+function markdownOptions(): MarkdownOptions {
+	return { chips: drawsColour(), bullet: glyphs().bullet };
+}
+
+/**
+ * A reply drawn from lib/inline-markdown: inline code as a quiet chip (the
+ * same tint as the DONE results' path chips), bold as bold, lists with a
+ * hanging indent, and fences as a plain block behind a thin rule. The row
+ * estimator counts the same blocks at the same widths (markdownRows).
+ */
+function MarkdownBody({
 	content,
-	adhdMode = false,
 	wrapWidth,
+	color,
+	adhdMode = false,
 }: {
 	content: string;
-	adhdMode?: boolean;
 	wrapWidth: number;
+	color: string;
+	adhdMode?: boolean;
 }) {
-	const parts = content.split(/(```[\s\S]*?```)/);
-
+	const blocks = parseBlocks(content, markdownOptions());
+	const g = glyphs();
 	return (
 		<Box flexDirection="column" width={wrapWidth}>
-			{/* parts come from a deterministic regex split of the message content into code-fence + prose segments; positional and never reordered for a given content string. */}
-			{parts.map((part, index) => {
-				if (part.startsWith("```")) {
-					// Extract language and code
-					const match = part.match(/```(\w+)?\n?([\s\S]*?)```/);
-					if (match) {
-						const [, language, code] = match;
-						const fenceInner = Math.max(8, wrapWidth - 8);
-						return (
-							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-							<Box
-								key={index}
-								flexDirection="column"
-								borderStyle="round"
-								borderColor="blue"
-								paddingX={1}
-								paddingY={1}
-								marginY={1}
-								flexShrink={1}
-								width={wrapWidth}
-							>
-								{language && <MutedText>{language}</MutedText>}
-								<Box width={fenceInner}>
-									<Text color="green" wrap="wrap">
-										{code.trim()}
-									</Text>
-								</Box>
-							</Box>
-						);
-					}
-				}
-				// Apply bionic reading to non-code parts if ADHD mode is enabled
-				if (adhdMode) {
+			{/* blocks come from a deterministic parse of the content; positional and never reordered. */}
+			{blocks.map((block, index) => {
+				const key = `${block.kind}-${index}`;
+				if (block.kind === "blank") return <Text key={key}> </Text>;
+				if (block.kind === "code") {
+					const w = blockWrapWidth(block, wrapWidth);
 					return (
-						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-						<Box key={index} width={wrapWidth}>
-							<BionicText>{part}</BionicText>
+						<Box key={key} flexDirection="column" width={wrapWidth}>
+							{block.lang ? <Text color={t.textTertiary}>{block.lang}</Text> : null}
+							{block.lines.map((line, li) => (
+								// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+								<Box key={li} width={wrapWidth}>
+									<Box width={CODE_GUTTER} flexShrink={0}>
+										<Text color={t.textTertiary}>{g.gutter}</Text>
+									</Box>
+									<Box width={w}>
+										<Text color={t.textPrimary} wrap="wrap">
+											{line || " "}
+										</Text>
+									</Box>
+								</Box>
+							))}
+						</Box>
+					);
+				}
+				const w = blockWrapWidth(block, wrapWidth);
+				const text = (
+					<Box flexDirection="column" width={w}>
+						{layoutLines(block.spans, w).map((line, li) => (
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<InlineSpans key={li} spans={line} color={color} adhdMode={adhdMode} />
+						))}
+					</Box>
+				);
+				if (block.kind === "item") {
+					const indent = block.depth * INDENT_STEP;
+					return (
+						<Box key={key} width={wrapWidth} paddingLeft={indent}>
+							<Box width={markerWidth(block.marker)} flexShrink={0}>
+								<Text color={t.textTertiary}>{block.marker}</Text>
+							</Box>
+							{text}
 						</Box>
 					);
 				}
 				return (
-					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-					<Box key={index} width={wrapWidth}>
-						<AppText wrap="wrap">{part}</AppText>
+					<Box key={key} width={wrapWidth}>
+						{text}
 					</Box>
 				);
 			})}
 		</Box>
+	);
+}
+
+function InlineSpans({ spans, color, adhdMode }: { spans: Span[]; color: string; adhdMode: boolean }) {
+	return (
+		<Text color={color} wrap="wrap">
+			{spans.length === 0 ? " " : null}
+			{/* spans are positional output of layoutLines; never reordered. */}
+			{spans.map((s, i) => {
+				if (s.code) {
+					return (
+						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+						<Text key={i} backgroundColor={t.border} color={t.textPrimary} bold={s.bold}>
+							{s.text}
+						</Text>
+					);
+				}
+				if (adhdMode && !s.bold) {
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+					return <BionicText key={i}>{s.text}</BionicText>;
+				}
+				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+					<Text key={i} bold={s.bold} italic={s.italic}>
+						{s.text}
+					</Text>
+				);
+			})}
+		</Text>
 	);
 }
 

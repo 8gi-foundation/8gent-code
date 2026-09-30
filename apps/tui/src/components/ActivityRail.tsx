@@ -55,7 +55,7 @@ function RailSection({
 	return (
 		<Box flexDirection="column" marginTop={1} width="100%" flexShrink={0}>
 			<Box flexShrink={0}>
-				<Text color={t.orange} bold>{title}</Text>
+				<Text color={t.heading} bold>{title}</Text>
 			</Box>
 			<Box flexDirection="column" width="100%" flexShrink={0}>
 				{children}
@@ -193,14 +193,14 @@ const TOOL_COLOR: Record<ToolState, string> = {
 
 const PROVIDER_COLOR: Record<ProviderState, string> = {
 	local:    t.green,
-	fallback: t.orange,
+	fallback: t.textSecondary,
 	offline:  t.red,
 };
 
 const AGENT_COLOR: Record<AgentState, string> = {
 	idle:    t.muted,
 	active:  t.green,
-	blocked: t.orange,
+	blocked: t.textPrimary,
 };
 
 // Body-parts taxonomy: hands (cliclick), eyes (AX bridge), handeyes
@@ -256,7 +256,7 @@ export function ActivityRail({
 			overflow="hidden"
 		>
 			<Box flexShrink={0}>
-				<Text color={t.orange} bold>AGENT ACTIVITY</Text>
+				<Text color={t.heading} bold>AGENT ACTIVITY</Text>
 			</Box>
 
 			<RailSection title="TASKS">
@@ -306,7 +306,7 @@ export function ActivityRail({
 							<MetricRow
 								label="queued"
 								value={String(queued)}
-								color={queued > 0 ? t.orange : t.dim}
+								color={queued > 0 ? t.textPrimary : t.dim}
 							/>
 						</>
 					);
@@ -326,7 +326,7 @@ export function ActivityRail({
 
 			<RailSection title="MEMORY">
 				<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
-				<MetricRow label="misses" value={String(memory.misses)} color={t.orange} />
+				<MetricRow label="misses" value={String(memory.misses)} color={t.textSecondary} />
 				<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
 			</RailSection>
 

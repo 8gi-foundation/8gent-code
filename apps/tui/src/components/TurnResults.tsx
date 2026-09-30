@@ -31,7 +31,7 @@ function iconFor(status: ResultStatus): { icon: string; color: string } {
 	const g = glyphs();
 	if (status === "ok") return { icon: g.ok, color: t.green };
 	if (status === "fail") return { icon: g.fail, color: t.red };
-	if (status === "blocked") return { icon: g.blocked, color: t.orange };
+	if (status === "blocked") return { icon: g.blocked, color: t.textSecondary };
 	return { icon: g.pending, color: t.muted };
 }
 

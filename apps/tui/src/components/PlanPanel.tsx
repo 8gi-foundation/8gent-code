@@ -94,7 +94,7 @@ export function PlanPanel({
 	return (
 		<Box flexDirection="column" width={width} flexShrink={0} paddingX={1}>
 			<Box justifyContent="space-between">
-				<Text color={t.orange} bold>
+				<Text color={t.heading} bold>
 					PLAN
 				</Text>
 				<Text color={t.muted}>
@@ -166,7 +166,7 @@ export function PlanPanel({
 export function PlanEmpty({ width = 24 }: { width?: number }) {
 	return (
 		<Box width={width} flexShrink={0} paddingX={1} flexDirection="column">
-			<Text color={t.orange} bold>
+			<Text color={t.heading} bold>
 				PLAN
 			</Text>
 			<Box marginTop={1}>

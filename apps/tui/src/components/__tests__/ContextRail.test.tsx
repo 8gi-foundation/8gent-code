@@ -60,40 +60,58 @@ describe("ContextRail", () => {
 		expect(props.overflow).toBe("hidden");
 	});
 
-	test("workspace name defaults to 8gent-code when omitted", () => {
-		const rendered = render(baseProps);
-		const children = React.Children.toArray(
+	function rows(props: ContextRailProps): React.ReactElement[] {
+		const rendered = render(props);
+		return React.Children.toArray(
 			(rendered.props as { children: React.ReactNode }).children,
 		) as React.ReactElement[];
-		// children[1] is the workspace-name Text node (after the WORKSPACE header).
-		const workspaceNode = children[1] as React.ReactElement<{ children: string }>;
-		expect(workspaceNode.props.children).toBe("8gent-code");
+	}
+	function textOf(el: React.ReactElement): string {
+		const c = (el.props as { children?: unknown }).children;
+		return typeof c === "string" ? c : "";
+	}
+	function metric(props: ContextRailProps, label: string) {
+		return rows(props).find((el) => (el.props as { label?: string }).label === label) as
+			| React.ReactElement<{ color: string; value: string }>
+			| undefined;
+	}
+
+	test("no workspace name is invented when none is passed", () => {
+		// It used to default to "8gent-code" in every folder (hardcoded data).
+		const texts = rows(baseProps).map(textOf);
+		expect(texts).not.toContain("8gent-code");
+		expect(texts[0]).toBe("WORKSPACE");
+		expect(texts[1]).toBe("");
 	});
 
 	test("workspace name override is honored", () => {
-		const rendered = render({ ...baseProps, workspaceName: "8gi-governance" });
-		const children = React.Children.toArray(
-			(rendered.props as { children: React.ReactNode }).children,
-		) as React.ReactElement[];
-		const workspaceNode = children[1] as React.ReactElement<{ children: string }>;
-		expect(workspaceNode.props.children).toBe("8gi-governance");
+		expect(rows({ ...baseProps, workspaceName: "8gi-governance" }).map(textOf)).toContain("8gi-governance");
+	});
+
+	test("git truth (audit #10): branch, or 'no repo', or nothing - never '-'", () => {
+		expect(metric(baseProps, "branch")?.props.value).toBe("feat/tui-context-rail");
+		const outside = rows({ ...baseProps, branch: "", noRepo: true }).map(textOf);
+		expect(metric({ ...baseProps, branch: "", noRepo: true }, "branch")).toBeUndefined();
+		expect(outside).toContain("no repo");
+		const unknown = rows({ ...baseProps, branch: "" }).map(textOf);
+		expect(metric({ ...baseProps, branch: "" }, "branch")).toBeUndefined();
+		expect(unknown).not.toContain("no repo");
+		expect(unknown).not.toContain("-");
+	});
+
+	test("section labels use the calm heading tone, not orange", () => {
+		const headings = rows(baseProps).filter((el) =>
+			["WORKSPACE", "STATE", "CONTEXT", "ACCESS"].includes(textOf(el)),
+		);
+		expect(headings).toHaveLength(4);
+		for (const h of headings) expect((h.props as { color: string }).color).toBe(t.heading);
 	});
 
 	for (const risk of RISKS) {
 		test(`risk "${risk}" maps to the correct theme color`, () => {
-			const rendered = render({ ...baseProps, risk });
-			const children = React.Children.toArray(
-				(rendered.props as { children: React.ReactNode }).children,
-			) as React.ReactElement[];
-			// Layout (per component): [0] WORKSPACE header, [1] workspace name,
-			// [2] branch RailRow, [3] spacer, [4] STATE header,
-			// [5] approval RailRow, [6] risk RailRow, ...
-			const riskRow = children[6] as React.ReactElement<{
-				color: string;
-				value: string;
-			}>;
-			expect(riskRow.props.color).toBe(expectedRiskColor[risk]);
-			expect(riskRow.props.value).toBe(risk.toUpperCase());
+			const riskRow = metric({ ...baseProps, risk }, "risk");
+			expect(riskRow?.props.color).toBe(expectedRiskColor[risk]);
+			expect(riskRow?.props.value).toBe(risk.toUpperCase());
 		});
 	}
 

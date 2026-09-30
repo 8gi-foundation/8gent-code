@@ -243,12 +243,12 @@ export function FmFooterSegment(props: {
 	return (
 		<Box width={Math.min(natural, props.width)} flexShrink={0} overflow="hidden">
 			<Text wrap="truncate-end">
-				<Text color={t.orange}>{props.playing ? "▶ " : "● "}</Text>
+				<Text color={props.playing ? t.teal : t.textTertiary}>{props.playing ? "▶ " : "● "}</Text>
 				{props.track ? (
 					<Text color={t.textPrimary}>{props.track}</Text>
 				) : (
 					<>
-						<Text color={t.orange}>8GENT FM</Text>
+						<Text color={t.textSecondary}>8GENT FM</Text>
 						{showLabel ? <Text color={props.labelColor}> {props.label}</Text> : null}
 					</>
 				)}
@@ -450,7 +450,7 @@ export function DjDeck({
 						playing={playing}
 						track={stripTrack}
 						label={playing ? "" : "idle"}
-						labelColor={t.dim}
+						labelColor={t.textTertiary}
 					/>
 					{footer}
 				</Box>
@@ -470,7 +470,7 @@ export function DjDeck({
 			: isProcessing
 				? "agent pulse"
 				: "idle";
-		const idleColor = isProcessing ? t.teal : t.dim;
+		const idleColor = isProcessing ? t.teal : t.textTertiary;
 		if (footer !== undefined) {
 			return (
 				<Box width="100%" flexShrink={0} height={1}>
@@ -541,7 +541,7 @@ export function DjDeck({
 		<Box width="100%" flexDirection="column" flexShrink={0}>
 			{fullDeck}
 			<Box width="100%" flexShrink={0} height={1}>
-				<FmFooterSegment width={fmWidth} playing track="" label="playing" labelColor={t.orangeAlt} />
+				<FmFooterSegment width={fmWidth} playing track="" label="playing" labelColor={t.teal} />
 				{footer}
 			</Box>
 		</Box>
