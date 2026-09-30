@@ -250,9 +250,10 @@ export class Agent {
 				permission: config.permission,
 			},
 		);
-		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
-		// background, so the first gated command does not pay the model load.
-		// Idempotent per process; flag off it is a no-op with no import.
+		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
+		// opted out, start loading the judge now, in the background, so the
+		// first gated command does not pay the model load. Idempotent per
+		// process; allowlist on (the default) or System One off, it is a no-op.
 		// Guarded mode (#3170) turns System One on for this agent's calls, so
 		// it warms the judge too.
 		startSystemOneWarmup(

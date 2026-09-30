@@ -12,7 +12,7 @@
  * match), otherwise the smallest installed non-embedding model. There is
  * no hardcoded model list - only substrings to rank what `/api/tags` says.
  *
- * Shared judge (EIGHT_S1_SHARED_JUDGE=1, #3162): before loading a private
+ * Shared judge (on by default, EIGHT_S1_SHARED_JUDGE=0 opts out, #3162): before loading a private
  * copy in-process, ask the machine's local model server (Ollama, through the
  * local-model-server layer) whether it already serves the judge. One server
  * process holds the model once for every agent, child and tab on the machine.
@@ -130,10 +130,15 @@ export async function listOllamaModels(fetchImpl: FetchLike, host: string, timeo
  */
 export const SHARED_JUDGE_NUM_CTX = 4096;
 
-/** True when EIGHT_S1_SHARED_JUDGE asks for the machine's shared judge server. */
+/**
+ * True unless EIGHT_S1_SHARED_JUDGE opts out (0, false, off, no). On by
+ * default since System One went on by default (James, 2026-09-30): a machine
+ * holds one judge, not one per tab or child. When the shared server does not
+ * serve the judge, the in-process path runs as before.
+ */
 export function sharedJudgeEnabled(env: Record<string, string | undefined>): boolean {
-	const v = env.EIGHT_S1_SHARED_JUDGE?.trim().toLowerCase();
-	return v === "1" || v === "true" || v === "on";
+	const v = env.EIGHT_S1_SHARED_JUDGE?.trim().toLowerCase() ?? "";
+	return !["0", "false", "off", "no"].includes(v);
 }
 
 /**

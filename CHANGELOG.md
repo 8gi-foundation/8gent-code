@@ -9,11 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - System One on by default, one shared judge per machine (#3048)
+- System One now checks every agent shell command unless `EIGHT_SYSTEM_ONE=0`. Unset, it asks only a calibrated judge (Selene today) and, when there is none or it cannot answer in time, checks with the safety rules and the read-only allowlist alone, saying so once. `EIGHT_SYSTEM_ONE=1` (and Guarded) is strict: any judge found is asked; when none can answer, a block rule still blocks and everything else goes to the person on the normal card, never an allow (#3193). Headless, with no person, that stays a refusal. Every refusal now tells the agent not to run the same command again, which stops the retry loop.
+- The shared judge (`EIGHT_S1_SHARED_JUDGE`) is on by default, so a machine loads Selene once in its local Ollama rather than once per tab; `EIGHT_S1_SHARED_JUDGE=0` opts out. Before the first judge load, one line names the model, where it loads and its size.
+
 ### Added - permission modes on Shift+Tab (#3170, #3174)
 - Shift+Tab cycles the focused tab through Plan (reads and plans, changes nothing), Ask (the default, unchanged), Guarded (System One checks every shell command; safe steps run, risky ones still ask) and Infinite (never asks, except the always-blocked list; back to Ask after 30 minutes). Each tab keeps its own mode. A child agent gets the stricter of its parent's mode and the one it asked for. The footer, tab tags, header chip and a one-line chat note show the mode. Shift+Tab no longer moves to the previous tab; Ctrl+1 to Ctrl+9 still do. Guide: `docs/guides/permission-modes.md`.
 
 ### Added - one shared System One judge per machine (#3162)
-- `EIGHT_S1_SHARED_JUDGE=1` lets every 8gent process on a machine use one copy of System One's model on the local Ollama server (`EIGHT_DECIDE_OLLAMA_HOST`, default `http://localhost:11434`) instead of loading one each. Same model, same verdicts. If the shared server stops answering mid-session, that session loads its own copy and carries on; it never falls back to another server or model. Off by default. Guide: `docs/guides/system-one-shared-judge.md`.
+- On by default since #3176 (`EIGHT_S1_SHARED_JUDGE=0` opts out). The shared judge lets every 8gent process on a machine use one copy of System One's model on the local Ollama server (`EIGHT_DECIDE_OLLAMA_HOST`, default `http://localhost:11434`) instead of loading one each. Same model, same verdicts. If the shared server stops answering mid-session, that session loads its own copy and carries on; it never falls back to another server or model. Off by default. Guide: `docs/guides/system-one-shared-judge.md`.
 
 ### Fixed - NO_COLOR is honoured across the whole interface (#3171)
 - `NO_COLOR=1` now turns colour off everywhere, keeping bold, dim and inverse so the cursor stays visible. `FORCE_COLOR` still wins over it. The dark theme's danger red is brighter so it meets contrast guidelines. Guide: `docs/guides/no-color.md`.

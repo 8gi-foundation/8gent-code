@@ -96,9 +96,10 @@ the first match of a substring preference order (`MODEL_PREFERENCE`, smallest
 first), else the smallest non-embedding model. Reports
 `{ backend, model, url, os, arch, notes }`.
 
-### Shared judge: one per machine (`EIGHT_S1_SHARED_JUDGE=1`, #3162)
+### Shared judge: one per machine (`EIGHT_S1_SHARED_JUDGE`, #3162)
 
-Off by default. With the flag, `detectBackend()` first asks the machine's
+On by default since 2026-09-30 (`EIGHT_S1_SHARED_JUDGE=0` opts out).
+`detectBackend()` first asks the machine's
 local model server (Ollama, through `packages/local-model-server`) for the
 judge, before loading a private in-process copy. One server process then holds
 the model once for every agent, child and tab on the machine.
@@ -249,13 +250,40 @@ before the model and do not alter what it is asked.
 ## Harness guard
 
 `packages/permissions/system-one-gate.ts` puts `bashGuard` on the agent's
-shell path. **Off by default**, and it stays off until the eval says
-otherwise: 40 commands is smoke-level, and only Selene hard-blocks at the
-default thresholds.
+shell path. **On by default** (James, 2026-09-30, #3048), with the shared
+judge (#3163) and its in-process failover (#3164), until 8J passes its ladder
+and replaces Selene.
 
-- **Flag:** env `EIGHT_SYSTEM_ONE=1` (or `true`). `packages/settings` has no
+- **Flag:** env `EIGHT_SYSTEM_ONE`, three modes. `packages/settings` has no
   section for feature flags (its keys are voice, performance, models,
   providers, ui, agents), so the flag is env only, like `EIGHT_TEXT_TOOLS`.
+  - unset (default): on. It asks only a **calibrated** judge, one with a
+    `calibration/<backend>-<model>.json` (Selene, llama3.2:3b, MiniCPM5-1B,
+    qwen3.8:27b-mlx today). When there is none (the probe would otherwise fall
+    back to the chat model, at guessed thresholds), or the judge cannot answer
+    (not installed, unreachable, invalid probability, over the time budget),
+    that command is checked by the deterministic rules and the read-only
+    allowlist alone: a block rule blocks, an escalate rule asks a person (and
+    is a block when headless), anything else runs. It never blocks
+    everything and never waits past the budget.
+  - `EIGHT_SYSTEM_ONE=1` (or `true`): strict. Any judge the probe finds is
+    asked. When it cannot answer, the rules still run (a block rule is
+    final) and everything else escalates to a person on the normal card,
+    never an allow (#3193); with no person (headless, daemon, CI) that
+    escalate is a block, fail closed as before. Guarded mode (#3170) sets
+    this for its calls.
+  - `EIGHT_SYSTEM_ONE=0` (or `false`/`off`/`no`): off. See "Flag off" below.
+- **Notices.** Two one-line notices, each once per process: `System One: no
+  judge (<why>); shell commands are checked by the safety rules and the
+  read-only allowlist only.`, and, before the first judge load, `System One:
+  loading the judge <model> (<where>, <size> GB) ...`, so a multi-GB load is
+  never silent. Both name the opt-out. The TUI shows them in the chat
+  (`setSystemOneNoticeSink`); elsewhere they go to stderr.
+- **Shared judge on by default.** `EIGHT_S1_SHARED_JUDGE` is on unless set
+  to `0`/`false`/`off`/`no`, so a machine holds one Selene in its local
+  Ollama, not one per tab or child. When that server does not serve the judge
+  the in-process path runs as before. One behaviour change comes with it: a
+  running local laya-serve is now asked after the shared Ollama, not before.
 - **Read-only allowlist (on by default under System One).** With
   `EIGHT_SYSTEM_ONE` on, commands the rules pass and `allowlist.ts` reads as
   plainly read-only (or additive: `mkdir` inside the work dir, a dev tool's
@@ -307,18 +335,22 @@ default thresholds.
     infinite mode, with `autoApprove`, for allow-listed commands, and for any
     non-dangerous command when headless. Those rules would quietly turn
     escalate into allow.
-  - Any error blocks (fail closed): the decider or module fails to load, no
-    backend, an unreachable backend, or an invalid probability.
-  - A timeout blocks (fail closed). Decider construction, the calibration
+  - Any error (the decider or module fails to load, no backend, an
+    unreachable backend, an invalid probability) and any timeout: default
+    mode falls back to the rules, as above; strict mode asks a person
+    instead, and blocks when no person can be asked (fail closed). Decider construction, the calibration
     lookup and the guard question share one budget: 30 s until the decider
     has answered once in the process (that includes the model load; the
     first gate call took 5.9 to 6.7 s here with the GGUF in the disk cache,
     and a first ever llamacpp run took 47 s), then 10 s. Env
     `EIGHT_SYSTEM_ONE_TIMEOUT_MS` (a positive number) overrides both. The
-    message says `timed out after N ms, failing closed`. A load that overruns
-    blocks that one command and carries on, and the next call uses it. The
+    reason says `timed out after N ms`. A load that overruns affects that
+    one command and carries on, and the next call uses it.
+  - Every refusal ends with a line telling the model not to run the same
+    command again (`SYSTEM_ONE_NO_RETRY`), so a final block does not start
+    a retry loop (#3193). The
     escalate prompt to a human is outside the budget.
-- **Warm-up:** with the flag on, `startSystemOneWarmup` runs at TUI startup
+- **Warm-up:** with System One on and the allowlist opted out, `startSystemOneWarmup` runs at TUI startup
   and in the `Agent` constructor. It builds the decider and asks the judge
   one throwaway question (`echo warmup`, never run) in the background, so the
   model load does not land on the user's first command. The TUI footer

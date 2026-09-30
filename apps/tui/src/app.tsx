@@ -222,6 +222,7 @@ import {
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import {
+	setSystemOneNoticeSink,
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
@@ -2121,9 +2122,18 @@ export function App({
 		]);
 	}, []);
 
-	// System One (EIGHT_SYSTEM_ONE=1): load the judge in the background at
-	// startup so the user's first shell command is not the one that waits for
-	// the model load. Flag off: startSystemOneWarmup returns null, nothing loads.
+	// System One (on by default; EIGHT_SYSTEM_ONE=0 turns it off): its two
+	// one-time notices (no judge, so rules and allowlist only; or which judge
+	// is loading, and its size) land in the chat once each, not on stderr,
+	// which would tear Ink's frame. Everything else about the judge is status.
+	useEffect(() => {
+		setSystemOneNoticeSink(addSystemMessage);
+		return () => setSystemOneNoticeSink(null);
+	}, [addSystemMessage]);
+	// With the allowlist opted out (EIGHT_S1_ALLOWLIST=0), load the judge in
+	// the background at startup so the user's first shell command is not the
+	// one that waits for the model load. Otherwise, and with System One off,
+	// startSystemOneWarmup returns null and nothing loads here.
 	// Its state is status, so it lives in the footer, not the chat (#3090). A
 	// failed load's reason reaches the person in the block message of the
 	// shell command it refuses, which retries the load.

@@ -358,7 +358,8 @@ describe("probe", () => {
 
 	it("prefers laya when its health check answers", async () => {
 		const fetch = fakeFetch({ "/health": () => json({ ok: true }), "/api/tags": () => json(tags) });
-		const r = await detectBackend({ fetch, env: {} });
+		// The probe order without the shared judge (on by default, which asks local Ollama first).
+		const r = await detectBackend({ fetch, env: { EIGHT_S1_SHARED_JUDGE: "0" } });
 		expect(r.backend).toBe("laya");
 		expect(r.url).toBe("http://127.0.0.1:8000");
 		expect(r.os).toBe(process.platform);
@@ -367,7 +368,7 @@ describe("probe", () => {
 
 	it("falls back to ollama and picks from the installed list", async () => {
 		const fetch = fakeFetch({ "/api/tags": () => json(tags) });
-		const r = await detectBackend({ fetch, env: {} });
+		const r = await detectBackend({ fetch, env: { EIGHT_S1_SHARED_JUDGE: "0" } });
 		expect(r.backend).toBe("ollama");
 		expect(r.model).toBe("llama3.2:3b");
 		expect(r.notes[0]).toContain("laya unreachable");
@@ -380,10 +381,15 @@ describe("probe", () => {
 	});
 
 	it("reports none when nothing answers", async () => {
-		const r = await detectBackend({ fetch: fakeFetch({}), env: {} });
+		const r = await detectBackend({ fetch: fakeFetch({}), env: { EIGHT_S1_SHARED_JUDGE: "0" } });
 		expect(r.backend).toBe("none");
 		expect(r.model).toBeNull();
 		expect(r.notes.length).toBe(2);
+		// On by default, the shared judge is asked first and its miss is a third note.
+		const byDefault = await detectBackend({ fetch: fakeFetch({}), env: {} });
+		expect(byDefault.backend).toBe("none");
+		expect(byDefault.notes.length).toBe(3);
+		expect(byDefault.notes[0]).toContain("shared judge");
 	});
 
 	it("pickModel never invents a model and skips embeddings", () => {

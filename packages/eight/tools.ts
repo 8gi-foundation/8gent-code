@@ -2035,7 +2035,7 @@ export class ToolExecutor {
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}
 
-		// System One (EIGHT_SYSTEM_ONE=1, off by default): it can only stop a
+		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
 		// command, never allow one. It runs BEFORE the approval card (#3124): a
 		// System One block is final and must not follow a Y the person gave,
 		// and when it escalates it asks the person itself, so that answer is

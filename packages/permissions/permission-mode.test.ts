@@ -7,7 +7,8 @@
  * Integration through the REAL tool entry points (ToolExecutor.execute for the
  * text-tool loop, agentTools for the native loop, spawnAgentTool for both):
  * Plan refuses before anything touches disk, Guarded routes shell commands
- * through System One even with EIGHT_SYSTEM_ONE unset, Infinite answers
+ * through System One even with EIGHT_SYSTEM_ONE=0, Ask with System One on by
+ * default runs it before the card exactly as EIGHT_SYSTEM_ONE=1 does, Infinite answers
  * exactly as the process-wide infinite flag does, two agents in one process
  * never share a mode, and a child is never more permissive than its parent.
  *
@@ -253,9 +254,9 @@ afterAll(() => {
 	resetPermissionManager();
 });
 
-/** A fresh permission manager on an empty data dir, System One stubbed, env flag off. */
+/** A fresh permission manager on an empty data dir, System One stubbed, env flag off (EIGHT_SYSTEM_ONE=0). */
 function freshWorld(): { dir: string; asked: string[]; humanAsked: string[] } {
-	Reflect.deleteProperty(process.env, SYSTEM_ONE_FLAG);
+	process.env[SYSTEM_ONE_FLAG] = "0";
 	Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
 	Reflect.deleteProperty(process.env, "EIGHT_S1_ALLOWLIST");
 	process.env.EIGHT_DATA_DIR = dataDir;
@@ -369,7 +370,7 @@ describe("Plan refuses before anything changes, on both tool paths", () => {
 	});
 });
 
-describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE unset", () => {
+describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE=0", () => {
 	let w: ReturnType<typeof freshWorld>;
 	let restore: () => void;
 	beforeEach(() => {
@@ -392,9 +393,9 @@ describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE unset",
 		expect(w.asked).toEqual([]);
 		expect(stub.asks.length).toBe(1);
 
-		// Ask, today's default: the permission layer already allows `find`, so
-		// the same command runs with no card and no judge. That is the gap
-		// Guarded closes.
+		// Ask with System One opted out: the permission layer already allows
+		// `find`, so the same command runs with no card and no judge. That is
+		// the gap Guarded closes (and that default-on closes in Ask too).
 		await executorIn(w.dir, "ask").execute("run_command", {
 			command: "find . -name victim.txt -delete",
 		});
@@ -426,6 +427,83 @@ describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE unset",
 		expect(w.asked).toEqual(["chmod 777 build"]);
 		expect(out).toContain("[PERMISSION DENIED]");
 		expect(statSync(join(w.dir, "build")).mode & 0o777).toBe(before);
+	});
+});
+
+describe("Ask with System One on by default (EIGHT_SYSTEM_ONE unset) behaves as Ask with EIGHT_SYSTEM_ONE=1", () => {
+	let w: ReturnType<typeof freshWorld>;
+	let restore: () => void;
+	beforeEach(() => {
+		w = freshWorld();
+		// Default mode asks only a calibrated judge; give the stub one.
+		const cal = mkdtempSync(join(tmpdir(), "perm-mode-cal-"));
+		writeFileSync(
+			join(cal, "stub-stub-model.json"),
+			JSON.stringify({
+				model: "stub-model",
+				backend: "stub",
+				temperature: 1,
+				bias: 0,
+				blockAbove: 0.5,
+				escalateBand: [0.35, 0.65],
+				fittedOn: "test",
+				n: 2,
+				heldOut: { recall: 1, falseBlock: 0, accuracy: 1, escalate: 0, method: "leave-one-out" },
+			}),
+		);
+		_setSystemOneOverridesForTests({
+			createDecider: () => createDecider({ backend: stub, cacheSize: 0 }),
+			askHuman: async (req) => {
+				w.humanAsked.push(req.command);
+				return false;
+			},
+			calibrationDir: cal,
+		});
+		restore = stubCards(w.asked, false);
+	});
+	afterEach(() => {
+		restore();
+		rmSync(w.dir, { recursive: true, force: true });
+	});
+
+	async function askRun(flag: string | undefined) {
+		if (flag === undefined) Reflect.deleteProperty(process.env, SYSTEM_ONE_FLAG);
+		else process.env[SYSTEM_ONE_FLAG] = flag;
+		const dir = mkdtempSync(join(tmpdir(), "perm-mode-ask-"));
+		writeFileSync(join(dir, "victim.txt"), "v");
+		const cardsBefore = w.asked.length;
+		const del = await executorIn(dir, "ask").execute("run_command", {
+			command: "find . -name victim.txt -delete",
+		});
+		const cardsForDelete = w.asked.length - cardsBefore;
+		const made = await executorIn(dir, "ask").execute("run_command", {
+			command: "printf ok > made.txt",
+		});
+		const out = {
+			deleteBlocked: del.startsWith(SYSTEM_ONE_BLOCK_MARKER),
+			victimKept: existsSync(join(dir, "victim.txt")),
+			cardsForDelete,
+			allowReachedCard: w.asked.at(-1) === "printf ok > made.txt",
+			declinedCardDenied: made.includes("[PERMISSION DENIED]"),
+		};
+		rmSync(dir, { recursive: true, force: true });
+		return out;
+	}
+
+	test("a block is final with no card; an allow still shows the card; same as EIGHT_SYSTEM_ONE=1", async () => {
+		const byDefault = await askRun(undefined);
+		expect(byDefault).toEqual({
+			deleteBlocked: true,
+			victimKept: true,
+			cardsForDelete: 0,
+			allowReachedCard: true,
+			declinedCardDenied: true,
+		});
+		const explicit = await askRun("1");
+		expect(explicit).toEqual(byDefault);
+		// Opted out, the delete runs (the permission layer allows find).
+		const off = await askRun("0");
+		expect(off.victimKept).toBe(false);
 	});
 });
 
