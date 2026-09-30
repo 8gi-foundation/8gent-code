@@ -12,7 +12,7 @@
  * - Safe list is user-configurable via .8gent/safe-apps.json
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -148,13 +148,13 @@ export function listProcesses(sort: SortMode = "memory"): ProcessInfo[] {
 
 		if (platform === "darwin") {
 			// macOS: get user-facing apps + their memory via ps
-			raw = execSync("ps -eo pid,rss,pcpu,user,comm -r", {
+			raw = execFileSync("ps", ["-eo", "pid,rss,pcpu,user,comm", "-r"], {
 				encoding: "utf-8",
 				timeout: 5000,
 			});
 		} else {
 			// Linux
-			raw = execSync("ps -eo pid,rss,pcpu,user,comm --sort=-rss", {
+			raw = execFileSync("ps", ["-eo", "pid,rss,pcpu,user,comm", "--sort=-rss"], {
 				encoding: "utf-8",
 				timeout: 5000,
 			});
@@ -250,7 +250,7 @@ export function quitProcess(pid: number, strategy: QuitStrategy = "graceful"): C
 
 	// Look up process name for safety check
 	try {
-		const info = execSync(`ps -p ${pid} -o comm=`, {
+		const info = execFileSync("ps", ["-p", String(pid), "-o", "comm="], {
 			encoding: "utf-8",
 			timeout: 3000,
 		}).trim();
@@ -286,26 +286,61 @@ export function quitProcess(pid: number, strategy: QuitStrategy = "graceful"): C
 }
 
 /**
+ * Every running process as { pid, name }, name being the executable's basename.
+ * Unfiltered (unlike listProcesses), so a name lookup sees small processes too.
+ */
+function runningProcesses(): { pid: number; name: string }[] {
+	const raw = execFileSync("ps", ["-axo", "pid=,comm="], {
+		encoding: "utf-8",
+		timeout: 5000,
+	});
+	const out: { pid: number; name: string }[] = [];
+	for (const line of raw.split("\n")) {
+		const m = line.match(/^\s*(\d+)\s+(.+?)\s*$/);
+		if (!m) continue;
+		out.push({ pid: Number.parseInt(m[1], 10), name: path.basename(m[2]) });
+	}
+	return out;
+}
+
+/**
  * Quit a process by name.
- * Finds the PID first, then terminates.
+ *
+ * The name comes from the model, so it is never put into a command line
+ * (#3213: it used to be interpolated into a `pkill` shell string, and
+ * `$(...)` or backticks in it ran as the user). Instead the name is matched
+ * EXACTLY against the running process list, and each matching PID is
+ * signalled directly. A name that matches no running process quits nothing.
  */
 export function quitByName(name: string, strategy: QuitStrategy = "graceful"): CommandResult {
+	if (typeof name !== "string" || name.trim() === "") {
+		return { ok: false, error: "An app name is required" };
+	}
 	const blockReason = canQuit(name);
 	if (blockReason) return { ok: false, error: blockReason };
 
+	let matches: { pid: number; name: string }[];
 	try {
-		const signal = strategy === "force" ? "-9" : "-15";
-		execSync(`pkill ${signal} -x "${name.replace(/"/g, "")}"`, {
-			encoding: "utf-8",
-			timeout: 5000,
-		});
-		return { ok: true };
-	} catch (err: any) {
-		if (err.status === 1) {
-			return { ok: false, error: `No process named "${name}" found` };
-		}
-		return { ok: false, error: `Failed to quit "${name}": ${err.message}` };
+		matches = runningProcesses().filter(
+			(p) => p.name === name && p.pid !== process.pid && p.pid !== process.ppid,
+		);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { ok: false, error: `Failed to list processes: ${message}` };
 	}
+	if (matches.length === 0) {
+		return { ok: false, error: `No running process named "${name}" found` };
+	}
+
+	const errors: string[] = [];
+	for (const p of matches) {
+		const result = quitProcess(p.pid, strategy);
+		if (!result.ok && result.error) errors.push(result.error);
+	}
+	if (errors.length === matches.length) {
+		return { ok: false, error: errors.join("; ") };
+	}
+	return { ok: true };
 }
 
 /**

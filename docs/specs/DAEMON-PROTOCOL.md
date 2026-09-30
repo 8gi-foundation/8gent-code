@@ -439,7 +439,7 @@ daemon -> { "type":"event", "event": { "kind":"tool_call", ... } }
 
 ### NemoClaw policy (no bypass)
 
-Every `desktop_*` tool call goes through `evaluatePolicy("desktop_use", ctx)` in `packages/permissions/policy-engine.ts`. The first `click`, `type`, `press`, `drag`, or `clipboard_set` of a session triggers `approval_required`. Read-only actions (`screenshot`, `window_list`, `display_list`, `hover`, `scroll`, `clipboard_get`, `list_processes`, `suggest_quit`, `safe_list`) are allowed without prompt. Dangerous key combinations (`cmd+q`, `alt+f4`, `ctrl+alt+delete`, `cmd+shift+q`) are hard-blocked.
+Every `desktop_*` tool call goes through `evaluatePolicy("desktop_use", ctx)` in `packages/permissions/policy-engine.ts`. The first `click`, `type`, `press`, `drag`, or `clipboard_set` of a session triggers `approval_required`. Read-only actions (`screenshot`, `window_list`, `display_list`, `hover`, `scroll`, `clipboard_get`, `list_processes`, `suggest_quit`, `safe_list`) are allowed without prompt. Dangerous key combinations (`cmd+q`, `alt+f4`, `ctrl+alt+delete`, `cmd+shift+q`) are hard-blocked. `quit_app` always requires approval, and a desktop action no rule covers asks rather than running (the `desktop_use` default is ask, not allow). The agent's own `ToolExecutor` gates `desktop_*` under the same `desktop_use` name and descriptor (`packages/computer/desktop-policy.ts`); with no person to ask it refuses (#3213).
 
 The headless CLI uses the same path; the policy gate is **never** bypassed.
 

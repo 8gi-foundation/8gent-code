@@ -62,6 +62,8 @@ const TABLE_DENIED_ACTIONS: PolicyActionType[] = [
 	// changing behaviour for any other scope.
 	"term_orchestration" as PolicyActionType,
 	"computer_use" as PolicyActionType,
+	// Desktop tools are gated as desktop_use (#3213); block that name too.
+	"desktop_use" as PolicyActionType,
 ];
 
 /**

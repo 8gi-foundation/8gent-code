@@ -53,6 +53,7 @@ import {
 	getToolDefinitions as getComputerToolDefs,
 	imageToDesktop,
 } from "../computer";
+import { DESKTOP_POLICY_ACTION, desktopPolicyContext } from "../computer/desktop-policy";
 import {
 	detectDesignNeed,
 	getAvailableDesignSystems,
@@ -115,6 +116,7 @@ import {
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
 import { ToolG8 } from "../permissions/toolg8.js";
+import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
 	WRITE_CONTENT_TOOLS,
 	applyEdit,
@@ -1287,15 +1289,23 @@ export class ToolExecutor {
 		// may touch, so each maps to the capability the policy engine already
 		// knows how to deny rather than relying on someone remembering to add
 		// every new member of the family to the map by hand.
+		//
+		// desktop_* is gated as `desktop_use`, the name its rules in
+		// default-policies.yaml are written under, with the `action` descriptor
+		// those rules match on (#3213). It was gated as `computer_use`, which
+		// has no rules, so every desktop call - quitting apps included - fell
+		// through to the engine's default allow and no card appeared.
+		const isDesktop = toolName.startsWith("desktop_");
 		const policyAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
-				: toolName.startsWith("desktop_")
-					? "computer_use"
+				: isDesktop
+					? (DESKTOP_POLICY_ACTION as PolicyActionType)
 					: undefined);
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
+				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				path: args.path as string,
 				// Every write tool is checked on what it actually writes, not
 				// only write_file's `content` (#3011: edit_file's newText was
@@ -1308,7 +1318,11 @@ export class ToolExecutor {
 				url: args.url as string,
 				key: args.key as string,
 			});
-			if (!gateResult.allowed) {
+			const askFirst = !gateResult.allowed && gateResult.requiresApproval && isDesktop;
+			if (askFirst) {
+				const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
+				if (refusal) return refusal;
+			} else if (!gateResult.allowed) {
 				// Say plainly that nothing happened (see blockedToolMessage).
 				return blockedToolMessage(
 					toolName,
@@ -3037,6 +3051,36 @@ export class ToolExecutor {
 		} catch (err) {
 			return `desktop_processes failed: ${err}`;
 		}
+	}
+
+	/**
+	 * A desktop action the policy says needs the person (#3213). Returns null
+	 * when they approved, or the refusal to hand back to the model. With no
+	 * person to ask (headless, no approval card) it refuses: desktop control
+	 * never runs unattended on a require_approval rule.
+	 */
+	private async askDesktopApproval(
+		toolName: string,
+		args: Record<string, unknown>,
+		reason: string | undefined,
+	): Promise<string | null> {
+		if (this.permissionManager.isInfiniteMode()) return null;
+		const request = {
+			action: "Desktop control",
+			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(args)}`,
+		};
+		let approved: boolean;
+		if (hasTuiApprovalHandler()) {
+			approved = (await requestTuiApproval(request)) === true;
+		} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
+			approved = await this.permissionManager.requestPermission(request.action, request.details);
+		} else {
+			return `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
+		}
+		if (!approved) {
+			return `[PERMISSION DENIED] The person declined ${toolName}. Nothing was done. Do not retry this call.`;
+		}
+		return null;
 	}
 
 	private async handleDesktopQuitApp(
