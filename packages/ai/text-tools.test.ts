@@ -564,3 +564,57 @@ describe("parseToolCalls - JSON in an answer must NOT execute", () => {
 		expect(parseToolCalls(text, opts)).toEqual([]);
 	});
 });
+
+// Qwen's native markup, as the raw Ollama path returns it (the model's own
+// format, untouched by Ollama's parser). Seen from qwen3.8:27b-mlx 2026-09-30.
+describe("native <tool_call> markup", () => {
+	const known = { knownTools: ["run_command", "write_file", "read_file"] };
+
+	test("parses a JSON body and strips the tags from the prose", () => {
+		const reply = 'Running the tests now.\n<tool_call>\n{"name": "run_command", "arguments": {"command": "bun test"}}\n</tool_call>';
+		expect(parseToolCalls(reply, known)).toEqual([{ name: "run_command", arguments: { command: "bun test" } }]);
+		expect(stripToolCalls(reply, known)).toBe("Running the tests now.");
+	});
+
+	test("parses the XML <function=...> body, keeping multi-line values as strings", () => {
+		const reply = [
+			"<tool_call>",
+			"<function=write_file>",
+			"<parameter=path>",
+			"src/a.ts",
+			"</parameter>",
+			"<parameter=content>",
+			"export const a = 1;",
+			"export const b = 2;",
+			"</parameter>",
+			"</function>",
+			"</tool_call>",
+		].join("\n");
+		expect(parseToolCalls(reply, known)).toEqual([
+			{ name: "write_file", arguments: { path: "src/a.ts", content: "export const a = 1;\nexport const b = 2;" } },
+		]);
+		expect(stripToolCalls(reply, known)).toBe("");
+	});
+
+	test("parses several blocks in order, and an unclosed last block", () => {
+		const reply =
+			'<tool_call>\n{"name": "read_file", "arguments": {"path": "a"}}\n</tool_call>\n<tool_call>\n<function=read_file>\n<parameter=path>\nb\n</parameter>\n</function>';
+		expect(parseToolCalls(reply, known).map((c) => c.arguments.path)).toEqual(["a", "b"]);
+	});
+
+	test("never runs an unknown tool, an inline mention, or without knownTools", () => {
+		const unknown = '<tool_call>\n{"name": "rm_rf", "arguments": {}}\n</tool_call>';
+		expect(parseToolCalls(unknown, known)).toEqual([]);
+		expect(stripToolCalls(unknown, known)).toBe("");
+		const inline = 'Qwen can emit <tool_call>{"name": "run_command", "arguments": {}}</tool_call> tags.';
+		expect(parseToolCalls(inline, known)).toEqual([]);
+		const block = '<tool_call>\n{"name": "run_command", "arguments": {"command": "ls"}}\n</tool_call>';
+		expect(parseToolCalls(block)).toEqual([]);
+	});
+
+	test("the fenced ```tool_call format still wins", () => {
+		const reply =
+			'```tool_call\n{"name": "read_file", "arguments": {"path": "fenced"}}\n```\n<tool_call>\n{"name": "read_file", "arguments": {"path": "native"}}\n</tool_call>';
+		expect(parseToolCalls(reply, known)).toEqual([{ name: "read_file", arguments: { path: "fenced" } }]);
+	});
+});

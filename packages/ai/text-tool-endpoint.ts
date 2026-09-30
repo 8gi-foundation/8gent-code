@@ -127,8 +127,11 @@ export function extractUsage(data: unknown): TextToolUsage | null {
  * fails, and Ollama turns the whole reply into a 500 whose message is the Go
  * XML error: `EOF`, `unexpected EOF`, or `XML syntax error ...` (Ollama 0.34.4,
  * model/parsers/qwen3coder.go parseToolCall; seen live in Rishi's pilot,
- * 2026-09-29). The chat endpoints have no switch to turn that parser off, so
- * the reply is gone; the only recovery is to ask again.
+ * 2026-09-29). Proven against qwen3.8:27b-mlx on 2026-09-30: the same reply
+ * 500s with `EOF` on /v1/chat/completions, /api/chat AND /api/generate, and
+ * none of them has a switch to turn the parser off. Only `/api/generate` with
+ * `raw: true` skips it and returns the text untouched, so that is the recovery
+ * path (see buildTextToolCall).
  */
 const NATIVE_PARSER_ERROR_RE = /^(?:unexpected EOF|EOF|XML syntax error\b.*)$/;
 
@@ -190,6 +193,151 @@ export const NATIVE_TOOL_MARKUP_REMINDER = [
 ].join("\n");
 
 /**
+ * Ollama renderers whose prompt format renderQwenChatML reproduces. Both are
+ * Qwen ChatML (`<|im_start|>role ... <|im_end|>`) with a `<think>` block;
+ * qwen3.8 also adds a reasoning-effort line to the system turn and renders a
+ * (empty) think block on every assistant turn. Source: Ollama 0.34.4
+ * model/renderers/qwen35.go (Qwen35Renderer / newQwen38Renderer).
+ */
+export type QwenChatMLVariant = "qwen3.5" | "qwen3.8";
+
+// What Ollama's qwen3.8 renderer puts in the system turn when the request sets
+// no `think` value (our requests never do): its default effort is "xhigh".
+const QWEN38_DEFAULT_REASONING =
+	"Reasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer.";
+
+/**
+ * Render a text-tool conversation as the exact prompt Ollama's qwen3.5 /
+ * qwen3.8 renderer builds for it (no native tools, default thinking), ending
+ * with the open assistant turn and its `<think>` opener. Used to send the
+ * conversation through `/api/generate` with `raw: true`, the one Ollama path
+ * that skips the model's built-in output parser. `tool` messages render as
+ * `<tool_response>` user turns, as the renderer does. Pure.
+ */
+export function renderQwenChatML(messages: ChatMessage[], variant: QwenChatMLVariant): string {
+	// Fold every system message into one leading system turn (qwen3.8 accepts
+	// exactly one; our conversations only ever carry one anyway).
+	const system = messages
+		.filter((m) => m.role === "system")
+		.map((m) => m.content.trim())
+		.filter((c) => c !== "")
+		.join("\n\n");
+	const rest = messages.filter((m) => m.role !== "system");
+
+	let out = "";
+	const sysParts = variant === "qwen3.8" ? [QWEN38_DEFAULT_REASONING, system] : [system];
+	const sysText = sysParts.filter((s) => s !== "").join("\n\n");
+	if (sysText !== "") out += `<|im_start|>system\n${sysText}<|im_end|>\n`;
+
+	// qwen3.5 renders a think block only on assistant turns after the last real
+	// user query; qwen3.8 renders one on every assistant turn.
+	let lastQuery = rest.length - 1;
+	for (let i = rest.length - 1; i >= 0; i--) {
+		if (rest[i].role === "user") {
+			lastQuery = i;
+			break;
+		}
+	}
+	for (let i = 0; i < rest.length; i++) {
+		const m = rest[i];
+		const content = m.content.trim();
+		if (m.role === "user") {
+			out += `<|im_start|>user\n${content}<|im_end|>\n`;
+		} else if (m.role === "assistant") {
+			const think = variant === "qwen3.8" || i > lastQuery;
+			out += think
+				? `<|im_start|>assistant\n<think>\n\n</think>\n\n${content}<|im_end|>\n`
+				: `<|im_start|>assistant\n${content}<|im_end|>\n`;
+		} else if (m.role === "tool") {
+			if (i === 0 || rest[i - 1].role !== "tool") out += "<|im_start|>user";
+			out += `\n<tool_response>\n${content}\n</tool_response>`;
+			if (i === rest.length - 1 || rest[i + 1].role !== "tool") out += "<|im_end|>\n";
+		}
+	}
+	return `${out}<|im_start|>assistant\n<think>\n`;
+}
+
+/**
+ * The visible answer in a raw qwen completion: everything after the closing
+ * `</think>` (the prompt opened the think block, so the model's reasoning comes
+ * first), minus a trailing `<|im_end|>`. A completion that never closed its
+ * think block has no answer yet and yields "". Pure.
+ */
+export function answerFromRawQwen(raw: string): string {
+	const close = raw.lastIndexOf("</think>");
+	if (close === -1) return "";
+	return raw
+		.slice(close + "</think>".length)
+		.replace(/<\|im_end\|>\s*$/, "")
+		.trim();
+}
+
+/** The Ollama server root ("http://h:11434") behind a chat-completions URL. */
+export function ollamaRootFromEndpoint(endpoint: string): string {
+	return endpoint
+		.trim()
+		.replace(/\/+$/, "")
+		.replace(/\/chat\/completions$/, "")
+		.replace(/\/v1$/, "")
+		.replace(/\/api\/chat$/, "");
+}
+
+/**
+ * Which Qwen ChatML renderer (if any) an Ollama model is served with, read
+ * from its Modelfile's `RENDERER` line. Returns null for any other model, so
+ * the raw path never guesses a prompt format it cannot reproduce. Pure.
+ */
+export function qwenVariantFromModelfile(modelfile: string): QwenChatMLVariant | null {
+	const m = /^RENDERER\s+(\S+)\s*$/m.exec(modelfile);
+	if (!m) return null;
+	return m[1] === "qwen3.8" || m[1] === "qwen3.5" ? m[1] : null;
+}
+
+// Per root+model cache of the renderer lookup (one /api/show per model per
+// process, and only ever on the parser-failure path).
+const variantCache = new Map<string, Promise<QwenChatMLVariant | null>>();
+
+/** Test hook: forget cached renderer lookups. */
+export function _resetQwenVariantCache(): void {
+	variantCache.clear();
+}
+
+function lookupQwenVariant(
+	root: string,
+	model: string,
+	signal?: AbortSignal,
+): Promise<QwenChatMLVariant | null> {
+	const key = `${root}\n${model}`;
+	const cached = variantCache.get(key);
+	if (cached) return cached;
+	const pending = (async () => {
+		try {
+			const res = await modelFetch(
+				`${root}/api/show`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ model }),
+					signal,
+				},
+				{ timeoutMs: 15_000, label: `ollama/${model} show` },
+			);
+			if (!res.ok) return null;
+			const data = (await res.json()) as { modelfile?: unknown };
+			return typeof data?.modelfile === "string" ? qwenVariantFromModelfile(data.modelfile) : null;
+		} catch {
+			return null;
+		}
+	})();
+	variantCache.set(key, pending);
+	// A failed lookup (null) is not cached forever: a later failure retries it.
+	pending.then((v) => {
+		if (v === null) variantCache.delete(key);
+	});
+	return pending;
+}
+
+/**
  * Build a `call` function for runTextToolAgent that hits a local provider's
  * OpenAI-compatible /v1/chat/completions endpoint. Sends NO `tools` field so a
  * GGUF chat template that rejects native tool calling never 400s. Returns the
@@ -205,10 +353,20 @@ export const NATIVE_TOOL_MARKUP_REMINDER = [
  * modelFetch, whose limit is `timeoutMs` (default: EIGHT_TURN_TIMEOUT_MS via
  * resolveTurnTimeoutMs). A step that runs past it rejects with TurnTimeoutError.
  *
- * On provider "ollama" it retries ONCE, with NATIVE_TOOL_MARKUP_REMINDER
- * appended to a copy of the conversation, when Ollama's built-in tool-call
- * parser ate the reply: a parser 500 (isNativeToolParserFailure) or an empty
- * 200 for generated tokens (isSwallowedReply). See #3012.
+ * When Ollama's built-in tool-call parser eats the reply (a parser 500, see
+ * isNativeToolParserFailure, or an empty 200 for generated tokens, see
+ * isSwallowedReply), recovery runs in this order, at most one extra request
+ * each:
+ *  1. Raw re-request (the root-cause fix): if the model is served with a Qwen
+ *     ChatML renderer, send the SAME conversation to `/api/generate` with
+ *     `raw: true` and the prompt rendered by renderQwenChatML. Raw mode is the
+ *     only Ollama path that skips the model's PARSER, so the model's text comes
+ *     back untouched and our own parser (which reads native `<tool_call>`
+ *     markup too) handles it.
+ *  2. Otherwise, or if that fails, ONE /v1 retry with
+ *     NATIVE_TOOL_MARKUP_REMINDER appended to a copy of the conversation.
+ *  3. If that fails too, reject with an error that names the problem. The call
+ *     never resolves to an empty reply after a parser failure.
  */
 export function buildTextToolCall(opts: {
 	provider: string;
@@ -235,6 +393,7 @@ export function buildTextToolCall(opts: {
 }): (messages: ChatMessage[]) => Promise<string> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
+	const label = `${opts.provider}/${opts.model}`;
 
 	const post = (messages: ChatMessage[]) =>
 		modelFetch(
@@ -250,17 +409,16 @@ export function buildTextToolCall(opts: {
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label: `${opts.provider}/${opts.model}` },
+			{ timeoutMs: opts.timeoutMs, label },
 		);
+
+	type Attempt =
+		| { ok: true; content: string; completionTokens: number }
+		| { ok: false; status: number; body: string };
 
 	// One completion: POST, surface a non-2xx as an error, report real usage,
 	// and return the assistant text alongside what we need to judge the reply.
-	const attempt = async (
-		messages: ChatMessage[],
-	): Promise<
-		| { ok: true; content: string; completionTokens: number }
-		| { ok: false; status: number; body: string }
-	> => {
+	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
 		const res = await post(messages);
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
@@ -279,30 +437,99 @@ export function buildTextToolCall(opts: {
 		};
 	};
 
+	// The same conversation through Ollama's raw generate path, which never runs
+	// the model's built-in parser. Returns the visible answer, or a failure.
+	const rawAttempt = async (
+		messages: ChatMessage[],
+		variant: QwenChatMLVariant,
+	): Promise<{ ok: true; content: string } | { ok: false; why: string }> => {
+		const root = ollamaRootFromEndpoint(endpoint);
+		const res = await modelFetch(
+			`${root}/api/generate`,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					model: opts.model,
+					prompt: renderQwenChatML(messages, variant),
+					raw: true,
+					stream: false,
+					options: { temperature },
+				}),
+				signal: opts.signal,
+			},
+			{ timeoutMs: opts.timeoutMs, label: `${label} (raw)` },
+		);
+		if (!res.ok) {
+			const body = await res.text().catch(() => "");
+			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
+		}
+		const data = (await res.json()) as {
+			response?: unknown;
+			prompt_eval_count?: unknown;
+			eval_count?: unknown;
+		};
+		const p = typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : null;
+		const c = typeof data?.eval_count === "number" ? data.eval_count : null;
+		if (p !== null && c !== null && opts.onUsage) {
+			opts.onUsage({ promptTokens: p, completionTokens: c, totalTokens: p + c });
+		}
+		const content = answerFromRawQwen(typeof data?.response === "string" ? data.response : "");
+		if (content === "") {
+			return { ok: false, why: "raw generate returned no answer after the think block" };
+		}
+		return { ok: true, content };
+	};
+
 	return async (messages: ChatMessage[]): Promise<string> => {
 		const first = await attempt(messages);
+		let firstFailure: string;
 		if (first.ok) {
 			if (!isSwallowedReply(opts.provider, first.content, first.completionTokens)) {
 				return first.content;
 			}
-		} else if (!isNativeToolParserFailure(opts.provider, first.status, first.body)) {
+			firstFailure = `an empty reply for ${first.completionTokens} generated tokens`;
+		} else if (isNativeToolParserFailure(opts.provider, first.status, first.body)) {
+			firstFailure = `${first.status} ${first.body.slice(0, 200)}`;
+		} else {
 			throw new Error(
 				`${opts.provider} chat completions ${first.status}: ${first.body.slice(0, 300)}`,
 			);
 		}
 
-		// Ollama's built-in parser ate the reply, loudly (500) or silently (empty
-		// 200). Ask exactly once more, on a copy of the conversation plus a
-		// reminder. Never more than one retry per call.
+		// 1. Root-cause recovery: bypass the parser with a raw request.
+		let rawNote = "the model's prompt format is not one the raw path can render";
+		const variant = await lookupQwenVariant(
+			ollamaRootFromEndpoint(endpoint),
+			opts.model,
+			opts.signal,
+		);
+		if (variant) {
+			const raw = await rawAttempt(messages, variant).catch(
+				(e: unknown) => ({ ok: false as const, why: e instanceof Error ? e.message : String(e) }),
+			);
+			if (raw.ok) return raw.content;
+			rawNote = raw.why;
+		}
+
+		// 2. One reminder retry on the normal endpoint.
 		const retry = await attempt([
 			...messages,
 			{ role: "user", content: NATIVE_TOOL_MARKUP_REMINDER },
 		]);
-		if (retry.ok) return retry.content;
+		if (retry.ok && !isSwallowedReply(opts.provider, retry.content, retry.completionTokens)) {
+			return retry.content;
+		}
+
+		// 3. Out of recoveries: say what happened, never hand back "".
+		const retryFailure = retry.ok
+			? `an empty reply for ${retry.completionTokens} generated tokens`
+			: `${retry.status} ${retry.body.slice(0, 200)}`;
 		throw new Error(
-			`${opts.provider} chat completions ${retry.status}: the model replied in native ` +
-				`tool-call markup that ${opts.provider}'s built-in tool-call parser rejected; ` +
-				`retried once with a format reminder and it failed again: ${retry.body.slice(0, 300)}`,
+			`${opts.provider} chat completions: the model replied in native tool-call markup that ` +
+				`${opts.provider}'s built-in tool-call parser rejected (${firstFailure}). ` +
+				`Raw re-request without the parser: ${variant ? "failed" : "skipped"} (${rawNote}). ` +
+				`Retried once with a format reminder and it failed again (${retryFailure}).`,
 		);
 	};
 }
