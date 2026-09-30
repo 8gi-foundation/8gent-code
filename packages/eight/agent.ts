@@ -596,7 +596,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 	 * tool loop. Builds {spec, run} tools from the REAL ToolExecutor (so writes,
 	 * edits, and run_command actually execute, honouring the working directory),
 	 * drives the local model through buildTextToolCall (no native `tools`
-	 * payload), and emits the same onToolStart/onToolEnd events the native path
+	 * payload, except Ollama, where the tools are declared so native calls its
+	 * parser accepts come back as tool_calls), and emits the same onToolStart/onToolEnd events the native path
 	 * emits so the TUI step rail and the Pill work-surface render the calls live.
 	 * Returns the final assistant text in the exact shape Agent.chat() normally
 	 * returns (flavored prose), so app.tsx and agent-pool.ts render it unchanged.
@@ -780,6 +781,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				// Same limit as withTurnTimeout below, so EIGHT_TURN_TIMEOUT_MS is the
 				// only thing that bounds a model step (never Bun's hidden 300 s cap).
 				timeoutMs: attemptTimeoutMs,
+				// Declared to Ollama so a native tool call its parser accepts comes
+				// back in message.tool_calls instead of being silently dropped.
+				tools: tools.map((t) => t.spec),
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;

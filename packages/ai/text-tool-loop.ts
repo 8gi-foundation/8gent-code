@@ -55,7 +55,7 @@
  */
 
 import { checkClaims, claimFollowUpMessage, formatHarnessNote } from "./claim-check";
-import { runTextToolTurn, type TextToolMessage } from "./text-tool-client";
+import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
 
 export type TextTool = {
@@ -72,7 +72,7 @@ export type TextToolLogEntry = {
 export interface TextToolAgentOptions {
 	messages: TextToolMessage[];
 	tools: TextTool[];
-	call: (messages: TextToolMessage[]) => Promise<string>;
+	call: TextToolCall;
 	maxRounds?: number;
 	/**
 	 * Optional abort signal. Checked at the top of every round and before every

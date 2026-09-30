@@ -73,6 +73,18 @@ back 200 with empty content. Two rules follow:
   empty reply for tokens it generated. A second parser 500 fails with a clear
   error; a second empty reply is returned as is.
 
+A third case is silent. When the parser SUCCEEDS on a well-formed
+`<tool_call><function=...>` block, it strips the call from `content` and only
+returns it in `message.tool_calls` if the request declared that tool. With no
+`tools` field the call is thrown away, the prose before it ("Let me check the
+root README.") comes back 200, and the loop reads a reply with no call: a stall.
+Seen on qwen3.8:27b-mlx, Ollama 0.34.4, 2026-09-30. So for provider `ollama`,
+`buildTextToolCall` declares the registered tools (`opts.tools`), reads
+`message.tool_calls` back, and resolves to `{ content, toolCalls }`.
+`runTextToolTurn` keeps only registered names and dedupes them against calls
+written in the text. A model that 400s with "does not support tools" is sent
+again without them. `EIGHT_TEXT_TOOLS_DECLARE=0` turns the declaration off.
+
 ## The gate
 
 `needsTextTools({ supportsNativeTools }): boolean` in

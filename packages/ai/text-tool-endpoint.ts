@@ -7,9 +7,10 @@
  *
  *  - TEXT_TOOL_ENDPOINTS: the per-provider OpenAI-compatible chat-completions URL.
  *  - buildTextToolCall: a `call` function (the kind runTextToolAgent wants) that
- *    POSTs the conversation to that endpoint with NO native `tools` payload (the
- *    whole point - the model's served template 400s on a tools field), then
- *    returns the assistant text.
+ *    POSTs the conversation to that endpoint, then returns the assistant text
+ *    (plus any structured `tool_calls`). No native `tools` payload by default -
+ *    some served GGUF templates 400 on a tools field; Ollama is the exception
+ *    (see shouldDeclareTools).
  *  - toolDefsToTextTools: convert OpenAI-style function definitions (the shape
  *    ToolExecutor.getToolDefinitions returns) into runTextToolAgent's
  *    {spec, run} tools, wiring `run` to a real executor.
@@ -19,7 +20,8 @@
  */
 
 import { modelFetch } from "./model-fetch";
-import type { ToolSpec } from "./text-tools";
+import type { TextToolReply } from "./text-tool-client";
+import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
 import type { TextTool } from "./text-tool-loop";
 
 /** Per-provider OpenAI-compatible chat-completions endpoints for text tools. */
@@ -177,6 +179,72 @@ export function isSwallowedReply(
 	completionTokens: number,
 ): boolean {
 	return provider === "ollama" && content.trim() === "" && completionTokens > 0;
+}
+
+/**
+ * Convert an OpenAI-shape `message.tool_calls` array into parsed calls, in
+ * order. Each entry is `{ function: { name, arguments } }` where `arguments` is
+ * a JSON string (OpenAI, Ollama /v1) or already an object (Ollama /api/chat).
+ * An entry without a string name, or whose arguments are neither an object nor
+ * a JSON string holding one, is skipped. Does NOT filter by registered tools:
+ * runTextToolTurn does that, since only it knows the tool set. Pure, never
+ * throws.
+ */
+export function toolCallsFromMessage(message: unknown): ParsedToolCall[] {
+	const list = (message as { tool_calls?: unknown } | null | undefined)?.tool_calls;
+	if (!Array.isArray(list)) return [];
+	const calls: ParsedToolCall[] = [];
+	for (const entry of list) {
+		const fn = (entry as { function?: { name?: unknown; arguments?: unknown } } | null)?.function;
+		if (!fn || typeof fn.name !== "string" || fn.name === "") continue;
+		const args = structuredArguments(fn.arguments);
+		if (args === null) continue;
+		calls.push({ name: fn.name, arguments: args });
+	}
+	return calls;
+}
+
+function structuredArguments(raw: unknown): Record<string, unknown> | null {
+	if (raw === undefined || raw === null || raw === "") return {};
+	const isObject = (v: unknown): v is Record<string, unknown> =>
+		typeof v === "object" && v !== null && !Array.isArray(v);
+	if (isObject(raw)) return raw;
+	if (typeof raw !== "string") return null;
+	for (const text of [raw, escapeControlCharsInStrings(raw)]) {
+		try {
+			const parsed: unknown = JSON.parse(text);
+			return isObject(parsed) ? parsed : null;
+		} catch {
+			// try the next form
+		}
+	}
+	return null;
+}
+
+/**
+ * Ollama runs the model's PARSER on every chat reply. When the parser SUCCEEDS
+ * on native `<tool_call>` markup it strips the call from `content`, and it only
+ * puts it in `message.tool_calls` if the request declared that tool: with no
+ * `tools` field the call is thrown away and the reply reads as prose ("Let me
+ * check the root README."), a silent stall. Proven against qwen3.8:27b-mlx
+ * (PARSER qwen3.5, Ollama 0.34.4) on 2026-09-30: the same conversation returned
+ * only prose on /v1/chat/completions and /api/chat without `tools`, the full
+ * `<tool_call><function=read_file>...` block on raw /api/generate, and a
+ * `tool_calls` entry on /v1 once `tools` was declared. So for Ollama the text
+ * path declares the registered tools, and reads `message.tool_calls` back.
+ * `EIGHT_TEXT_TOOLS_DECLARE=0` turns the declaration off.
+ */
+export function shouldDeclareTools(
+	provider: string,
+	tools: ToolSpec[] | undefined,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return provider === "ollama" && (tools?.length ?? 0) > 0 && env.EIGHT_TEXT_TOOLS_DECLARE !== "0";
+}
+
+/** Ollama's 400 for a model whose template has no tool support. */
+export function isToolsUnsupported(status: number, body: string): boolean {
+	return status === 400 && /does not support tools/i.test(body);
 }
 
 /**
@@ -367,6 +435,16 @@ function lookupQwenVariant(
  *     NATIVE_TOOL_MARKUP_REMINDER appended to a copy of the conversation.
  *  3. If that fails too, reject with an error that names the problem. The call
  *     never resolves to an empty reply after a parser failure.
+ *
+ * Structured calls: pass `tools` (the registered specs) and, for Ollama, they
+ * are declared on the request (see shouldDeclareTools) so a native tool call
+ * the model's parser accepted lands in `message.tool_calls` instead of being
+ * discarded. Whenever a completion carries `message.tool_calls`, the call
+ * resolves to a TextToolReply `{ content, toolCalls }` (content stays the
+ * prose reply) instead of a bare string; runTextToolTurn keeps only the
+ * registered ones and dedupes them against calls written in the text. A model
+ * whose template rejects `tools` (Ollama 400 "does not support tools") is sent
+ * again without them, and never declared again for this call function.
  */
 export function buildTextToolCall(opts: {
 	provider: string;
@@ -390,12 +468,22 @@ export function buildTextToolCall(opts: {
 	 * (#2805). Never fired when the endpoint omits usage - no fabricated tokens.
 	 */
 	onUsage?: (usage: TextToolUsage) => void;
-}): (messages: ChatMessage[]) => Promise<string> {
+	/**
+	 * The registered tool specs. For Ollama they are declared on the request so
+	 * the model's parser keeps native tool calls (see shouldDeclareTools).
+	 */
+	tools?: ToolSpec[];
+}): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 	const label = `${opts.provider}/${opts.model}`;
+	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
+	const declared = (opts.tools ?? []).map((t) => ({
+		type: "function",
+		function: { name: t.name, description: t.description, parameters: t.parameters },
+	}));
 
-	const post = (messages: ChatMessage[]) =>
+	const post = (messages: ChatMessage[], withTools: boolean) =>
 		modelFetch(
 			endpoint,
 			{
@@ -406,6 +494,7 @@ export function buildTextToolCall(opts: {
 					messages,
 					temperature,
 					stream: false,
+					...(withTools ? { tools: declared } : {}),
 				}),
 				signal: opts.signal,
 			},
@@ -413,32 +502,50 @@ export function buildTextToolCall(opts: {
 		);
 
 	type Attempt =
-		| { ok: true; content: string; completionTokens: number }
+		| { ok: true; content: string; toolCalls: ParsedToolCall[]; completionTokens: number }
 		| { ok: false; status: number; body: string };
 
 	// One completion: POST, surface a non-2xx as an error, report real usage,
-	// and return the assistant text alongside what we need to judge the reply.
+	// and return the assistant text and structured calls alongside what we need
+	// to judge the reply.
 	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
-		const res = await post(messages);
+		let res = await post(messages, declareTools);
+		if (!res.ok && declareTools) {
+			const body = await res.text().catch(() => "");
+			if (!isToolsUnsupported(res.status, body)) return { ok: false, status: res.status, body };
+			declareTools = false;
+			res = await post(messages, false);
+		}
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
 		const data = (await res.json()) as {
-			choices?: Array<{ message?: { content?: unknown } }>;
+			choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }>;
 			usage?: unknown;
 		};
 		const usage = extractUsage(data);
 		if (usage && opts.onUsage) opts.onUsage(usage);
-		const content = data?.choices?.[0]?.message?.content;
+		const message = data?.choices?.[0]?.message;
+		const content = message?.content;
 		return {
 			ok: true,
 			content: typeof content === "string" ? content : "",
+			toolCalls: toolCallsFromMessage(message),
 			completionTokens: usage?.completionTokens ?? 0,
 		};
 	};
 
+	// A completion's result: the bare text, or text plus structured calls.
+	const reply = (a: { content: string; toolCalls: ParsedToolCall[] }): string | TextToolReply =>
+		a.toolCalls.length > 0 ? { content: a.content, toolCalls: a.toolCalls } : a.content;
+	// A reply that carried structured calls was not swallowed, even with no text.
+	const swallowed = (a: { content: string; toolCalls: ParsedToolCall[]; completionTokens: number }) =>
+		a.toolCalls.length === 0 && isSwallowedReply(opts.provider, a.content, a.completionTokens);
+
 	// The same conversation through Ollama's raw generate path, which never runs
 	// the model's built-in parser. Returns the visible answer, or a failure.
+	// Raw mode has no `tool_calls`: native markup stays in the text, where our
+	// own parser reads it.
 	const rawAttempt = async (
 		messages: ChatMessage[],
 		variant: QwenChatMLVariant,
@@ -481,13 +588,11 @@ export function buildTextToolCall(opts: {
 		return { ok: true, content };
 	};
 
-	return async (messages: ChatMessage[]): Promise<string> => {
+	return async (messages: ChatMessage[]): Promise<string | TextToolReply> => {
 		const first = await attempt(messages);
 		let firstFailure: string;
 		if (first.ok) {
-			if (!isSwallowedReply(opts.provider, first.content, first.completionTokens)) {
-				return first.content;
-			}
+			if (!swallowed(first)) return reply(first);
 			firstFailure = `an empty reply for ${first.completionTokens} generated tokens`;
 		} else if (isNativeToolParserFailure(opts.provider, first.status, first.body)) {
 			firstFailure = `${first.status} ${first.body.slice(0, 200)}`;
@@ -517,9 +622,7 @@ export function buildTextToolCall(opts: {
 			...messages,
 			{ role: "user", content: NATIVE_TOOL_MARKUP_REMINDER },
 		]);
-		if (retry.ok && !isSwallowedReply(opts.provider, retry.content, retry.completionTokens)) {
-			return retry.content;
-		}
+		if (retry.ok && !swallowed(retry)) return reply(retry);
 
 		// 3. Out of recoveries: say what happened, never hand back "".
 		const retryFailure = retry.ok

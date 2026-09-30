@@ -37,10 +37,60 @@ export type TextToolTurn = {
 	cutOffToolCall?: { name: string | null };
 };
 
+/**
+ * What a `call` may resolve to besides a bare string: the reply text plus the
+ * calls the endpoint returned as structured `message.tool_calls` (Ollama moves
+ * a native tool call there once its parser accepts it, and strips it from the
+ * text). runTextToolTurn keeps only the registered ones.
+ */
+export type TextToolReply = {
+	content: string;
+	toolCalls: ParsedToolCall[];
+};
+
+export type TextToolCall = (messages: TextToolMessage[]) => Promise<string | TextToolReply>;
+
 export interface TextToolTurnOptions {
 	messages: TextToolMessage[];
 	tools: ToolSpec[];
-	call: (messages: TextToolMessage[]) => Promise<string>;
+	call: TextToolCall;
+}
+
+/** Canonical JSON (object keys sorted) so equal arguments compare equal. */
+function canonical(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+	if (typeof value === "object" && value !== null) {
+		const obj = value as Record<string, unknown>;
+		return `{${Object.keys(obj)
+			.sort()
+			.map((k) => `${JSON.stringify(k)}:${canonical(obj[k])}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * The calls from the reply text, then each structured call to a registered
+ * tool that the text did not already carry (same name and same arguments,
+ * compared as canonical JSON). Structured calls to unregistered names are
+ * dropped, exactly like unregistered bare JSON in the text. Pure.
+ */
+export function mergeToolCalls(
+	fromText: ParsedToolCall[],
+	structured: ParsedToolCall[],
+	knownTools: Iterable<string>,
+): ParsedToolCall[] {
+	const known = new Set(knownTools);
+	const seen = new Set(fromText.map((c) => `${c.name}\u0000${canonical(c.arguments)}`));
+	const merged = fromText.slice();
+	for (const call of structured) {
+		if (!known.has(call.name)) continue;
+		const key = `${call.name}\u0000${canonical(call.arguments)}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		merged.push(call);
+	}
+	return merged;
 }
 
 /**
@@ -89,7 +139,9 @@ function withToolInstructions(
  * Run one text-tool model turn.
  *
  * Injects the tool instructions into the system prompt, calls the injected
- * model `call` once, then returns the stripped prose and any parsed tool calls.
+ * model `call` once, then returns the stripped prose and any parsed tool calls
+ * (those written in the text first, then any structured ones the call
+ * returned, deduped; see mergeToolCalls).
  * Never throws for normal model output. If `call` itself rejects, the rejection
  * propagates unchanged.
  */
@@ -97,10 +149,14 @@ export async function runTextToolTurn(
 	opts: TextToolTurnOptions,
 ): Promise<TextToolTurn> {
 	const messages = withToolInstructions(opts.messages, opts.tools);
-	const raw = await opts.call(messages);
+	const reply = await opts.call(messages);
+	const raw = typeof reply === "string" ? reply : reply.content;
+	const structured = typeof reply === "string" ? [] : reply.toolCalls;
 	// Only registered tools may be called in the bare / ```json JSON form, so a
 	// JSON example in an answer never runs.
 	const parse = { knownTools: opts.tools.map((t) => t.name) };
+	const calls = (text: string) =>
+		mergeToolCalls(parseToolCalls(text, parse), structured, parse.knownTools);
 	const cutOff = findUnterminatedToolCall(raw);
 	if (cutOff) {
 		// Everything before the cut-off block is still usable; the partial
@@ -108,12 +164,12 @@ export async function runTextToolTurn(
 		const head = raw.slice(0, cutOff.fenceStart);
 		return {
 			content: stripToolCalls(head, parse),
-			toolCalls: parseToolCalls(head, parse),
+			toolCalls: calls(head),
 			cutOffToolCall: { name: cutOff.name },
 		};
 	}
 	return {
 		content: stripToolCalls(raw, parse),
-		toolCalls: parseToolCalls(raw, parse),
+		toolCalls: calls(raw),
 	};
 }

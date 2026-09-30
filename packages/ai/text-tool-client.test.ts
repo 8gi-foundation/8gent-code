@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+	mergeToolCalls,
 	runTextToolTurn,
 	type TextToolMessage,
 } from "./text-tool-client";
@@ -236,5 +237,87 @@ describe("runTextToolTurn", () => {
 				},
 			}),
 		).rejects.toBe(boom);
+	});
+});
+
+describe("runTextToolTurn with structured tool_calls from the call", () => {
+	const known: ToolSpec[] = [
+		{ name: "read_file", description: "read", parameters: { type: "object", properties: {} } },
+		{ name: "list_files", description: "list", parameters: { type: "object", properties: {} } },
+	];
+
+	it("runs structured calls in order and keeps the prose as the reply", async () => {
+		const turn = await runTextToolTurn({
+			messages: [{ role: "user", content: "x" }],
+			tools: known,
+			call: async () => ({
+				content: "Let me look.",
+				toolCalls: [
+					{ name: "list_files", arguments: { path: "." } },
+					{ name: "read_file", arguments: { path: "README.md" } },
+				],
+			}),
+		});
+		expect(turn.content).toBe("Let me look.");
+		expect(turn.toolCalls).toEqual([
+			{ name: "list_files", arguments: { path: "." } },
+			{ name: "read_file", arguments: { path: "README.md" } },
+		]);
+	});
+
+	it("ignores a structured call to an unregistered tool", async () => {
+		const turn = await runTextToolTurn({
+			messages: [{ role: "user", content: "x" }],
+			tools: known,
+			call: async () => ({
+				content: "ok",
+				toolCalls: [
+					{ name: "rm_rf", arguments: {} },
+					{ name: "read_file", arguments: { path: "a" } },
+				],
+			}),
+		});
+		expect(turn.toolCalls).toEqual([{ name: "read_file", arguments: { path: "a" } }]);
+	});
+
+	it("dedupes a call present both in the text and as a structured call", async () => {
+		const text =
+			'Reading it.\n```tool_call\n{"name": "read_file", "arguments": {"path": "a", "limit": 5}}\n```';
+		const turn = await runTextToolTurn({
+			messages: [{ role: "user", content: "x" }],
+			tools: known,
+			call: async () => ({
+				content: text,
+				toolCalls: [
+					{ name: "read_file", arguments: { limit: 5, path: "a" } },
+					{ name: "list_files", arguments: { path: "." } },
+				],
+			}),
+		});
+		expect(turn.content).toBe("Reading it.");
+		expect(turn.toolCalls).toEqual([
+			{ name: "read_file", arguments: { path: "a", limit: 5 } },
+			{ name: "list_files", arguments: { path: "." } },
+		]);
+	});
+});
+
+describe("mergeToolCalls", () => {
+	it("keeps text calls first, drops unknown and duplicate structured calls", () => {
+		expect(
+			mergeToolCalls(
+				[{ name: "a", arguments: { x: { p: 1, q: [1, 2] } } }],
+				[
+					{ name: "a", arguments: { x: { q: [1, 2], p: 1 } } },
+					{ name: "a", arguments: { x: 2 } },
+					{ name: "a", arguments: { x: 2 } },
+					{ name: "zzz", arguments: {} },
+				],
+				["a"],
+			),
+		).toEqual([
+			{ name: "a", arguments: { x: { p: 1, q: [1, 2] } } },
+			{ name: "a", arguments: { x: 2 } },
+		]);
 	});
 });
