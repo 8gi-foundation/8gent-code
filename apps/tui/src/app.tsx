@@ -136,7 +136,7 @@ import {
 } from "./lib/provider-readiness.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatSessionTime, formatTokens } from "./lib/format.js";
+import { formatSessionTime, formatTokens, msUntilSessionTimeChanges } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import {
@@ -846,13 +846,16 @@ export function App({
 	const [tokensPerSecond, setTokensPerSecond] = useState(0);
 	// tokensSaved removed — using real totalTokens from agent events
 	const [startTime] = useState(new Date());
-	// 1s ticker for the BottomBar session timer.
+	// Session clock tick. It sleeps until the clock text next changes (each
+	// second in the first minute, then each minute), so an idle App is not
+	// re-rendered every second to draw the same "12m".
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [sessionTick, setSessionTick] = useState(0);
 	useEffect(() => {
-		const id = setInterval(() => setSessionTick((v) => v + 1), 1000);
-		return () => clearInterval(id);
-	}, []);
+		const wait = msUntilSessionTimeChanges(Date.now() - startTime.getTime());
+		const id = setTimeout(() => setSessionTick((v) => v + 1), wait);
+		return () => clearTimeout(id);
+	}, [sessionTick, startTime]);
 	const [recentCommands, setRecentCommands] = useState<string[]>([]);
 
 	// Auth state (non-blocking)
@@ -1204,7 +1207,12 @@ export function App({
 		const tick = async () => {
 			try {
 				const { live, total } = await probeProviders();
-				if (!cancelled) setProviderHealth({ live, total });
+				// Same counts keep the same object, so the 8 s probe only
+				// re-renders App when the X/Y figure actually changes.
+				if (!cancelled)
+					setProviderHealth((prev) =>
+						prev.live === live && prev.total === total ? prev : { live, total },
+					);
 			} catch {
 				// best-effort - status bar can stay stale rather than crash
 			}

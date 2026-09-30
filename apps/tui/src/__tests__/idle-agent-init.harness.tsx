@@ -9,6 +9,12 @@
  * come up and sends a prompt. The parent counts /api/tags calls during the idle window: the
  * agent-init effect re-running on every render used to call
  * TaskRouter.autoAssign (one /api/tags each) about 2.7 times a second (#3087).
+ *
+ * It also counts Ink frames (render option onRender) in the idle window, so
+ * the parent can bound how often an idle TUI redraws the screen (#3099).
+ * IDLE_CLOCK_JUMP_MS moves the wall clock forward before the window, so the
+ * window sits past the session clock's first minute (the only stretch where
+ * the clock legitimately shows, and ticks, seconds).
  */
 
 import { EventEmitter } from "node:events";
@@ -50,6 +56,21 @@ function makeStdout(cols: number, rows: number): FakeStdout {
 const strip = (s: string) => s.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// A wall clock the harness can move forward. Timers keep real time; only
+// what Date reports jumps, which is all the session clock reads.
+let clockOffsetMs = 0;
+const RealDate = Date;
+class ShiftedDate extends RealDate {
+	constructor(...args: unknown[]) {
+		if (args.length === 0) super(RealDate.now() + clockOffsetMs);
+		else super(...(args as [number]));
+	}
+	static now() {
+		return RealDate.now() + clockOffsetMs;
+	}
+}
+if (process.env.IDLE_CLOCK_JUMP_MS) globalThis.Date = ShiftedDate as DateConstructor;
+
 async function waitFor(check: () => boolean, label: string, timeoutMs = 20000) {
 	const start = Date.now();
 	while (!check()) {
@@ -63,6 +84,7 @@ async function main() {
 	const { App } = await import("../app.js");
 	const stdin = new FakeStdin();
 	const stdout = makeStdout(160, 48);
+	let frames = 0;
 	const app = render(
 		<App initialCommand="" args={[]} cliProvider="ollama" cliModel={process.env.IDLE_MODEL ?? "none"} />,
 		{
@@ -72,6 +94,9 @@ async function main() {
 			debug: false,
 			exitOnCtrlC: false,
 			patchConsole: false,
+			onRender: () => {
+				frames++;
+			},
 		},
 	);
 	await waitFor(() => strip(stdout.written).includes("Enter to begin"), "setup placeholder");
@@ -101,9 +126,22 @@ async function main() {
 	}
 	// Settle: the agent is built and startup probes finish.
 	await tick(Number(process.env.IDLE_SETTLE_MS ?? 3000));
-	console.log(JSON.stringify({ phase: "idle-start", t: Date.now() }));
+	if (process.env.IDLE_CLOCK_JUMP_MS) {
+		clockOffsetMs = Number(process.env.IDLE_CLOCK_JUMP_MS);
+		// Let the pending one-second clock tick land on the new time.
+		await tick(1500);
+	}
+	const framesAtStart = frames;
+	console.log(JSON.stringify({ phase: "idle-start", t: RealDate.now() }));
 	await tick(Number(process.env.IDLE_WINDOW_MS ?? 8000));
-	console.log(JSON.stringify({ phase: "idle-end", t: Date.now(), written: stdout.written.length }));
+	console.log(
+		JSON.stringify({
+			phase: "idle-end",
+			t: RealDate.now(),
+			written: stdout.written.length,
+			frames: frames - framesAtStart,
+		}),
+	);
 	app.unmount();
 	process.exit(0);
 }

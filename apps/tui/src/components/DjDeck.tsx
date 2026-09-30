@@ -14,6 +14,7 @@
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../theme.js";
+import { keepIfSame } from "../lib/keep-if-same.js";
 
 // ── Persistence helpers ───────────────────────────────────────────────
 // Lazy + best-effort: never let a DB error crash the deck. If the workspace
@@ -333,7 +334,9 @@ export function DjDeck({
 			if (!dj || !djRef.current.ready) return;
 			try {
 				const s: DjStatus = await dj.status();
-				setStatus(s);
+				// Same status keeps the same object: this poll runs every second
+				// while the deck is mounted, playing or not.
+				setStatus(keepIfSame(s));
 				if (s.position != null) setLocalPos(s.position);
 				if (s.volume != null && s.volume > 0) {
 					lastVolumeRef.current = s.volume;

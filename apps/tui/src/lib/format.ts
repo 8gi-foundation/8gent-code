@@ -44,11 +44,15 @@ export function formatDuration(ms: number): string {
 /**
  * Format an elapsed-since-mount duration for the bottom-HUD SESSION
  * card. Distinct from `formatDuration` because the contract is fixed
- * by spec (#2367):
+ * by spec (#2367), narrowed so the clock only ticks when it has to:
  *   <60s:  "Ns"
- *   <60m:  "Nm Ss"
+ *   <60m:  "Nm"
  *   <24h:  "Hh Mm"
  *   >=24h: "Dd Hh"
+ *
+ * Seconds show only in the first minute. After that the clock is a
+ * minutes clock: every change of this text is a full-screen Ink redraw,
+ * and "12m 7s" ticking once a second kept an idle TUI redrawing forever.
  *
  * Always reports the elapsed delta from the timestamp the TUI captured
  * at mount; resets on every TUI restart by design (no persistence).
@@ -63,8 +67,7 @@ export function formatSessionTime(elapsedMs: number): string {
 
 	const totalMinutes = Math.floor(totalSeconds / 60);
 	if (totalMinutes < 60) {
-		const seconds = totalSeconds % 60;
-		return `${totalMinutes}m ${seconds}s`;
+		return `${totalMinutes}m`;
 	}
 
 	const totalHours = Math.floor(totalMinutes / 60);
@@ -76,6 +79,17 @@ export function formatSessionTime(elapsedMs: number): string {
 	const days = Math.floor(totalHours / 24);
 	const hours = totalHours % 24;
 	return `${days}d ${hours}h`;
+}
+
+/**
+ * How long until `formatSessionTime(elapsedMs)` next changes: to the next
+ * second in the first minute, the next minute up to a day, the next hour
+ * after that. The session clock sleeps exactly this long between ticks.
+ */
+export function msUntilSessionTimeChanges(elapsedMs: number): number {
+	if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+	const unit = elapsedMs < 60_000 ? 1_000 : elapsedMs < 24 * 3_600_000 ? 60_000 : 3_600_000;
+	return unit - (elapsedMs % unit);
 }
 
 /** Format a value/total as a percentage string. */

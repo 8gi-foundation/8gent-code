@@ -7,7 +7,12 @@
  */
 import { describe, expect, test, beforeEach } from "bun:test";
 
-import { deriveLilEightState, turnEndedInError, _testing } from "../hooks/useLilEightState";
+import {
+	deriveLilEightState,
+	nextLilEightChangeAt,
+	turnEndedInError,
+	_testing,
+} from "../hooks/useLilEightState";
 import { computeGitSync, gitView, type GitRunner } from "../hooks/useGitSync";
 import {
 	deriveTools,
@@ -154,6 +159,51 @@ describe("deriveLilEightState", () => {
 				idleSinceMs: _testing.SLEEP_AFTER_MS + 1_000,
 			}),
 		).toBe("sleep");
+	});
+});
+
+// The hook sleeps until nextLilEightChangeAt instead of ticking every
+// second (#3099). Each case checks the badge really flips at that moment
+// and not a millisecond before.
+describe("nextLilEightChangeAt", () => {
+	const base = {
+		messages: [] as any[],
+		isProcessing: false,
+		lastTurnEndedAt: null as number | null,
+		lastTurnSuccess: null as boolean | null,
+		now: 1_000_000,
+		idleSinceMs: 0,
+	};
+	const at = (input: typeof base, t: number) =>
+		deriveLilEightState({ ...input, now: t, idleSinceMs: input.idleSinceMs + (t - input.now) });
+
+	test("idle: wakes exactly when the sleep window opens", () => {
+		const input = { ...base, idleSinceMs: 10_000 };
+		const next = nextLilEightChangeAt(input);
+		expect(next).not.toBeNull();
+		expect(at(input, next! - 1)).toBe("idle");
+		expect(at(input, next!)).toBe("sleep");
+	});
+
+	test("done: wakes when the done window closes", () => {
+		const input = { ...base, lastTurnEndedAt: base.now - 1_000, lastTurnSuccess: true };
+		const next = nextLilEightChangeAt(input)!;
+		expect(next).toBe(input.lastTurnEndedAt + _testing.DONE_WINDOW_MS);
+		expect(at(input, next - 1)).toBe("done");
+		expect(at(input, next)).toBe("idle");
+	});
+
+	test("error: wakes when the error window closes", () => {
+		const input = { ...base, lastTurnEndedAt: base.now - 1_000, lastTurnSuccess: false };
+		const next = nextLilEightChangeAt(input)!;
+		expect(next).toBe(input.lastTurnEndedAt + _testing.ERROR_WINDOW_MS);
+		expect(at(input, next - 1)).toBe("error");
+		expect(at(input, next)).toBe("idle");
+	});
+
+	test("nothing to wait for while a turn runs or once asleep", () => {
+		expect(nextLilEightChangeAt({ ...base, isProcessing: true })).toBeNull();
+		expect(nextLilEightChangeAt({ ...base, idleSinceMs: _testing.SLEEP_AFTER_MS + 1 })).toBeNull();
 	});
 });
 
