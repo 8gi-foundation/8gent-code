@@ -5280,10 +5280,14 @@ export function App({
 					const trimmed = (reply ?? "").trim();
 					if (trimmed) {
 						// The plan column is the active tab's; a background turn has none.
-						// The reply's own PLAN: lines join in, since the column may not
-						// have them yet when the plan came in this same step (#3096).
+						// A plan written in the reply joins the column and the stamp alike
+						// (#3096): the text-tool path reports steps with no text, so a
+						// turn that only wrote a plan never reached the column before,
+						// and the column can be a render behind the reply in any case.
+						const replyPlanLines = tabId === activeTabId ? planStepsFromText(trimmed) : [];
+						if (replyPlanLines.length > 0) setPlanSteps((prev) => mergePlanText(prev, replyPlanLines));
 						const turnPlanSteps =
-							tabId === activeTabId ? replyPlan(planStepsRef.current, planStepsFromText(trimmed)) : [];
+							tabId === activeTabId ? replyPlan(planStepsRef.current, replyPlanLines) : [];
 						appendToTab(tabId, {
 							id: `assistant-${Date.now()}`,
 							role: "assistant" as const,
