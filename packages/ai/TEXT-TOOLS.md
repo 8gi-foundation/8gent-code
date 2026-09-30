@@ -43,6 +43,14 @@ All three live in `packages/ai/text-tools.ts` and are pure (no I/O, no network).
   another object, and it is not inside a fence tagged with another language
   (` ```ts `, ` ```python `). JSON examples in an answer therefore never run.
 
+  Invalid escapes: llama3.2:3b writes a regex such as `/\s+/` into a JSON
+  string as `\s`, which strict JSON rejects. When a call fails to parse
+  strictly (and after the raw-control-character repair), a backslash that does
+  not start a valid JSON escape is kept as a literal backslash, so the call runs
+  with exactly the text the model wrote. Valid escapes are untouched and the
+  gates above still apply. Every dropped write call in the pilot's
+  l4-spawn-parallel-m5 runs carried one.
+
 - `stripToolCalls(text: string, opts?: { knownTools?: Iterable<string> }): string`
   Removes every `tool_call` block and returns the remaining prose, trimmed. Use
   it to recover the model's natural-language answer with no JSON shrapnel left.

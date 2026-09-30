@@ -334,6 +334,51 @@ export function escapeControlCharsInStrings(jsonText: string): string {
 	return out;
 }
 
+// The characters a JSON escape may start with: \" \\ \/ \b \f \n \r \t \uXXXX.
+const JSON_ESCAPE_CHARS = new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
+
+/**
+ * Double every backslash INSIDE a JSON string literal that does not start a
+ * valid JSON escape, so it survives as a literal backslash. Small local models
+ * (llama3.2:3b) write a regex such as /\s+/ into a JSON string as `\s`, which
+ * strict JSON rejects, so the whole call was dropped and the agent ended with
+ * its fix unrun (pilot l4-spawn-parallel-m5: every dropped write call across
+ * its runs carried one, and in two it was the only fault). An
+ * invalid escape has no other meaning, and the fix keeps exactly what the model
+ * wrote. Valid escapes (`\n`, `\"`, `\u00e9`) and everything outside strings are
+ * untouched.
+ */
+export function escapeInvalidBackslashesInStrings(jsonText: string): string {
+	let out = "";
+	let inString = false;
+	for (let i = 0; i < jsonText.length; i++) {
+		const ch = jsonText[i];
+		if (!inString) {
+			if (ch === '"') inString = true;
+			out += ch;
+			continue;
+		}
+		if (ch === '"') {
+			inString = false;
+			out += ch;
+			continue;
+		}
+		if (ch !== "\\") {
+			out += ch;
+			continue;
+		}
+		const next = jsonText[i + 1];
+		const validUnicode = next === "u" && /^[0-9a-fA-F]{4}$/.test(jsonText.slice(i + 2, i + 6));
+		if (next !== undefined && (JSON_ESCAPE_CHARS.has(next) || validUnicode)) {
+			out += ch + next;
+			i++;
+			continue;
+		}
+		out += "\\\\";
+	}
+	return out;
+}
+
 /**
  * Detect a `tool_call` block whose JSON object was opened but never closed:
  * the reply stopped mid-call, almost always because it hit the model's output
@@ -380,7 +425,13 @@ function parseJsonLoose(jsonText: string): unknown {
 		try {
 			return JSON.parse(escapeControlCharsInStrings(jsonText));
 		} catch {
-			return undefined;
+			// Last try: also keep invalid escapes (a regex's \s) as literal
+			// backslashes. Reached only when stricter parses failed.
+			try {
+				return JSON.parse(escapeControlCharsInStrings(escapeInvalidBackslashesInStrings(jsonText)));
+			} catch {
+				return undefined;
+			}
 		}
 	}
 }
