@@ -6,7 +6,7 @@
  *   ✓ Read  packages/decide/  5 files
  *
  * Rows come from lib/turn-results.ts: the turn's real tool trail and the
- * plan the agent reported with update_plan. Every row is pre-fitted to
+ * plan the PLAN column held for the turn (the agent's own update_plan). Every row is pre-fitted to
  * `width`, so nothing wraps or pushes the column sideways.
  *
  * Motion: the rows land in order when the reply arrives, after the figure-8
@@ -22,6 +22,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import { SETTLE_HOLD_MS, motionEnabled, staggerFor } from "../lib/motion.js";
+import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import type { ToolTrailEntry } from "../lib/tool-trail.js";
 import { type ResultStatus, buildTurnResults, fitResultRow } from "../lib/turn-results.js";
@@ -67,12 +68,15 @@ export function useResultLanding(total: number, land: boolean): number {
 
 export function TurnResults({
 	trail,
+	plan,
 	width,
 	maxRows,
 	land = false,
 	animate = true,
 }: {
 	trail: ToolTrailEntry[];
+	/** The plan the PLAN column held for this turn; else the trail's update_plan. */
+	plan?: ReadonlyArray<PlanStep>;
 	width: number;
 	/** Row ceiling; the oldest successful calls fold into one row. */
 	maxRows?: number;
@@ -81,7 +85,7 @@ export function TurnResults({
 	/** False (Ctrl+A) draws every row at once. */
 	animate?: boolean;
 }) {
-	const rows = buildTurnResults(trail, maxRows);
+	const rows = buildTurnResults(trail, maxRows, plan);
 	const visible = useResultLanding(rows.length, land && motionEnabled(animate));
 	if (rows.length === 0) return null;
 	// The block keeps its full height while rows land, so the reply below it

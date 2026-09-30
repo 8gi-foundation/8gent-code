@@ -164,10 +164,12 @@ interface MessageListProps {
  * Rows a turn's calls take: the live trail while the turn runs (a "tool"
  * item), the results block once the reply has landed (an assistant item).
  */
-function callRows(role: Message["role"], trail: ToolTrailEntry[], maxRows?: number): number {
+function callRows(message: Message, trail: ToolTrailEntry[], maxRows?: number): number {
 	if (trail.length === 0) return 0;
 	// Results carry one blank row between them and the reply (mockup A).
-	return role === "assistant" ? turnResultRows(trail, maxRows) + 1 : toolTrailRows(trail, maxRows);
+	return message.role === "assistant"
+		? turnResultRows(trail, maxRows, message.plan) + 1
+		: toolTrailRows(trail, maxRows);
 }
 
 function estimateMessageRows(
@@ -175,7 +177,7 @@ function estimateMessageRows(
 	wrapWidth: number,
 	trail: ToolTrailEntry[] = [],
 ): number {
-	const trailRows = callRows(message.role, trail);
+	const trailRows = callRows(message, trail);
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
@@ -265,14 +267,14 @@ export function MessageList({
 			bubbleWidths(resolvedContentWidth, i.message.role).wrap,
 			i.trail,
 		);
-		const trailRows = callRows(i.message.role, i.trail);
+		const trailRows = callRows(i.message, i.trail);
 		if (trailRows === 0 || full <= resolvedRowBudget) return full;
 		const base = full - trailRows;
 		// The results' gap row is not a trail row: leave it out of the cap.
 		const gap = i.message.role === "assistant" ? 1 : 0;
 		const cap = Math.max(1, resolvedRowBudget - base - gap);
 		trailCaps.set(i.message.id, cap);
-		return base + callRows(i.message.role, i.trail, cap);
+		return base + callRows(i.message, i.trail, cap);
 	});
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
@@ -661,6 +663,7 @@ function MessageItem({
 				<Box flexDirection="column" flexShrink={0} marginBottom={message.content.trim() ? 1 : 0}>
 					<TurnResults
 						trail={trail}
+						plan={message.plan}
 						width={innerContentWidth}
 						maxRows={trailMaxRows}
 						land={isNew}

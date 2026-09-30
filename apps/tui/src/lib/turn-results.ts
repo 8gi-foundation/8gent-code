@@ -13,17 +13,18 @@
  * 1. The turn's tool trail. Every row is a call that ran, with the status the
  *    tool itself reported. Reads and searches in a row fold into one line;
  *    repeated writes to one file fold into one line with a count.
- * 2. The turn's last update_plan call (#3044), when the agent made one. Its
- *    steps lead the block with the status the agent reported. A step still
- *    marked in progress when the turn ended is shown as not done, exactly as
- *    the PLAN column settles it (lib/plan-state.ts settlePlan).
+ * 2. The turn's plan: the one the PLAN column held when the reply landed
+ *    (stamped on the reply by app.tsx), or else the turn's last update_plan
+ *    call (#3044). Its steps lead the block with the status the agent
+ *    reported. A step still marked in progress when the turn ended is shown
+ *    as not done, exactly as the PLAN column settles it (settlePlan).
  *
  * No description, verb or step is invented: verbs are a fixed map from tool
  * names, an unknown tool shows its own name, and plan steps are shown in the
  * agent's own words.
  */
 
-import { applyPlanUpdate, settlePlan } from "./plan-state.js";
+import { type PlanStep, applyPlanUpdate, settlePlan } from "./plan-state.js";
 import type { ToolTrailEntry, TrailStatus } from "./tool-trail.js";
 
 export type ResultStatus = TrailStatus | "pending";
@@ -41,6 +42,8 @@ export interface ResultRow {
 	note?: string;
 	/** Calls this row stands for. */
 	count: number;
+	/** Fold rows only: the plan steps folded into this row. */
+	steps?: number;
 }
 
 /** A turn's result block never grows past this many rows. */
@@ -144,8 +147,8 @@ export function turnPlan(trail: ToolTrailEntry[]) {
 	return [];
 }
 
-function planRows(trail: ToolTrailEntry[]): ResultRow[] {
-	return turnPlan(trail).map((s) => {
+function planRows(plan: ReadonlyArray<PlanStep>): ResultRow[] {
+	return plan.map((s) => {
 		const [first, ...rest] = s.text.split(/\s+/);
 		const status: ResultStatus =
 			s.status === "done" ? "ok" : s.status === "failed" ? "fail" : "pending";
@@ -198,18 +201,53 @@ function toolRows(trail: ToolTrailEntry[]): ResultRow[] {
 }
 
 /**
- * The result rows for a finished turn: plan steps first (when the agent
- * reported any), then what the calls did, in order. Past `maxRows`, the
- * oldest successful calls fold into one "N more steps" row, so failures,
- * blocks and plan steps stay visible for as long as the space allows.
+ * The result rows for a finished turn: plan steps first (when the turn had a
+ * plan), then what the calls did, in order. Past `maxRows`, the oldest
+ * successful calls fold into one "N more actions" row, and after them the
+ * pending plan steps into one "N more steps" row, so failures, blocks and
+ * finished plan steps stay visible for as long as the space allows.
+ *
+ * `plan` is the plan the PLAN column holds for this turn (app.tsx stamps it
+ * on the reply), so the two surfaces count the same steps. Without one, the
+ * turn's own update_plan calls stand in (turnPlan). Either way the word
+ * "step" only ever counts plan steps: the plan rows plus the steps in a
+ * fold row always add up to the plan's length.
  */
-export function buildTurnResults(trail: ToolTrailEntry[], maxRows = MAX_RESULT_ROWS): ResultRow[] {
-	const plan = planRows(trail);
-	const tools = toolRows(trail);
-	const rows = [...plan, ...tools];
+export function buildTurnResults(
+	trail: ToolTrailEntry[],
+	maxRows = MAX_RESULT_ROWS,
+	plan: ReadonlyArray<PlanStep> = turnPlan(trail),
+): ResultRow[] {
+	const rows = [...planRows(plan), ...toolRows(trail)];
 	const cap = Math.max(1, Math.floor(maxRows));
 	if (rows.length <= cap) return rows;
-	let toFold = rows.length - cap + 1;
+	// Plan steps and calls never share a fold row, so a fold of both kinds
+	// costs two rows. Try with one summary row, then with two.
+	let fold = pickFolds(rows, rows.length - cap + 1);
+	if (foldsBothKinds(rows, fold) && cap >= 2) fold = pickFolds(rows, rows.length - cap + 2);
+	const out: ResultRow[] = [];
+	const summarised = new Set<string>();
+	const combine = foldsBothKinds(rows, fold) && cap < 2;
+	for (let i = 0; i < rows.length; i++) {
+		if (!fold.has(i)) {
+			out.push(rows[i]);
+			continue;
+		}
+		// A fold row sits where the first row it stands for was.
+		const kind = combine ? "all" : rows[i].kind === "plan" ? "plan" : "tool";
+		if (summarised.has(kind)) continue;
+		summarised.add(kind);
+		const members = [...fold]
+			.map((j) => rows[j])
+			.filter((r) => kind === "all" || (r.kind === "plan") === (kind === "plan"));
+		out.push(foldRow(members));
+	}
+	return out;
+}
+
+/** Rows to fold, as indexes: `n` of them, least informative first. */
+function pickFolds(rows: ResultRow[], n: number): Set<number> {
+	let toFold = n;
 	const fold = new Set<number>();
 	// Pass 1: successful calls, oldest first. Pass 2: pending plan steps.
 	// Pass 3 (only when still too many): anything, oldest first.
@@ -225,25 +263,53 @@ export function buildTurnResults(trail: ToolTrailEntry[], maxRows = MAX_RESULT_R
 			toFold--;
 		}
 	}
-	const folded = rows.filter((_, i) => fold.has(i));
-	const calls = folded.reduce((n, r) => n + r.count, 0);
-	const failed = folded.filter((r) => r.status === "fail").length;
-	const blocked = folded.filter((r) => r.status === "blocked").length;
+	return fold;
+}
+
+function foldsBothKinds(rows: ResultRow[], fold: Set<number>): boolean {
+	const kinds = new Set([...fold].map((i) => rows[i].kind === "plan"));
+	return kinds.size > 1;
+}
+
+function plural(n: number, one: string, many: string): string {
+	return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * One row standing for folded rows. Plan steps say "steps", calls say
+ * "actions"; when a one-row window forces both into one row, the steps lead
+ * and the calls follow in the note.
+ */
+function foldRow(members: ResultRow[]): ResultRow {
+	const steps = members.filter((r) => r.kind === "plan");
+	const calls = members.filter((r) => r.kind !== "plan").reduce((n, r) => n + r.count, 0);
+	const failed = members.filter((r) => r.status === "fail").length;
+	const blocked = members.filter((r) => r.status === "blocked").length;
+	const pending = steps.filter((r) => r.status === "pending").length;
+	const done = steps.filter((r) => r.status === "ok").length;
 	const notes: string[] = [];
+	// A fold of steps that are not all alike says how many were done, so a
+	// pending icon never hides a finished step and a tick never claims one.
+	if (steps.length > 0 && done > 0 && done < steps.length) notes.push(`${done} done`);
 	if (failed) notes.push(`${failed} failed`);
 	if (blocked) notes.push(`${blocked} blocked`);
-	const summary: ResultRow = {
+	if (steps.length > 0 && calls > 0) notes.push(`+${plural(calls, "action", "actions")}`);
+	return {
 		kind: "fold",
-		status: failed ? "fail" : blocked ? "blocked" : "ok",
-		verb: `${calls} more ${calls === 1 ? "step" : "steps"}`,
+		status: failed ? "fail" : blocked ? "blocked" : pending ? "pending" : "ok",
+		verb:
+			steps.length > 0
+				? `${plural(steps.length, "more step", "more steps")}`
+				: `${plural(calls, "more action", "more actions")}`,
 		note: notes.length ? notes.join(", ") : undefined,
-		count: calls,
+		count: steps.length + calls,
+		steps: steps.length,
 	};
-	const firstFolded = Math.min(...fold);
-	const kept = rows.filter((_, i) => !fold.has(i));
-	// The fold row sits where the first folded row was.
-	const at = rows.slice(0, firstFolded).filter((_, i) => !fold.has(i)).length;
-	return [...kept.slice(0, at), summary, ...kept.slice(at)];
+}
+
+/** How many plan steps the rows stand for: plan rows plus folded steps. */
+export function stepsShown(rows: ReadonlyArray<ResultRow>): number {
+	return rows.reduce((n, r) => n + (r.kind === "plan" ? 1 : (r.steps ?? 0)), 0);
 }
 
 export interface FittedRow {
@@ -295,6 +361,10 @@ export function fitResultRow(row: ResultRow, width: number): FittedRow {
 }
 
 /** Rows a result block occupies, for MessageList's row-budget math. */
-export function turnResultRows(trail: ToolTrailEntry[], maxRows?: number): number {
-	return buildTurnResults(trail, maxRows).length;
+export function turnResultRows(
+	trail: ToolTrailEntry[],
+	maxRows?: number,
+	plan?: ReadonlyArray<PlanStep>,
+): number {
+	return buildTurnResults(trail, maxRows, plan).length;
 }

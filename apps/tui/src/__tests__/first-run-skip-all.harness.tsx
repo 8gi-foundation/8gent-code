@@ -4,8 +4,8 @@
  * leaks into other test files. HOME is set by the parent. Exit 0 = pass.
  *
  * First run, end to end through the real App: the chat-based setup shows,
- * "/skip all" typed at its very first step ("Enter to begin") ends it, and
- * the normal input comes back. Rishi's overnight pilot does exactly this at
+ * "/skip all" typed at its very first step ("Enter to begin") ends it, the
+ * normal input comes back, and nothing is added to the chat. Rishi's overnight pilot does exactly this at
  * the start of every run, so a setup that cannot be skipped blocks the loop.
  *
  * The App is mounted in-process with a TTY-shaped stdin and an empty HOME,
@@ -84,11 +84,17 @@ async function main() {
 	await waitFor(() => strip(stdout.written.slice(mark)).includes("/skip all"), "typed /skip all");
 	await tick(50);
 	stdin.feed("\r");
-	await waitFor(() => strip(stdout.written.slice(mark)).includes("ask again later"), "skip reply");
 	await waitFor(
 		() => strip(stdout.written.slice(mark)).includes("Type a command or ask a question"),
 		"normal input",
 	);
+	await tick(300);
+	// The input coming back is the whole answer: /skip all leaves no status
+	// line in the transcript, and makes no promise to ask again (#3088).
+	const after = strip(stdout.written.slice(mark));
+	if (after.includes("ask again later") || after.includes("Understood.")) {
+		throw new Error("/skip all left a status line in the chat");
+	}
 	const user = JSON.parse(fs.readFileSync(path.join(home, ".8gent", "user.json"), "utf-8"));
 	app.unmount();
 	console.log(
