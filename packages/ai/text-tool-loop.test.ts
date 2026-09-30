@@ -9,6 +9,9 @@ import {
 	isQuestionToUser,
 	MAX_COMPLETION_CHECKS,
 	MAX_CONSECUTIVE_CHECKS,
+	MAX_CALLS_PER_ROUND,
+	abortedCallResult,
+	overCapCallResult,
 	isShellFileWrite,
 	runTextToolAgent,
 	stripDoneMarker,
@@ -1420,7 +1423,9 @@ describe("runTextToolAgent - repetition degeneration", () => {
 		const tools = ws.tools.map((t) => ({
 			...t,
 			run: async (a: Record<string, unknown>) => {
-				if (++calls > 50) ac.abort();
+				// 10, not the real 50: the round cap (MAX_CALLS_PER_ROUND) now stops
+				// a single reply well before 50, so the abort must land inside it.
+				if (++calls > 10) ac.abort();
 				return t.run(a);
 			},
 		}));
@@ -1521,5 +1526,149 @@ describe("runTextToolAgent - repetition degeneration", () => {
 		expect(model.seen.filter((m) => lastUserMessage(m) === DEGENERATE_REPLY_MESSAGE)).toHaveLength(0);
 		expect(model.calls()).toBe(3);
 		expect(result.content).toBe(table.replace(/^DONE: /, ""));
+	});
+});
+
+// ── Abort mid-round and the per-reply call cap (issue #3056, run 2026-09-30_010512) ──
+//
+// qwen3.8 27B asked for 144 read_file calls in one reply. The circuit breaker
+// aborted the turn at 103 calls, but the loop only checked the signal at the
+// top of a round, so it ran all 144 anyway.
+
+function countingReadTool(onRun?: (n: number) => void) {
+	let runs = 0;
+	const tool: TextTool = {
+		...READ_FILE_TOOL,
+		run: async () => {
+			runs++;
+			onRun?.(runs);
+			return "contents";
+		},
+	};
+	return { tool, runs: () => runs };
+}
+
+function manyReads(n: number): string {
+	return Array.from({ length: n }, (_, i) => tc("read_file", { path: `f${i}.ts` })).join("\n");
+}
+
+describe("runTextToolAgent - abort mid-round", () => {
+	test("a round of 144 calls with an abort after N runs only N, and the turn ends", async () => {
+		const N = 7;
+		const ac = new AbortController();
+		const { tool, runs } = countingReadTool((n) => {
+			if (n === N) ac.abort();
+		});
+		const model = scriptedModel([manyReads(144), "UNREACHED"]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read everything" }],
+			tools: [tool],
+			call: model.call,
+			maxRounds: 10,
+			signal: ac.signal,
+		});
+		expect(runs()).toBe(N);
+		expect(model.calls()).toBe(1);
+		expect(result.rounds).toBe(1);
+		expect(result.content).not.toContain("UNREACHED");
+	});
+
+	test("every skipped call is in the tool log as not run, never as done", async () => {
+		const N = 7;
+		const ac = new AbortController();
+		const { tool } = countingReadTool((n) => {
+			if (n === N) ac.abort();
+		});
+		const model = scriptedModel([manyReads(20)]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read everything" }],
+			tools: [tool],
+			call: model.call,
+			signal: ac.signal,
+		});
+		expect(result.toolLog).toHaveLength(20);
+		expect(result.toolLog.slice(0, N).every((e) => e.result === "contents")).toBe(true);
+		const skipped = result.toolLog.slice(N);
+		expect(skipped).toHaveLength(20 - N);
+		expect(skipped.every((e) => e.result === "Error: not run: turn aborted.")).toBe(true);
+		expect(skipped[0].args).toEqual({ path: `f${N}.ts` });
+	});
+
+	test("an abort reason, when given, is recorded with the skipped calls", async () => {
+		const ac = new AbortController();
+		const reason = "Global tool call limit exceeded: 103 calls this turn (limit: 50)";
+		const { tool } = countingReadTool((n) => {
+			if (n === 2) ac.abort(new Error(reason));
+		});
+		const model = scriptedModel([manyReads(4)]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read everything" }],
+			tools: [tool],
+			call: model.call,
+			signal: ac.signal,
+		});
+		expect(result.toolLog[3].result).toBe(`Error: not run: turn aborted (${reason}).`);
+		expect(abortedCallResult(undefined)).toBe("Error: not run: turn aborted.");
+	});
+
+	test("a skipped run_command the user asked for is reported as not verified", async () => {
+		const ac = new AbortController();
+		const ws = fakeWorkspace();
+		const tools = ws.tools.map((t) =>
+			t.spec.name === "read_file"
+				? { ...t, run: async (a: Record<string, unknown>) => { ac.abort(); return t.run(a); } }
+				: t,
+		);
+		const model = scriptedModel([
+			[tc("read_file", { path: "packages/decide/README.md" }), tc("run_command", { command: "bun test" })].join("\n"),
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Read the README, then run `bun test`." }],
+			tools,
+			call: model.call,
+			signal: ac.signal,
+		});
+		expect(ws.commands).toEqual([]);
+		expect(result.toolLog[1]).toEqual({
+			name: "run_command",
+			args: { command: "bun test" },
+			result: "Error: not run: turn aborted.",
+		});
+		expect(result.unverified.some((u) => u.includes("bun test"))).toBe(true);
+	});
+});
+
+describe("runTextToolAgent - per-reply call cap", () => {
+	test("a reply with 144 calls runs only MAX_CALLS_PER_ROUND; the rest are logged and reported once", async () => {
+		const { tool, runs } = countingReadTool();
+		const model = scriptedModel([manyReads(144), "DONE: read them."]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read everything" }],
+			tools: [tool],
+			call: model.call,
+			maxRounds: 10,
+		});
+		expect(MAX_CALLS_PER_ROUND).toBe(25);
+		expect(runs()).toBe(MAX_CALLS_PER_ROUND);
+		expect(result.toolLog).toHaveLength(144);
+		const skipped = result.toolLog.slice(MAX_CALLS_PER_ROUND);
+		expect(skipped.every((e) => e.result === overCapCallResult(144))).toBe(true);
+		const fed = lastUserMessage(model.seen[1]);
+		expect(fed.split("Tool read_file returned:").length - 1).toBe(MAX_CALLS_PER_ROUND);
+		expect(fed.split("not run: too many tool calls").length - 1).toBe(1);
+		expect(fed).toContain("Calls 26-144 (119) were not run");
+	});
+
+	test("normal rounds are unchanged: exactly MAX_CALLS_PER_ROUND calls all run, no extra text", async () => {
+		const { tool, runs } = countingReadTool();
+		const model = scriptedModel([manyReads(MAX_CALLS_PER_ROUND), "DONE: read them."]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read everything" }],
+			tools: [tool],
+			call: model.call,
+		});
+		expect(runs()).toBe(MAX_CALLS_PER_ROUND);
+		expect(result.toolLog.every((e) => e.result === "contents")).toBe(true);
+		expect(lastUserMessage(model.seen[1])).not.toContain("not run");
 	});
 });
