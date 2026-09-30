@@ -633,6 +633,8 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
 	"peers_send",
 	"computer_use",
 	"desktop_use",
+	// An MCP server can do anything its author wrote (#3230).
+	"mcp_call",
 ]);
 
 /**
@@ -640,7 +642,13 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
  * rather than allow (#3213). Desktop control reaches every app the person
  * has open, so an unlisted desktop action must never run silently.
  */
-const ASK_BY_DEFAULT_ACTIONS = new Set<string>(["desktop_use"]);
+const ASK_BY_DEFAULT_ACTIONS = new Set<string>([
+	"desktop_use",
+	// MCP tool calls reach a third-party server that can write, send and
+	// spend (#3230). With no rule naming the tool as allowed, the person is
+	// asked; Infinite skips the card in the caller, as for desktop_use.
+	"mcp_call",
+]);
 
 /**
  * Shadow hard-deny gate. If the context agent is the shadow scope and the

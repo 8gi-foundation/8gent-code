@@ -36,7 +36,9 @@ export type PolicyActionType =
 	| "peers_subscribe"
 	| "email_send"
 	| "email_receive"
-	| "issue_email_address";
+	| "issue_email_address"
+	/** Any call to a tool on an MCP server (#3230). Asks by default. */
+	| "mcp_call";
 
 /** What the policy engine decides */
 export type PolicyDecision =

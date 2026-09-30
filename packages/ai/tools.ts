@@ -1113,6 +1113,15 @@ const mcpCallTool = tool({
 		args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments"),
 	}),
 	execute: async ({ server, tool: toolName, args }) => {
+		// Policy, then the person, before anything reaches the server (#3230).
+		const { gateMcpCall } = await import("../permissions/mcp-gate");
+		const refusal = await gateMcpCall(
+			getToolContext().agentId ?? "primary",
+			server,
+			toolName,
+			args,
+		);
+		if (refusal) return refusal;
 		try {
 			const { getMCPClient, formatToolResult } = await import("../mcp");
 			const mcpClient = getMCPClient();

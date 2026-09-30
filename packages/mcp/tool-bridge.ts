@@ -8,6 +8,7 @@
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { gateMcpCall } from "../permissions/mcp-gate";
 import type { MCPClient } from "./client";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -128,10 +129,13 @@ export function bridgeTools(
 
 		result[key] = tool({
 			description,
-			// TODO: NemoClaw permission check hook point
-			// Before execute, check policyEngine.evaluate("mcp", { server, tool, args })
 			inputSchema: inputSchema as z.ZodObject<any>,
 			execute: async (args: Record<string, unknown>) => {
+				// Policy, then the person, before anything reaches the server
+				// (#3230). The agent scope is not known here; "primary" gets the
+				// default ask, never a silent allow.
+				const refusal = await gateMcpCall("primary", serverName, mcpTool.name, args);
+				if (refusal) return refusal;
 				const mcpResult = await client.callTool(serverName, mcpTool.name, args);
 				// Flatten MCP content array to string for AI SDK
 				if (!mcpResult?.content) return "No result";

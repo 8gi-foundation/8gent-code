@@ -64,6 +64,9 @@ const TABLE_DENIED_ACTIONS: PolicyActionType[] = [
 	"computer_use" as PolicyActionType,
 	// Desktop tools are gated as desktop_use (#3213); block that name too.
 	"desktop_use" as PolicyActionType,
+	// MCP tool calls reach a third-party server (#3230); a Table agent has no
+	// use for one.
+	"mcp_call",
 ];
 
 /**
