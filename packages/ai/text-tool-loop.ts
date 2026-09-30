@@ -39,6 +39,15 @@
  * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
  * A false completion claim is never passed through silently.
  *
+ * One reply can ask for many calls (qwen3.8 27B asked for 144 read_file calls
+ * in pilot run 2026-09-30_010512). The loop runs at most MAX_CALLS_PER_ROUND of
+ * them; the rest get a short "not run" result asking the model to re-issue the
+ * ones it still needs. The abort signal is checked before every call, not only
+ * at the top of a round: once the caller aborts (the circuit breaker tripped at
+ * 103 calls in that run while the round kept going), the remaining calls are
+ * not run, each is logged as "Error: not run: turn aborted", and the turn ends.
+ * A skipped call is never dropped silently and never counts as done.
+ *
  * A tool that throws never breaks the loop: the error is turned into a short
  * string result and fed back to the model like any other tool output. The only
  * network/I/O the loop performs is whatever the caller's `call` and the tools'
@@ -66,10 +75,11 @@ export interface TextToolAgentOptions {
 	call: (messages: TextToolMessage[]) => Promise<string>;
 	maxRounds?: number;
 	/**
-	 * Optional abort signal. Checked at the top of every round; once aborted the
-	 * loop stops and returns the last round's prose. The caller is responsible
-	 * for wiring this signal into `call` (so an in-flight model request is torn
-	 * down) - this only stops the loop from STARTING another round.
+	 * Optional abort signal. Checked at the top of every round and before every
+	 * tool call; once aborted the loop runs no further tools, logs the calls it
+	 * skipped as not run, and returns the last round's prose. The caller is
+	 * responsible for wiring this signal into `call` (so an in-flight model
+	 * request is torn down) and into long-running tools.
 	 */
 	signal?: AbortSignal;
 }
@@ -293,6 +303,47 @@ export const DEGENERATE_REPLY_MESSAGE = [
 	`your final summary of what you did, starting with "${DONE_MARKER}".`,
 ].join("\n");
 
+/**
+ * The most tool calls one reply may run. Calls past it are not run and the
+ * model is asked to re-issue the ones it still needs, a few at a time.
+ * Well under the agent's per-turn circuit breaker limit (50), so one reply can
+ * no longer spend the whole turn's budget by itself.
+ */
+export const MAX_CALLS_PER_ROUND = 25;
+
+/**
+ * The result logged for a call skipped because the turn was aborted. Starts
+ * with "Error" so the claim check and the success bookkeeping never count it
+ * as done.
+ */
+export function abortedCallResult(signal: AbortSignal | undefined): string {
+	const reason = abortReasonText(signal?.reason);
+	return reason ? `Error: not run: turn aborted (${reason}).` : "Error: not run: turn aborted.";
+}
+
+/**
+ * A short, human reason from AbortSignal.reason, or "" when there is none
+ * worth showing (abort() with no argument yields a generic AbortError).
+ */
+function abortReasonText(reason: unknown): string {
+	if (reason === undefined || reason === null) return "";
+	if (typeof reason === "string") return reason.trim();
+	if (reason instanceof Error) {
+		if (reason.name === "AbortError") return "";
+		return reason.message.trim();
+	}
+	return "";
+}
+
+/** The result logged for a call past MAX_CALLS_PER_ROUND. */
+export function overCapCallResult(requested: number): string {
+	return (
+		`Error: not run: too many tool calls in one reply (${requested} requested, ` +
+		`limit ${MAX_CALLS_PER_ROUND}). The first ${MAX_CALLS_PER_ROUND} ran. ` +
+		"Re-issue the calls you still need, a few at a time."
+	);
+}
+
 /** executeTool's own failures, and tools' conventional error results. */
 function isErrorResult(result: string): boolean {
 	return /^\s*error\b/i.test(result);
@@ -509,7 +560,28 @@ export async function runTextToolAgent(
 		prevRoundHadSuccess = false;
 		// The model resumed tools: a later stall is a fresh one (re-armed).
 		awaitingCheckAnswer = false;
-		for (const tc of turn.toolCalls) {
+		const calls = turn.toolCalls;
+		let abortedAt = -1;
+		for (let k = 0; k < calls.length; k++) {
+			const tc = calls[k];
+			// The caller can abort mid-round (circuit breaker, turn timeout, ESC):
+			// stop before the next call instead of running the rest of the reply.
+			if (opts.signal?.aborted) {
+				abortedAt = k;
+				break;
+			}
+			if (k >= MAX_CALLS_PER_ROUND) {
+				// Over the per-reply cap: log each skipped call, and tell the model
+				// once (not once per call) in the result block.
+				const result = overCapCallResult(calls.length);
+				toolLog.push({ name: tc.name, args: tc.arguments, result });
+				if (k === MAX_CALLS_PER_ROUND) {
+					resultParts.push(
+						`Calls ${MAX_CALLS_PER_ROUND + 1}-${calls.length} (${calls.length - MAX_CALLS_PER_ROUND}) were not run:\n${result}`,
+					);
+				}
+				continue;
+			}
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
 			if (!isErrorResult(result)) {
@@ -525,6 +597,16 @@ export async function runTextToolAgent(
 					? SHELL_WRITE_NOTE
 					: "";
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
+		}
+
+		if (abortedAt >= 0) {
+			// Aborted mid-round: every call not reached is logged as not run,
+			// then the turn ends here. No further model round is started.
+			const result = abortedCallResult(opts.signal);
+			for (const tc of calls.slice(abortedAt)) {
+				toolLog.push({ name: tc.name, args: tc.arguments, result });
+			}
+			return finish(finalContent(lastContent), round);
 		}
 
 		// Record the model's raw round output, then the tool results as the next
