@@ -29,6 +29,8 @@ export interface EightAgentConfig {
 	runtime?: RuntimeParams;
 	/** This agent's permission mode, bound to each native tool call (#3170). */
 	permission?: import("../permissions/permission-mode").PermissionModeHolder;
+	/** Files this agent created (#3177), shared with its ToolExecutor so both tool paths record into one place. */
+	createdFiles?: import("../permissions/s1-created-files").CreatedFiles;
 	/** Tools to use (default: all agentTools) */
 	tools?: ToolSet;
 	/** Max output tokens per step (default: 4096 for local, unlimited for cloud) */
@@ -149,6 +151,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		agentId: config.agentId ?? "primary",
 		runtime: config.runtime ?? getRuntimeParams(),
 		permission: config.permission,
+		createdFiles: config.createdFiles,
 	};
 
 	const model = createModel(config.provider);

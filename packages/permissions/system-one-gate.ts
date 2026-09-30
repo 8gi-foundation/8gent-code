@@ -85,6 +85,7 @@
 import * as readline from "node:readline";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
+import type { CreatedFiles } from "./s1-created-files";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -194,7 +195,9 @@ function noticeOnce(key: string, line: string): void {
  *
  * Also under this flag (#3168): an `rm` whose every target does not exist
  * inside the caller's working directory passes without the judge, since it
- * deletes nothing (see s1-rm-nothing.ts for the exact conditions).
+ * deletes nothing; and (#3177) so does one whose targets are absent or
+ * untracked files this session created, per the caller's CreatedFiles record
+ * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions).
  *
  * `bun test` runs the repo's own test code, so skipping the judge for it is a
  * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
@@ -511,6 +514,7 @@ export async function systemOneGate(
 	command: string,
 	env: Record<string, string | undefined> = process.env,
 	cwd?: string,
+	created?: CreatedFiles,
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
@@ -535,11 +539,13 @@ export async function systemOneGate(
 			// The allowlist failing is "no opinion": fall through to the judge.
 		}
 		// An rm whose every target is absent inside the workspace deletes
-		// nothing (#3168). Needs the caller's working directory; without it,
-		// today's behaviour.
+		// nothing (#3168); one whose targets are absent or untracked files this
+		// session created removes only its own scratch (#3177). Needs the
+		// caller's working directory (and record); without them, today's behaviour.
 		try {
-			const { rmOfNothing } = await import("./s1-rm-nothing");
-			if (rmOfNothing(command, cwd)) {
+			const { rmOfNothingOrOwn } = await import("./s1-rm-nothing");
+			const kind = rmOfNothingOrOwn(command, cwd, created);
+			if (kind) {
 				return {
 					run: true,
 					guard: {
@@ -547,7 +553,10 @@ export async function systemOneGate(
 						pYes: Number.NaN,
 						backend: "allowlist",
 						model: "allowlist",
-						reason: "rm of paths that do not exist in the workspace: nothing to delete",
+						reason:
+							kind === "nothing"
+								? "rm of paths that do not exist in the workspace: nothing to delete"
+								: "rm of untracked files this session created (or of absent paths): its own scratch",
 					},
 				};
 			}

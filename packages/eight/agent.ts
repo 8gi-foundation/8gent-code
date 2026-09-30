@@ -1400,6 +1400,8 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			runtime: this.runtimeParams,
 			// Its permission mode, per call, like the context above (#3170).
 			permission: this.config.permission,
+			// The files it created, one record for both tool paths (#3177).
+			createdFiles: this.executor.createdFiles,
 			tools: effectiveTools,
 
 			onToolCallStart: async (event) => {
