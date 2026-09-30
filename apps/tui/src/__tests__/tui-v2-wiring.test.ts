@@ -300,7 +300,7 @@ describe("activity-rail-derivation", () => {
 			fallback: { name: "openrouter:free", latencyMs: 1200 },
 			offline: { name: "deepseek-v4-flash" },
 		});
-		expect(rows.map((r) => r.state)).toEqual(["local", "fallback", "offline"]);
+		expect(rows.map((r) => r.state)).toEqual(["primary", "fallback", "offline"]);
 		expect(rows[0].latency).toBe("42ms");
 		// Unmeasured latency has no placeholder glyph: the slot is empty.
 		expect(rows[2].latency).toBeUndefined();
@@ -329,7 +329,7 @@ describe("activity-rail-derivation", () => {
 			fallback: fallbackFromChain(fo, "ollama", "qwen3.8:27b-mlx"),
 			offline: null,
 		});
-		expect(rows.map((r) => r.state)).toEqual(["local"]);
+		expect(rows.map((r) => r.state)).toEqual(["primary"]);
 	});
 
 	test("deriveAgents collapses statuses and falls back to main", () => {

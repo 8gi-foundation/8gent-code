@@ -187,6 +187,22 @@ describe("HeaderBar", () => {
 		).toBeLessThanOrEqual(80);
 	});
 
+	test("the middle reads from the left: 'no repo' sits where a branch would, not centred", () => {
+		const middleBox = (props: HeaderBarProps) => {
+			const kids = React.Children.toArray(
+				(render(props).props as { children: React.ReactNode }).children,
+			) as React.ReactElement<Record<string, unknown>>[];
+			return kids[1];
+		};
+		const noRepo = middleBox({ ...live, branch: "", syncStatus: "no repo", sessionTime: "7s", width: 80 });
+		const branchOnly = middleBox({ ...live, branch: "main", width: 80 });
+		const wide = middleBox({ ...live, width: 160 });
+		for (const box of [noRepo, branchOnly, wide]) {
+			expect(box.props.flexGrow).toBe(1);
+			expect(box.props.justifyContent).toBe("flex-start");
+		}
+	});
+
 	test("defaults to an 80 column plan when width is omitted", () => {
 		expect(planHeader(live)).toEqual(planHeader({ ...live, width: 80 }));
 		expect(occupied(live)).toBeLessThanOrEqual(80);
