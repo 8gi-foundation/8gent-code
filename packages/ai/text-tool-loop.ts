@@ -25,6 +25,12 @@
  * The check never reads the reply's wording or punctuation, except for the
  * marker and to leave a question to the user alone.
  *
+ * A degenerate reply (qwen3.8 27B, pilot run 2026-09-30_010512: one line of
+ * prose, then "[TOOL_CALL]" 144 times) never reaches the user or the model's
+ * own history: the repeated junk is stripped from every reply (see
+ * cleanDegenerateReply). A no-tool-call reply that was mostly junk is treated
+ * like a stall and gets DEGENERATE_REPLY_MESSAGE, inside the same check budget.
+ *
  * The final answer is then checked against the turn's own tool log
  * (claim-check.ts): commands the user asked to run that never ran, and files the
  * answer says it wrote whose last write was blocked or never happened. Anything
@@ -199,6 +205,94 @@ export function stripDoneMarker(content: string): string {
 	return m ? content.slice(m[0].length) : content;
 }
 
+/**
+ * A line that repeats this many times in a row (blank lines between allowed)
+ * is degeneration, not content. Also the removed-line count at which a reply
+ * counts as degenerate.
+ */
+export const DEGENERATE_REPEAT_MIN = 8;
+
+/**
+ * A bare placeholder line: a bracket tag like "[TOOL_CALL]" or "[/TOOL_CALL]",
+ * or an angle tag like "<tool_call>" or "</tool_call>", alone on its line. It
+ * carries no content for the user; the call itself, if any, has already been
+ * parsed out of the reply.
+ */
+const PLACEHOLDER_LINE = /^(?:\[\/?[A-Z][A-Z0-9_ ]*\]|<\/?[a-z][a-z0-9_]*\s*\/?>)$/;
+
+export interface DegenerateCheck {
+	/** The reply with placeholder lines and repeated runs removed. */
+	clean: string;
+	/**
+	 * Was the reply degenerate: a repeated run was found, DEGENERATE_REPEAT_MIN
+	 * or more placeholder lines were removed, or nothing but junk was left?
+	 */
+	degenerate: boolean;
+}
+
+/**
+ * Strip repetition degeneration from a reply, structurally: bare placeholder
+ * lines, and every repeat after the first in a run of DEGENERATE_REPEAT_MIN
+ * or more identical lines. Markdown table rows ("| ... |") are never treated
+ * as a repeated run, so a table with repeated values is left alone. A reply
+ * with nothing to strip is returned unchanged.
+ */
+export function cleanDegenerateReply(content: string): DegenerateCheck {
+	const lines = content.split("\n");
+	const drop = new Array<boolean>(lines.length).fill(false);
+	let placeholders = 0;
+	for (let i = 0; i < lines.length; i++) {
+		if (PLACEHOLDER_LINE.test(lines[i].trim())) {
+			drop[i] = true;
+			placeholders++;
+		}
+	}
+	let repeatedRun = false;
+	// Runs of identical non-blank lines, ignoring blank lines between them.
+	let i = 0;
+	while (i < lines.length) {
+		const text = lines[i].trim();
+		if (text === "" || drop[i] || text.startsWith("|")) {
+			i++;
+			continue;
+		}
+		const members = [i];
+		let j = i + 1;
+		while (j < lines.length) {
+			const t = lines[j].trim();
+			if (t === "") {
+				j++;
+				continue;
+			}
+			if (t !== text) break;
+			members.push(j);
+			j++;
+		}
+		if (members.length >= DEGENERATE_REPEAT_MIN) {
+			repeatedRun = true;
+			for (const m of members.slice(1)) drop[m] = true;
+		}
+		i = members[members.length - 1] + 1;
+	}
+	if (!drop.includes(true)) return { clean: content, degenerate: false };
+	const clean = lines
+		.filter((_, k) => !drop[k])
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+	return {
+		clean,
+		degenerate: repeatedRun || placeholders >= DEGENERATE_REPEAT_MIN || clean === "",
+	};
+}
+
+/** Sent after a no-tool-call reply that was mostly repeated junk. */
+export const DEGENERATE_REPLY_MESSAGE = [
+	"Your last reply repeated a placeholder and no tool ran.",
+	"Either call the next tool now (reply with only the tool_call block), or give",
+	`your final summary of what you did, starting with "${DONE_MARKER}".`,
+].join("\n");
+
 /** executeTool's own failures, and tools' conventional error results. */
 function isErrorResult(result: string): boolean {
 	return /^\s*error\b/i.test(result);
@@ -276,7 +370,9 @@ export async function runTextToolAgent(
 		toolLog.length > 0 ? checkClaims({ request, answer, toolLog }) : [];
 	// Every exit goes through here: whatever the log still contradicts is
 	// appended as a factual note, never passed through silently.
-	const finish = (content: string, rounds: number): TextToolAgentResult => {
+	const finish = (raw: string, rounds: number): TextToolAgentResult => {
+		// Repeated junk never reaches the user, whichever exit this is.
+		const content = cleanDegenerateReply(raw).clean;
 		const unfulfilled = claimsAgainstLog(content);
 		if (unfulfilled.length === 0) return { content, rounds, toolLog, unverified: [] };
 		const note = formatHarnessNote(unfulfilled);
@@ -299,7 +395,12 @@ export async function runTextToolAgent(
 			tools: specs,
 			call: opts.call,
 		});
-		lastContent = turn.content;
+		// Strip repetition degeneration before the reply is judged, fed back to
+		// the model as its own history, or kept as the turn's last prose, which
+		// the abort exit returns.
+		const degen = cleanDegenerateReply(turn.content);
+		const replyText = degen.clean;
+		lastContent = replyText;
 
 		// A reply that stopped inside a tool_call block (output token limit) is
 		// neither a final answer nor a runnable call. Tell the model exactly what
@@ -310,7 +411,7 @@ export async function runTextToolAgent(
 			cutOffNote = cutOffToolCallMessage(turn.cutOffToolCall.name);
 			// No round left to retry in: surface the error as the turn's text.
 			if (round === maxRounds) {
-				lastContent = [turn.content, cutOffNote].filter(Boolean).join("\n\n");
+				lastContent = [replyText, cutOffNote].filter(Boolean).join("\n\n");
 			}
 			if (turn.toolCalls.length === 0) {
 				if (round === maxRounds) break;
@@ -321,7 +422,7 @@ export async function runTextToolAgent(
 				prevRoundHadSuccess = false;
 				messages = [
 					...messages,
-					{ role: "assistant", content: turn.content },
+					{ role: "assistant", content: replyText },
 					{ role: "user", content: cutOffNote },
 				];
 				continue;
@@ -329,6 +430,28 @@ export async function runTextToolAgent(
 		}
 
 		if (turn.toolCalls.length === 0) {
+			// A reply that was mostly repeated junk is a stall whatever came
+			// before it: ask once more for a tool call or a DONE summary, inside
+			// the same budget as the completion check.
+			if (
+				degen.degenerate &&
+				!hasDoneMarker(replyText) &&
+				!isQuestionToUser(replyText) &&
+				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
+				checksSent < MAX_COMPLETION_CHECKS &&
+				round < maxRounds
+			) {
+				checksSent++;
+				checksWithoutProgress++;
+				awaitingCheckAnswer = true;
+				prevRoundHadSuccess = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: DEGENERATE_REPLY_MESSAGE },
+				];
+				continue;
+			}
 			// Bounded completion check: straight after a successful tool round, a
 			// reply with no tool call may be a real summary or a step the model
 			// announced and never took ("Now creating the Marp deck from the
@@ -339,23 +462,23 @@ export async function runTextToolAgent(
 			// a row without tool work between them, ten in the whole turn.
 			// Once the model has been told the protocol this turn, a DONE-marked
 			// reply after later tool rounds is taken at its word.
-			const freshStall = prevRoundHadSuccess && !(checksSent > 0 && hasDoneMarker(turn.content));
-			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(turn.content);
+			const freshStall = prevRoundHadSuccess && !(checksSent > 0 && hasDoneMarker(replyText));
+			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
 			if (
 				(freshStall || unansweredCheck) &&
 				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
 				checksSent < MAX_COMPLETION_CHECKS &&
 				round < maxRounds &&
-				!isQuestionToUser(turn.content)
+				!isQuestionToUser(replyText)
 			) {
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
-				if (freshStall) preCheckContent = turn.content;
+				if (freshStall) preCheckContent = replyText;
 				prevRoundHadSuccess = false;
 				messages = [
 					...messages,
-					{ role: "assistant", content: turn.content },
+					{ role: "assistant", content: replyText },
 					{ role: "user", content: COMPLETION_CHECK_MESSAGE },
 				];
 				continue;
@@ -363,8 +486,8 @@ export async function runTextToolAgent(
 			// Model gave its final answer. Check it against the tool log once; a
 			// contradiction gets one follow-up while a round remains. A question
 			// to the user is left alone here (finish() still notes it).
-			const answer = finalContent(turn.content);
-			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(turn.content)) {
+			const answer = finalContent(replyText);
+			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(replyText)) {
 				const unfulfilled = claimsAgainstLog(answer);
 				if (unfulfilled.length > 0) {
 					claimFollowUpSent = true;
@@ -372,7 +495,7 @@ export async function runTextToolAgent(
 					prevRoundHadSuccess = false;
 					messages = [
 						...messages,
-						{ role: "assistant", content: turn.content },
+						{ role: "assistant", content: replyText },
 						{ role: "user", content: claimFollowUpMessage(unfulfilled) },
 					];
 					continue;
@@ -411,7 +534,7 @@ export async function runTextToolAgent(
 		if (cutOffNote) resultParts.push(cutOffNote);
 		messages = [
 			...messages,
-			{ role: "assistant", content: turn.content },
+			{ role: "assistant", content: replyText },
 			{
 				role: "user",
 				content: [
