@@ -41,6 +41,8 @@ export async function sendTelegram(
 				chat_id: chatId,
 				text: message,
 				parse_mode: "Markdown",
+				// #3231: previews off, or Telegram fetches any URL in the message.
+				link_preview_options: { is_disabled: true },
 			}),
 		});
 

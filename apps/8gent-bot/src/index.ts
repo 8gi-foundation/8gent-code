@@ -9,6 +9,7 @@
  */
 
 import { routeMessage } from "./router";
+import { sendMessageBody } from "./send-body";
 import { invokeVessel } from "./vessel-client";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
@@ -24,13 +25,10 @@ async function sendMessage(
 	text: string,
 	parse_mode: "Markdown" | "HTML" | "None" = "Markdown",
 ): Promise<void> {
-	const body: Record<string, unknown> = { chat_id, text };
-	if (parse_mode !== "None") body.parse_mode = parse_mode;
-
 	await fetch(`${TG_API}/sendMessage`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
+		body: JSON.stringify(sendMessageBody(chat_id, text, parse_mode)),
 	});
 }
 

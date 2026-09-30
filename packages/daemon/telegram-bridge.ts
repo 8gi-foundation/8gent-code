@@ -33,6 +33,7 @@ import {
 	runBoardroom,
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { NO_LINK_PREVIEW } from "./notifications";
 import {
 	decideVoice,
 	readVoiceState,
@@ -160,7 +161,7 @@ interface BridgeConfig {
 	operatorUserIds?: string[];
 }
 
-async function tgSend(
+export async function tgSend(
 	token: string,
 	chatId: string,
 	text: string,
@@ -189,6 +190,7 @@ async function tgSend(
 					chat_id: chatId,
 					text: chunk,
 					...(parseMode ? { parse_mode: parseMode } : {}),
+					...NO_LINK_PREVIEW,
 				}),
 			});
 		} catch {
@@ -196,7 +198,7 @@ async function tgSend(
 			await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ chat_id: chatId, text: chunk }),
+				body: JSON.stringify({ chat_id: chatId, text: chunk, ...NO_LINK_PREVIEW }),
 			}).catch(() => {});
 		}
 	}
@@ -986,7 +988,7 @@ class TelegramDaemonBridge {
 					chat_id: this.replyChat(),
 					text,
 					parse_mode: "Markdown",
-					disable_web_page_preview: true,
+					...NO_LINK_PREVIEW,
 				}),
 			});
 			const data = await res.json();
@@ -1007,7 +1009,7 @@ class TelegramDaemonBridge {
 				message_id: messageId,
 				text,
 				parse_mode: "Markdown",
-				disable_web_page_preview: true,
+				...NO_LINK_PREVIEW,
 			}),
 		}).catch(() => {});
 	}
@@ -1090,6 +1092,7 @@ class TelegramDaemonBridge {
 					chat_id: this.replyChat(),
 					text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}`,
 					parse_mode: "Markdown",
+					...NO_LINK_PREVIEW,
 					reply_markup: {
 						inline_keyboard: [
 							[
@@ -1256,6 +1259,7 @@ class TelegramDaemonBridge {
 					message_id: query.message.message_id,
 					text: `*${statusText}:* \`${approval.tool}\``,
 					parse_mode: "Markdown",
+					...NO_LINK_PREVIEW,
 				}),
 			}).catch(() => {});
 		}
