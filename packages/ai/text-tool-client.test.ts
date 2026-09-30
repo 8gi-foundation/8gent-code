@@ -265,7 +265,10 @@ describe("runTextToolTurn with structured tool_calls from the call", () => {
 		]);
 	});
 
-	it("ignores a structured call to an unregistered tool", async () => {
+	// #3091: dropping it made the call vanish; the model was then told its
+	// reply "had no tool_call block" and retried the same call until the turn
+	// ended empty. It is kept, so the loop answers it with an error result.
+	it("keeps a structured call to an unregistered tool, so it gets an error result", async () => {
 		const turn = await runTextToolTurn({
 			messages: [{ role: "user", content: "x" }],
 			tools: known,
@@ -277,7 +280,10 @@ describe("runTextToolTurn with structured tool_calls from the call", () => {
 				],
 			}),
 		});
-		expect(turn.toolCalls).toEqual([{ name: "read_file", arguments: { path: "a" } }]);
+		expect(turn.toolCalls).toEqual([
+			{ name: "rm_rf", arguments: {} },
+			{ name: "read_file", arguments: { path: "a" } },
+		]);
 	});
 
 	it("dedupes a call present both in the text and as a structured call", async () => {
@@ -303,7 +309,7 @@ describe("runTextToolTurn with structured tool_calls from the call", () => {
 });
 
 describe("mergeToolCalls", () => {
-	it("keeps text calls first, drops unknown and duplicate structured calls", () => {
+	it("keeps text calls first, drops duplicate structured calls, keeps unknown ones", () => {
 		expect(
 			mergeToolCalls(
 				[{ name: "a", arguments: { x: { p: 1, q: [1, 2] } } }],
@@ -313,11 +319,11 @@ describe("mergeToolCalls", () => {
 					{ name: "a", arguments: { x: 2 } },
 					{ name: "zzz", arguments: {} },
 				],
-				["a"],
 			),
 		).toEqual([
 			{ name: "a", arguments: { x: { p: 1, q: [1, 2] } } },
 			{ name: "a", arguments: { x: 2 } },
+			{ name: "zzz", arguments: {} },
 		]);
 	});
 });

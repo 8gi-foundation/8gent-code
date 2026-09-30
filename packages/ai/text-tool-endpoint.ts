@@ -502,8 +502,9 @@ function lookupQwenVariant(
  * the model's parser accepted lands in `message.tool_calls` instead of being
  * discarded. Whenever a completion carries `message.tool_calls`, the call
  * resolves to a TextToolReply `{ content, toolCalls }` (content stays the
- * prose reply) instead of a bare string; runTextToolTurn keeps only the
- * registered ones and dedupes them against calls written in the text. A model
+ * prose reply) instead of a bare string; runTextToolTurn dedupes them
+ * against calls written in the text, and a call to an unregistered tool is
+ * answered with an error, never run and never dropped (#3091). A model
  * whose template rejects `tools` (Ollama 400 "does not support tools") is sent
  * again without them, and never declared again for this call function.
  */

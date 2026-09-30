@@ -34,7 +34,7 @@ import {
 	toolCallsFromMessage,
 } from "./text-tool-endpoint";
 import { resolveBaseUrl as resolveOllamaClientBaseUrl } from "../eight/clients/ollama";
-import { runTextToolAgent } from "./text-tool-loop";
+import { runTextToolAgent, unknownToolResult } from "./text-tool-loop";
 
 const realFetch = globalThis.fetch;
 
@@ -756,9 +756,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 		expect(result.content).toContain("Deck section");
 	});
 
-	it("ignores a structured call to an unregistered tool", async () => {
+	// #3091: the unregistered call used to be dropped without a word. It still
+	// never runs, but it is answered with an error the model can act on.
+	it("never runs a structured call to an unregistered tool, and tells the model so", async () => {
 		ran.length = 0;
-		stubSequence([
+		const seen = stubSequence([
 			structuredReply("On it.", [{ name: "delete_everything", arguments: "{}" }]),
 			ok("DONE: nothing to do."),
 		]);
@@ -769,8 +771,50 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 			call,
 			maxRounds: 2,
 		});
-		expect(result.toolLog).toEqual([]);
 		expect(ran).toEqual([]);
+		expect(result.toolLog).toEqual([
+			{ name: "delete_everything", args: {}, result: unknownToolResult("delete_everything", ["read_file"]) },
+		]);
+		const fedBack = JSON.stringify(seen[1]);
+		expect(fedBack).toContain('no tool named \\"delete_everything\\"');
+	});
+
+	// #3091, the pilot shape (run 2026-09-30_055542, l4-spawn-parallel-m5):
+	// after a read round, qwen3.8 answered with structured spawn_agent calls
+	// and empty text three times. The calls were dropped, two completion checks
+	// told the model it had called nothing, and the third empty reply became
+	// the answer: "" with status ok.
+	it("a turn of structured calls to a missing tool never ends as an empty answer", async () => {
+		ran.length = 0;
+		const spawn = () =>
+			structuredReply("", [
+				{
+					name: "spawn_agent",
+					arguments: '{"runtime":"8gent","model":"llama3.2:3b","task":"Fix ONLY src/wordcount.ts"}',
+				},
+			])();
+		const seen = stubSequence([
+			structuredReply("", [{ name: "read_file", arguments: '{"path":"README.md"}' }]),
+			spawn,
+			spawn,
+			spawn,
+			spawn,
+			spawn,
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: tools.map((t) => t.spec) });
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Fix it: call spawn_agent with model llama3.2:3b." }],
+			tools,
+			call,
+			maxRounds: 6,
+		});
+		expect(ran).toEqual(["README.md"]);
+		const spawns = result.toolLog.filter((e) => e.name === "spawn_agent");
+		expect(spawns.length).toBeGreaterThan(0);
+		for (const s of spawns) expect(s.result).toBe(unknownToolResult("spawn_agent", ["read_file"]));
+		expect(JSON.stringify(seen[2])).toContain('no tool named \\"spawn_agent\\"');
+		expect(result.content.trim()).not.toBe("");
+		expect(result.unverified.length).toBeGreaterThan(0);
 	});
 });
 

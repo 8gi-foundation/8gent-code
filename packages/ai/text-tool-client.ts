@@ -41,7 +41,8 @@ export type TextToolTurn = {
  * What a `call` may resolve to besides a bare string: the reply text plus the
  * calls the endpoint returned as structured `message.tool_calls` (Ollama moves
  * a native tool call there once its parser accepts it, and strips it from the
- * text). runTextToolTurn keeps only the registered ones.
+ * text). runTextToolTurn keeps them all; a call to a tool that is not
+ * registered never runs and is answered with an error (#3091).
  */
 export type TextToolReply = {
 	content: string;
@@ -70,21 +71,21 @@ function canonical(value: unknown): string {
 }
 
 /**
- * The calls from the reply text, then each structured call to a registered
- * tool that the text did not already carry (same name and same arguments,
- * compared as canonical JSON). Structured calls to unregistered names are
- * dropped, exactly like unregistered bare JSON in the text. Pure.
+ * The calls from the reply text, then each structured call that the text did
+ * not already carry (same name and same arguments, compared as canonical
+ * JSON). A structured call to an unregistered name is KEPT: the endpoint's
+ * parser returned it, so it is the model's call, not an example in prose. The
+ * loop never runs it (no such tool) and answers it with an error naming the
+ * tools that exist. Dropping it made the call vanish and the model was told it
+ * had called nothing (#3091). Pure.
  */
 export function mergeToolCalls(
 	fromText: ParsedToolCall[],
 	structured: ParsedToolCall[],
-	knownTools: Iterable<string>,
 ): ParsedToolCall[] {
-	const known = new Set(knownTools);
 	const seen = new Set(fromText.map((c) => `${c.name}\u0000${canonical(c.arguments)}`));
 	const merged = fromText.slice();
 	for (const call of structured) {
-		if (!known.has(call.name)) continue;
 		const key = `${call.name}\u0000${canonical(call.arguments)}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -155,8 +156,7 @@ export async function runTextToolTurn(
 	// Only registered tools may be called in the bare / ```json JSON form, so a
 	// JSON example in an answer never runs.
 	const parse = { knownTools: opts.tools.map((t) => t.name) };
-	const calls = (text: string) =>
-		mergeToolCalls(parseToolCalls(text, parse), structured, parse.knownTools);
+	const calls = (text: string) => mergeToolCalls(parseToolCalls(text, parse), structured);
 	const cutOff = findUnterminatedToolCall(raw);
 	if (cutOff) {
 		// Everything before the cut-off block is still usable; the partial
