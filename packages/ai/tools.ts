@@ -9,6 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
@@ -35,14 +36,45 @@ export interface ToolContext {
 	agentId?: string;
 }
 
+// The context is per agent, not per process (#3127). An agent hands its own
+// ToolContext to the AI SDK as `experimental_context` (see createEightAgent),
+// the SDK passes it to every execute(), and bindToolContext() makes it the
+// current context for the length of that one call. Two Agents in one process
+// therefore never see each other's working directory or write scope.
+// `_ctx` is only the fallback for a call that carries no context: tests and
+// direct callers that invoke execute() by hand.
 let _ctx: ToolContext = { workingDirectory: process.cwd() };
+const _callCtx = new AsyncLocalStorage<ToolContext>();
 
+/** Set the fallback context, used only by a tool call that carries none. */
 export function setToolContext(ctx: ToolContext): void {
 	_ctx = ctx;
 }
 
+/** The context of the tool call in flight, else the fallback. */
 export function getToolContext(): ToolContext {
-	return _ctx;
+	return _callCtx.getStore() ?? _ctx;
+}
+
+function isToolContext(value: unknown): value is ToolContext {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as ToolContext).workingDirectory === "string"
+	);
+}
+
+/** Run each tool's execute() inside the ToolContext its call carries. */
+function bindToolContext<T extends ToolSet>(tools: T): T {
+	for (const def of Object.values(tools)) {
+		const run = def.execute as ((input: unknown, options: unknown) => unknown) | undefined;
+		if (!run) continue;
+		(def as { execute: unknown }).execute = (input: unknown, options: unknown) => {
+			const ctx = (options as { experimental_context?: unknown } | undefined)?.experimental_context;
+			return isToolContext(ctx) ? _callCtx.run(ctx, () => run(input, options)) : run(input, options);
+		};
+	}
+	return tools;
 }
 
 // ── Mutable Runtime State (self-tunable by the agent) ────────────────
@@ -119,11 +151,12 @@ export function resetRuntimeParams(): void {
  * text-tool path (packages/eight/tools.ts), with the same blocked message.
  */
 function gateWrite(toolName: string, args: Record<string, unknown>): string | null {
-	return gateWriteTool(_ctx.agentId ?? "primary", toolName, args, _ctx.workingDirectory);
+	const ctx = getToolContext();
+	return gateWriteTool(ctx.agentId ?? "primary", toolName, args, ctx.workingDirectory);
 }
 
 function resolvePath(p: string): string {
-	return path.isAbsolute(p) ? p : path.join(_ctx.workingDirectory, p);
+	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
 }
 
 // ============================================
@@ -208,7 +241,7 @@ const searchSymbols = tool({
 		const { glob } = await import("glob");
 
 		const files = await glob("**/*.{ts,tsx,js,jsx}", {
-			cwd: _ctx.workingDirectory,
+			cwd: getToolContext().workingDirectory,
 			absolute: true,
 			ignore: ["**/node_modules/**", "**/dist/**"],
 		});
@@ -230,7 +263,7 @@ const searchSymbols = tool({
 						matches.push({
 							name: symbol.name,
 							kind: symbol.kind,
-							file: path.relative(_ctx.workingDirectory, file),
+							file: path.relative(getToolContext().workingDirectory, file),
 							line: symbol.startLine,
 						});
 					}
@@ -260,7 +293,7 @@ const locate = tool({
 			LOCATE_INDEX_WAIT_MS,
 			locate: runLocate,
 		} = await import("../ast-index/locate");
-		const root = _ctx.workingDirectory;
+		const root = getToolContext().workingDirectory;
 		// The same shared build the ToolExecutor uses, waited on only briefly:
 		// while it is still running, path and text search answer now and the
 		// answer says symbol search was skipped.
@@ -319,7 +352,7 @@ const writeFile = tool({
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(absolutePath, content);
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
-		const deckLine = await deckVideoAfterWrite(absolutePath, content, _ctx.workingDirectory);
+		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
 		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
@@ -532,7 +565,7 @@ const lspGotoDefinition = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspGoToDefinition } = await import("../lsp");
-		return lspGoToDefinition(filePath, line, character, _ctx.workingDirectory);
+		return lspGoToDefinition(filePath, line, character, getToolContext().workingDirectory);
 	},
 });
 
@@ -545,7 +578,7 @@ const lspFindReferences = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspFindReferences } = await import("../lsp");
-		return lspFindReferences(filePath, line, character, _ctx.workingDirectory);
+		return lspFindReferences(filePath, line, character, getToolContext().workingDirectory);
 	},
 });
 
@@ -558,7 +591,7 @@ const lspHover = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspHover } = await import("../lsp");
-		return lspHover(filePath, line, character, _ctx.workingDirectory);
+		return lspHover(filePath, line, character, getToolContext().workingDirectory);
 	},
 });
 
@@ -569,7 +602,7 @@ const lspDocumentSymbols = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { lspDocumentSymbols } = await import("../lsp");
-		return lspDocumentSymbols(filePath, _ctx.workingDirectory);
+		return lspDocumentSymbols(filePath, getToolContext().workingDirectory);
 	},
 });
 
@@ -580,7 +613,7 @@ const lspDiagnostics = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { lspDiagnostics } = await import("../lsp");
-		return lspDiagnostics(filePath, _ctx.workingDirectory);
+		return lspDiagnostics(filePath, getToolContext().workingDirectory);
 	},
 });
 
@@ -1057,7 +1090,7 @@ const backgroundStart = tool({
 		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
-			const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
+			const taskManager = getBackgroundTaskManager(getToolContext().workingDirectory);
 			const taskId = taskManager.startTask(command, { timeout });
 			return `Background task started: ${taskId}\nCommand: ${command}\nUse background_status or background_output to check progress.`;
 		} catch (err) {
@@ -1114,9 +1147,11 @@ async function runShellCommand(command: string): Promise<string> {
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");
 
+	// Captured once: the timer and process callbacks below run after this call.
+	const ctx = getToolContext();
 	const permissionManager = getPermissionManager();
 	const hookManager = getHookManager();
-	hookManager.setWorkingDirectory(_ctx.workingDirectory);
+	hookManager.setWorkingDirectory(ctx.workingDirectory);
 
 	const permissionCheck = permissionManager.checkPermission(command);
 	if (permissionCheck === "denied") {
@@ -1144,7 +1179,7 @@ async function runShellCommand(command: string): Promise<string> {
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
 		command,
-		workingDirectory: _ctx.workingDirectory,
+		workingDirectory: ctx.workingDirectory,
 	});
 
 	let finalCommand = command;
@@ -1157,7 +1192,7 @@ async function runShellCommand(command: string): Promise<string> {
 
 	return new Promise((resolve) => {
 		const proc = spawnShell(finalCommand, {
-			cwd: _ctx.workingDirectory,
+			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
 		});
@@ -1186,7 +1221,7 @@ async function runShellCommand(command: string): Promise<string> {
 
 			try {
 				const { getBackgroundTaskManager } = await import("../tools/background");
-				const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
+				const taskManager = getBackgroundTaskManager(ctx.workingDirectory);
 				const taskId = taskManager.adoptProcess(finalCommand, proc, stdout, stderr);
 
 				hookManager.executeHooks("afterCommand", {
@@ -1195,7 +1230,7 @@ async function runShellCommand(command: string): Promise<string> {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: _ctx.workingDirectory,
+					workingDirectory: ctx.workingDirectory,
 				});
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
@@ -1221,7 +1256,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr: `${stderr}\nTIMEOUT`,
 				duration: Date.now() - startTime,
-				workingDirectory: _ctx.workingDirectory,
+				workingDirectory: ctx.workingDirectory,
 			});
 			resolve(
 				`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
@@ -1241,7 +1276,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr,
 				duration: Date.now() - startTime,
-				workingDirectory: _ctx.workingDirectory,
+				workingDirectory: ctx.workingDirectory,
 			});
 			resolve(
 				code === 0
@@ -1258,7 +1293,7 @@ async function runShellCommand(command: string): Promise<string> {
 			hookManager.executeHooks("onError", {
 				command: finalCommand,
 				error: err.message,
-				workingDirectory: _ctx.workingDirectory,
+				workingDirectory: ctx.workingDirectory,
 			});
 			resolve(`Error: ${err.message}`);
 		});
@@ -1290,7 +1325,7 @@ const spawnAgent = tool({
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
 	}),
 	execute: async ({ task, runtime, model, timeout, allowedPaths }) =>
-		spawnAgentTool(_ctx.workingDirectory, task, runtime, model, timeout, normaliseAllowedPaths(allowedPaths)),
+		spawnAgentTool(getToolContext().workingDirectory, task, runtime, model, timeout, normaliseAllowedPaths(allowedPaths)),
 });
 
 const checkAgent = tool({
@@ -1686,7 +1721,7 @@ const rememberTool = tool({
 	execute: async ({ fact, layer }) => {
 		try {
 			const { getMemoryManager } = await import("../memory");
-			const mm = getMemoryManager(_ctx.workingDirectory);
+			const mm = getMemoryManager(getToolContext().workingDirectory);
 			await mm.remember(fact, layer);
 			return { stored: true, fact: fact.slice(0, 80), layer };
 		} catch (err) {
@@ -1705,7 +1740,7 @@ const recallTool = tool({
 	execute: async ({ query, limit }) => {
 		try {
 			const { getMemoryManager } = await import("../memory");
-			const mm = getMemoryManager(_ctx.workingDirectory);
+			const mm = getMemoryManager(getToolContext().workingDirectory);
 			const results = await mm.recall(query, limit || 5);
 			return { query, count: results.length, memories: results };
 		} catch (err) {
@@ -2737,7 +2772,7 @@ const handeyesExitStruggleMode = tool({
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
  */
-export const agentTools = {
+export const agentTools = bindToolContext({
 	// Code exploration
 	get_outline: getOutline,
 	get_symbol: getSymbol,
@@ -2874,6 +2909,6 @@ export const agentTools = {
 
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
-} satisfies ToolSet;
+} satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

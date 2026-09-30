@@ -127,7 +127,6 @@ import {
 	createModel,
 	getRuntimeParams,
 	setRuntimeParams,
-	setToolContext,
 } from "../ai";
 import {
 	type TextTool,
@@ -272,12 +271,6 @@ export class Agent {
 
 		// Set working directory for hooks
 		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
-
-		// Set tool context for AI SDK tools
-		setToolContext({
-			workingDirectory: config.workingDirectory || process.cwd(),
-			agentId: config.agentScope ?? "primary",
-		});
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
@@ -1391,6 +1384,8 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			frequencyPenalty: tunedParams.frequencyPenalty,
 			presencePenalty: tunedParams.presencePenalty,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
+			// Carried into every native tool call; per agent, never process-wide (#3127).
+			agentId: this.config.agentScope ?? "primary",
 			tools: effectiveTools,
 
 			onToolCallStart: async (event) => {

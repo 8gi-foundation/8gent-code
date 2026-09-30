@@ -12,7 +12,7 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import type { GenerateTextResult, LanguageModel, ToolSet } from "ai";
 import { type ProviderConfig, createModel } from "./providers";
-import { type AgentTools, agentTools, setRuntimeParams, setToolContext } from "./tools";
+import { type AgentTools, type ToolContext, agentTools, setRuntimeParams } from "./tools";
 
 export interface EightAgentConfig {
 	/** Provider configuration */
@@ -23,6 +23,8 @@ export interface EightAgentConfig {
 	maxSteps?: number;
 	/** Working directory */
 	workingDirectory?: string;
+	/** Agent scope for the write-policy gate (default "primary"). */
+	agentId?: string;
 	/** Tools to use (default: all agentTools) */
 	tools?: ToolSet;
 	/** Max output tokens per step (default: 4096 for local, unlimited for cloud) */
@@ -136,8 +138,12 @@ export interface FinishEvent {
  * Create an 8gent AI agent powered by the Vercel AI SDK.
  */
 export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never, AgentTools> {
-	const workingDir = config.workingDirectory || process.cwd();
-	setToolContext({ workingDirectory: workingDir });
+	// This agent's own tool context, handed to every tool call through the SDK
+	// (#3127). Never written to module state, so a second agent cannot move it.
+	const toolContext: ToolContext = {
+		workingDirectory: config.workingDirectory || process.cwd(),
+		agentId: config.agentId ?? "primary",
+	};
 
 	const model = createModel(config.provider);
 
@@ -211,6 +217,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),
 		...(config.presencePenalty !== undefined ? { presencePenalty: config.presencePenalty } : {}),
 		tools,
+		experimental_context: toolContext,
 		stopWhen: stepCountIs(config.maxSteps || 30),
 
 		onStepFinish: config.onStepFinish
