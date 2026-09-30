@@ -148,7 +148,12 @@ import {
  * "false" forces it off. Built on the pure needsTextTools gate so the single
  * source of truth for the native-vs-text decision stays in packages/ai.
  */
-function shouldUseTextTools(providerName: string): boolean {
+export function shouldUseTextTools(providerName: string, scoped = false): boolean {
+	// An edit scope (allowedPaths) is enforced only by the text-path executor
+	// (ToolExecutor). The native AI SDK tools share one process-wide context, so
+	// they cannot hold a per-agent scope; a scoped agent never runs on them,
+	// whatever EIGHT_TEXT_TOOLS says.
+	if (scoped) return true;
 	const override = (process.env.EIGHT_TEXT_TOOLS || "").trim().toLowerCase();
 	if (override === "1" || override === "true") return true;
 	if (override === "0" || override === "false") return false;
@@ -1359,7 +1364,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		// tool-incapable local providers (the provider registry's coarse
 		// supportsTools flag is true for them, but their GGUF templates reject a
 		// tools payload), overridable via EIGHT_TEXT_TOOLS=1|0.
-		if (shouldUseTextTools(providerName)) {
+		if (shouldUseTextTools(providerName, (this.config.allowedPaths?.length ?? 0) > 0)) {
 			const textResult = await this.runTextToolChat({
 				providerName,
 				providerModel: providerConfig.model,

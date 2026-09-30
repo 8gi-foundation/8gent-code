@@ -94,6 +94,15 @@ import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
+import {
+	ALLOWED_PATHS_DESCRIPTION,
+	CHECK_AGENT_DESCRIPTION,
+	LIST_AGENTS_DESCRIPTION,
+	SPAWN_AGENT_DESCRIPTION,
+	checkAgentTool,
+	listAgentsTool,
+	spawnAgentTool,
+} from "../orchestration/delegation-tools";
 import { ToolG8 } from "../permissions/toolg8.js";
 import {
 	WRITE_CONTENT_TOOLS,
@@ -121,16 +130,6 @@ import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../
 import { ArtifactStore } from "./artifact-store";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
-
-/**
- * How long check_agent waits on a running 8gent agent for it or a sibling to
- * finish (ms). EIGHT_CHECK_AGENT_WAIT_MS overrides; 0 answers at once.
- */
-export function checkAgentWaitMs(): number {
-	const raw = process.env.EIGHT_CHECK_AGENT_WAIT_MS?.trim();
-	const ms = raw ? Number(raw) : Number.NaN;
-	return Number.isFinite(ms) && ms >= 0 ? ms : 20_000;
-}
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -600,8 +599,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "spawn_agent",
-					description:
-						"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
+					description: SPAWN_AGENT_DESCRIPTION,
 					parameters: {
 						type: "object",
 						properties: {
@@ -626,8 +624,7 @@ export class ToolExecutor {
 							allowedPaths: {
 								type: "array",
 								items: { type: "string" },
-								description:
-									"Only for 8gent runtime: the files (or directories) this agent may write or edit. Writes and edits anywhere else are refused and never run. Omit for no limit.",
+								description: ALLOWED_PATHS_DESCRIPTION,
 							},
 						},
 						required: ["task"],
@@ -638,8 +635,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "check_agent",
-					description:
-						"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 20s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.",
+					description: CHECK_AGENT_DESCRIPTION,
 					parameters: {
 						type: "object",
 						properties: {
@@ -656,8 +652,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "list_agents",
-					description:
-						"[SHELL] Returns a summary of all spawned background agents with their IDs, runtimes, statuses, and elapsed times. Use this to get an overview before checking individual agents, or to find an agentId you lost track of.",
+					description: LIST_AGENTS_DESCRIPTION,
 					parameters: { type: "object", properties: {} },
 				},
 			},
@@ -2396,233 +2391,23 @@ export class ToolExecutor {
 	// Multi-Agent Orchestration
 	// ============================================
 
-	private async handleSpawnAgent(
+	// One implementation for both tool paths: packages/orchestration/delegation-tools.ts.
+	private handleSpawnAgent(
 		task: string,
 		runtime?: "8gent" | "claude" | "shell",
 		model?: string,
 		timeout?: number,
 		allowedPaths?: string[],
 	): Promise<string> {
-		try {
-			const effectiveRuntime = runtime || "8gent";
-
-			// CLI runtimes: claude and shell
-			if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
-				// runtime "shell" runs the task through sh -c, so it is a shell command.
-				if (effectiveRuntime === "shell") {
-					const systemOne = await systemOneGate(task);
-					if (!systemOne.run) return systemOne.message as string;
-				}
-				const { spawnCLIAgent } = await import("../orchestration");
-				const agent = spawnCLIAgent(effectiveRuntime, task, {
-					workingDirectory: this.workingDirectory,
-					timeout: timeout || undefined,
-				});
-				return JSON.stringify(
-					{
-						agentId: agent.id,
-						runtime: effectiveRuntime,
-						status: "running",
-						task: task.slice(0, 100),
-						message: `CLI agent ${agent.id} (${effectiveRuntime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
-					},
-					null,
-					2,
-				);
-			}
-
-			// Default: 8gent runtime
-			// Resolve "auto:free" to the best available free model via OpenRouter
-			let resolvedModel = model;
-			if (model === "auto:free") {
-				try {
-					const { resolveModel } = await import("../providers");
-					const resolved = await resolveModel(model);
-					resolvedModel = resolved.model;
-				} catch {
-					// Fall back to default if provider resolution fails
-					resolvedModel = undefined;
-				}
-			}
-			const { getAgentPool } = await import("../orchestration");
-			const pool = getAgentPool();
-			const agent = await pool.spawnAgent(task, {
-				model: resolvedModel || undefined,
-				workingDirectory: this.workingDirectory,
-				allowedPaths,
-			});
-			return JSON.stringify(
-				{
-					agentId: agent.id,
-					runtime: "8gent",
-					status: agent.status,
-					task: task.slice(0, 100),
-					...(allowedPaths
-						? { allowedPaths }
-						: {
-								scope:
-									"none: this agent may write any file. If the task names the file(s) it may edit, pass them as allowedPaths.",
-							}),
-					message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
-				},
-				null,
-				2,
-			);
-		} catch (err) {
-			return `Failed to spawn agent: ${err}`;
-		}
+		return spawnAgentTool(this.workingDirectory, task, runtime, model, timeout, allowedPaths);
 	}
 
-	private async handleCheckAgent(agentId: string): Promise<string> {
-		try {
-			// Check CLI agents first (claude/shell runtimes)
-			if (agentId.startsWith("cli-")) {
-				const { getCLIAgentStatus } = await import("../orchestration");
-				const status = getCLIAgentStatus(agentId);
-				if (!status) return `Agent not found: ${agentId}`;
-
-				const result: Record<string, unknown> = {
-					agentId: status.id,
-					runtime: status.runtime,
-					status: status.status,
-					task: status.task,
-					elapsed: status.elapsed,
-				};
-
-				if (status.result) {
-					result.stdout = status.result.stdout.slice(0, 2000);
-					if (status.result.stderr) {
-						result.stderr = status.result.stderr.slice(0, 500);
-					}
-					result.exitCode = status.result.exitCode;
-				}
-
-				return JSON.stringify(result, null, 2);
-			}
-
-			// Default: check 8gent agent pool
-			const { getAgentPool } = await import("../orchestration");
-			const { agentOutcome, pendingRespawns } = await import("../orchestration/agent-outcome");
-			const pool = getAgentPool();
-			const agent = pool.getAgent(agentId);
-			if (!agent) return `Agent not found: ${agentId}`;
-
-			// A running agent: wait (bounded) for it or any sibling to finish, so a
-			// sibling that ends early is reported while the others still run. Skip
-			// the wait when a sibling already needs a re-spawn.
-			if (pendingRespawns(pool.listAgents(), agent.id).length === 0) {
-				await pool.waitForAnyFinish(agent.id, checkAgentWaitMs());
-			}
-
-			const elapsed = agent.completedAt
-				? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
-				: `${((Date.now() - agent.startedAt.getTime()) / 1000).toFixed(1)}s (running)`;
-
-			// Outcome first: whether the task is done, not only the agent's own claim.
-			const result: Record<string, unknown> = {
-				agentId: agent.id,
-				runtime: "8gent",
-				status: agent.status,
-				outcome: agentOutcome(agent),
-				filesChanged: agent.filesChanged,
-				...(agent.config.allowedPaths ? { allowedPaths: agent.config.allowedPaths } : {}),
-				task: agent.task.description,
-				elapsed,
-			};
-
-			if (agent.status === "completed" && agent.task.result) {
-				result.result =
-					typeof agent.task.result === "string"
-						? agent.task.result.slice(0, 2000)
-						: JSON.stringify(agent.task.result).slice(0, 2000);
-			}
-			if (agent.status === "failed" && agent.task.error) {
-				result.error = agent.task.error;
-			}
-			const respawn = pendingRespawns(pool.listAgents(), agent.id);
-			if (respawn.length > 0) {
-				result.respawnNow = respawn.map((a) => ({
-					agentId: a.id,
-					...(a.config.allowedPaths ? { allowedPaths: a.config.allowedPaths } : {}),
-					outcome: agentOutcome(a),
-				}));
-			}
-
-			return JSON.stringify(result, null, 2);
-		} catch (err) {
-			return `Failed to check agent: ${err}`;
-		}
+	private handleCheckAgent(agentId: string): Promise<string> {
+		return checkAgentTool(agentId);
 	}
 
-	private async handleListAgents(): Promise<string> {
-		try {
-			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
-			const pool = getAgentPool();
-			const poolAgents = pool.listAgents();
-			const cliAgentsList = listCLIAgents();
-
-			if (poolAgents.length === 0 && cliAgentsList.length === 0) {
-				return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
-			}
-
-			const stats = pool.getStats();
-
-			// 8gent agents
-			const eightAgentList = poolAgents.map((a) => {
-				const elapsed = a.completedAt
-					? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
-					: `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
-				return {
-					id: a.id,
-					runtime: "8gent" as const,
-					status: a.status,
-					task: a.task.description.slice(0, 80),
-					elapsed,
-					hasResult: a.status === "completed" && !!a.task.result,
-				};
-			});
-
-			// CLI agents (claude/shell)
-			const cliAgentList = cliAgentsList.map((a) => {
-				const status = getCLIAgentStatus(a.id);
-				return {
-					id: a.id,
-					runtime: a.runtime,
-					status: status?.status || "running",
-					task: a.task.slice(0, 80),
-					elapsed: status?.elapsed || "...",
-					hasResult: !!a.result,
-				};
-			});
-
-			const allAgents = [...eightAgentList, ...cliAgentList];
-
-			// Augment stats with CLI agents
-			const cliRunning = cliAgentsList.filter((a) => !a.completedAt).length;
-			const cliCompleted = cliAgentsList.filter(
-				(a) => a.completedAt && a.result?.exitCode === 0,
-			).length;
-			const cliFailed = cliAgentsList.filter(
-				(a) => a.completedAt && a.result?.exitCode !== 0,
-			).length;
-
-			return JSON.stringify(
-				{
-					stats: {
-						...stats,
-						totalAgents: stats.totalAgents + cliAgentsList.length,
-						running: stats.running + cliRunning,
-						completed: stats.completed + cliCompleted,
-						failed: stats.failed + cliFailed,
-					},
-					agents: allAgents,
-				},
-				null,
-				2,
-			);
-		} catch (err) {
-			return `Failed to list agents: ${err}`;
-		}
+	private handleListAgents(): Promise<string> {
+		return listAgentsTool();
 	}
 
 	// ============================================
