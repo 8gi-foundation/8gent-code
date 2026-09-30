@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { type ProviderConfig, type ProviderName, createModel } from "./providers";
-import { createOllamaServer } from "../local-model-server";
+import { createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 // ============================================
@@ -220,6 +220,18 @@ export class TaskRouter {
 			};
 		}
 
+		// The classifier and every slot live on Ollama. With another local server
+		// selected (#3149) Ollama is off: no classify call, and confidence 0 so no
+		// caller switches the session onto an Ollama model.
+		if (this.config.classifierProvider === "ollama" && !isOllamaEnabled()) {
+			return {
+				category: "simple",
+				confidence: 0,
+				model: this.config.defaultModel.model,
+				reasoning: "Routing skipped: Ollama is off (EIGHT_LOCAL_SERVER selects another server)",
+			};
+		}
+
 		const start = Date.now();
 
 		try {
@@ -320,6 +332,8 @@ export class TaskRouter {
 	 */
 	async autoAssign(): Promise<string[]> {
 		const changes: string[] = [];
+		// Ollama is off when another local server is selected (#3149).
+		if (!isOllamaEnabled()) return changes;
 
 		try {
 			// The configured ollama, not a hardcoded localhost (#3080). A non-2xx

@@ -370,6 +370,7 @@ const TEXT_TOOL_PROVIDERS: ReadonlySet<ProviderName> = new Set<ProviderName>([
 	"8gent",
 	"ollama",
 	"lmstudio",
+	"llama-server",
 ]);
 
 /**

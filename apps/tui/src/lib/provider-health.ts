@@ -12,10 +12,15 @@
  */
 
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
-import { createOllamaServer } from "../../../../packages/local-model-server/index.js";
+import {
+	createLlamaServer,
+	createOllamaServer,
+	isLlamaServerSelected,
+	resolveLlamaServerUrl,
+} from "../../../../packages/local-model-server/index.js";
 
 export interface ProviderStatus {
-	name: "apfel" | "lmstudio" | "ollama";
+	name: "apfel" | "lmstudio" | "ollama" | "llama-server";
 	live: boolean;
 }
 
@@ -77,13 +82,16 @@ export async function probeProviders(): Promise<{
 	// The configured Ollama, resolved like everywhere else (OLLAMA_BASE_URL,
 	// then OLLAMA_HOST, normalised). A bare host:port OLLAMA_HOST, which the
 	// ollama CLI accepts, used to be an invalid URL here and read as down.
-	const ollamaHost = resolveOllamaBaseUrl();
-	const ollamaLive = await probeUrl(createOllamaServer({ baseUrl: ollamaHost }).healthUrl);
+	// With llama-server selected (#3149) Ollama is off: its slot reports llama-server.
+	const localServer = isLlamaServerSelected()
+		? { name: "llama-server" as const, url: createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).healthUrl }
+		: { name: "ollama" as const, url: createOllamaServer({ baseUrl: resolveOllamaBaseUrl() }).healthUrl };
+	const localLive = await probeUrl(localServer.url);
 
 	const statuses: ProviderStatus[] = [
 		{ name: "apfel", live: apfelOk },
 		{ name: "lmstudio", live: lmStudioLive },
-		{ name: "ollama", live: ollamaLive },
+		{ name: localServer.name, live: localLive },
 	];
 
 	const live = statuses.filter((s) => s.live).length;

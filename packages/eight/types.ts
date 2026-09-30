@@ -109,6 +109,7 @@ export interface AgentConfig {
 	runtime:
 		| "ollama"
 		| "lmstudio"
+		| "llama-server"
 		| "openrouter"
 		| "anthropic"
 		| "apple-foundation"

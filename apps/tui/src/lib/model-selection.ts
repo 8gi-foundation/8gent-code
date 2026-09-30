@@ -76,7 +76,7 @@ export function pickBestChatModel(modelIds: string[], opts?: { preference?: stri
 }
 
 /** Runtime literal understood by the Agent's AgentConfig. */
-export type AgentRuntime = "ollama" | "lmstudio" | "openrouter";
+export type AgentRuntime = "ollama" | "lmstudio" | "llama-server" | "openrouter";
 
 /**
  * Map a TUI provider id to the runtime literal the Agent understands.
@@ -87,6 +87,7 @@ export type AgentRuntime = "ollama" | "lmstudio" | "openrouter";
  * provider-routing bug where `--provider=lmstudio` ran against Ollama).
  *
  * - lmstudio                         -> lmstudio
+ * - llama-server                     -> llama-server (#3149)
  * - openrouter / openrouter-free     -> openrouter
  * - apfel (apple-foundation), ollama -> ollama (apfel rides the ollama adapter
  *   chain, matching prior behaviour)
@@ -94,6 +95,7 @@ export type AgentRuntime = "ollama" | "lmstudio" | "openrouter";
  */
 export function providerToRuntime(provider?: string): AgentRuntime {
 	if (provider === "lmstudio") return "lmstudio";
+	if (provider === "llama-server") return "llama-server";
 	if (provider === "openrouter" || provider === "openrouter-free") return "openrouter";
 	// apfel / apple-foundation, ollama, undefined, and any unknown provider fall
 	// through to the ollama runtime (apfel is OpenAI-compatible and handled by the

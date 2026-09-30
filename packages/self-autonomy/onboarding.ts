@@ -13,7 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
-import { LocalServerHttpError, createOllamaServer } from "../local-model-server";
+import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import { getVault } from "../secrets";
 import {
 	loadSettings,
@@ -256,6 +256,11 @@ export async function probeOllama(
 	const fetchImpl = opts.fetchImpl ?? fetch;
 	const host = resolveOllamaBaseUrl(env);
 	const configured = Boolean(env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim());
+	// Another local server is selected (#3149): Ollama is off, so it is not asked.
+	// Reported as an unconfigured miss, which the welcome leaves out.
+	if (!isOllamaEnabled(env)) {
+		return { status: "unreachable", host, reason: "not used: EIGHT_LOCAL_SERVER selects another server", configured: false, timedOut: false };
+	}
 	try {
 		const listed = await createOllamaServer({ baseUrl: host, fetch: fetchImpl }).listModels({
 			signal: AbortSignal.timeout(timeoutMs),

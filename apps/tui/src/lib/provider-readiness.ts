@@ -17,6 +17,7 @@
  */
 
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
+import { createLlamaServer, isLlamaServerSelected, resolveLlamaServerUrl } from "../../../../packages/local-model-server/index.js";
 import { pickBestChatModel } from "./model-selection.js";
 
 export const PROBE_TIMEOUT_MS = 3000;
@@ -36,14 +37,16 @@ export function localProviderEndpoints(
 	// The same resolution as the rest of the app (#3115): OLLAMA_BASE_URL, then
 	// OLLAMA_HOST, normalised. A bare "host:port" OLLAMA_HOST (what the ollama
 	// CLI accepts) used to become an invalid URL here and read as unreachable.
+	const openAiIds: LocalProviderEndpoint["extract"] = (d) => (d?.data || []).map((m: any) => String(m?.id ?? ""));
+	const lmStudio: LocalProviderEndpoint = { provider: "lmstudio", label: "LM Studio", modelsUrl: `${lm}/v1/models`, extract: openAiIds };
+	// With llama-server selected (#3149) Ollama is off and is never probed.
+	if (isLlamaServerSelected(env)) {
+		const llama = createLlamaServer({ baseUrl: resolveLlamaServerUrl(env) });
+		return [{ provider: "llama-server", label: "llama-server", modelsUrl: llama.modelsUrl, extract: openAiIds }, lmStudio];
+	}
 	const ollama = resolveOllamaBaseUrl(env);
 	return [
-		{
-			provider: "lmstudio",
-			label: "LM Studio",
-			modelsUrl: `${lm}/v1/models`,
-			extract: (d) => (d?.data || []).map((m: any) => String(m?.id ?? "")),
-		},
+		lmStudio,
 		{
 			provider: "ollama",
 			label: "Ollama",

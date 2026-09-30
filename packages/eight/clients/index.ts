@@ -14,6 +14,7 @@ import { ApfelClient } from "./apfel";
 import { AppleFoundationClient } from "./apple-foundation";
 import { DeepSeekClient } from "./deepseek";
 import { LMStudioClient } from "./lmstudio";
+import { resolveLlamaServerUrl } from "../../local-model-server/select";
 import { OllamaClient } from "./ollama";
 import { OpenRouterClient } from "./openrouter";
 
@@ -71,6 +72,8 @@ export function runtimeForProvider(provider: ProviderName): AgentConfig["runtime
 			return "deepseek";
 		case "lmstudio":
 			return "lmstudio";
+		case "llama-server":
+			return "llama-server";
 		case "ollama":
 		case "8gent":
 			return "ollama"; // 8gent runs on the local ollama server today
@@ -118,6 +121,11 @@ export function createClient(config: AgentConfig): LLMClient {
 		// LMStudioClient appends "/v1/chat/completions" to baseUrl, so the base
 		// must NOT include a "/v1" suffix (e.g. "http://127.0.0.1:1234").
 		return new LMStudioClient(config.model, config.baseUrl);
+	}
+	if (config.runtime === "llama-server") {
+		// llama-server speaks the same OpenAI API; the LM Studio client is the
+		// generic one (it appends "/v1/chat/completions" to a root URL).
+		return new LMStudioClient(config.model, config.baseUrl ?? resolveLlamaServerUrl());
 	}
 	if (config.runtime === "apple-foundation") {
 		// No baseUrl: this client spawns the apple-foundation-bridge subprocess

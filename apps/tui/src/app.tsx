@@ -22,6 +22,11 @@ import {
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
+import {
+	createLlamaServer,
+	isLlamaServerSelected,
+	resolveLlamaServerUrl,
+} from "../../../packages/local-model-server/index.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
@@ -362,10 +367,14 @@ function loadProviderSettings(): { provider: string; model: string } {
 function detectBestLocalProvider(): { provider: string; model: string } {
 	const { execFileSync } = require("node:child_process");
 	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+	// With llama-server selected (#3149) Ollama is off: its slot probes llama-server instead.
+	const llamaServer = isLlamaServerSelected();
 	const urls = [
 		"http://localhost:1234/v1/models",
 		// The configured ollama (OLLAMA_BASE_URL / OLLAMA_HOST), not a hardcoded localhost (#3080).
-		`${resolveOllamaBaseUrl()}/api/tags`,
+		llamaServer
+			? createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).modelsUrl
+			: `${resolveOllamaBaseUrl()}/api/tags`,
 		// Apfel (Apple Intelligence, macOS 26+, Apple Silicon only): apfel --serve --port 11435
 		...(isAppleSilicon ? ["http://localhost:11435/v1/models"] : []),
 	];
@@ -404,14 +413,20 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	}
 	const openAiIds = (d: any) => (d.data || []).map((m: any) => String(m.id ?? ""));
 
+	// The selected llama-server comes first: choosing it is the user's say-so.
+	if (llamaServer) {
+		const models = chatModels(answers[1], openAiIds);
+		if (models.length > 0) return { provider: "llama-server", model: pickBestChatModel(models) };
+	}
+
 	// Priority: LM Studio, then Ollama, then Apfel.
 	const lmModels = chatModels(answers[0], openAiIds);
 	if (lmModels.length > 0) {
 		return { provider: "lmstudio", model: pickBestChatModel(lmModels) };
 	}
-	const ollamaModels = chatModels(answers[1], (d) =>
-		(d.models || []).map((m: any) => String(m.name ?? "")),
-	);
+	const ollamaModels = llamaServer
+		? []
+		: chatModels(answers[1], (d) => (d.models || []).map((m: any) => String(m.name ?? "")));
 	if (ollamaModels.length > 0) {
 		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
 	}
@@ -1322,6 +1337,13 @@ export function App({
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
+				} else if (currentProvider === "llama-server") {
+					// llama-server lists the model(s) it serves (#3149).
+					const listed = await createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).listModels({
+						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+					});
+					const ids = listed.map((m) => m.name);
+					if (!cancelled) setAvailableModels(ids);
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
 					// never pollute the model list or get auto-selected as chat models

@@ -16,7 +16,7 @@
 import { resolveLayaUrl } from "./backends/laya";
 import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { resolveOllamaHost } from "./backends/ollama";
-import { LocalServerHttpError, LocalServerResponseError, createOllamaServer } from "../local-model-server";
+import { LocalServerHttpError, LocalServerResponseError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import type { FetchLike } from "./types";
 
 /**
@@ -123,6 +123,11 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	}
 	notes.push(layaNote);
 
+	// Another local server is selected (#3149): Ollama is off, so it is not asked.
+	if (!isOllamaEnabled(env)) {
+		notes.push("ollama: not used, EIGHT_LOCAL_SERVER selects another server");
+		return { ...base, backend: "none", model: null, url: null, notes };
+	}
 	const host = resolveOllamaHost(env);
 	try {
 		const installed = await listOllamaModels(fetchImpl, host, timeoutMs);

@@ -31,6 +31,7 @@ export interface AgentInfo {
 	runtime:
 		| "ollama"
 		| "lmstudio"
+		| "llama-server"
 		| "openrouter"
 		| "anthropic"
 		| "apple-foundation"
