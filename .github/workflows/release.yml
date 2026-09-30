@@ -42,6 +42,11 @@ jobs:
           head -1 dist/cli.js | grep -q "#!/usr/bin/env bun" || (echo "Shebang missing" && exit 1)
           echo "Build OK"
 
+      # #3219: never publish a tarball that has not been installed and run
+      # somewhere other than the build checkout.
+      - name: npm pack-and-install smoke
+        run: bun scripts/pack-smoke.ts --skip-build
+
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT

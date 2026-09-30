@@ -61,6 +61,15 @@ jobs:
           head -1 dist/cli.js | grep -q "#!/usr/bin/env bun" || (echo "Shebang missing" && exit 1)
           echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"
 
+      # #3219: the npm tarball must install and run on a machine that is not
+      # the builder's. Packs, installs with an isolated HOME, runs --version,
+      # and opens the TUI under a pty until its first screen renders.
+      - name: Packaging unit tests
+        run: bun test scripts/lib/
+
+      - name: npm pack-and-install smoke
+        run: bun scripts/pack-smoke.ts --skip-build
+
       - name: Verify version sync
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
