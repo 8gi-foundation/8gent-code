@@ -27,6 +27,7 @@ import { Box, Text, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
 import type { WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
 import { SWEEP_FRAME_MS, type Span, motionEnabled, sweepFrames } from "../lib/motion.js";
 import {
 	PERM_LOOK,
@@ -95,6 +96,22 @@ export interface TabLine {
 	spans: Span[];
 }
 
+/** Each cell's whole span on the label row (number, title, tag), for clicks (#3239). */
+export function cellSpans(cells: TabCell[]): Span[] {
+	let x = 0;
+	return cells.map((cell, i) => {
+		if (i > 0) x += GAP.length;
+		const w =
+			(cell.grabbed ? 2 : 0) +
+			cell.num.length +
+			cell.title.length +
+			(cell.tag ? cell.tag.length : 0);
+		const span = { x, width: w };
+		x += w;
+		return span;
+	});
+}
+
 /** Lay the cells out on one row. Pure, so the geometry can be tested. */
 export function layoutTabs(cells: TabCell[]): TabLine {
 	let text = "";
@@ -126,6 +143,7 @@ export function ruleRow(
 
 export function TabBar({
 	tabs,
+	onSwitch,
 	isTabProcessing,
 	groups = [],
 	grabbedTabId = null,
@@ -189,6 +207,15 @@ export function TabBar({
 		return () => clearInterval(id);
 	}, [targetKey]);
 
+	// A click on a tab switches to it, as its number key does (#3239).
+	const labelRef = useRef(null);
+	const clickSpans: ClickSpan[] = cellSpans(cells).map((span, i) => {
+		const id = visibleTabs[i]?.id ?? String(i);
+		return { id: `tab:${id}`, dx: span.x, w: span.width, action: () => onSwitch(id) };
+	});
+	useClickSpans(labelRef, tabs.length <= 1 ? [] : clickSpans);
+	const pressed = usePressedIn("tab:");
+
 	if (tabs.length <= 1) return null;
 
 	const hint = dragging ? ` ${GRAB_HINT}` : "";
@@ -197,14 +224,18 @@ export function TabBar({
 	return (
 		<Box flexDirection="column" marginBottom={0} flexShrink={0}>
 			<Box>
-				<Box flexGrow={1} minWidth={0}>
+				<Box ref={labelRef} flexGrow={1} minWidth={0}>
 					<Text wrap="truncate-end">
 						{cells.map((cell, i) => (
 							<React.Fragment key={visibleTabs[i]?.id ?? i}>
 								{i > 0 ? GAP : ""}
 								{cell.grabbed ? <Text color={t.orange}>[</Text> : null}
 								<Text color={t.textTertiary}>{cell.num}</Text>
-								<Text color={cell.active ? t.orange : t.muted} bold={cell.active}>
+								<Text
+									color={cell.active ? t.orange : t.muted}
+									bold={cell.active}
+									inverse={pressed === `tab:${visibleTabs[i]?.id ?? String(i)}`}
+								>
 									{cell.title}
 								</Text>
 								{cell.tag ? (

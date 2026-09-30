@@ -20,7 +20,7 @@
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
 import { t } from "../theme.js";
-import { KEY_CAP_GAP, KeyCap } from "./KeyCap.js";
+import { KeyCapRow } from "./KeyCap.js";
 
 export interface CommandPaletteCommand {
 	name: string;
@@ -214,13 +214,15 @@ export function CommandPaletteView({
 				</Box>
 			) : null}
 			<Box>
-				<Text>
-					<KeyCap cap="↑↓" verb="move" />
-					{KEY_CAP_GAP}
-					<KeyCap cap="Enter" verb="run" />
-					{KEY_CAP_GAP}
-					<KeyCap cap="Esc" verb="close" />
-				</Text>
+				<KeyCapRow
+					caps={[
+						{ cap: "↑↓", verb: "move" },
+						{ cap: "Enter", verb: "run" },
+						{ cap: "Esc", verb: "close" },
+					]}
+					idPrefix="palette"
+					z={20}
+				/>
 			</Box>
 			<Box>
 				{/* The modifier legend, once, where every command is listed (#3238). */}

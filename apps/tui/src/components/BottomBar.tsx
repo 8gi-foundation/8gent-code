@@ -40,6 +40,8 @@ interface BottomBarProps {
 	permHeld?: boolean;
 	/** The permission switch being announced in the hints slot, if any (#3174). */
 	permToast?: FooterToast | null;
+	/** A short confirmation in the hints slot, e.g. "copied 22 chars" (#3239). */
+	notice?: string | null;
 	sessionTime: string;
 	mode: FooterMode;
 	/** ADHD mode is on: a footer segment (the context rail it lived in is gone, #3238). */
@@ -74,6 +76,7 @@ export function BottomBar(props: BottomBarProps) {
 						width={Math.max(0, columns - (station ? fmWidth : 0) - 1)}
 						leading={station}
 						toast={props.permToast}
+						notice={props.notice}
 						data={{
 							mode: props.mode,
 							tokensPerSecond: props.tokensPerSecond,

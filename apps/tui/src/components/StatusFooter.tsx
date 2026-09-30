@@ -22,11 +22,14 @@
  */
 
 import { Box, Text } from "ink";
-import React from "react";
+import React, { useRef } from "react";
 import {
 	type PermissionMode,
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { keyBytes } from "../lib/key-bytes.js";
+import { injectKeys } from "../lib/mouse-input.js";
 import {
 	PERM_KEY,
 	PERM_LOOK,
@@ -104,7 +107,6 @@ export function segmentWidth(s: FooterSegment): number {
 	);
 }
 
-
 function formatTps(tps: number): string {
 	if (tps >= 100) return `${Math.round(tps)} t/s`;
 	if (tps >= 10) return `${tps.toFixed(0)} t/s`;
@@ -174,7 +176,13 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 		out.push({ key: "user", label: "user", value: d.user, color: ui.cream, priority: 7 });
 	}
 	if (known(d.sessionTime)) {
-		out.push({ key: "session", label: "session", value: d.sessionTime, color: ui.muted, priority: 4 });
+		out.push({
+			key: "session",
+			label: "session",
+			value: d.sessionTime,
+			color: ui.muted,
+			priority: 4,
+		});
 	}
 	return out;
 }
@@ -206,7 +214,8 @@ export function fitFooterSegments(
 		let dropAt = -1;
 		for (let i = 0; i < kept.length; i++) {
 			const s = kept[i];
-			if (s && s.priority > 0 && (dropAt < 0 || s.priority > (kept[dropAt]?.priority ?? -1))) dropAt = i;
+			if (s && s.priority > 0 && (dropAt < 0 || s.priority > (kept[dropAt]?.priority ?? -1)))
+				dropAt = i;
 		}
 		if (dropAt < 0) break;
 		kept.splice(dropAt, 1);
@@ -301,64 +310,110 @@ export function fitFooterToast(
 	return null;
 }
 
+/** Click spans for the footer row (#3239): the segment keys and the hint caps. */
+export function footerClickSpans(
+	segments: FooterSegment[],
+	hints: string[],
+	leading: boolean,
+): { segments: ClickSpan[]; hints: ClickSpan[] } {
+	const segSpans: ClickSpan[] = [];
+	let x = 0;
+	segments.forEach((s, i) => {
+		if (i > 0 || leading) x += FOOTER_SEPARATOR.length;
+		const w = segmentWidth(s);
+		const bytes = s.hint ? keyBytes(s.hint) : null;
+		// The whole segment is the target: "perm Infinite [⇧Tab]" cycles the mode.
+		if (bytes)
+			segSpans.push({ id: `footer:seg:${s.key}`, dx: x, w, action: () => injectKeys(bytes) });
+		x += w;
+	});
+	const hintSpans: ClickSpan[] = [];
+	let hx = 0;
+	hints.forEach((h, i) => {
+		if (i > 0) hx += KEY_CAP_GAP.length;
+		const w = hintWidth(h);
+		const bytes = keyBytes(splitHint(h).cap);
+		if (bytes)
+			hintSpans.push({ id: `footer:hint:${h}`, dx: hx, w, action: () => injectKeys(bytes) });
+		hx += w;
+	});
+	return { segments: segSpans, hints: hintSpans };
+}
+
 export function StatusSegments({
 	data,
 	width,
 	toast,
 	leading = false,
+	notice,
 }: {
 	data: FooterData;
 	width: number;
 	toast?: FooterToast | null;
 	/** The DJ station segment is drawn before this row: start with a separator. */
 	leading?: boolean;
+	/** A short confirmation in the hint slot, e.g. "copied 22 chars" after a selection (#3239). */
+	notice?: string | null;
 }) {
 	const all = buildFooterSegments(data);
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
 	const segments = toastFit ? toastFit.segments : fitFooterSegments(all, width, leading);
-	const hints = toastFit
-		? []
-		: fitFooterHints(
-				Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
-				segments.some((s) => s.key === "perm"),
-			);
+	const hints =
+		toastFit || notice
+			? []
+			: fitFooterHints(
+					Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
+					segments.some((s) => s.key === "perm"),
+				);
+	const segRef = useRef(null);
+	const hintRef = useRef(null);
+	const spans = footerClickSpans(segments, hints, leading);
+	useClickSpans(segRef, spans.segments);
+	useClickSpans(hintRef, spans.hints);
+	const pressed = usePressedIn("footer:");
 	return (
 		// One column clear of the right edge, like the chips in the header (#3238).
 		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between" marginRight={1}>
-			<Text wrap="truncate-end">
-				{segments.map((s, i) => (
-					<React.Fragment key={s.key}>
-						{i > 0 || leading ? <Text color={ui.dim}>{FOOTER_SEPARATOR}</Text> : null}
-						{s.label ? <Text color={ui.muted}>{s.label} </Text> : null}
-						<Text color={s.color} bold={s.bold}>
-							{s.value}
-						</Text>
-						{s.note ? <Text color={ui.muted}> {s.note}</Text> : null}
-						{s.hint ? (
-							<Text>
-								{" "}
-								<KeyCap cap={s.hint} />
+			<Box ref={segRef} minWidth={0} flexShrink={1}>
+				<Text wrap="truncate-end">
+					{segments.map((s, i) => (
+						<React.Fragment key={s.key}>
+							{i > 0 || leading ? <Text color={ui.dim}>{FOOTER_SEPARATOR}</Text> : null}
+							{s.label ? <Text color={ui.muted}>{s.label} </Text> : null}
+							<Text color={s.color} bold={s.bold}>
+								{s.value}
 							</Text>
-						) : null}
-					</React.Fragment>
-				))}
-			</Text>
+							{s.note ? <Text color={ui.muted}> {s.note}</Text> : null}
+							{s.hint ? (
+								<Text>
+									{" "}
+									<KeyCap cap={s.hint} pressed={pressed === `footer:seg:${s.key}`} />
+								</Text>
+							) : null}
+						</React.Fragment>
+					))}
+				</Text>
+			</Box>
 			{toastFit && toast ? (
 				<Box flexShrink={0}>
 					<Text color={permColour(toast.mode)} bold={PERM_LOOK[toast.mode].bold}>
 						{toastFit.text}
 					</Text>
 				</Box>
+			) : notice ? (
+				<Box flexShrink={0}>
+					<Text color={theme.color.textSecondary}>{notice}</Text>
+				</Box>
 			) : null}
 			{hints.length > 0 ? (
-				<Box flexShrink={0}>
+				<Box ref={hintRef} flexShrink={0}>
 					<Text>
 						{hints.map((h, i) => {
 							const { cap, verb } = splitHint(h);
 							return (
 								<Text key={h}>
 									{i > 0 ? KEY_CAP_GAP : ""}
-									<KeyCap cap={cap} verb={verb} />
+									<KeyCap cap={cap} verb={verb} pressed={pressed === `footer:hint:${h}`} />
 								</Text>
 							);
 						})}
