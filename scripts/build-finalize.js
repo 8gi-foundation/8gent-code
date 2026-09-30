@@ -1,23 +1,62 @@
 #!/usr/bin/env node
 // Cross-platform replacement for: chmod +x && bash copy-bundled-skills.sh && bash copy-bundled-sounds.sh
-import { chmodSync, mkdirSync, readdirSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	readdirSync,
+	copyFileSync,
+	existsSync,
+	readFileSync,
+	writeFileSync,
+	realpathSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
-import { platform } from "node:os";
+import { homedir, platform } from "node:os";
 import { fileURLToPath } from "node:url";
+import { findBakedRoots, unbakeBuildPaths } from "./lib/unbake-build-paths.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 
-// Inject shebang if missing (same logic as the old inline node -e)
-const cliPath = join(ROOT, "dist", "cli.js");
-const contents = readFileSync(cliPath, "utf-8");
-if (!contents.startsWith("#!")) {
-	writeFileSync(cliPath, "#!/usr/bin/env bun\n" + contents);
+// Strip build-machine absolute paths from both bundles (#3219). Without this,
+// dist/cli.js shipped `__dirname = "/Users/<builder>/8gent-code/..."` to npm.
+// Roots: the checkout, its real path, and the real directory node_modules
+// resolves into (a symlinked node_modules reports paths from its target).
+const buildRoots = [ROOT];
+try {
+	buildRoots.push(realpathSync(ROOT));
+} catch {}
+try {
+	buildRoots.push(dirname(realpathSync(join(ROOT, "node_modules"))));
+} catch {}
+for (const name of ["cli.js", "tui.js"]) {
+	const file = join(ROOT, "dist", name);
+	if (!existsSync(file)) continue;
+	const { code, replaced } = unbakeBuildPaths(readFileSync(file, "utf-8"), buildRoots);
+	const left = findBakedRoots(code, buildRoots, [homedir()]);
+	if (left.length > 0) {
+		console.error(
+			`[build-finalize] dist/${name} still contains build-machine paths: ${left.join(", ")}`,
+		);
+		process.exit(1);
+	}
+	writeFileSync(file, code);
+	console.log(`[unbake-build-paths] dist/${name}: rewrote ${replaced} build-machine paths`);
 }
 
-// chmod +x (Unix only - no-op on Windows)
-if (platform() !== "win32") {
-	chmodSync(cliPath, 0o755);
+// Inject shebang if missing (same logic as the old inline node -e)
+// (`build:tui` builds dist/tui.js alone, so dist/cli.js may not exist.)
+const cliPath = join(ROOT, "dist", "cli.js");
+if (existsSync(cliPath)) {
+	const contents = readFileSync(cliPath, "utf-8");
+	if (!contents.startsWith("#!")) {
+		writeFileSync(cliPath, "#!/usr/bin/env bun\n" + contents);
+	}
+
+	// chmod +x (Unix only - no-op on Windows)
+	if (platform() !== "win32") {
+		chmodSync(cliPath, 0o755);
+	}
 }
 
 // copy-bundled-skills: packages/skills/*/SKILL.md -> dist/skills/*/SKILL.md
