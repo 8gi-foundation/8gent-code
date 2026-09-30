@@ -135,8 +135,8 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 	}
 	if (probe.backend === "laya") return local(new LayaBackend({ ...common, url: probe.url ?? undefined }));
 	if (probe.backend === "ollama" && probe.model) {
-		const numCtx = probe.shared ? SHARED_JUDGE_NUM_CTX : undefined;
-		const backend = new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined, numCtx });
+		// Every Ollama judge pins its context (OllamaBackend default, #3212), shared or not.
+		const backend = new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined, numCtx: SHARED_JUDGE_NUM_CTX });
 		return { backend, shared: probe.shared === true };
 	}
 	throw new DecideUnavailableError(`no decide backend available: ${probe.notes.join("; ")}`);

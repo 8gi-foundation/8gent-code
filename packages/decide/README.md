@@ -110,9 +110,11 @@ the model once for every agent, child and tab on the machine.
   server is used only if it serves that exact model, so calibration stays
   `(ollama, Selene)`. Otherwise, or when the server is down, or when
   `EIGHT_DECIDE_GGUF` names a file, the in-process path runs as before.
-- Context is pinned to 4096 (`SHARED_JUDGE_NUM_CTX`, the llamacpp context).
-  Without it Ollama 0.34 sized Selene's context to free memory (131072 tokens,
-  21.9 GB resident on a 96 GB Mac).
+- Context is pinned to 4096 (`JUDGE_NUM_CTX` in `backends/ollama.ts`, the
+  llamacpp context) on every Ollama judge, shared or not (#3212). Without it
+  Ollama 0.34 sized Selene's context to free memory (131072 tokens, 21.3 to
+  21.9 GB resident on a 96 GB Mac); the opt-out path
+  (`EIGHT_S1_SHARED_JUDGE=0` with no `node-llama-cpp`) hit exactly that.
 - Measured, 3 processes judging the 40 `eval/commands.ts` commands at once
   through `systemOneGate`, M2 Mac, 2026-09-30: judge memory 16,866 MB
   in-process (3 x ~5.6 GB) vs 5,693 MB shared (one 5,544 MB server + 3 x 50 MB
@@ -125,7 +127,7 @@ the model once for every agent, child and tab on the machine.
   shared server again, is not repeated for 2 s, doubling to 60 s
   (`FAILOVER_BACKOFF_MS`). A failover only goes in-process or back to the
   shared server, never to laya or the chat model's `OLLAMA_HOST` (that path
-  sends no `num_ctx`: Selene loaded at 21.4 GB when it was allowed, first live
+  sent no `num_ctx` before #3212: Selene loaded at 21.4 GB when it was allowed, first live
   run). The session then stays in-process; new sessions
   probe fresh and use the shared server again once it is back. An answer the
   model gave but that cannot be read never fails over. The gate's budget is

@@ -219,7 +219,7 @@ describe("ollama backend", () => {
 			model: "m",
 			stream: false,
 			raw: true,
-			options: { temperature: 0, num_predict: 1, seed: 1 },
+			options: { temperature: 0, num_predict: 1, seed: 1, num_ctx: 4096 },
 			logprobs: true,
 			top_logprobs: 20,
 		});

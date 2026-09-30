@@ -626,7 +626,7 @@ describe("shared judge: one judge per machine", () => {
 		expect([r.backend, r.model, r.url]).toEqual(["ollama", SELENE_NAME, LOCAL]);
 	});
 
-	it("pins the shared judge's context window; the unflagged Ollama path sends none", async () => {
+	it("pins the judge's context window on every Ollama path, shared or not (#3212)", async () => {
 		// Ollama 0.34 otherwise sizes Selene's context to free memory: 131072 tokens, 21.9 GB resident (#3162).
 		const store = makeStore([SELENE]);
 		const m = machine({ [LOCAL]: [SELENE_NAME] });
@@ -637,9 +637,18 @@ describe("shared judge: one judge per machine", () => {
 		expect((m.generated[0].options as Record<string, unknown>).num_ctx).toBe(SHARED_JUDGE_NUM_CTX);
 		expect(SHARED_JUDGE_NUM_CTX).toBe(4096);
 		m.generated.length = 0;
+		// Opted out of the shared judge with no node-llama-cpp: the probe lands on the
+		// chat host's Ollama. That path sent no num_ctx and Selene loaded at 131072 (21.3 GB).
 		const plain = createDecider({ fetch: m.fetch, env: { OLLAMA_MODELS: store, EIGHT_S1_SHARED_JUDGE: "0" }, llamacppLoader: missingLoader });
 		await plain.noul("state", "p");
-		expect(m.generated[0].options).toEqual({ temperature: 0, num_predict: 1, seed: 1 });
+		expect(m.generated[0].options).toEqual({ temperature: 0, num_predict: 1, seed: 1, num_ctx: 4096 });
+		// The explicit backend: "ollama" selections, with and without a model.
+		for (const opts of [{ model: SELENE_NAME }, {}]) {
+			m.generated.length = 0;
+			const explicit = createDecider({ ...opts, backend: "ollama", fetch: m.fetch, env: { OLLAMA_HOST: LOCAL } });
+			await explicit.noul("state", "p");
+			expect((m.generated[0].options as Record<string, unknown>).num_ctx).toBe(4096);
+		}
 	});
 });
 

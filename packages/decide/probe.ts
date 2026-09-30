@@ -31,7 +31,7 @@
 
 import { resolveLayaUrl } from "./backends/laya";
 import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
-import { resolveOllamaHost } from "./backends/ollama";
+import { JUDGE_NUM_CTX, resolveOllamaHost } from "./backends/ollama";
 import { LocalServerHttpError, LocalServerResponseError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import { DEFAULT_OLLAMA_BASE_URL, normaliseOllamaHost } from "../local-model-server/ollama-host";
 import type { FetchLike } from "./types";
@@ -122,13 +122,8 @@ export async function listOllamaModels(fetchImpl: FetchLike, host: string, timeo
 	}
 }
 
-/**
- * Context window the shared judge asks for: the same 4096 the in-process
- * backend loads with (llamacpp DEFAULT_CONTEXT_SIZE). A guard prompt is a few
- * hundred tokens, and every client must ask for the same value or the server
- * reloads the model between them.
- */
-export const SHARED_JUDGE_NUM_CTX = 4096;
+/** The shared judge's context window: the one every Ollama judge now asks for (backends/ollama.ts JUDGE_NUM_CTX, #3212). */
+export const SHARED_JUDGE_NUM_CTX = JUDGE_NUM_CTX;
 
 /**
  * True unless EIGHT_S1_SHARED_JUDGE opts out (0, false, off, no). On by
