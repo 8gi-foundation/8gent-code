@@ -1,6 +1,6 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
-exports[`LilEightBadge snapshot of all 6 states is stable 1`] = `
+exports[`LilEightBadge snapshot of all 7 states is stable 1`] = `
 [
   {
     "borderColor": "#8A8078",
@@ -22,6 +22,13 @@ exports[`LilEightBadge snapshot of all 6 states is stable 1`] = `
     "flexShrink": 0,
     "paddingX": 1,
     "state": "working",
+  },
+  {
+    "borderColor": "#E8610A",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "waiting",
   },
   {
     "borderColor": "#47A639",

@@ -79,7 +79,15 @@ interface CommandInputProps {
 	transformInputValue?: (value: string) => string;
 	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
 	allowEmptySubmit?: boolean;
+	/** An approval card is pending: the status line says the turn waits on the
+	 *  person and stops spinning, and the placeholder points at the card (#3118). */
+	approvalPending?: boolean;
 }
+
+/** The status line while an approval card waits on the person (#3118). */
+export const WAITING_LINE = "Waiting for you. Nothing runs until you answer.";
+/** The input placeholder then: the card owns Y, N, E and S. */
+export const WAITING_PLACEHOLDER = "Answer the card above first";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -138,6 +146,7 @@ export function CommandInput({
 	focused = true,
 	transformInputValue,
 	allowEmptySubmit = false,
+	approvalPending = false,
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
@@ -346,7 +355,11 @@ export function CommandInput({
 	return (
 		<Box flexDirection="column" paddingX={1}>
 			{/* Processing status — compact line above input, not replacing it */}
-			{processingStatusLine && (
+			{approvalPending ? (
+				<Box marginBottom={0}>
+					<Text color={t.orange}>{WAITING_LINE}</Text>
+				</Box>
+			) : processingStatusLine && (
 				<Box marginBottom={0}>
 					<AnimatedSpinner
 						color={t.teal}
@@ -385,9 +398,11 @@ export function CommandInput({
 						}}
 						onSubmit={handleSubmit}
 						placeholder={
-							isProcessing
-								? "Queue a follow-up message..."
-								: isVisible
+							approvalPending
+								? WAITING_PLACEHOLDER
+								: isProcessing
+									? "Queue a follow-up message..."
+									: isVisible
 									? ""
 									: (placeholder ?? "Type a command or ask a question...")
 						}

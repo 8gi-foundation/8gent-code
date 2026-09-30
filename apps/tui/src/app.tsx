@@ -1602,6 +1602,7 @@ export function App({
 		lastTurnEndedAt,
 		lastTurnSuccess,
 		idleSinceMs: Date.now() - lastActivityAt,
+		approvalPending: approvalPending !== null,
 	});
 
 	// Onboarding system
@@ -6127,6 +6128,7 @@ export function App({
 								}
 								processingStage={processingStage}
 								showAnimations={showAnimations}
+								approvalPending={isApprovalPending}
 								activeTool={activeTool}
 								stepCount={stepCount}
 								toolCount={toolCount}

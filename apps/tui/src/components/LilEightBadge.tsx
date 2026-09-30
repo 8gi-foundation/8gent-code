@@ -13,12 +13,14 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
 
-type LilEightState = "idle" | "thinking" | "working" | "done" | "error" | "sleep";
+type LilEightState = "idle" | "thinking" | "working" | "waiting" | "done" | "error" | "sleep";
 
 const stateColor: Record<LilEightState, string> = {
 	idle:     t.muted,
 	thinking: t.teal,
 	working:  t.orange,
+	// An approval card is up: the one state that asks for the person (#3118).
+	waiting:  t.orange,
 	done:     t.green,
 	error:    t.red,
 	sleep:    t.dim,
