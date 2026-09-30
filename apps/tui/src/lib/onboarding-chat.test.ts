@@ -5,7 +5,17 @@
 
 import { describe, expect, test } from "bun:test";
 import { ONBOARDING_QUESTIONS } from "../../../../packages/self-autonomy/onboarding";
-import { answerFromInput, placeholderFor, providerCheckLine, questionForChat } from "./onboarding-chat";
+import {
+	SETUP_SKIP_HINT,
+	SETUP_WELCOME_ID,
+	SETUP_WELCOME_PROMPT,
+	answerFromInput,
+	placeholderFor,
+	providerCheckLine,
+	questionForChat,
+	settleSetupTranscript,
+	settledSetupCard,
+} from "./onboarding-chat";
 
 const step = (name: string) => {
 	const q = ONBOARDING_QUESTIONS.find((x) => x.step === name);
@@ -82,5 +92,55 @@ describe("provider checks", () => {
 		expect(providerCheckLine("LM Studio", false, "Get it at lmstudio.ai")).toBe(
 			"LM Studio is not running. Get it at lmstudio.ai",
 		);
+	});
+});
+
+describe("once setup is done, nothing still asks for setup input (#3090)", () => {
+	const welcome = step("language");
+	const card = `Good day. I'm 8gent.\n\nFound on this machine:\nProvider ollama\n\n${SETUP_WELCOME_PROMPT}\n\n${SETUP_SKIP_HINT}`;
+	const msg = (id: string, content: string) => ({ id, content });
+
+	test("the prompt it strips is the welcome's real call to action", () => {
+		expect(welcome.question.endsWith(SETUP_WELCOME_PROMPT)).toBe(true);
+	});
+
+	test("the welcome keeps its greeting and what was found, and loses the prompt and the hint", () => {
+		const settled = settledSetupCard(card);
+		expect(settled).toBe("Good day. I'm 8gent.\n\nFound on this machine:\nProvider ollama");
+		expect(settled).not.toContain("Press Enter to begin");
+		expect(settled).not.toContain("/skip");
+	});
+
+	test("/skip all at the welcome: the welcome stays, settled; other messages are untouched", () => {
+		const before = [msg("sys-1", "Press Enter to begin"), msg(`${SETUP_WELCOME_ID}1`, card)];
+		const after = settleSetupTranscript(before, true);
+		expect(after.map((m) => m.id)).toEqual(["sys-1", `${SETUP_WELCOME_ID}1`]);
+		expect(after[0]).toBe(before[0]);
+		expect(after[1].content).not.toContain("Press Enter to begin");
+	});
+
+	test("ended by a skip later on: the unanswered question goes, answered ones stay", () => {
+		const before = [
+			msg(`${SETUP_WELCOME_ID}1`, card),
+			msg("setup-q-2", "What should I call you?"),
+			msg("user-3", "Ada"),
+			msg("setup-q-4", "Ready to begin?\n\n  1  Yes, let's go\n  2  No, restart later"),
+		];
+		const after = settleSetupTranscript(before, true);
+		expect(after.map((m) => m.id)).toEqual([`${SETUP_WELCOME_ID}1`, "setup-q-2", "user-3"]);
+		expect(after.map((m) => m.content).join("\n")).not.toMatch(/Press Enter to begin|\/skip|Ready to begin/);
+	});
+
+	test("answered to the end: every card stays, only the prompt and hint go", () => {
+		const before = [msg(`${SETUP_WELCOME_ID}1`, card), msg("setup-q-2", "Ready to begin?"), msg("user-3", "1")];
+		const after = settleSetupTranscript(before, false);
+		expect(after.map((m) => m.id)).toEqual(before.map((m) => m.id));
+		expect(after[1]).toBe(before[1]);
+		expect(after[0].content).not.toContain("Press Enter to begin");
+	});
+
+	test("a transcript with no setup cards comes back as it was", () => {
+		const before = [msg("a", "hello"), msg("b", "/skip all")];
+		expect(settleSetupTranscript(before, true)).toEqual(before);
 	});
 });

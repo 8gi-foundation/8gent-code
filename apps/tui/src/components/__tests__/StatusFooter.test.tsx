@@ -126,6 +126,49 @@ describe("BottomBar renders one footer row plus the hint row", () => {
 	});
 });
 
+describe("the System One judge is a footer segment, not a chat line (#3090)", () => {
+	test("no segment while System One is off", async () => {
+		const row = (await frame(160, 48))[0] ?? "";
+		expect(row).not.toContain("judge");
+	});
+
+	test("loading, ready and failed read as one word after 'judge'", () => {
+		for (const judge of ["loading", "ready", "failed"] as const) {
+			const seg = buildFooterSegments({ mode: "Planning", judge }).find((s) => s.key === "judge");
+			expect(seg?.label).toBe("judge");
+			expect(seg?.value).toBe(judge);
+		}
+	});
+
+	test("failed is the look-here colour, like infinite approval", () => {
+		const failed = buildFooterSegments({ mode: "Planning", judge: "failed" }).find((s) => s.key === "judge");
+		const infinite = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
+			(s) => s.key === "approval",
+		);
+		const ready = buildFooterSegments({ mode: "Planning", judge: "ready" }).find((s) => s.key === "judge");
+		expect(failed?.color).toBe(infinite?.color);
+		expect(ready?.color).not.toBe(infinite?.color);
+	});
+
+	test("80x45: loading and failed survive the squeeze; ready gives way", async () => {
+		for (const judge of ["loading", "failed"] as const) {
+			const row = (await frame(80, 45, { judge }))[0] ?? "";
+			expect(row).toContain(`judge ${judge}`);
+			expect(row).toContain("mode Planning ^Y");
+			expect(row.length).toBeLessThanOrEqual(80);
+		}
+		const ready = (await frame(80, 45, { judge: "ready" }))[0] ?? "";
+		expect(ready).not.toContain("judge");
+		expect(ready).toContain("model qwen3.8:27b-mlx");
+	});
+
+	test("160 columns: 'judge ready' shows beside approval", async () => {
+		const row = (await frame(160, 48, { judge: "ready", user: undefined, tokens: "0 tok" }))[0] ?? "";
+		expect(row).toContain("approval ask │ judge ready");
+		expect(row.length).toBeLessThanOrEqual(160);
+	});
+});
+
 describe("footer segments", () => {
 	test("the approval mode prints as a word, never as ?", () => {
 		const seg = buildFooterSegments({ mode: "Planning", permissions: "ask" }).find((s) => s.key === "approval");

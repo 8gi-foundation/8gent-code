@@ -80,20 +80,45 @@ async function main() {
 	await waitFor(() => strip(stdout.written).includes("A short setup follows"), "setup welcome");
 	await waitFor(() => strip(stdout.written).includes("Enter to begin"), "setup placeholder");
 	const mark = stdout.written.length;
-	stdin.feed("/skip all");
-	await waitFor(() => strip(stdout.written.slice(mark)).includes("/skip all"), "typed /skip all");
-	await tick(50);
-	stdin.feed("\r");
+	const perQuestion = process.env.SKIP_MODE === "each";
+	if (perQuestion) {
+		// "/skip" at every question until setup runs out of questions.
+		for (let i = 0; i < 30; i++) {
+			if (strip(stdout.written.slice(mark)).includes("Type a command or ask a question")) break;
+			const at = stdout.written.length;
+			stdin.feed("/skip");
+			await waitFor(() => strip(stdout.written.slice(at)).includes("/skip"), "typed /skip");
+			await tick(50);
+			stdin.feed("\r");
+			await tick(400);
+		}
+	} else {
+		stdin.feed("/skip all");
+		await waitFor(() => strip(stdout.written.slice(mark)).includes("/skip all"), "typed /skip all");
+		await tick(50);
+		stdin.feed("\r");
+	}
 	await waitFor(
 		() => strip(stdout.written.slice(mark)).includes("Type a command or ask a question"),
 		"normal input",
 	);
 	await tick(300);
-	// The input coming back is the whole answer: /skip all leaves no status
-	// line in the transcript, and makes no promise to ask again (#3088).
+	// The input coming back is the whole answer: a skip leaves no status line
+	// in the transcript, and makes no promise to ask again (#3088, #3090).
 	const after = strip(stdout.written.slice(mark));
-	if (after.includes("ask again later") || after.includes("Understood.")) {
-		throw new Error("/skip all left a status line in the chat");
+	if (after.includes("ask again later") || after.includes("Understood.") || after.includes("Onboarding complete")) {
+		throw new Error("a skip left a status line in the chat");
+	}
+	// Setup is over, so no card may still ask for setup input (#3090). A key
+	// forces a fresh frame; the whole chat is read from it.
+	const settledAt = stdout.written.length;
+	stdin.feed("x");
+	await waitFor(() => /❯ x/.test(strip(stdout.written.slice(settledAt))), "a fresh frame");
+	await tick(200);
+	const settled = strip(stdout.written.slice(settledAt));
+	if (!perQuestion && !settled.includes("Good day")) throw new Error("the welcome's greeting is gone");
+	for (const stale of ["Press Enter to begin", "/skip skips a question", "Ready to begin?"]) {
+		if (settled.includes(stale)) throw new Error(`setup is over but the chat still says "${stale}"`);
 	}
 	const user = JSON.parse(fs.readFileSync(path.join(home, ".8gent", "user.json"), "utf-8"));
 	app.unmount();

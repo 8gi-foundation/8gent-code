@@ -14,7 +14,7 @@
 import { Box, useStdout } from "ink";
 import React from "react";
 import { DjDeck } from "./DjDeck.js";
-import { FooterHints, StatusSegments, fmSegmentWidth } from "./StatusFooter.js";
+import { FooterHints, type JudgeState, StatusSegments, fmSegmentWidth } from "./StatusFooter.js";
 
 export type FooterMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
@@ -36,6 +36,8 @@ interface BottomBarProps {
 	/** Smoothed output tokens-per-second from the most recent agent step.
 	 *  0/undefined hides the indicator. */
 	tokensPerSecond?: number;
+	/** System One judge warm-up; undefined when System One is off. */
+	judge?: JudgeState;
 }
 
 function resolveUser(override?: string): string | undefined {
@@ -69,6 +71,7 @@ export function BottomBar(props: BottomBarProps) {
 							providersLive: props.ready,
 							providersTotal: props.total,
 							user: resolveUser(props.user),
+							judge: props.judge,
 						}}
 					/>
 				}

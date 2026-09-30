@@ -120,6 +120,9 @@ import {
 	placeholderFor,
 	providerCheckLine,
 	questionForChat,
+	SETUP_SKIP_HINT,
+	SETUP_WELCOME_ID,
+	settleSetupTranscript,
 } from "./lib/onboarding-chat.js";
 
 /** How setup names the local engines it checks. */
@@ -160,6 +163,7 @@ import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { BottomBar } from "./components/BottomBar.js";
+import type { JudgeState } from "./components/StatusFooter.js";
 import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
@@ -206,7 +210,10 @@ import {
 	planStepsFromText,
 	type OrchestrationAgentSnapshot,
 } from "./lib/activity-rail-derivation.js";
-import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
+import {
+	startSystemOneWarmup,
+	systemOneJudgeWarm,
+} from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 
@@ -2002,18 +2009,24 @@ export function App({
 	// System One (EIGHT_SYSTEM_ONE=1): load the judge in the background at
 	// startup so the user's first shell command is not the one that waits for
 	// the model load. Flag off: startSystemOneWarmup returns null, nothing loads.
+	// Its state is status, so it lives in the footer, not the chat (#3090). A
+	// failed load's reason reaches the person in the block message of the
+	// shell command it refuses, which retries the load.
+	const [judgeState, setJudgeState] = useState<JudgeState | undefined>(undefined);
 	useEffect(() => {
 		const warmup = startSystemOneWarmup();
 		if (!warmup) return;
-		addSystemMessage("System One judge loading...");
+		setJudgeState("loading");
 		warmup.then(
-			() => addSystemMessage("System One judge ready."),
-			(err: Error) =>
-				addSystemMessage(
-					`System One judge failed to load (${err?.message ?? err}). Shell commands fail closed until it loads.`,
-				),
+			() => setJudgeState("ready"),
+			() => setJudgeState("failed"),
 		);
-	}, [addSystemMessage]);
+	}, []);
+	// A failed warm-up does not stick: the next gate call retries the load.
+	// When a turn ends, a judge that has since answered clears "failed".
+	useEffect(() => {
+		if (judgeState === "failed" && !isProcessing && systemOneJudgeWarm()) setJudgeState("ready");
+	}, [judgeState, isProcessing]);
 
 	/**
 	 * Append a message to a specific tab's history. Always updates
@@ -2515,11 +2528,11 @@ export function App({
 						{
 							// 8gent asks: setup questions are its own words, drawn as
 							// its messages, not as dim system notices.
-							id: `setup-q-${Date.now()}`,
+							id: `${SETUP_WELCOME_ID}${Date.now()}`,
 							role: "assistant" as const,
 							// One greeting (the question opens with it), then one quiet
 							// line on how to skip. Intro audit #12: fewer labels first.
-							content: `${question.question}\n\n/skip skips a question. /skip all skips the setup.`,
+							content: `${question.question}\n\n${SETUP_SKIP_HINT}`,
 							timestamp: new Date(),
 						},
 					]);
@@ -3069,6 +3082,8 @@ export function App({
 							// No reply in the transcript (#3088): the input coming back is
 							// the answer. The old line promised "I'll ask again later", but
 							// skipAll marks setup complete and nothing ever asks again.
+							// Nor may a setup card still ask for Enter (#3090).
+							setMessages((prev) => settleSetupTranscript(prev, true));
 						} else {
 							const skipped = onboardingManager.skipQuestion();
 							const nextQ = skipped ? await resolveSetupChecks(skipped) : null;
@@ -3076,12 +3091,18 @@ export function App({
 								applyOnboardingQuestion(nextQ);
 								addSetupQuestion(questionForChat(nextQ));
 							} else {
+								// The last question skipped ends setup exactly as /skip all
+								// does (#3090). skipQuestion alone never marked it complete,
+								// so the next launch opened setup with no question to ask.
+								onboardingManager.skipAll();
 								setShowOnboarding(false);
 								setOnboardingSelectChoices(null);
 								setOnboardingProviderCheck(null);
 								setOnboardingAgentDefault(null);
 								setViewMode("chat");
-								addSystemMessage("Onboarding complete. Let's begin.");
+								// Same as /skip all (#3090): the input coming back is the
+								// answer, and no setup card is left asking for one.
+								setMessages((prev) => settleSetupTranscript(prev, true));
 							}
 						}
 					}
@@ -4984,6 +5005,7 @@ export function App({
 					setOnboardingProviderCheck(null);
 					setOnboardingAgentDefault(null);
 					setViewMode("chat");
+					setMessages((prev) => settleSetupTranscript(prev, false));
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
 					addSystemMessage(
@@ -6095,6 +6117,7 @@ export function App({
 					mode={agentMode}
 					isProcessing={isProcessing}
 					tokensPerSecond={tokensPerSecond}
+					judge={judgeState}
 				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>

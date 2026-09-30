@@ -229,6 +229,16 @@ export function startSystemOneWarmup(
 	return p;
 }
 
+/**
+ * True once the judge has given a real model verdict (warm-up or a gate
+ * call). The TUI footer reads it to clear "judge failed" after a later gate
+ * call loaded the judge: a failed warm-up does not stick, so neither may its
+ * status.
+ */
+export function systemOneJudgeWarm(): boolean {
+	return warmed;
+}
+
 function fmtP(p: number): string {
 	return Number.isFinite(p) ? p.toFixed(4) : "NaN";
 }
