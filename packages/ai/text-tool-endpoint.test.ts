@@ -11,19 +11,27 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { describeLocalTurnFailure, isLocalTurnFailureReply } from "../eight/local-turn-error";
 import { TurnTimeoutError } from "../eight/turn-timeout";
 import {
+	_resetQwenVariantCache,
+	answerFromRawQwen,
 	buildTextToolCall,
 	extractUsage,
 	isNativeToolParserFailure,
 	NATIVE_TOOL_MARKUP_REMINDER,
+	ollamaRootFromEndpoint,
+	qwenVariantFromModelfile,
+	renderQwenChatML,
 	type TextToolUsage,
 } from "./text-tool-endpoint";
+import { runTextToolAgent } from "./text-tool-loop";
 
 const realFetch = globalThis.fetch;
 
 afterEach(() => {
 	globalThis.fetch = realFetch;
+	_resetQwenVariantCache();
 });
 
 function stubEndpoint(body: Record<string, unknown>): void {
@@ -172,10 +180,18 @@ const OLLAMA_PARSER_EOF = JSON.stringify({
 type SeenRequest = { messages: Array<{ role: string; content: string }> };
 
 // Serve a scripted sequence of responses, recording every request body.
-function stubSequence(responses: Array<() => Response>): SeenRequest[] {
+// Ollama's /api/show (the renderer lookup on the parser-failure path) is
+// answered separately: 404 by default, so the raw path is skipped, or the given
+// Modelfile. It is not recorded in `seen` and does not consume the sequence.
+function stubSequence(responses: Array<() => Response>, modelfile?: string): SeenRequest[] {
 	const seen: SeenRequest[] = [];
 	let i = 0;
-	globalThis.fetch = (async (_input: unknown, init?: { body?: string }) => {
+	globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+		if (String(input).endsWith("/api/show")) {
+			return modelfile === undefined
+				? new Response("not found", { status: 404 })
+				: Response.json({ modelfile });
+		}
 		seen.push(JSON.parse(init?.body ?? "{}") as SeenRequest);
 		const next = responses[Math.min(i, responses.length - 1)];
 		i++;
@@ -259,9 +275,10 @@ describe("buildTextToolCall recovers from Ollama's native tool parser 500", () =
 
 		expect(seen.length).toBe(2);
 		expect(err).toBeInstanceOf(Error);
-		expect(err.message).toStartWith("ollama chat completions 500:");
+		expect(err.message).toStartWith("ollama chat completions:");
 		expect(err.message).toContain("built-in tool-call parser");
-		expect(err.message).toContain("retried once");
+		expect(err.message).toContain("Raw re-request without the parser: skipped");
+		expect(err.message).toContain("Retried once");
 		expect(err.message).toContain("EOF");
 	});
 
@@ -304,17 +321,21 @@ describe("buildTextToolCall recovers a reply Ollama's parser silently swallowed"
 		expect(seen[1].messages.at(-1)).toEqual({ role: "user", content: NATIVE_TOOL_MARKUP_REMINDER });
 	});
 
-	it("returns empty after one retry instead of looping", async () => {
+	it("fails with a clear error after one retry instead of looping or returning empty", async () => {
 		const seen = stubSequence([swallowed, swallowed, ok("never reached")]);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
-		expect(await call([{ role: "user", content: "hi" }])).toBe("");
+		const err = (await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e)) as Error;
+		expect(err).toBeInstanceOf(Error);
+		expect(err.message).toContain("built-in tool-call parser");
+		expect(err.message).toContain("empty reply for 113 generated tokens");
 		expect(seen.length).toBe(2);
 	});
 
 	it("uses one retry in total when a 500 is followed by a swallowed reply", async () => {
 		const seen = stubSequence([parserEof, swallowed, ok("never reached")]);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
-		expect(await call([{ role: "user", content: "hi" }])).toBe("");
+		const err = (await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e)) as Error;
+		expect(err.message).toContain("EOF");
 		expect(seen.length).toBe(2);
 	});
 
@@ -340,5 +361,235 @@ describe("buildTextToolCall recovers a reply Ollama's parser silently swallowed"
 			{ promptTokens: 50, completionTokens: 113, totalTokens: 163 },
 			{ promptTokens: 9, completionTokens: 2, totalTokens: 11 },
 		]);
+	});
+});
+
+// ── Root-cause recovery: Ollama's raw generate path skips the model's PARSER ──
+// Reproduced on 2026-09-30 against Ollama 0.34.4 + qwen3.8:27b-mlx: a reply of
+// `<tool_call>\n{json}\n</tool_call>` is a 500 "EOF" on /v1/chat/completions,
+// /api/chat and /api/generate, and a 200 with the text untouched on
+// /api/generate with raw:true.
+describe("renderQwenChatML (mirror of Ollama's qwen3.5 / qwen3.8 renderer)", () => {
+	const convo = [
+		{ role: "system" as const, content: "  sys rules  " },
+		{ role: "user" as const, content: "fix it" },
+		{ role: "assistant" as const, content: "```tool_call\n{}\n```" },
+		{ role: "user" as const, content: "Tool result: ok" },
+	];
+
+	it("qwen3.8: xhigh reasoning line in the system turn, think block on every assistant turn", () => {
+		expect(renderQwenChatML(convo, "qwen3.8")).toBe(
+			"<|im_start|>system\nReasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer.\n\nsys rules<|im_end|>\n" +
+				"<|im_start|>user\nfix it<|im_end|>\n" +
+				"<|im_start|>assistant\n<think>\n\n</think>\n\n```tool_call\n{}\n```<|im_end|>\n" +
+				"<|im_start|>user\nTool result: ok<|im_end|>\n" +
+				"<|im_start|>assistant\n<think>\n",
+		);
+	});
+
+	it("qwen3.5: no reasoning line, no think block on assistant turns before the last query", () => {
+		expect(renderQwenChatML(convo, "qwen3.5")).toBe(
+			"<|im_start|>system\nsys rules<|im_end|>\n" +
+				"<|im_start|>user\nfix it<|im_end|>\n" +
+				"<|im_start|>assistant\n```tool_call\n{}\n```<|im_end|>\n" +
+				"<|im_start|>user\nTool result: ok<|im_end|>\n" +
+				"<|im_start|>assistant\n<think>\n",
+		);
+	});
+
+	it("renders consecutive tool messages as one <tool_response> user turn", () => {
+		const out = renderQwenChatML(
+			[
+				{ role: "user", content: "q" },
+				{ role: "tool", content: "a" },
+				{ role: "tool", content: "b" },
+			],
+			"qwen3.5",
+		);
+		expect(out).toContain(
+			"<|im_start|>user\n<tool_response>\na\n</tool_response>\n<tool_response>\nb\n</tool_response><|im_end|>\n",
+		);
+	});
+});
+
+describe("raw-path helpers", () => {
+	it("answerFromRawQwen keeps only the text after </think>", () => {
+		expect(answerFromRawQwen("reasoning here\n</think>\n\nThe answer.<|im_end|>")).toBe("The answer.");
+		expect(answerFromRawQwen("still thinking, cut off")).toBe("");
+	});
+
+	it("qwenVariantFromModelfile reads the RENDERER line only", () => {
+		expect(qwenVariantFromModelfile("FROM x\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n")).toBe("qwen3.8");
+		expect(qwenVariantFromModelfile("FROM x\nRENDERER qwen3.5\n")).toBe("qwen3.5");
+		expect(qwenVariantFromModelfile("FROM x\nRENDERER glm47\n")).toBeNull();
+		expect(qwenVariantFromModelfile("FROM x\nPARSER qwen3.5\n")).toBeNull();
+	});
+
+	it("ollamaRootFromEndpoint strips the chat suffix in any convention", () => {
+		expect(ollamaRootFromEndpoint("http://127.0.0.1:21434/v1/chat/completions")).toBe("http://127.0.0.1:21434");
+		expect(ollamaRootFromEndpoint("http://h:11434/v1/")).toBe("http://h:11434");
+		expect(ollamaRootFromEndpoint("http://h:11434")).toBe("http://h:11434");
+	});
+});
+
+describe("buildTextToolCall recovers through Ollama's raw path", () => {
+	const QWEN38 = "FROM qwen3.8:27b-mlx\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n";
+	const NATIVE_REPLY = '<tool_call>\n{"name": "run_command", "arguments": {"command": "bun test"}}\n</tool_call>';
+	const rawOk = (response: string) => () =>
+		Response.json({ response, done: true, prompt_eval_count: 40, eval_count: 21 });
+
+	type Seen = { url: string; body: Record<string, unknown> };
+	function stubRouted(responses: Array<() => Response>, modelfile: string | null): Seen[] {
+		const seen: Seen[] = [];
+		let i = 0;
+		globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+			const url = String(input);
+			if (url.endsWith("/api/show")) {
+				return modelfile === null ? new Response("nope", { status: 404 }) : Response.json({ modelfile });
+			}
+			seen.push({ url, body: JSON.parse(init?.body ?? "{}") });
+			const next = responses[Math.min(i, responses.length - 1)];
+			i++;
+			return next();
+		}) as unknown as typeof fetch;
+		return seen;
+	}
+
+	it("on a parser 500, re-requests the SAME conversation raw and returns the model's text untouched", async () => {
+		const seen = stubRouted([parserEof, rawOk(`I will run the tests.\n</think>\n\n${NATIVE_REPLY}`)], QWEN38);
+		const usage: TextToolUsage[] = [];
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "qwen3.8:27b-mlx",
+			baseUrl: "http://127.0.0.1:21434",
+			onUsage: (u) => usage.push(u),
+		});
+		const content = await call([
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "fix the tests" },
+		]);
+
+		expect(content).toBe(NATIVE_REPLY);
+		expect(seen.map((s) => s.url)).toEqual([
+			"http://127.0.0.1:21434/v1/chat/completions",
+			"http://127.0.0.1:21434/api/generate",
+		]);
+		const raw = seen[1].body;
+		expect(raw.raw).toBe(true);
+		expect(raw.model).toBe("qwen3.8:27b-mlx");
+		expect(String(raw.prompt)).toContain("<|im_start|>user\nfix the tests<|im_end|>\n");
+		expect(String(raw.prompt)).toEndWith("<|im_start|>assistant\n<think>\n");
+		// No reminder: the model is asked the same question, not a different one.
+		expect(String(raw.prompt)).not.toContain(NATIVE_TOOL_MARKUP_REMINDER);
+		expect(usage).toEqual([{ promptTokens: 40, completionTokens: 21, totalTokens: 61 }]);
+	});
+
+	it("also recovers a reply the parser silently swallowed", async () => {
+		const swallowed = () =>
+			Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 5, completion_tokens: 30, total_tokens: 35 } });
+		const seen = stubRouted([swallowed, rawOk("ok\n</think>\n\nAll tests pass.")], QWEN38);
+		const call = buildTextToolCall({ provider: "ollama", model: "m" });
+		expect(await call([{ role: "user", content: "hi" }])).toBe("All tests pass.");
+		expect(seen.length).toBe(2);
+	});
+
+	it("falls back to the one reminder retry when the raw request fails", async () => {
+		const seen = stubRouted(
+			[parserEof, () => new Response("boom", { status: 500 }), ok("```tool_call\n{\"name\":\"x\"}\n```")],
+			QWEN38,
+		);
+		const call = buildTextToolCall({ provider: "ollama", model: "m" });
+		expect(await call([{ role: "user", content: "hi" }])).toContain("```tool_call");
+		expect(seen.map((s) => new URL(s.url).pathname)).toEqual([
+			"/v1/chat/completions",
+			"/api/generate",
+			"/v1/chat/completions",
+		]);
+		expect((seen[2].body.messages as Array<{ content: string }>).at(-1)?.content).toBe(
+			NATIVE_TOOL_MARKUP_REMINDER,
+		);
+	});
+
+	it("names every step it tried when all recoveries fail, and never returns empty", async () => {
+		const seen = stubRouted([parserEof, rawOk("thinking forever, never closed"), parserEof], QWEN38);
+		const call = buildTextToolCall({ provider: "ollama", model: "m" });
+		const err = (await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e)) as Error;
+		expect(seen.length).toBe(3);
+		expect(err).toBeInstanceOf(Error);
+		expect(err.message).toContain("native tool-call markup");
+		expect(err.message).toContain("Raw re-request without the parser: failed");
+		expect(err.message).toContain("no answer after the think block");
+		expect(err.message).toContain("Retried once with a format reminder");
+	});
+
+	it("skips the raw path for a model whose renderer it cannot reproduce", async () => {
+		const seen = stubRouted([parserEof, ok("recovered")], "FROM llama\nTEMPLATE {{ .Prompt }}\n");
+		const call = buildTextToolCall({ provider: "ollama", model: "m" });
+		expect(await call([{ role: "user", content: "hi" }])).toBe("recovered");
+		expect(seen.every((s) => s.url.endsWith("/v1/chat/completions"))).toBe(true);
+	});
+});
+
+describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never empty", () => {
+	const QWEN38 = "RENDERER qwen3.8\n";
+	const tools = [
+		{
+			spec: { name: "run_command", description: "run", parameters: { type: "object", properties: {} } },
+			run: async (args: Record<string, unknown>) => `ran ${String(args.command)}: 5 pass`,
+		},
+	];
+
+	function stubScript(steps: Array<(url: string) => Response>): string[] {
+		const urls: string[] = [];
+		let i = 0;
+		globalThis.fetch = (async (input: unknown) => {
+			const url = String(input);
+			if (url.endsWith("/api/show")) return Response.json({ modelfile: QWEN38 });
+			urls.push(new URL(url).pathname);
+			const step = steps[Math.min(i, steps.length - 1)];
+			i++;
+			return step(url);
+		}) as unknown as typeof fetch;
+		return urls;
+	}
+
+	it("recovers: the native call from the raw reply runs, and the turn ends with the model's answer", async () => {
+		const urls = stubScript([
+			() => parserEof(),
+			() =>
+				Response.json({
+					response:
+						'run them\n</think>\n\n<tool_call>\n<function=run_command>\n<parameter=command>\nbun test\n</parameter>\n</function>\n</tool_call>',
+				}),
+			() => ok("DONE: All 5 tests pass; the off-by-one in paginate was the bug.")(),
+		]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx" });
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "fix the tests" }],
+			tools,
+			call,
+			maxRounds: 4,
+		});
+		expect(result.toolLog.map((t) => [t.name, t.args])).toEqual([["run_command", { command: "bun test" }]]);
+		expect(result.content).toContain("All 5 tests pass");
+		expect(urls.slice(0, 3)).toEqual(["/v1/chat/completions", "/api/generate", "/v1/chat/completions"]);
+	});
+
+	it("unrecoverable: the turn rejects with a clear message the agent shows, never an empty reply", async () => {
+		stubScript([() => parserEof()]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx" });
+		const err = (await runTextToolAgent({
+			messages: [{ role: "user", content: "fix the tests" }],
+			tools,
+			call,
+		}).catch((e: unknown) => e)) as Error;
+		const failure = describeLocalTurnFailure(err, {
+			endpoint: "http://localhost:11434/v1/chat/completions",
+			timeoutMs: 60_000,
+		});
+		expect(failure.message.trim().length).toBeGreaterThan(0);
+		expect(failure.message).toStartWith("The local model turn could not complete:");
+		expect(failure.message).toContain("built-in tool-call parser");
+		expect(isLocalTurnFailureReply(failure.message)).toBe(true);
 	});
 });

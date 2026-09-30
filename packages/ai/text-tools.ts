@@ -511,19 +511,89 @@ function locateBareCalls(text: string, known: Set<string>): LocatedBlock[] {
 	return blocks;
 }
 
+// Qwen's native tool-call markup. The model falls back to it under pressure;
+// Ollama's built-in parser rejects it (a 500 or an emptied reply), so the
+// endpoint re-requests in raw mode and the markup reaches us here instead.
+const NATIVE_TAG_OPEN = "<tool_call>";
+const NATIVE_TAG_CLOSE = "</tool_call>";
+
+/**
+ * Parse the body of one native `<tool_call>` block: either a JSON object
+ * `{"name": ..., "arguments": {...}}` or Qwen's XML form
+ * `<function=NAME><parameter=KEY>VALUE</parameter>...</function>`. Parameter
+ * values stay strings (one leading and one trailing newline trimmed), except
+ * a value that is a JSON object or array, which is parsed. Null when the body
+ * is neither. Never throws.
+ */
+function parseNativeBody(body: string): ParsedToolCall | null {
+	const trimmed = body.trim();
+	if (trimmed.startsWith("{")) {
+		const obj = scanBalancedObject(trimmed, 0);
+		return obj ? parseCall(trimmed.slice(obj.open, obj.end)) : null;
+	}
+	const fn = /^<function=([^>\s]+)>/.exec(trimmed);
+	if (!fn) return null;
+	const args: Record<string, unknown> = {};
+	const param = /<parameter=([^>\s]+)>([\s\S]*?)<\/parameter>/g;
+	let m: RegExpExecArray | null;
+	while ((m = param.exec(trimmed)) !== null) {
+		const value = m[2].replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+		const t = value.trim();
+		let parsed: unknown = value;
+		if (t.startsWith("{") || t.startsWith("[")) {
+			const j = parseJsonLoose(t);
+			if (typeof j === "object" && j !== null) parsed = j;
+		}
+		args[m[1]] = parsed;
+	}
+	return { name: fn[1], arguments: args };
+}
+
+/**
+ * Locate native `<tool_call>...</tool_call>` blocks (the tag must start its
+ * line; an unclosed block runs to the end of the text). A block whose call
+ * names a registered tool (`known`) is a call; any other block is still
+ * located, with call null, so stripToolCalls leaves no markup in the prose.
+ */
+function locateNativeCalls(text: string, known: Set<string>): LocatedBlock[] {
+	const blocks: LocatedBlock[] = [];
+	let from = 0;
+	while (from < text.length) {
+		const open = text.indexOf(NATIVE_TAG_OPEN, from);
+		if (open === -1) break;
+		const lineStart = text.lastIndexOf("\n", open - 1) + 1;
+		if (text.slice(lineStart, open).trim() !== "") {
+			from = open + NATIVE_TAG_OPEN.length;
+			continue;
+		}
+		const bodyStart = open + NATIVE_TAG_OPEN.length;
+		const close = text.indexOf(NATIVE_TAG_CLOSE, bodyStart);
+		const bodyEnd = close === -1 ? text.length : close;
+		const end = close === -1 ? text.length : close + NATIVE_TAG_CLOSE.length;
+		const call = parseNativeBody(text.slice(bodyStart, bodyEnd));
+		blocks.push({ fenceStart: lineStart, end, call: call && known.has(call.name) ? call : null });
+		from = end;
+	}
+	return blocks;
+}
+
 /**
  * Every tool call in `text`. The ```tool_call format always wins: bare JSON
- * calls are only looked for when `knownTools` is given and no fenced
- * tool_call block in the reply parsed.
+ * calls and native `<tool_call>` markup are only looked for when `knownTools`
+ * is given and no fenced tool_call block in the reply parsed.
  */
 function locateAllCalls(text: string, knownTools?: Iterable<string>): LocatedBlock[] {
 	const fenced = locateBlocks(text);
 	if (!knownTools || fenced.some((b) => b.call)) return fenced;
 	const known = new Set(knownTools);
 	if (known.size === 0) return fenced;
-	const bare = locateBareCalls(text, known);
-	if (bare.length === 0) return fenced;
-	return [...fenced, ...bare].sort((a, b) => a.fenceStart - b.fenceStart);
+	const native = locateNativeCalls(text, known);
+	// A bare JSON object inside a native block belongs to that block.
+	const inNative = (b: LocatedBlock) =>
+		native.some((n) => b.fenceStart < n.end && b.end > n.fenceStart);
+	const bare = locateBareCalls(text, known).filter((b) => !inNative(b));
+	if (bare.length === 0 && native.length === 0) return fenced;
+	return [...fenced, ...native, ...bare].sort((a, b) => a.fenceStart - b.fenceStart);
 }
 
 export type ParseOptions = {
