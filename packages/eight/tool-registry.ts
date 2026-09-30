@@ -192,14 +192,26 @@ export class ToolRegistry {
 		return loaded;
 	}
 
-	/** Get the current active tool set for AI SDK */
+	/**
+	 * Get the current active tool set for AI SDK. The set is append-only
+	 * (#3222): Map order is insertion order, loadCategory only adds names it
+	 * does not have, and registerExternalTool never redefines one. A loaded
+	 * category therefore lands after the tools already sent, and the serialized
+	 * list of an earlier turn stays a byte-identical prefix of the next.
+	 */
 	getTools(): ToolSet {
 		return Object.fromEntries(this.activeTools) as ToolSet;
 	}
 
-	/** Register an external tool (e.g. from extensions) */
-	registerExternalTool(name: string, handler: Function): void {
+	/**
+	 * Register an external tool (e.g. from extensions). A name already in the
+	 * set is left as it is: redefining it would change bytes mid-list (#3222)
+	 * and let an extension shadow a built-in such as read_file.
+	 */
+	registerExternalTool(name: string, handler: Function): boolean {
+		if (this.activeTools.has(name)) return false;
 		this.activeTools.set(name, handler as unknown as ToolSet[string]);
+		return true;
 	}
 
 	/** Which categories are currently loaded */
