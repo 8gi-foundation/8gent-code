@@ -75,6 +75,11 @@ interface CommandInputProps {
 	injectedText?: string | null;
 	/** Whether the input is focused (false when non-chat views are active) */
 	focused?: boolean;
+	/**
+	 * Another surface has the keyboard (the DJ deck's keys, #3188): the text
+	 * field takes no keys at all, so a deck key never types into the chat.
+	 */
+	typingPaused?: boolean;
 	/** Rewrite the input on each change (e.g. consume a lone pasted file path into an attachment) */
 	transformInputValue?: (value: string) => string;
 	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
@@ -144,6 +149,7 @@ export function CommandInput({
 	onSystemMessage,
 	injectedText = null,
 	focused = true,
+	typingPaused = false,
 	transformInputValue,
 	allowEmptySubmit = false,
 	approvalPending = false,
@@ -383,6 +389,7 @@ export function CommandInput({
 				{/* Text input with ghost overlay */}
 				<Box>
 					<BufferedTextInput
+						focus={!typingPaused}
 						value={value}
 						onChange={(v) => {
 							// Any manual edit exits history navigation and updates the draft

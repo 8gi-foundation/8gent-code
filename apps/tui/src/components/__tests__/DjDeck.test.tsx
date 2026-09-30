@@ -1,187 +1,144 @@
 /**
- * DjDeck snapshot tests (#2341).
- *
- * The stateful DjDeck component drives audio polling and useInput, so we
- * cover the two render shapes via the pure render helpers it exports:
- *   - StereoDisplay         (expanded, three-row stereo)
- *   - CollapsedDjDeckStrip  (single-line strip, height 1)
- *
- * Pattern mirrors HeaderBar.test.tsx: shallow render, snapshot stable
- * top-level structural props.
+ * The compact DJ deck (James, 2026-09-30): one row while a track plays, two
+ * while the deck has the keyboard, labelled DJ, with car-stereo key caps that
+ * show keys a normal terminal delivers (#3188).
  */
 
 import { describe, expect, test } from "bun:test";
-import React from "react";
-import { CollapsedDjDeckStrip, StereoDisplay, djKey } from "../DjDeck";
+import { EventEmitter } from "node:events";
+import { Box, render, renderToString } from "ink";
+import type React from "react";
+import stringWidth from "string-width";
+import { DJ_KEYS, DjKeysRow, DjRow, FmFooterSegment, djControl } from "../DjDeck";
 
-function shallow<T>(node: React.ReactElement): T {
-	return node.props as T;
+const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const strip = (s: string) => s.replace(SGR, "");
+/** The row's flexible gap collapsed to its two-space minimum. */
+const tight = (s: string) => s.replace(/ {3,}/g, "  ");
+
+function frame(node: React.ReactElement, width = 80): string {
+	return strip(renderToString(<Box width={width}>{node}</Box>, { columns: width }));
 }
 
-describe("DjDeck — collapsed strip", () => {
-	test("renders a single-line strip with height 1", () => {
-		const el = CollapsedDjDeckStrip({
-			playing: true,
-			track: "Lazer Dim 700 — Lottery",
-			tick: 3,
-		});
-		const props = shallow<{ width: string; height: number; flexShrink: number }>(el);
-		expect(props.width).toBe("100%");
-		expect(props.height).toBe(1);
-		expect(props.flexShrink).toBe(0);
+const FELA = {
+	paused: false,
+	track: "No Agreement (LP)",
+	artist: "Fela Kuti",
+	keyLabel: "Key: F minor (est.)",
+	elapsed: "1:15",
+	duration: "31:05",
+	volume: 60,
+	keysActive: false,
+};
+
+describe("the DJ row", () => {
+	test("one row: DJ, the track, the artist, the key, the clock, the volume and the ^D cap", () => {
+		const f = frame(<DjRow {...FELA} />, 160);
+		expect(f.split("\n")).toHaveLength(1);
+		expect(tight(f)).toBe(
+			"DJ ▶ No Agreement (LP)  Fela Kuti  Key: F minor (est.)  1:15 / 31:05  vol 60%  [^D] keys",
+		);
+		expect(f).not.toContain("8GENT FM");
 	});
 
-	test("renders idle placeholder when no track", () => {
-		const el = CollapsedDjDeckStrip({ playing: false, track: "", tick: 0 });
-		expect(el).toBeDefined();
-		const props = shallow<{ height: number }>(el);
-		// Even with no track the strip stays in chrome.
-		expect(props.height).toBe(1);
+	test("fits 80 columns with a long title and many artists; the key, clock and cap stay whole", () => {
+		const f = frame(
+			<DjRow
+				{...FELA}
+				track="An Extremely Long Track Title That Goes On And On Past Any Reasonable Width (Remastered)"
+				artist="Fela Kuti, Africa 70, Ginger Baker, Roy Ayers, Tony Allen"
+				showVolume={false}
+			/>,
+		);
+		expect(f.split("\n")).toHaveLength(1);
+		expect(stringWidth(f)).toBeLessThanOrEqual(80);
+		expect(f).toContain("Key: F minor (est.)");
+		expect(f).toContain("1:15 / 31:05  [^D] keys");
 	});
 
-	test("matrix snapshot across playing / track-length / tick", () => {
-		const matrix = [
-			{ playing: true, track: "Short", tick: 0 },
-			{ playing: true, track: "Short", tick: 7 },
-			{ playing: false, track: "Short", tick: 0 },
-			{
-				playing: true,
-				track:
-					"A Very Long Track Title That Should Be Truncated By The Strip Renderer",
-				tick: 12,
+	test("at 80 columns Fela Kuti's row keeps the name, the artist and the key whole", () => {
+		const f = frame(<DjRow {...FELA} showVolume={false} />);
+		expect(tight(f)).toBe(
+			"DJ ▶ No Agreement (LP)  Fela Kuti  Key: F minor (est.)  1:15 / 31:05  [^D] keys",
+		);
+		expect(stringWidth(f)).toBeLessThanOrEqual(80);
+	});
+
+	test("paused and muted say so in words, not only in colour", () => {
+		const f = frame(<DjRow {...FELA} paused volume={0} />, 160);
+		expect(f).toStartWith("DJ ❚❚ ");
+		expect(f).toContain("muted");
+	});
+
+	test("while the deck has the keyboard the row drops its ^D cap: the caps are on the next row", () => {
+		expect(frame(<DjRow {...FELA} keysActive />, 160)).not.toContain("[^D]");
+	});
+
+	test("never a placeholder artist", () => {
+		expect(frame(<DjRow {...FELA} artist="" />, 160)).toMatch(/^DJ ▶ No Agreement \(LP\) +Key/);
+	});
+});
+
+describe("the key caps (car stereo)", () => {
+	test("show the key and its symbol, in stereo order, and fit 80 columns", () => {
+		const f = frame(<DjKeysRow volume={60} />);
+		expect(f.trim()).toBe("[B ◀◀] [Space ▶❚] [N ▶▶] [S ■]  [-] [+] vol 60%  [M] mute  [Esc] chat");
+		expect(stringWidth(f)).toBeLessThanOrEqual(80);
+	});
+
+	test("every cap draws one cell per character: no two-cell emoji transport symbols", () => {
+		for (const k of DJ_KEYS) {
+			expect(stringWidth(k.cap)).toBe([...k.cap].length);
+			expect(k.cap).not.toMatch(/[⏯⏭⏮⏹]/);
+		}
+	});
+
+	test("the keys are plain keys a normal terminal delivers, and each cap's key does what it says", () => {
+		expect(djControl("b")).toBe("prev");
+		expect(djControl(" ")).toBe("pause");
+		expect(djControl("n")).toBe("next");
+		expect(djControl("s")).toBe("stop");
+		expect(djControl("-")).toBe("down");
+		expect(djControl("+")).toBe("up");
+		expect(djControl("=")).toBe("up");
+		expect(djControl("m")).toBe("mute");
+		expect(djControl("x")).toBeNull();
+		expect(djControl(undefined)).toBeNull();
+	});
+
+	test("a screen reader hears the controls in words", async () => {
+		const out: string[] = [];
+		const stdout = Object.assign(new EventEmitter(), {
+			columns: 80,
+			rows: 10,
+			isTTY: false,
+			write: (s: string) => {
+				out.push(s);
+				return true;
 			},
-			{ playing: false, track: "", tick: 0 },
-		].map((cfg, idx) => {
-			const el = CollapsedDjDeckStrip(cfg);
-			const top = shallow<{ width: string; height: number; flexShrink: number }>(el);
-			return {
-				idx,
-				width: top.width,
-				height: top.height,
-				flexShrink: top.flexShrink,
-				playing: cfg.playing,
-				trackLen: cfg.track.length,
-			};
 		});
-		expect(matrix).toMatchSnapshot();
+		const app = render(<DjKeysRow />, {
+			stdout: stdout as unknown as NodeJS.WriteStream,
+			isScreenReaderEnabled: true,
+			patchConsole: false,
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		app.unmount();
+		const spoken = strip(out.join(""));
+		expect(spoken).toContain("Space play or pause");
+		expect(spoken).toContain("Escape back to chat");
+		expect(spoken).not.toContain("▶❚");
 	});
 });
 
-describe("DjDeck — expanded stereo", () => {
-	test("renders a bordered three-row column", () => {
-		const el = StereoDisplay({
-			playing: true,
-			track: "8gent FM",
-			artist: "Instrumental",
-			elapsed: "0:14",
-			duration: "3:21",
-			volume: 50,
-			muted: false,
-			tick: 4,
-			termWidth: 80,
-		});
-		const props = shallow<{
-			width: string;
-			borderStyle: string;
-			flexDirection: string;
-		}>(el);
-		expect(props.width).toBe("100%");
-		expect(props.borderStyle).toBe("single");
-		expect(props.flexDirection).toBe("column");
-	});
-
-	test("matrix snapshot across playing / muted / volume", () => {
-		const base = {
-			track: "8gent FM",
-			artist: "Instrumental",
-			elapsed: "0:00",
-			duration: "0:00",
-			tick: 0,
-			termWidth: 80,
-		};
-		const matrix = [
-			{ ...base, playing: false, volume: 50, muted: false },
-			{ ...base, playing: true, volume: 50, muted: false },
-			{ ...base, playing: true, volume: 0, muted: true },
-			{ ...base, playing: true, volume: 120, muted: false },
-		].map((cfg, idx) => {
-			const el = StereoDisplay(cfg);
-			const top = shallow<{
-				width: string;
-				borderStyle: string;
-				flexDirection: string;
-			}>(el);
-			return {
-				idx,
-				width: top.width,
-				borderStyle: top.borderStyle,
-				flexDirection: top.flexDirection,
-				playing: cfg.playing,
-				muted: cfg.muted,
-				volume: cfg.volume,
-			};
-		});
-		expect(matrix).toMatchSnapshot();
-	});
-
-	test("renders no-track state distinct from loading (#2365)", () => {
-		// hasTrack=false: dim placeholder, no artist, idle waveform, volume meter still visible
-		const el = StereoDisplay({
-			playing: false,
-			track: "",
-			artist: "",
-			elapsed: "0:00",
-			duration: "0:00",
-			volume: 50,
-			muted: false,
-			tick: 0,
-			termWidth: 80,
-			hasTrack: false,
-		});
-		const props = shallow<{
-			width: string;
-			borderStyle: string;
-			flexDirection: string;
-			children: React.ReactNode;
-		}>(el);
-		// Stereo stays in chrome — same shell as loaded state.
-		expect(props.width).toBe("100%");
-		expect(props.borderStyle).toBe("single");
-		expect(props.flexDirection).toBe("column");
-		// Three rows still rendered (track row, artist/wave/time row, volume row).
-		const rows = React.Children.toArray(props.children);
-		expect(rows.length).toBe(3);
-	});
-
-	test("hasTrack defaults to true for backwards compatibility", () => {
-		// Existing call sites that don't pass hasTrack should still render the
-		// loaded-state stereo (no regression of #2341 always-on chrome).
-		const el = StereoDisplay({
-			playing: true,
-			track: "Some Track",
-			artist: "Instrumental",
-			elapsed: "0:14",
-			duration: "3:21",
-			volume: 50,
-			muted: false,
-			tick: 4,
-			termWidth: 80,
-		});
-		expect(el).toBeDefined();
-	});
-});
-
-describe("djKey: DJ keys never collide with the app's Ctrl+letter shortcuts", () => {
-	test("maps Ctrl+Shift letters (delivered upper-case) to DJ commands", () => {
-		expect(djKey("P")).toBe("p");
-		expect(djKey("N")).toBe("n");
-		expect(djKey("B")).toBe("b");
-		expect(djKey("M")).toBe("m");
-	});
-
-	test("ignores plain Ctrl+p/n/b/m, which open the palette, Notes, processes and model picker", () => {
-		for (const k of ["p", "n", "b", "m"]) expect(djKey(k)).toBeNull();
-		expect(djKey(undefined)).toBeNull();
-		expect(djKey("")).toBeNull();
+describe("the footer segment", () => {
+	test("reads DJ while a track is loaded, 8GENT FM when nothing is", () => {
+		const dj = frame(<FmFooterSegment width={22} playing dj track="" label="" labelColor="" />, 22);
+		expect(dj.trim()).toBe("▶ DJ");
+		const idle = frame(
+			<FmFooterSegment width={22} playing={false} track="" label="idle" labelColor="" />,
+			22,
+		);
+		expect(idle.trim()).toBe("● 8GENT FM idle");
 	});
 });

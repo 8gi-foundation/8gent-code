@@ -127,11 +127,8 @@ export function useDJ() {
 			}
 
 			case "stop": {
+				// Stops mpv and the producer's afplay by their own handles, never by name (#3183).
 				dj.stop();
-				// Also kill any afplay from producer
-				try {
-					require("node:child_process").execSync("pkill -f afplay 2>/dev/null");
-				} catch {}
 				setState(INITIAL_STATE);
 				return "Stopped.";
 			}

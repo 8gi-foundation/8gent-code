@@ -256,7 +256,7 @@ export const FOOTER_HINTS = [
 	"^C clear",
 	"^K kanban",
 	"^B processes",
-	"^D deck",
+	"^D DJ",
 	"^A anim",
 	"^S sound",
 ];

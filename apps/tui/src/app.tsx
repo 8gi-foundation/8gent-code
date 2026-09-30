@@ -175,7 +175,7 @@ import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { BottomBar } from "./components/BottomBar.js";
 import type { JudgeState } from "./components/StatusFooter.js";
-import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
+import { djHasTrack, setDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -1820,6 +1820,14 @@ export function App({
 
 	// Command palette overlay (Ctrl+P).
 	const [paletteOpen, setPaletteOpen] = useState(false);
+	// The DJ deck has the keyboard (^D, #3188): plain keys drive it, the chat input waits.
+	const [djKeys, setDjKeys] = useState(false);
+	const endDjKeys = useCallback(() => setDjKeys(false), []);
+	// An approval card owns Y/N/E/S; S must never skip a tool AND stop the music.
+	const approvalUp = approvalPending !== null;
+	useEffect(() => {
+		if (approvalUp) setDjKeys(false);
+	}, [approvalUp]);
 
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
@@ -1852,6 +1860,18 @@ export function App({
 			return;
 		}
 		if (paletteOpen) {
+			return;
+		}
+
+		// Ctrl+D: give the DJ deck the keyboard while a track is loaded, or take it
+		// back. While the deck has it, only Esc and ^C reach the app; the deck's
+		// own useInput takes Space, N, B, S, -, + and M (#3188).
+		if (key.ctrl && input === "d") {
+			if (djKeys || djHasTrack()) setDjKeys((v) => !v);
+			return;
+		}
+		if (djKeys && !(key.ctrl && input === "c")) {
+			if (key.escape) setDjKeys(false);
 			return;
 		}
 
@@ -2003,14 +2023,6 @@ export function App({
 		if (key.ctrl && input === "j") {
 			setBgPanelOpen((prev) => !prev);
 			setBgBanner(null);
-		}
-
-		// Ctrl+D: toggle DjDeck stereo between expanded and the single-line
-		// collapsed strip. Choice persists in workspace DB (#2341). ^D was
-		// free at time of binding; if it ever collides, swap to ^J would
-		// require relocating the background-jobs panel hotkey above first.
-		if (key.ctrl && input === "d") {
-			toggleDjDeckOpen();
 		}
 
 		// Ctrl+T: new chat tab
@@ -4081,9 +4093,17 @@ export function App({
 							const dj = new DJ();
 							let result: string;
 							switch (djSub) {
-								case "play":
-									result = await dj.play(djArgs.join(" ") || "");
+								case "play": {
+									const query = djArgs.join(" ").trim();
+									if (!query) {
+										result = "Usage: /dj play <song or URL>";
+										break;
+									}
+									// The search runs off the event loop; say so while it does (#3182).
+									if (!/^https?:/.test(query)) addSystemMessage(`Searching: ${query}`);
+									result = await dj.play(query);
 									break;
+								}
 								case "radio":
 									result = await dj.radio(djArgs.join(" ") || "lofi");
 									break;
@@ -4091,11 +4111,8 @@ export function App({
 									result = await dj.pause();
 									break;
 								case "stop":
-									dj.stop();
-									try {
-										require("node:child_process").execSync("pkill -f afplay 2>/dev/null");
-									} catch {}
-									result = "Stopped.";
+									// Stops the DJ's own players by their own handles, never by name (#3183).
+									result = dj.stop();
 									break;
 								case "skip":
 									result = await dj.skip();
@@ -4105,7 +4122,9 @@ export function App({
 									break;
 								case "vol":
 								case "volume":
-									result = await dj.volume(Number.parseInt(djArgs[0] || "80"));
+									result = djArgs[0]
+										? await dj.volume(Number.parseInt(djArgs[0]))
+										: `Volume: ${dj.preferredVolume()}%`;
 									break;
 								case "loop":
 								case "repeat":
@@ -4161,7 +4180,8 @@ export function App({
 							}
 							// Transient playback feedback now lives in the DjDeck. `np` is not
 							// transient: it is the text readout of what plays (#3192).
-							const playbackSubs = new Set(["play","radio","pause","stop","skip","vol","volume","loop","repeat","queue","resume","produce","gen"]);
+							// `play` is not transient either: "Searching: ..." then "Now playing: ..." (#3182).
+							const playbackSubs = new Set(["radio","pause","stop","skip","vol","volume","loop","repeat","queue","resume","produce","gen"]);
 							const looksLikeFailure =
 								/^(mpv|yt-dlp|ffmpeg|sox)\b.*(not installed|missing)/i.test(result) ||
 								/^No (results|radio stations) found/i.test(result) ||
@@ -6285,8 +6305,10 @@ export function App({
 									((viewMode === "chat" && activeTabType === "chat") ||
 										viewMode === "onboarding") &&
 									!isBubbleNavMode &&
-									!paletteOpen
+									!paletteOpen &&
+									!djKeys
 								}
+								typingPaused={djKeys}
 								processingStage={processingStage}
 								showAnimations={showAnimations}
 								approvalPending={isApprovalPending}
@@ -6350,6 +6372,8 @@ export function App({
 					isProcessing={isProcessing}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					djKeys={djKeys}
+					onDjKeysDone={endDjKeys}
 				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>
