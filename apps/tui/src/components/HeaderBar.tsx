@@ -170,12 +170,15 @@ export function HeaderBar(props: HeaderBarProps) {
 			</Box>
 
 			{middle.branch || middle.path || middle.sync ? (
+				// Reads from the left, one column clear of the pill, at every
+				// width: "no repo" and "⎇ branch" sit where the path starts,
+				// never floating in the middle of the leftover space.
 				<Box
 					flexGrow={1}
 					flexShrink={1}
 					minWidth={0}
 					paddingX={1}
-					justifyContent="center"
+					justifyContent="flex-start"
 					overflow="hidden"
 				>
 					<Text wrap="truncate-end">

@@ -144,3 +144,26 @@ export function specForActivatedTab(
 	if (pin && pin.tabId === tabId) return pin.spec;
 	return roleSpec;
 }
+
+/** The one registry call `declaredModels` needs (ProviderManager in packages/providers). */
+export interface ProviderModelsReader {
+	isKnownProvider(name: string): boolean;
+	getProvider(name: string): { models?: readonly string[] };
+}
+
+/**
+ * Models a provider's registry entry declares, for providers the TUI has no
+ * live model listing for (8gent, groq, openai and the rest). Empty for a name
+ * the registry does not know. Never an invented `${provider}/default` id: that
+ * placeholder used to replace the configured model, so the footer, the chat
+ * header and the rail all named a model that does not exist.
+ */
+export function declaredModels(reader: ProviderModelsReader, provider: string): string[] {
+	if (!provider || !reader.isKnownProvider(provider)) return [];
+	try {
+		const models = reader.getProvider(provider).models ?? [];
+		return models.map((m) => String(m).trim()).filter((m) => m.length > 0);
+	} catch {
+		return [];
+	}
+}

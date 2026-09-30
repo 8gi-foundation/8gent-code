@@ -207,6 +207,7 @@ import {
 } from "./lib/activity-rail-derivation.js";
 import { startSystemOneWarmup } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
+import { getProviderManager } from "../../../packages/providers/index.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
 // the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
@@ -277,6 +278,7 @@ import {
 	type CliTabPin,
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
+	declaredModels,
 	pickBestChatModel,
 	providerToRuntime,
 	specForActivatedTab,
@@ -1330,8 +1332,8 @@ export function App({
 						setAvailableModels(["apple-foundationmodel"]);
 					}
 				} else {
-					// Other providers — show placeholder
-					if (!cancelled) setAvailableModels([`${currentProvider}/default`]);
+					// Every other provider: the models its registry entry declares.
+					if (!cancelled) setAvailableModels(declaredModels(getProviderManager(), currentProvider));
 				}
 			} catch {
 				// Provider not reachable — show fallback
@@ -5854,7 +5856,7 @@ export function App({
 	const activeTasks = deriveActiveTasks(planSteps, isProcessing);
 	const recentTools = deriveTools(messages, isProcessing, 5);
 	const providerRows = deriveProviders({
-		primary: { name: `${currentProvider}:${currentModel || "—"}` },
+		primary: { name: currentModel ? `${currentProvider}:${currentModel}` : currentProvider },
 		fallback: railFallback(currentProvider, currentModel),
 		offline: null,
 	});

@@ -10,6 +10,7 @@ import { Text } from "ink";
 import React from "react";
 import {
 	ActivityRail,
+	providerDisplay,
 	type ActivityRailProps,
 	type ToolState,
 	type ProviderState,
@@ -17,13 +18,14 @@ import {
 	type BodyPartState,
 } from "../ActivityRail";
 import { t } from "../../theme.js";
+import { getProviderManager } from "../../../../../packages/providers/index.js";
 import {
 	bodyPartForToolName,
 	detectDefaultBodyPartsState,
 } from "../../hooks/useBodyParts.js";
 
 const TOOL_STATES: ToolState[] = ["idle", "running", "ok", "fail"];
-const PROVIDER_STATES: ProviderState[] = ["local", "fallback", "offline"];
+const PROVIDER_STATES: ProviderState[] = ["primary", "fallback", "offline"];
 const AGENT_STATES: AgentState[] = ["idle", "active", "blocked"];
 const BODY_PART_STATES: BodyPartState[] = ["disabled", "idle", "inFlight"];
 
@@ -39,7 +41,7 @@ const baseProps: ActivityRailProps = {
 		{ name: "verify", state: "fail" },
 	],
 	providers: [
-		{ name: "8gent local", state: "local", latency: "12ms" },
+		{ name: "8gent:eight-1.0-q3:14b", state: "primary", latency: "12ms" },
 		{ name: "ollama", state: "fallback", latency: "180ms" },
 	],
 	memory: { hits: 42, misses: 3, cache: "1.2MB" },
@@ -229,7 +231,7 @@ describe("ActivityRail", () => {
 
 	test("a provider with no measured latency draws no trailing glyph (#3070)", () => {
 		const texts = flatten(
-			expand(render({ ...baseProps, providers: [{ name: "lmstudio:ornith", state: "local" }] })),
+			expand(render({ ...baseProps, providers: [{ name: "lmstudio:ornith", state: "primary" }] })),
 		)
 			.filter((el) => el.type === Text)
 			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
@@ -243,7 +245,7 @@ describe("ActivityRail", () => {
 				render({
 					...baseProps,
 					providers: [
-						{ name: "lmstudio:ornith-1.0-9b", state: "local" },
+						{ name: "lmstudio:ornith-1.0-9b", state: "primary" },
 						{ name: "apfel:MiniMax-M2.7", state: "fallback" },
 					],
 				}),
@@ -251,9 +253,37 @@ describe("ActivityRail", () => {
 		)
 			.filter((el) => el.type === Text)
 			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
-		expect(texts).toContain("● local:lm");
-		expect(texts).toContain("○ local:apfel");
+		expect(texts).toContain("● lmstudio ornith-1.0-9b");
+		expect(texts).toContain("○ apfel MiniMax-M2.7");
 		expect(texts).toContain("fallback");
+	});
+
+	test("the primary row names its real provider, never a tier word", () => {
+		const texts = (name: string) =>
+			flatten(expand(render({ ...baseProps, providers: [{ name, state: "primary" }] })))
+				.filter((el) => el.type === Text)
+				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		expect(texts("8gent:eight-1.0-q3:14b")).toContain("● 8gent eight-1.0-q3:14b");
+		expect(texts("ollama:qwen3.8:27b-mlx")).toContain("● ollama qwen3.8:27b-mlx");
+		expect(texts("openrouter:auto:free")).toContain("● openrouter auto:free");
+		for (const word of ["local:", "fallback:free", "route:available", "remote:standby"]) {
+			expect(texts("8gent:eight-1.0-q3:14b").join(" ")).not.toContain(word);
+		}
+	});
+
+	test("every provider in the registry is named by its own id, 8gent included", () => {
+		// The registry is the list: a provider added to it is covered here with
+		// no edit to the rail. Its ids carry no colon, which is what makes the
+		// first colon of `provider:model` the exact split.
+		const ids = getProviderManager()
+			.listProviders()
+			.map((p) => String(p.name));
+		expect(ids).toContain("8gent");
+		for (const id of ids) {
+			expect(id).not.toContain(":");
+			expect(providerDisplay(id)).toBe(id);
+			expect(providerDisplay(`${id}:some-model:tag`)).toBe(`${id} some-model:tag`);
+		}
 	});
 
 	test("snapshot of full rail is stable", () => {

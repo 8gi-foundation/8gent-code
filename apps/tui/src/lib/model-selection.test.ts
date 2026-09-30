@@ -10,8 +10,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	type ModelSpec,
+	declaredModels,
 	normalizeProviderId,
 	providerToRuntime,
 	specForActivatedTab,
@@ -116,5 +118,26 @@ describe("specForActivatedTab", () => {
 			current = specForActivatedTab(tab, pin, roles[tab] ?? null) ?? current;
 		}
 		expect(current.model).toBe("qwen3.8:27b-mlx");
+	});
+});
+
+describe("declaredModels: the registry, never a placeholder id", () => {
+	test("8gent lists the models its registry entry declares", () => {
+		const pm = getProviderManager();
+		const models = declaredModels(pm, "8gent");
+		expect(models).toEqual([...pm.getProvider("8gent").models]);
+		expect(models).toContain(pm.getProvider("8gent").defaultModel);
+	});
+
+	test("no provider in the registry yields an invented '<provider>/default'", () => {
+		const pm = getProviderManager();
+		for (const p of pm.listProviders()) {
+			expect(declaredModels(pm, String(p.name))).not.toContain(`${p.name}/default`);
+		}
+	});
+
+	test("a name the registry does not know yields no models", () => {
+		expect(declaredModels(getProviderManager(), "not-a-provider")).toEqual([]);
+		expect(declaredModels(getProviderManager(), "")).toEqual([]);
 	});
 });

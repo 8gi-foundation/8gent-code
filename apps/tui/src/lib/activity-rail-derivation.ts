@@ -94,7 +94,7 @@ export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow
 	const rows: ActivityRailProviderRow[] = [];
 	const fmt = (ms?: number) => (typeof ms === "number" ? `${Math.round(ms)}ms` : undefined);
 	if (snap.primary) {
-		rows.push({ name: snap.primary.name, state: "local", latency: fmt(snap.primary.latencyMs) });
+		rows.push({ name: snap.primary.name, state: "primary", latency: fmt(snap.primary.latencyMs) });
 	}
 	if (snap.fallback) {
 		rows.push({

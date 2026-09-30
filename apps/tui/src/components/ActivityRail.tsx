@@ -95,7 +95,7 @@ function NamedRow({
 }
 
 type ToolState = "idle" | "running" | "ok" | "fail";
-type ProviderState = "local" | "fallback" | "offline";
+type ProviderState = "primary" | "fallback" | "offline";
 type AgentState = "idle" | "active" | "blocked";
 type BodyPartState = "disabled" | "idle" | "inFlight";
 
@@ -160,29 +160,24 @@ interface ActivityRailProps {
 	bodyParts?: BodyPartsRow;
 }
 
-// Friendly route label. The rail surfaces the agent's tiering, not the
-// vendor SKU. Translates raw provider:model identifiers to operator
-// vocabulary: local / fallback / remote.
-function providerDisplay(value: string): string {
-	const v = value.toLowerCase();
-	if (v.includes("lmstudio")) {
-		if (v.includes("gemma")) return "local:gemma";
-		if (v.includes("qwen")) return "local:qwen";
-		if (v.includes("llama")) return "local:llama";
-		return "local:lm";
-	}
-	if (v.includes("ollama")) {
-		if (v.includes("qwen")) return "local:qwen";
-		if (v.includes("llama")) return "local:llama";
-		if (v.includes("gemma")) return "local:gemma";
-		return "local:ollama";
-	}
-	if (v.includes("openrouter")) return "fallback:free";
-	if (v.includes("apfel") || v.includes("apple")) return "local:apfel";
-	if (v.includes("deepseek")) return "remote:deepseek";
-	if (v.includes("anthropic") || v.includes("claude")) return "remote:standby";
-	if (v.includes("openai") || v.includes("gpt")) return "remote:standby";
-	return "route:available";
+/**
+ * The route as the rail names it: the provider's registry id, then the
+ * model, e.g. `8gent eight-1.0-q3:14b` or `ollama qwen3.8:27b-mlx`.
+ *
+ * Rows arrive as `provider:model`. A registry id never contains a colon
+ * (pinned in the tests against `listProviders()`), so the first colon is
+ * the exact split and a model id's own colons stay with the model. The
+ * provider is shown as the registry names it, never translated into a
+ * tier word: a hand-kept keyword table is what drifted into `local` for
+ * every route and `route:available` for 8gent.
+ */
+export function providerDisplay(value: string): string {
+	const v = value.trim();
+	const cut = v.indexOf(":");
+	if (cut < 0) return v;
+	const provider = v.slice(0, cut);
+	const model = v.slice(cut + 1).trim();
+	return model ? `${provider} ${model}` : provider;
 }
 
 const TOOL_GLYPH: Record<ToolState, string> = {
@@ -200,22 +195,23 @@ const TOOL_COLOR: Record<ToolState, string> = {
 };
 
 const PROVIDER_COLOR: Record<ProviderState, string> = {
-	local:    t.green,
+	primary:  t.green,
 	fallback: t.textSecondary,
 	offline:  t.red,
 };
 
 // The route in use is filled; a standby route is a hollow ring, and says
 // what it is in words, so the two rows never differ by colour alone
-// (both can read `local:...`). A measured latency takes the word's place.
+// (both can be the same provider, two lmstudio models say). A measured
+// latency takes the word's place.
 const PROVIDER_GLYPH: Record<ProviderState, string> = {
-	local:    "●",
+	primary:  "●",
 	fallback: "○",
 	offline:  "✕",
 };
 
 const PROVIDER_ROLE: Record<ProviderState, string | undefined> = {
-	local:    undefined,
+	primary:  undefined,
 	fallback: "fallback",
 	offline:  "offline",
 };
