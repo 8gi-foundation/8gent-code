@@ -55,6 +55,23 @@ export type Summarizer = (
 	context: { previousSummary: string | null },
 ) => Promise<string>;
 
+/**
+ * The prompt a checkpoint summary is written from. When an earlier checkpoint
+ * exists its summary goes in as the base to update (#3237), so decisions from
+ * before the summarised window survive instead of every checkpoint starting
+ * from scratch.
+ */
+export function twoStageCheckpointPrompt(
+	messages: AgentMessage[],
+	previousSummary: string | null,
+): string {
+	const serialised = messages.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
+	const previous = previousSummary
+		? `Update the previous checkpoint below with the new conversation. Keep everything in it that is still true.\n\n<previous_checkpoint>\n${previousSummary}\n</previous_checkpoint>\n\n`
+		: "";
+	return `${previous}Summarise the following conversation into a concise structured checkpoint another agent can resume from. Preserve file paths, function names, and decisions verbatim.\n\n<conversation>\n${serialised}\n</conversation>\n\n## Goal\n## Progress\n## Decisions\n## Next Steps`;
+}
+
 export interface TwoStageOptions {
 	/** Trigger fraction for the cheap checkpoint stage. Default 0.65. */
 	checkpointPct?: number;

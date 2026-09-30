@@ -81,6 +81,7 @@ import {
 	type Summarizer,
 	type AgentState as TwoStageAgentState,
 	TwoStageCompactor,
+	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
@@ -216,6 +217,8 @@ export class Agent {
 	private compaction: ProactiveCompression;
 	private twoStageCompactor: TwoStageCompactor | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
+	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
+	private compactionContextWindow: number;
 	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
 	// Lazily constructed so sessions that never call a tool pay nothing.
 	private timeTravelStore: TimeTravelStore | null = null;
@@ -291,6 +294,7 @@ export class Agent {
 			getProviderManager().getProvider(config.runtime as ProviderRegistryName),
 		);
 		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
+		this.compactionContextWindow = compactionContextWindow;
 
 		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
 		// rather than replacing it: the legacy single-threshold engine still
@@ -2186,48 +2190,9 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			}
 
 			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%. Provider context
-			// size resolved per-provider; defaults applied conservatively when the
-			// provider definition does not expose contextSize.
+			// above. Cheap checkpoint at 65%, hard compact at 80%.
 			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				try {
-					if (!this.twoStageCompactor) {
-						const summarizer: Summarizer = async (msgs) => {
-							const compactModel = createModel(providerConfig);
-							const serialised = msgs
-								.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`)
-								.join("\n\n");
-							const { generateText } = await import("ai");
-							const { text } = await generateText({
-								model: compactModel,
-								prompt: `Summarise the following conversation into a concise structured checkpoint another agent can resume from. Preserve file paths, function names, and decisions verbatim.\n\n<conversation>\n${serialised}\n</conversation>\n\n## Goal\n## Progress\n## Decisions\n## Next Steps`,
-								maxOutputTokens: 800,
-							});
-							return text;
-						};
-						this.twoStageCompactor = new TwoStageCompactor({
-							checkpointPct: 0.65,
-							compactPct: 0.8,
-							keepLastN: 4,
-							summarizer,
-						});
-					}
-					const ctxSize =
-						(providerConfig as unknown as { contextSize?: number }).contextSize ?? 32_768;
-					const state: TwoStageAgentState = {
-						messages: this.messageHistory,
-						checkpoints: this.twoStageCheckpoints,
-						provider: { contextSize: ctxSize },
-					};
-					const result = await this.twoStageCompactor.observe(state);
-					if (result.action !== "none") {
-						console.log(
-							`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
-						);
-					}
-				} catch (err) {
-					console.error("  [TWO_STAGE] Failed:", (err as Error).message);
-				}
+				await this.observeTwoStage(providerConfig);
 			}
 
 			// Move BMAD task to review/done if we had one
@@ -2499,6 +2464,54 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 	getSessionEvidence(): Evidence[] {
 		return this.sessionEvidence;
+	}
+
+	/**
+	 * One pass of the two-stage compactor (#2467) after a turn. Thresholds
+	 * resolve against the provider's known context window, the same one
+	 * ProactiveCompression uses (#3237: this used to read a `contextSize` that
+	 * ProviderConfig never carries, so every model was treated as 32,768).
+	 */
+	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
+		try {
+			if (!this.twoStageCompactor) {
+				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
+					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
+				this.twoStageCompactor = new TwoStageCompactor({
+					checkpointPct: 0.65,
+					compactPct: 0.8,
+					keepLastN: 4,
+					summarizer,
+				});
+			}
+			const state: TwoStageAgentState = {
+				messages: this.messageHistory,
+				checkpoints: this.twoStageCheckpoints,
+				provider: { contextSize: this.compactionContextWindow },
+			};
+			const result = await this.twoStageCompactor.observe(state);
+			if (result.action !== "none") {
+				console.log(
+					`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
+				);
+			}
+		} catch (err) {
+			console.error("  [TWO_STAGE] Failed:", (err as Error).message);
+		}
+	}
+
+	/** The model call behind a two-stage checkpoint. A method so tests can stand in for it. */
+	private async generateCheckpoint(
+		providerConfig: ProviderConfig,
+		prompt: string,
+	): Promise<string> {
+		const { generateText } = await import("ai");
+		const { text } = await generateText({
+			model: createModel(providerConfig),
+			prompt,
+			maxOutputTokens: 800,
+		});
+		return text;
 	}
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
