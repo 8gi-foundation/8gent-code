@@ -21,6 +21,7 @@ import {
 	getRouterStats,
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
+import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
@@ -375,7 +376,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	}
 
 	// 2. Ollama
-	const ollamaModels = fetchChatModels("http://localhost:11434/api/tags", (d) =>
+	// The configured ollama (OLLAMA_BASE_URL / OLLAMA_HOST), not a hardcoded localhost (#3080).
+	const ollamaModels = fetchChatModels(`${resolveOllamaBaseUrl()}/api/tags`, (d) =>
 		(d.models || []).map((m: any) => String(m.name ?? "")),
 	);
 	if (ollamaModels.length > 0) {
@@ -1260,7 +1262,8 @@ export function App({
 			try {
 				if (currentProvider === "ollama") {
 					// Fetch locally installed Ollama models — filter embedding models at source
-					const res = await fetch("http://localhost:11434/api/tags");
+					// The configured ollama, which may be remote (#3080).
+					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`);
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.models || [])

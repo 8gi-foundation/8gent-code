@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { type ProviderConfig, type ProviderName, createModel } from "./providers";
+import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 // ============================================
 // Types
@@ -320,7 +321,8 @@ export class TaskRouter {
 		const changes: string[] = [];
 
 		try {
-			const res = await fetch("http://localhost:11434/api/tags", {
+			// The configured ollama, not a hardcoded localhost (#3080).
+			const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
 				signal: AbortSignal.timeout(3000),
 			});
 			if (!res.ok) return changes;

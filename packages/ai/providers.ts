@@ -8,6 +8,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { modelFetchAsFetch } from "./model-fetch";
+import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel";
 
@@ -19,8 +20,7 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<ProviderName, string> = {
-	ollama: "http://localhost:11434/v1",
+const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama">, string> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
@@ -28,6 +28,16 @@ const DEFAULT_URLS: Record<ProviderName, string> = {
 	// Ollama collision on 11434. Override via APFEL_BASE_URL.
 	apfel: process.env.APFEL_BASE_URL || "http://localhost:11500/v1",
 };
+
+/**
+ * The OpenAI-compatible base a provider uses when the config names none. For
+ * ollama it is resolved at call time from OLLAMA_BASE_URL, then OLLAMA_HOST,
+ * then localhost (#3080): a hardcoded localhost here sent the TUI's per-turn
+ * task-router classify to this machine even with ollama configured remote.
+ */
+export function defaultBaseUrl(name: ProviderName): string {
+	return name === "ollama" ? `${resolveOllamaBaseUrl()}/v1` : DEFAULT_URLS[name];
+}
 
 /**
  * Create a language model from provider config.
@@ -44,7 +54,7 @@ export function createModel(config: ProviderConfig): LanguageModel {
 				`Pass { name, model } — got model=${JSON.stringify(config.model)}.`,
 		);
 	}
-	const baseURL = config.baseURL || DEFAULT_URLS[config.name];
+	const baseURL = config.baseURL || defaultBaseUrl(config.name);
 	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
 
 	const provider = createOpenAICompatible({
@@ -115,7 +125,7 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
  * Check if a provider is available by hitting its models endpoint.
  */
 export async function isProviderAvailable(config: ProviderConfig): Promise<boolean> {
-	const baseURL = config.baseURL || DEFAULT_URLS[config.name];
+	const baseURL = config.baseURL || defaultBaseUrl(config.name);
 	try {
 		const response = await fetch(`${baseURL.replace("/v1", "")}/api/tags`, {
 			signal: AbortSignal.timeout(3000),
