@@ -12,7 +12,7 @@ import { LayaBackend } from "./backends/laya";
 import { LlamaCppBackend, type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { MockBackend } from "./backends/mock";
 import { OllamaBackend, resolveOllamaHost } from "./backends/ollama";
-import { detectBackend, listOllamaModels, pickModel, type ProbeResult } from "./probe";
+import { SHARED_JUDGE_NUM_CTX, detectBackend, listOllamaModels, pickModel, type ProbeResult } from "./probe";
 import {
 	type ChoiceAnswer,
 	type DecideBackend,
@@ -127,7 +127,8 @@ async function buildBackend(opts: DeciderOptions): Promise<DecideBackend> {
 	}
 	if (probe.backend === "laya") return new LayaBackend({ ...common, url: probe.url ?? undefined });
 	if (probe.backend === "ollama" && probe.model) {
-		return new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined });
+		const numCtx = probe.shared ? SHARED_JUDGE_NUM_CTX : undefined;
+		return new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined, numCtx });
 	}
 	throw new DecideUnavailableError(`no decide backend available: ${probe.notes.join("; ")}`);
 }

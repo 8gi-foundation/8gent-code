@@ -11,12 +11,24 @@
  * of a preference order of name substrings (smallest first within a
  * match), otherwise the smallest installed non-embedding model. There is
  * no hardcoded model list - only substrings to rank what `/api/tags` says.
+ *
+ * Shared judge (EIGHT_S1_SHARED_JUDGE=1, #3162): before loading a private
+ * copy in-process, ask the machine's local model server (Ollama, through the
+ * local-model-server layer) whether it already serves the judge. One server
+ * process holds the model once for every agent, child and tab on the machine.
+ * Its host is pinned to this machine (EIGHT_DECIDE_OLLAMA_HOST, default
+ * localhost:11434), never the chat model's OLLAMA_HOST, which can point at a
+ * remote box. The flag changes where the judge runs, never which model
+ * judges: when a GGUF resolves for llama.cpp, the shared server is used only
+ * if it serves that same model. Anything short of that falls back to the
+ * in-process path unchanged.
  */
 
 import { resolveLayaUrl } from "./backends/laya";
 import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { resolveOllamaHost } from "./backends/ollama";
 import { LocalServerHttpError, LocalServerResponseError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
+import { DEFAULT_OLLAMA_BASE_URL, normaliseOllamaHost } from "../local-model-server/ollama-host";
 import type { FetchLike } from "./types";
 
 /**
@@ -45,6 +57,8 @@ export interface ProbeResult {
 	url: string | null;
 	/** GGUF file path when the backend is llamacpp. */
 	path?: string;
+	/** True when the backend is the machine's shared judge server (EIGHT_S1_SHARED_JUDGE). */
+	shared?: boolean;
 	os: string;
 	arch: string;
 	/** Why each earlier backend was skipped, plus the final reason when none. */
@@ -96,6 +110,58 @@ export async function listOllamaModels(fetchImpl: FetchLike, host: string, timeo
 	}
 }
 
+/**
+ * Context window the shared judge asks for: the same 4096 the in-process
+ * backend loads with (llamacpp DEFAULT_CONTEXT_SIZE). A guard prompt is a few
+ * hundred tokens, and every client must ask for the same value or the server
+ * reloads the model between them.
+ */
+export const SHARED_JUDGE_NUM_CTX = 4096;
+
+/** True when EIGHT_S1_SHARED_JUDGE asks for the machine's shared judge server. */
+export function sharedJudgeEnabled(env: Record<string, string | undefined>): boolean {
+	const v = env.EIGHT_S1_SHARED_JUDGE?.trim().toLowerCase();
+	return v === "1" || v === "true" || v === "on";
+}
+
+/**
+ * The shared judge's server root: EIGHT_DECIDE_OLLAMA_HOST, else this
+ * machine's default Ollama. Deliberately not OLLAMA_HOST / OLLAMA_BASE_URL:
+ * those follow the chat model, which may live on another machine.
+ */
+export function resolveSharedJudgeHost(env: Record<string, string | undefined>): string {
+	return normaliseOllamaHost(env.EIGHT_DECIDE_OLLAMA_HOST) ?? DEFAULT_OLLAMA_BASE_URL;
+}
+
+/**
+ * Ask the shared server for the judge. Returns the model to judge with, or a
+ * note saying why the shared judge was skipped. `required` is the model the
+ * in-process path would load; when set, only that exact model is accepted.
+ */
+async function sharedJudge(
+	fetchImpl: FetchLike,
+	host: string,
+	env: Record<string, string | undefined>,
+	required: string | null,
+	timeoutMs: number,
+): Promise<{ model: string } | { note: string }> {
+	const server = createOllamaServer({ baseUrl: host, fetch: fetchImpl });
+	// The judge reads next-token logprobs from a raw prompt; a server without raw prompts cannot judge.
+	if (!server.capabilities.rawPrompt) return { note: `shared judge: ${server.kind} at ${host} has no raw prompt endpoint` };
+	let installed: InstalledModel[];
+	try {
+		installed = await listOllamaModels(fetchImpl, host, timeoutMs);
+	} catch (err) {
+		return { note: `shared judge unreachable at ${host}: ${(err as Error).message}` };
+	}
+	if (required) {
+		const hit = installed.find((m) => m?.name === required || m?.name === `${required}:latest`);
+		return hit ? { model: hit.name } : { note: `shared judge at ${host} does not serve ${required}` };
+	}
+	const model = pickModel(installed, env.EIGHT_DECIDE_MODEL);
+	return model ? { model } : { note: `shared judge at ${host} has no usable models installed` };
+}
+
 export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResult> {
 	const fetchImpl: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
 	const env = opts.env ?? process.env;
@@ -104,9 +170,19 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	const notes: string[] = [];
 
 	const loader = opts.llamacppLoader === undefined ? defaultLlamaCppLoader : opts.llamacppLoader;
-	if (loader) {
-		// GGUF first: a cheap file check, so the package is only imported when there is a model to load.
-		const gguf = resolveGguf(env);
+	// GGUF first: a cheap file check, so the package is only imported when there is a model to load.
+	const gguf = loader ? resolveGguf(env) : null;
+
+	// An explicit EIGHT_DECIDE_GGUF names a file, not a served model: it stays in-process.
+	// The shared server is Ollama: with another local server selected (#3149), Ollama is off and not asked.
+	if (sharedJudgeEnabled(env) && isOllamaEnabled(env) && !env.EIGHT_DECIDE_GGUF?.trim()) {
+		const host = resolveSharedJudgeHost(env);
+		const shared = await sharedJudge(fetchImpl, host, env, gguf?.path ? gguf.model : null, timeoutMs);
+		if ("model" in shared) return { ...base, backend: "ollama", model: shared.model, url: host, shared: true, notes };
+		notes.push(shared.note);
+	}
+
+	if (loader && gguf) {
 		if (gguf.path) {
 			const missing = await llamaCppUnavailable(loader);
 			if (missing === null) return { ...base, backend: "llamacpp", model: gguf.model, url: null, path: gguf.path, notes };

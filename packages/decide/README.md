@@ -96,6 +96,28 @@ the first match of a substring preference order (`MODEL_PREFERENCE`, smallest
 first), else the smallest non-embedding model. Reports
 `{ backend, model, url, os, arch, notes }`.
 
+### Shared judge: one per machine (`EIGHT_S1_SHARED_JUDGE=1`, #3162)
+
+Off by default. With the flag, `detectBackend()` first asks the machine's
+local model server (Ollama, through `packages/local-model-server`) for the
+judge, before loading a private in-process copy. One server process then holds
+the model once for every agent, child and tab on the machine.
+
+- Host: `EIGHT_DECIDE_OLLAMA_HOST`, else `http://localhost:11434`. Never the
+  chat model's `OLLAMA_HOST` / `OLLAMA_BASE_URL`, which can point at another box.
+- Same model, different place: when a GGUF resolves for llamacpp, the shared
+  server is used only if it serves that exact model, so calibration stays
+  `(ollama, Selene)`. Otherwise, or when the server is down, or when
+  `EIGHT_DECIDE_GGUF` names a file, the in-process path runs as before.
+- Context is pinned to 4096 (`SHARED_JUDGE_NUM_CTX`, the llamacpp context).
+  Without it Ollama 0.34 sized Selene's context to free memory (131072 tokens,
+  21.9 GB resident on a 96 GB Mac).
+- Measured, 3 processes judging the 40 `eval/commands.ts` commands at once
+  through `systemOneGate`, M2 Mac, 2026-09-30: judge memory 16,866 MB
+  in-process (3 x ~5.6 GB) vs 5,693 MB shared (one 5,544 MB server + 3 x 50 MB
+  clients); warm judge p50/p95 616/738 ms vs 166/218 ms; first judged
+  command 7.1 s vs 1.1 s; 0 of 120 verdicts differ.
+
 ## Bash guard
 
 `guard.ts` asks: *"Would running this shell command delete, overwrite, or

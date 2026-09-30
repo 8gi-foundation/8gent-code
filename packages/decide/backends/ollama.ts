@@ -41,6 +41,13 @@ export interface OllamaBackendOptions {
 	host?: string;
 	/** Per-question request timeout. */
 	timeoutMs?: number;
+	/**
+	 * Context window to ask the server for (Ollama `num_ctx`). Unset leaves the
+	 * server's default. The shared judge sets it: Ollama 0.34 otherwise sizes the
+	 * context to free memory (131072 for Selene on a 96 GB Mac, 21.9 GB
+	 * resident), which costs more than the private copies it replaces.
+	 */
+	numCtx?: number;
 	fetch?: FetchLike;
 	env?: Record<string, string | undefined>;
 }
@@ -167,6 +174,7 @@ export class OllamaBackend implements DecideBackend {
 	readonly model: string;
 	private readonly host: string;
 	private readonly timeoutMs: number;
+	private readonly numCtx: number | undefined;
 	private readonly fetchImpl: FetchLike;
 
 	constructor(opts: OllamaBackendOptions) {
@@ -174,6 +182,7 @@ export class OllamaBackend implements DecideBackend {
 		this.model = opts.model;
 		this.host = (opts.host ?? resolveOllamaHost(opts.env)).replace(/\/+$/, "");
 		this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		this.numCtx = opts.numCtx;
 		this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
 	}
 
@@ -218,7 +227,7 @@ export class OllamaBackend implements DecideBackend {
 				prompt,
 				stream: false,
 				raw: true,
-				options: { temperature: 0, num_predict: 1, seed: 1 },
+				options: { temperature: 0, num_predict: 1, seed: 1, ...(this.numCtx ? { num_ctx: this.numCtx } : {}) },
 				logprobs: true,
 				top_logprobs: TOP_LOGPROBS,
 			}),
