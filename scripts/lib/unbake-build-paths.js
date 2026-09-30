@@ -57,7 +57,12 @@ export function unbakeBuildPaths(source, roots) {
  */
 export function findBakedRoots(source, roots, homes = []) {
 	const lit = (p) => JSON.stringify(p).slice(1, -1);
-	const found = [...new Set(roots.filter(Boolean))].filter((r) => source.includes(lit(r)));
+	// A root only counts when it ends at a path boundary. A short root such as the
+	// CI container's `/work` otherwise matches `/workspace` or `/workers` inside
+	// bundled dependencies, and fails a build that is actually clean.
+	const found = [...new Set(roots.filter(Boolean))].filter((r) =>
+		new RegExp(`${escapeRegExp(lit(r))}(?![A-Za-z0-9_.-])`).test(source),
+	);
 	for (const home of new Set(homes)) {
 		if (!home || home.length < 2) continue;
 		if (source.includes(`"${lit(home)}/`) || source.includes(`"${lit(home)}\\`)) found.push(home);
