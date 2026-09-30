@@ -22,6 +22,7 @@ import {
 	normalizeProviderId,
 	providerToRuntime,
 	specForActivatedTab,
+	tabAgentRole,
 } from "./model-selection.js";
 
 describe("providerToRuntime", () => {
@@ -246,5 +247,18 @@ describe("an explicit --model is never overridden (#3084)", () => {
 		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "ollama" })).toBe(true);
 		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "lmstudio" })).toBe(false);
 		expect(canReuseTabAgent(built, { model: "qwen3.8:27b-mlx", runtime: "ollama" })).toBe(false);
+	});
+});
+
+describe("tabAgentRole (#3095)", () => {
+	test("reads the role a workspace chat tab carries", () => {
+		expect(tabAgentRole({ role: "orchestrator", systemPrompt: "x" })).toBe("orchestrator");
+		expect(tabAgentRole({ role: "engineer" })).toBe("engineer");
+		expect(tabAgentRole({ role: "qa" })).toBe("qa");
+	});
+	test("anything else is no role", () => {
+		expect(tabAgentRole(undefined)).toBeUndefined();
+		expect(tabAgentRole({})).toBeUndefined();
+		expect(tabAgentRole({ role: "admin" })).toBeUndefined();
 	});
 });

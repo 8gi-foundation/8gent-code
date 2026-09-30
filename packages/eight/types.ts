@@ -139,6 +139,13 @@ export interface AgentConfig {
 	 * CheckerDecision. Interactive surfaces leave this false. Default: false.
 	 */
 	unattended?: boolean;
+	/**
+	 * The workspace role of the TUI tab this agent serves. On the local
+	 * text-tool path only "orchestrator" registers the delegation tools
+	 * (spawn_agent, check_agent, list_agents); every other role, and no role,
+	 * keeps the lean set and is not told about them (#3095).
+	 */
+	role?: "orchestrator" | "engineer" | "qa";
 }
 
 export interface LLMResponse {

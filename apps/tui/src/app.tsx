@@ -285,6 +285,7 @@ import {
 	type ModelSpec,
 	autoSelectModel,
 	canReuseTabAgent,
+	tabAgentRole,
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	declaredModels,
@@ -2433,6 +2434,9 @@ export function App({
 					maxTurns: 50,
 					apiKey: process.env.OPENROUTER_API_KEY,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
+					// The tab's role decides the local tool set: only the
+					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
+					role: tabAgentRole(_activeTab?.data),
 				});
 				builtSpecRef.current.set(newAgent, { model: currentModel, runtime });
 				// Belt and braces: the client's own check has no bound, so cap it.

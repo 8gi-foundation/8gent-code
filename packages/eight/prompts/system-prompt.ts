@@ -228,6 +228,12 @@ export interface ToolCatalogOptions {
 	concise?: boolean;
 	/** When true, tell the model to call discover_tools before using a category. */
 	deferred?: boolean;
+	/**
+	 * Tools to leave out because this agent does not register them (#3095). A
+	 * category left with no tools is omitted. An advertised tool that is not
+	 * registered gets called and fails.
+	 */
+	omit?: Iterable<string>;
 }
 
 /**
@@ -239,6 +245,7 @@ export interface ToolCatalogOptions {
  */
 export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	const { concise = false, deferred = false } = opts;
+	const omit = new Set(opts.omit ?? []);
 	const lines: string[] = ["## TOOLS YOU HAVE"];
 
 	if (deferred) {
@@ -255,8 +262,9 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	}
 	lines.push("");
 
-	for (const [category, toolNames] of Object.entries(TOOL_CATEGORIES)) {
-		if (!toolNames || toolNames.length === 0) continue;
+	for (const [category, allNames] of Object.entries(TOOL_CATEGORIES)) {
+		const toolNames = (allNames ?? []).filter((t) => !omit.has(t));
+		if (toolNames.length === 0) continue;
 		const desc = TOOL_CATEGORY_DESCRIPTIONS[category] ?? "";
 		if (concise) {
 			lines.push(`- **${category}**: ${toolNames.join(", ")}`);
