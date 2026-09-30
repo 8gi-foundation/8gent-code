@@ -27,7 +27,7 @@ import { motionEnabled } from "../lib/motion.js";
 import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
-import { KeyCap } from "./KeyCap.js";
+import { KeyCapRow } from "./KeyCap.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { useLandingRows } from "./ToolTrail.js";
 
@@ -163,7 +163,7 @@ export function PlanPanel({
 			) : null}
 			{toggleHint ? (
 				<Box marginTop={1}>
-					<KeyCap cap={toggleHint} verb="hide" />
+					<KeyCapRow caps={[{ cap: toggleHint, verb: "hide" }]} idPrefix="plan" />
 				</Box>
 			) : null}
 		</Box>

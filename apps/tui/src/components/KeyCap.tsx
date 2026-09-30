@@ -10,8 +10,11 @@
  * colour.
  */
 
-import { Text } from "ink";
-import React from "react";
+import { Box, Text } from "ink";
+import React, { useRef } from "react";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { keyBytes } from "../lib/key-bytes.js";
+import { injectKeys } from "../lib/mouse-input.js";
 import { t } from "../theme.js";
 
 /** Plain text of a cap, for width budgets and tests. */
@@ -19,9 +22,15 @@ export function keyCapText(cap: string, verb?: string): string {
 	return `[${cap}]${verb ? ` ${verb}` : ""}`;
 }
 
-export function KeyCap({ cap, verb }: { cap: string; verb?: string }) {
+export function KeyCap({
+	cap,
+	verb,
+	pressed = false,
+}: { cap: string; verb?: string; pressed?: boolean }) {
+	// Pressed (mouse down on it, #3239): the cap draws in reverse video until
+	// the release. Reverse video reads without colour too.
 	return (
-		<Text>
+		<Text inverse={pressed}>
 			<Text color={t.frame}>[</Text>
 			<Text color={t.textSecondary}>{cap}</Text>
 			<Text color={t.frame}>]</Text>
@@ -37,4 +46,48 @@ export const KEY_CAP_GAP = "  ";
 export function splitHint(hint: string): { cap: string; verb: string } {
 	const i = hint.indexOf(" ");
 	return i < 0 ? { cap: hint, verb: "" } : { cap: hint.slice(0, i), verb: hint.slice(i + 1) };
+}
+
+export interface CapSpec {
+	cap: string;
+	verb?: string;
+	/** Cells before this cap; defaults to KEY_CAP_GAP for all but the first. */
+	gap?: number;
+}
+
+/**
+ * A row of key caps that are also click targets (#3239): a click injects the
+ * cap's key, so it does exactly what the key does. `z` lifts a surface's caps
+ * (palette, approval card) over the HUD's.
+ */
+export function KeyCapRow({
+	caps,
+	idPrefix,
+	z = 0,
+}: { caps: CapSpec[]; idPrefix: string; z?: number }) {
+	const ref = useRef(null);
+	const spans: ClickSpan[] = [];
+	let x = 0;
+	caps.forEach((c, i) => {
+		x += c.gap ?? (i > 0 ? KEY_CAP_GAP.length : 0);
+		const w = keyCapText(c.cap, c.verb).length;
+		const bytes = keyBytes(c.cap);
+		if (bytes)
+			spans.push({ id: `${idPrefix}:${c.cap}`, dx: x, w, action: () => injectKeys(bytes) });
+		x += w;
+	});
+	useClickSpans(ref, spans, z);
+	const pressed = usePressedIn(`${idPrefix}:`);
+	return (
+		<Box ref={ref} flexShrink={0}>
+			<Text>
+				{caps.map((c, i) => (
+					<Text key={c.cap}>
+						{" ".repeat(c.gap ?? (i > 0 ? KEY_CAP_GAP.length : 0))}
+						<KeyCap cap={c.cap} verb={c.verb} pressed={pressed === `${idPrefix}:${c.cap}`} />
+					</Text>
+				))}
+			</Text>
+		</Box>
+	);
 }

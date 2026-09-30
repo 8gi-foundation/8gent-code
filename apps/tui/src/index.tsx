@@ -20,6 +20,7 @@ import React from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { App } from "./app.js";
+import { startMouse } from "./lib/mouse-wiring.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";
 
 const argv = process.argv.slice(2);
@@ -48,6 +49,10 @@ const passthroughArgs = parsed.positional.slice(1);
 if (process.stdout.isTTY) {
 	process.stdout.write("\x1b[2J\x1b[H");
 }
+
+// Mouse (#3239): clicks on key caps, tabs and chips, drag-to-copy and the
+// wheel. Installed before Ink so no mouse byte ever reaches its input parser.
+startMouse();
 
 // Render the TUI
 render(

@@ -18,7 +18,7 @@
  */
 
 import { Box, Text, useStdout } from "ink";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import {
 	cellWidth,
 	fitHeaderMiddle,
@@ -32,6 +32,8 @@ import {
 	headerMarkFrame,
 	livingMarkWriter,
 } from "../lib/living-mark.js";
+import { type ClickSpan, useClickSpans, usePressed } from "../lib/click-targets.js";
+import { injectKeys } from "../lib/mouse-input.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 
@@ -204,7 +206,6 @@ export function HeaderBar(props: HeaderBarProps) {
 	const { updateAvailable, version } = props;
 	const { compactBrand, middle, mark } = planHeader(props);
 	const chips = headerChips(props);
-
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
 			<Box flexShrink={0}>
@@ -246,23 +247,47 @@ export function HeaderBar(props: HeaderBarProps) {
 				<Box flexGrow={1} flexShrink={1} minWidth={0} />
 			)}
 
-			{chips.length > 0 ? (
-				// One row, centred on the pill's text row by the header's
-				// alignItems (the chips were on the pill's top edge before #3238).
-				// The right margin mirrors the pill's border and padding on the left.
-				<Box flexShrink={0} marginLeft={1} marginRight={CHIP_GAP}>
-					<Text>
-						{chips.map((chip, i) => (
-							<Text key={chip}>
-								{i > 0 ? "  " : ""}
-								<Text color={chip === MIC_CHIP ? t.red : t.orange} bold>
-									{chip}
-								</Text>
-							</Text>
-						))}
+			{chips.length > 0 ? <HeaderChips chips={chips} /> : null}
+		</Box>
+	);
+}
+
+/**
+ * The chips, one row, centred on the pill's text row by the header's
+ * alignItems (they were on the pill's top edge before #3238). The right
+ * margin mirrors the pill's border and padding on the left. INFINITE is the
+ * chip with a key: a click cycles the mode as Shift+Tab does (#3239); ASK
+ * and MIC name states you answer elsewhere.
+ */
+export function HeaderChips({ chips }: { chips: string[] }) {
+	const chipRef = useRef(null);
+	let cx = 0;
+	const spans: ClickSpan[] = [];
+	chips.forEach((chip, i) => {
+		if (i > 0) cx += 2;
+		if (chip === INFINITE_CHIP) {
+			spans.push({ id: "chip:infinite", dx: cx, w: cellWidth(chip), action: () => injectKeys("\x1b[Z") });
+		}
+		cx += cellWidth(chip);
+	});
+	useClickSpans(chipRef, spans);
+	const pressed = usePressed("chip:infinite");
+	return (
+		<Box ref={chipRef} flexShrink={0} marginLeft={1} marginRight={CHIP_GAP}>
+			<Text>
+				{chips.map((chip, i) => (
+					<Text key={chip}>
+						{i > 0 ? "  " : ""}
+						<Text
+							color={chip === MIC_CHIP ? t.red : t.orange}
+							bold
+							inverse={pressed && chip === INFINITE_CHIP}
+						>
+							{chip}
+						</Text>
 					</Text>
-				</Box>
-			) : null}
+				))}
+			</Text>
 		</Box>
 	);
 }

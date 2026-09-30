@@ -34,7 +34,7 @@ import { colourPolicy } from "../lib/colour-policy.js";
 import { keepIfSame } from "../lib/keep-if-same.js";
 import { reducedMotionFromEnv } from "../lib/motion.js";
 import { t } from "../theme.js";
-import { KeyCap } from "./KeyCap.js";
+import { KeyCapRow } from "./KeyCap.js";
 
 // ── Persistence helpers ───────────────────────────────────────────────
 // Lazy + best-effort: never let a DB error crash the deck. If the workspace
@@ -204,27 +204,20 @@ export function DjKeysRow({ volume = null }: { volume?: number | null } = {}) {
 			overflow="hidden"
 			aria-label={`DJ keys: ${DJ_KEYS.map((k) => k.spoken).join(", ")}.`}
 		>
-			<Text wrap="truncate-end">
-				{"     "}
-				{groups.map((g, gi) => (
-					<Text key={g[0].cap}>
-						{gi > 0 ? "  " : ""}
-						{g.map((k, i) => (
-							<Text key={k.cap}>
-								{i > 0 ? " " : ""}
-								<KeyCap
-									cap={k.cap}
-									verb={
-										k.verb === "vol" && volume != null
-											? `vol ${volume === 0 ? "muted" : `${volume}%`}`
-											: k.verb
-									}
-								/>
-							</Text>
-						))}
-					</Text>
-				))}
-			</Text>
+			<KeyCapRow
+				idPrefix="dj"
+				caps={groups.flatMap((g, gi) =>
+					g.map((k, i) => ({
+						cap: k.cap,
+						verb:
+							k.verb === "vol" && volume != null
+								? `vol ${volume === 0 ? "muted" : `${volume}%`}`
+								: k.verb,
+						// Past "DJ ▶ " on the first cap, one space inside a group, two between.
+						gap: gi === 0 && i === 0 ? 5 : i === 0 ? 2 : 1,
+					})),
+				)}
+			/>
 		</Box>
 	);
 }
@@ -284,10 +277,9 @@ export function DjRow(props: {
 					{`  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
 				</Text>
 				{props.keysActive ? null : (
-					<Text>
-						{"  "}
-						<KeyCap cap="^D" verb="keys" />
-					</Text>
+					<Box marginLeft={2}>
+						<KeyCapRow caps={[{ cap: "^D", verb: "keys" }]} idPrefix="djrow" />
+					</Box>
 				)}
 			</Box>
 		</Box>

@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
-import { KEY_CAP_GAP, KeyCap } from "./KeyCap.js";
+import { KeyCapRow } from "./KeyCap.js";
 
 /** The card's keys, as key caps (#3238): one format for every key in the HUD. */
 export const APPROVAL_KEYS: ReadonlyArray<readonly [string, string]> = [
@@ -54,16 +54,11 @@ export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptPro
 					{target}
 				</Text>
 			</Box>
-			<Box flexShrink={0}>
-				<Text>
-					{APPROVAL_KEYS.map(([cap, verb], i) => (
-						<Text key={cap}>
-							{i > 0 ? KEY_CAP_GAP : ""}
-							<KeyCap cap={cap} verb={verb} />
-						</Text>
-					))}
-				</Text>
-			</Box>
+			<KeyCapRow
+				caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
+				idPrefix="card"
+				z={10}
+			/>
 		</Box>
 	);
 }

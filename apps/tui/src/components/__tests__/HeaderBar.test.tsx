@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import {
 	HeaderBar,
+	HeaderChips,
 	brandPillWidth,
 	headerChips,
 	planHeader,
@@ -77,8 +78,9 @@ describe("HeaderBar", () => {
 		const [pill, , cluster] = children;
 		expect(pill.props.flexShrink).toBe(0);
 		expect(pill.props.width).toBeUndefined();
-		expect(cluster.props.flexShrink).toBe(0);
-		expect(cluster.props.width).toBeUndefined();
+		// The chips render through HeaderChips, a click target (#3239); the
+		// rendered-row tests below pin that it never shrinks or clips.
+		expect(cluster.type).toBe(HeaderChips);
 	});
 
 	test("brand pill width matches the rendered pill", () => {

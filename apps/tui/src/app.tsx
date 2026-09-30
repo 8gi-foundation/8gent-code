@@ -209,6 +209,7 @@ import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.j
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
+import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
 import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
@@ -1614,6 +1615,21 @@ export function App({
 	// handler and routes Y/N/E/S to the card, never to the chat input (#3055).
 	// Headless callers see no handler and PermissionManager falls back to stdin.
 	const approvalPending = useApprovalCard();
+
+	// A mouse selection copied text (#3239): the footer says so for 2 s.
+	const [copyNotice, setCopyNotice] = useState<string | null>(null);
+	useEffect(() => {
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const off = onCopied((chars) => {
+			setCopyNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`);
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(() => setCopyNotice(null), 2000);
+		});
+		return () => {
+			off();
+			if (timer) clearTimeout(timer);
+		};
+	}, []);
 
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
@@ -6325,6 +6341,7 @@ export function App({
 					permissions={activePermMode}
 					permHeld={activePermView.held}
 					permToast={permToast}
+					notice={copyNotice}
 					sessionTime={sessionTime}
 					mode={agentMode}
 					adhd={adhdMode}
