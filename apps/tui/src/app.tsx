@@ -5215,14 +5215,24 @@ export function App({
 							speakAgentReply(targetTabRole, trimmed);
 						}
 					}
-					// appendClosingQuestionIfNeeded reads the just-appended buffer
-					// and decides whether to add a follow-up bubble.
-					{
-						const cur = tabMessagesRef.current.get(tabId) ?? [];
-						const after = appendClosingQuestionIfNeeded(cur);
-						if (after !== cur) {
-							tabMessagesRef.current.set(tabId, after);
-							if (tabId === activeTabId) setMessagesRaw(after);
+					// appendClosingQuestionIfNeeded decides whether this turn's reply
+					// gets a follow-up line. Only when a reply landed this turn, and
+					// only through a queued update: tabMessagesRef is written inside
+					// appendToTab's state updater, so reading it here could miss the
+					// reply just appended, and writing that stale copy back dropped
+					// the reply (seen in Rishi's pilot once setup questions became
+					// 8gent messages: the follow-up landed on the welcome instead).
+					if (trimmed) {
+						if (tabId === activeTabId) {
+							setMessagesRaw((prev) => {
+								const after = appendClosingQuestionIfNeeded(prev);
+								if (after !== prev) tabMessagesRef.current.set(tabId, after);
+								return after;
+							});
+						} else {
+							const cur = tabMessagesRef.current.get(tabId) ?? [];
+							const after = appendClosingQuestionIfNeeded(cur);
+							if (after !== cur) tabMessagesRef.current.set(tabId, after);
 						}
 					}
 					// Clear image after sending
