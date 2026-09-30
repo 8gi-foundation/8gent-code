@@ -77,7 +77,8 @@ export function parseToolName(content: string): string | null {
 
 /**
  * Derive the PROVIDERS rows. Every row names a real route:
- *   - primary: the provider and model the TUI is configured to use;
+ *   - primary: the provider and model serving the turns. After a reroute
+ *     that is the model that ran, with the configured one as `asked` (#3102);
  *   - fallback: the next hop in the real failover chain for that model
  *     (see `fallbackFromChain`), or no row at all when the chain has none;
  *   - offline: only when something reports a route down.
@@ -85,7 +86,7 @@ export function parseToolName(content: string): string | null {
  * glyph for an unknown value: the slot is simply empty.
  */
 export interface ProviderSnapshot {
-	primary: { name: string; latencyMs?: number } | null;
+	primary: { name: string; latencyMs?: number; asked?: string } | null;
 	fallback: { name: string; latencyMs?: number } | null;
 	offline: { name: string; latencyMs?: number } | null;
 }
@@ -94,7 +95,12 @@ export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow
 	const rows: ActivityRailProviderRow[] = [];
 	const fmt = (ms?: number) => (typeof ms === "number" ? `${Math.round(ms)}ms` : undefined);
 	if (snap.primary) {
-		rows.push({ name: snap.primary.name, state: "primary", latency: fmt(snap.primary.latencyMs) });
+		rows.push({
+			name: snap.primary.name,
+			state: "primary",
+			latency: fmt(snap.primary.latencyMs),
+			...(snap.primary.asked ? { asked: snap.primary.asked } : {}),
+		});
 	}
 	if (snap.fallback) {
 		rows.push({

@@ -300,6 +300,7 @@ import {
 	providerToRuntime,
 	specForActivatedTab,
 } from "./lib/model-selection.js";
+import { modelOnScreen } from "./lib/model-truth.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -2081,8 +2082,21 @@ export function App({
 	 * fire when the event belongs to the active tab so background runs do
 	 * not steal foreground attention.
 	 */
+	// The model each tab agent's last reroute named (#3102). Display only:
+	// the reroute event lands before the agent's config.model self-corrects,
+	// so this is what names the right model during the rerouted turn. Keyed
+	// by agent, so an agent rebuilt for another model starts clean.
+	const routedModelRef = useRef(new WeakMap<object, string>());
+	const [, setRoutedTick] = useState(0);
+	const getTabAgent = perTabAgents.getAgent;
 	const buildEventsForTab = useCallback(
 		(tabId: string, tabTitle: string): AgentEventCallbacks => ({
+			onModelRouted: (event) => {
+				const routedAgent = getTabAgent(tabId);
+				if (!routedAgent) return;
+				routedModelRef.current.set(routedAgent, event.used);
+				setRoutedTick((n) => n + 1);
+			},
 			onToolStart: (event: AgentToolStartEvent) => {
 				const isActive = tabId === activeTabId;
 				// update_plan carries the agent's own step statuses: the only
@@ -2338,7 +2352,7 @@ export function App({
 				}
 			},
 		}),
-		[activeTabId, appendToTab, kanbanTaskStart, kanbanTaskComplete, markBodyPartStart, markBodyPartEnd],
+		[activeTabId, appendToTab, getTabAgent, kanbanTaskStart, kanbanTaskComplete, markBodyPartStart, markBodyPartEnd],
 	);
 
 	// One shared readiness probe per provider/model (see createReadinessCache)
@@ -5939,9 +5953,19 @@ export function App({
 	// TASKS reads the same plan as the PLAN column, so the two never disagree.
 	const activeTasks = deriveActiveTasks(planSteps, isProcessing);
 	const recentTools = deriveTools(messages, isProcessing, 5);
+	// The model that ran the turn, not only the one asked for (#3102). Read
+	// from the active agent's reroute event and live config, for display only.
+	const shownModel = modelOnScreen({
+		asked: currentModel,
+		built: agent ? builtSpecRef.current.get(agent)?.model : undefined,
+		live: agent ? (agent as unknown as { config?: { model?: string } }).config?.model : undefined,
+		routed: agent ? routedModelRef.current.get(agent) : undefined,
+	});
 	const providerRows = deriveProviders({
-		primary: { name: currentModel ? `${currentProvider}:${currentModel}` : currentProvider },
-		fallback: railFallback(currentProvider, currentModel),
+		primary: currentModel
+			? { name: `${currentProvider}:${shownModel.ran}`, asked: shownModel.asked }
+			: { name: currentProvider },
+		fallback: railFallback(currentProvider, shownModel.ran),
 		offline: null,
 	});
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
@@ -6029,7 +6053,8 @@ export function App({
 												: "Researching"
 							}
 							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={currentModel || "-"}
+							route={shownModel.ran || "-"}
+							routeAsked={shownModel.asked}
 							tokens={tokenStr}
 							contextPct={contextPct}
 							approvalPending={isApprovalPending}
@@ -6140,7 +6165,8 @@ export function App({
 				</Box>
 
 				<BottomBar
-					model={currentModel || "—"}
+					model={shownModel.ran || "—"}
+					modelAsked={shownModel.asked}
 					ready={providerHealth.live}
 					total={providerHealth.total}
 					tokens={tokenStr}

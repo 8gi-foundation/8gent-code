@@ -3,6 +3,9 @@
  *
  *   ● 8GENT FM idle │ mode Planning ^Y │ model qwen3.8:27b │ tokens 179K tok │ branch main │ session 8m 12s
  *
+ * After a reroute the model segment names the model that ran, and the one
+ * asked for follows as a dim hint: "model qwen3.8:27b (asked eight-1.0-q3:14b)".
+ *
  * It replaces three stacked blocks that took 11 rows between them: the
  * bordered 8GENT FM bar, the seven bordered MODEL/AGENTS/TOKENS/... tiles
  * and the bordered PLANNING/RESEARCH/... mode strip.
@@ -22,6 +25,7 @@
 
 import { Box, Text, useStdout } from "ink";
 import React from "react";
+import { askedNote } from "../lib/model-truth.js";
 import { theme } from "../theme.js";
 
 const ui = {
@@ -51,7 +55,11 @@ export type JudgeState = "loading" | "ready" | "failed";
 
 export interface FooterData {
 	mode: string;
+	/** The model that ran the turn. */
 	model?: string;
+	/** The configured model, only when a reroute ran the turn on `model`
+	 *  instead. Shown after it as a dim "(asked ...)" hint (#3102). */
+	modelAsked?: string;
 	tokens?: string;
 	tokensPerSecond?: number;
 	branch?: string;
@@ -96,7 +104,14 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 		{ key: "mode", label: "mode", value: d.mode, hint: "^Y", color: ui.teal, priority: 0 },
 	];
 	if (known(d.model)) {
-		out.push({ key: "model", label: "model", value: truncateMiddle(d.model, 24), color: ui.cream, priority: 1 });
+		out.push({
+			key: "model",
+			label: "model",
+			value: truncateMiddle(d.model, 24),
+			hint: known(d.modelAsked) ? askedNote(truncateMiddle(d.modelAsked, 24)) : undefined,
+			color: ui.cream,
+			priority: 1,
+		});
 	}
 	if (known(d.tokens)) {
 		out.push({ key: "tokens", label: "tokens", value: d.tokens, color: ui.cream, priority: 2 });

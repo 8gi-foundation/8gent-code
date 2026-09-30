@@ -40,6 +40,7 @@ import {
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
+import { askedNote } from "../lib/model-truth.js";
 import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
@@ -51,6 +52,9 @@ interface LiveFocalStripProps {
 	mode: Mode;
 	activeStep: string;
 	route: string;
+	/** The configured model when a reroute ran the turn on `route` instead.
+	 *  Shown dim after the route as "(asked ...)" (#3102). */
+	routeAsked?: string;
 	tokens: string;
 	contextPct: number;
 	approvalPending?: boolean;
@@ -86,6 +90,7 @@ export function LiveFocalStrip({
 	mode,
 	activeStep,
 	route,
+	routeAsked,
 	tokens,
 	contextPct,
 	approvalPending = false,
@@ -106,13 +111,19 @@ export function LiveFocalStrip({
 	const middleMin = isProcessing ? Math.min(12, middle.length) : middle.length;
 	const fit =
 		width === undefined
-			? { middle, route: route === "-" ? "" : route, meter: true }
+			? {
+					middle,
+					route: route === "-" ? "" : route,
+					asked: route && route !== "-" && routeAsked ? askedNote(routeAsked) : "",
+					meter: true,
+				}
 			: fitNowStrip({
 					width,
 					middle,
 					middleMin,
 					middleShort: finished ? "finished" : undefined,
 					route,
+					asked: routeAsked,
 					tokens,
 				});
 	return (
@@ -146,6 +157,7 @@ export function LiveFocalStrip({
 
 			<Box flexShrink={0} justifyContent="flex-end">
 				{fit.route ? <Text color={t.steel}>{fit.route}</Text> : null}
+				{fit.asked ? <Text color={t.textTertiary}> {fit.asked}</Text> : null}
 				{fit.meter ? (
 					<>
 						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
