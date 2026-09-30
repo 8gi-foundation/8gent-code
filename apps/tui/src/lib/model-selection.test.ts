@@ -16,6 +16,8 @@ import * as path from "node:path";
 import { ProviderManager, getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	type ModelSpec,
+	autoSelectModel,
+	canReuseTabAgent,
 	declaredModels,
 	normalizeProviderId,
 	providerToRuntime,
@@ -190,5 +192,59 @@ describe("normalizeProviderId validates against the provider registry (#3081)", 
 		expect(normalizeProviderId("8gent", isKnown)).toBe("8gent");
 		expect(normalizeProviderId("nope", isKnown)).toBeUndefined();
 		fs.rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+// #3084: `--provider 8gent --model qwen3.8:27b-mlx`. The 8gent registry entry
+// DECLARES eight-1.0-q3:14b; the validity check swapped the explicit model for
+// it, that model was not installed, the agent rerouted to qwen3.8 and
+// self-corrected config.model, and the TUI then dropped the "stale" agent as
+// the turn finished, discarding the reply ("No reply.").
+describe("an explicit --model is never overridden (#3084)", () => {
+	const declared8gent = ["eight-1.0-q3:14b"];
+	const pin: ModelSpec = { provider: "8gent", model: "qwen3.8:27b-mlx" };
+
+	test("--provider 8gent --model X keeps X even though X is not in 8gent's declared list", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: pin }),
+		).toBeNull();
+	});
+
+	test("without an explicit choice, a model missing from the list is still auto-replaced", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: null }),
+		).toBe("eight-1.0-q3:14b");
+	});
+
+	test("the pin only protects its own provider: after switching provider the check runs", () => {
+		expect(
+			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "lmstudio", available: ["m-a"], explicit: pin }),
+		).toBe("m-a");
+	});
+
+	test("no model, an embedding model, or an empty list behave as before", () => {
+		expect(autoSelectModel({ current: "", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null })).toBe(
+			"llama3.2:3b",
+		);
+		expect(
+			autoSelectModel({
+				current: "nomic-embed-text:latest",
+				currentProvider: "ollama",
+				available: ["nomic-embed-text:latest", "llama3.2:3b"],
+				explicit: null,
+			}),
+		).toBe("llama3.2:3b");
+		expect(autoSelectModel({ current: "x", currentProvider: "ollama", available: [], explicit: null })).toBeNull();
+		expect(
+			autoSelectModel({ current: "llama3.2:3b", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null }),
+		).toBeNull();
+	});
+
+	test("a rerouted agent (live config.model changed) is still reused for the spec it was built for", () => {
+		const built = { model: "eight-1.0-q3:14b", runtime: "ollama" };
+		// The live config would now say qwen3.8 after the reroute; reuse keys on the build spec.
+		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "ollama" })).toBe(true);
+		expect(canReuseTabAgent(built, { model: "eight-1.0-q3:14b", runtime: "lmstudio" })).toBe(false);
+		expect(canReuseTabAgent(built, { model: "qwen3.8:27b-mlx", runtime: "ollama" })).toBe(false);
 	});
 });

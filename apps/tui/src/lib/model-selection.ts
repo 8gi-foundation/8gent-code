@@ -132,6 +132,46 @@ export interface ModelSpec {
 	model: string;
 }
 
+
+/**
+ * The model the validity check should switch to once a provider's model list
+ * has loaded, or null to keep the current one.
+ *
+ * An explicit launch choice is never overridden (#3084): `--provider 8gent
+ * --model qwen3.8:27b-mlx` loads the registry's DECLARED list for 8gent
+ * (`eight-1.0-q3:14b`), the requested model is not on it, and the old check
+ * swapped in the declared default. That model was not installed, so the agent
+ * silently rerouted, the header showed a model that never ran, and the rebuilt
+ * agent dropped the reply. A model the user named is the user's call; if it is
+ * wrong the turn says so.
+ */
+export function autoSelectModel(opts: {
+	current: string;
+	currentProvider: string;
+	available: string[];
+	/** The launch --provider/--model pin, if the user passed one. */
+	explicit: ModelSpec | null;
+}): string | null {
+	const { current, currentProvider, available, explicit } = opts;
+	if (available.length === 0) return null;
+	if (explicit && current && explicit.model === current && explicit.provider === currentProvider) return null;
+	const inList = Boolean(current && available.includes(current));
+	if (current && inList && !isLikelyEmbeddingModelId(current)) return null;
+	const next = pickBestChatModel(available, { preference: explicit?.model || undefined });
+	return next && next !== current ? next : null;
+}
+
+/**
+ * Whether a tab's existing agent can keep serving the active spec. Compare the
+ * spec the agent was BUILT for, not its live config: the agent self-corrects
+ * `config.model` after a reroute, and comparing the live value made the TUI
+ * drop and rebuild the agent the moment the rerouted turn finished, which
+ * discarded that turn's in-flight reply ("No reply.", #3084).
+ */
+export function canReuseTabAgent(built: { model?: string; runtime?: string }, want: { model: string; runtime: string }): boolean {
+	return built.model === want.model && built.runtime === want.runtime;
+}
+
 /** The tab a CLI --provider/--model override was pinned to at launch, with that spec. */
 export interface CliTabPin {
 	tabId: string;
