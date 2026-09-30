@@ -1,17 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MARK_HEADER, MARK_INTRO, MARK_MEDIUM, MARK_SMALL } from "./mark8-cells.js";
+import { MARK_HEADER, MARK_INTRO } from "./mark8-cells.js";
 import { brailleRows, curve, generateCellsModule } from "./mark8.js";
-
-/** Pixels at half coverage or more, as # and . per pixel row. */
-function silhouette(coverage: readonly string[]): string[] {
-	return coverage.map((row) => {
-		let s = "";
-		for (let i = 0; i < row.length; i += 2) s += Number.parseInt(row.slice(i, i + 2), 16) >= 128 ? "#" : ".";
-		return s;
-	});
-}
 
 describe("the figure-8 mark", () => {
 	test("the precomputed cells match the maths (regenerate with bun apps/tui/src/lib/mark8.ts)", () => {
@@ -24,56 +15,33 @@ describe("the figure-8 mark", () => {
 		expect(brailleRows(4, 3, 1.3)).toEqual([...MARK_HEADER]);
 	});
 
-	test("the intro mark is an upright 8: round bowls, top bowl smaller, strokes crossing in an X", () => {
-		expect(silhouette(MARK_INTRO.coverage)).toEqual([
-			"........######........",
-			"......##########......",
-			".....############.....",
-			"....####......####....",
-			"...###..........###...",
-			"...###..........###...",
-			"...##............##...",
-			"...##............##...",
-			"...###..........###...",
-			"...###..........###...",
-			"....###........###....",
-			"....###........###....",
-			".....###......###.....",
-			"......####..####......",
-			".......########.......",
-			"........######........",
-			"........######........",
-			".......########.......",
-			"......####..####......",
-			".....####....####.....",
-			"....####......####....",
-			"...####........####...",
-			"..####..........####..",
-			"..###............###..",
-			".###..............###.",
-			".###..............###.",
-			".###..............###.",
-			".###..............###.",
-			".###..............###.",
-			".###..............###.",
-			"..###............###..",
-			"..####..........####..",
-			"...####........####...",
-			"....##############....",
-			".....############.....",
-			"........######........",
-		]);
+	test("the intro marks are braille only: smooth dots, never half blocks (#3159)", () => {
+		for (const rows of Object.values(MARK_INTRO)) {
+			for (const ch of rows.join("")) {
+				expect(ch === " " || (ch.codePointAt(0)! >= 0x2800 && ch.codePointAt(0)! <= 0x28ff)).toBe(true);
+			}
+		}
 	});
 
-	test("every size is anti-aliased: partial coverage exists, not just on and off", () => {
-		for (const m of [MARK_INTRO, MARK_MEDIUM, MARK_SMALL]) {
-			const values = new Set<number>();
-			for (const row of m.coverage) {
-				for (let i = 0; i < row.length; i += 2) values.add(Number.parseInt(row.slice(i, i + 2), 16));
-			}
-			const partial = [...values].filter((v) => v > 16 && v < 240);
-			expect(partial.length).toBeGreaterThan(10);
-			expect(m.coverage.length).toBe(m.rows * 2);
+	test("the large intro mark is an upright 8: top bowl narrower, strokes crossing at the waist", () => {
+		const rows = MARK_INTRO.large;
+		const width = (line: string) => line.trim().length;
+		const top = Math.max(...rows.slice(0, 5).map(width));
+		const bottom = Math.max(...rows.slice(6).map(width));
+		expect(top).toBeLessThan(bottom);
+		// The waist row is the narrowest inked row between the bowls.
+		const waist = Math.min(...rows.slice(3, 8).map(width));
+		expect(waist).toBeLessThanOrEqual(4);
+		expect(rows.length).toBe(12);
+		expect(rows[0]!.length).toBe(18);
+	});
+
+	test("every intro size keeps both bowls open (an empty cell inside each)", () => {
+		for (const rows of Object.values(MARK_INTRO)) {
+			const h = rows.length;
+			const inner = (r: number) => rows[r]!.slice(Math.floor(rows[0]!.length / 2) - 1, Math.floor(rows[0]!.length / 2) + 1);
+			expect(inner(1)).toMatch(/^ +$/);
+			expect(inner(h - 2)).toMatch(/^ +$/);
 		}
 	});
 

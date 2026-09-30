@@ -4,21 +4,24 @@
  *
  * When: first run and once after each update only (lib/intro-gate.ts).
  *
- * Sequence, about 1.5 s in all:
- *   T+0      the figure-8 mark, the wordmark and the hint, still
- *   T+150    three lines type into a fixed left column, 300 ms each
- *   T+1250   the mark collapses into the header's 8: 4 frames x 60 ms
+ * Direction B, "Converge" (#3159, James's pick). Sequence, 1.49 s in all
+ * (lib/intro-converge.ts has the maths):
+ *   T+0      dots of the braille 8 sit on a ring near the screen edge
+ *   T+0..880 they warp inward, staggered, eased out, and land
+ *   T+880    one warm pulse
+ *   T+900    the name and one line come up on the mark's own axis
+ *   T+1020   the mark is alive: a slow colour wave, a dot blinking off now
+ *            and then, changing at most 8 times a second
  *   T+1490   the HUD
  *
- * Any key skips at once, from the first frame. A printable key is handed on
- * to the input, so nothing typed during the splash is lost.
+ * Any key skips at once, from the first frame; lib/early-input.ts holds keys
+ * typed before the first paint so they skip too. A printable key is handed
+ * on to the input, so nothing typed during the splash is lost.
  *
- * Reduced motion (Ctrl+A, or 8GENT_REDUCED_MOTION=1): the final frame is
- * drawn at once, nothing types and nothing collapses.
- *
- * Layout: the whole block is centred vertically. The three lines share one
- * left column whose width is the longest line, so typing only grows to the
- * right and nothing jitters sideways.
+ * Reduced motion (Ctrl+A, or 8GENT_REDUCED_MOTION=1), TERM=dumb, a terminal
+ * without braille (ASCII) or one too small for the mark: no splash.
+ * NO_COLOR: shape and weight only, no colour escapes, and the mark holds
+ * still once it lands (#3158).
  *
  * Audio (macOS only): the bundled launch instrumental at 10% via afplay,
  * faded out when the splash leaves. ~/.8gent/sounds/launch.mp3 or
@@ -40,10 +43,20 @@ import React, { useEffect, useRef, useState } from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { loadSettings } from "../../../../packages/settings/index.js";
 import { useViewport } from "../hooks/useViewport.js";
+import {
+	ALIVE_FRAME_MS,
+	type ColourKey,
+	INTRO_DONE_MS,
+	INTRO_PALETTE,
+	LANDED_MS,
+	PULSE_MS,
+	introDots,
+	introFrame,
+	introLayout,
+	introSize,
+} from "../lib/intro-converge.js";
 import { motionEnabled } from "../lib/motion.js";
-import { glyphs } from "../lib/term-caps.js";
-import { t } from "../theme.js";
-import { Mark8, type MarkSize, markSize } from "./Mark8.js";
+import { drawsColour, glyphs } from "../lib/term-caps.js";
 
 // ============================================
 // Audio
@@ -237,121 +250,10 @@ export function stopIntroMusic(opts?: { abrupt?: boolean; durationMs?: number })
 }
 
 // ============================================
-// Copy and timeline (pure, tested)
+// Copy and timeline (pure, tested in lib/intro-converge.ts)
 // ============================================
 
-export const INTRO_LINES = [
-	"Your intelligence shouldn't be a subscription.",
-	"Take back custody of your cognition.",
-	"Infinite General Intelligence. Free, local, open.",
-] as const;
-
-/** Theme tokens per line, then the hint. All at least 4.5:1 on the background. */
-export const INTRO_LINE_TOKENS = ["textPrimary", "textSecondary", "textTertiary"] as const;
-export const INTRO_HINT_TOKEN = "textTertiary" as const;
-
-export const INTRO_TYPE_START_MS = 150;
-/** Each line types in this long. */
-export const INTRO_LINE_MS = 300;
-export const INTRO_COLLAPSE_AT_MS = 1250;
-export const COLLAPSE_FRAME_MS = 60;
-/** Eased progress of the collapse, one entry per frame; ends exactly on the header. */
-export const COLLAPSE_EASE: readonly number[] = [0.35, 0.7, 0.9, 1];
-export const COLLAPSE_SIZES: readonly MarkSize[] = ["medium", "small", "header", "header"];
-export const INTRO_DONE_MS = INTRO_COLLAPSE_AT_MS + COLLAPSE_FRAME_MS * COLLAPSE_EASE.length;
-
-/** Width of the shared text column: the longest line, so typing never re-centres. */
-export const INTRO_BLOCK_WIDTH = Math.max(...INTRO_LINES.map((l) => l.length));
-
-const WORDMARK_WIDTH = "8gent Code".length;
-
-/** Where the header's "8" sits: row 1, column 2, inside the brand pill's border. */
-export const HEADER_EIGHT = { row: 1, col: 2 } as const;
-
-/** How much of line `i` has typed in at `elapsed` ms. Motion off shows it all. */
-export function typedLine(i: number, elapsed: number, animate: boolean): string {
-	const line = INTRO_LINES[i] ?? "";
-	if (!animate) return line;
-	const start = INTRO_TYPE_START_MS + i * INTRO_LINE_MS;
-	if (elapsed <= start) return "";
-	const chars = Math.ceil(((elapsed - start) / INTRO_LINE_MS) * line.length);
-	return line.slice(0, Math.min(chars, line.length));
-}
-
-/** The largest mark that leaves the whole block room in `rows` terminal rows. */
-export function introMarkSize(rows: number): MarkSize {
-	if (rows >= 30) return "intro";
-	if (rows >= 24) return "medium";
-	if (rows >= 18) return "small";
-	return "header";
-}
-
-/** Rows below the mark: gap, wordmark, gap, three lines, gap, hint. */
-export const BELOW_MARK_ROWS = 8;
-
-export interface IntroLayout {
-	size: MarkSize;
-	top: number;
-	markLeft: number;
-	wordLeft: number;
-	blockLeft: number;
-	markCols: number;
-	markRows: number;
-}
-
-/** Centred placement of the splash block in a cols x rows viewport. */
-export function introLayout(cols: number, rows: number, rich: boolean): IntroLayout {
-	const size = introMarkSize(rows);
-	const m = markSize(size, rich);
-	const height = m.rows + BELOW_MARK_ROWS;
-	return {
-		size,
-		top: Math.max(0, Math.floor((rows - height) / 2)),
-		markLeft: Math.max(0, Math.floor((cols - m.cols) / 2)),
-		wordLeft: Math.max(0, Math.floor((cols - WORDMARK_WIDTH) / 2)),
-		blockLeft: Math.max(1, Math.floor((cols - INTRO_BLOCK_WIDTH) / 2)),
-		markCols: m.cols,
-		markRows: m.rows,
-	};
-}
-
-export interface CollapseFrame {
-	size: MarkSize;
-	top: number;
-	left: number;
-}
-
-/**
- * The collapse, one frame per COLLAPSE_EASE entry. The mark's centre travels
- * from its splash position to the header's 8 while it steps down in size, so
- * the last frame lands the small braille 8 over the header's 8.
- */
-export function collapseFrames(layout: IntroLayout, rich: boolean): CollapseFrame[] {
-	const fromY = layout.top + layout.markRows / 2;
-	const fromX = layout.markLeft + layout.markCols / 2;
-	const toY = HEADER_EIGHT.row + 0.5;
-	const toX = HEADER_EIGHT.col + 0.5;
-	return COLLAPSE_EASE.map((p, k) => {
-		const size = COLLAPSE_SIZES[k] ?? "header";
-		const m = markSize(size, rich);
-		const cy = fromY + (toY - fromY) * p;
-		const cx = fromX + (toX - fromX) * p;
-		return {
-			size,
-			top: Math.max(0, Math.round(cy - m.rows / 2)),
-			left: Math.max(0, Math.round(cx - m.cols / 2)),
-		};
-	});
-}
-
-/** The collapse frame index at `elapsed`, or -1 before the collapse starts. */
-export function collapseIndex(elapsed: number): number {
-	if (elapsed < INTRO_COLLAPSE_AT_MS) return -1;
-	return Math.min(
-		COLLAPSE_EASE.length - 1,
-		Math.floor((elapsed - INTRO_COLLAPSE_AT_MS) / COLLAPSE_FRAME_MS),
-	);
-}
+export { INTRO_DONE_MS, INTRO_LINE, INTRO_NAME } from "../lib/intro-converge.js";
 
 /**
  * The text a key press hands on to the input: printable characters only, and
@@ -381,9 +283,22 @@ interface IntroBannerProps {
 	speed?: number;
 	/** Override the glyph capability check (tests). */
 	rich?: boolean;
+	/** Override the colour check (tests). Defaults to NO_COLOR / TERM=dumb. */
+	colour?: boolean;
 	/** Play the launch music. Default true. */
 	sound?: boolean;
 }
+
+/**
+ * The colour a run is drawn in, or undefined for none. Under NO_COLOR (or
+ * TERM=dumb) nothing gets a colour, so Ink writes no colour escapes (#3158).
+ */
+export function runColour(colour: ColourKey | null, inColour: boolean): string | undefined {
+	return inColour && colour ? INTRO_PALETTE[colour] : undefined;
+}
+
+/** Frame interval while the dots fly; the living mark after landing changes at 8 fps. */
+const FLY_FRAME_MS = 33;
 
 export function IntroBanner({
 	onDone,
@@ -391,12 +306,20 @@ export function IntroBanner({
 	version,
 	speed = 1,
 	rich,
+	colour,
 	sound = true,
 }: IntroBannerProps) {
 	const viewport = useViewport();
 	const [elapsed, setElapsed] = useState(0);
 	const done = useRef(false);
 	const motion = motionEnabled(animate);
+	const isRich = rich ?? glyphs().eight === null;
+	const inColour = colour ?? drawsColour();
+	const size = isRich ? introSize(viewport.width, viewport.height) : null;
+	// Reduced motion, a terminal that cannot draw braille, or one too small for
+	// the mark: no splash at all. The HUD header already carries the name.
+	// TERM=dumb cannot place a cursor, so it cannot draw a moving splash.
+	const skip = !motion || size === null || process.env.TERM === "dumb";
 	const onDoneRef = useRef(onDone);
 	onDoneRef.current = onDone;
 
@@ -408,79 +331,67 @@ export function IntroBanner({
 	});
 
 	useEffect(() => {
-		if (sound) playIntroSound();
-	}, [sound]);
+		if (sound && !skip) playIntroSound();
+	}, [sound, skip]);
 
 	useEffect(() => {
-		// Reduced motion: one still frame, then the HUD. No ticking repaints.
-		if (!motion) {
-			const timer = setTimeout(() => finishRef.current(), INTRO_DONE_MS / speed);
-			return () => clearTimeout(timer);
+		if (skip) {
+			finishRef.current();
+			return;
 		}
 		const start = performance.now();
-		const tick = setInterval(() => {
+		let timer: ReturnType<typeof setTimeout>;
+		const step = () => {
 			const ms = (performance.now() - start) * speed;
-			setElapsed(ms);
 			if (ms >= INTRO_DONE_MS) {
-				clearInterval(tick);
 				finishRef.current();
+				return;
 			}
-		}, 30);
-		return () => clearInterval(tick);
-	}, [motion, speed]);
+			setElapsed(ms);
+			// While dots fly, about 30 fps. Once the mark is home it only changes
+			// on the living beat, so there is nothing to redraw in between.
+			const next =
+				ms < LANDED_MS + PULSE_MS ? FLY_FRAME_MS : ALIVE_FRAME_MS - (ms % ALIVE_FRAME_MS);
+			timer = setTimeout(step, Math.max(8, next / speed));
+		};
+		step();
+		return () => clearTimeout(timer);
+	}, [skip, speed]);
 
 	useInput((input, key) => {
 		finishRef.current(carriedText(input, key));
 	});
 
-	if (done.current) return null;
+	if (done.current || skip || size === null) return null;
+	// The first commit draws nothing: a key pressed before the first paint is
+	// read in that beat, so it skips the splash before a single frame shows.
+	// The clock started at mount, so this adds nothing to the 1.49 s.
+	if (elapsed < FLY_FRAME_MS / 2) return null;
 
-	const isRich = rich ?? glyphs().eight === null;
-	const layout = introLayout(viewport.width, viewport.height, isRich);
-
-	const k = motion ? collapseIndex(elapsed) : -1;
-	const frame = k >= 0 ? collapseFrames(layout, isRich)[k] : undefined;
-	if (frame) {
-		return (
-			<Box flexDirection="column" paddingTop={frame.top} paddingLeft={frame.left}>
-				<Mark8 size={frame.size} rich={isRich} />
-			</Box>
-		);
-	}
-
-	const hint = `any key to continue${version ? ` · v${version}` : ""}`;
+	const layout = introLayout(viewport.width, viewport.height, size);
+	const frame = introFrame(viewport.width, viewport.height, layout, introDots(size), elapsed, {
+		// Colour carries the life: without it the mark holds still.
+		alive: inColour,
+		hint: `any key skips${version ? ` · v${version}` : ""}`,
+	});
 
 	return (
-		<Box flexDirection="column" paddingTop={layout.top}>
-			<Box paddingLeft={layout.markLeft}>
-				<Mark8 size={layout.size} rich={isRich} />
-			</Box>
-			<Box marginTop={1} paddingLeft={layout.wordLeft}>
-				<Text color={t.orange} bold>
-					8
+		<Box flexDirection="column">
+			{frame.map((runs, r) => (
+				// Rows are positional and never reorder.
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+				<Text key={r} wrap="truncate-end">
+					{runs.length === 0
+						? " "
+						: runs.map((run, i) => (
+								// Runs are positional within a fixed row.
+								// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+								<Text key={i} color={runColour(run.colour, inColour)} bold={run.bold}>
+									{run.text}
+								</Text>
+							))}
 				</Text>
-				<Text color={t.textPrimary} bold>
-					gent
-				</Text>
-				<Text color={t.textTertiary}> Code</Text>
-			</Box>
-			<Box marginTop={1} paddingLeft={layout.blockLeft} flexDirection="column">
-				{INTRO_LINES.map((line, i) => {
-					const shown = typedLine(i, elapsed, motion);
-					const typing = shown.length > 0 && shown.length < line.length;
-					return (
-						<Box key={line} width={INTRO_BLOCK_WIDTH} minHeight={1}>
-							<Text color={t[INTRO_LINE_TOKENS[i] ?? "textTertiary"]} bold={i === 0}>
-								{shown}
-								{typing ? (isRich ? "▌" : "_") : ""}
-							</Text>
-						</Box>
-					);
-				})}
-			</Box>
-			<Box marginTop={1} paddingLeft={layout.blockLeft}>
-				<Text color={t[INTRO_HINT_TOKEN]}>{hint}</Text>
-			</Box>
+			))}
 		</Box>
 	);
 }
