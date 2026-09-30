@@ -595,6 +595,9 @@ export interface Message {
 	latencyMs?: number;
 	/** For assistant messages: total tokens used by this turn (footer) */
 	tokens?: number;
+	/** For a turn's reply: the plan the PLAN column held when it landed, settled.
+	 *  The DONE block reads its steps from here, so the two never disagree. */
+	plan?: PlanStep[];
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
@@ -1042,6 +1045,12 @@ export function App({
 	// update_plan calls, see lib/plan-state.ts). Saved tasks from the task
 	// manager show there when no turn plan exists. Ctrl+X opens and closes it.
 	const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+	// The reply stamps the plan it closes (Message.plan); the send path reads
+	// it here because its closure holds the plan from when the turn began.
+	const planStepsRef = useRef<PlanStep[]>([]);
+	useEffect(() => {
+		planStepsRef.current = planSteps;
+	}, [planSteps]);
 	const planStartedAtRef = useRef<number | null>(null);
 	const [planElapsedMs, setPlanElapsedMs] = useState<number | null>(null);
 	const savedTasks = useManagerTasks(taskManagerRef.current);
@@ -3044,9 +3053,9 @@ export function App({
 							onboardingManager.skipAll();
 							setShowOnboarding(false);
 							setViewMode("chat");
-							addSystemMessage(
-								"Understood. I'll ask again later.\n" + "(The more I know, the better I serve.)",
-							);
+							// No reply in the transcript (#3088): the input coming back is
+							// the answer. The old line promised "I'll ask again later", but
+							// skipAll marks setup complete and nothing ever asks again.
 						} else {
 							const skipped = onboardingManager.skipQuestion();
 							const nextQ = skipped ? await resolveSetupChecks(skipped) : null;
@@ -5213,11 +5222,14 @@ export function App({
 					perTabAgents.clearPromise(tabId);
 					const trimmed = (reply ?? "").trim();
 					if (trimmed) {
+						// The plan column is the active tab's; a background turn has none.
+						const turnPlanSteps = tabId === activeTabId ? planStepsRef.current : [];
 						appendToTab(tabId, {
 							id: `assistant-${Date.now()}`,
 							role: "assistant" as const,
 							content: trimmed,
 							timestamp: new Date(),
+							...(turnPlanSteps.length > 0 ? { plan: settlePlan(turnPlanSteps) } : {}),
 						});
 						{
 							const targetTabRole = (

@@ -5,8 +5,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { type PlanStep, applyPlanUpdate, mergePlanText, settlePlan } from "./plan-state";
 import { type ToolTrailEntry, toTrailEntry } from "./tool-trail";
-import { MAX_RESULT_ROWS, buildTurnResults, fitResultRow, turnPlan } from "./turn-results";
+import {
+	MAX_RESULT_ROWS,
+	buildTurnResults,
+	fitResultRow,
+	stepsShown,
+	turnPlan,
+} from "./turn-results";
 
 const ok = (tool: string, summary: string): ToolTrailEntry => ({ tool, summary, status: "ok" });
 
@@ -154,13 +161,103 @@ describe("buildTurnResults: a long turn folds", () => {
 		];
 		const rows = buildTurnResults(trail, 5);
 		expect(rows).toHaveLength(5);
-		expect(rows[0]).toMatchObject({ kind: "fold", verb: "9 more steps" });
+		expect(rows[0]).toMatchObject({ kind: "fold", verb: "9 more actions" });
 		expect(rows.at(-1)).toMatchObject({ status: "blocked", verb: "Run blocked" });
 	});
 
 	test("the default ceiling holds", () => {
 		const trail = Array.from({ length: 40 }, (_, i) => ok("write_file", `f${i}.txt`));
 		expect(buildTurnResults(trail).length).toBe(MAX_RESULT_ROWS);
+	});
+});
+
+describe("buildTurnResults: the step count is the PLAN column's", () => {
+	const statuses = ["done", "pending", "failed"] as const;
+	const planOf = (n: number, seed = 0): PlanStep[] =>
+		Array.from({ length: n }, (_, i) => ({
+			id: `s${i}`,
+			text: `Step ${i + 1} of the plan`,
+			status: statuses[(i + seed) % statuses.length],
+		}));
+	const callsOf = (n: number): ToolTrailEntry[] =>
+		Array.from({ length: n }, (_, i) =>
+			i % 5 === 4
+				? { tool: "run_command", summary: `cmd ${i}`, status: "fail", reason: "exit 1" }
+				: ok("write_file", `f${i}.txt`),
+		);
+
+	test("the pilot turn: 5 of 5 done and 3 folded calls read as actions, not steps", () => {
+		// Run 2026-09-30 052339: PLAN 5/5, then "✓ 3 more steps" under the plan.
+		const plan = planOf(5).map((s) => ({ ...s, status: "done" as const }));
+		const trail = [
+			ok("list_files", "."),
+			ok("read_file", "src/paginate.test.ts"),
+			ok("run_command", "bun test"),
+			ok("read_file", "src/paginate.ts"),
+			ok("edit_file", "src/paginate.ts"),
+			ok("run_command", "bun test 2>&1 | tail -30"),
+		];
+		const rows = buildTurnResults(trail, 9, plan);
+		expect(rows).toHaveLength(9);
+		expect(stepsShown(rows)).toBe(5);
+		const fold = rows.find((r) => r.kind === "fold");
+		expect(fold?.verb).toMatch(/^\d+ more actions?$/);
+		expect(rows.some((r) => /more steps?/.test(r.verb))).toBe(false);
+	});
+
+	test("every plan length, call count and window: steps shown = plan length, rows fit", () => {
+		for (let n = 0; n <= 8; n++) {
+			for (let calls = 0; calls <= 14; calls++) {
+				for (let cap = 1; cap <= 12; cap++) {
+					const plan = planOf(n, calls);
+					const rows = buildTurnResults(callsOf(calls), cap, plan);
+					const where = `plan ${n}, calls ${calls}, cap ${cap}`;
+					expect({ where, steps: stepsShown(rows) }).toEqual({ where, steps: n });
+					expect({ where, fits: rows.length <= cap }).toEqual({ where, fits: true });
+					for (const r of rows) {
+						if (r.kind !== "fold") continue;
+						// "N more steps" names exactly the plan steps folded into it.
+						const m = /^(\d+) more steps?$/.exec(r.verb);
+						if (m) expect(Number(m[1])).toBe(r.steps ?? -1);
+						else expect(r.steps ?? 0).toBe(0);
+					}
+				}
+			}
+		}
+	});
+
+	test("a folded run of pending steps is not ticked", () => {
+		const plan = planOf(6).map((s, i) => ({ ...s, status: i === 0 ? ("done" as const) : ("pending" as const) }));
+		const rows = buildTurnResults([], 3, plan);
+		const fold = rows.find((r) => r.kind === "fold");
+		expect(fold).toMatchObject({ status: "pending", verb: "4 more steps" });
+		expect(stepsShown(rows)).toBe(6);
+	});
+
+	test("a plan written as PLAN: text, never reported by update_plan, still shows", () => {
+		// The PLAN column merges written plan text; the trail has no update_plan.
+		const column = settlePlan(mergePlanText([], ["Read the failing test", "Fix the slice", "Run bun test"]));
+		const trail = [ok("edit_file", "src/paginate.ts"), ok("run_command", "bun test")];
+		expect(turnPlan(trail)).toEqual([]);
+		const rows = buildTurnResults(trail, MAX_RESULT_ROWS, column);
+		expect(rows.slice(0, 3).map((r) => [r.kind, r.status, r.verb])).toEqual([
+			["plan", "pending", "Read"],
+			["plan", "pending", "Fix"],
+			["plan", "pending", "Run"],
+		]);
+		expect(stepsShown(rows)).toBe(column.length);
+	});
+
+	test("the column's own reducer and the trail agree when update_plan is the source", () => {
+		const reports = [
+			[{ step: "Find the bug", status: "in_progress" }, { step: "Fix it", status: "pending" }],
+			[{ step: "Find the bug", status: "completed" }, { step: "Fix it", status: "in_progress" }],
+		];
+		const column = settlePlan(reports.reduce<PlanStep[]>((prev, items) => applyPlanUpdate(prev, items), []));
+		const trail = reports.map((items) => ({ tool: "update_plan", status: "ok" as const, plan: items }));
+		const fromColumn = buildTurnResults(trail as ToolTrailEntry[], MAX_RESULT_ROWS, column);
+		const fromTrail = buildTurnResults(trail as ToolTrailEntry[]);
+		expect(fromColumn).toEqual(fromTrail);
 	});
 });
 

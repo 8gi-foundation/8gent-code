@@ -211,11 +211,9 @@ User can skip with:
 - `/skip all` - Skip remaining onboarding
 - `/later` - Ask again next session
 
-But 8gent will gently persist:
-```
-"Understood. I'll ask again later.
-(The more I know, the better I serve.)"
-```
+`/skip all` adds nothing to the chat: the input coming back is the answer.
+It marks setup complete, so 8gent does not promise to ask again. `/onboarding`
+runs it whenever the user wants.
 
 ## Re-onboarding
 

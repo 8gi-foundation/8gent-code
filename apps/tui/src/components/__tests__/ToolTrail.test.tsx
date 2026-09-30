@@ -215,7 +215,7 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		// Header + trail + body + margin stays within the 8-row budget.
 		expect(lines(out).length).toBeLessThanOrEqual(8);
 		expect(out).toContain("⊘ Run blocked  ls notes");
-		expect(out).toContain("more steps");
+		expect(out).toContain("more actions");
 		expect(out).toContain("Done.");
 	});
 
