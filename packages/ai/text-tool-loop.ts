@@ -48,6 +48,11 @@
  * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
  * A false completion claim is never passed through silently.
  *
+ * A final answer that leaves steps of the turn's plan open (pending or in
+ * progress in the last update_plan call) gets ONE plan check per turn
+ * (planCheckMessage, #3098): report each step's real status or do it, then
+ * summarise. The harness never marks a step done on the agent's behalf.
+ *
  * One reply can ask for many calls (qwen3.8 27B asked for 144 read_file calls
  * in pilot run 2026-09-30_010512). The loop runs at most MAX_CALLS_PER_ROUND of
  * them; the rest get a short "not run" result asking the model to re-issue the
@@ -70,6 +75,7 @@ import {
 	isRefusedToolResult,
 } from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
+import { type PlanItem, parsePlan } from "./update-plan";
 import type { ToolSpec } from "./text-tools";
 
 export type TextTool = {
@@ -420,6 +426,41 @@ export function emptyReplyNote(toolCalls: number): string {
 }
 
 /**
+ * The plan steps still open when the turn ends (#3098): pending or in
+ * progress in the turn's last successful update_plan call. Failed steps are
+ * an honest report, so they are not open. No update_plan call, or none that
+ * parsed, means there is no plan to hold the answer to: empty.
+ */
+export function openPlanSteps(toolLog: ReadonlyArray<TextToolLogEntry>): PlanItem[] {
+	for (let i = toolLog.length - 1; i >= 0; i--) {
+		const entry = toolLog[i];
+		if (entry.name !== "update_plan" || isRefusedToolResult(entry.result)) continue;
+		const parsed = parsePlan(entry.args.plan);
+		if (!parsed.ok) continue;
+		return parsed.items.filter((s) => s.status === "pending" || s.status === "in_progress");
+	}
+	return [];
+}
+
+/**
+ * The plan check, sent once per turn when the final answer leaves plan steps
+ * open (#3098, pilot run 2026-09-30_062747: 7 update_plan calls, the last one
+ * left step 8 of 8 in progress). The harness never ticks a step itself: the
+ * person reads this plan, so only the agent may say a step is done.
+ */
+export function planCheckMessage(open: ReadonlyArray<PlanItem>): string {
+	const lines = open.map((s) => `- ${s.step} (${s.status})`);
+	return [
+		"Your plan still has steps that are not marked done:",
+		...lines,
+		"The user sees this plan. If these steps are finished, call update_plan now",
+		"with every step and its real status. If a step is not finished, do it now,",
+		"or mark it failed if it cannot be done. Then reply with your final summary,",
+		`starting with "${DONE_MARKER}".`,
+	].join("\n");
+}
+
+/**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
  * throwing `run` is captured as a short error string so the loop can feed it
  * back to the model instead of aborting.
@@ -493,6 +534,8 @@ export async function runTextToolAgent(
 	};
 	// The claim check's follow-up fires at most once per turn.
 	let claimFollowUpSent = false;
+	// The plan check (#3098) fires at most once per turn.
+	let planCheckSent = false;
 	// The user's request this turn: the last user message the caller sent.
 	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
 	const claimsAgainstLog = (answer: string) =>
@@ -605,7 +648,7 @@ export async function runTextToolAgent(
 			const emptyAfterWork = replyText.trim() === "" && toolLog.length > 0;
 			const freshStall =
 				(prevRoundHadSuccess || prevRoundAllRefused || emptyAfterWork) &&
-				!(checksSent > 0 && hasDoneMarker(replyText));
+				!((checksSent > 0 || planCheckSent) && hasDoneMarker(replyText));
 			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
 			const stalled = (freshStall || unansweredCheck) && !isQuestionToUser(replyText);
 			if (
@@ -638,6 +681,25 @@ export async function runTextToolAgent(
 			// contradiction gets one follow-up while a round remains. A question
 			// to the user is left alone here (finish() still notes it).
 			const answer = finalContent(replyText);
+			// The answer leaves plan steps open: ask once for their real status
+			// (#3098). A question to the user pauses the plan, so it is left
+			// alone, and so is a turn that ended on a stall it could not check.
+			if (!planCheckSent && !stalled && round < maxRounds && !isQuestionToUser(replyText)) {
+				const open = openPlanSteps(toolLog);
+				if (open.length > 0) {
+					planCheckSent = true;
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: planCheckMessage(open) },
+					];
+					continue;
+				}
+			}
 			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(replyText)) {
 				const unfulfilled = claimsAgainstLog(answer);
 				if (unfulfilled.length > 0) {
