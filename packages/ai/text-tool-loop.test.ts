@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+	cleanDegenerateReply,
 	COMPLETION_CHECK_MESSAGE,
+	DEGENERATE_REPEAT_MIN,
+	DEGENERATE_REPLY_MESSAGE,
 	DONE_MARKER,
 	hasDoneMarker,
 	isQuestionToUser,
@@ -1343,5 +1346,180 @@ describe("runTextToolAgent - progress resets the check cap", () => {
 		expect(model.calls()).toBe(6 + MAX_CONSECUTIVE_CHECKS);
 		expect(result.content).toBe("Starting now.");
 		expect(ws.files.has("deck/outline.md")).toBe(false);
+	});
+});
+
+// ── Repetition degeneration (Rishi pilot l4-refactor-m5 run 2026-09-30_010512) ──
+//
+// The refactor itself succeeded (tests pass, hidden judge passes). qwen3.8 27B
+// then replied "Let me capture output inside the working directory and read
+// it." followed by 144 "[TOOL_CALL]" lines, each in front of the same
+// read_file call. The circuit breaker aborted the turn (103 calls, limit 50),
+// and the abort exit returned that reply as it was: the user got 144
+// "[TOOL_CALL]" lines and no summary.
+
+const RUN_010512_PROSE = "Let me capture output inside the working directory and read it.";
+
+function run010512Reply(n: number, withCalls: boolean): string {
+	const unit = withCalls
+		? `[TOOL_CALL]\n${tc("read_file", { path: "./buntest.out" })}\n`
+		: "[TOOL_CALL]\n\n\n";
+	return `${RUN_010512_PROSE}\n\n${unit.repeat(n)}`;
+}
+
+describe("cleanDegenerateReply", () => {
+	test("strips placeholder lines and flags a mostly-junk reply", () => {
+		const raw = `${RUN_010512_PROSE}\n\n${"[TOOL_CALL]\n\n\n".repeat(144)}`;
+		const r = cleanDegenerateReply(raw);
+		expect(r.degenerate).toBe(true);
+		expect(r.clean).toBe(RUN_010512_PROSE);
+	});
+
+	test("a run of DEGENERATE_REPEAT_MIN identical lines keeps one copy", () => {
+		const raw = ["Summary.", ...Array(DEGENERATE_REPEAT_MIN).fill("I will read the file now.")].join("\n");
+		const r = cleanDegenerateReply(raw);
+		expect(r.degenerate).toBe(true);
+		expect(r.clean).toBe("Summary.\nI will read the file now.");
+	});
+
+	test("angle-tag placeholders are stripped too; a lone one is not degenerate", () => {
+		expect(cleanDegenerateReply("Done the rename.\n<tool_call>\n</tool_call>")).toEqual({
+			clean: "Done the rename.",
+			degenerate: false,
+		});
+		expect(cleanDegenerateReply("[TOOL_CALL]")).toEqual({ clean: "", degenerate: true });
+	});
+
+	test("a table with repeated values is not flagged or changed", () => {
+		const rows = Array.from({ length: 12 }, (_, i) => `| src/file${i}.ts | 0 | pass |`);
+		const same = Array(12).fill("| - | 0 | pass |");
+		const table = ["| file | fail | status |", "|---|---|---|", ...rows, ...same].join("\n");
+		expect(cleanDegenerateReply(table)).toEqual({ clean: table, degenerate: false });
+	});
+
+	test("ordinary prose, short repeats, and repeated words in a line are untouched", () => {
+		const text = [
+			"DONE: Renamed formatPrice to formatMoney.",
+			"- ok",
+			"- ok",
+			"- ok",
+			"Tests: pass pass pass pass pass pass pass pass pass pass.",
+		].join("\n");
+		expect(cleanDegenerateReply(text)).toEqual({ clean: text, degenerate: false });
+	});
+});
+
+describe("runTextToolAgent - repetition degeneration", () => {
+	test("run 010512 replay: circuit-breaker abort after a '[TOOL_CALL]' x144 reply returns only the prose", async () => {
+		const ws = fakeWorkspace();
+		ws.files.set("./buntest.out", "3 pass 0 fail");
+		const ac = new AbortController();
+		let calls = 0;
+		// Mirror agent.ts: the circuit breaker aborts the shared signal from
+		// inside a tool once the turn's tool-call limit is passed.
+		const tools = ws.tools.map((t) => ({
+			...t,
+			run: async (a: Record<string, unknown>) => {
+				if (++calls > 50) ac.abort();
+				return t.run(a);
+			},
+		}));
+		const model = scriptedModel([
+			tc("run_command", { command: "bun test > ./buntest.out 2>&1" }),
+			run010512Reply(144, true),
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Rename formatPrice to formatMoney and run bun test." }],
+			tools,
+			call: model.call,
+			maxRounds: 50,
+			signal: ac.signal,
+		});
+
+		expect(model.calls()).toBe(2);
+		expect(result.toolLog).toHaveLength(145);
+		expect(result.content).not.toContain("[TOOL_CALL]");
+		expect(result.content).toStartWith(RUN_010512_PROSE);
+	});
+
+	test("the junk never goes back to the model as its own history", async () => {
+		const ws = fakeWorkspace();
+		ws.files.set("./buntest.out", "3 pass 0 fail");
+		const model = scriptedModel([
+			run010512Reply(20, true),
+			// A DONE reply straight after a tool round still gets the one check.
+			"DONE: Renamed it; bun test shows 3 pass, 0 fail.",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "read ./buntest.out" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		const history = model.seen[1].filter((m) => m.role === "assistant").map((m) => m.content);
+		expect(history).toEqual([RUN_010512_PROSE]);
+		expect(result.content).toBe("Renamed it; bun test shows 3 pass, 0 fail.");
+	});
+
+	test("a no-tool-call degenerate reply is treated as a stall: corrective message, then DONE ends it", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "src/format.ts", content: "export function formatMoney() {}" }),
+			run010512Reply(144, false),
+			"DONE: Renamed formatPrice to formatMoney in src/format.ts.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Rename formatPrice to formatMoney." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(lastUserMessage(model.seen[2])).toBe(DEGENERATE_REPLY_MESSAGE);
+		expect(model.seen[2][model.seen[2].length - 2]).toEqual({ role: "assistant", content: RUN_010512_PROSE });
+		expect(model.calls()).toBe(3);
+		expect(result.content).toBe("Renamed formatPrice to formatMoney in src/format.ts.");
+	});
+
+	test("still degenerate at the cap: only the non-junk prose is returned, and the loop is bounded", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "src/format.ts", content: "x" }),
+			run010512Reply(144, false),
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Rename formatPrice to formatMoney." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.seen.filter((m) => lastUserMessage(m) === DEGENERATE_REPLY_MESSAGE)).toHaveLength(
+			MAX_CONSECUTIVE_CHECKS,
+		);
+		expect(model.calls()).toBe(2 + MAX_CONSECUTIVE_CHECKS);
+		expect(result.content).toBe(RUN_010512_PROSE);
+	});
+
+	test("a legitimately repetitive final answer (a table) ends the turn as normal", async () => {
+		const ws = fakeWorkspace();
+		const table = [
+			"DONE: Results:",
+			"| file | fail | status |",
+			"|---|---|---|",
+			...Array(10).fill("| src/cart.ts | 0 | pass |"),
+		].join("\n");
+		// The table answers the usual completion check, too.
+		const model = scriptedModel([tc("write_file", { path: "a.md", content: "a" }), table]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write a.md" }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		expect(model.seen.filter((m) => lastUserMessage(m) === DEGENERATE_REPLY_MESSAGE)).toHaveLength(0);
+		expect(model.calls()).toBe(3);
+		expect(result.content).toBe(table.replace(/^DONE: /, ""));
 	});
 });
