@@ -34,6 +34,8 @@ export interface ToolContext {
 	workingDirectory: string;
 	/** Agent scope passed to the write-policy gate (defaults to "primary"). */
 	agentId?: string;
+	/** This agent's own runtime params, read and tuned by the self_* tools (#3140). */
+	runtime?: RuntimeParams;
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -131,18 +133,33 @@ const DEFAULT_RUNTIME: RuntimeParams = {
 	voiceChatActive: false,
 };
 
-let _runtime: RuntimeParams = { ...DEFAULT_RUNTIME };
-
-export function setRuntimeParams(params: Partial<RuntimeParams>): void {
-	Object.assign(_runtime, params);
+/**
+ * A fresh RuntimeParams. The arrays are new each time: a spread of
+ * DEFAULT_RUNTIME alone would share one appendedContext array between every
+ * copy, so one agent's self_append_context would reach all of them.
+ */
+export function createRuntimeParams(): RuntimeParams {
+	return { ...DEFAULT_RUNTIME, loadedCategories: [], appendedContext: [] };
 }
 
+// Runtime params are per agent, the same way as ToolContext (#3140): each Agent
+// owns a RuntimeParams and passes it in its ToolContext, so self_inspect,
+// self_tune and self_append_context act on the calling agent only. `_runtime`
+// is the fallback outside a tool call that carries one: the TUI's
+// process-wide voice flag, tests, and direct callers.
+let _runtime: RuntimeParams = createRuntimeParams();
+
+export function setRuntimeParams(params: Partial<RuntimeParams>): void {
+	Object.assign(getRuntimeParams(), params);
+}
+
+/** The calling agent's runtime params inside a tool call, else the fallback. */
 export function getRuntimeParams(): RuntimeParams {
-	return _runtime;
+	return _callCtx.getStore()?.runtime ?? _runtime;
 }
 
 export function resetRuntimeParams(): void {
-	_runtime = { ...DEFAULT_RUNTIME };
+	_runtime = createRuntimeParams();
 }
 
 /**

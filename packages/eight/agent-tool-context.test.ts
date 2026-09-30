@@ -35,3 +35,14 @@ test("a second Agent does not switch the first one's working dir or scope", () =
 		fs.rmSync(subagentWd, { recursive: true, force: true });
 	}
 });
+
+test("each Agent owns its runtime params, apart from the process fallback (#3140)", async () => {
+	const { getRuntimeParams } = await import("../ai/tools");
+	type WithRuntime = { runtimeParams?: object };
+	const a = new Agent({ model: "eight-1.0-q3:14b", runtime: "ollama" }) as unknown as WithRuntime;
+	const b = new Agent({ model: "eight-1.0-q3:14b", runtime: "ollama" }) as unknown as WithRuntime;
+	expect(a.runtimeParams).toBeDefined();
+	expect(b.runtimeParams).toBeDefined();
+	expect(a.runtimeParams).not.toBe(b.runtimeParams);
+	expect(a.runtimeParams).not.toBe(getRuntimeParams());
+});

@@ -125,8 +125,8 @@ import {
 	type StepFinishEvent,
 	createEightAgent,
 	createModel,
+	createRuntimeParams,
 	getRuntimeParams,
-	setRuntimeParams,
 } from "../ai";
 import {
 	type TextTool,
@@ -178,6 +178,8 @@ function readPinnedActiveModel(): string[] {
 export class Agent {
 	private executor: ToolExecutor;
 	private config: AgentConfig;
+	/** This agent's own runtime params: self_tune on another agent never reaches them (#3140). */
+	private runtimeParams = createRuntimeParams();
 	private hookManager: HookManager;
 	private sessionId: string;
 	private sessionStartTime: number;
@@ -777,7 +779,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				// a specific port). Suffix-reconciled inside resolveTextToolEndpoint,
 				// so lmstudio (no /v1) and apfel (/v1) bases both land correctly.
 				baseUrl: this.config.baseUrl,
-				temperature: getRuntimeParams().temperature ?? 0.2,
+				temperature: this.runtimeParams.temperature ?? 0.2,
 				signal,
 				// Same limit as withTurnTimeout below, so EIGHT_TURN_TIMEOUT_MS is the
 				// only thing that bounds a model step (never Bun's hidden 300 s cap).
@@ -1310,8 +1312,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools;
 
 		// ── Populate runtime params for self-awareness tools ──────────
-		const runtimeState = getRuntimeParams();
-		setRuntimeParams({
+		Object.assign(this.runtimeParams, {
+			// The voice flag is process-wide by design (one terminal, one mic): the
+			// TUI sets it on the fallback params, and each agent copies it per turn.
+			voiceChatActive: getRuntimeParams().voiceChatActive,
 			model: providerConfig.model,
 			provider: providerConfig.name,
 			toolCount: Object.keys(effectiveTools).length,
@@ -1323,8 +1327,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			maxOutputTokens: isLocalProvider ? 4096 : 8192,
 		});
 
-		// Apply any previously tuned params
-		const tunedParams = getRuntimeParams();
+		// Apply any previously tuned params (this agent's own, #3140)
+		const tunedParams = this.runtimeParams;
 
 		// Inject appended context into instructions
 		let effectiveInstructions = systemPrompt || "";
@@ -1386,6 +1390,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			workingDirectory: this.config.workingDirectory || process.cwd(),
 			// Carried into every native tool call; per agent, never process-wide (#3127).
 			agentId: this.config.agentScope ?? "primary",
+			runtime: this.runtimeParams,
 			tools: effectiveTools,
 
 			onToolCallStart: async (event) => {
@@ -1644,7 +1649,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			onStepFinish: async (event: StepFinishEvent) => {
 				stepCount++;
 				// Update runtime params so self_inspect shows live step count
-				setRuntimeParams({
+				Object.assign(this.runtimeParams, {
 					stepCount,
 					messageHistoryLength: this.messageHistory.length,
 				});

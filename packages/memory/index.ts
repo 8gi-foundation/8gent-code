@@ -1308,24 +1308,28 @@ export class MemoryManager {
 
 // ── Singleton ─────────────────────────────────────────────────────────
 
-let _instance: MemoryManager | null = null;
+// One manager per working directory, not per process (#3140). A single
+// instance used to take the first caller's directory for good, so a second
+// agent in the process (a sub-agent, a Table session, another tab) read and
+// wrote the first agent's project memory.
+const _instances = new Map<string, MemoryManager>();
 
 export function getMemoryManager(workingDirectory?: string): MemoryManager {
-	if (!_instance && workingDirectory) {
-		_instance = new MemoryManager(workingDirectory);
+	const key = path.resolve(workingDirectory || process.cwd());
+	let manager = _instances.get(key);
+	if (!manager) {
+		manager = new MemoryManager(key);
+		_instances.set(key, manager);
 	}
-	if (!_instance) {
-		_instance = new MemoryManager(process.cwd());
-	}
-	return _instance;
+	return manager;
 }
 
 /** Alias for v2 consumers */
 export const getMemoryManagerV2 = getMemoryManager;
 
 export function resetMemoryManager(): void {
-	_instance?.close();
-	_instance = null;
+	for (const manager of _instances.values()) manager.close();
+	_instances.clear();
 }
 
 // ── V1 Compat: extractAutoMemories ──────────────────────────────────
