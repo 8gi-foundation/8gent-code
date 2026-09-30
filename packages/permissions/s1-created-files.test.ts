@@ -13,7 +13,15 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
@@ -277,6 +285,18 @@ describe("everything else still goes to the judge", () => {
 		unlinkSync(join(ws, "made.txt"));
 		writeFileSync(join(ws, "made.txt"), "someone else's");
 		await judged(ex, "rm -f made.txt", "made.txt");
+	});
+});
+
+describe("identity: the same file, not just the same inode", () => {
+	test("the session's own edit_file keeps it the session's; a change from outside does not", async () => {
+		const ex = new ToolExecutor(ws, "own-a");
+		await write(ex, "made.txt");
+		await ex.execute("edit_file", { path: "made.txt", oldText: "scratch", newText: "edited" });
+		expect(readFileSync(join(ws, "made.txt"), "utf8")).toBe("edited\n");
+		expect(ex.createdFiles.createdBySession(join(ws, "made.txt"))).toBe(true);
+		writeFileSync(join(ws, "made.txt"), "changed by someone else, longer");
+		expect(ex.createdFiles.createdBySession(join(ws, "made.txt"))).toBe(false);
 	});
 });
 

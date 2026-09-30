@@ -16,10 +16,11 @@
  * the same object: one per ToolExecutor, which the Agent also hands to its
  * native tool context. A different agent, tab or child has its own record.
  *
- * In memory only, never written to disk. Each entry keeps the file's device
- * and inode, so a file that was since replaced by something else (another
- * process deleted and recreated it) no longer counts. The session's own later
- * writes to a recorded file refresh the entry.
+ * In memory only, never written to disk. Each entry keeps the file's identity
+ * (device, inode, change and birth time, size), so a file that was since
+ * replaced or changed by something else no longer counts. The session's own
+ * later writes to a recorded file (write_file, edit_file, a redirect) refresh
+ * the entry.
  *
  * A file that existed before the session wrote to it is never recorded: an
  * overwrite or a `>` truncation of a pre-existing file is a modification, not
@@ -37,10 +38,15 @@ import { maskQuotes } from "../decide/rules";
 /** The words a recorded path may contain: no quotes, glob, `$`, `~`, spaces. */
 const PLAIN_PATH = /^[A-Za-z0-9._/+,=@:-]+$/;
 
-interface Identity {
-	dev: number;
-	ino: number;
-}
+/**
+ * What makes a file "that same file". Device and inode alone are not enough:
+ * Linux hands a freed inode straight to the next file created, so a delete and
+ * recreate at the same path can keep both (the Linux CI job caught this). The
+ * change time and birth time in nanoseconds and the size move when a file is
+ * recreated. The session's own writes refresh the entry, so they never count
+ * as a replacement.
+ */
+type Identity = string;
 
 /** Canonical key: the realpath of the parent directory plus the base name; null when the parent does not resolve. */
 function keyOf(abs: string): string | null {
@@ -54,8 +60,8 @@ function keyOf(abs: string): string | null {
 /** The identity of `abs` when it is a regular file (not a symlink, not a directory), else null. */
 function regularFile(abs: string): Identity | null {
 	try {
-		const st = lstatSync(abs);
-		return st.isFile() ? { dev: st.dev, ino: st.ino } : null;
+		const st = lstatSync(abs, { bigint: true });
+		return st.isFile() ? [st.dev, st.ino, st.ctimeNs, st.birthtimeNs, st.size].join(":") : null;
 	} catch {
 		return null;
 	}
@@ -96,7 +102,7 @@ export class CreatedFiles {
 		if (!key) return false;
 		const want = this.files.get(key);
 		const now = regularFile(abs);
-		return !!want && !!now && want.dev === now.dev && want.ino === now.ino;
+		return !!want && !!now && want === now;
 	}
 
 	get size(): number {

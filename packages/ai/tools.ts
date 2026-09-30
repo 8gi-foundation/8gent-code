@@ -424,7 +424,9 @@ const editFile = tool({
 		const edited = applyEdit(content, oldText, newText);
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
+		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, edited);
+		recordEdit();
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	},
 });
