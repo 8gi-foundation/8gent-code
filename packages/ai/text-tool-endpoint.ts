@@ -82,6 +82,30 @@ export function resolveTextToolEndpoint(provider: string, baseUrl?: string): str
 	return TEXT_TOOL_ENDPOINTS[provider] || TEXT_TOOL_ENDPOINTS.lmstudio;
 }
 
+/** Default output budget for one text-tool model step (#3074). */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+
+/**
+ * Output token budget for one text-tool model step, sent as `max_tokens` (and
+ * `num_predict` on Ollama's raw path). Without it a small model that falls into
+ * a repetition loop generates until its context window fills: llama3.2:3b ran
+ * 41,341 tokens in 13 minutes on one step, and the non-streaming request showed
+ * the user "0 tok" the whole time (#3074). EIGHT_MAX_OUTPUT_TOKENS overrides;
+ * anything that is not a positive number falls back to the default.
+ */
+export function resolveMaxOutputTokens(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	const parsed = Number(env.EIGHT_MAX_OUTPUT_TOKENS);
+	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_OUTPUT_TOKENS;
+	return Math.floor(parsed);
+}
+
+/** The error a step gets when the model hit the output cap without finishing. */
+export function outputCapMessage(label: string, maxTokens: number): string {
+	return `${label} hit the ${maxTokens}-token output cap without finishing its reply (likely a runaway repetition loop). Raise EIGHT_MAX_OUTPUT_TOKENS if the reply was genuinely that long.`;
+}
+
 type ChatMessage = {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string;
@@ -473,9 +497,15 @@ export function buildTextToolCall(opts: {
 	 * the model's parser keeps native tool calls (see shouldDeclareTools).
 	 */
 	tools?: ToolSpec[];
+	/**
+	 * Output token budget per model step. Default: resolveMaxOutputTokens(), so
+	 * EIGHT_MAX_OUTPUT_TOKENS governs (#3074).
+	 */
+	maxTokens?: number;
 }): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
+	const maxTokens = opts.maxTokens ?? resolveMaxOutputTokens();
 	const label = `${opts.provider}/${opts.model}`;
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
@@ -493,6 +523,7 @@ export function buildTextToolCall(opts: {
 					model: opts.model,
 					messages,
 					temperature,
+					max_tokens: maxTokens,
 					stream: false,
 					...(withTools ? { tools: declared } : {}),
 				}),
@@ -520,11 +551,20 @@ export function buildTextToolCall(opts: {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
 		const data = (await res.json()) as {
-			choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }>;
+			choices?: Array<{
+				message?: { content?: unknown; tool_calls?: unknown };
+				finish_reason?: unknown;
+			}>;
 			usage?: unknown;
 		};
 		const usage = extractUsage(data);
 		if (usage && opts.onUsage) opts.onUsage(usage);
+		// The cap cut the reply off: whatever came back is a fragment, most often
+		// a repetition loop. Fail the step loudly rather than hand the loop a
+		// truncated reply it would treat as an answer (#3074).
+		if (data?.choices?.[0]?.finish_reason === "length") {
+			throw new Error(outputCapMessage(label, maxTokens));
+		}
 		const message = data?.choices?.[0]?.message;
 		const content = message?.content;
 		return {
@@ -561,7 +601,7 @@ export function buildTextToolCall(opts: {
 					prompt: renderQwenChatML(messages, variant),
 					raw: true,
 					stream: false,
-					options: { temperature },
+					options: { temperature, num_predict: maxTokens },
 				}),
 				signal: opts.signal,
 			},
@@ -575,11 +615,15 @@ export function buildTextToolCall(opts: {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;
+			done_reason?: unknown;
 		};
 		const p = typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : null;
 		const c = typeof data?.eval_count === "number" ? data.eval_count : null;
 		if (p !== null && c !== null && opts.onUsage) {
 			opts.onUsage({ promptTokens: p, completionTokens: c, totalTokens: p + c });
+		}
+		if (data?.done_reason === "length") {
+			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens) };
 		}
 		const content = answerFromRawQwen(typeof data?.response === "string" ? data.response : "");
 		if (content === "") {

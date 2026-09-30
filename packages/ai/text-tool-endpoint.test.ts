@@ -17,6 +17,7 @@ import {
 	_resetQwenVariantCache,
 	answerFromRawQwen,
 	buildTextToolCall,
+	DEFAULT_MAX_OUTPUT_TOKENS,
 	extractUsage,
 	isNativeToolParserFailure,
 	isToolsUnsupported,
@@ -24,6 +25,7 @@ import {
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
 	renderQwenChatML,
+	resolveMaxOutputTokens,
 	shouldDeclareTools,
 	type TextToolUsage,
 	toolCallsFromMessage,
@@ -765,5 +767,108 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 		});
 		expect(result.toolLog).toEqual([]);
 		expect(ran).toEqual([]);
+	});
+});
+
+// #3074: pilot run 2026-09-30_031816, turn D. llama3.2:3b fell into a repetition
+// loop and generated 41,341 tokens over 13 minutes on ONE step; the request had
+// no max_tokens and was non-streaming, so the TUI showed "0 tok" throughout and
+// only the 20 min turn timeout ended it. Every step now carries an output cap,
+// and a reply the cap cut off fails loudly instead of posing as an answer.
+describe("buildTextToolCall output cap (#3074)", () => {
+	type Seen = { url: string; body: Record<string, unknown> };
+	function stubCapped(responses: Array<() => Response>, modelfile: string | null = null): Seen[] {
+		const seen: Seen[] = [];
+		let i = 0;
+		globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+			const url = String(input);
+			if (url.endsWith("/api/show")) {
+				return modelfile === null
+					? new Response("nope", { status: 404 })
+					: Response.json({ modelfile });
+			}
+			seen.push({ url, body: JSON.parse(init?.body ?? "{}") });
+			const next = responses[Math.min(i, responses.length - 1)];
+			i++;
+			return next();
+		}) as unknown as typeof fetch;
+		return seen;
+	}
+	const finished = (content: string, finish_reason: string) => () =>
+		Response.json({
+			choices: [{ message: { content }, finish_reason }],
+			usage: { prompt_tokens: 4730, completion_tokens: 8192, total_tokens: 12922 },
+		});
+
+	it("sends the resolved cap as max_tokens on every chat request", async () => {
+		const seen = stubCapped([finished("done", "stop")]);
+		const call = buildTextToolCall({ provider: "ollama", model: "llama3.2:3b" });
+		expect(await call([{ role: "user", content: "hi" }])).toBe("done");
+		expect(seen[0].body.max_tokens).toBe(resolveMaxOutputTokens());
+		expect(seen[0].body.max_tokens).toBeGreaterThan(0);
+		expect(seen[0].body.stream).toBe(false);
+	});
+
+	it("honours an explicit maxTokens", async () => {
+		const seen = stubCapped([finished("done", "stop")]);
+		const call = buildTextToolCall({ provider: "lmstudio", model: "m", maxTokens: 512 });
+		await call([{ role: "user", content: "hi" }]);
+		expect(seen[0].body.max_tokens).toBe(512);
+	});
+
+	it("fails the step, naming the cap and the knob, when the reply was cut off", async () => {
+		stubCapped([finished("Fixed bug. Fixed bug. Fixed bug. Fixed bug.", "length")]);
+		const usage: TextToolUsage[] = [];
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "llama3.2:3b",
+			maxTokens: 8192,
+			onUsage: (u) => usage.push(u),
+		});
+		const run = call([{ role: "user", content: "fix it" }]);
+		await expect(run).rejects.toThrow("ollama/llama3.2:3b hit the 8192-token output cap");
+		await expect(run).rejects.toThrow("EIGHT_MAX_OUTPUT_TOKENS");
+		// The real usage is still reported, so token totals stay true.
+		expect(usage).toEqual([{ promptTokens: 4730, completionTokens: 8192, totalTokens: 12922 }]);
+	});
+
+	it("the raw recovery path carries the same cap as num_predict and treats a cut-off as a failure", async () => {
+		const QWEN38 =
+			"FROM qwen3.8:27b-mlx\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n";
+		const seen = stubCapped(
+			[
+				() => new Response(OLLAMA_PARSER_EOF, { status: 500 }),
+				() => Response.json({ response: "loop loop loop", done: true, done_reason: "length" }),
+				finished("All tests pass.", "stop"),
+			],
+			QWEN38,
+		);
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "qwen3.8:27b-mlx",
+			maxTokens: 1000,
+		});
+		expect(await call([{ role: "user", content: "hi" }])).toBe("All tests pass.");
+		expect(seen.map((s) => s.url.replace(/^http:\/\/[^/]+/, ""))).toEqual([
+			"/v1/chat/completions",
+			"/api/generate",
+			"/v1/chat/completions",
+		]);
+		expect((seen[1].body.options as Record<string, unknown>).num_predict).toBe(1000);
+		expect(seen[2].body.max_tokens).toBe(1000);
+	});
+});
+
+describe("resolveMaxOutputTokens (#3074)", () => {
+	it("defaults when unset, empty, zero, negative or not a number", () => {
+		for (const v of [undefined, "", "0", "-5", "lots"]) {
+			expect(resolveMaxOutputTokens({ EIGHT_MAX_OUTPUT_TOKENS: v })).toBe(
+				DEFAULT_MAX_OUTPUT_TOKENS,
+			);
+		}
+	});
+	it("uses a positive override, floored to an integer", () => {
+		expect(resolveMaxOutputTokens({ EIGHT_MAX_OUTPUT_TOKENS: "16384" })).toBe(16384);
+		expect(resolveMaxOutputTokens({ EIGHT_MAX_OUTPUT_TOKENS: "300.7" })).toBe(300);
 	});
 });
