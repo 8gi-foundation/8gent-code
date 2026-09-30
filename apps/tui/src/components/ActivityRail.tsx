@@ -5,8 +5,10 @@
  *   - AGENT ACTIVITY heading
  *   - Active Tasks with progress bars
  *   - Tools status (read/patch/test/verify with state glyphs)
- *   - Providers (local/fallback/offline + latency)
- *   - Memory (hits/misses/cache)
+ *   - Providers (the configured route, its real failover hop, and a
+ *     latency only when one was measured)
+ *   - Memory (hits/misses/cache, each row only when a source reports it;
+ *     the section is absent when none does)
  *   - Agents row (Core/Research/Tester/Reviewer with LED dots)
  *
  * Pure presentational: caller owns every value, no internal state, no
@@ -120,14 +122,20 @@ interface ToolStatus {
 interface ProviderRow {
 	name: string;
 	state: ProviderState;
-	/** Round-trip latency hint, e.g. "42ms" or "—". */
-	latency: string;
+	/** Measured round-trip latency, e.g. "42ms". Absent when unmeasured. */
+	latency?: string;
 }
 
+/**
+ * Memory counters. Each field is present only when a real source reports
+ * it: a row is never drawn for a count nobody measured. The memory store
+ * (packages/memory/store.ts) exposes no hit/miss or cache counter yet, so
+ * the TUI passes nothing and the MEMORY section does not render.
+ */
 interface MemoryStats {
-	hits: number;
-	misses: number;
-	cache: string;
+	hits?: number;
+	misses?: number;
+	cache?: string;
 }
 
 interface AgentRow {
@@ -139,7 +147,7 @@ interface ActivityRailProps {
 	tasks: ReadonlyArray<ActiveTask>;
 	tools: ReadonlyArray<ToolStatus>;
 	providers: ReadonlyArray<ProviderRow>;
-	memory: MemoryStats;
+	memory?: MemoryStats;
 	agents: ReadonlyArray<AgentRow>;
 	/** Live turn signals - when set, the TOOLS section reflects the active
 	 *  turn (chat-truth) instead of the stale tools array. */
@@ -197,6 +205,21 @@ const PROVIDER_COLOR: Record<ProviderState, string> = {
 	offline:  t.red,
 };
 
+// The route in use is filled; a standby route is a hollow ring, and says
+// what it is in words, so the two rows never differ by colour alone
+// (both can read `local:...`). A measured latency takes the word's place.
+const PROVIDER_GLYPH: Record<ProviderState, string> = {
+	local:    "●",
+	fallback: "○",
+	offline:  "✕",
+};
+
+const PROVIDER_ROLE: Record<ProviderState, string | undefined> = {
+	local:    undefined,
+	fallback: "fallback",
+	offline:  "offline",
+};
+
 const AGENT_COLOR: Record<AgentState, string> = {
 	idle:    t.muted,
 	active:  t.green,
@@ -228,6 +251,11 @@ const BODY_PART_LABELS: ReadonlyArray<{ key: keyof BodyPartsRow; label: string }
 	{ key: "eyes",     label: "eyes" },
 	{ key: "handeyes", label: "handeyes" },
 ];
+
+function hasMemoryRows(memory: MemoryStats | undefined): memory is MemoryStats {
+	if (!memory) return false;
+	return typeof memory.hits === "number" || typeof memory.misses === "number" || Boolean(memory.cache);
+}
 
 function bar(percent: number, width = 12): string {
 	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
@@ -317,18 +345,26 @@ export function ActivityRail({
 				{providers.map((provider) => (
 					<NamedRow
 						key={provider.name}
-						name={`● ${providerDisplay(provider.name)}`}
+						name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
 						color={PROVIDER_COLOR[provider.state]}
-						trailing={provider.latency}
+						trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
 					/>
 				))}
 			</RailSection>
 
-			<RailSection title="MEMORY">
-				<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
-				<MetricRow label="misses" value={String(memory.misses)} color={t.textSecondary} />
-				<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
-			</RailSection>
+			{hasMemoryRows(memory) ? (
+				<RailSection title="MEMORY">
+					{typeof memory.hits === "number" ? (
+						<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
+					) : null}
+					{typeof memory.misses === "number" ? (
+						<MetricRow label="misses" value={String(memory.misses)} color={t.textSecondary} />
+					) : null}
+					{memory.cache ? (
+						<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
+					) : null}
+				</RailSection>
+			) : null}
 
 			<RailSection title="AGENTS">
 				{agents.map((agent) => (
@@ -365,6 +401,7 @@ export type {
 	ToolState,
 	ProviderRow,
 	ProviderState,
+	MemoryStats,
 	AgentRow,
 	AgentState,
 	BodyPartState,

@@ -175,6 +175,18 @@ describe("HeaderBar", () => {
 		expect(occupied(props)).toBeLessThanOrEqual(80);
 	});
 
+	test("at 80 columns outside a repo the header says 'no repo' (#3070)", () => {
+		const props = { ...live, branch: "", syncStatus: "no repo", sessionTime: "7s", width: 80 };
+		const plan = planHeader(props);
+		expect(plan.middle.sync).toBe("no repo");
+		expect(
+			brandPillWidth(props.version, props.updateAvailable, plan.compactBrand) +
+				headerMiddleWidth(plan.middle) +
+				2 +
+				statusClusterWidth(props, plan.compactHint),
+		).toBeLessThanOrEqual(80);
+	});
+
 	test("defaults to an 80 column plan when width is omitted", () => {
 		expect(planHeader(live)).toEqual(planHeader({ ...live, width: 80 }));
 		expect(occupied(live)).toBeLessThanOrEqual(80);

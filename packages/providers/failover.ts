@@ -248,6 +248,32 @@ export class ModelFailover {
 		return last;
 	}
 
+	/**
+	 * Where the agent would go if `provider`/`model` failed right now: the
+	 * entry `resolve()` returns after `markDown(model, provider)`, which is
+	 * the walk `packages/eight/agent.ts` does on an error. Read-only: nothing
+	 * is marked down and no event is recorded.
+	 *
+	 * Null when no chain is registered for the model (resolve() would only
+	 * retry the same model id on openrouter) or when every other entry is
+	 * already down. Display surfaces use this so a fallback they show is one
+	 * the chain really holds.
+	 */
+	nextHop(
+		model: string,
+		provider: string,
+		channel: FailoverChannel = "text",
+	): FailoverEntry | null {
+		const chain = this.chainsByChannel[channel]?.[model];
+		if (!chain) return null;
+		for (const entry of chain.models) {
+			if (entry.model === model && entry.provider === provider) continue;
+			if (this.down.has(this.key(entry.model, entry.provider))) continue;
+			return entry;
+		}
+		return null;
+	}
+
 	markDown(model: string, provider: string): void {
 		this.down.add(this.key(model, provider));
 	}

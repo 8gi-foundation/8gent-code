@@ -12,6 +12,7 @@ import { computeGitSync, gitView, type GitRunner } from "../hooks/useGitSync";
 import {
 	deriveTools,
 	deriveProviders,
+	fallbackFromChain,
 	deriveAgents,
 	deriveActiveTasks,
 	parseToolName,
@@ -25,6 +26,7 @@ import {
 	_resetTuiApprovalChannel,
 	type TuiApprovalDecision,
 } from "../../../../packages/permissions/tui-approval-channel";
+import { ModelFailover } from "../../../../packages/providers/failover";
 
 function msg(partial: { role: string; content?: string; toolSuccess?: boolean; id?: string; toolTrail?: any }) {
 	return {
@@ -300,7 +302,34 @@ describe("activity-rail-derivation", () => {
 		});
 		expect(rows.map((r) => r.state)).toEqual(["local", "fallback", "offline"]);
 		expect(rows[0].latency).toBe("42ms");
-		expect(rows[2].latency).toBe("—");
+		// Unmeasured latency has no placeholder glyph: the slot is empty.
+		expect(rows[2].latency).toBeUndefined();
+	});
+
+	test("the fallback row is the real next hop in the failover chain (#3070)", () => {
+		const fo = new ModelFailover({
+			text: {
+				"ornith-1.0-9b": {
+					models: [
+						{ model: "ornith-1.0-9b", provider: "lmstudio" },
+						{ model: "MiniMax-M2.7", provider: "apfel" },
+						{ model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
+					],
+				},
+			},
+			computer: {},
+		});
+		expect(fallbackFromChain(fo, "lmstudio", "ornith-1.0-9b")).toEqual({ name: "apfel:MiniMax-M2.7" });
+		// No chain for the model, no model set, no chain at all: no fallback row.
+		expect(fallbackFromChain(fo, "ollama", "qwen3.8:27b-mlx")).toBeNull();
+		expect(fallbackFromChain(fo, "lmstudio", "")).toBeNull();
+		expect(fallbackFromChain(null, "lmstudio", "ornith-1.0-9b")).toBeNull();
+		const rows = deriveProviders({
+			primary: { name: "ollama:qwen3.8:27b-mlx" },
+			fallback: fallbackFromChain(fo, "ollama", "qwen3.8:27b-mlx"),
+			offline: null,
+		});
+		expect(rows.map((r) => r.state)).toEqual(["local"]);
 	});
 
 	test("deriveAgents collapses statuses and falls back to main", () => {

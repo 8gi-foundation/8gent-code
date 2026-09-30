@@ -76,11 +76,13 @@ export function parseToolName(content: string): string | null {
 }
 
 /**
- * Derive providers from the failover chain. The runtime ModelFailover
- * exposes only `resolve(model)` which returns the active head. We treat
- * the head as `local` and synthesize a fallback + offline placeholder
- * so the rail always shows three tiers - matches the spec "local +
- * fallback + offline".
+ * Derive the PROVIDERS rows. Every row names a real route:
+ *   - primary: the provider and model the TUI is configured to use;
+ *   - fallback: the next hop in the real failover chain for that model
+ *     (see `fallbackFromChain`), or no row at all when the chain has none;
+ *   - offline: only when something reports a route down.
+ * Latency is shown only when it was measured. There is no placeholder
+ * glyph for an unknown value: the slot is simply empty.
  */
 export interface ProviderSnapshot {
 	primary: { name: string; latencyMs?: number } | null;
@@ -90,7 +92,7 @@ export interface ProviderSnapshot {
 
 export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow[] {
 	const rows: ActivityRailProviderRow[] = [];
-	const fmt = (ms?: number) => (typeof ms === "number" ? `${Math.round(ms)}ms` : "—");
+	const fmt = (ms?: number) => (typeof ms === "number" ? `${Math.round(ms)}ms` : undefined);
 	if (snap.primary) {
 		rows.push({ name: snap.primary.name, state: "local", latency: fmt(snap.primary.latencyMs) });
 	}
@@ -105,6 +107,28 @@ export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow
 		rows.push({ name: snap.offline.name, state: "offline", latency: fmt(snap.offline.latencyMs) });
 	}
 	return rows;
+}
+
+/** The one call the rail needs from `ModelFailover` (packages/providers/failover.ts). */
+export interface FailoverChainReader {
+	nextHop(model: string, provider: string): { model: string; provider: string } | null;
+}
+
+/**
+ * The fallback row for the configured route: where the agent would really
+ * go if this provider/model failed now, read from the failover chain
+ * (`~/.8gent/failover.json`, else the built-in chains). Null, so the rail
+ * shows no fallback row, when the chain has no entry for the model or no
+ * model is set. Never a fixed "free tier" guess.
+ */
+export function fallbackFromChain(
+	chain: FailoverChainReader | null,
+	provider: string,
+	model: string,
+): { name: string } | null {
+	if (!chain || !provider || !model) return null;
+	const hop = chain.nextHop(model, provider);
+	return hop ? { name: `${hop.provider}:${hop.model}` } : null;
 }
 
 /**
