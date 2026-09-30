@@ -42,6 +42,50 @@ export function modelOnScreen(input: ModelTruthInput): ModelTruth {
 	return ran === asked ? { ran } : { ran, asked };
 }
 
+/**
+ * Which provider the screen names beside the model that ran. A reroute can
+ * move the turn to another provider as well as another model (for example
+ * `8gent` asked, the installed qwen3.8:27b-mlx served by `ollama`), and the
+ * reroute event carries it. The provider follows the route the same way the
+ * model does: the routed one while the routed model is the one on screen,
+ * else the configured one.
+ */
+export function providerOnScreen(input: {
+	/** The configured provider (currentProvider). */
+	asked: string;
+	/** The last reroute event for the active agent, if any. */
+	routed?: { model: string; provider: string };
+	/** The model on screen (modelOnScreen(...).ran). */
+	ran: string;
+}): string {
+	const { routed } = input;
+	return routed?.provider && routed.model === input.ran ? routed.provider : input.asked;
+}
+
+/**
+ * The route the screen names: the model that ran (with the asked one when
+ * different) and the provider that served it. The reroute event is passed
+ * whole, so its provider cannot be dropped on the way to the screen.
+ */
+export function routeOnScreen(
+	input: Omit<ModelTruthInput, "routed"> & {
+		/** The configured provider (currentProvider). */
+		askedProvider: string;
+		/** The active agent's last reroute event, if any. */
+		routed?: { model: string; provider: string };
+	},
+): ModelTruth & { provider: string } {
+	const shown = modelOnScreen({ ...input, routed: input.routed?.model });
+	return {
+		...shown,
+		provider: providerOnScreen({
+			asked: input.askedProvider,
+			routed: input.routed,
+			ran: shown.ran,
+		}),
+	};
+}
+
 /** One-line form, for surfaces with a single text slot. */
 export function askedNote(asked: string): string {
 	return `(asked ${asked})`;

@@ -4,7 +4,7 @@
  *
  *   NOW strip   qwen3.8:27b-mlx (asked eight-1.0-q3:14b) ctx ████░░ 51K tok
  *   status bar  model qwen3.8:27b-mlx (asked eight-1.0-q3:14b)
- *   PROVIDERS   ● 8gent qwen3.8:27b-mlx
+ *   PROVIDERS   ● ollama qwen3.8:27b-mlx   (the provider that served it, #3106 review)
  *                 (asked eight-1.0-q3:14b)
  *
  * The note takes the existing dim tones; no colour or layout is new.
