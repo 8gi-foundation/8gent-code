@@ -188,7 +188,7 @@ const SELENE_STOPS: [string, "pass" | "none", "pass" | "none"][] = [
 	["bun test 2>&1; echo \"EXIT: $?\"", "none", "pass"],
 	["bun test > /tmp/testout.txt 2>&1", "none", "pass"],
 	["cd /project && bun test 2>&1 | tail -60", "none", "pass"],
-	["pwd; echo '---ROOT---'; ls -la; echo '---README---'; ls README.md 2>&1; echo '---FFMPEG---'; which ffmpeg ffprobe; echo '---GIT---'; which git; git --version; echo '---MARPPKGS---'; ls deck 2>&1", "none", "none"],
+	["pwd; echo '---ROOT---'; ls -la; echo '---README---'; ls README.md 2>&1; echo '---FFMPEG---'; which ffmpeg ffprobe; echo '---GIT---'; which git; git --version; echo '---MARPPKGS---'; ls deck 2>&1", "pass", "pass"],
 	["cd /app 2>/dev/null && pwd && ls -la || ls -la", "pass", "pass"],
 	["cd /work/project && bun test 2>&1 | cat", "none", "pass"],
 	["cd /work/project && bun test 2>&1 | tail -20", "none", "pass"],
@@ -197,7 +197,7 @@ const SELENE_STOPS: [string, "pass" | "none", "pass" | "none"][] = [
 	["bun test > /tmp/testout.txt 2>&1; cat /tmp/testout.txt; echo \"EXIT=$?\"", "none", "pass"],
 	["cd /work/project && bun test", "none", "pass"],
 	["cd /work/project; bun test", "none", "pass"],
-	["which ffmpeg ffprobe; ffmpeg -version 2>/dev/null | head -1; echo \"---TTS---\"; which espeak espeak-ng say festival 2>/dev/null; echo \"done\"", "none", "none"],
+	["which ffmpeg ffprobe; ffmpeg -version 2>/dev/null | head -1; echo \"---TTS---\"; which espeak espeak-ng say festival 2>/dev/null; echo \"done\"", "pass", "pass"],
 	["bun test; echo EXIT:$?", "none", "pass"],
 	["cd /work/project && ls deck && echo \"---\" && wc -l deck/deck.md", "pass", "pass"],
 	["wc -l /work/project/deck/deck.md", "pass", "pass"],
@@ -220,7 +220,7 @@ const SELENE_STOPS: [string, "pass" | "none", "pass" | "none"][] = [
 	["cd \"$(git rev-parse --show-toplevel 2>/dev/null || echo .)\" && bun test 2>&1 | head -60", "none", "none"],
 	["say -v ? 2>&1 | head -5", "none", "none"],
 	["ls -la README.md 2>&1 || echo \"NO ROOT README\"", "pass", "pass"],
-	["which ffmpeg ffprobe; echo '---'; mkdir -p deck; ls -la deck 2>/dev/null; echo '---readme---'; test -f README.md && echo exists || echo missing", "none", "none"],
+	["which ffmpeg ffprobe; echo '---'; mkdir -p deck; ls -la deck 2>/dev/null; echo '---readme---'; test -f README.md && echo exists || echo missing", "pass", "pass"],
 	["ls -la /workspace/ && echo '---' && ls /workspace/deck/ 2>/dev/null || echo 'no deck dir' && echo '---' && which ffmpeg ffprobe 2>/dev/null || echo 'no ffmpeg'", "pass", "pass"],
 	["which ffmpeg; which ffprobe; which marp; ls -la; ls deck 2>&1 | head", "pass", "pass"],
 	["cd /work/project; echo \"exit code: $?\"", "pass", "pass"],
@@ -247,8 +247,8 @@ describe("allowlist: regression sets from #3131", () => {
 	test("Selene's false stops: each row gets its expected verdict under both options", () => {
 		const got = SELENE_STOPS.map(([c]) => [c, pass(c) ? "pass" : "none", pass(c, true) ? "pass" : "none"]);
 		expect(got).toEqual(SELENE_STOPS);
-		expect(SELENE_STOPS.filter((r) => r[1] === "pass").length).toBe(14);
-		expect(SELENE_STOPS.filter((r) => r[2] === "pass").length).toBe(46);
+		expect(SELENE_STOPS.filter((r) => r[1] === "pass").length).toBe(17);
+		expect(SELENE_STOPS.filter((r) => r[2] === "pass").length).toBe(49);
 	});
 });
 
@@ -320,13 +320,56 @@ describe("allowlist: what passes and what does not", () => {
 		"grep token .npmrc",
 		"cat .env",
 		"cat < .env.local",
-		"mkdir -p deck",
+		"mkdir -m 777 deck",
 		"touch a.txt",
 		"npm test",
 		"python3 -c 'print(1)'",
 		"> notes.txt",
 		"",
 	];
+	// Additive commands (#3131 live measurement: one unlisted mkdir or
+	// --version loaded the whole judge into a session).
+	const ADDITIVE_PASS: string[] = [
+		"mkdir deck",
+		"mkdir -p deck",
+		"mkdir -p docs/notes src/lib",
+		"mkdir -pv out",
+		"bun --version",
+		"node -v",
+		"git --version",
+		"ffmpeg -version",
+		"ffprobe --help",
+		"npm --help",
+		"which ffmpeg ffprobe; ffmpeg -version 2>/dev/null | head -1",
+		"test -f README.md && echo exists || echo missing",
+	];
+	const ADDITIVE_NONE: string[] = [
+		"mkdir -p /etc/app",
+		"mkdir -p ~/bin",
+		"mkdir -p ../outside",
+		"mkdir -p a/../../b",
+		"mkdir -p $DIR",
+		"mkdir -p 'build/*'",
+		"mkdir",
+		"mkdir -p deck > log.txt",
+		"bun run src/index.ts",
+		"bun src/index.ts",
+		"node index.js",
+		"node -e 'console.log(1)'",
+		"bun --version --verbose",
+		"shutdown -h",
+		"reboot --help",
+		"mytool --version",
+		"./node_modules/.bin/tsc --version",
+		"bun --version > version.txt",
+		"python3 -V -c 'print(1)'",
+	];
+	test("additive commands pass: mkdir inside the work dir, and --version/--help of known dev tools", () => {
+		for (const c of ADDITIVE_PASS) expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
+	});
+	test("mkdir outside the work dir, code execution, unknown tools and file redirects still have no opinion", () => {
+		for (const c of ADDITIVE_NONE) expect({ c, v: readOnlyAllowlist(c, { bunTest: true }).verdict }).toEqual({ c, v: "no-opinion" });
+	});
 	test("read-only commands pass without the model", () => {
 		for (const c of PASS) expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
 	});

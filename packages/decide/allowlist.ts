@@ -17,9 +17,20 @@
  *     unquoted `$` expansion other than `$?`;
  *   - every redirect goes to /dev/null, a temp path or another fd, never a file;
  *   - every segment is a bare read-only binary (READ_ONLY_BINS, with the
- *     per-binary argument checks below), `cd`, a read-only git subcommand, or,
- *     only when `bunTest` is set, `bun test`;
+ *     per-binary argument checks below), `cd`, a read-only git subcommand, an
+ *     additive command (see below), or, only when `bunTest` is set, `bun test`;
  *   - no argument names a secret (.env, keys, credentials).
+ *
+ * Additive commands (#3131 live measurement: one unlisted `mkdir -p deck` or
+ * `bun --version` was enough to load the whole judge into a session):
+ *   - `mkdir [-p] [-v] <path>...` where every path is relative, inside the
+ *     working directory (no leading /, ~ or -, no `..`, no glob or `$`). It
+ *     only creates; on an existing directory it does nothing or fails.
+ *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
+ *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
+ *     `ffmpeg -version`). A known set, never "any binary": some system tools
+ *     read -h or an unknown flag as an action (`shutdown -h`).
+ * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
  * and stays off unless the caller opts in. Callers pass the options; the env
@@ -49,7 +60,7 @@ export interface AllowlistResult {
 export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
 	"ls", "pwd", "which", "wc", "head", "tail", "cat", "grep", "egrep", "fgrep", "rg", "echo", "printf", "true", "false",
 	"sleep", "date", "file", "stat", "du", "df", "basename", "dirname", "realpath", "whoami", "uname", "tr", "cut", "diff",
-	"cmp", "nl", "tree", "jq", "sort", "uniq", "find",
+	"cmp", "nl", "tree", "jq", "sort", "uniq", "find", "test",
 ]);
 
 /** Arguments that make an otherwise read-only binary write, delete or run something. */
@@ -65,6 +76,35 @@ const GIT_READ = new Set(["status", "log", "diff", "show", "rev-parse", "ls-file
 const GIT_BRANCH_READ = /^(-a|-r|-v|-vv|--all|--list|--remotes|--show-current|--no-color|--color)$/;
 /** Git flags that write a file, run a helper or change config. */
 const GIT_WRITING_ARG = /^(--output(=.*)?|-o|--ext-diff|-c|--exec-path(=.*)?|--config-env(=.*)?)$/;
+
+/** Dev tools whose `--version` / `--help`, given alone, only print. */
+export const VERSION_TOOLS: ReadonlySet<string> = new Set([
+	"bun", "node", "npm", "npx", "pnpm", "yarn", "deno", "python", "python3", "pip", "pip3", "uv", "git", "go", "cargo",
+	"rustc", "tsc", "gh", "docker", "make", "gcc", "clang", "java", "ruby", "perl", "php", "curl", "wget", "brew",
+	"ffmpeg", "ffprobe", "marp", "jq", "rg", "sqlite3", "psql", "tmux", "biome", "eslint", "prettier", "vite",
+]);
+/** Short version flags, only for the tools that define them this way. */
+const SHORT_VERSION: Record<string, string> = {
+	node: "-v", bun: "-v", npm: "-v", pnpm: "-v", yarn: "-v", deno: "-V", python: "-V", python3: "-V",
+	ffmpeg: "-version", ffprobe: "-version", go: "version",
+};
+
+function versionOnly(b: string, args: string[]): boolean {
+	if (!VERSION_TOOLS.has(b) || args.length !== 1) return false;
+	return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
+}
+
+/** `mkdir` that only creates directories inside the working directory. */
+function mkdirOk(args: string[]): string | null {
+	const flags = args.filter((a) => a.startsWith("-"));
+	const paths = args.filter((a) => !a.startsWith("-"));
+	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f))) return "mkdir with a flag other than -p/-v";
+	if (paths.length === 0) return "mkdir with no path";
+	for (const p of paths) {
+		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p)) return `mkdir outside the working directory (${p})`;
+	}
+	return null;
+}
 
 const SECRET_ARG =
 	/(^|\/)\.env(\.[\w.-]+)?$|(^|\/)\.env\b|id_rsa|id_ed25519|id_ecdsa|(^|\/)\.ssh(\/|$)|\.aws\/|credentials|\.netrc|\.npmrc|\.git-credentials|keychain|\.pem$|\.key$|\.p12$/;
@@ -98,6 +138,8 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (b.includes("=") || b.includes("/")) return `runs ${b}, not a bare read-only binary`;
 	if (args.some((a) => SECRET_ARG.test(a))) return "names a secret";
 	if (b === "cd") return null;
+	if (versionOnly(b, args)) return null;
+	if (b === "mkdir") return mkdirOk(args);
 	if (b === "git") return gitOk(args);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";
