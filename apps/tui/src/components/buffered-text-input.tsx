@@ -71,7 +71,10 @@ export function BufferedTextInput({
 					next = current.slice(0, cursor - 1) + current.slice(cursor);
 					nextCursor = cursor - 1;
 				}
-			} else if (input) {
+			} else if (input && !key.ctrl) {
+				// Ink reports Ctrl+P as input "p" with key.ctrl, and hands it to
+				// every active handler. Ctrl+letter is a shortcut, never text,
+				// or the app's shortcut also types its letter here (#3166).
 				next = current.slice(0, cursor) + input + current.slice(cursor);
 				nextCursor = cursor + input.length;
 			}
