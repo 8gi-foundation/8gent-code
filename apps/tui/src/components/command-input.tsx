@@ -47,6 +47,8 @@ const EMPTY_SUGGESTIONS: string[] = [];
 interface CommandInputProps {
 	onSubmit: (input: string) => void;
 	isProcessing: boolean;
+	/** Idle placeholder override: what a waiting question expects ("Your name"). */
+	placeholder?: string;
 	processingStage?: "planning" | "toolshed" | "executing" | "complete";
 	showAnimations?: boolean;
 	// Real-time agent progress
@@ -117,6 +119,7 @@ export function splitTrailingEnter(value: string): { text: string; submit: boole
 export function CommandInput({
 	onSubmit,
 	isProcessing,
+	placeholder,
 	processingStage = "planning",
 	showAnimations = true,
 	activeTool = null,
@@ -398,7 +401,7 @@ export function CommandInput({
 								? "Queue a follow-up message..."
 								: isVisible
 									? ""
-									: "Type a command or ask a question..."
+									: (placeholder ?? "Type a command or ask a question...")
 						}
 					/>
 

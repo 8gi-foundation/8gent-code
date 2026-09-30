@@ -120,18 +120,18 @@ describe("MessageList with a tool trail at 80 columns", () => {
 			/>,
 		);
 
-	test("the turn's calls sit inside the assistant reply, above the text", () => {
+	test("once the reply lands, the turn's calls read as results above the text", () => {
 		const out = renderList(pilotTurn);
 		const ls = lines(out);
 		const header = ls.findIndex((l) => l.includes("◆ 8gent"));
-		const write = ls.findIndex((l) => l.includes("✓ write_file deck/outline.md"));
+		const write = ls.findIndex((l) => l.includes("✓ Wrote  deck/outline.md"));
 		const body = ls.findIndex((l) => l.includes("The outline is written."));
 		expect(header).toBeGreaterThan(-1);
 		expect(write).toBeGreaterThan(header);
 		expect(body).toBeGreaterThan(write);
-		expect(out).toContain("⊘ run_command ls deck && wc -l deck/deck.md (blocked)");
-		expect(out).toContain("✗ run_command bun test (exit 1)");
-		expect(out).toContain("✓ read_file packages/decide/README.md");
+		expect(out).toContain("⊘ Run blocked  ls deck && wc -l deck/deck.md");
+		expect(out).toContain("✗ Ran  bun test  exit 1");
+		expect(out).toContain("✓ Read  packages/decide/README.md");
 		// Raw tool-start/tool-end strings stay out of chat.
 		expect(out).not.toContain("→ write_file(");
 	});
@@ -149,6 +149,40 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		expect(out).toContain("✓ write_file deck/outline.md");
 		expect(out).toContain("⊘ run_command ls deck && wc -l deck/deck.md (blocked)");
 		expect(out).not.toContain("waiting with you");
+	});
+
+	test("a turn that ended with calls but no reply settles into results", () => {
+		const turn = pilotTurn.slice(0, 4);
+		const out = render80(
+			<MessageList
+				messages={turn}
+				animateTyping={false}
+				showAnimations={false}
+				scrollEnabled={false}
+				contentWidth={72}
+				rowBudget={40}
+				turnRunning={false}
+			/>,
+		);
+		expect(out).toContain("◆ 8gent");
+		expect(out).toContain("✓ Wrote  deck/outline.md");
+		expect(out).toContain("⊘ Run blocked  ls deck && wc -l deck/deck.md");
+		expect(out).toContain("No reply.");
+		expect(out).not.toContain("✓ write_file");
+		// While the turn still runs, the same calls are the live trail.
+		const live = render80(
+			<MessageList
+				messages={turn}
+				animateTyping={false}
+				showAnimations={false}
+				scrollEnabled={false}
+				contentWidth={72}
+				rowBudget={40}
+				turnRunning
+			/>,
+		);
+		expect(live).toContain("✓ write_file deck/outline.md");
+		expect(live).not.toContain("No reply.");
 	});
 
 	test("a turn taller than the chat window caps its trail to fit", () => {
@@ -180,8 +214,8 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		);
 		// Header + trail + body + margin stays within the 8-row budget.
 		expect(lines(out).length).toBeLessThanOrEqual(8);
-		expect(out).toContain("⊘ run_command ls notes (blocked)");
-		expect(out).toContain("earlier calls");
+		expect(out).toContain("⊘ Run blocked  ls notes");
+		expect(out).toContain("more steps");
 		expect(out).toContain("Done.");
 	});
 

@@ -38,6 +38,8 @@ import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Stack } from "./primitives/Stack.js";
 import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
+import { TurnResults } from "./TurnResults.js";
+import { turnResultRows } from "../lib/turn-results.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 
@@ -125,6 +127,10 @@ interface MessageListProps {
 	 *  rendered tree never exceeds the container — which is what was causing
 	 *  the streaming overlap artifacts. */
 	rowBudget?: number;
+	/** True while the agent's turn is still running. A trail of calls with no
+	 *  reply is live only while its turn runs; once the turn ends without a
+	 *  reply, it settles into results like any finished turn. */
+	turnRunning?: boolean;
 	/** When false, skip bubble fade-in delays (matches ^A global anim toggle). */
 	showAnimations?: boolean;
 	/** Disable mouse-wheel + keyboard scroll capture (e.g. another modal owns input). */
@@ -140,8 +146,22 @@ interface MessageListProps {
  * Overhead per message: 1 header row + 1 marginBottom; assistant footer adds 1.
  * Body: count wrapped lines for each line of content.
  */
-function estimateMessageRows(message: Message, wrapWidth: number, trail: ToolTrailEntry[] = []): number {
-	const trailRows = toolTrailRows(trail);
+/**
+ * Rows a turn's calls take: the live trail while the turn runs (a "tool"
+ * item), the results block once the reply has landed (an assistant item).
+ */
+function callRows(role: Message["role"], trail: ToolTrailEntry[], maxRows?: number): number {
+	if (trail.length === 0) return 0;
+	// Results carry one blank row between them and the reply (mockup A).
+	return role === "assistant" ? turnResultRows(trail, maxRows) + 1 : toolTrailRows(trail, maxRows);
+}
+
+function estimateMessageRows(
+	message: Message,
+	wrapWidth: number,
+	trail: ToolTrailEntry[] = [],
+): number {
+	const trailRows = callRows(message.role, trail);
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
@@ -173,6 +193,7 @@ export function MessageList({
 	rowBudget,
 	showAnimations = true,
 	scrollEnabled = true,
+	turnRunning = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
@@ -192,7 +213,15 @@ export function MessageList({
 	// Raw tool messages never render in chat. Each finished call's trail entry
 	// attaches to its turn's assistant reply; calls with no reply yet become a
 	// standalone trail item.
-	const chatItems: ChatItem<Message>[] = buildChatItems(messages);
+	// A turn that ended with calls but no reply text still gets its results:
+	// its trail item becomes a reply-less 8gent turn ("No reply." below the
+	// results). Only the newest trail, while its turn runs, stays live.
+	const grouped: ChatItem<Message>[] = buildChatItems(messages);
+	const chatItems: ChatItem<Message>[] = grouped.map((it, idx) =>
+		it.message.role === "tool" && !(turnRunning && idx === grouped.length - 1)
+			? { ...it, message: { ...it.message, role: "assistant" as const, content: "" } }
+			: it,
+	);
 	const chatMessages = chatItems.map((i) => i.message);
 	const trailById = new Map(chatItems.map((i) => [i.message.id, i.trail]));
 
@@ -202,13 +231,19 @@ export function MessageList({
 	// the container is what makes Ink leave stale characters behind.
 	const trailCaps = new Map<string, number>();
 	const rowEstimates = chatItems.map((i) => {
-		const full = estimateMessageRows(i.message, bubbleWidths(resolvedContentWidth, i.message.role).wrap, i.trail);
-		const trailRows = toolTrailRows(i.trail);
+		const full = estimateMessageRows(
+			i.message,
+			bubbleWidths(resolvedContentWidth, i.message.role).wrap,
+			i.trail,
+		);
+		const trailRows = callRows(i.message.role, i.trail);
 		if (trailRows === 0 || full <= resolvedRowBudget) return full;
 		const base = full - trailRows;
-		const cap = Math.max(1, resolvedRowBudget - base);
+		// The results' gap row is not a trail row: leave it out of the cap.
+		const gap = i.message.role === "assistant" ? 1 : 0;
+		const cap = Math.max(1, resolvedRowBudget - base - gap);
 		trailCaps.set(i.message.id, cap);
-		return base + toolTrailRows(i.trail, cap);
+		return base + callRows(i.message.role, i.trail, cap);
 	});
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
@@ -476,7 +511,12 @@ function MessageItem({
 				borderColor={t.muted}
 				paddingLeft={1}
 			>
-				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} animate={showAnimations} />
+				<ToolTrail
+					entries={trail}
+					width={innerContentWidth}
+					maxRows={trailMaxRows}
+					animate={showAnimations}
+				/>
 			</Box>
 		);
 	}
@@ -588,23 +628,39 @@ function MessageItem({
 				)}
 			</Box>
 
-			{/* This turn's tool calls, one line each, above the reply text */}
+			{/* The finished turn's work as checked steps, above the reply text.
+			    While the turn ran, the same calls showed as the live trail. */}
 			{!isUser && trail.length > 0 && (
-				<ToolTrail entries={trail} width={innerContentWidth} maxRows={trailMaxRows} animate={showAnimations} />
+				<Box flexDirection="column" flexShrink={0} marginBottom={message.content.trim() ? 1 : 0}>
+					<TurnResults
+						trail={trail}
+						width={innerContentWidth}
+						maxRows={trailMaxRows}
+						land={isNew}
+						animate={showAnimations}
+					/>
+				</Box>
 			)}
 
+			{/* A turn that ended with calls and no words says so, quietly. */}
+			{!isUser && !message.content.trim() && trail.length > 0 ? (
+				<MutedText>No reply.</MutedText>
+			) : null}
+
 			{/* Message body — left-bar carries the visual frame, strict width */}
-			<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
-				<MessageContent
-					content={safeContent}
-					role={message.role}
-					isNew={isNew}
-					animate={animate}
-					onTypingComplete={() => setTypingComplete(true)}
-					wrapWidth={textWrapWidth}
-					accentColor={isUser ? "yellow" : "cyan"}
-				/>
-			</Box>
+			{message.content.trim() || trail.length === 0 ? (
+				<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
+					<MessageContent
+						content={safeContent}
+						role={message.role}
+						isNew={isNew}
+						animate={animate}
+						onTypingComplete={() => setTypingComplete(true)}
+						wrapWidth={textWrapWidth}
+						accentColor={isUser ? "yellow" : "cyan"}
+					/>
+				</Box>
+			) : null}
 
 			{/* Footer (assistant + metadata present): "Xs · N tok" */}
 			{showFooter && (

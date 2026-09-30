@@ -5,10 +5,11 @@ exports[`MessageList with a tool trail at 80 columns 80-column render snapshot 1
 │ Write deck/outline.md, then run \`ls deck\`
 
 │ ◆ 8gent HH:MM
-│ ✓ write_file deck/outline.md
-│ ⊘ run_command ls deck && wc -l deck/deck.md (blocked)
-│ ✗ run_command bun test (exit 1)
-│ ✓ read_file packages/decide/README.md
+│ ✓ Wrote  deck/outline.md
+│ ⊘ Run blocked  ls deck && wc -l deck/deck.md
+│ ✗ Ran  bun test  exit 1
+│ ✓ Read  packages/decide/README.md
+│
 │ The outline is written.
 │
 │ [harness] Not verified: 'ls deck' was requested but never ran

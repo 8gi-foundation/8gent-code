@@ -23,6 +23,8 @@ export interface ToolTrailEntry {
 	status: TrailStatus;
 	/** Short reason for fail/blocked, e.g. "exit 1" or "blocked: [no-secrets-in-files]". */
 	reason?: string;
+	/** update_plan only: the steps and statuses the agent reported (lib/turn-results.ts). */
+	plan?: Array<{ step: string; status: string }>;
 }
 
 export interface ToolTrailRow extends ToolTrailEntry {
@@ -121,6 +123,16 @@ export function toTrailEntry(event: {
 		status,
 	};
 	if (reason) entry.reason = reason;
+	if (event.toolName === "update_plan") {
+		const items = (event.args as { plan?: unknown } | undefined)?.plan;
+		if (Array.isArray(items)) {
+			const plan = items
+				.map((i) => (i && typeof i === "object" ? (i as { step?: unknown; status?: unknown }) : {}))
+				.filter((i): i is { step: string; status: unknown } => typeof i.step === "string" && i.step.trim() !== "")
+				.map((i) => ({ step: i.step, status: typeof i.status === "string" ? i.status : "pending" }));
+			if (plan.length > 0) entry.plan = plan;
+		}
+	}
 	return entry;
 }
 
