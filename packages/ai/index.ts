@@ -24,6 +24,7 @@ export {
 	setRuntimeParams,
 	getRuntimeParams,
 	resetRuntimeParams,
+	createRuntimeParams,
 } from "./tools";
 export type { ToolContext, AgentTools, RuntimeParams } from "./tools";
 

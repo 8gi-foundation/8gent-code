@@ -16,10 +16,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createEightAgent } from "./agent";
-import { getToolContext, setToolContext } from "./tools";
+import { type EightAgentConfig, createEightAgent } from "./agent";
+import { agentTools, createRuntimeParams, getToolContext, setToolContext } from "./tools";
 
 type Call = { name: string; args: Record<string, unknown> };
+
+// Memory tests open a global store: keep it off the real ~/.8gent.
+process.env.EIGHT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "toolctx-data-"));
 
 const servers: { stop: (force?: boolean) => void }[] = [];
 const dirs: string[] = [];
@@ -27,6 +30,7 @@ const dirs: string[] = [];
 afterAll(() => {
 	for (const s of servers) s.stop(true);
 	for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+	fs.rmSync(process.env.EIGHT_DATA_DIR as string, { recursive: true, force: true });
 });
 
 function tempDir(label: string): string {
@@ -87,13 +91,19 @@ function scriptedModel(call: Call): { baseURL: string; toolResults: string[] } {
 	return { baseURL: `http://127.0.0.1:${server.port}`, toolResults };
 }
 
-function agentFor(workingDirectory: string, agentId: string, call: Call) {
+function agentFor(
+	workingDirectory: string,
+	agentId: string,
+	call: Call,
+	extra: Partial<EightAgentConfig> = {},
+) {
 	const model = scriptedModel(call);
 	const agent = createEightAgent({
 		provider: { name: "ollama", model: "fake", baseURL: model.baseURL },
 		workingDirectory,
 		agentId,
 		maxSteps: 3,
+		...extra,
 	});
 	return { agent, toolResults: model.toolResults };
 }
@@ -168,5 +178,99 @@ describe("two agents in one process keep their own tool context (#3127)", () => 
 		} finally {
 			setToolContext(saved);
 		}
+	});
+});
+
+// ── Runtime params and memory are per agent too (#3140) ─────────────────
+// Before: one module-level RuntimeParams for the process, so self_tune on one
+// agent changed another agent's next turn and self_inspect reported whichever
+// agent wrote last; and one MemoryManager for the process, fixed to the first
+// caller's directory, so a second agent's remember and recall used the first
+// agent's project memory.
+
+// The local-provider default trims tools to a core set; give these tests the
+// self and memory tools explicitly.
+const selfAndMemoryTools = {
+	self_tune: agentTools.self_tune,
+	self_inspect: agentTools.self_inspect,
+	self_append_context: agentTools.self_append_context,
+	remember: agentTools.remember,
+	recall: agentTools.recall,
+};
+
+describe("two agents in one process keep their own runtime params (#3140)", () => {
+	test("self_tune on one agent never reaches the other", async () => {
+		const runtimeA = createRuntimeParams();
+		const runtimeB = createRuntimeParams();
+		const a = agentFor(
+			tempDir("rta"),
+			"primary",
+			{ name: "self_tune", args: { parameter: "temperature", value: 0.1, reason: "test" } },
+			{ tools: selfAndMemoryTools, runtime: runtimeA },
+		);
+		const b = agentFor(
+			tempDir("rtb"),
+			"primary",
+			{ name: "self_inspect", args: {} },
+			{ tools: selfAndMemoryTools, runtime: runtimeB },
+		);
+
+		await run(a);
+		expect(runtimeA.temperature).toBe(0.1);
+		expect(runtimeB.temperature).toBe(0.7);
+		// B inspects itself after A tuned: it must see its own 0.7, not A's 0.1.
+		expect(JSON.parse(await run(b)).tunable.temperature).toBe(0.7);
+	});
+
+	test("self_append_context stays on the agent that appended it", async () => {
+		const runtimeA = createRuntimeParams();
+		const runtimeB = createRuntimeParams();
+		const a = agentFor(
+			tempDir("apa"),
+			"primary",
+			{ name: "self_append_context", args: { context: "only for A", reason: "test" } },
+			{ tools: selfAndMemoryTools, runtime: runtimeA },
+		);
+		agentFor(tempDir("apb"), "primary", { name: "self_inspect", args: {} }, {
+			tools: selfAndMemoryTools,
+			runtime: runtimeB,
+		});
+
+		await run(a);
+		expect(runtimeA.appendedContext).toEqual(["only for A"]);
+		expect(runtimeB.appendedContext).toEqual([]);
+		expect(createRuntimeParams().appendedContext).toEqual([]);
+	});
+});
+
+describe("two agents in one process keep their own memory (#3140)", () => {
+	test("remember on one agent is not recalled by an agent in another directory", async () => {
+		const dirA = tempDir("mema");
+		const dirB = tempDir("memb");
+		const fact = "the orchestrator codename is bluefinch";
+		const a = agentFor(
+			dirA,
+			"primary",
+			{ name: "remember", args: { fact, layer: "session" } },
+			{ tools: selfAndMemoryTools },
+		);
+		const b = agentFor(
+			dirB,
+			"primary",
+			{ name: "recall", args: { query: "bluefinch" } },
+			{ tools: selfAndMemoryTools },
+		);
+		const a2 = agentFor(
+			dirA,
+			"primary",
+			{ name: "recall", args: { query: "bluefinch" } },
+			{ tools: selfAndMemoryTools },
+		);
+
+		expect(JSON.parse(await run(a)).stored).toBe(true);
+		// B works in another directory: A's memory is not its memory.
+		expect(JSON.parse(await run(b)).count).toBe(0);
+		// A, in its own directory, still finds it.
+		expect(JSON.parse(await run(a2)).count).toBe(1);
 	});
 });

@@ -12,7 +12,7 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import type { GenerateTextResult, LanguageModel, ToolSet } from "ai";
 import { type ProviderConfig, createModel } from "./providers";
-import { type AgentTools, type ToolContext, agentTools, setRuntimeParams } from "./tools";
+import { type AgentTools, type RuntimeParams, type ToolContext, agentTools, getRuntimeParams } from "./tools";
 
 export interface EightAgentConfig {
 	/** Provider configuration */
@@ -25,6 +25,8 @@ export interface EightAgentConfig {
 	workingDirectory?: string;
 	/** Agent scope for the write-policy gate (default "primary"). */
 	agentId?: string;
+	/** This agent's runtime params (default: the process fallback). */
+	runtime?: RuntimeParams;
 	/** Tools to use (default: all agentTools) */
 	tools?: ToolSet;
 	/** Max output tokens per step (default: 4096 for local, unlimited for cloud) */
@@ -143,6 +145,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	const toolContext: ToolContext = {
 		workingDirectory: config.workingDirectory || process.cwd(),
 		agentId: config.agentId ?? "primary",
+		runtime: config.runtime ?? getRuntimeParams(),
 	};
 
 	const model = createModel(config.provider);
@@ -242,7 +245,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 					const instantTps = isPlausible ? Math.min(5000, (stepOutputTokens / durationMs) * 1000) : 0;
 					if (instantTps > 0) {
 						smoothedTps = smoothedTps === 0 ? instantTps : smoothedTps * 0.7 + instantTps * 0.3;
-						setRuntimeParams({
+						Object.assign(toolContext.runtime as RuntimeParams, {
 							lastTokensPerSecond: instantTps,
 							avgTokensPerSecond: smoothedTps,
 						});
