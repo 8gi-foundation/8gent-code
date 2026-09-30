@@ -219,8 +219,9 @@ export function CommandInput({
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
-			// Tab to accept ghost suggestion
-			if (key.tab && isVisible && suggestion) {
+			// Tab to accept ghost suggestion. Not Shift+Tab: Ink sets key.tab for
+			// it too, and Shift+Tab switches the permission mode (#3170).
+			if (key.tab && !key.shift && isVisible && suggestion) {
 				const newValue = accept();
 				setValue(newValue);
 				return;

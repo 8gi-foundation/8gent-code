@@ -29,6 +29,7 @@ import {
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
+import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -246,12 +247,17 @@ export class Agent {
 				unattended: config.unattended ?? false,
 				allowedPaths: config.allowedPaths,
 				openOnWrite: config.openOnWrite ?? true,
+				permission: config.permission,
 			},
 		);
 		// System One (EIGHT_SYSTEM_ONE=1): start loading the judge now, in the
 		// background, so the first gated command does not pay the model load.
 		// Idempotent per process; flag off it is a no-op with no import.
-		startSystemOneWarmup()?.catch(() => {});
+		// Guarded mode (#3170) turns System One on for this agent's calls, so
+		// it warms the judge too.
+		startSystemOneWarmup(
+			systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
+		)?.catch(() => {});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -1391,6 +1397,8 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// Carried into every native tool call; per agent, never process-wide (#3127).
 			agentId: this.config.agentScope ?? "primary",
 			runtime: this.runtimeParams,
+			// Its permission mode, per call, like the context above (#3170).
+			permission: this.config.permission,
 			tools: effectiveTools,
 
 			onToolCallStart: async (event) => {

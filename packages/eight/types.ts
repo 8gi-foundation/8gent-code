@@ -166,6 +166,13 @@ export interface AgentConfig {
 	 * false so spawned sub-agents never open windows (#3107).
 	 */
 	openOnWrite?: boolean;
+	/**
+	 * This agent's permission mode (#3170): plan, ask, guarded or infinite,
+	 * bound to each of its tool calls. The TUI hands every agent of a tab the
+	 * tab's holder, so Shift+Tab changes that tab and no other. Undefined: no
+	 * mode, today's behaviour.
+	 */
+	permission?: import("../permissions/permission-mode").PermissionModeHolder;
 }
 
 export interface LLMResponse {

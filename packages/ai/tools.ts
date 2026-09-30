@@ -15,6 +15,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
+	PERMISSION_MODE_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
@@ -27,6 +28,14 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import {
+	type PermissionModeHolder,
+	currentPermissionMode,
+	guardedSkipsCard,
+	planModeRefusal,
+	runWithPermissionHolder,
+	systemOneEnvFor,
+} from "../permissions/permission-mode";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 
 // Execution context passed to tools
@@ -36,6 +45,8 @@ export interface ToolContext {
 	agentId?: string;
 	/** This agent's own runtime params, read and tuned by the self_* tools (#3140). */
 	runtime?: RuntimeParams;
+	/** This agent's permission mode (#3170); undefined: no mode, today's behaviour. */
+	permission?: PermissionModeHolder;
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -66,14 +77,29 @@ function isToolContext(value: unknown): value is ToolContext {
 	);
 }
 
-/** Run each tool's execute() inside the ToolContext its call carries. */
+/**
+ * Run each tool's execute() inside the ToolContext its call carries, and in
+ * that agent's permission mode (#3170): Plan refuses anything that is not a
+ * read before the tool runs, and the permission layer below reads the mode.
+ */
 function bindToolContext<T extends ToolSet>(tools: T): T {
-	for (const def of Object.values(tools)) {
+	for (const [name, def] of Object.entries(tools)) {
 		const run = def.execute as ((input: unknown, options: unknown) => unknown) | undefined;
 		if (!run) continue;
+		const inMode = async (holder: PermissionModeHolder, input: unknown, options: unknown) => {
+			if (currentPermissionMode() === "plan") {
+				const refusal = await planModeRefusal(name, (input ?? {}) as Record<string, unknown>);
+				if (refusal) return refusal;
+			}
+			return run(input, options);
+		};
 		(def as { execute: unknown }).execute = (input: unknown, options: unknown) => {
 			const ctx = (options as { experimental_context?: unknown } | undefined)?.experimental_context;
-			return isToolContext(ctx) ? _callCtx.run(ctx, () => run(input, options)) : run(input, options);
+			const holder = (isToolContext(ctx) ? ctx : _ctx).permission;
+			const call = holder
+				? () => runWithPermissionHolder(holder, () => inMode(holder, input, options))
+				: () => run(input, options);
+			return isToolContext(ctx) ? _callCtx.run(ctx, call) : call();
 		};
 	}
 	return tools;
@@ -1103,7 +1129,7 @@ const backgroundStart = tool({
 	}),
 	execute: async ({ command, timeout }) => {
 		const { systemOneGate } = await import("../permissions/system-one-gate");
-		const systemOne = await systemOneGate(command);
+		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
@@ -1166,6 +1192,7 @@ async function runShellCommand(command: string): Promise<string> {
 
 	// Captured once: the timer and process callbacks below run after this call.
 	const ctx = getToolContext();
+	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
 	const hookManager = getHookManager();
 
@@ -1178,10 +1205,16 @@ async function runShellCommand(command: string): Promise<string> {
 	// ToolExecutor.runCommand: a block is final and never follows a Y, and an
 	// escalate's own question is the card. One command, at most one card.
 	const { systemOneGate } = await import("../permissions/system-one-gate");
-	const systemOne = await systemOneGate(command, process.env, ctx.workingDirectory);
+	// Guarded mode (#3170) turns System One on for this call whatever the env
+	// says; the env flag stays on in every mode.
+	const systemOne = await systemOneGate(command, systemOneEnvFor(mode), ctx.workingDirectory);
 	if (!systemOne.run) return systemOne.message as string;
 
-	if (permissionCheck === "ask" && systemOne.humanApproved !== true) {
+	if (
+		permissionCheck === "ask" &&
+		systemOne.humanApproved !== true &&
+		!guardedSkipsCard(mode, systemOne, isCommandDangerous(command))
+	) {
 		const allowed = await permissionManager.requestPermission(
 			"Execute Shell Command",
 			isCommandDangerous(command)
@@ -1339,9 +1372,18 @@ const spawnAgent = tool({
 			),
 		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
+		permissionMode: z.enum(["plan", "ask", "guarded", "infinite"]).optional().describe(PERMISSION_MODE_DESCRIPTION),
 	}),
-	execute: async ({ task, runtime, model, timeout, allowedPaths }) =>
-		spawnAgentTool(getToolContext().workingDirectory, task, runtime, model, timeout, normaliseAllowedPaths(allowedPaths)),
+	execute: async ({ task, runtime, model, timeout, allowedPaths, permissionMode }) =>
+		spawnAgentTool(
+			getToolContext().workingDirectory,
+			task,
+			runtime,
+			model,
+			timeout,
+			normaliseAllowedPaths(allowedPaths),
+			permissionMode,
+		),
 });
 
 const checkAgent = tool({

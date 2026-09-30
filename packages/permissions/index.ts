@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { currentPermissionMode } from "./permission-mode.js";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
 // ============================================
@@ -543,6 +544,12 @@ export class PermissionManager {
 	 * Check if infinite mode is active (accounts for expiry).
 	 */
 	isInfiniteMode(): boolean {
+		// A call made by an agent that holds a permission mode (#3170) answers
+		// from that mode, not from this process-wide flag: one tab in Infinite
+		// never makes another tab's call infinite, and the reverse. A call with
+		// no mode bound falls through to the flag, exactly as before.
+		const perCall = currentPermissionMode();
+		if (perCall !== undefined) return perCall === "infinite";
 		if (!this.infiniteMode) return false;
 
 		// Check time limit

@@ -157,10 +157,10 @@ describe("the System One judge is a footer segment, not a chat line (#3090)", ()
 		}
 	});
 
-	test("failed is the look-here colour, like infinite approval", () => {
+	test("failed is the look-here colour, like the Infinite permission mode", () => {
 		const failed = buildFooterSegments({ mode: "Planning", judge: "failed" }).find((s) => s.key === "judge");
 		const infinite = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
-			(s) => s.key === "approval",
+			(s) => s.key === "perm",
 		);
 		const loading = buildFooterSegments({ mode: "Planning", judge: "loading" }).find((s) => s.key === "judge");
 		expect(failed?.color).toBe(infinite?.color);
@@ -193,14 +193,12 @@ describe("the System One judge is a footer segment, not a chat line (#3090)", ()
 });
 
 describe("footer segments", () => {
-	test("the approval mode prints as a word, never as ?", () => {
-		const seg = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
-			(s) => s.key === "approval",
-		);
-		expect(seg?.value).toBe("infinite");
+	test("the permission mode prints as a word, never as ?", () => {
+		const seg = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find((s) => s.key === "perm");
+		expect(seg?.value).toBe("Infinite");
 	});
 
-	test("infinite approval is kept almost as long as the mode", () => {
+	test("the Infinite permission mode is kept as long as the mode", () => {
 		const segs = buildFooterSegments({
 			mode: "Planning",
 			model: "qwen3.8:27b-mlx",
@@ -211,7 +209,7 @@ describe("footer segments", () => {
 		});
 		const kept = fitFooterSegments(segs, 60).map((s) => s.key);
 		expect(kept).toContain("mode");
-		expect(kept).toContain("approval");
+		expect(kept).toContain("perm");
 	});
 
 	test("fit keeps display order and drops the highest priority first", () => {
@@ -242,11 +240,11 @@ describe("footer segments", () => {
 });
 
 describe("quiet states leave the footer (#3130)", () => {
-	test("approval ask, the default, is not a segment; anything else is", () => {
-		expect(buildFooterSegments({ mode: "Planning", permissions: "ask" }).some((s) => s.key === "approval")).toBe(false);
-		expect(buildFooterSegments({ mode: "Planning", permissions: "infinite" }).some((s) => s.key === "approval")).toBe(
-			true,
-		);
+	test("Ask, the default, is not a segment; every other mode is", () => {
+		const has = (permissions: string) =>
+			buildFooterSegments({ mode: "Planning", permissions }).some((s) => s.key === "perm" || s.key === "approval");
+		expect(has("ask")).toBe(false);
+		for (const m of ["plan", "guarded", "infinite"]) expect(has(m)).toBe(true);
 	});
 
 	test("the OS login is not a segment; a signed-in name is", async () => {
@@ -271,7 +269,7 @@ describe("footer hints", () => {
 		expect(fitFooterHints(0)).toEqual([]);
 		expect(fitFooterHints(6)).toEqual([]);
 		expect(fitFooterHints(7)).toEqual(["^X plan"]);
-		expect(fitFooterHints(18)).toEqual(["^X plan", "^O expand"]);
+		expect(fitFooterHints(7 + 2 + (FOOTER_HINTS[1] ?? "").length)).toEqual(["^X plan", FOOTER_HINTS[1]]);
 		expect(fitFooterHints(999)).toEqual([...FOOTER_HINTS]);
 	});
 });
