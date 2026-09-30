@@ -7,6 +7,13 @@
  * The App runs in its own bun process (first-run-skip-all.harness.tsx) with
  * an empty HOME, so OnboardingManager sees a fresh first run and no module
  * state leaks into other test files.
+ *
+ * The setup only opens after OnboardingManager.autoDetect() returns, and that
+ * runs `ollama list`, which follows OLLAMA_HOST. The child used to inherit the
+ * parent's OLLAMA_HOST, so an unreachable host (a leak from another test file,
+ * or a developer's remote box that is down) held the setup back ~30 s and the
+ * harness timed out waiting for it (#3108). The child now points at a fake
+ * ollama served here with no models, which is what CI sees and answers at once.
  */
 
 import { expect, test } from "bun:test";
@@ -16,6 +23,14 @@ import * as path from "node:path";
 
 async function runHarness(skipMode: "all" | "each") {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-first-run-"));
+	const ollama = Bun.serve({
+		port: 0,
+		fetch(req) {
+			if (new URL(req.url).pathname === "/api/tags") return Response.json({ models: [] });
+			return new Response("not found", { status: 404 });
+		},
+	});
+	const base = `http://127.0.0.1:${ollama.port}`;
 	try {
 		const proc = Bun.spawn(
 			[
@@ -30,6 +45,8 @@ async function runHarness(skipMode: "all" | "each") {
 				env: {
 					...process.env,
 					HOME: home,
+					OLLAMA_HOST: base,
+					OLLAMA_BASE_URL: base,
 					"8GENT_NO_INTRO": "1",
 					"8GENT_REDUCED_MOTION": "1",
 					SKIP_MODE: skipMode,
@@ -48,6 +65,7 @@ async function runHarness(skipMode: "all" | "each") {
 				.at(-1) ?? "{}";
 		return JSON.parse(last);
 	} finally {
+		ollama.stop(true);
 		fs.rmSync(home, { recursive: true, force: true });
 	}
 }
