@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
 import { getVault } from "../secrets";
 import {
 	loadSettings,
@@ -197,6 +198,99 @@ export interface AutoDetected {
 	preferredProvider: "ollama" | "lmstudio" | "openrouter" | null;
 	hasPython: boolean;
 	hasKittenTTS: boolean;
+	/** What the Ollama probe saw. Absent only in hand-built test fixtures. */
+	ollama?: OllamaCheck;
+}
+
+/**
+ * Bound on the launch-time Ollama probe (#3115). A healthy Ollama answers
+ * /api/tags in ~10 ms locally (measured 8-17 ms) and well under a second on a
+ * LAN, so 2.5 s is two orders of magnitude of headroom, yet short enough that
+ * "could not be reached" lands while the person is still reading the welcome.
+ * It sits between the house bounds for the same probe: 2 s in
+ * detectBestLocalProvider and the LM Studio check, 3 s in provider-readiness.
+ * Unbounded, `ollama list` against a down host took 30 s, and it ran twice.
+ */
+export const OLLAMA_PROBE_TIMEOUT_MS = 2500;
+
+/**
+ * Safety net for the other detection commands (git, gh, python). They are
+ * local and usually answer in well under a second; `gh auth status` touches
+ * the network. None of them holds the setup back any more; this only stops a
+ * wedged one from keeping the detection result from ever landing.
+ */
+export const DETECT_COMMAND_TIMEOUT_MS = 5000;
+
+/**
+ * Result of one Ollama probe. `found` means the server answered (models may
+ * be empty). `unreachable` means it did not, and says why, so the welcome can
+ * say "could not be reached" instead of implying nothing is installed.
+ */
+export type OllamaCheck =
+	| { status: "found"; host: string; models: string[] }
+	| {
+			status: "unreachable";
+			host: string;
+			reason: string;
+			/** OLLAMA_HOST / OLLAMA_BASE_URL was set: the person pointed us there. */
+			configured: boolean;
+			/** Something is there but did not answer in time (vs. refused). */
+			timedOut: boolean;
+	  };
+
+/**
+ * Ask the configured Ollama for its models over HTTP, bounded. Same host
+ * resolution as the rest of the app (OLLAMA_BASE_URL, then OLLAMA_HOST, then
+ * localhost). Never throws, never outlives `timeoutMs`.
+ */
+export async function probeOllama(
+	opts: {
+		env?: Record<string, string | undefined>;
+		timeoutMs?: number;
+		fetchImpl?: typeof fetch;
+	} = {},
+): Promise<OllamaCheck> {
+	const env = opts.env ?? process.env;
+	const timeoutMs = opts.timeoutMs ?? OLLAMA_PROBE_TIMEOUT_MS;
+	const fetchImpl = opts.fetchImpl ?? fetch;
+	const host = resolveOllamaBaseUrl(env);
+	const configured = Boolean(env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim());
+	try {
+		const res = await fetchImpl(`${host}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
+		if (!res.ok) {
+			return { status: "unreachable", host, reason: `answered HTTP ${res.status}`, configured, timedOut: false };
+		}
+		const data = (await res.json()) as { models?: Array<{ name?: string }> };
+		const models = (data.models ?? []).flatMap((m) => {
+			const name = String(m?.name ?? "").trim();
+			return name ? [name] : [];
+		});
+		return { status: "found", host, models };
+	} catch (err) {
+		const name = (err as Error)?.name;
+		const timedOut = name === "TimeoutError" || name === "AbortError";
+		return {
+			status: "unreachable",
+			host,
+			reason: timedOut ? `no answer within ${timeoutMs / 1000}s` : "connection refused or no route",
+			configured,
+			timedOut,
+		};
+	}
+}
+
+/**
+ * The welcome's line about Ollama. Pending: say we are checking. Unreachable:
+ * say so plainly when the person pointed us at a host, or when a host is there
+ * but did not answer. A refused default localhost means no Ollama runs here,
+ * and that is left out like any other miss (the found block lists hits only).
+ */
+export function ollamaCheckLine(check: OllamaCheck | "pending" | null): string {
+	if (check === "pending") return "Checking this machine for local models...\n\n";
+	if (!check || check.status === "found") return "";
+	if (!check.configured && !check.timedOut) return "";
+	const where = check.host.replace(/^https?:\/\//, "");
+	return `Ollama at ${where} could not be reached (${check.reason}).\n\n`;
 }
 
 // ============================================
@@ -673,6 +767,8 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 export class OnboardingManager {
 	private userConfigPath: string;
 	private user: UserConfig;
+	/** Ollama probe state for the welcome: null before detect(), then pending, then the result. */
+	private ollamaCheck: OllamaCheck | "pending" | null = null;
 
 	constructor(workingDirectory: string = process.cwd()) {
 		// Always use home dir for user config — workingDirectory varies by launch location
@@ -684,7 +780,9 @@ export class OnboardingManager {
 	 * Auto-detect user environment: git config, ollama models, gh auth.
 	 * Returns detected values so onboarding can skip questions.
 	 */
-	static async autoDetect(): Promise<AutoDetected> {
+	static async autoDetect(
+		opts: { ollama?: Promise<OllamaCheck> } = {},
+	): Promise<AutoDetected> {
 		const detected: AutoDetected = {
 			name: null,
 			email: null,
@@ -695,37 +793,37 @@ export class OnboardingManager {
 			hasKittenTTS: false,
 		};
 
+		const run = (cmd: string) => execAsync(cmd, { timeout: DETECT_COMMAND_TIMEOUT_MS });
 		const checks = await Promise.allSettled([
 			// Git config name
-			execAsync("git config --global user.name 2>/dev/null").then(({ stdout }) => {
+			run("git config --global user.name 2>/dev/null").then(({ stdout }) => {
 				detected.name = stdout.trim() || null;
 			}),
 			// Git config email
-			execAsync("git config --global user.email 2>/dev/null").then(({ stdout }) => {
+			run("git config --global user.email 2>/dev/null").then(({ stdout }) => {
 				detected.email = stdout.trim() || null;
 			}),
-			// Ollama models
-			execAsync("ollama list 2>/dev/null").then(({ stdout }) => {
-				detected.ollamaModels = stdout
-					.split("\n")
-					.slice(1)
-					.map((line) => line.split(/\s+/)[0])
-					.filter(Boolean);
+			// Ollama models: bounded HTTP probe of the configured host (#3115).
+			// `ollama list` had no bound and waited 30 s on a down OLLAMA_HOST.
+			(opts.ollama ?? probeOllama()).then((check) => {
+				detected.ollama = check;
+				if (check.status !== "found") return;
+				detected.ollamaModels = check.models;
 				if (detected.ollamaModels.length > 0) {
 					detected.preferredProvider = "ollama";
 				}
 			}),
 			// GitHub auth
-			execAsync("gh auth status 2>&1").then(({ stdout }) => {
+			run("gh auth status 2>&1").then(({ stdout }) => {
 				const match = stdout.match(/Logged in to github.com account (\S+)/);
 				detected.githubUsername = match?.[1] || null;
 			}),
 			// Python3 available
-			execAsync("python3 --version 2>/dev/null").then(() => {
+			run("python3 --version 2>/dev/null").then(() => {
 				detected.hasPython = true;
 			}),
 			// KittenTTS already installed
-			execAsync('python3 -c "import kittentts" 2>/dev/null').then(() => {
+			run('python3 -c "import kittentts" 2>/dev/null').then(() => {
 				detected.hasKittenTTS = true;
 			}),
 		]);
@@ -734,11 +832,37 @@ export class OnboardingManager {
 	}
 
 	/**
+	 * Run every launch-time detection once, sharing one Ollama probe between
+	 * autoDetect and detectIntegrations. The welcome reads as pending from the
+	 * moment this is called, so the setup can show at once and fill in when
+	 * this resolves (#3115). Never throws.
+	 */
+	async detect(): Promise<void> {
+		this.ollamaCheck = "pending";
+		const ollama = probeOllama();
+		try {
+			const detected = await OnboardingManager.autoDetect({ ollama });
+			this.applyAutoDetected(detected);
+			await this.detectIntegrations(ollama);
+		} catch {
+			// Detection is best effort; the setup never depends on it.
+		}
+		this.ollamaCheck = await ollama;
+	}
+
+	/** Where the Ollama check stands, for the welcome text. */
+	getOllamaCheck(): OllamaCheck | "pending" | null {
+		return this.ollamaCheck;
+	}
+
+	/**
 	 * Apply auto-detected values to user config.
 	 * Called before onboarding starts to pre-fill detected values.
 	 */
 	applyAutoDetected(detected: AutoDetected): void {
-		if (detected.name) {
+		// Fill the name only while it is empty: detection can now land after the
+		// person has answered "What should I call you?", and that answer wins.
+		if (detected.name && !this.user.identity.name) {
 			this.user.identity.name = detected.name;
 		}
 		if (detected.preferredProvider) {
@@ -1031,22 +1155,16 @@ export class OnboardingManager {
 	/**
 	 * Detect available integrations (non-blocking)
 	 */
-	async detectIntegrations(): Promise<void> {
-		// Run all checks in parallel, non-blocking
+	async detectIntegrations(ollama?: Promise<OllamaCheck>): Promise<void> {
+		// Run all checks in parallel, each one bounded
 		const checks = await Promise.allSettled([
-			// Check Ollama
-			execAsync("ollama list 2>/dev/null")
-				.then(({ stdout }) => {
-					const models = stdout
-						.split("\n")
-						.slice(1)
-						.map((line) => line.split(/\s+/)[0])
-						.filter(Boolean);
-					this.user.integrations.ollama = { available: true, models };
-				})
-				.catch(() => {
-					this.user.integrations.ollama = { available: false, models: [] };
-				}),
+			// Check Ollama: the same bounded probe as autoDetect, shared when given.
+			(ollama ?? probeOllama()).then((check) => {
+				this.user.integrations.ollama =
+					check.status === "found"
+						? { available: true, models: check.models }
+						: { available: false, models: [] };
+			}),
 
 			// Check LM Studio
 			fetch("http://localhost:1234/v1/models", {
@@ -1064,7 +1182,7 @@ export class OnboardingManager {
 				}),
 
 			// Check GitHub
-			execAsync("gh auth status 2>&1")
+			execAsync("gh auth status 2>&1", { timeout: DETECT_COMMAND_TIMEOUT_MS })
 				.then(({ stdout }) => {
 					const usernameMatch = stdout.match(/Logged in to github.com account (\S+)/);
 					this.user.integrations.github = {
@@ -1102,7 +1220,10 @@ export class OnboardingManager {
 			"{telegram}",
 			getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up",
 		);
-		text = text.replace("{found_on_machine}", foundOnMachine(this.user));
+		text = text.replace(
+			"{found_on_machine}",
+			foundOnMachine(this.user) + ollamaCheckLine(this.ollamaCheck),
+		);
 		text = text.replace(
 			"{name_default_hint}",
 			this.user.identity.name ? ` Enter keeps ${this.user.identity.name}.` : "",

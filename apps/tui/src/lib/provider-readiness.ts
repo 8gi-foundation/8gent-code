@@ -16,6 +16,7 @@
  *  - Non-local providers (OpenRouter and friends) are not probed here.
  */
 
+import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
 import { pickBestChatModel } from "./model-selection.js";
 
 export const PROBE_TIMEOUT_MS = 3000;
@@ -32,7 +33,10 @@ export function localProviderEndpoints(
 	env: Record<string, string | undefined> = process.env,
 ): LocalProviderEndpoint[] {
 	const lm = (env.LM_STUDIO_HOST || "http://localhost:1234").replace(/\/+$/, "");
-	const ollama = (env.OLLAMA_HOST || "http://localhost:11434").replace(/\/+$/, "");
+	// The same resolution as the rest of the app (#3115): OLLAMA_BASE_URL, then
+	// OLLAMA_HOST, normalised. A bare "host:port" OLLAMA_HOST (what the ollama
+	// CLI accepts) used to become an invalid URL here and read as unreachable.
+	const ollama = resolveOllamaBaseUrl(env);
 	return [
 		{
 			provider: "lmstudio",
