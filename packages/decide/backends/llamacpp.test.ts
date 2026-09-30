@@ -760,7 +760,7 @@ describe("shared judge failover: a lost shared judge recovers", () => {
 		const srv = server([SELENE_NAME]);
 		const remote = "http://127.0.0.1:21434";
 		const asked: string[] = [];
-		const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+		const fetchImpl = async (url: string): Promise<Response> => {
 			if (url.startsWith(remote)) {
 				asked.push(url);
 				if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: SELENE_NAME, size: 1 }] });
