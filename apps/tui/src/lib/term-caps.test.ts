@@ -34,6 +34,13 @@ describe("drawsColour (code chips need a tint to read as code)", () => {
 		expect(drawsColour({ TERM: "dumb" })).toBe(false);
 	});
 
+	test("an explicit FORCE_COLOR wins over NO_COLOR and TERM=dumb (#3171)", () => {
+		expect(drawsColour({ NO_COLOR: "1", FORCE_COLOR: "3" })).toBe(true);
+		expect(drawsColour({ TERM: "dumb", FORCE_COLOR: "1" })).toBe(true);
+		expect(drawsColour({ FORCE_COLOR: "0" })).toBe(false);
+		expect(drawsColour({ FORCE_COLOR: "false" })).toBe(false);
+	});
+
 	test("plain terminals get ASCII list bullets and code gutters", () => {
 		expect(glyphs({ TERM: "linux" }, "linux")).toMatchObject({ bullet: "-", gutter: "|" });
 		expect(glyphs({}, "darwin")).toMatchObject({ bullet: "•", gutter: "│" });

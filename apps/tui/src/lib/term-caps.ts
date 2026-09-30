@@ -12,9 +12,12 @@
  *   host; Windows Terminal sets WT_SESSION, VS Code and others set
  *   TERM_PROGRAM).
  *
- * Colour is not handled here: always pass colours through Ink's colour
- * props, so chalk steps down to 256 or 16 colours by itself.
+ * Always pass colours through Ink's colour props, so chalk steps down to 256
+ * or 16 colours by itself; NO_COLOR is enforced on stdout by
+ * lib/colour-policy.ts.
  */
+
+import { colourPolicy } from "./colour-policy.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -77,12 +80,12 @@ export function glyphs(env?: Env, platform?: string): Glyphs {
 }
 
 /**
- * False when the terminal draws no colour at all (NO_COLOR set, or
- * TERM=dumb). Chalk drops every colour there, backgrounds included, so a
- * tinted code chip would read as plain text; callers keep the backticks.
+ * False when the terminal draws no colour at all. Same precedence as the
+ * stdout colour policy (lib/colour-policy.ts): an explicit FORCE_COLOR wins,
+ * then NO_COLOR (non-empty) or TERM=dumb turn colour off. Every colour is
+ * dropped there, backgrounds included, so a tinted code chip would read as
+ * plain text; callers keep the backticks.
  */
 export function drawsColour(env: Env = process.env): boolean {
-	if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return false;
-	if (env.TERM === "dumb") return false;
-	return true;
+	return colourPolicy(env) !== "none";
 }
