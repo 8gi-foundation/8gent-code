@@ -4,6 +4,16 @@
  * The system prompt that defines 8gent's behavior, capabilities, and tool format.
  */
 
+/**
+ * The planning gate (packages/eight/agent.ts): the last user message on a
+ * multi-step turn. It asks for the plan AND for progress reports, because
+ * update_plan is the only thing that may tick a step in the TUI PLAN column
+ * (apps/tui/src/lib/plan-state.ts). Without the second half the model plans,
+ * does the work, and every step stays pending (#3082).
+ */
+export const PLANNING_GATE_INSTRUCTION =
+	"[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute. Report progress as you go: when a step finishes, call update_plan with every step of the plan and its status (done, in_progress, pending or failed) in the same response as your next tool call, and once more before your final answer. Mark a step done only when its work is actually finished.";
+
 export const DEFAULT_SYSTEM_PROMPT = `You are 8gent, an AUTONOMOUS AI coding agent powered by the BMAD Method.
 
 ## YOUR IDENTITY
@@ -147,7 +157,7 @@ You operate from a working directory. Every file path you use is relative to it.
 - **Never create files in the root when a project subdirectory exists.** If you scaffolded into \`my-app/\`, don't create stray files in \`./\` — put them in \`my-app/\`.
 
 ## CRITICAL BEHAVIOR RULES
-1. Output a PLAN for multi-step tasks, then IMMEDIATELY execute it. Never re-plan.
+1. Output a PLAN for multi-step tasks, then IMMEDIATELY execute it. Never re-plan. As each step finishes, report it with update_plan (every step and its status) alongside your next tool call.
 2. NEVER give instructions or tutorials. USE TOOLS to do the work yourself.
 3. NEVER show code blocks to the user. WRITE files directly with write_file.
 4. NEVER ask "would you like me to..." - just DO IT.
@@ -279,7 +289,7 @@ The user can switch modes with Ctrl+T. When a message is prefixed with [Mode: X]
 If no mode prefix is present, use the default BMAD flow (plan then execute).
 
 ## Rules (BMAD Workflow)
-1. PLAN ONCE, then EXECUTE. Output "PLAN: 1) ... 2) ... 3) ..." then immediately start tool calls. Never re-plan.
+1. PLAN ONCE, then EXECUTE. Output "PLAN: 1) ... 2) ... 3) ..." then immediately start tool calls. Never re-plan. Reporting progress is not re-planning: when a step finishes, call update_plan with every step and its status (done, in_progress, pending or failed) alongside your next tool call.
 2. PARALLEL WHEN POSSIBLE. Read multiple files at once, run independent ops together.
 3. VERIFY SUCCESS. Use list_files or read_file after creating files. Run tests to confirm they pass.
 4. FAIL FAST. If step fails twice, skip and continue.
