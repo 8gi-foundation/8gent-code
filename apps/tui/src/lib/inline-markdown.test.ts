@@ -11,6 +11,7 @@ import {
 	layoutLines,
 	plainInline,
 } from "./inline-markdown.js";
+import type { Block } from "./inline-markdown.js";
 
 describe("parseInline", () => {
 	test("code spans become padded chips", () => {
@@ -161,5 +162,56 @@ describe("plainInline and clipSpans (#3109): plan steps outside the chat", () =>
 		const cut = clipSpans(spans, 12);
 		expect(cut.at(-1)).toEqual({ text: " packa… ", code: true });
 		expect(spanText(cut)).toBe("run  packa… ");
+	});
+});
+
+describe("hand-aligned lines keep their spaces (audit 2026-09-30, #6)", () => {
+	const card = [
+		"Found on this machine:",
+		"  Provider  ollama",
+		"  Models    qwen3.8:27b-mlx",
+		"            llama3.2:3b",
+		"            qwen3.6:27b",
+	].join("\n");
+	const rowText = (row: { text: string }[]) => row.map((s) => s.text).join("");
+	const spansOf = (b: Block) => (b.kind === "para" || b.kind === "item" ? b.spans : []);
+
+	test("an indented line is marked keepSpaces; prose is not", () => {
+		const blocks = parseBlocks(card);
+		expect(blocks[0]).toMatchObject({ kind: "para" });
+		expect((blocks[0] as { keepSpaces?: boolean }).keepSpaces).toBeUndefined();
+		for (const b of blocks.slice(1)) expect(b).toMatchObject({ kind: "para", keepSpaces: true });
+	});
+
+	test("the welcome card's models start in the same column", () => {
+		const rows = parseBlocks(card)
+			.slice(1)
+			.map((b) => rowText(layoutLines(spansOf(b), 60, true)[0]));
+		expect(rows).toEqual([
+			"  Provider  ollama",
+			"  Models    qwen3.8:27b-mlx",
+			"            llama3.2:3b",
+			"            qwen3.6:27b",
+		]);
+		const col = (r: string) => r.search(/\S+$/);
+		expect(new Set(rows.slice(1).map(col)).size).toBe(1);
+	});
+
+	test("prose still collapses runs of spaces", () => {
+		const [b] = parseBlocks("one  two   three");
+		expect(rowText(layoutLines(spansOf(b), 60)[0])).toBe("one two three");
+	});
+
+	test("a kept line wraps without starting a row with spaces, and rows match the estimate", () => {
+		const [b] = parseBlocks("  Models    qwen3.8:27b-mlx");
+		const rows = layoutLines(spansOf(b), 14, true).map(rowText);
+		expect(rows).toEqual(["  Models", "qwen3.8:27b-", "mlx"]);
+		expect(markdownRows("  Models    qwen3.8:27b-mlx", 14)).toBe(rows.length);
+	});
+
+	test("an indented line under a list item is still its continuation", () => {
+		const blocks = parseBlocks("- item\n  carries on");
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0]).toMatchObject({ kind: "item" });
 	});
 });

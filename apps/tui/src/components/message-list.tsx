@@ -823,7 +823,7 @@ function MarkdownBody({
 				const w = blockWrapWidth(block, wrapWidth);
 				const text = (
 					<Box flexDirection="column" width={w}>
-						{layoutLines(block.spans, w).map((line, li) => (
+						{layoutLines(block.spans, w, block.kind === "para" && block.keepSpaces).map((line, li) => (
 							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 							<InlineSpans key={li} spans={line} color={color} adhdMode={adhdMode} />
 						))}
