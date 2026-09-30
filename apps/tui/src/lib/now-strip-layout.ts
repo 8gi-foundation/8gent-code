@@ -76,7 +76,8 @@ function rightWidth(route: string, meter: boolean, tokens: string, asked = ""): 
 	const routeW = route ? cellWidth(route) : 0;
 	const askedW = asked ? 1 + cellWidth(asked) : 0;
 	const meterW = meter ? CTX_LABEL + METER_CELLS : 0;
-	return routeW + askedW + meterW + 1 + cellWidth(tokens);
+	// No count yet ("" before the first reply): no space reserved for it.
+	return routeW + askedW + meterW + (tokens ? 1 + cellWidth(tokens) : 0);
 }
 
 /** Fit the strip into `width` columns. */

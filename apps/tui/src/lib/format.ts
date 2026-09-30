@@ -12,6 +12,18 @@ export function formatTokens(count: number): string {
 	return `${(count / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
 }
 
+/**
+ * The HUD's running token count ("842 tok", "6.4K tok", "179K tok"), or ""
+ * while it is zero. Before the first reply lands "0 tok" is true but reads
+ * as broken, so the NOW strip and the footer leave it out (audit
+ * 2026-09-30, #7).
+ */
+export function hudTokens(total: number): string {
+	if (!Number.isFinite(total) || total <= 0) return "";
+	if (total >= 1000) return `${(total / 1000).toFixed(total >= 10000 ? 0 : 1)}K tok`;
+	return `${Math.round(total)} tok`;
+}
+
 /** Format a duration in milliseconds to a human-readable string. */
 export function formatDuration(ms: number): string {
 	if (ms < 0) ms = 0;

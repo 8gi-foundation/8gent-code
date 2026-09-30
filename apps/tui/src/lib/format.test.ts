@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatSessionTime, msUntilSessionTimeChanges } from "./format.js";
+import { formatSessionTime, hudTokens, msUntilSessionTimeChanges } from "./format.js";
 
 describe("formatSessionTime", () => {
 	test("under 60s reports whole seconds", () => {
@@ -71,5 +71,19 @@ describe("msUntilSessionTimeChanges", () => {
 	test("non-finite or negative input behaves like 0", () => {
 		expect(msUntilSessionTimeChanges(-5)).toBe(1_000);
 		expect(msUntilSessionTimeChanges(Number.NaN)).toBe(1_000);
+	});
+});
+
+describe("hudTokens (audit 2026-09-30, #7)", () => {
+	test("zero, or no count yet, is empty: no '0 tok' before the first reply", () => {
+		expect(hudTokens(0)).toBe("");
+		expect(hudTokens(-3)).toBe("");
+		expect(hudTokens(Number.NaN)).toBe("");
+	});
+
+	test("above zero it reads as before", () => {
+		expect(hudTokens(842)).toBe("842 tok");
+		expect(hudTokens(6400)).toBe("6.4K tok");
+		expect(hudTokens(179_000)).toBe("179K tok");
 	});
 });

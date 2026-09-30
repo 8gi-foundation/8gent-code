@@ -58,3 +58,12 @@ describe("fitNowStrip (audit #9: 'finis…')", () => {
 		expect(4 + NOW_LABEL_WIDTH + 2 + 12 + fit.rightWidth).toBeLessThanOrEqual(76);
 	});
 });
+
+describe("no count yet (audit 2026-09-30, #7)", () => {
+	test("an empty token count reserves no columns", () => {
+		const base = { width: 92, middle: "thinking...", middleMin: 11, route: model };
+		const none = fitNowStrip({ ...base, tokens: "" });
+		const some = fitNowStrip({ ...base, tokens: "0 tok" });
+		expect(some.rightWidth - none.rightWidth).toBe(1 + cellWidth("0 tok"));
+	});
+});
