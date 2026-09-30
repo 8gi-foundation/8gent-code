@@ -1941,6 +1941,14 @@ export class ToolExecutor {
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
+		// Validate command for shell injection before asking anyone: a command
+		// the sanitizer will refuse must not raise an approval card, or the
+		// person approves it and then sees it blocked anyway (#3055).
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) {
+			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+		}
+
 		if (permissionCheck === "ask") {
 			const allowed = await this.permissionManager.requestPermission(
 				"Execute Shell Command",
@@ -1953,12 +1961,6 @@ export class ToolExecutor {
 			if (!allowed) {
 				return `[PERMISSION DENIED] User declined to execute: ${command}`;
 			}
-		}
-
-		// Validate command for shell injection before execution
-		const validation = sanitizeShellCommand(command);
-		if (!validation.safe) {
-			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}
 
 		// System One (EIGHT_SYSTEM_ONE=1, off by default): an extra layer after
