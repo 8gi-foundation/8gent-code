@@ -23,16 +23,18 @@
  * in the HyperFrames convention so the offline path stays open.
  */
 
+import { resolveHome } from "../core/home";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { renderSlide, THEME_VERSION, esc, type RenderContext } from "./slide-render";
 import type { SlideSpec } from "./slide-spec";
 
-export const CREATIVE_DIR = join(homedir(), ".8gent", "creative");
-export const HUDDLES_DIR = join(homedir(), ".8gent", "huddles");
+// resolveHome reads the env at call time; the OS lookup is frozen at process
+// start, so only the env lets tests (tests/preload-temp-home.ts) avoid the real home.
+export const CREATIVE_DIR = join(resolveHome(), ".8gent", "creative");
+export const HUDDLES_DIR = join(resolveHome(), ".8gent", "huddles");
 
 const CHROME_CANDIDATES = [
 	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
