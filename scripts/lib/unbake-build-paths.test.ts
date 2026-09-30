@@ -61,4 +61,11 @@ describe("findBakedRoots", () => {
 		expect(findBakedRoots(`"anything"`, [], ["/"])).toEqual([]);
 		expect(findBakedRoots(`clean`, [ROOT], ["/Users/builder"])).toEqual([]);
 	});
+
+	test("a short container root only matches at a path boundary (Linux CI builds in /work)", () => {
+		expect(findBakedRoots(`"/workspace/x" "/workers" "/work.d" "/work_dir"`, ["/work"])).toEqual([]);
+		expect(findBakedRoots(`var __dirname = "/work/packages/daemon"`, ["/work"])).toEqual(["/work"]);
+		expect(findBakedRoots(`"/work"`, ["/work"])).toEqual(["/work"]);
+		expect(findBakedRoots(`"file:///work/x"`, ["/work"])).toEqual(["/work"]);
+	});
 });
