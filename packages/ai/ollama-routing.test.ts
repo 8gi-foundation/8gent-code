@@ -19,7 +19,11 @@ const KEYS = ["OLLAMA_BASE_URL", "OLLAMA_HOST"] as const;
 let saved: Array<readonly [string, string | undefined]> = [];
 
 function setEnv(vars: Partial<Record<(typeof KEYS)[number], string>>): void {
-	saved = KEYS.map((k) => [k, process.env[k]] as const);
+	// Snapshot once per test. A test that calls setEnv more than once must be
+	// restored to the env it started with, not to its own previous setEnv:
+	// re-snapshotting leaked OLLAMA_HOST=10.0.0.5:11434 into every later test
+	// file, and any child that ran `ollama list` then hung on it (#3108).
+	if (saved.length === 0) saved = KEYS.map((k) => [k, process.env[k]] as const);
 	for (const k of KEYS) Reflect.deleteProperty(process.env, k);
 	Object.assign(process.env, vars);
 }
@@ -98,5 +102,15 @@ describe("the TUI never hardcodes the ollama host (#3080)", () => {
 			.map((line, i) => ({ line: line.trim(), n: i + 1 }))
 			.filter(({ line }) => /https?:\/\/(localhost|127\.0\.0\.1):11434/.test(line) && !line.startsWith("//"));
 		expect(hits).toEqual([]);
+	});
+});
+
+// Runs last in this file: every test above has had its afterEach, so the env
+// must be exactly what the file started with. Anything else leaks into every
+// test file bun runs after this one, and into the children they spawn (#3108).
+const envAtLoad = KEYS.map((k) => [k, process.env[k]] as const);
+describe("env hygiene (#3108)", () => {
+	it("leaves OLLAMA_BASE_URL and OLLAMA_HOST as it found them", () => {
+		expect(KEYS.map((k) => [k, process.env[k]] as const)).toEqual(envAtLoad);
 	});
 });

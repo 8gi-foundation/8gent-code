@@ -3,6 +3,11 @@
  *
  * Locks in the vendor-neutral priority order: AGENTS.md (open standard) is
  * canonical and wins over 8GENT.md and CLAUDE.md within a directory.
+ *
+ * HOME points at an empty temp dir for every test: the loader also merges
+ * ~/.claude/CLAUDE.md and ~/.8gent/, so on any machine that has either file
+ * the real home was a hidden input and "no instruction file" was not empty
+ * (#2888, #3108). The loader reads $HOME for exactly this reason.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -12,13 +17,20 @@ import * as path from "node:path";
 import { loadInstructions } from "../instruction-loader";
 
 let tmpRoot: string;
+let tmpHome: string;
+const realHome = process.env.HOME;
 
 beforeEach(() => {
 	tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "instr-"));
+	tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "instr-home-"));
+	process.env.HOME = tmpHome;
 });
 
 afterEach(() => {
+	if (realHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+	else process.env.HOME = realHome;
 	fs.rmSync(tmpRoot, { recursive: true, force: true });
+	fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
 describe("loadInstructions priority", () => {
