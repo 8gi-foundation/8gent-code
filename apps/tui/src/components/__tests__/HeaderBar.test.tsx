@@ -14,7 +14,12 @@ import {
 	statusClusterWidth,
 	type HeaderBarProps,
 } from "../HeaderBar";
-import { headerMiddleWidth } from "../../lib/header-layout.js";
+import { stripVTControlCharacters } from "node:util";
+import { EventEmitter } from "node:events";
+import { render as inkRender, renderToString } from "ink";
+import { cellWidth, headerMiddleWidth } from "../../lib/header-layout.js";
+import { MARK_COLUMNS, MIN_COLS, type MarkStream, livingMarkWriter } from "../../lib/living-mark.js";
+import { MARK_HEADER } from "../../lib/mark8-cells.js";
 
 function render(props: HeaderBarProps): React.ReactElement {
 	return (HeaderBar as (p: HeaderBarProps) => React.ReactElement)(props);
@@ -47,6 +52,7 @@ const live: HeaderBarProps = {
 function occupied(props: HeaderBarProps): number {
 	const plan = planHeader(props);
 	return (
+		(plan.mark ? MARK_COLUMNS : 0) +
 		brandPillWidth(props.version, props.updateAvailable, plan.compactBrand) +
 		// The middle's paddingX={1} is only rendered when the middle is.
 		(plan.middle.branch ? headerMiddleWidth(plan.middle) + 2 : 0) +
@@ -230,5 +236,97 @@ describe("HeaderBar", () => {
 			};
 		});
 		expect(matrix).toMatchSnapshot();
+	});
+});
+
+// The living 8 (#3160) is written straight to the terminal at the header's
+// first three rows, first four columns. A write at the wrong place corrupts a
+// cell until Ink's next frame, so the place is pinned at every width class.
+describe("HeaderBar braille mark geometry", () => {
+	const strip = (s: string) => stripVTControlCharacters(s);
+	const WIDTHS = [40, 59, 60, 64, 72, 80, 90, 100, 120, 140, 160, 200, 240];
+
+	for (const width of WIDTHS) {
+		for (const [name, props] of [
+			["live", live],
+			["base", base],
+			["update", { ...live, updateAvailable: { latest: "0.18.0", current: "0.17.3" } }],
+		] as const) {
+			test(`${width} columns, ${name}: the mark is at rows 1-3, columns 1-4, or absent`, () => {
+				const p = { ...props, width, mark: true };
+				const plan = planHeader(p);
+				const lines = strip(renderToString(<HeaderBar {...p} />, { columns: width })).split("\n");
+				expect(lines.length).toBe(3);
+				for (const line of lines) expect(cellWidth(line)).toBeLessThanOrEqual(width);
+				if (plan.mark) {
+					lines.forEach((line, r) => {
+						expect([...line].slice(0, MARK_COLUMNS).join("")).toBe(`${MARK_HEADER[r]} `);
+					});
+				} else {
+					for (const line of lines) expect(line.codePointAt(0)).not.toBe(MARK_HEADER[0].codePointAt(0));
+				}
+			});
+		}
+	}
+
+	test("the mark shows on the usual widths when it costs nothing", () => {
+		const short = { ...base, workspacePath: "/Users/operator/8gent-code", branch: "main" };
+		for (const width of [100, 120, 160, 200]) expect(planHeader({ ...short, width, mark: true }).mark).toBe(true);
+		for (const width of [40, MIN_COLS - 1]) expect(planHeader({ ...short, width, mark: true }).mark).toBe(false);
+	});
+
+	test("the mark never costs the branch, the sync state, the tagline or the hint", () => {
+		for (const props of [live, base, { ...live, branch: "main" }]) {
+			for (let width = 40; width <= 240; width++) {
+				const withMark = planHeader({ ...props, width, mark: true });
+				const without = planHeader({ ...props, width, mark: false });
+				expect(withMark.middle.branch).toBe(without.middle.branch);
+				if (without.middle.sync) expect(withMark.middle.sync).toBe(without.middle.sync);
+				expect(withMark.compactBrand).toBe(without.compactBrand);
+				expect(withMark.compactHint).toBe(without.compactHint);
+				if (!withMark.mark) expect(withMark).toEqual(without);
+			}
+		}
+	});
+
+	test("no braille, no mark: the pill starts at column 1 as before", () => {
+		const plan = planHeader({ ...live, width: 160, mark: false });
+		expect(plan.mark).toBe(false);
+		const lines = strip(renderToString(<HeaderBar {...live} width={160} mark={false} />, { columns: 160 })).split("\n");
+		expect(lines[0].startsWith("╭")).toBe(true);
+	});
+});
+
+
+describe("HeaderMark drives the living-mark writer", () => {
+	class Out extends EventEmitter {
+		isTTY = true;
+		columns = 160;
+		rows = 48;
+		write = () => true;
+	}
+
+	test("active only while the HUD says living; off again on unmount", async () => {
+		const out = new Out();
+		const props = { ...live, width: 160, mark: true, workspacePath: "/w", branch: "main" };
+		const app = inkRender(<HeaderBar {...props} living={false} />, {
+			stdout: out as unknown as NodeJS.WriteStream,
+			patchConsole: false,
+		});
+		await new Promise((r) => setTimeout(r, 10));
+		const w = livingMarkWriter(out as unknown as MarkStream);
+		expect(w.isActive).toBe(false);
+		app.rerender(<HeaderBar {...props} living />);
+		await new Promise((r) => setTimeout(r, 10));
+		expect(w.isActive).toBe(true);
+		app.rerender(<HeaderBar {...props} living={false} />);
+		await new Promise((r) => setTimeout(r, 10));
+		expect(w.isActive).toBe(false);
+		app.rerender(<HeaderBar {...props} living />);
+		await new Promise((r) => setTimeout(r, 10));
+		expect(w.isActive).toBe(true);
+		app.unmount();
+		expect(w.isActive).toBe(false);
+		w.dispose();
 	});
 });

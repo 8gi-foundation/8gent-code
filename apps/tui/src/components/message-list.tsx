@@ -52,6 +52,7 @@ import {
 	markerWidth,
 	parseBlocks,
 } from "../lib/inline-markdown.js";
+import { holdLivingMark, type MarkStream } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useCompletionSound } from "./sound-effects.js";
@@ -326,6 +327,14 @@ export function MessageList({
 		return 0;
 	})();
 	const clampedOffset = Math.min(scrollOffset, maxScrollOffset);
+
+	// A scrolled chat is being read: the header's braille 8 holds still.
+	const scrolled = clampedOffset > 0;
+	useEffect(() => {
+		if (!stdout) return;
+		holdLivingMark("scroll", scrolled, stdout as unknown as MarkStream);
+		return () => holdLivingMark("scroll", false, stdout as unknown as MarkStream);
+	}, [scrolled, stdout]);
 
 	const scrollBy = useCallback(
 		(deltaMessages: number) => {
