@@ -172,6 +172,16 @@ export function canReuseTabAgent(built: { model?: string; runtime?: string }, wa
 	return built.model === want.model && built.runtime === want.runtime;
 }
 
+/**
+ * The agent role a chat tab's data carries ("orchestrator", "engineer",
+ * "qa"), or undefined for a tab without one. It decides the local tool set:
+ * only the Orchestrator registers the delegation tools (#3095).
+ */
+export function tabAgentRole(data: unknown): "orchestrator" | "engineer" | "qa" | undefined {
+	const role = (data as { role?: unknown } | null | undefined)?.role;
+	return role === "orchestrator" || role === "engineer" || role === "qa" ? role : undefined;
+}
+
 /** The tab a CLI --provider/--model override was pinned to at launch, with that spec. */
 export interface CliTabPin {
 	tabId: string;

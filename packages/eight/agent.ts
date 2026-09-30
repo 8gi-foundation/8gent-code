@@ -61,6 +61,7 @@ import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./p
 import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
+import { localCatalogOmissions, localDelegationTools } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -387,7 +388,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		const runtimeName = this.config.runtime as string;
 		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true })}`;
+		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role) })}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -1231,6 +1232,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			this.toolRegistry.loadCategory("design");
 			this.toolRegistry.loadCategory("self");
 			this.toolRegistry.loadCategory("memory");
+			// Only the Orchestrator delegates on the local path (#3095).
+			if (localDelegationTools(this.config.role).length > 0) {
+				this.toolRegistry.loadCategory("orchestration");
+			}
 		}
 		// Load computer category when cua:setup has been run, regardless of provider.
 		const { existsSync } = await import("node:fs");
@@ -1257,7 +1262,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"desktop_windows",
 			"desktop_clipboard",
 		];
-		const localCoreTools = cuaConfigured ? [...CORE_TOOLS, ...DESKTOP_TOOLS] : CORE_TOOLS;
+		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
+		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
+		const localCoreTools = [
+			...CORE_TOOLS,
+			...(cuaConfigured ? DESKTOP_TOOLS : []),
+			...localDelegationTools(this.config.role),
+		];
 		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
 			: allTools;
