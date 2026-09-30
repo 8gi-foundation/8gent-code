@@ -18,8 +18,8 @@
  * so tests never touch a real home directory.
  */
 
+import { resolveHome } from "../core/home";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
@@ -113,7 +113,7 @@ const EMA_ALPHA = 0.2;
 
 /** Default on-disk location, alongside the existing `failover.json`. */
 export function defaultBanditStorePath(): string {
-	return join(homedir(), ".8gent", "router-bandit.json");
+	return join(resolveHome(), ".8gent", "router-bandit.json");
 }
 
 function emptyClasses(): Record<CapabilityClass, Record<string, ArmStats>> {

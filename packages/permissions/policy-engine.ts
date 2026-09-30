@@ -11,6 +11,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home.js";
 import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
@@ -36,12 +37,12 @@ const DEFAULT_POLICY_PATH = path.join(
 );
 
 const USER_POLICY_PATH = path.join(
-	process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+	process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
 	"policies.yaml",
 );
 
 const POLICY_CHECKSUM_PATH = path.join(
-	process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+	process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
 	"policy-checksum",
 );
 

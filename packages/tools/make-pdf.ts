@@ -15,9 +15,9 @@
  * the creative folder.
  */
 
+import { resolveHome } from "../core/home";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import {
@@ -28,10 +28,10 @@ import {
 } from "../design-systems/index";
 
 /** Absolute path to the creative folder the CLI writes into by default. */
-export const CREATIVE_DIR = path.join(os.homedir(), ".8gent", "creative");
+export const CREATIVE_DIR = path.join(resolveHome(), ".8gent", "creative");
 
 /** Absolute path to the canonical renderer CLI. Overridable for tests. */
-export const DEFAULT_MAKE_PDF_BIN = path.join(os.homedir(), ".8gent", "bin", "make-pdf");
+export const DEFAULT_MAKE_PDF_BIN = path.join(resolveHome(), ".8gent", "bin", "make-pdf");
 
 /** Resolve the CLI binary, honouring an env override (used by the test suite). */
 export function resolveMakePdfBin(): string {

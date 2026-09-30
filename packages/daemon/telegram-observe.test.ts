@@ -10,6 +10,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { OBSERVED_LOG, observeUnauthorized } from "./telegram-bridge";
 
 const readLines = () =>
@@ -24,6 +25,12 @@ afterEach(() => {
 });
 
 describe("observeUnauthorized", () => {
+	test("writes under the test's temp $HOME, never the real ~/.8gent (#3240)", () => {
+		const realHome = homedir();
+		expect(OBSERVED_LOG.startsWith(`${realHome}/`)).toBe(false);
+		expect(OBSERVED_LOG.startsWith(`${process.env.HOME}/`)).toBe(true);
+	});
+
 	test("records a group message so another process can read it", () => {
 		observeUnauthorized({
 			update_id: 42,

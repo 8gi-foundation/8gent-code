@@ -13,6 +13,7 @@
  * - Startup notification: "I'm online. What do we work on next?"
  */
 
+import { resolveHome } from "../core/home";
 import { spawnSync } from "node:child_process";
 import {
 	appendFileSync,
@@ -22,8 +23,8 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
 import {
 	BOARD_ROSTER,
@@ -45,7 +46,7 @@ import {
  * Where messages from chats the bridge does not answer are recorded.
  * One JSON object per line, appended.
  */
-export const OBSERVED_LOG = join(homedir(), ".8gent", "telegram-observed.jsonl");
+export const OBSERVED_LOG = join(resolveHome(), ".8gent", "telegram-observed.jsonl");
 
 /** Stop the log growing without bound; ~5MB is weeks of a busy group. */
 const OBSERVED_MAX_BYTES = 5 * 1024 * 1024;
@@ -83,7 +84,7 @@ export function observeUnauthorized(update: unknown): void {
 		try {
 			if (statSync(OBSERVED_LOG).size > OBSERVED_MAX_BYTES) return;
 		} catch {
-			mkdirSync(join(homedir(), ".8gent"), { recursive: true });
+			mkdirSync(dirname(OBSERVED_LOG), { recursive: true });
 		}
 
 		appendFileSync(
