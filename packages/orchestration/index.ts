@@ -12,6 +12,7 @@
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
 // Types
@@ -60,6 +61,10 @@ export interface SpawnedAgent {
 	 * reports it, so an agent that ended having changed nothing is visible.
 	 */
 	filesChanged: string[];
+	/** Hash of each scoped file at spawn (#3126); compared when the agent ends. */
+	scopeBaseline: ScopeBaseline;
+	/** Per scoped file: unchanged, fixed (its test passes), test fails, or not verified. */
+	verification?: FileVerdict[];
 }
 
 export interface AgentMessage {
@@ -134,6 +139,7 @@ export class AgentPool extends EventEmitter {
 			messages: [],
 			tokenCount: 0,
 			filesChanged: [],
+			scopeBaseline: snapshotScope(agentConfig.workingDirectory, agentConfig.allowedPaths),
 		};
 
 		this.agents.set(agentId, spawnedAgent);
@@ -194,6 +200,34 @@ export class AgentPool extends EventEmitter {
 
 			// Execute the task
 			const result = await agent.chat(spawnedAgent.task.description);
+
+			// Evidence before "completed": did the scoped files change, and do their tests pass?
+			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {
+				try {
+					// Run the test the way the sub-agent's own run_command would: an
+					// executor built exactly as the Agent builds its own, so every gate
+					// (maker-checker, ToolG8, permissions, sanitizer, System One) applies.
+					const { ToolExecutor } = await import("../eight/tools");
+					const gated = new ToolExecutor(
+						spawnedAgent.config.workingDirectory,
+						"primary",
+						undefined,
+						{
+							unattended: false,
+							allowedPaths: spawnedAgent.config.allowedPaths,
+							openOnWrite: false,
+						},
+					);
+					spawnedAgent.verification = await verifyScope(
+						spawnedAgent.config.workingDirectory,
+						spawnedAgent.scopeBaseline,
+						(command, timeoutMs) =>
+							gated.execute("run_command", { command, timeout: timeoutMs / 1000 }),
+					);
+				} catch {
+					// No verdict is better than a wrong one: the outcome falls back to "not verified".
+				}
+			}
 
 			spawnedAgent.status = "completed";
 			spawnedAgent.task.status = "completed";

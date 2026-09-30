@@ -31,17 +31,44 @@ type Check = {
 	respawnNow?: Array<{ agentId: string; allowedPaths?: string[]; outcome: string }>;
 };
 
+// The twofix tests, so a finished agent's file is verified, not only seen to change (#3126).
+const WORDCOUNT_TEST = `import { expect, test } from "bun:test";
+import { wordCount } from "./wordcount";
+test("counts words", () => {
+	expect(wordCount("one two three")).toBe(3);
+	expect(wordCount("  hello   world\\n")).toBe(2);
+	expect(wordCount("")).toBe(0);
+});
+`;
+const CLAMP_TEST = `import { expect, test } from "bun:test";
+import { clamp } from "./clamp";
+test("clamps", () => {
+	expect(clamp(5, 0, 10)).toBe(5);
+	expect(clamp(-1, 0, 10)).toBe(0);
+	expect(clamp(11, 0, 10)).toBe(10);
+});
+`;
+
 function runProbe() {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "delegation-outcome-"));
 	fs.mkdirSync(path.join(dir, "src"));
 	fs.writeFileSync(path.join(dir, "src", "wordcount.ts"), WORDCOUNT);
 	fs.writeFileSync(path.join(dir, "src", "clamp.ts"), CLAMP);
+	fs.writeFileSync(path.join(dir, "src", "wordcount.test.ts"), WORDCOUNT_TEST);
+	fs.writeFileSync(path.join(dir, "src", "clamp.test.ts"), CLAMP_TEST);
 	fs.writeFileSync(path.join(dir, "README.md"), "# twofix\n");
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "delegation-outcome-home-"));
 	const r = Bun.spawnSync(
 		["bun", path.join(import.meta.dir, "__tests__", "fixtures", "delegation-probe.ts"), dir],
 		{
-			env: { ...process.env, HOME: home, EIGHT_CHECK_AGENT_WAIT_MS: "10000" },
+			env: {
+				...process.env,
+				HOME: home,
+				// Permission config lives here, not under a HOME that Docker may ignore:
+				// the deny probe must never leak a rule into another test.
+				EIGHT_DATA_DIR: path.join(home, ".8gent"),
+				EIGHT_CHECK_AGENT_WAIT_MS: "10000",
+			},
 			stdout: "pipe",
 			stderr: "pipe",
 		},
@@ -98,15 +125,15 @@ describe("check_agent reports what a sub-agent did, while its sibling still runs
 
 	test("the pilot's unescaped \\s reply now lands, and the re-spawn clears the alert", () => {
 		expect(out.regexCheck.filesChanged).toEqual(["src/wordcount.ts"]);
-		expect(out.regexCheck.outcome).toBe("changed src/wordcount.ts");
+		expect(out.regexCheck.outcome).toBe("FIXED src/wordcount.ts (src/wordcount.test.ts passes)");
 		expect(out.wordcount).toContain("text.trim().split(/\\s+/).filter(Boolean).length");
 		expect(out.slowDone.respawnNow).toBeUndefined();
 	});
 
-	test("an agent that changed its file reports it", () => {
+	test("an agent that fixed its file says FIXED, with the passing test as evidence", () => {
 		expect(out.slowDone.status).toBe("completed");
 		expect(out.slowDone.filesChanged).toEqual(["src/clamp.ts"]);
-		expect(out.slowDone.outcome).toBe("changed src/clamp.ts");
+		expect(out.slowDone.outcome).toBe("FIXED src/clamp.ts (src/clamp.test.ts passes)");
 		expect(out.clamp).toContain("Math.min(Math.max(n, min), max)");
 	});
 
