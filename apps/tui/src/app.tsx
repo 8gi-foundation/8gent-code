@@ -128,7 +128,6 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	apfel: "apfel (Apple Foundation Model)",
 };
 import { PROBE_TIMEOUT_MS, createReadinessCache, withTimeout } from "./lib/provider-readiness.js";
-import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatSessionTime, formatTokens } from "./lib/format.js";
@@ -255,10 +254,12 @@ import type {
 import * as fs from "node:fs";
 import * as pathMod from "node:path";
 import {
+	type CliTabPin,
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	pickBestChatModel,
 	providerToRuntime,
+	specForActivatedTab,
 } from "./lib/model-selection.js";
 
 function loadEnvFile() {
@@ -1127,42 +1128,24 @@ export function App({
 		if (!role) return;
 		// CLI override guard: a --provider/--model passed on launch is authoritative
 		// for the tab that was active at launch. Without this guard the role-registry
-		// default below (e.g. orchestrator -> ollama) overwrites currentProvider,
-		// so the turn-serving agent is built with runtime=ollama even though the
-		// user asked for lmstudio. Pin once, then let role defaults take over for
-		// subsequent tab switches.
-		if (cliProviderRequestedRef.current || cliModelRequestedRef.current) {
-			if (cliPinnedTabIdRef.current === null) {
-				// First run after launch: remember the pinned tab and keep the CLI
-				// override intact (do not apply role defaults to it).
-				cliPinnedTabIdRef.current = tab.id;
-				return;
-			}
-			if (cliPinnedTabIdRef.current === tab.id) {
-				// Re-entering the pinned tab: still honour the CLI override.
-				return;
-			}
+		// default (e.g. orchestrator -> ollama) overwrites currentProvider, so the
+		// turn-serving agent is built with runtime=ollama even though the user asked
+		// for lmstudio. The pin remembers the launch spec so re-entering that tab
+		// restores it; returning early instead left the previous tab's model live.
+		if (
+			(cliProviderRequestedRef.current || cliModelRequestedRef.current) &&
+			cliPinRef.current === null
+		) {
+			cliPinRef.current = {
+				tabId: tab.id,
+				spec: { provider: currentProvider, model: currentModel },
+			};
+			return;
 		}
-		const cfg = ROLE_REGISTRY[role];
-		// Persisted settings override role-registry defaults for orchestrator/engineer/qa tabs.
-		try {
-			const s = loadAppSettings();
-			const tabsMap = s.models?.tabs as unknown as Record<
-				string,
-				{ provider: string; model: string }
-			>;
-			const tabSettings = tabsMap?.[role];
-			if (tabSettings?.provider && tabSettings?.model) {
-				setCurrentProvider(tabSettings.provider);
-				setCurrentModel(tabSettings.model);
-				return;
-			}
-		} catch {
-			// Fall through to role-registry default
-		}
-		if (!cfg?.inferenceMode || !cfg?.model) return;
-		setCurrentProvider(cfg.inferenceMode);
-		setCurrentModel(cfg.model);
+		const next = specForActivatedTab(tab.id, cliPinRef.current, resolveSpecForRole(role));
+		if (!next) return;
+		setCurrentProvider(next.provider);
+		setCurrentModel(next.model);
 	}, [activeTabId]);
 
 	// Provider health probe: count how many of the 3 local inference engines
@@ -1211,7 +1194,7 @@ export function App({
 	const cliProviderRequestedRef = useRef(normalizeProviderId(cliProvider));
 	// The tab that is active at launch. A CLI --provider/--model override pins
 	// THIS tab only; switching to or opening other tabs uses their role defaults.
-	const cliPinnedTabIdRef = useRef<string | null>(null);
+	const cliPinRef = useRef<CliTabPin | null>(null);
 	const [currentProvider, setCurrentProvider] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).provider,
 	);

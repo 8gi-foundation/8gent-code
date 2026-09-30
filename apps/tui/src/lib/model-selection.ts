@@ -114,3 +114,33 @@ export function normalizeProviderId(raw?: string): string | undefined {
 	if (x === "mistral") return "mistral";
 	return undefined;
 }
+
+/** A provider/model pair as the foreground agent consumes it. */
+export interface ModelSpec {
+	provider: string;
+	model: string;
+}
+
+/** The tab a CLI --provider/--model override was pinned to at launch, with that spec. */
+export interface CliTabPin {
+	tabId: string;
+	spec: ModelSpec;
+}
+
+/**
+ * What the foreground provider/model must become when a chat tab is activated.
+ *
+ * - The tab the CLI override was pinned to gets the launch spec back. Doing
+ *   nothing here is the bug: the foreground state still holds the previous
+ *   tab's model, so returning to Orchestrator after QA ran QA's model.
+ * - Any other tab gets its role spec (settings override -> role registry).
+ * - null means leave the current provider/model alone (no role spec known).
+ */
+export function specForActivatedTab(
+	tabId: string,
+	pin: CliTabPin | null,
+	roleSpec: ModelSpec | null,
+): ModelSpec | null {
+	if (pin && pin.tabId === tabId) return pin.spec;
+	return roleSpec;
+}
