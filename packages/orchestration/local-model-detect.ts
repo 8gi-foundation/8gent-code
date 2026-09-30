@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
 import type { ProviderConfig, ProviderName } from "../providers";
 import type { RoleConfig, RoleModelAssignment } from "./role-config";
 
@@ -38,7 +39,14 @@ export interface DetectedModel {
 	toolCapable?: boolean;
 }
 
-const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+/**
+ * The configured Ollama, resolved per call like the rest of the app
+ * (OLLAMA_BASE_URL, then OLLAMA_HOST, normalised). This was a module constant
+ * read from OLLAMA_BASE_URL only, so OLLAMA_HOST was ignored and a later env
+ * change never applied: the tool-capability probe then went to this machine's
+ * localhost:11434 whatever the session was pointed at.
+ */
+const ollamaUrl = (): string => resolveOllamaBaseUrl();
 const LMSTUDIO_URL = process.env.LMSTUDIO_BASE_URL || "http://localhost:1234/v1";
 const PROBE_TIMEOUT_MS = 3000;
 
@@ -70,7 +78,7 @@ export type ToolCapability = "native" | "none" | "unknown";
 /** OpenAI-compatible chat-completions endpoint per probeable local provider. */
 function chatCompletionsUrl(provider: string): string | null {
 	if (provider === "lmstudio") return `${LMSTUDIO_URL}/chat/completions`;
-	if (provider === "ollama") return `${OLLAMA_URL}/v1/chat/completions`;
+	if (provider === "ollama") return `${ollamaUrl()}/v1/chat/completions`;
 	return null; // apple-foundation has no HTTP endpoint - never probed, never demoted.
 }
 
@@ -200,7 +208,7 @@ async function fetchJson(url: string): Promise<unknown | null> {
 
 /** Probe Ollama. Returns [] if the server is down. */
 export async function detectOllama(): Promise<DetectedModel[]> {
-	const json = (await fetchJson(`${OLLAMA_URL}/api/tags`)) as {
+	const json = (await fetchJson(`${ollamaUrl()}/api/tags`)) as {
 		models?: { name?: string }[];
 	} | null;
 	if (!json?.models) return [];
@@ -288,7 +296,7 @@ export function recommendRoleConfig(models: DetectedModel[]): RoleConfig | null 
  * the local models must time-share RAM rather than co-reside - a resident
  * 27B model can starve a second large model and cause inference failures.
  */
-export async function unloadOllamaModel(model: string, baseUrl = OLLAMA_URL): Promise<void> {
+export async function unloadOllamaModel(model: string, baseUrl = ollamaUrl()): Promise<void> {
 	try {
 		await fetch(`${baseUrl}/api/generate`, {
 			method: "POST",

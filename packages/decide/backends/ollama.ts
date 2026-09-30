@@ -36,7 +36,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 
 export interface OllamaBackendOptions {
 	model: string;
-	/** Defaults to env OLLAMA_HOST, then http://localhost:11434. */
+	/** Defaults to env OLLAMA_BASE_URL, then OLLAMA_HOST, then http://localhost:11434. */
 	host?: string;
 	/** Per-question request timeout. */
 	timeoutMs?: number;
@@ -49,12 +49,18 @@ export interface TopLogprob {
 	logprob: number;
 }
 
-/** Resolve the Ollama base URL from env, adding a scheme if OLLAMA_HOST is bare host:port. */
+/**
+ * Resolve the Ollama base URL from env: OLLAMA_BASE_URL, then OLLAMA_HOST, then
+ * localhost, the same order as the rest of the harness (resolveOllamaBaseUrl in
+ * packages/ai). A bare host:port gets a scheme; an OpenAI-style "/v1" base is
+ * cut back to the server root. OLLAMA_BASE_URL used to be ignored here, so a
+ * session pointed at a remote Ollama that way still judged on localhost.
+ */
 export function resolveOllamaHost(env: Record<string, string | undefined> = process.env): string {
-	const raw = env.OLLAMA_HOST?.trim();
+	const raw = env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim();
 	if (!raw) return DEFAULT_OLLAMA_HOST;
 	const withScheme = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
-	return withScheme.replace(/\/+$/, "");
+	return withScheme.replace(/\/+$/, "").replace(/\/v1$/, "");
 }
 
 // ----- Prompt templates --------------------------------------------------------

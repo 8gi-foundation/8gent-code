@@ -201,7 +201,7 @@ describe("knownContextWindow / providerSupportsJsonMode", () => {
 
 // ── Law 2 (issue #2747): only tool-capable models do tool-work ──────────────
 
-import { probeToolCapability, scoreForAgentic } from "./local-model-detect";
+import { detectOllama, probeToolCapability, scoreForAgentic } from "./local-model-detect";
 
 describe("probeToolCapability", () => {
 	const fetch400 = (async () =>
@@ -285,5 +285,59 @@ describe("scoreForAgentic", () => {
 				toolCapable: true,
 			}),
 		).toBe(9);
+	});
+});
+
+
+/**
+ * The Ollama host is resolved per call like the rest of the app
+ * (OLLAMA_BASE_URL, then OLLAMA_HOST). It was a module constant read from
+ * OLLAMA_BASE_URL only, so OLLAMA_HOST was ignored and the tool-capability
+ * probe went to this machine's localhost:11434 whatever the session used.
+ */
+describe("ollama host resolution (per call, both env vars)", () => {
+	const KEYS = ["OLLAMA_HOST", "OLLAMA_BASE_URL"] as const;
+	const saved = KEYS.map((k) => [k, process.env[k]] as const);
+	const restore = () => {
+		for (const [k, v] of saved) {
+			if (v === undefined) Reflect.deleteProperty(process.env, k);
+			else process.env[k] = v;
+		}
+	};
+	const recorder = () => {
+		const urls: string[] = [];
+		const impl = (async (input: string | URL | Request) => {
+			urls.push(String(input instanceof Request ? input.url : input));
+			return new Response("{}", { status: 404 });
+		}) as unknown as typeof fetch;
+		return { urls, impl };
+	};
+
+	test("the tools probe follows OLLAMA_HOST set after import", async () => {
+		try {
+			Reflect.deleteProperty(process.env, "OLLAMA_BASE_URL");
+			process.env.OLLAMA_HOST = "10.0.0.5:11434";
+			const { urls, impl } = recorder();
+			await probeToolCapability("ollama", "m", { fetchImpl: impl });
+			expect(urls).toEqual(["http://10.0.0.5:11434/v1/chat/completions"]);
+		} finally {
+			restore();
+		}
+	});
+
+	test("OLLAMA_BASE_URL wins, and detectOllama asks the same host", async () => {
+		const realFetch = globalThis.fetch;
+		try {
+			process.env.OLLAMA_BASE_URL = "http://gpu:21434";
+			process.env.OLLAMA_HOST = "other:1";
+			const { urls, impl } = recorder();
+			await probeToolCapability("ollama", "m", { fetchImpl: impl });
+			globalThis.fetch = impl;
+			await detectOllama();
+			expect(urls).toEqual(["http://gpu:21434/v1/chat/completions", "http://gpu:21434/api/tags"]);
+		} finally {
+			globalThis.fetch = realFetch;
+			restore();
+		}
 	});
 });
