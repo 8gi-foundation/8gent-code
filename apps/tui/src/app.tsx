@@ -361,56 +361,63 @@ function loadProviderSettings(): { provider: string; model: string } {
  */
 function detectBestLocalProvider(): { provider: string; model: string } {
 	const { execFileSync } = require("node:child_process");
+	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+	const urls = [
+		"http://localhost:1234/v1/models",
+		// The configured ollama (OLLAMA_BASE_URL / OLLAMA_HOST), not a hardcoded localhost (#3080).
+		`${resolveOllamaBaseUrl()}/api/tags`,
+		// Apfel (Apple Intelligence, macOS 26+, Apple Silicon only): apfel --serve --port 11435
+		...(isAppleSilicon ? ["http://localhost:11435/v1/models"] : []),
+	];
 
 	// Probe with the Bun runtime we are already running on, not curl: minimal
 	// Linux installs ship without curl, and then every local model silently
 	// went undetected. execFileSync keeps this synchronous and shell-free.
+	// One child probes every provider at once, each fetch bounded at 2 s, so a
+	// down OLLAMA_HOST costs 2 s before the first frame, not 2 s per provider
+	// in turn (up to 6 s, 9 s at the exec bound) as when they ran one by one (#3115).
 	const PROBE =
-		"const r = await fetch(process.argv[1], { signal: AbortSignal.timeout(2000) }); process.stdout.write(await r.text());";
-	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
-		try {
-			const raw = execFileSync(process.execPath, ["-e", PROBE, url], {
+		"const out = await Promise.all(process.argv.slice(1).map(async (u) => { try { const r = await fetch(u, { signal: AbortSignal.timeout(2000) }); return r.ok ? await r.json() : null; } catch { return null; } })); process.stdout.write(JSON.stringify(out));";
+	let answers: any[] = [];
+	try {
+		answers = JSON.parse(
+			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
-			}).toString();
-			const data = JSON.parse(raw);
-			const all = extract(data).flatMap((s: string) => {
-				const trimmed = s.trim();
-				return trimmed ? [trimmed] : [];
-			});
-			return all.filter((id: string) => !isLikelyEmbeddingModelId(id));
+			}).toString(),
+		);
+	} catch {
+		answers = [];
+	}
+	function chatModels(data: any, extract: (data: any) => string[]): string[] {
+		if (!data) return [];
+		try {
+			return extract(data)
+				.flatMap((s: string) => {
+					const trimmed = s.trim();
+					return trimmed ? [trimmed] : [];
+				})
+				.filter((id: string) => !isLikelyEmbeddingModelId(id));
 		} catch {
 			return [];
 		}
 	}
+	const openAiIds = (d: any) => (d.data || []).map((m: any) => String(m.id ?? ""));
 
-	// 1. LM Studio
-	const lmModels = fetchChatModels("http://localhost:1234/v1/models", (d) =>
-		(d.data || []).map((m: any) => String(m.id ?? "")),
-	);
+	// Priority: LM Studio, then Ollama, then Apfel.
+	const lmModels = chatModels(answers[0], openAiIds);
 	if (lmModels.length > 0) {
 		return { provider: "lmstudio", model: pickBestChatModel(lmModels) };
 	}
-
-	// 2. Ollama
-	// The configured ollama (OLLAMA_BASE_URL / OLLAMA_HOST), not a hardcoded localhost (#3080).
-	const ollamaModels = fetchChatModels(`${resolveOllamaBaseUrl()}/api/tags`, (d) =>
+	const ollamaModels = chatModels(answers[1], (d) =>
 		(d.models || []).map((m: any) => String(m.name ?? "")),
 	);
 	if (ollamaModels.length > 0) {
 		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
 	}
-
-	// 3. Apfel (Apple Intelligence — macOS 26+, Apple Silicon only)
-	// Run with: apfel --serve --port 11435
-	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
-	if (isAppleSilicon) {
-		const apfelModels = fetchChatModels("http://localhost:11435/v1/models", (d) =>
-			(d.data || []).map((m: any) => String(m.id ?? "")),
-		);
-		if (apfelModels.length > 0) {
-			return { provider: "apfel", model: pickBestChatModel(apfelModels) };
-		}
+	const apfelModels = chatModels(answers[2], openAiIds);
+	if (apfelModels.length > 0) {
+		return { provider: "apfel", model: pickBestChatModel(apfelModels) };
 	}
 
 	// No local provider answered. Default to OpenRouter free tier so a fresh
@@ -1300,8 +1307,11 @@ export function App({
 			try {
 				if (currentProvider === "ollama") {
 					// Fetch locally installed Ollama models — filter embedding models at source
-					// The configured ollama, which may be remote (#3080).
-					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`);
+					// The configured ollama, which may be remote (#3080). Bounded: a
+					// down host left the model list loading for as long as TCP took (#3115).
+					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
+						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+					});
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.models || [])
@@ -1315,7 +1325,9 @@ export function App({
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
 					// never pollute the model list or get auto-selected as chat models
-					const res = await fetch("http://localhost:1234/v1/models");
+					const res = await fetch("http://localhost:1234/v1/models", {
+						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+					});
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.data || [])
@@ -2544,12 +2556,11 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const checkOnboarding = async () => {
-			// Auto-detect environment (git config, ollama models, gh auth)
-			const detected = await OnboardingManager.autoDetect();
-			onboardingManager.applyAutoDetected(detected);
-
-			// Also detect integrations (LM Studio, etc.)
-			await onboardingManager.detectIntegrations();
+			// Auto-detect environment (git config, ollama models, gh auth,
+			// LM Studio). Every probe is bounded, and the setup does not wait on
+			// them: an unreachable OLLAMA_HOST held the welcome back 60 s (#3115).
+			// The welcome shows at once with a "checking" line and fills in below.
+			const detection = onboardingManager.detect();
 
 			if (cliAutoApprove && onboardingManager.needsOnboarding()) {
 				onboardingManager.skipAll();
@@ -2585,8 +2596,31 @@ export function App({
 							timestamp: new Date(),
 						},
 					]);
+					// Detection landed: redraw the welcome with what it found, or
+					// with "could not be reached". Only while the welcome is still
+					// the open step; once the person has moved on it stays as read.
+					await detection;
+					const settled = onboardingManager.getNextQuestion();
+					if (settled && settled.step === question.step) {
+						applyOnboardingQuestion(settled);
+						setOnboardingSteps((prev) =>
+							prev.map((st, i) => (i === 0 ? { ...st, question: settled.question } : st)),
+						);
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id.startsWith(SETUP_WELCOME_ID)
+									? { ...m, content: `${settled.question}\n\n${SETUP_SKIP_HINT}` }
+									: m,
+							),
+						);
+					}
 				}
-			} else if (onboardingManager.shouldAskClarification()) {
+				return;
+			}
+			// Not a first run: the clarification question may use what detection
+			// found, so it waits for it, as before.
+			await detection;
+			if (onboardingManager.shouldAskClarification()) {
 				const clarification = onboardingManager.getClarificationQuestion();
 				if (clarification) {
 					// The next thing typed is the answer: it goes to the profile,

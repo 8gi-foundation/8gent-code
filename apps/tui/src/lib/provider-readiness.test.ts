@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
 	createReadinessCache,
 	type LocalProviderEndpoint,
+	localProviderEndpoints,
 	probeModels,
 	resolveReadyProvider,
 	withTimeout,
@@ -179,5 +180,24 @@ describe("withTimeout", () => {
 
 	test("a settled promise wins", async () => {
 		expect(await withTimeout(Promise.resolve(true), 1000, false)).toBe(true);
+	});
+});
+
+describe("localProviderEndpoints (#3115)", () => {
+	const ollamaUrl = (env: Record<string, string | undefined>) =>
+		localProviderEndpoints(env).find((e) => e.provider === "ollama")?.modelsUrl;
+
+	test("a bare host:port OLLAMA_HOST, as the ollama CLI takes it, becomes a real URL", () => {
+		expect(ollamaUrl({ OLLAMA_HOST: "10.0.0.5:11434" })).toBe("http://10.0.0.5:11434/api/tags");
+	});
+
+	test("OLLAMA_BASE_URL wins, as everywhere else in the app", () => {
+		expect(ollamaUrl({ OLLAMA_BASE_URL: "http://gpu:11434/v1", OLLAMA_HOST: "other:1" })).toBe(
+			"http://gpu:11434/api/tags",
+		);
+	});
+
+	test("nothing set is localhost", () => {
+		expect(ollamaUrl({})).toBe("http://localhost:11434/api/tags");
 	});
 });
