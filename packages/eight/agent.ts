@@ -651,7 +651,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		localCoreTools: string[];
 		chatStartTime: number;
 		textForAgent: string;
-	}): Promise<{ content: string; provider: string; model: string; baseURL: string }> {
+	}): Promise<{ content: string; ok: boolean; provider: string; model: string; baseURL: string }> {
 		const {
 			providerName,
 			providerModel,
@@ -912,8 +912,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const route = { provider: effectiveProvider, model: effectiveModel };
 		// The reply plus the route, with the endpoint runTurn sent it to (the
 		// same resolution buildTextToolCall makes), as an OpenAI "/v1" base.
-		const answered = (content: string) => ({
+		// `ok` is false on the failed exits, which skip post-turn compaction.
+		const answered = (content: string, ok: boolean) => ({
 			content,
+			ok,
 			...route,
 			baseURL: toOpenAiV1Base(resolveTextToolEndpoint(route.provider, this.config.baseUrl)),
 		});
@@ -967,7 +969,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
 				recordFailedRun(`no local model: ${outcome.message}`);
-				return answered(outcome.message);
+				return answered(outcome.message, false);
 			}
 			if (outcome.rerouted) {
 				// Self-correct the session so subsequent turns skip the dead model
@@ -982,11 +984,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// instead of throwing a raw fetch error up through the surface. A slow
 			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
-			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
+			const endpoint = resolveTextToolEndpoint(route.provider, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
 			recordFailedRun(failure.reason);
-			return answered(failure.message);
+			return answered(failure.message, false);
 		}
 		this.abortController = null;
 
@@ -1084,7 +1086,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			/* journal is best-effort; never break the turn */
 		}
 
-		return answered(flavoredContent);
+		return answered(flavoredContent, true);
 	}
 
 	/**
@@ -1453,13 +1455,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// returns before that block, so local sessions never compacted (#3267).
 			// A reroute can move the turn to another local provider, so the
 			// summary call goes to the provider, model and endpoint the turn ran
-			// on. The session's API key belongs to the pinned provider only.
-			await this.compactAfterTurn({
-				name: textResult.provider as ProviderName,
-				model: textResult.model,
-				baseURL: textResult.baseURL,
-				apiKey: textResult.provider === providerConfig.name ? providerConfig.apiKey : undefined,
-			});
+			// on. The turn itself sends no session key, and hosts still pass a
+			// cloud key whatever the runtime, so the compaction call sends none
+			// either: createModel falls back to the provider's own env key.
+			// A failed turn (no model, timeout, abort) shows its error at once.
+			if (textResult.ok) {
+				await this.compactAfterTurn({
+					name: textResult.provider as ProviderName,
+					model: textResult.model,
+					baseURL: textResult.baseURL,
+					apiKey: undefined,
+				});
+			}
 			return textResult.content;
 		}
 

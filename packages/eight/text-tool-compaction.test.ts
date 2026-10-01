@@ -40,11 +40,11 @@ let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 const bodies: Body[] = [];
 
-// Cross-provider reroute (#3267): the fake endpoint 404s `goneModel` as Ollama
-// does for a model that is not pulled, and local model detection reports one
-// LM Studio model while `lmStudioOnly` is set. Otherwise both behave as normal.
+// Reroutes (#3267): the fake endpoint 404s `goneModel` as Ollama does for a
+// model that is not pulled, and local model detection reports what `detected`
+// says: the real host, one LM Studio model, or nothing installed at all.
 let goneModel: string | null = null;
-let lmStudioOnly = false;
+let detected: "real" | "lmstudio" | "none" = "real";
 const LM_MODEL = "lm-studio-model";
 
 /** A summariser call: a bare prompt (no system message) over a serialised conversation. */
@@ -68,16 +68,19 @@ beforeAll(async () => {
 	({ Agent } = await import("./agent"));
 	({ ProactiveCompression } = await import("./compaction"));
 	({ estimateMessageTokens: twoStageTokens } = await import("./two-stage-compactor"));
-	// Delegates to the real detector unless a test sets the flag, so the mock
-	// cannot change any other test file sharing this process.
+	// mock.module is permanent for the process (bun has no undo for it), so it
+	// delegates to the real detector unless a test here sets `detected`: other
+	// test files sharing the process see the real behaviour.
 	const detect = await import("../orchestration/local-model-detect");
 	const real = { ...detect };
 	mock.module("../orchestration/local-model-detect", () => ({
 		...real,
 		detectLocalModels: async () =>
-			lmStudioOnly
+			detected === "lmstudio"
 				? [{ provider: "lmstudio", model: LM_MODEL, score: 10, toolCapable: true }]
-				: real.detectLocalModels(),
+				: detected === "none"
+					? []
+					: real.detectLocalModels(),
 	}));
 	server = Bun.serve({
 		port: 0,
@@ -117,12 +120,13 @@ afterAll(() => {
 	rmSync(repo, { recursive: true, force: true });
 });
 
-function build(): AgentT {
+function build(apiKey?: string): AgentT {
 	return new Agent({
 		model: "m",
 		runtime: "ollama",
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${server.port}`,
+		apiKey,
 	} as ConstructorParameters<typeof Agent>[0]);
 }
 
@@ -222,13 +226,13 @@ describe("text-tool compaction follows a cross-provider reroute (#3267)", () => 
 	 */
 	async function reroutesThenCompacts(agent: AgentT): Promise<void> {
 		goneModel = "m";
-		lmStudioOnly = true;
+		detected = "lmstudio";
 		const start = bodies.length;
 		try {
 			await compactsAndCarries(agent);
 		} finally {
 			goneModel = null;
-			lmStudioOnly = false;
+			detected = "real";
 		}
 		const summaries = bodies.slice(start).filter(isSummaryRequest);
 		expect(summaries.length).toBeGreaterThan(0);
@@ -262,6 +266,50 @@ describe("text-tool compaction follows a cross-provider reroute (#3267)", () => 
 			await reroutesThenCompacts(agent);
 		} finally {
 			process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
+		}
+	}, 60_000);
+});
+
+describe("text-tool compaction sends no session key, and skips failed turns (#3267)", () => {
+	/** A long session whose ProactiveCompression window the next turn crosses. */
+	async function pressed(apiKey?: string): Promise<AgentT> {
+		const agent = build(apiKey);
+		await longSession(agent);
+		const used = proactiveTokens(agent.getMessageHistory());
+		Reflect.set(
+			agent,
+			"compaction",
+			new ProactiveCompression({ contextWindow: Math.floor(used / 0.82), keepRecentTokens: 200 }),
+		);
+		return agent;
+	}
+
+	test("a cloud key on a local session never reaches the local host", async () => {
+		// Hosts pass OPENROUTER_API_KEY whatever the runtime. The text-tool turn
+		// sends no Authorization, so neither may its compaction call.
+		const KEY = "sk-or-SENTINEL-3267";
+		const agent = await pressed(KEY);
+		const start = bodies.length;
+		await compactsAndCarries(agent);
+		const sent = bodies.slice(start);
+		expect(sent.some(isSummaryRequest)).toBe(true);
+		for (const b of sent) expect(b.auth ?? "").not.toContain(KEY);
+	}, 60_000);
+
+	test("a failed text-tool turn returns its error without compacting", async () => {
+		const agent = await pressed();
+		goneModel = "m";
+		detected = "none";
+		try {
+			const start = bodies.length;
+			const before = agent.getMessageHistory().length;
+			await agent.chat("Using typescript, list the open release risks for the team.");
+			// No model anywhere: the turn fails, and no summary call follows it.
+			expect(bodies.slice(start).some(isSummaryRequest)).toBe(false);
+			expect(agent.getMessageHistory().length).toBeGreaterThan(before);
+		} finally {
+			goneModel = null;
+			detected = "real";
 		}
 	}, 60_000);
 });
