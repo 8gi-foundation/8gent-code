@@ -20,10 +20,24 @@ import { Database, type Statement } from "bun:sqlite";
  * This subclass remembers every statement it prepares (weakly, so it never
  * keeps one alive) and finalizes the ones still live before closing. It is a
  * drop-in for `new Database(...)`: same constructor, same methods.
+ *
+ * A statement the garbage collector has already reclaimed needs one more
+ * step. Its WeakRef is cleared when the collector marks it dead, but bun only
+ * finalizes the SQLite statement when the collector later sweeps that memory,
+ * and sweeping is lazy: it happens on some future allocation, not at the
+ * collection. Between the two the statement is unreachable from JS yet still
+ * holds the connection open. That window is what kept the file locked on
+ * windows-latest when several suites shared one process (store.test.ts,
+ * decision-audit): the earlier suites' garbage made a collection land
+ * mid-suite, and a blocked thread never swept. So when any tracked statement
+ * has been reclaimed, close() runs a synchronous full collection first,
+ * which sweeps and finalizes it.
  */
 export class SqliteDatabase extends Database {
 	#statements = new Set<WeakRef<Statement>>();
 	#sinceSweep = 0;
+	/** A tracked statement was reclaimed, so it may not be finalized yet. */
+	#reclaimed = false;
 
 	// biome-ignore lint/suspicious/noExplicitAny: mirrors bun's generic signature
 	override prepare(...args: Parameters<Database["prepare"]>): any {
@@ -34,20 +48,31 @@ export class SqliteDatabase extends Database {
 		if (++this.#sinceSweep >= 512) {
 			this.#sinceSweep = 0;
 			for (const ref of this.#statements)
-				if (ref.deref() === undefined) this.#statements.delete(ref);
+				if (ref.deref() === undefined) {
+					this.#statements.delete(ref);
+					this.#reclaimed = true;
+				}
 		}
 		return stmt;
 	}
 
 	override close(throwOnError?: boolean): void {
 		for (const ref of this.#statements) {
+			const stmt = ref.deref();
+			if (stmt === undefined) {
+				this.#reclaimed = true;
+				continue;
+			}
 			try {
-				ref.deref()?.finalize();
+				stmt.finalize();
 			} catch {
 				// already finalized
 			}
 		}
 		this.#statements.clear();
+		// Reclaimed but possibly unswept statements: sweep them now (see above).
+		if (this.#reclaimed) Bun.gc(true);
+		this.#reclaimed = false;
 		super.close(throwOnError);
 	}
 }

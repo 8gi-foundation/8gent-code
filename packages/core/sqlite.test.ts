@@ -59,6 +59,21 @@ describe("SqliteDatabase", () => {
 		expect(isOpenByThisProcess(file)).toBe(false);
 	});
 
+	test("close() releases the file when the GC has reclaimed statements but not swept them", async () => {
+		const { file, db } = freshDb();
+		for (let i = 0; i < 50; i++) db.prepare("INSERT INTO t (x) VALUES (?)").run(i);
+		// End the job so the statements are collectable, then collect without
+		// sweeping: their WeakRefs clear, but bun has not finalized them yet.
+		// This is the state that kept store.test.ts locked on windows-latest.
+		await Bun.sleep(1);
+		Bun.gc(false);
+
+		db.close();
+
+		for (const f of [file, `${file}-wal`, `${file}-shm`])
+			expect(isOpenByThisProcess(f)).toBe(false);
+	});
+
 	test("a statement finalized by its owner, and a second close(), are both harmless", () => {
 		const { file, db } = freshDb();
 		const stmt = db.prepare("SELECT x FROM t");

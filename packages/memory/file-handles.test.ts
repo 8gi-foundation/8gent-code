@@ -16,6 +16,7 @@ import { SqliteDatabase } from "../core/sqlite";
 import { createSharedMemoryBus } from "./bus.js";
 import { recallPriorSessionsSync, writeSessionToKG } from "./session-kg.js";
 import { MemoryStore } from "./store.js";
+import type { Memory } from "./types.js";
 
 let dir: string;
 const savedDataDir = process.env.EIGHT_DATA_DIR;
@@ -36,12 +37,39 @@ function expectReleased(file: string): void {
 }
 
 describe("memory databases release their files on close", () => {
-	test("MemoryStore.close() after reads and writes", () => {
+	test("MemoryStore.close() after reads and writes", async () => {
 		const file = path.join(tempDir(), "memory.db");
 		const store = new MemoryStore(file);
+		const now = Date.now();
+		const id = store.write({
+			id: "mem-handles-1",
+			type: "core",
+			scope: "project",
+			category: "architecture",
+			key: "k",
+			title: "Handles",
+			content: "close() must release the file after a write",
+			confidence: 0.9,
+			evidenceCount: 1,
+			tags: ["test"],
+			importance: 0.7,
+			decayFactor: 1.0,
+			accessCount: 0,
+			lastAccessed: now,
+			createdAt: now,
+			updatedAt: now,
+			version: 1,
+			source: "user_explicit",
+		} as Memory);
+		store.update(id, { content: "updated" } as Partial<Memory>, "test", "test-user");
+		store.get(id);
 		store.getStats();
 		store.get("no-such-id");
 		expect(isOpenByThisProcess(file)).toBe(true);
+		// Let the GC reclaim the per-call statements without sweeping them,
+		// as it does when other suites share the process (windows-latest).
+		await Bun.sleep(1);
+		Bun.gc(false);
 
 		store.close();
 
