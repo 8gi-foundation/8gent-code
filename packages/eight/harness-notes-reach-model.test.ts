@@ -14,9 +14,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeWhenReleased } from "../core/open-files";
 import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
@@ -79,8 +80,8 @@ afterAll(async () => {
 	// Close the memory databases the agents opened under the temp home first:
 	// Windows refuses to delete a directory holding an open file.
 	(await import("../memory")).resetMemoryManager();
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	removeWhenReleased(home);
+	removeWhenReleased(repo);
 });
 
 function build(events?: Record<string, unknown>): AgentT {
