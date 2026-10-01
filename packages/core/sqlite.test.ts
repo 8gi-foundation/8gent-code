@@ -149,18 +149,23 @@ describe("reclaimed but unswept statements (Windows sweep)", () => {
 		expectReleased(file);
 	});
 
+	// These two leave a reclaimed statement unswept on purpose, so on Windows
+	// the file stays locked until a full collection: run one before cleanup.
 	test("runs at most once per minIntervalMs", async () => {
 		reclaimSweep.minIntervalMs = 60_000;
 		const before = reclaimSweep.runs;
+		const dirs: string[] = [];
 		for (let round = 0; round < 2; round++) {
 			const { db } = freshDb();
+			dirs.push(dir);
 			for (let i = 0; i < 20; i++) db.prepare("SELECT x FROM t").all();
 			await Bun.sleep(1);
 			Bun.gc(false);
 			db.close();
-			fs.rmSync(dir, { recursive: true, force: true });
 		}
 		expect(reclaimSweep.runs - before).toBe(1);
+		Bun.gc(true);
+		for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 	});
 
 	test("never runs when disabled (the default off Windows)", async () => {
@@ -172,5 +177,6 @@ describe("reclaimed but unswept statements (Windows sweep)", () => {
 		Bun.gc(false);
 		db.close();
 		expect(reclaimSweep.runs).toBe(before);
+		Bun.gc(true);
 	});
 });
