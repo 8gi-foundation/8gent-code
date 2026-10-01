@@ -7,9 +7,9 @@
  * All operations are best-effort: never throws, never blocks cleanup.
  */
 
-import { Database } from "bun:sqlite";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SqliteDatabase as Database } from "../core/sqlite";
 import { KnowledgeGraph } from "./graph.js";
 
 // Resolved per call, not at import: a path fixed at import time outlives a
@@ -106,35 +106,38 @@ export async function writeSessionToKG(input: SessionKGInput): Promise<void> {
 		mkdirSync(dir, { recursive: true });
 
 		const db = new Database(globalDbPath(), { create: true });
-		db.run("PRAGMA journal_mode=WAL");
-		const kg = new KnowledgeGraph(db);
+		try {
+			db.run("PRAGMA journal_mode=WAL");
+			const kg = new KnowledgeGraph(db);
 
-		const { sessionId, summary, cwd, filesCreated, filesModified, durationMs, branch } = input;
-		const repo = path.basename(cwd);
-		const now = Date.now();
+			const { sessionId, summary, cwd, filesCreated, filesModified, durationMs, branch } = input;
+			const repo = path.basename(cwd);
+			const now = Date.now();
 
-		const sessionId_ = kg.addEntity("session", sessionId, {
-			description: summary,
-			metadata: { cwd, repo, branch: branch ?? null, durationMs, timestamp: now },
-		});
-
-		const allFiles = [...new Set([...filesCreated, ...filesModified])].filter(Boolean);
-		for (const filePath of allFiles) {
-			const fileId = kg.addEntity("file", filePath, {
-				description: `File in ${repo}`,
-				metadata: { repo, cwd, lastSeen: now },
+			const sessionId_ = kg.addEntity("session", sessionId, {
+				description: summary,
+				metadata: { cwd, repo, branch: branch ?? null, durationMs, timestamp: now },
 			});
-			kg.addRelationship(sessionId_, fileId, "contains");
-		}
 
-		for (const name of extractPeople(summary)) {
-			const personId = kg.addEntity("person", name, {
-				metadata: { mentionedIn: sessionId, mentionedAt: now },
-			});
-			kg.addRelationship(sessionId_, personId, "related_to");
-		}
+			const allFiles = [...new Set([...filesCreated, ...filesModified])].filter(Boolean);
+			for (const filePath of allFiles) {
+				const fileId = kg.addEntity("file", filePath, {
+					description: `File in ${repo}`,
+					metadata: { repo, cwd, lastSeen: now },
+				});
+				kg.addRelationship(sessionId_, fileId, "contains");
+			}
 
-		db.close();
+			for (const name of extractPeople(summary)) {
+				const personId = kg.addEntity("person", name, {
+					metadata: { mentionedIn: sessionId, mentionedAt: now },
+				});
+				kg.addRelationship(sessionId_, personId, "related_to");
+			}
+		} finally {
+			// Close on every path: a handle left open locks the file on Windows.
+			db.close();
+		}
 	} catch {
 		// best-effort
 	}
@@ -155,20 +158,23 @@ export function recallGlobalMemoriesSync(limit = 30): string {
 		if (!existsSync(globalDbPath())) return "";
 
 		const db = new Database(globalDbPath());
-		db.run("PRAGMA journal_mode=WAL");
+		let rows: { content_text: string; importance: number; created_at: number }[];
+		try {
+			db.run("PRAGMA journal_mode=WAL");
 
-		const rows = db
-			.query<{ content_text: string; importance: number; created_at: number }, []>(
-				`SELECT content_text, importance, created_at
+			rows = db
+				.query<{ content_text: string; importance: number; created_at: number }, []>(
+					`SELECT content_text, importance, created_at
          FROM memories
          WHERE scope = 'global'
            AND deleted_at IS NULL
          ORDER BY importance DESC, created_at DESC
          LIMIT ${limit}`,
-			)
-			.all();
-
-		db.close();
+				)
+				.all();
+		} finally {
+			db.close();
+		}
 
 		if (rows.length === 0) return "";
 
@@ -185,21 +191,24 @@ export function recallPriorSessionsSync(cwd: string, limit = 3): string {
 		if (!existsSync(globalDbPath())) return "";
 
 		const db = new Database(globalDbPath());
-		db.run("PRAGMA journal_mode=WAL");
+		let rows: { description: string; metadata: string; last_seen: number }[];
+		try {
+			db.run("PRAGMA journal_mode=WAL");
 
-		const repo = path.basename(cwd);
-		const rows = db
-			.query<{ description: string; metadata: string; last_seen: number }, [string, string]>(
-				`SELECT description, metadata, last_seen
+			const repo = path.basename(cwd);
+			rows = db
+				.query<{ description: string; metadata: string; last_seen: number }, [string, string]>(
+					`SELECT description, metadata, last_seen
          FROM knowledge_entities
          WHERE type = 'session'
            AND (metadata LIKE ? OR metadata LIKE ?)
          ORDER BY last_seen DESC
          LIMIT ${limit}`,
-			)
-			.all(`%"cwd":"${cwd}"%`, `%"repo":"${repo}"%`);
-
-		db.close();
+				)
+				.all(`%"cwd":"${cwd}"%`, `%"repo":"${repo}"%`);
+		} finally {
+			db.close();
+		}
 
 		if (rows.length === 0) return "";
 

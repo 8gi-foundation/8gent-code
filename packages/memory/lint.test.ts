@@ -12,9 +12,9 @@
  * 8. lintReportToMarkdown produces valid markdown
  */
 
-import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
+import { SqliteDatabase as Database } from "../core/sqlite";
 import { KnowledgeGraph } from "./graph.js";
 import { lintMemory, lintReportToMarkdown } from "./lint.js";
 
@@ -258,6 +258,8 @@ describe("lintMemory", () => {
 		const report = lintMemory(db, graph);
 
 		// Also get a clean-ish baseline
+		// Close first: Windows refuses to delete a database that is still open.
+		db.close();
 		cleanup();
 		const db2 = new Database(TEST_DB);
 		createMemoriesTable(db2);

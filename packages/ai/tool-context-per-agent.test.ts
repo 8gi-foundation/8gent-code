@@ -27,8 +27,11 @@ process.env.EIGHT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "toolctx-data
 const servers: { stop: (force?: boolean) => void }[] = [];
 const dirs: string[] = [];
 
-afterAll(() => {
+afterAll(async () => {
 	for (const s of servers) s.stop(true);
+	// Close the memory databases the agents opened under the temp home first:
+	// Windows refuses to delete a directory holding an open file.
+	(await import("../memory")).resetMemoryManager();
 	for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 	fs.rmSync(process.env.EIGHT_DATA_DIR as string, { recursive: true, force: true });
 });

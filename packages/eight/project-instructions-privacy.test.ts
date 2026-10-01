@@ -37,7 +37,10 @@ beforeAll(() => {
 	process.env.HOME = home;
 });
 
-afterAll(() => {
+afterAll(async () => {
+	// Close the memory databases the agents opened under the temp home first:
+	// Windows refuses to delete a directory holding an open file.
+	(await import("../memory")).resetMemoryManager();
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
 	rmSync(home, { recursive: true, force: true });

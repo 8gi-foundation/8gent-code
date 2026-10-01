@@ -8,9 +8,10 @@
  *         entity_mentions, memory_relationships, consolidation_log
  */
 
-import { Database } from "bun:sqlite";
-import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
+import type { Database } from "bun:sqlite";
+import { SqliteDatabase } from "../core/sqlite";
 import { admitMemory } from "./admission.js";
+import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import {
 	type VecLoadResult,
@@ -191,7 +192,7 @@ export class MemoryStore {
 		// Must run before the first Database is opened in this process.
 		ensureSqliteSupportsExtensions();
 
-		this.db = new Database(dbPath, { create: true });
+		this.db = new SqliteDatabase(dbPath, { create: true });
 		this.embeddingProvider = embeddingProvider ?? null;
 
 		// Configure WAL mode and pragmas

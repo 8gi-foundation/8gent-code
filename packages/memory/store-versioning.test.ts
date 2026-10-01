@@ -7,11 +7,11 @@
  * Issue: #1367
  */
 
-import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqliteDatabase as Database } from "../core/sqlite";
 import { MemoryStore } from "./store.js";
 import type { CoreMemory, SemanticMemory } from "./types.js";
 
