@@ -320,6 +320,7 @@ import {
 	declaredModels,
 	pickBestChatModel,
 	providerToRuntime,
+	resolveAgentModel,
 	specForActivatedTab,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
@@ -2616,8 +2617,22 @@ export function App({
 				// (CLI / settings) provider instead of silently defaulting to ollama.
 				const runtime = _wantRuntime;
 
+				// auto:free names no real model: resolve it to a live ":free" id,
+				// and stop with the reason rather than run a paid one (#3289).
+				const _resolved = await resolveAgentModel(currentProvider, currentModel);
+				if (cancelled) return;
+				if (!_resolved.ok) {
+					setAgentReady(false);
+					notify(
+						_initTabId,
+						`No free OpenRouter model to run: ${_resolved.reason}. Nothing will run until one is found. Pick a model with /model, or another provider with /provider.`,
+					);
+					retryLater();
+					return;
+				}
+
 				const newAgent = new Agent({
-					model: currentModel,
+					model: _resolved.model,
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
