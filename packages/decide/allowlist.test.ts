@@ -13,10 +13,9 @@
  *                      judge stopped although the rules pass them.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
 	SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG,
 	SYSTEM_ONE_ALLOWLIST_FLAG,
@@ -31,6 +30,9 @@ import { READ_ONLY_BINS, readOnlyAllowlist } from "./allowlist";
 import { type Decider, createDecider } from "./index";
 import { decideRules } from "./rules";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "./types";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 const MUST_NOT_ALLOW: string[] = [
 	"rm -rf build",
@@ -427,7 +429,7 @@ describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {
 				return createDecider({ backend, cacheSize: 0 });
 			},
 			askHuman: async () => null,
-			calibrationDir: mkdtempSync(join(tmpdir(), "s1-allow-nocal-")),
+			calibrationDir: tempDir("s1-allow-nocal-"),
 		});
 	});
 	afterEach(() => _resetSystemOne());

@@ -26,12 +26,15 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { ToolExecutor } from "../eight/tools";
 import { addPolicy, loadPolicies } from "./policy-engine";
 import { ToolG8, getAuditPath } from "./toolg8";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 function lastAuditEntry(): Record<string, any> {
 	// getAuditPath() is the path toolg8 resolved at ITS module load, so this
@@ -265,7 +268,7 @@ describe("ToolG8 - parser fault falls back to whole-string evaluation", () => {
 
 describe("ToolExecutor.execute - bash gate at the production chokepoint", () => {
 	test("compound evasion is [TOOLG8 BLOCKED] and nothing executes", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "bashgate-exec-"));
+		const dir = tempDir("bashgate-exec-");
 		const exec = new ToolExecutor(dir, "primary");
 		const marker = join(dir, "leaked.txt");
 
@@ -280,7 +283,7 @@ describe("ToolExecutor.execute - bash gate at the production chokepoint", () => 
 	});
 
 	test("subshell evasion is [TOOLG8 BLOCKED] before any spawn", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "bashgate-exec-"));
+		const dir = tempDir("bashgate-exec-");
 		const exec = new ToolExecutor(dir, "primary");
 
 		const result = await exec.execute("run_command", {
@@ -291,7 +294,7 @@ describe("ToolExecutor.execute - bash gate at the production chokepoint", () => 
 	});
 
 	test("redirection to /etc/passwd is [TOOLG8 BLOCKED] as a write_file capability", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "bashgate-exec-"));
+		const dir = tempDir("bashgate-exec-");
 		const exec = new ToolExecutor(dir, "primary");
 
 		// Pre-wiring, this passed the whole-string run_command check AND
@@ -303,7 +306,7 @@ describe("ToolExecutor.execute - bash gate at the production chokepoint", () => 
 	});
 
 	test("zero regression: a benign command still executes end-to-end", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "bashgate-exec-"));
+		const dir = tempDir("bashgate-exec-");
 		const exec = new ToolExecutor(dir, "primary");
 
 		const result = await exec.execute("run_command", { command: "echo bashgate-ok" });
@@ -313,7 +316,7 @@ describe("ToolExecutor.execute - bash gate at the production chokepoint", () => 
 	});
 
 	test("zero regression: a benign redirect inside the workspace still executes", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "bashgate-exec-"));
+		const dir = tempDir("bashgate-exec-");
 		const exec = new ToolExecutor(dir, "primary");
 		const out = join(dir, "out.txt");
 
