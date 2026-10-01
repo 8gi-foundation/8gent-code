@@ -319,6 +319,7 @@ import {
 	normalizeProviderId,
 	declaredModels,
 	pickBestChatModel,
+	planAgentBuild,
 	providerToRuntime,
 	specForActivatedTab,
 } from "./lib/model-selection.js";
@@ -2616,8 +2617,20 @@ export function App({
 				// (CLI / settings) provider instead of silently defaulting to ollama.
 				const runtime = _wantRuntime;
 
+				// auto:free names no real model: resolve it to a live ":free" id,
+				// and stop with the reason rather than run a paid one (#3289).
+				const _plan = await planAgentBuild(currentProvider, currentModel);
+				if (cancelled) return;
+				if (_plan.kind === "wait") {
+					setAgent(null);
+					setAgentReady(false);
+					notify(_initTabId, _plan.notice);
+					retryLater();
+					return;
+				}
+
 				const newAgent = new Agent({
-					model: currentModel,
+					model: _plan.model,
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
@@ -2665,6 +2678,7 @@ export function App({
 						}
 					} catch {}
 				} else {
+					setAgent(null);
 					setAgentReady(false);
 					retryLater();
 					notify(

@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
+- In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.
+
 ### Fixed - the anonymizer masks the running user's identity, not a fixed one (#3283)
 - The owner identity is now read at runtime from the git config and the OS account, then cached on the git config's change time, so a mid-session `git config --global` change is picked up. Account-like names (admin, ubuntu, GitHub Actions) are not treated as a person's name.
 
