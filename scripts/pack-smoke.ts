@@ -11,8 +11,8 @@
  *   2. npm pack                          -> tarball must contain dist/cli.js, dist/tui.js
  *   3. scan the packed bundles           -> no build root, no builder home, no "/Users/<name>/,
  *                                           no hardcoded owner identity (any commit author's
- *                                           full name or email, the builder's profile name,
- *                                           or PACK_SMOKE_OWNER_IDENTITY)
+ *                                           full name or email, the builder's git name/email
+ *                                           and profile name, or PACK_SMOKE_OWNER_IDENTITY)
  *   4. npm install -g --prefix <tmp>     with an isolated HOME and a minimal PATH
  *   5. 8gent --version                   must print this package.json version
  *   6. 8gent tui --no-pet under a pty    must render its first screen (greeting or status bar)
@@ -47,11 +47,10 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+	collectOwnerIdentities,
 	envIdentities,
 	findOwnerIdentity,
 	maskIdentity,
-	profileIdentity,
-	repoAuthorIdentities,
 } from "./lib/owner-identity-scan";
 
 const ROOT = realpathSync(join(import.meta.dir, ".."));
@@ -156,12 +155,15 @@ async function main(): Promise<void> {
 	const home = homedir();
 	// The owner identity is read from the running user at runtime; no real
 	// person's name or email may be baked into a bundle (v0.18.0 shipped one).
-	const ownerIdentities = [
-		...repoAuthorIdentities(ROOT),
-		...profileIdentity(home),
-		...envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY),
-	];
+	const ownerIdentities = collectOwnerIdentities({ root: ROOT, home });
 	check(ownerIdentities.length > 0, "owner-identity scan has identities to look for");
+	// The release job sets this so the gate never rests on who happens to build.
+	if (process.env.PACK_SMOKE_REQUIRE_OWNER_IDENTITY === "1") {
+		check(
+			envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY).length > 0,
+			"PACK_SMOKE_OWNER_IDENTITY is set (repository secret)",
+		);
+	}
 	for (const f of ["dist/cli.js", "dist/tui.js"]) {
 		const p = join(EXTRACT, "package", f);
 		if (!existsSync(p)) continue;

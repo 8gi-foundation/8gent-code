@@ -9,22 +9,29 @@
  *
  * This scan is the release gate for that rule, in the same spirit as the
  * build-path scan in pack-smoke: it collects the real identities that could
- * plausibly be baked in (the repo's commit authors, plus the builder's own
- * profile name, plus anything passed in PACK_SMOKE_OWNER_IDENTITY) and fails if
+ * plausibly be baked in (the repo's commit authors, the builder's git name and
+ * email and profile name, and anything in PACK_SMOKE_OWNER_IDENTITY) and fails if
  * any of them appears as a literal in a bundle. No identity is written here.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** A full name (has whitespace) or an email that is not a no-reply address. */
-export function isScannableIdentity(value: string): boolean {
+/**
+ * A full name (has whitespace) or an email that is not a no-reply address.
+ *
+ * `trusted` values come from the builder's own git config or from
+ * PACK_SMOKE_OWNER_IDENTITY: they name a specific person on purpose, so a
+ * single word (a surname, a handle) of 4+ characters is scanned too, matched
+ * as a whole word. Commit authors are not trusted that way: a single-word
+ * author name ("Claude") is too generic to scan a 25 MB bundle for.
+ */
+export function isScannableIdentity(value: string, trusted = false): boolean {
 	const v = value.trim();
-	if (v.length < 5) return false;
 	if (v.includes("[bot]")) return false;
-	if (v.includes("@")) return !/noreply/i.test(v);
-	// Single words ("Claude", a handle) are too generic to scan a 25 MB bundle for.
-	return /\s/.test(v);
+	if (v.includes("@")) return v.length >= 5 && !/noreply/i.test(v);
+	if (/\s/.test(v)) return v.length >= 5;
+	return trusted && v.length >= 4;
 }
 
 /**
@@ -67,18 +74,57 @@ export function envIdentities(value: string | undefined): string[] {
 	return (value ?? "")
 		.split(",")
 		.map((v) => v.trim())
-		.filter(isScannableIdentity);
+		.filter((v) => isScannableIdentity(v, true));
+}
+
+/**
+ * The building user's git identity (`git config user.name` / `user.email`, as
+ * git resolves them in `root`: local, then global, then system). Run with the
+ * builder's real environment, not the isolated install HOME.
+ */
+export function builderIdentities(root: string, env: NodeJS.ProcessEnv = process.env): string[] {
+	const out: string[] = [];
+	for (const key of ["user.name", "user.email"]) {
+		const r = spawnSync("git", ["config", key], { cwd: root, encoding: "utf-8", env });
+		const v = r.status === 0 ? r.stdout.trim() : "";
+		if (v && isScannableIdentity(v, true)) out.push(v);
+	}
+	return out;
+}
+
+/**
+ * Every identity the release gate scans for: commit authors, the builder's git
+ * identity and profile name, and PACK_SMOKE_OWNER_IDENTITY (set in CI from a
+ * repository secret, so the gate does not depend on who builds).
+ */
+export function collectOwnerIdentities(opts: {
+	root: string;
+	home: string;
+	env?: NodeJS.ProcessEnv;
+}): string[] {
+	const env = opts.env ?? process.env;
+	return [
+		...new Set([
+			...repoAuthorIdentities(opts.root),
+			...builderIdentities(opts.root, env),
+			...profileIdentity(opts.home),
+			...envIdentities(env.PACK_SMOKE_OWNER_IDENTITY),
+		]),
+	];
 }
 
 /**
  * Identities from `identities` that appear in `src`. Emails match
- * case-insensitively; names match exactly.
+ * case-insensitively, full names exactly, single words as whole words.
  */
 export function findOwnerIdentity(src: string, identities: string[]): string[] {
 	const lower = src.toLowerCase();
-	return [...new Set(identities)].filter((id) =>
-		id.includes("@") ? lower.includes(id.toLowerCase()) : src.includes(id),
-	);
+	return [...new Set(identities)].filter((id) => {
+		if (id.includes("@")) return lower.includes(id.toLowerCase());
+		if (/\s/.test(id)) return src.includes(id);
+		// A single word (surname, handle): whole-word only.
+		return new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(id)}(?![A-Za-z0-9_])`).test(src);
+	});
 }
 
 /** Mask an identity for logs: keep two characters, hide the rest. */
@@ -86,4 +132,8 @@ export function maskIdentity(value: string): string {
 	const at = value.indexOf("@");
 	if (at > 0) return `${value.slice(0, 2)}***@${value.slice(at + 1)}`;
 	return `${value.slice(0, 2)}***`;
+}
+
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

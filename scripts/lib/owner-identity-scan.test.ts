@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	builderIdentities,
+	collectOwnerIdentities,
 	envIdentities,
 	findOwnerIdentity,
 	identitiesFromAuthorLog,
@@ -58,5 +63,51 @@ describe("owner-identity scan - the shipped anonymizer", () => {
 		expect(built.success).toBe(true);
 		const src = await built.outputs[0].text();
 		expect(findOwnerIdentity(src, identities).map(maskIdentity)).toEqual([]);
+	});
+});
+
+describe("owner-identity scan - identities that are not commit authors", () => {
+	// A bundle that hardcodes only an email (as v0.18.0 did) or only a surname.
+	const BUNDLE = `var OWNER = [{ value: "ada.quill@example.test", type: "EMAIL" }], T = ["Quill"];`;
+	const isolatedGit = (home: string): NodeJS.ProcessEnv => ({
+		...process.env,
+		HOME: home,
+		GIT_CONFIG_GLOBAL: join(home, "none.gitconfig"),
+		GIT_CONFIG_NOSYSTEM: "1",
+		PACK_SMOKE_OWNER_IDENTITY: "",
+	});
+
+	test("an email-only identity from PACK_SMOKE_OWNER_IDENTITY is caught", () => {
+		const home = mkdtempSync(join(tmpdir(), "8gent-owner-scan-"));
+		try {
+			expect(repoAuthorIdentities(ROOT)).not.toContain("ada.quill@example.test");
+			const env = { ...isolatedGit(home), PACK_SMOKE_OWNER_IDENTITY: "ada.quill@example.test" };
+			const ids = collectOwnerIdentities({ root: ROOT, home, env });
+			expect(findOwnerIdentity(BUNDLE, ids)).toEqual(["ada.quill@example.test"]);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("a bare surname from PACK_SMOKE_OWNER_IDENTITY is caught as a whole word only", () => {
+		const ids = envIdentities("Quill");
+		expect(findOwnerIdentity(BUNDLE, ids)).toEqual(["Quill"]);
+		expect(findOwnerIdentity(`var q = "Quillon";`, ids)).toEqual([]);
+	});
+
+	test("the building user's git email and name are scanned", () => {
+		const repo = mkdtempSync(join(tmpdir(), "8gent-owner-scan-repo-"));
+		try {
+			const env = isolatedGit(repo);
+			spawnSync("git", ["init", "-q"], { cwd: repo, env });
+			spawnSync("git", ["config", "user.email", "ada.quill@example.test"], { cwd: repo, env });
+			spawnSync("git", ["config", "user.name", "Quill"], { cwd: repo, env });
+			expect(builderIdentities(repo, env).sort()).toEqual(["Quill", "ada.quill@example.test"]);
+			// The repo has no commits, so neither value is a commit author.
+			const ids = collectOwnerIdentities({ root: repo, home: repo, env });
+			expect(findOwnerIdentity(BUNDLE, ids).sort()).toEqual(["Quill", "ada.quill@example.test"]);
+		} finally {
+			rmSync(repo, { recursive: true, force: true });
+		}
 	});
 });
