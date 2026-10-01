@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isOpenByThisProcess } from "../core/open-files";
-import { SqliteDatabase } from "../core/sqlite";
+import { SqliteDatabase, reclaimSweep } from "../core/sqlite";
 import { createSharedMemoryBus } from "./bus.js";
 import { recallPriorSessionsSync, writeSessionToKG } from "./session-kg.js";
 import { MemoryStore } from "./store.js";
@@ -66,14 +66,43 @@ describe("memory databases release their files on close", () => {
 		store.getStats();
 		store.get("no-such-id");
 		expect(isOpenByThisProcess(file)).toBe(true);
-		// Let the GC reclaim the per-call statements without sweeping them,
-		// as it does when other suites share the process (windows-latest).
+		// Let the GC reclaim any per-call statement without sweeping it, as it
+		// does when other suites share the process (windows-latest).
 		await Bun.sleep(1);
 		Bun.gc(false);
 
 		store.close();
 
 		expectReleased(file);
+	});
+
+	test("MemoryStore never needs the Windows GC sweep to release its file", async () => {
+		// MemoryStore runs every query through db.cached(), so close() must
+		// release the file with the sweep switched off. A per-call prepare()
+		// (the sqlite-vec version probe was one) shows up only under a large
+		// heap and over a few rounds, as in a full test run: a small heap
+		// sweeps eagerly and hides it.
+		const savedSweep = reclaimSweep.enabled;
+		reclaimSweep.enabled = false;
+		const ballast = Array.from({ length: 300_000 }, (_, i) => ({ i, s: `b${i}` }));
+		const leaked: number[] = [];
+		try {
+			const root = tempDir();
+			for (let round = 0; round < 10; round++) {
+				const file = path.join(root, `memory-${round}.db`);
+				const store = new MemoryStore(file);
+				store.getStats();
+				store.get("no-such-id");
+				await Bun.sleep(1);
+				Bun.gc(false);
+				store.close();
+				if ([file, `${file}-wal`, `${file}-shm`].some(isOpenByThisProcess)) leaked.push(round);
+			}
+		} finally {
+			reclaimSweep.enabled = savedSweep;
+		}
+		expect(leaked).toEqual([]);
+		expect(ballast.length).toBe(300_000);
 	});
 
 	test("SharedMemoryBus.close() releases the store and its own statements", () => {

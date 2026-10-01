@@ -9,6 +9,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - closing a database releases its file, so Windows can delete it (#2986, #3275)
+- bun's `Database.close()` left the `.db`, `-wal` and `-shm` files open while any prepared statement was unfinalized. Linux and macOS allow deleting an open file. Windows does not, so cleanup, rotation and uninstall failed with EBUSY. That caused 77 of the 252 failures on windows-latest.
+- `SqliteDatabase` (`packages/core/sqlite.ts`) finalizes what it prepared when it closes. `cached(sql)` reuses one statement per SQL text, and `MemoryStore` now runs every query through it, so its file is released without any garbage collection. The sqlite-vec version probe uses `query()` for the same reason.
+- Windows only: a statement the collector has reclaimed but not yet swept still holds the file. When there is one, `close()` runs a full collection, at most once every 3 s per process. The collection is skipped on Linux and macOS, where the open file harms nothing.
+- The memory, evolution, capability-audit, audit, decision-audit, Table, board-plane (task queue, memory bridge, audit log), workspace, design-systems and computer-use-trace stores use `SqliteDatabase`. A guard test fails when product code constructs a raw `bun:sqlite` Database.
+
 ### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
 - In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.
 

@@ -9,7 +9,8 @@
  * Follows the SQLite patterns from packages/memory/store.ts.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { SqliteDatabase } from "../core/sqlite";
 import type {
 	AccessEvent,
 	AccessOperation,
@@ -60,7 +61,7 @@ export class AccessAuditStore {
 	private db: Database;
 
 	constructor(dbPath: string) {
-		this.db = new Database(dbPath, { create: true });
+		this.db = new SqliteDatabase(dbPath, { create: true });
 		try {
 			this.db.exec("PRAGMA journal_mode = WAL");
 			this.db.exec("PRAGMA synchronous = NORMAL");

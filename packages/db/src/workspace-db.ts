@@ -8,9 +8,10 @@
  * state, replacing the @8gent/memory store. This is workspace-local glue.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { SqliteDatabase } from "../../core/sqlite";
 import { applyMigrations, currentSchemaVersion, targetSchemaVersion } from "./migrations.js";
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ export class WorkspaceDb {
 			fs.mkdirSync(parentDir, { recursive: true });
 		}
 
-		this.db = new Database(this.path, {
+		this.db = new SqliteDatabase(this.path, {
 			create: !options.readonly,
 			readonly: options.readonly ?? false,
 		});

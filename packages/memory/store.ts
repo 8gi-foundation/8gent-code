@@ -182,7 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_versions_memory ON memory_versions(memory_id, ver
 // ── MemoryStore ───────────────────────────────────────────────────────
 
 export class MemoryStore {
-	db: Database;
+	db: SqliteDatabase;
 	private embeddingProvider: EmbeddingProvider | null;
 	private vecLoaded = false;
 	private vecTableDimensions: number | null = null;
@@ -298,18 +298,18 @@ export class MemoryStore {
 	 */
 	private _backfillVecTable(dimensions: number): void {
 		const vecCount = (
-			this.db.prepare("SELECT COUNT(*) AS c FROM memories_vec").get() as { c: number }
+			this.db.cached("SELECT COUNT(*) AS c FROM memories_vec").get() as { c: number }
 		).c;
 		if (vecCount > 0) return;
 
 		const rows = this.db
-			.prepare(
+			.cached(
 				"SELECT memory_id, vector FROM embeddings WHERE dimensions = ?",
 			)
 			.all(dimensions) as Array<{ memory_id: string; vector: Buffer }>;
 		if (rows.length === 0) return;
 
-		const insert = this.db.prepare(
+		const insert = this.db.cached(
 			"INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)",
 		);
 		const txn = this.db.transaction(() => {
@@ -343,7 +343,7 @@ export class MemoryStore {
 		const tags = extractTags(memory);
 		const data = safeJsonStringify(memory);
 
-		const stmt = this.db.prepare(`
+		const stmt = this.db.cached(`
       INSERT INTO memories (id, type, scope, data, content_text, tags, importance, decay_factor,
         access_count, last_accessed, confidence, evidence_count, version, source, source_id,
         created_at, updated_at)
@@ -402,14 +402,14 @@ export class MemoryStore {
 	get(id: string, includeDeleted = false): Memory | null {
 		const where = includeDeleted ? "" : "AND deleted_at IS NULL";
 		const row = this.db
-			.prepare(`SELECT data, access_count FROM memories WHERE id = ? ${where}`)
+			.cached(`SELECT data, access_count FROM memories WHERE id = ? ${where}`)
 			.get(id) as { data: string; access_count: number } | null;
 
 		if (!row) return null;
 
 		// Bump access count
 		this.db
-			.prepare(
+			.cached(
 				"UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
 			)
 			.run(Date.now(), id);
@@ -457,7 +457,7 @@ export class MemoryStore {
 		results.sort((a, b) => b.score - a.score);
 
 		// Bump access counts and retrieval tracking for returned results
-		const updateStmt = this.db.prepare(
+		const updateStmt = this.db.cached(
 			`UPDATE memories SET access_count = access_count + 1, last_accessed = ?,
        retrieval_count = COALESCE(retrieval_count, 0) + 1, last_retrieved_at = ? WHERE id = ?`,
 		);
@@ -476,7 +476,7 @@ export class MemoryStore {
 	 */
 	update(id: string, updates: Partial<Memory>, reason: string, changedBy: string): boolean {
 		const row = this.db
-			.prepare("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
+			.cached("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
 			.get(id) as { data: string; version: number } | null;
 
 		if (!row) return false;
@@ -486,7 +486,7 @@ export class MemoryStore {
 
 		// Create version snapshot
 		this.db
-			.prepare(
+			.cached(
 				`INSERT INTO memory_versions (id, memory_id, version, data_snapshot, changed_by, change_reason, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			)
@@ -503,7 +503,7 @@ export class MemoryStore {
 		const tags = extractTags(merged as Memory);
 
 		this.db
-			.prepare(
+			.cached(
 				`UPDATE memories SET data = ?, content_text = ?, tags = ?, importance = ?,
          confidence = ?, evidence_count = ?, version = ?, updated_at = ? WHERE id = ?`,
 			)
@@ -535,7 +535,7 @@ export class MemoryStore {
 	 */
 	forget(id: string, reason?: string): boolean {
 		const row = this.db
-			.prepare("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
+			.cached("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
 			.get(id) as { data: string; version: number } | null;
 
 		if (!row) return false;
@@ -544,7 +544,7 @@ export class MemoryStore {
 
 		// Create version snapshot before deletion
 		this.db
-			.prepare(
+			.cached(
 				`INSERT INTO memory_versions (id, memory_id, version, data_snapshot, changed_by, change_reason, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			)
@@ -552,7 +552,7 @@ export class MemoryStore {
 
 		// Soft delete
 		this.db
-			.prepare("UPDATE memories SET deleted_at = ?, updated_at = ? WHERE id = ?")
+			.cached("UPDATE memories SET deleted_at = ?, updated_at = ? WHERE id = ?")
 			.run(now, now, id);
 
 		return true;
@@ -568,7 +568,7 @@ export class MemoryStore {
 		// Atomic upsert via ON CONFLICT -- race-condition-safe.
 		// UNIQUE(type, name) constraint guarantees one row per (type, name).
 		this.db
-			.prepare(
+			.cached(
 				`INSERT INTO entities
            (id, type, name, description, metadata, first_seen, last_seen, mention_count, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -601,14 +601,14 @@ export class MemoryStore {
 		// Return the actual row ID (may differ from `id` on conflict).
 		// Row is guaranteed to exist because we just INSERTed (or updated on conflict).
 		const row = this.db
-			.prepare("SELECT id FROM entities WHERE type = ? AND name = ?")
+			.cached("SELECT id FROM entities WHERE type = ? AND name = ?")
 			.get(entity.type, entity.name) as { id: string } | null;
 
 		return row?.id ?? id;
 	}
 
 	getEntity(id: string): Entity | null {
-		const row = this.db.prepare("SELECT * FROM entities WHERE id = ?").get(id) as Record<
+		const row = this.db.cached("SELECT * FROM entities WHERE id = ?").get(id) as Record<
 			string,
 			unknown
 		> | null;
@@ -635,7 +635,7 @@ export class MemoryStore {
 		sql += " ORDER BY mention_count DESC LIMIT ?";
 		params.push(query.limit ?? 20);
 
-		return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(rowToEntity);
+		return (this.db.cached(sql).all(...params) as Record<string, unknown>[]).map(rowToEntity);
 	}
 
 	addRelationship(rel: Omit<Relationship, "id" | "createdAt" | "updatedAt">): string {
@@ -643,7 +643,7 @@ export class MemoryStore {
 		const now = Date.now();
 
 		this.db
-			.prepare(
+			.cached(
 				`INSERT OR REPLACE INTO relationships (id, source_id, target_id, type, strength, metadata, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
@@ -679,7 +679,7 @@ export class MemoryStore {
 			params.push(entityId, entityId);
 		}
 
-		return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(
+		return (this.db.cached(sql).all(...params) as Record<string, unknown>[]).map(
 			rowToRelationship,
 		);
 	}
@@ -687,14 +687,14 @@ export class MemoryStore {
 	linkEntityToMemory(entityId: string, memoryId: string, context?: string): void {
 		const now = Date.now();
 		this.db
-			.prepare(
+			.cached(
 				"INSERT OR IGNORE INTO entity_mentions (entity_id, memory_id, context, created_at) VALUES (?, ?, ?, ?)",
 			)
 			.run(entityId, memoryId, context || null, now);
 
 		// Bump entity mention count and last_seen
 		this.db
-			.prepare(
+			.cached(
 				"UPDATE entities SET mention_count = mention_count + 1, last_seen = ?, updated_at = ? WHERE id = ?",
 			)
 			.run(now, now, entityId);
@@ -709,7 +709,7 @@ export class MemoryStore {
 	 */
 	trackSuccess(memoryIds: string[]): void {
 		if (memoryIds.length === 0) return;
-		const stmt = this.db.prepare(
+		const stmt = this.db.cached(
 			`UPDATE memories SET contributed_to_success = COALESCE(contributed_to_success, 0) + 1,
        updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		);
@@ -728,7 +728,7 @@ export class MemoryStore {
 	searchByUser(userId: string, options?: { limit?: number }): Memory[] {
 		const limit = options?.limit ?? 20;
 		const rows = this.db
-			.prepare(
+			.cached(
 				`SELECT data FROM memories
          WHERE deleted_at IS NULL
            AND json_extract(data, '$.userId') = ?
@@ -751,7 +751,7 @@ export class MemoryStore {
 		embeddingsCount: number;
 	} {
 		const total = (
-			this.db.prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL").get() as {
+			this.db.cached("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL").get() as {
 				c: number;
 			}
 		).c;
@@ -764,7 +764,7 @@ export class MemoryStore {
 			working: 0,
 		};
 		const typeRows = this.db
-			.prepare("SELECT type, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY type")
+			.cached("SELECT type, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY type")
 			.all() as Array<{ type: string; c: number }>;
 		for (const r of typeRows) byType[r.type] = r.c;
 
@@ -774,22 +774,22 @@ export class MemoryStore {
 			global: 0,
 		};
 		const scopeRows = this.db
-			.prepare("SELECT scope, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY scope")
+			.cached("SELECT scope, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY scope")
 			.all() as Array<{ scope: string; c: number }>;
 		for (const r of scopeRows) byScope[r.scope] = r.c;
 
 		const entities = (
-			this.db.prepare("SELECT COUNT(*) as c FROM entities").get() as {
+			this.db.cached("SELECT COUNT(*) as c FROM entities").get() as {
 				c: number;
 			}
 		).c;
 		const relationships = (
-			this.db.prepare("SELECT COUNT(*) as c FROM relationships").get() as {
+			this.db.cached("SELECT COUNT(*) as c FROM relationships").get() as {
 				c: number;
 			}
 		).c;
 		const embeddingsCount = (
-			this.db.prepare("SELECT COUNT(*) as c FROM embeddings").get() as {
+			this.db.cached("SELECT COUNT(*) as c FROM embeddings").get() as {
 				c: number;
 			}
 		).c;
@@ -859,7 +859,7 @@ export class MemoryStore {
 		params.push((options.limit ?? 10) * 2); // Fetch extra for fusion
 
 		try {
-			const rows = this.db.prepare(sql).all(...params) as Array<{
+			const rows = this.db.cached(sql).all(...params) as Array<{
 				id: string;
 				data: string;
 				rank: number;
@@ -941,7 +941,7 @@ export class MemoryStore {
 			importance: number;
 		}>;
 		try {
-			rows = this.db.prepare(sql).all(...params) as typeof rows;
+			rows = this.db.cached(sql).all(...params) as typeof rows;
 		} catch (err) {
 			// MATCH on an empty / mis-indexed vec0 table can throw — fall back to JS.
 			console.warn("[memory] sqlite-vec query failed, falling back:", (err as Error).message);
@@ -990,7 +990,7 @@ export class MemoryStore {
 			params.push(options.minImportance);
 		}
 
-		const rows = this.db.prepare(sql).all(...params) as Array<{
+		const rows = this.db.cached(sql).all(...params) as Array<{
 			memory_id: string;
 			vector: Buffer;
 			data: string;
@@ -1079,7 +1079,7 @@ export class MemoryStore {
 		const buffer = encodeVector(embedding);
 
 		this.db
-			.prepare(
+			.cached(
 				`INSERT OR REPLACE INTO embeddings (memory_id, model, dimensions, vector, created_at)
          VALUES (?, ?, ?, ?, ?)`,
 			)
@@ -1098,9 +1098,9 @@ export class MemoryStore {
 		}
 		if (this.hasNativeVectorSearch()) {
 			try {
-				this.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(memoryId);
+				this.db.cached("DELETE FROM memories_vec WHERE memory_id = ?").run(memoryId);
 				this.db
-					.prepare("INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)")
+					.cached("INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)")
 					.run(memoryId, buffer);
 			} catch (err) {
 				console.warn("[memory] vec0 upsert failed:", (err as Error).message);

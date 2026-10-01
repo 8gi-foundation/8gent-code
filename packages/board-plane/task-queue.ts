@@ -5,7 +5,8 @@
  * assign, complete, fail, stale recovery, and stats.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { SqliteDatabase } from "../core/sqlite";
 import type { BoardTask } from "./types";
 
 type TaskInsert = Omit<
@@ -17,7 +18,7 @@ export class TaskQueue {
 	private db: Database;
 
 	constructor(dbPath: string) {
-		this.db = new Database(dbPath, { create: true });
+		this.db = new SqliteDatabase(dbPath, { create: true });
 		this.db.exec("PRAGMA journal_mode=WAL");
 		this.db.exec("PRAGMA busy_timeout=5000");
 		this.init();

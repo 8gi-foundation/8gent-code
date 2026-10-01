@@ -1,6 +1,7 @@
 /** Computer-use trace capture (Phase 4). Local-only; not synced. 8gi:200-exempt */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { SqliteDatabase } from "../core/sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -85,7 +86,7 @@ export class ComputerUseTraceStore {
 	readonly tracesDir: string;
 
 	constructor(dbPath: string, options?: { tracesDir?: string }) {
-		this.db = new Database(dbPath, { create: true });
+		this.db = new SqliteDatabase(dbPath, { create: true });
 		try {
 			this.db.exec("PRAGMA journal_mode = WAL");
 			this.db.exec("PRAGMA foreign_keys = ON");

@@ -1,3 +1,9 @@
+/**
+ * TEST SUPPORT ONLY. Nothing in product code may import this module: it
+ * shells out to lsof on macOS, renames files on Windows and blocks the thread
+ * while retrying. It lives in packages/core so tests in every package can
+ * reach it with a relative import.
+ */
 import * as fs from "node:fs";
 
 /**
@@ -11,6 +17,10 @@ import * as fs from "node:fs";
  *   linux:  scan /proc/self/fd
  *   darwin: lsof on our own pid
  *   win32:  try to rename the file away and back (fails while it is open)
+ *
+ * The Windows probe cannot tell whose handle it is: a file held open by ANY
+ * process (an antivirus scan, another test worker) reads as open. On Linux
+ * and macOS the answer is about this process only.
  */
 export function isOpenByThisProcess(file: string): boolean {
 	if (!fs.existsSync(file)) return false;
@@ -23,7 +33,13 @@ export function isOpenByThisProcess(file: string): boolean {
 		} catch {
 			return true;
 		}
-		fs.renameSync(probe, file);
+		try {
+			fs.renameSync(probe, file);
+		} catch (err) {
+			// Something grabbed the original name in between. Say so loudly:
+			// the file now lives at the probe path.
+			throw new Error(`isOpenByThisProcess: could not rename ${probe} back to ${file}: ${err}`);
+		}
 		return false;
 	}
 
@@ -49,19 +65,25 @@ export function isOpenByThisProcess(file: string): boolean {
  * for about 100 ms after every handle in this process is closed (the probe
  * above finds no open file in it, and a retry 100 ms later succeeds). Linux
  * and macOS never hit this. bun's rmSync ignores maxRetries, so the retry is
- * done here: up to `timeoutMs`, only for EBUSY, EPERM and ENOTEMPTY, and the
- * last error is rethrown so a lock that does not clear still fails the test.
+ * done here: up to `timeoutMs`, only for EBUSY, ENOTEMPTY and (on Windows)
+ * EPERM. The last error is rethrown, so a lock that does not clear still
+ * fails the test.
  */
 export function removeWhenReleased(target: string, timeoutMs = 3000): void {
-	const deadline = Date.now() + timeoutMs;
+	const deadline = performance.now() + timeoutMs;
 	for (;;) {
 		try {
 			fs.rmSync(target, { recursive: true, force: true });
 			return;
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException).code;
-			const transient = code === "EBUSY" || code === "EPERM" || code === "ENOTEMPTY";
-			if (!transient || Date.now() >= deadline) throw err;
+			// EPERM is how Windows reports a pending delete; elsewhere it is a
+			// real permission error and must fail at once.
+			const transient =
+				code === "EBUSY" ||
+				code === "ENOTEMPTY" ||
+				(code === "EPERM" && process.platform === "win32");
+			if (!transient || performance.now() >= deadline) throw err;
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 		}
 	}

@@ -66,9 +66,9 @@ export type VecLoadResult =
 export function loadSqliteVec(db: Database): VecLoadResult {
 	try {
 		sqliteVec.load(db);
-		const row = db
-			.prepare("SELECT vec_version() AS version")
-			.get() as { version: string } | null;
+		// query(), not prepare(): bun caches it and finalizes it on close(), so
+		// this probe never holds the database file open after the store closes.
+		const row = db.query("SELECT vec_version() AS version").get() as { version: string } | null;
 		return { ok: true, version: row?.version ?? "unknown" };
 	} catch (err) {
 		return { ok: false, reason: (err as Error).message };
