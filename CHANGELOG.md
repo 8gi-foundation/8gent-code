@@ -9,6 +9,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-01
+
+### Fixed - npm install works on a bare machine (#3259, #3256)
+- `npm install -g @8gi-foundation/8gent-code` no longer fails on a Linux box without Python or a compiler. `node-pty` and the tree-sitter packages are optional dependencies, so a failed native build is skipped instead of aborting the install. `dist/pty-bridge.cjs` now ships in the package, and without `node-pty` a terminal tab says how to install the build tools instead of crashing. CI installs every candidate package in a clean `node:22-bookworm-slim` container with install scripts on.
+
+### Fixed - web_fetch only reaches the public internet (#3255, #3233)
+- `web_fetch` refuses loopback, private, link-local, CGNAT and cloud metadata addresses (IPv4 and IPv6, including mapped forms), pins each connection to the address it checked, and re-checks every redirect hop (at most 5). A host whose DNS answers mix public and private addresses is refused.
+
+### Fixed - the system prompt and tool list stay byte-stable (#3258, #3222)
+- Memories, prior sessions, self-appended context and voice mode now travel as a context message after the system prompt, and tool loading is append-only, so a local model can reuse its prompt cache. On qwen3.5:9b-32k the second turn's prefill went from 2.4 s to 0.56 s.
+
+### Fixed - harness notes reach the model (#3262, #3260)
+- Vision descriptions, proactive questions and pre-tool-router prefetches were added as extra system messages and then filtered out before every model call. They now reach the model as context messages.
+
+### Fixed - Linux CI builds no longer fail on the container path (#3257)
+- The build-path check matches a build root only at a path boundary, so `/work` no longer matches `/workspace` inside bundled dependencies.
+
 ### Changed - an agent can remove its own scratch files without the System One judge (#3177)
 - A plain `rm -f` of files the same agent created this session (with `write_file`, or a `>` / `>>` redirect in `run_command`), untracked by git and inside the workspace, no longer goes to the judge. The pilot's `bun test > bunout.txt` then `rm -f bunout.txt` now passes System One. Files it only modified, files another tab made, tracked files, `rm -r` and globs are judged as before. The record is in memory, per agent.
 
