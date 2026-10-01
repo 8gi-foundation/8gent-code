@@ -7,6 +7,7 @@
  */
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
+import { harnessNote } from "./context-note";
 
 export interface CompactionConfig {
 	enabled: boolean;
@@ -164,9 +165,11 @@ export class CompactionEngine {
 		const fullSummary = `${summary}\n\n${this.fileTracker.getSummary()}`;
 		this.previousSummary = fullSummary;
 
+		// A harness note, not a system message: request builders send only the
+		// first system message, so a second one never reached the model (#3263).
 		const summaryMsg: Message = {
-			role: "system",
-			content: `[Context Compaction Summary]\n\n${fullSummary}`,
+			role: "user",
+			content: harnessNote(`[Context Compaction Summary]\n\n${fullSummary}`),
 		};
 		const compactedMessages = [systemMsg, summaryMsg, ...toKeep];
 		const tokensAfter = estimateMessageTokens(compactedMessages);
@@ -385,9 +388,12 @@ export class ProactiveCompression extends CompactionEngine {
 		const fullSummary = `${historySummary}\n\n## Key Questions\n${questions}\n\n## Synthesized Answers\n${answers}`;
 		const tracker = this.getFileTracker();
 
+		// A harness note, not a system message (#3263): see compact().
 		const summaryMsg: Message = {
-			role: "system",
-			content: `[Proactive Compression: Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+			role: "user",
+			content: harnessNote(
+				`[Proactive Compression: Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+			),
 		};
 
 		const compacted = [systemMsg, summaryMsg, ...recent];

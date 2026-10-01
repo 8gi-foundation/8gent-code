@@ -131,7 +131,7 @@ describe("TwoStageCompactor — acceptance criteria for #2467", () => {
 		expect(result.action).toBe("compact");
 		// 1 system + 1 summary + keepLastN tail
 		expect(state.messages.length).toBe(2 + keepLastN);
-		expect(state.messages[1].role).toBe("system");
+		expect(state.messages[1].role).toBe("user");
 		expect(state.messages[1].content).toContain("SUMMARY");
 	});
 
@@ -253,7 +253,7 @@ describe("TwoStageCompactor — acceptance criteria for #2467", () => {
 		state.messages[1] = makeMessage("user", Math.floor(ctx * 0.85), "B");
 		const r2 = await compactor.observe(state);
 		expect(r2.action).toBe("compact");
-		expect(state.messages[1].role).toBe("system");
+		expect(state.messages[1].role).toBe("user");
 		expect(state.messages[1].content).toContain("SUMMARY");
 	});
 });
