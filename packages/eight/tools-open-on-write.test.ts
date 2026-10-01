@@ -43,19 +43,25 @@ const { ToolExecutor } = await import("./tools");
 const { decideOpenOnWrite, isDocumentMarkdown } = await import("./open-on-write");
 
 const realPlatform = process.platform;
-const realTTY = process.stdout.isTTY;
+// Save the descriptor, not the value: on a non-TTY stdout (CI) isTTY has no
+// own property, and defineProperty would create a non-writable one that makes
+// a later plain assignment in another test file throw (#3287).
+const realTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+const setStdoutTTY = (value: boolean) =>
+	Object.defineProperty(process.stdout, "isTTY", { value, writable: true, configurable: true });
 const realNoOpen = process.env.EIGHT_NO_OPEN;
 
 beforeEach(() => {
 	fs.rmSync(openLog, { force: true });
 	// An interactive macOS session: the only place opening is allowed at all.
 	Object.defineProperty(process, "platform", { value: "darwin" });
-	Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+	setStdoutTTY(true);
 	delete process.env.EIGHT_NO_OPEN;
 });
 afterEach(() => {
 	Object.defineProperty(process, "platform", { value: realPlatform });
-	Object.defineProperty(process.stdout, "isTTY", { value: realTTY, configurable: true });
+	if (realTTY) Object.defineProperty(process.stdout, "isTTY", realTTY);
+	else Reflect.deleteProperty(process.stdout, "isTTY");
 	if (realNoOpen === undefined) delete process.env.EIGHT_NO_OPEN;
 	else process.env.EIGHT_NO_OPEN = realNoOpen;
 });
@@ -117,9 +123,9 @@ describe("write_file opens only deliverables (#3107)", () => {
 	});
 
 	test("never when not interactive: no TTY, or EIGHT_NO_OPEN=1", async () => {
-		Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+		setStdoutTTY(false);
 		await new ToolExecutor(workdir()).execute("write_file", { path: "a.pdf", content: "%PDF" });
-		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+		setStdoutTTY(true);
 		process.env.EIGHT_NO_OPEN = "1";
 		const out = await new ToolExecutor(workdir()).execute("write_file", { path: "a.png", content: "x" });
 		expect(out).toStartWith("File written: ");
