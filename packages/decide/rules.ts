@@ -401,7 +401,8 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 
 /**
  * POSIX shell-word split (quotes removed, backslash escapes applied, `#`
- * comments dropped). Returns null on an unclosed quote or trailing escape.
+ * comments dropped: only a `#` at the start of a word starts one, #3303).
+ * Returns null on an unclosed quote or trailing escape.
  */
 export function shellWords(s: string): string[] | null {
 	const out: string[] = [];
@@ -415,15 +416,17 @@ export function shellWords(s: string): string[] | null {
 			tok = "";
 			has = false;
 			i++;
-		} else if (c === "#") {
-			if (has) out.push(tok);
-			tok = "";
-			has = false;
+		} else if (c === "#" && !has) {
+			// POSIX: `#` starts a comment only at the beginning of a word.
+			// Mid-word (`a#b`) it is an ordinary character (#3303).
 			while (i < s.length && s[i] !== "\n") i++;
 		} else if (c === "\\") {
 			if (i + 1 >= s.length) return null;
-			tok += s[i + 1];
-			has = true;
+			// Backslash-newline is a line continuation: both vanish.
+			if (s[i + 1] !== "\n") {
+				tok += s[i + 1];
+				has = true;
+			}
 			i += 2;
 		} else if (c === "'") {
 			const j = s.indexOf("'", i + 1);
@@ -444,7 +447,8 @@ export function shellWords(s: string): string[] | null {
 				if (d === "\\") {
 					if (i + 1 >= s.length) return null;
 					const e = s[i + 1];
-					tok += e === '"' || e === "\\" ? e : `\\${e}`;
+					// Inside double quotes a backslash escapes only $ ` " \ and newline.
+					if (e !== "\n") tok += e === '"' || e === "\\" || e === "$" || e === "`" ? e : `\\${e}`;
 					i += 2;
 					continue;
 				}

@@ -15,6 +15,9 @@
  *   - decideRules says pass and there is no prompt-control text;
  *   - no command, process or arithmetic substitution, backtick, heredoc or
  *     unquoted `$` expansion other than `$?`;
+ *   - no unquoted glob character (`*`, `?`, `[`) and no brace expansion
+ *     (`{a,b}`, `{1..3}`): sh expands them, so the argv that runs is not the
+ *     one read here (#3303);
  *   - every redirect goes to /dev/null, a temp path or another fd, never a file;
  *   - every segment is a bare read-only binary (READ_ONLY_BINS, with the
  *     per-binary argument checks below), `cd`, a read-only git subcommand, an
@@ -173,6 +176,12 @@ export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}):
 		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
 		if (/\$\(|`|<\(|>\(|<<|\$\[/.test(command)) return none("has a substitution or heredoc");
 		if (/\$(?!\?)/.test(maskQuotes(command))) return none("has an unquoted $ expansion");
+		// sh expands these before the binary sees its argv, so the words read
+		// here are not the words that run: a glob can match a planted file
+		// named like a flag, a brace can produce one (#3303).
+		const bare = maskQuotes(command).replace(/\$\?/g, "");
+		if (/[*?[]/.test(bare)) return none("has an unquoted glob");
+		if (/\{[^{}]*(,|\.\.)[^{}]*\}/.test(bare)) return none("has a brace expansion");
 		const { segs, subs } = splitSegments(command);
 		if (subs.length) return none("has a substitution");
 		for (const { text } of segs) {

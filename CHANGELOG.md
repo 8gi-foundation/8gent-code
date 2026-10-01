@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security - System One parses words the way sh does (#3303)
+- The shell-word parser treated a `#` anywhere in a word as the start of a comment. POSIX sh, which runs the agent's commands, only does that at the start of a word. Anything after a mid-word `#` was invisible to the rules and the read-only allowlist but still ran, so a `find` with `-delete` or a `git log` with an output-file flag could skip the judge. The parser now starts a comment only at a word boundary, removes backslash-newline continuations, and unescapes `\$` and `` \` `` inside double quotes, as sh does. A parity test compares its words with the argv `sh -c` produces over a corpus of tricky inputs.
+- Defence in depth: the read-only allowlist now has no opinion (the judge decides) on any command with an unquoted glob (`*`, `?`, `[`) or brace expansion (`{a,b}`, `{1..3}`), because sh expands them before the program sees its arguments and a planted file can turn into a flag. Quoted or escaped glob characters and `$?` still pass.
+
 ### Fixed - the test suite no longer leaves temp folders behind (#3285)
 - Test suites left about 24k folders and 11 GB in the OS temp folder, which pushed the Mac CI runner below its disk floor. A test run now keeps its temp files in one `8gent-test-tmp-<pid>-*` folder (TMPDIR, TEMP and TMP all point there, so Windows is covered too) and removes it afterwards. Folders left by an interrupted run are swept on the next run once their process is gone and they are 6 hours old. The 11 test files behind the biggest leaks make their temp folders with `tempDir()` from `tests/temp-dirs.ts` and clean them up, and the run fails if one of them leaks again. Other leftovers are listed in a `[temp-dirs]` line. `tests/preload-temp-dirs.test.ts` tests the guard and runs as part of `bun run test`.
 
