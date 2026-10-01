@@ -12,6 +12,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed - the test suite no longer leaves temp folders behind (#3285)
 - Test suites left about 24k folders and 11 GB in the OS temp folder, which pushed the Mac CI runner below its disk floor. A test run now keeps its temp files in one `8gent-test-tmp-<pid>-*` folder (TMPDIR, TEMP and TMP all point there, so Windows is covered too) and removes it afterwards. Folders left by an interrupted run are swept on the next run once their process is gone and they are 6 hours old. The 11 test files behind the biggest leaks make their temp folders with `tempDir()` from `tests/temp-dirs.ts` and clean them up, and the run fails if one of them leaks again. Other leftovers are listed in a `[temp-dirs]` line. `tests/preload-temp-dirs.test.ts` tests the guard and runs as part of `bun run test`.
 
+### Fixed - the anonymizer masks the running user's identity, not a fixed one (#3283)
+- The owner identity is now read at runtime from the git config and the OS account, then cached on the git config's change time, so a mid-session `git config --global` change is picked up. Account-like names (admin, ubuntu, GitHub Actions) are not treated as a person's name.
+
 ### Fixed - CI Validate is green on GitHub-hosted ubuntu again (#3287, #3288)
 - The type-check and lint errors on main are fixed. The Validate job now installs ripgrep before the Test step: the `locate` tool runs `rg`, and the ubuntu runner does not have it, which broke 16 locate tests. Without rg, `locate` still says so in its answer, and that path keeps its own tests. `tools-open-on-write.test.ts` now restores `process.stdout.isTTY` to its original descriptor. Before, it left behind a read-only copy on a non-TTY stdout, so `auto-tune.test.ts` failed 15 tests whenever it ran later in the same process.
 

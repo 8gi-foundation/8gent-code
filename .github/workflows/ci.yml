@@ -74,6 +74,10 @@ jobs:
 
       - name: npm pack-and-install smoke
         run: bun scripts/pack-smoke.ts --skip-build
+        env:
+          # Comma-separated owner names/emails the bundle must never contain.
+          # Held in a repository secret, never in the repo.
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
 
       - name: Verify version sync
         run: |

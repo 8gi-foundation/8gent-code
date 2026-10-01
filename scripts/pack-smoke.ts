@@ -9,7 +9,10 @@
  *
  *   1. bun run build                     (skip with --skip-build)
  *   2. npm pack                          -> tarball must contain dist/cli.js, dist/tui.js
- *   3. scan the packed bundles           -> no build root, no builder home, no "/Users/<name>/
+ *   3. scan the packed bundles           -> no build root, no builder home, no "/Users/<name>/,
+ *                                           no hardcoded owner identity (any commit author's
+ *                                           full name or email, the builder's git name/email
+ *                                           and profile name, or PACK_SMOKE_OWNER_IDENTITY)
  *   4. npm install -g --prefix <tmp>     with an isolated HOME and a minimal PATH
  *   5. 8gent --version                   must print this package.json version
  *   6. 8gent tui --no-pet under a pty    must render its first screen (greeting or status bar)
@@ -43,6 +46,12 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+	collectOwnerIdentities,
+	envIdentities,
+	findOwnerIdentity,
+	maskIdentity,
+} from "./lib/owner-identity-scan";
 
 const ROOT = realpathSync(join(import.meta.dir, ".."));
 const args = process.argv.slice(2);
@@ -144,6 +153,23 @@ async function main(): Promise<void> {
 		buildRoots.add(dirname(realpathSync(join(ROOT, "node_modules"))));
 	} catch {}
 	const home = homedir();
+	// The owner identity is read from the running user at runtime; no real
+	// person's name or email may be baked into a bundle (v0.18.0 shipped one).
+	// Keep each secret entry out of the Actions log, whatever prints it.
+	if (process.env.GITHUB_ACTIONS === "true") {
+		for (const v of envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY)) {
+			console.log(`::add-mask::${v}`);
+		}
+	}
+	const ownerIdentities = collectOwnerIdentities({ root: ROOT, home });
+	check(ownerIdentities.length > 0, "owner-identity scan has identities to look for");
+	// The release job sets this so the gate never rests on who happens to build.
+	if (process.env.PACK_SMOKE_REQUIRE_OWNER_IDENTITY === "1") {
+		check(
+			envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY).length > 0,
+			"PACK_SMOKE_OWNER_IDENTITY is set (repository secret)",
+		);
+	}
 	for (const f of ["dist/cli.js", "dist/tui.js"]) {
 		const p = join(EXTRACT, "package", f);
 		if (!existsSync(p)) continue;
@@ -156,6 +182,12 @@ async function main(): Promise<void> {
 		);
 		for (const r of buildRoots) check(!src.includes(r), `${f} has no build root ${r}`);
 		if (home.length > 1) check(!src.includes(`"${home}/`), `${f} has no builder home ${home}`);
+		const baked = findOwnerIdentity(src, ownerIdentities);
+		check(
+			baked.length === 0,
+			`${f} has no hardcoded owner name or email`,
+			baked.map(maskIdentity).join(", "),
+		);
 	}
 	rmSync(EXTRACT, { recursive: true, force: true });
 
