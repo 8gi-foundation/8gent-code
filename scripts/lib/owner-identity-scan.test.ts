@@ -101,11 +101,32 @@ describe("owner-identity scan - identities that are not commit authors", () => {
 			const env = isolatedGit(repo);
 			spawnSync("git", ["init", "-q"], { cwd: repo, env });
 			spawnSync("git", ["config", "user.email", "ada.quill@example.test"], { cwd: repo, env });
-			spawnSync("git", ["config", "user.name", "Quill"], { cwd: repo, env });
-			expect(builderIdentities(repo, env).sort()).toEqual(["Quill", "ada.quill@example.test"]);
+			spawnSync("git", ["config", "user.name", "Ada Quill"], { cwd: repo, env });
+			expect(builderIdentities(repo, env).sort()).toEqual(["Ada Quill", "ada.quill@example.test"]);
 			// The repo has no commits, so neither value is a commit author.
 			const ids = collectOwnerIdentities({ root: repo, home: repo, env });
-			expect(findOwnerIdentity(BUNDLE, ids).sort()).toEqual(["Quill", "ada.quill@example.test"]);
+			const bundle = `${BUNDLE} var N = "Ada Quill";`;
+			expect(findOwnerIdentity(bundle, ids).sort()).toEqual([
+				"Ada Quill",
+				"ada.quill@example.test",
+			]);
+		} finally {
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	test("a single-word builder git user.name (root, Mark) does not fail the scan", () => {
+		const repo = mkdtempSync(join(tmpdir(), "8gent-owner-scan-repo-"));
+		try {
+			const env = isolatedGit(repo);
+			spawnSync("git", ["init", "-q"], { cwd: repo, env });
+			const bundle = `if (user === "root") mark("Mark", { root: true });`;
+			for (const name of ["root", "Mark"]) {
+				spawnSync("git", ["config", "user.name", name], { cwd: repo, env });
+				expect(builderIdentities(repo, env)).toEqual([]);
+				const ids = collectOwnerIdentities({ root: repo, home: repo, env });
+				expect(findOwnerIdentity(bundle, ids)).toEqual([]);
+			}
 		} finally {
 			rmSync(repo, { recursive: true, force: true });
 		}

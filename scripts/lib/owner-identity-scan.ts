@@ -20,11 +20,12 @@ import { join } from "node:path";
 /**
  * A full name (has whitespace) or an email that is not a no-reply address.
  *
- * `trusted` values come from the builder's own git config or from
- * PACK_SMOKE_OWNER_IDENTITY: they name a specific person on purpose, so a
- * single word (a surname, a handle) of 4+ characters is scanned too, matched
- * as a whole word. Commit authors are not trusted that way: a single-word
- * author name ("Claude") is too generic to scan a 25 MB bundle for.
+ * `trusted` values come only from PACK_SMOKE_OWNER_IDENTITY: a maintainer put
+ * them there on purpose, so a single word (a surname, a handle) of 4+
+ * characters is scanned too, matched as a whole word. Names from commit
+ * authors and from the builder's git config are not trusted that way: a
+ * single word there ("Claude", "root", "runner", "Mark") is too generic to
+ * scan a 25 MB bundle for.
  */
 export function isScannableIdentity(value: string, trusted = false): boolean {
 	const v = value.trim();
@@ -87,7 +88,8 @@ export function builderIdentities(root: string, env: NodeJS.ProcessEnv = process
 	for (const key of ["user.name", "user.email"]) {
 		const r = spawnSync("git", ["config", key], { cwd: root, encoding: "utf-8", env });
 		const v = r.status === 0 ? r.stdout.trim() : "";
-		if (v && isScannableIdentity(v, true)) out.push(v);
+		// Untrusted: a git user.name must be a full name (has a space).
+		if (v && isScannableIdentity(v)) out.push(v);
 	}
 	return out;
 }
