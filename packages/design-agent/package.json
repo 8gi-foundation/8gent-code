@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/design-agent",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"description": "Proactive design system suggestion agent for 8gent Code",
 	"main": "index.ts",
 	"types": "index.ts",

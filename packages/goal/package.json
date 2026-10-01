@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/goal",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"private": true,
 	"type": "module",
 	"description": "Goal-loop orchestrator (/go). Executor + judge + budget + receipt. Pure logic, no I/O beyond passed-in handles.",

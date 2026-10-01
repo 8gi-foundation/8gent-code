@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.17.3-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.17.3 Body Parts" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.18.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.18.0" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -641,7 +641,11 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 <tr>
 <td valign="top" width="33%">
 
-### Just shipped (v0.17.3)
+### Just shipped (v0.18.0)
+
+**Installs anywhere, safer by default** - `npm install -g` works on a bare Linux machine, `web_fetch` only reaches the public internet, and the system prompt stays byte-stable so local models reuse their cache.
+
+**From v0.17.3 (first published in this release):**
 
 **Adaptive three-model orchestration** - planner, engineer, and judge roles are matched to distinct local models, with dynamic detection of what is installed on the host. New `/build` slash command runs the pipeline end-to-end.
 
