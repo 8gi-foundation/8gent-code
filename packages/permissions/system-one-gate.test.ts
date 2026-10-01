@@ -17,9 +17,9 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { type Decider, createDecider } from "../decide/index";
 import { decideRules } from "../decide/rules";
@@ -30,25 +30,28 @@ import { addPolicy, loadPolicies } from "./policy-engine";
 import {
 	DEFAULT_COLD_TIMEOUT_MS,
 	DEFAULT_TIMEOUT_MS,
+	RULES_ONLY,
 	SYSTEM_ONE_ALLOWLIST_BUN_TEST_FLAG,
 	SYSTEM_ONE_ALLOWLIST_FLAG,
+	SYSTEM_ONE_ASK_INSTEAD_NOTICE,
 	SYSTEM_ONE_BLOCK_MARKER,
 	SYSTEM_ONE_FLAG,
-	SYSTEM_ONE_ASK_INSTEAD_NOTICE,
 	SYSTEM_ONE_NO_RETRY,
 	SYSTEM_ONE_TIMEOUT_ENV,
-	RULES_ONLY,
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
 	setSystemOneNoticeSink,
 	startSystemOneWarmup,
-	systemOneJudgeWarm,
 	systemOneEnabled,
-	systemOneMode,
 	systemOneGate,
+	systemOneJudgeWarm,
+	systemOneMode,
 	systemOneTimeoutMs,
 } from "./system-one-gate";
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 // Destructive fixture: deletes one named file in the test's temp dir only.
 // The existing regex layer does not flag find -delete, so if System One were
@@ -107,7 +110,7 @@ function installStub(extra: { calibrationDir?: string; decider?: () => Decider }
 			asked.push({ command: req.command });
 			return humanAnswer;
 		},
-		calibrationDir: extra.calibrationDir ?? mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+		calibrationDir: extra.calibrationDir ?? tempDir("sys1-nocal-"),
 	});
 }
 
@@ -254,7 +257,7 @@ describe("systemOneGate verdicts (stub decider)", () => {
 	test("escalate with the default prompt, headless and no TUI handler -> block", async () => {
 		_setSystemOneOverridesForTests({
 			createDecider: () => createDecider({ backend: stub, cacheSize: 0 }),
-			calibrationDir: mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+			calibrationDir: tempDir("sys1-nocal-"),
 		});
 		registerTuiApprovalHandler(null);
 		const r = await systemOneGate("echo SYS1_UNSURE", on);
@@ -265,7 +268,7 @@ describe("systemOneGate verdicts (stub decider)", () => {
 	test("escalate with the default prompt routes to the TUI approval channel", async () => {
 		_setSystemOneOverridesForTests({
 			createDecider: () => createDecider({ backend: stub, cacheSize: 0 }),
-			calibrationDir: mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+			calibrationDir: tempDir("sys1-nocal-"),
 		});
 		const seen: string[] = [];
 		registerTuiApprovalHandler(async (req) => {
@@ -319,7 +322,7 @@ describe("systemOneGate verdicts (stub decider)", () => {
 				return createDecider({ backend: stub, cacheSize: 0 });
 			},
 			askHuman: async () => null,
-			calibrationDir: mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+			calibrationDir: tempDir("sys1-nocal-"),
 		});
 		const first = await systemOneGate("ls", on);
 		expect(first.run).toBe(false);
@@ -380,7 +383,7 @@ describe("systemOneGate verdicts (stub decider)", () => {
 	});
 
 	test("calibration for the detected (backend, model) is loaded and applied", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "sys1-cal-"));
+		const dir = tempDir("sys1-cal-");
 		// Identity scaling, block above 0.01: pYes 0.02 would allow on defaults.
 		writeFileSync(
 			join(dir, "stub-stub-model.json"),
@@ -508,7 +511,7 @@ describe("integration: real agent shell tool entry points", () => {
 	let executor: ToolExecutor;
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "sys1-int-"));
+		dir = tempDir("sys1-int-");
 		writeFileSync(join(dir, "victim.txt"), "keep me");
 		executor = new ToolExecutor(dir, "sys1-test");
 		setToolContext({ workingDirectory: dir });
@@ -713,14 +716,14 @@ describe("integration: the approval card and System One agree (#3124)", () => {
 	let headlessWas: string | undefined;
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "sys1-card-"));
+		dir = tempDir("sys1-card-");
 		writeFileSync(join(dir, "victim.txt"), "keep me");
 		executor = new ToolExecutor(dir, "sys1-card-test");
 		setToolContext({ workingDirectory: dir });
 		// System One's own human prompt goes through the real default: the TUI channel.
 		_setSystemOneOverridesForTests({
 			createDecider: () => createDecider({ backend: stub, cacheSize: 0 }),
-			calibrationDir: mkdtempSync(join(tmpdir(), "sys1-nocal-")),
+			calibrationDir: tempDir("sys1-nocal-"),
 		});
 		cards = [];
 		answer = "approve";
@@ -813,11 +816,11 @@ describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
 	const noJudgeMachine = () =>
 		createDecider({
 			fetch: refused,
-			env: { OLLAMA_MODELS: mkdtempSync(join(tmpdir(), "sys1-empty-store-")) },
+			env: { OLLAMA_MODELS: tempDir("sys1-empty-store-") },
 			llamacppLoader: null,
 		});
 	const calibrated = () => {
-		const d = mkdtempSync(join(tmpdir(), "sys1-cal-default-"));
+		const d = tempDir("sys1-cal-default-");
 		writeFileSync(
 			join(d, "stub-stub-model.json"),
 			JSON.stringify({
@@ -962,7 +965,7 @@ describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
 	});
 
 	test("headless, REAL ToolExecutor, flag unset, no judge: plain work runs, flagged commands do not", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "sys1-default-int-"));
+		const dir = tempDir("sys1-default-int-");
 		try {
 			writeFileSync(join(dir, "victim.txt"), "keep me");
 			installStub({ decider: noJudgeMachine });
@@ -1007,7 +1010,7 @@ describe("Guarded with no checker installed asks the person (#3193)", () => {
 	const noJudgeMachine = () =>
 		createDecider({
 			fetch: refused,
-			env: { OLLAMA_MODELS: mkdtempSync(join(tmpdir(), "sys1-3193-store-")) },
+			env: { OLLAMA_MODELS: tempDir("sys1-3193-store-") },
 			llamacppLoader: null,
 		});
 	const guarded = () =>
@@ -1027,7 +1030,7 @@ describe("Guarded with no checker installed asks the person (#3193)", () => {
 	};
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "sys1-3193-"));
+		dir = tempDir("sys1-3193-");
 		// System One's own question goes through the real default: the TUI channel.
 		_setSystemOneOverridesForTests({ createDecider: noJudgeMachine });
 		notes = [];
