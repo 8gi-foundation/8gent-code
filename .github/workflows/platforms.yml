@@ -15,11 +15,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - name: store bisection
-        run: bun diag/diag-store.ts || true
-      - name: store.test alone
-        run: bun test packages/memory/store.test.ts 2>&1 | grep -E "fail|pass|EBUSY" || true
-      - name: eight suites with probe
-        run: bun test --preload ./diag/probe-rm.ts packages/eight/ 2>&1 | grep -E "LOCKED|^\(fail\)| fail$| pass$" || true
-      - name: memory and eight together with probe
-        run: bun test --preload ./diag/probe-rm.ts packages/memory/ packages/eight/ 2>&1 | grep -E "LOCKED|^\(fail\)| fail$| pass$" || true
+      - name: memory and eight with retry probe
+        run: bun test --preload ./diag/retry-probe.ts packages/memory/ packages/eight/ 2>&1 | grep -E "RETRY| fail$| pass$" || true
+      - name: full suite with retry probe
+        run: bun test --preload ./diag/retry-probe.ts packages/ apps/ 2>&1 | grep -E "RETRY| fail$| pass$" || true
