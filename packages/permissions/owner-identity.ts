@@ -15,9 +15,10 @@
  *
  * Read-only and local: one small file read and at most two `git config` calls
  * (no shell, a minimal environment), no network. The result is cached and
- * re-read only when HOME, the
- * git global config path, or the profile file's mtime changes, so a name given
- * during onboarding is picked up without a restart. Nothing is written.
+ * re-read only when HOME, the git global config path, the git global config
+ * file's mtime or size, or the profile file's mtime changes, so a name given
+ * during onboarding or a mid-session `git config --global` change is picked up
+ * without a restart. Nothing is written.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
@@ -81,12 +82,36 @@ function readGitGlobal(key: "user.name" | "user.email", home: string): string | 
 			encoding: "utf-8",
 			timeout: GIT_TIMEOUT_MS,
 			stdio: ["ignore", "pipe", "ignore"],
-			env: gitEnv(home),
+			env: gitEnv(home) as NodeJS.ProcessEnv,
 		});
 		return out.trim() || null;
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * A change stamp for the global git config file(s) git would read: the file
+ * named by GIT_CONFIG_GLOBAL, otherwise $XDG_CONFIG_HOME/git/config (default
+ * ~/.config/git/config) and ~/.gitconfig. mtime plus size, "-" when absent.
+ */
+function gitConfigStamp(home: string): string {
+	const files = process.env.GIT_CONFIG_GLOBAL
+		? [process.env.GIT_CONFIG_GLOBAL]
+		: [
+				join(process.env.XDG_CONFIG_HOME || join(home, ".config"), "git", "config"),
+				join(home, ".gitconfig"),
+			];
+	return files
+		.map((f) => {
+			try {
+				const st = statSync(f);
+				return `${st.mtimeMs}:${st.size}`;
+			} catch {
+				return "-";
+			}
+		})
+		.join("|");
 }
 
 /** The running user's name and email, or nulls when none is configured. */
@@ -101,6 +126,7 @@ export function loadOwnerIdentity(): OwnerIdentity {
 		mtime,
 		process.env.GIT_CONFIG_GLOBAL ?? "",
 		process.env.XDG_CONFIG_HOME ?? "",
+		gitConfigStamp(home),
 	].join("\0");
 	if (cache?.key === key) return cache.identity;
 

@@ -64,6 +64,15 @@ describe("owner identity - configured owner", () => {
 		expect(anonymize("ask Ada").text).toBe("ask Ada");
 	});
 
+	test("a mid-session git config --global change is picked up without a restart", () => {
+		setGitConfig({ name: "Bo Tanaka" });
+		expect(anonymize("ask Tanaka").text).not.toContain("Tanaka");
+
+		setGitConfig({ name: "Cyd Marlowe" });
+		expect(anonymize("ask Marlowe").text).not.toContain("Marlowe");
+		expect(anonymize("ask Tanaka").text).toBe("ask Tanaka");
+	});
+
 	test("the configured owner is the only owner", () => {
 		setProfileName("Ada Quill");
 		expect(anonymize("ask James").text).toBe("ask James");
@@ -78,11 +87,19 @@ describe("owner identity - no over-redaction", () => {
 		expect(containsPii(text)).toBe(false);
 	});
 
-	test("single-word git names are never bare-masked (admin, ubuntu, Grace)", () => {
-		for (const name of ["admin", "ubuntu", "Grace"]) {
-			setGitConfig({ name });
-			expect(anonymize(`ask ${name} first`).text).toBe(`ask ${name} first`);
-		}
+	test("a single-word git name is never bare-masked (admin)", () => {
+		setGitConfig({ name: "admin" });
+		expect(anonymize("ask admin first").text).toBe("ask admin first");
+	});
+
+	test("a single-word git name is never bare-masked (ubuntu)", () => {
+		setGitConfig({ name: "ubuntu" });
+		expect(anonymize("ask ubuntu first").text).toBe("ask ubuntu first");
+	});
+
+	test("a single-word git name is never bare-masked (Grace)", () => {
+		setGitConfig({ name: "Grace" });
+		expect(anonymize("ask Grace first").text).toBe("ask Grace first");
 	});
 
 	test('"Will Smith" masks the full name and the surname, not "Will this work?"', () => {
@@ -125,13 +142,16 @@ describe("owner identity - one-word names and account-like git names", () => {
 		expect(containsPii("Will this work?")).toBe(false);
 	});
 
-	test('a git name like "GitHub Actions" or "Ubuntu User" masks only the full name', () => {
-		for (const name of ["GitHub Actions", "Ubuntu User"]) {
-			setGitConfig({ name });
-			const [first, last] = name.split(" ");
-			expect(anonymize(`${name} ran it`).text).not.toContain(name);
-			expect(anonymize(`the ${last} tab, ${first} box`).text).toBe(`the ${last} tab, ${first} box`);
-		}
+	test('a git name like "GitHub Actions" masks only the full name', () => {
+		setGitConfig({ name: "GitHub Actions" });
+		expect(anonymize("GitHub Actions ran it").text).not.toContain("GitHub Actions");
+		expect(anonymize("the Actions tab, GitHub box").text).toBe("the Actions tab, GitHub box");
+	});
+
+	test('a git name like "Ubuntu User" masks only the full name', () => {
+		setGitConfig({ name: "Ubuntu User" });
+		expect(anonymize("Ubuntu User ran it").text).not.toContain("Ubuntu User");
+		expect(anonymize("the User tab, Ubuntu box").text).toBe("the User tab, Ubuntu box");
 	});
 
 	test("a git full name keeps a non-common surname masked", () => {
