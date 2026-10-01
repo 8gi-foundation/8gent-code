@@ -1216,19 +1216,26 @@ async function tuiCommand(args: string[]) {
 /**
  * Run the TUI in the folder the user launched `8gent` from (#3264).
  *
- * The child used to get `cwd: path.dirname(tuiPath)`. For an npm install that
- * is `.../node_modules/@8gi-foundation/8gent-code/dist`, so the header showed
- * the install folder with "no repo", and `.env`, git and project skill lookups
- * all ran against the package. Bundled assets resolve from `import.meta.url`,
- * not the working folder, so nothing needs the child to sit in `dist/`.
+ * The child used to get `cwd: path.dirname(tuiPath)`, which for an npm install
+ * is the package's dist/ folder, so the header showed that folder with
+ * "no repo" and the TUI's own `.env` and git lookups ran against the package.
+ * The child now inherits the launch folder.
+ *
+ * Trust: Bun reads `bunfig.toml` (including `preload`) and `.env` from its
+ * working folder. That is not new exposure: bin/8gent-run.js already runs
+ * `bun dist/cli.js` in the launch folder, so the user's bunfig and .env were
+ * loaded before this change too. 8gent's own scripts (bin/debug.ts,
+ * bin/lil-eight.sh) resolve from the package, never from this folder; see
+ * apps/tui/src/lib/package-scripts.ts.
  */
 async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", tuiPath, ...args], {
-		stdio: "inherit",
-		cwd: process.cwd(),
+	const proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+	proc.on("error", (err) => {
+		console.error(`Could not start the TUI: ${err.message}`);
+		process.exit(1);
 	});
-	proc.on("exit", (code) => process.exit(code || 0));
+	proc.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 }
 
 /**

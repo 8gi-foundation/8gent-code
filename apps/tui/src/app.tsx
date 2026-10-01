@@ -319,6 +319,7 @@ import {
 	specForActivatedTab,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
+import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -3854,7 +3855,13 @@ export function App({
 				case "debug": {
 					// Debug CLI inside TUI — runs bin/debug.ts and shows output
 					const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
-					const debugScript = require("node:path").join(process.cwd(), "bin", "debug.ts");
+					// From the package, never the working folder: a cloned repo's
+					// bin/debug.ts must not run here (#3264).
+					const debugScript = packageBinScript("debug.ts");
+					if (!debugScript) {
+						addSystemMessage("/debug needs a source checkout of 8gent-code; bin/debug.ts is not in this install.");
+						break;
+					}
 					try {
 						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
@@ -4236,11 +4243,11 @@ export function App({
 
 									// Spawn dock pet on macOS
 									if (process.platform === "darwin") {
-										// Try multiple paths: cwd (source), __dirname relative, home .8gent
+										// The package's own script first, then a checkout in $HOME.
+										// Never the working folder: a cloned repo's bin/lil-eight.sh
+										// must not run here (#3264).
 										const candidates = [
-											path.join(process.cwd(), "bin/lil-eight.sh"),
-											path.join(__dirname, "../bin/lil-eight.sh"),
-											path.join(__dirname, "../../bin/lil-eight.sh"),
+											path.join(PACKAGE_ROOT, "bin", "lil-eight.sh"),
 											path.join(process.env.HOME || "~", "8gent-code/bin/lil-eight.sh"),
 										];
 										const lilEightScript = candidates.find((p) => fs.existsSync(p));

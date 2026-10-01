@@ -108,6 +108,7 @@ if screen | grep -aq "/tmp/work" && ! screen | grep -aq "8gent-code/dist"; then
 else
   fail "TUI header shows the launch folder (/tmp/work)"
   screen | grep -ao "[^ ]*8gent-code/dist[^ ]*" | head -1
+  screen | tail -c 2000
 fi
 # The TUI is still running; the container exits with this script and --init
 # reaps it. Nothing on the host is signalled.
