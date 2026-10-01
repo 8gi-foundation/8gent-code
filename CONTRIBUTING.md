@@ -17,7 +17,7 @@ Instead of reading entire files and searching through codebases, we use:
 ### Users
 
 ```bash
-npm install -g @podjamz/8gent-code
+npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 

@@ -141,6 +141,7 @@ import {
 	PROBE_TIMEOUT_MS,
 	READINESS_RETRY_MS,
 	createReadinessCache,
+	localProviderEndpoints,
 	withTimeout,
 } from "./lib/provider-readiness.js";
 import * as bgPool from "./lib/background-pool.js";
@@ -228,6 +229,8 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import { NoProviderNotice } from "./components/NoProviderCard.js";
+import { COMPACT_BELOW_ROWS, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
 // the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
@@ -292,6 +295,7 @@ import {
 import { usePermToast } from "./hooks/usePermToast.js";
 
 // Import the actual Agent for real execution
+import { sessionApiKey } from "../../../packages/eight/failover-provider-config.js";
 import { Agent } from "../../../packages/eight/index.js";
 import type {
 	AgentEventCallbacks,
@@ -319,6 +323,7 @@ import {
 	specForActivatedTab,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
+import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -836,9 +841,16 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [bgRunning, setBgRunning] = useState(0);
-	const [providerHealth, setProviderHealth] = useState<{ live: number; total: number }>({
+	// `checked` stays false until the first probe lands, so the first-run
+	// "no model" card (T5) never flashes on a machine where a model is up.
+	const [providerHealth, setProviderHealth] = useState<{
+		live: number;
+		total: number;
+		checked: boolean;
+	}>({
 		live: 0,
 		total: 1,
+		checked: false,
 	});
 	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
 	// run and once after each update only (lib/intro-gate.ts); the
@@ -1255,7 +1267,9 @@ export function App({
 				// re-renders App when the X/Y figure actually changes.
 				if (!cancelled)
 					setProviderHealth((prev) =>
-						prev.live === live && prev.total === total ? prev : { live, total },
+						prev.checked && prev.live === live && prev.total === total
+							? prev
+							: { live, total, checked: true },
 					);
 			} catch {
 				// best-effort - status bar can stay stale rather than crash
@@ -1339,6 +1353,13 @@ export function App({
 	const [currentProvider, setCurrentProvider] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).provider,
 	);
+	// Whether the active provider needs a key and has one. Keys load at start
+	// (loadEnvFile), so this only changes when the provider does.
+	const providerKeyState = React.useMemo(
+		() => providerKeyStatus(currentProvider),
+		[currentProvider],
+	);
+
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
@@ -2489,6 +2510,10 @@ export function App({
 	// config.model can self-correct after a reroute; reuse compares against this.
 	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
 	const lastReadinessNoticeRef = useRef("");
+	// Set when agent init found no local provider answering (T5). The "no
+	// model" card shows it as its reason line, in place of the chat notice
+	// that used to repeat on each provider and push the setup card away.
+	const [unreachableNote, setUnreachableNote] = useState<string | null>(null);
 	// Bumped to retry agent init after an attempt ended not ready, so a
 	// provider started after launch is still picked up. Until #3087 that
 	// happened by accident: the effect re-ran on every render.
@@ -2529,6 +2554,7 @@ export function App({
 					model: currentModel,
 				});
 				if (cancelled) return;
+				if (decision.kind !== "none") setUnreachableNote(null);
 				if (decision.kind === "fallback") {
 					notify(_gateTabId, decision.notice);
 					setCurrentProvider(decision.provider);
@@ -2537,7 +2563,9 @@ export function App({
 				}
 				if (decision.kind === "none") {
 					setAgentReady(false);
-					notify(_gateTabId, decision.notice);
+					const label =
+						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ?? decision.from;
+					setUnreachableNote(unreachableLine(label, decision.fromAddress, decision.reason));
 					retryLater();
 					return;
 				}
@@ -2593,7 +2621,9 @@ export function App({
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
-					apiKey: process.env.OPENROUTER_API_KEY,
+					// Only the runtime's own key: an OpenRouter key must never reach
+					// an ollama or LM Studio host (#3261).
+					apiKey: sessionApiKey(runtime),
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
@@ -3854,7 +3884,13 @@ export function App({
 				case "debug": {
 					// Debug CLI inside TUI — runs bin/debug.ts and shows output
 					const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
-					const debugScript = require("node:path").join(process.cwd(), "bin", "debug.ts");
+					// From the package, never the working folder: a cloned repo's
+					// bin/debug.ts must not run here (#3264).
+					const debugScript = packageBinScript("debug.ts");
+					if (!debugScript) {
+						addSystemMessage("/debug needs a source checkout of 8gent-code; bin/debug.ts is not in this install.");
+						break;
+					}
 					try {
 						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
@@ -4236,11 +4272,11 @@ export function App({
 
 									// Spawn dock pet on macOS
 									if (process.platform === "darwin") {
-										// Try multiple paths: cwd (source), __dirname relative, home .8gent
+										// The package's own script first, then a checkout in $HOME.
+										// Never the working folder: a cloned repo's bin/lil-eight.sh
+										// must not run here (#3264).
 										const candidates = [
-											path.join(process.cwd(), "bin/lil-eight.sh"),
-											path.join(__dirname, "../bin/lil-eight.sh"),
-											path.join(__dirname, "../../bin/lil-eight.sh"),
+											path.join(PACKAGE_ROOT, "bin", "lil-eight.sh"),
 											path.join(process.env.HOME || "~", "8gent-code/bin/lil-eight.sh"),
 										];
 										const lilEightScript = candidates.find((p) => fs.existsSync(p));
@@ -6228,6 +6264,15 @@ export function App({
 							lastTurnSuccess={lastTurnSuccess}
 							animate={showAnimations}
 							width={chatWidth}
+						/>
+
+						<NoProviderNotice
+							checked={providerHealth.checked}
+							liveLocal={providerHealth.live}
+							provider={currentProvider}
+							keyStatus={providerKeyState}
+							unreachable={unreachableNote}
+							compact={viewport.height < COMPACT_BELOW_ROWS}
 						/>
 
 						<Box

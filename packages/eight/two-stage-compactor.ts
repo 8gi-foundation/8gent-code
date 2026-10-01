@@ -25,6 +25,8 @@
  * @author podjamz
  */
 
+import { harnessNote } from "./context-note";
+
 export interface ProviderInfo {
 	/** Maximum context window of the active provider, in tokens. */
 	contextSize: number;
@@ -244,9 +246,11 @@ export class TwoStageCompactor {
 			});
 		}
 
+		// A harness note, not a system message: request builders send only the
+		// first system message, so a second one never reached the model (#3263).
 		const summaryMsg: AgentMessage = {
-			role: "system",
-			content: `[Two-Stage Compaction Summary]\n\n${summary}`,
+			role: "user",
+			content: harnessNote(`[Two-Stage Compaction Summary]\n\n${summary}`),
 		};
 		const next: AgentMessage[] = [];
 		if (systemMsg) next.push(systemMsg);

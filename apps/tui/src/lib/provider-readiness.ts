@@ -91,7 +91,17 @@ export type ReadinessDecision =
 			reason: string;
 			notice: string;
 	  }
-	| { kind: "none"; from: string; reason: string; notice: string };
+	| {
+			kind: "none";
+			from: string;
+			/** host:port the configured provider was probed at, for the no-model card (T5). */
+			fromAddress: string;
+			reason: string;
+			notice: string;
+	  };
+
+/** Reason used when an engine answers but lists no models (T5). */
+export const NO_MODELS_REASON = "no models";
 
 /**
  * Decide which provider/model the agent should be built on. Bounded: at most
@@ -107,9 +117,13 @@ export async function resolveReadyProvider(
 	if (!configured) return { kind: "ready", provider: want.provider, model: want.model };
 
 	const own = await probeModels(configured.modelsUrl, configured.extract, timeoutMs);
-	if (own.ok) return { kind: "ready", provider: want.provider, model: want.model };
+	// An engine that answers with an empty model list cannot serve a turn
+	// either (T5): a fresh Ollama before `ollama pull` looks exactly like this.
+	if (own.ok && own.models.length > 0)
+		return { kind: "ready", provider: want.provider, model: want.model };
 
-	const reason = own.reason;
+	const reason = own.ok ? NO_MODELS_REASON : own.reason;
+	const what = reason === NO_MODELS_REASON ? "has no models" : `is unreachable (${reason})`;
 	for (const alt of endpoints) {
 		if (alt.provider === configured.provider) continue;
 		const r = await probeModels(alt.modelsUrl, alt.extract, timeoutMs);
@@ -122,17 +136,27 @@ export async function resolveReadyProvider(
 			model,
 			from: configured.provider,
 			reason,
-			notice: `${configured.label} is unreachable (${reason}). Using ${alt.label} (${model}) for this session. /provider to change.`,
+			notice: `${configured.label} ${what}. Using ${alt.label} (${model}) for this session. /provider to change.`,
 		};
 	}
 	return {
 		kind: "none",
 		from: configured.provider,
+		fromAddress: addressOf(configured.modelsUrl),
 		reason,
 		notice:
-			`${configured.label} is unreachable (${reason}) and no other local provider answered. ` +
+			`${configured.label} ${what} and no other local provider answered. ` +
 			"Nothing will run until one does. Start LM Studio or Ollama, or pick another provider with /provider.",
 	};
+}
+
+/** "http://127.0.0.1:11434/api/tags" -> "127.0.0.1:11434". */
+export function addressOf(url: string): string {
+	try {
+		return new URL(url).host;
+	} catch {
+		return url;
+	}
 }
 
 /**

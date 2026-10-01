@@ -7,6 +7,7 @@
  */
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
+import { harnessNote } from "./context-note";
 
 export interface CompactionConfig {
 	enabled: boolean;
@@ -111,7 +112,10 @@ export class CompactionEngine {
 
 	private findCutPoint(messages: Message[]): number {
 		let accumulated = 0;
-		let cutIdx = messages.length;
+		// 1 means "summarise nothing". It stands when the history after the
+		// system prompt never reaches keepRecentTokens, which used to leave
+		// cutIdx at messages.length and read messages[length].role (#3268).
+		let cutIdx = 1;
 		for (let i = messages.length - 1; i > 0; i--) {
 			accumulated += estimateTokens(messages[i].content) + 4;
 			if (accumulated >= this.config.keepRecentTokens) {
@@ -139,6 +143,20 @@ export class CompactionEngine {
 	): Promise<{ messages: Message[]; result: CompactionResult }> {
 		const tokensBefore = estimateMessageTokens(messages);
 		const cutPoint = this.findCutPoint(messages);
+		// Nothing older than the recent window: no summary call, history unchanged.
+		if (cutPoint <= 1) {
+			return {
+				messages,
+				result: {
+					summary: this.previousSummary ?? "",
+					tokensBefore,
+					tokensAfter: tokensBefore,
+					messagesRemoved: 0,
+					filesRead: Array.from(this.fileTracker.read),
+					filesModified: Array.from(this.fileTracker.modified),
+				},
+			};
+		}
 		const systemMsg = messages[0];
 		const toSummarize = messages.slice(1, cutPoint);
 		const toKeep = messages.slice(cutPoint);
@@ -164,9 +182,11 @@ export class CompactionEngine {
 		const fullSummary = `${summary}\n\n${this.fileTracker.getSummary()}`;
 		this.previousSummary = fullSummary;
 
+		// A harness note, not a system message: request builders send only the
+		// first system message, so a second one never reached the model (#3263).
 		const summaryMsg: Message = {
-			role: "system",
-			content: `[Context Compaction Summary]\n\n${fullSummary}`,
+			role: "user",
+			content: harnessNote(`[Context Compaction Summary]\n\n${fullSummary}`),
 		};
 		const compactedMessages = [systemMsg, summaryMsg, ...toKeep];
 		const tokensAfter = estimateMessageTokens(compactedMessages);
@@ -215,6 +235,19 @@ export const DEFAULT_PROACTIVE_CONFIG: ProactiveConfig = {
 
 export interface ProactiveResult extends CompactionResult {
 	stage: CompressionStage;
+}
+
+/**
+ * Index where the Terminus-2 kept tail starts. Aims for the last `recentCount`
+ * messages, then walks back over any tool results so the tail never opens on a
+ * tool message whose assistant tool_call was summarized away (strict
+ * OpenAI-compatible servers reject that history with a 400). Never cuts into
+ * the system prompt at index 0.
+ */
+export function terminus2CutIndex(messages: Message[], recentCount: number): number {
+	let cut = Math.max(1, messages.length - recentCount);
+	while (cut > 1 && messages[cut]?.role === "tool") cut--;
+	return cut;
 }
 
 export class ProactiveCompression extends CompactionEngine {
@@ -355,9 +388,9 @@ export class ProactiveCompression extends CompactionEngine {
 	): Promise<{ messages: Message[]; result: CompactionResult }> {
 		const tokensBefore = estimateMessageTokens(messages);
 		const systemMsg = messages[0];
-		const recentCount = 8;
-		const recent = messages.slice(-recentCount);
-		const old = messages.slice(1, -recentCount);
+		const cut = terminus2CutIndex(messages, 8);
+		const recent = messages.slice(cut);
+		const old = messages.slice(1, cut);
 
 		const serialized = old.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
 
@@ -385,9 +418,12 @@ export class ProactiveCompression extends CompactionEngine {
 		const fullSummary = `${historySummary}\n\n## Key Questions\n${questions}\n\n## Synthesized Answers\n${answers}`;
 		const tracker = this.getFileTracker();
 
+		// A harness note, not a system message (#3263): see compact().
 		const summaryMsg: Message = {
-			role: "system",
-			content: `[Proactive Compression: Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+			role: "user",
+			content: harnessNote(
+				`[Proactive Compression: Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+			),
 		};
 
 		const compacted = [systemMsg, summaryMsg, ...recent];

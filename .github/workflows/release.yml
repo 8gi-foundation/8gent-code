@@ -77,7 +77,7 @@ jobs:
           body: |
             ## 8gent Code v${{ steps.version.outputs.version }}
 
-            Install: `npm install -g @podjamz/8gent-code`
+            Install: `npm install -g @8gi-foundation/8gent-code`
 
             ### Commits
             ${{ steps.notes.outputs.commits }}

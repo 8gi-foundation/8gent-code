@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
+import { sessionApiKey } from "../../../../packages/eight/failover-provider-config.js";
 import { Agent } from "../../../../packages/eight/index.js";
 import type {
 	AgentEvidenceEvent,
@@ -224,7 +225,8 @@ export function useChatTabState(
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
-					apiKey: process.env.OPENROUTER_API_KEY,
+					// Only the runtime's own key (#3261).
+					apiKey: sessionApiKey(runtime),
 					events: {
 						onToolStart: (event: AgentToolStartEvent) => {
 							updateTabState(tid, {
