@@ -26,7 +26,7 @@ describe("pty-bridge without node-pty", () => {
 				cwd: dir,
 				encoding: "utf-8",
 				// Minimal env on purpose: no NODE_PATH that could resolve node-pty.
-				env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir } as NodeJS.ProcessEnv,
+				env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir } as unknown as NodeJS.ProcessEnv,
 				timeout: 15_000,
 			});
 			expect(r.status).toBe(66);
