@@ -217,6 +217,19 @@ export interface ProactiveResult extends CompactionResult {
 	stage: CompressionStage;
 }
 
+/**
+ * Index where the Terminus-2 kept tail starts. Aims for the last `recentCount`
+ * messages, then walks back over any tool results so the tail never opens on a
+ * tool message whose assistant tool_call was summarized away (strict
+ * OpenAI-compatible servers reject that history with a 400). Never cuts into
+ * the system prompt at index 0.
+ */
+export function terminus2CutIndex(messages: Message[], recentCount: number): number {
+	let cut = Math.max(1, messages.length - recentCount);
+	while (cut > 1 && messages[cut]?.role === "tool") cut--;
+	return cut;
+}
+
 export class ProactiveCompression extends CompactionEngine {
 	private proactiveConfig: ProactiveConfig;
 
@@ -355,9 +368,9 @@ export class ProactiveCompression extends CompactionEngine {
 	): Promise<{ messages: Message[]; result: CompactionResult }> {
 		const tokensBefore = estimateMessageTokens(messages);
 		const systemMsg = messages[0];
-		const recentCount = 8;
-		const recent = messages.slice(-recentCount);
-		const old = messages.slice(1, -recentCount);
+		const cut = terminus2CutIndex(messages, 8);
+		const recent = messages.slice(cut);
+		const old = messages.slice(1, cut);
 
 		const serialized = old.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
 
