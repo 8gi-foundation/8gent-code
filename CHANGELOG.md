@@ -10,7 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed - the TUI header no longer says READY or names a model when none can answer (#3290)
-- With no reachable provider, the NOW strip said `READY` beside a model name (for example `ornith-1.0-9b`) while the NO MODEL card below said the opposite. The strip now reads the active tab's agent readiness: it shows `NO MODEL` with the reason (the same one the card gives) and leaves the model slot empty. Before the first provider probe lands it shows `CHECK` and "looking for a model". A running turn or a pending approval still wins, and a ready agent reads exactly as before.
+- With no reachable provider, the NOW strip said `READY` beside a model name (for example `ornith-1.0-9b`) while the NO MODEL card below said the opposite. Readiness is now one pure, deterministic answer (`apps/tui/src/lib/readiness.ts`) derived from live facts: the latest probe per engine, the provider's key status, the agent build result, the first probe, and the last turn's transport error. There is no stored ready flag. The strip and the card both render from it, so they cannot disagree.
+- Not ready reads `NO MODEL` with the reason, and the model slot stays empty. `CHECK` shows only while the first probe or the build is still running.
+- Adaptive: losing Ollama mid-session reads NO MODEL on the next 8 s probe, and an engine that comes back reads READY again with no restart. A turn that fails to connect triggers a probe straight away.
+- A missing key reads NO MODEL before any network call. OpenRouter readiness now uses the authenticated `/key` endpoint, because the public `/models` answers 200 with no key. A key refused on a turn reads NO MODEL until a turn succeeds.
 
 ### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
 - In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.

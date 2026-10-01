@@ -1,11 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
-import {
-	type GuidanceCopy,
-	type GuidanceInput,
-	guidanceCopy,
-	needsProviderGuidance,
-} from "../lib/no-provider-guidance.js";
+import { type GuidanceCopy, guidanceCopy } from "../lib/no-provider-guidance.js";
+import type { Readiness } from "../lib/readiness.js";
 import { t } from "../theme.js";
 
 /**
@@ -119,10 +115,11 @@ export function NoProviderCard({
 	);
 }
 
-/** Renders the card only while no provider can answer; nothing otherwise. */
-export function NoProviderNotice(
-	props: GuidanceInput & { copy?: GuidanceCopy; compact?: boolean },
-) {
-	if (!needsProviderGuidance(props)) return null;
-	return <NoProviderCard copy={props.copy} reason={props.unreachable} compact={props.compact} />;
+/**
+ * Renders the card only while the active tab cannot run a turn, from the same
+ * readiness the header strip reads (#3290); nothing otherwise.
+ */
+export function NoProviderNotice(props: { readiness: Readiness; copy?: GuidanceCopy; compact?: boolean }) {
+	if (props.readiness.state !== "none") return null;
+	return <NoProviderCard copy={props.copy} reason={props.readiness.reason} compact={props.compact} />;
 }

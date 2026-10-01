@@ -41,7 +41,7 @@ import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
-import type { NotReadyState } from "../lib/no-provider-guidance.js";
+import type { Readiness } from "../lib/readiness.js";
 import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
@@ -77,11 +77,11 @@ interface LiveFocalStripProps {
 	/** Columns the strip takes, borders included. When known, the route and
 	 *  meter give way before the state text is ever cut (audit #9). */
 	width?: number;
-	/** The active tab's agent cannot run a turn (#3290). The state word is
-	 *  NO MODEL (or CHECK before the first answer), the middle says why, and
-	 *  the route slot stays empty: no model is named as if it were live.
-	 *  Null or absent: the agent is ready. */
-	notReady?: NotReadyState | null;
+	/** Can the active tab run a turn (lib/readiness.ts, #3290)? When not,
+	 *  the state word is NO MODEL (or CHECK while the first probe or build is
+	 *  out), the middle says why, and the route slot stays empty: no model is
+	 *  named as if it were live. Absent: treated as ready. */
+	readiness?: Readiness;
 }
 
 /** Columns the NO MODEL label takes: "○ NO MODEL ". */
@@ -109,7 +109,7 @@ export function LiveFocalStrip({
 	lastTurnSuccess = null,
 	animate = true,
 	width,
-	notReady = null,
+	readiness,
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
@@ -118,8 +118,8 @@ export function LiveFocalStrip({
 	const showApprovalBorder = approvalPending && !autonomous;
 	// A running turn or a waiting card outranks readiness: both mean an agent
 	// answered. Otherwise a not-ready agent is never shown as READY (#3290).
-	const blocked = notReady && !isProcessing && !showApprovalBorder ? notReady : null;
-	const labelWidth = blocked?.kind === "none" ? NO_MODEL_LABEL_WIDTH : NOW_LABEL_WIDTH;
+	const blocked = readiness && readiness.state !== "ready" && !isProcessing && !showApprovalBorder ? readiness : null;
+	const labelWidth = blocked?.state === "none" ? NO_MODEL_LABEL_WIDTH : NOW_LABEL_WIDTH;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	const finished = done && lastTurnEndedAt;
 	// A pending card stops the turn on the person: the strip holds still and
@@ -178,7 +178,7 @@ export function LiveFocalStrip({
 					lastTurnEndedAt={lastTurnEndedAt}
 					done={done}
 					animate={animate}
-					notReady={blocked?.kind}
+					notReady={blocked?.state === "ready" ? undefined : blocked?.state}
 				/>
 			</Box>
 
@@ -241,7 +241,7 @@ export function TurnStateLabel({
 	animate: boolean;
 	/** The agent cannot run a turn (#3290): NO MODEL, or CHECK while the
 	 *  first probe is out. Never READY, never the spinner. */
-	notReady?: NotReadyState["kind"];
+	notReady?: "none" | "checking";
 }) {
 	const moving = motionEnabled(animate);
 	const [settlingFor, setSettlingFor] = useState<number | null>(null);

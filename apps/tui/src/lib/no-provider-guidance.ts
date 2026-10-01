@@ -2,17 +2,10 @@
  * First run with no model (T5): when nothing can answer, say how to connect one.
  *
  * A bare machine (no Ollama, no LM Studio, no keys) used to open to "READY"
- * with "providers 0/3" in the status bar and nothing else. This decides when
- * the chat area shows the short "no model" card and what the card says.
- *
- * The card shows when the ACTIVE provider cannot run a turn:
- *  - a local engine provider (Ollama, LM Studio, llama-server, apfel) and no
- *    local engine answers the status-bar probe, or
- *  - a hosted provider that needs a key and has none.
- * It also shows whenever agent init reports the local provider unreachable,
- * and carries that reason. It never shows before the first probe has landed, so it does not flash on a
- * machine where Ollama is up, and never for providers that need neither
- * (host CLI sessions, providers declared in providers.json).
+ * with "providers 0/3" in the status bar and nothing else. Whether the card
+ * shows is decided in lib/readiness.ts (#3290), the one answer the header
+ * strip also renders from; this file holds the card's words, the key check
+ * and the reason line.
  */
 
 import { getProviderManager } from "../../../../packages/providers/index.js";
@@ -29,54 +22,6 @@ export const LOCAL_ENGINE_PROVIDERS: ReadonlySet<string> = new Set([
 ]);
 
 export type KeyStatus = "not-needed" | "present" | "missing";
-
-export interface GuidanceInput {
-	/** True once the status-bar probe has answered at least once. */
-	checked: boolean;
-	/** Local engines answering right now (the "providers X/Y" figure). */
-	liveLocal: number;
-	/** The active tab's provider id. */
-	provider: string;
-	/** Whether the active provider needs a key, and whether it has one. */
-	keyStatus: KeyStatus;
-	/**
-	 * Agent init's reason when the configured local provider and its
-	 * fallbacks all failed, e.g. "Ollama is not reachable.".
-	 * Shown as the card's reason line; it alone is enough to show the card.
-	 */
-	unreachable?: string | null;
-}
-
-export function needsProviderGuidance(input: GuidanceInput): boolean {
-	if (input.unreachable) return true;
-	if (!input.checked) return false;
-	if (LOCAL_ENGINE_PROVIDERS.has(input.provider)) return input.liveLocal === 0;
-	return input.keyStatus === "missing";
-}
-
-/**
- * What the NOW strip says while the active tab's agent cannot run a turn
- * (#3290). "none": nothing can answer, the same test as the card above, with
- * the card's reason. "checking": no answer yet either way, so the strip says
- * it is looking rather than READY. Null once the agent is ready.
- */
-export interface NotReadyState {
-	kind: "none" | "checking";
-	reason: string;
-}
-
-export function notReadyState(input: GuidanceInput & { agentReady: boolean }): NotReadyState | null {
-	if (input.agentReady) return null;
-	if (needsProviderGuidance(input)) {
-		const reason =
-			input.unreachable ??
-			(input.keyStatus === "missing"
-				? `${input.provider} needs an API key.`
-				: "No local model is answering.");
-		return { kind: "none", reason };
-	}
-	return { kind: "checking", reason: "looking for a model" };
-}
 
 /**
  * Does `provider` need an API key, and is one set (env or saved)? The TUI-only
