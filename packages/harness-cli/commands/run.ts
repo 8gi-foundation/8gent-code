@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Agent } from "../../eight/agent.js";
+import { sessionApiKey } from "../../eight/failover-provider-config.js";
 import type { AgentConfig } from "../../eight/types.js";
 import { getPermissionManager } from "../../permissions/index.js";
 
@@ -90,7 +91,8 @@ function parseArgs(args: string[]): RunOptions {
 		workdir: null, // null = auto-create temp dir
 		timeout: 300_000,
 		json: false,
-		apiKey: process.env.OPENROUTER_API_KEY,
+		// Set only by --api-key; otherwise resolved for the runtime below (#3261).
+		apiKey: undefined,
 		task: "",
 	};
 
@@ -208,7 +210,9 @@ export async function run(args: string[]): Promise<void> {
 		runtime: opts.runtime,
 		workingDirectory: workdir,
 		maxTurns: opts.maxSteps,
-		apiKey: opts.apiKey,
+		// An explicit --api-key is the caller's own; otherwise only the runtime's
+		// own key, never the OpenRouter key on another runtime (#3261).
+		apiKey: opts.apiKey ?? sessionApiKey(opts.runtime),
 	};
 
 	const agent = new Agent(config);

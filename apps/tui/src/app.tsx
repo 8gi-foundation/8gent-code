@@ -292,6 +292,7 @@ import {
 import { usePermToast } from "./hooks/usePermToast.js";
 
 // Import the actual Agent for real execution
+import { sessionApiKey } from "../../../packages/eight/failover-provider-config.js";
 import { Agent } from "../../../packages/eight/index.js";
 import type {
 	AgentEventCallbacks,
@@ -2594,7 +2595,9 @@ export function App({
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
-					apiKey: process.env.OPENROUTER_API_KEY,
+					// Only the runtime's own key: an OpenRouter key must never reach
+					// an ollama or LM Studio host (#3261).
+					apiKey: sessionApiKey(runtime),
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).

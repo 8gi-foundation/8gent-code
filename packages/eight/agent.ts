@@ -76,6 +76,7 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
+import { providerConfigForStep } from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
@@ -1495,7 +1496,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							);
 							providerConfig.name = fallback.provider as typeof providerConfig.name;
 							providerConfig.model = fallback.model;
+							// The forced-local provider resolves its own endpoint and key:
+							// the session's belong to the provider it is leaving (#3261).
 							providerConfig.apiKey = undefined;
+							providerConfig.baseURL = undefined;
+							providerConfig.headers = undefined;
 						}
 					}
 				}
@@ -1930,10 +1935,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				if (tried.has(key)) break;
 				tried.add(key);
 
-				// Build agent for the current provider in the chain
+				// Build agent for the current provider in the chain. The session's
+				// endpoint and key stay with the session's provider; any other
+				// provider resolves its own (#3261).
 				const stepConfig = {
 					...agentConfig,
-					provider: { name: currentEntry.provider as any, model: currentEntry.model },
+					provider: providerConfigForStep(providerConfig, currentEntry),
 				};
 				const agent = createEightAgent(stepConfig);
 
@@ -1986,7 +1993,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 												? agent
 												: createEightAgent({
 														...agentConfig,
-														provider: { name: cand.provider as any, model: cand.model },
+														provider: providerConfigForStep(providerConfig, cand),
 													});
 										// The agent's GenerateTextResult is structurally a superset of the
 										// hedge GenerateResult (it has text + steps); widen for the executor.
@@ -2019,10 +2026,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								? stepConfig
 								: {
 										...agentConfig,
-										provider: {
-											name: hedgeOut.winner.provider as any,
-											model: hedgeOut.winner.model,
-										},
+										provider: providerConfigForStep(providerConfig, hedgeOut.winner),
 									};
 						break outer;
 					} catch (err: any) {
