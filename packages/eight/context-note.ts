@@ -57,3 +57,16 @@ export function contextNote(
 		sent: { ...sent, ...current },
 	};
 }
+
+/**
+ * Context the harness works out during a turn (vision interpretation, a
+ * clarifying question, a pre-fetched file), as a message body (#3260).
+ *
+ * It must not be a `system` message: every request builder sends only the
+ * first system message, the byte-stable prompt, so a second one never reached
+ * the model. It goes into the history as a user-role note under the same
+ * header as the session context, after the cached prefix.
+ */
+export function harnessNote(body: string): string {
+	return `${CONTEXT_NOTE_HEADER}\n\n${body}`;
+}

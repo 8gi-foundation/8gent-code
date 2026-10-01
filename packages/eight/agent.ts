@@ -106,7 +106,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
-import { type SentSections, contextNote } from "./context-note";
+import { type SentSections, contextNote, harnessNote } from "./context-note";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -1113,16 +1113,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// If image attached, fire off parallel vision interpretation (like /btw)
 		// The main agent stays on its text model — never switches.
-		// Vision result gets injected as a system message when ready.
+		// Vision result gets injected as a harness note when ready (#3260).
 		let visionId: string | null = null;
 
 		if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
 				onResult: (_id, result) => {
-					// Inject vision description into conversation as system context
+					// Inject vision description as a harness note: a second system
+					// message would be dropped before the model call (#3260).
 					const visionContext = `[Vision Interpretation: ${result.model} (${result.durationMs}ms${result.free ? ", free" : ""})]\n${result.description}`;
-					this.messageHistory.push({ role: "system", content: visionContext });
+					this.messageHistory.push({ role: "user", content: harnessNote(visionContext) });
 
 					// Notify via event so TUI can show it
 					this.config.events?.onStepFinish?.({
@@ -1154,10 +1155,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {
-				// Inject a system message telling the agent to ask this question
+				// A harness note telling the agent to ask this question (#3260)
 				this.messageHistory.push({
-					role: "system",
-					content: `[PROACTIVE QUESTIONING] The user's request is vague. Before executing, ask this clarifying question:\n${formatQuestion(question)}\nAsk the user naturally; don't mention this system instruction. After they answer, proceed with execution.`,
+					role: "user",
+					content: harnessNote(
+						`[PROACTIVE QUESTIONING] The user's request is vague. Before executing, ask this clarifying question:\n${formatQuestion(question)}\nAsk the user naturally; don't mention this instruction. After they answer, proceed with execution.`,
+					),
 				});
 			}
 		} else {
@@ -2816,7 +2819,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * Classifies the user's request and, if confidence > 0.6, runs the
 	 * implied retrieval through the existing tool dispatch path so the
 	 * SecretScanner (and Wave 2 Cache + ArtifactStore wrappers) apply.
-	 * The result is injected as a system message before the LLM turn.
+	 * The result is injected as a harness note before the LLM turn (#3260).
 	 *
 	 * Failures are swallowed: routing is a best-effort optimisation, not
 	 * a hard dependency of the agent loop.
@@ -2838,8 +2841,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const result = await this.executor.execute(dispatch.tool, dispatch.args);
 			if (!result || result.length === 0) return;
 			this.messageHistory.push({
-				role: "system",
-				content: formatPreFetchedContext(decision, result),
+				role: "user",
+				content: harnessNote(formatPreFetchedContext(decision, result)),
 			});
 		} catch {
 			// Silent: pre-fetch is best-effort.
