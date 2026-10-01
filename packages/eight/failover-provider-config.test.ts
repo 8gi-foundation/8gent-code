@@ -333,19 +333,20 @@ describe("sessionApiKey", () => {
 		expect(sessionApiKey("openrouter", {})).toBeUndefined();
 	});
 
-	test("no host passes the OpenRouter env key whatever the runtime", async () => {
+	test("no source passes the OpenRouter env key as an apiKey whatever the runtime", async () => {
 		const { readFileSync } = await import("node:fs");
 		const root = join(import.meta.dir, "..", "..");
-		for (const f of [
-			"apps/tui/src/app.tsx",
-			"apps/tui/src/hooks/useChatTabState.ts",
-			"packages/daemon/agent-pool.ts",
-			"packages/daemon/telegram-bridge.ts",
-		]) {
-			const src = readFileSync(join(root, f), "utf8");
-			const hit = /apiKey:\s*process\.env\.OPENROUTER_API_KEY/.test(src);
-			expect({ f, hit }).toEqual({ f, hit: false });
+		// Every host, now and future: an AgentConfig (or pool config) built with
+		// the OpenRouter env key sends it to whatever runtime the session runs.
+		const pattern = /apiKey:\s*process\.env\.OPENROUTER_API_KEY/;
+		const hits: string[] = [];
+		for (const dir of ["apps", "packages", "bin"]) {
+			for (const f of new Bun.Glob(`${dir}/**/*.{ts,tsx}`).scanSync({ cwd: root })) {
+				if (f.includes("node_modules") || /\.test\.tsx?$/.test(f)) continue;
+				if (pattern.test(readFileSync(join(root, f), "utf8"))) hits.push(f);
+			}
 		}
+		expect(hits).toEqual([]);
 	});
 });
 

@@ -239,7 +239,10 @@ export class AgentPool {
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
 			systemPrompt: overrides?.systemPrompt,
 			workingDirectory: this.config.workingDirectory,
-			apiKey: this.config.apiKey,
+			// The pool key was resolved for the pool's default runtime. A session
+			// whose runtime differs (an override, or a Table session forced local)
+			// gets only its own runtime's key, never the pool's (#3261).
+			apiKey: runtime === this.config.runtime ? this.config.apiKey : sessionApiKey(runtime),
 			maxTurns,
 			events,
 			// Delegation is the personal-OS channel (phone/glasses relay). It needs
@@ -524,8 +527,10 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 		runtime,
 		workingDirectory: fileConfig?.workingDirectory || process.cwd(),
 		// The OpenRouter env key only for an openrouter runtime (#3261).
-		// fileConfig.apiKey names no provider; it is passed through as before.
-		apiKey: sessionApiKey(runtime) || fileConfig?.apiKey,
+		// fileConfig.apiKey names no provider, so it is treated as the
+		// OpenRouter key it has always been used as, and only for openrouter.
+		apiKey:
+			sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
 		maxTurns: fileConfig?.maxTurns,
 	};
 }
