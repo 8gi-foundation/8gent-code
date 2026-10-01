@@ -15,15 +15,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
-	mkdtempSync,
 	readFileSync,
 	rmSync,
 	symlinkSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
@@ -38,6 +37,9 @@ import {
 	_setSystemOneOverridesForTests,
 } from "./system-one-gate";
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 class RmIsDangerous implements DecideBackend {
 	readonly name = "stub";
@@ -80,8 +82,8 @@ afterAll(() => {
 });
 
 beforeEach(() => {
-	ws = mkdtempSync(join(tmpdir(), "s1-own-ws-"));
-	outside = mkdtempSync(join(tmpdir(), "s1-own-out-"));
+	ws = tempDir("s1-own-ws-");
+	outside = tempDir("s1-own-out-");
 	execFileSync("git", ["init", "-q"], { cwd: ws });
 	writeFileSync(join(ws, "notes.md"), "tracked");
 	execFileSync("git", ["add", "notes.md"], { cwd: ws });
@@ -94,7 +96,7 @@ beforeEach(() => {
 	_setSystemOneOverridesForTests({
 		createDecider: () => createDecider({ backend: judge, cacheSize: 0 }),
 		askHuman: async () => null,
-		calibrationDir: mkdtempSync(join(tmpdir(), "s1-own-nocal-")),
+		calibrationDir: tempDir("s1-own-nocal-"),
 	});
 	process.env[SYSTEM_ONE_FLAG] = "1";
 });
