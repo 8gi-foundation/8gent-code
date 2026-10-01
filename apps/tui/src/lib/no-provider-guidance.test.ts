@@ -37,7 +37,7 @@ describe("needsProviderGuidance (T5)", () => {
 	});
 
 	test("agent init found the local provider unreachable: show, even before the probe lands", () => {
-		const unreachable = "Ollama is not reachable.";
+		const unreachable = "Ollama at 127.0.0.1:11434 did not answer.";
 		expect(needsProviderGuidance({ ...base, checked: false, unreachable })).toBe(true);
 		// apfel answering the status probe does not make Ollama runnable.
 		expect(needsProviderGuidance({ ...base, liveLocal: 1, unreachable })).toBe(true);
@@ -89,11 +89,18 @@ describe("providerKeyStatus", () => {
 });
 
 describe("unreachableLine", () => {
-	test("says it once, keeps a timeout or HTTP detail", () => {
-		expect(unreachableLine("Ollama", "not reachable")).toBe("Ollama is not reachable.");
-		expect(unreachableLine("LM Studio", "no answer within 3s")).toBe(
-			"LM Studio did not answer (no answer within 3s).",
+	test("names the engine and its address, says it once", () => {
+		expect(unreachableLine("Ollama", "127.0.0.1:11434", "not reachable")).toBe(
+			"Ollama at 127.0.0.1:11434 did not answer.",
 		);
-		expect(unreachableLine("Ollama", "http 500")).toBe("Ollama did not answer (http 500).");
+		expect(unreachableLine("LM Studio", "localhost:1234", "no answer within 3s")).toBe(
+			"LM Studio at localhost:1234 did not answer within 3s.",
+		);
+		expect(unreachableLine("Ollama", "127.0.0.1:11434", "http 500")).toBe(
+			"Ollama at 127.0.0.1:11434 answered with http 500.",
+		);
+		expect(unreachableLine("Ollama", "127.0.0.1:11434", "no models")).toBe(
+			"Ollama at 127.0.0.1:11434 has no models yet.",
+		);
 	});
 });

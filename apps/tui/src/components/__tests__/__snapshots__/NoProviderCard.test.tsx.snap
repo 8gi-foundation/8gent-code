@@ -6,11 +6,12 @@ exports[`no-model card in the chat area (T5) providers 0/3: the card shows both 
 │ NO MODEL 8gent needs a model to answer. Pick one, or type /provider.         │
 │ 1  Run a model on this machine (free, stays local)                           │
 │    curl -fsSL https://ollama.com/install.sh | sh                             │
-│    ollama pull qwen3.5                                                       │
+│    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    Add OPENROUTER_API_KEY=<your key> to ~/.8gent/.env                        │
-│    Restart 8gent. In 8gent: /provider openrouter-free                        │
+│    8gent keys   # opens ~/.8gent/keys.env                                    │
+│    Set OPENROUTER_API_KEY=<your key>, save, restart 8gent                    │
+│    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
 `;
 
@@ -18,23 +19,25 @@ exports[`no-model card in the chat area (T5) carries agent init's reason line in
 "
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ NO MODEL 8gent needs a model to answer. Pick one, or type /provider.         │
-│          LM Studio is not reachable.                                         │
+│          LM Studio at localhost:1234 did not answer.                         │
 │ 1  Run a model on this machine (free, stays local)                           │
 │    curl -fsSL https://ollama.com/install.sh | sh                             │
-│    ollama pull qwen3.5                                                       │
+│    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    Add OPENROUTER_API_KEY=<your key> to ~/.8gent/.env                        │
-│    Restart 8gent. In 8gent: /provider openrouter-free                        │
+│    8gent keys   # opens ~/.8gent/keys.env                                    │
+│    Set OPENROUTER_API_KEY=<your key>, save, restart 8gent                    │
+│    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
 `;
 
-exports[`no-model card in the chat area (T5) one provider ready: nothing renders 1`] = `""`;
-
-exports[`no-model card in the chat area (T5) short terminal (80x24): compact form, three text rows, nothing wraps 1`] = `
+exports[`no-model card in the chat area (T5) short terminal (80x24): compact form keeps the reason, nothing wraps 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────╮
-│ NO MODEL 8gent needs a model to answer. Pick one, or type /provider.     │
+│ NO MODEL Ollama at 127.0.0.1:11434 did not answer.                       │
 │ 1  Install Ollama (ollama.com), ollama pull qwen3.5, /provider ollama    │
-│ 2  Put OPENROUTER_API_KEY in ~/.8gent/.env, restart, use /provider       │
+│ 2  8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent          │
+│    /provider openrouter, then /model auto:free                           │
 ╰──────────────────────────────────────────────────────────────────────────╯"
 `;
+
+exports[`no-model card in the chat area (T5) one provider ready: nothing renders 1`] = `""`;

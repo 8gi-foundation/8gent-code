@@ -34,8 +34,8 @@ export function NoProviderCard({
 	compact = false,
 }: { copy?: GuidanceCopy; reason?: string | null; compact?: boolean }) {
 	if (compact) {
-		// Short terminal: the lead and one line per path, no reason line (the
-		// setup card above already says what could not be reached).
+		// Short terminal: one header row (the reason when there is one, since
+		// the setup card's own line scrolls away), then each path's lines.
 		return (
 			<Box
 				borderStyle="round"
@@ -50,16 +50,24 @@ export function NoProviderCard({
 							{copy.label}
 						</Text>
 					</Box>
-					<Text color={t[NO_PROVIDER_TONES.lead]}>{copy.lead}</Text>
+					<Text color={t[reason ? NO_PROVIDER_TONES.reason : NO_PROVIDER_TONES.lead]}>
+						{reason ?? copy.lead}
+					</Text>
 				</Box>
-				{copy.compact.map((line, i) => (
-					<Box key={line}>
+				{copy.compact.map((lines, i) => (
+					<Box key={copy.paths[i]?.n ?? String(i + 1)}>
 						<Box flexShrink={0} width={3}>
 							<Text color={t[NO_PROVIDER_TONES.number]} bold>
 								{copy.paths[i]?.n ?? String(i + 1)}
 							</Text>
 						</Box>
-						<Text color={t[NO_PROVIDER_TONES.step]}>{line}</Text>
+						<Box flexDirection="column">
+							{lines.map((line) => (
+								<Text key={line} color={t[NO_PROVIDER_TONES.step]}>
+									{line}
+								</Text>
+							))}
+						</Box>
 					</Box>
 				))}
 			</Box>

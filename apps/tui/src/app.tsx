@@ -2563,7 +2563,7 @@ export function App({
 					setAgentReady(false);
 					const label =
 						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ?? decision.from;
-					setUnreachableNote(unreachableLine(label, decision.reason));
+					setUnreachableNote(unreachableLine(label, decision.fromAddress, decision.reason));
 					retryLater();
 					return;
 				}

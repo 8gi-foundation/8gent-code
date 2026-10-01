@@ -81,13 +81,18 @@ function registryLookup(name: string): { needsKey: boolean; hasKey: boolean } {
 }
 
 /**
- * The card's reason line from agent init's readiness result. "Ollama is
- * unreachable (not reachable)" said the same thing twice, so the plain case
- * reads "Ollama is not reachable." and the others keep their detail.
+ * The card's reason line from agent init's readiness result, naming the
+ * engine and the address it was tried at, so a wrong OLLAMA_HOST is visible.
+ * `reason` is provider-readiness's own wording ("not reachable", "no answer
+ * within 3s", "http 500", "no models").
  */
-export function unreachableLine(label: string, reason: string): string {
-	if (reason === "not reachable") return `${label} is not reachable.`;
-	return `${label} did not answer (${reason}).`;
+export function unreachableLine(label: string, address: string, reason: string): string {
+	const at = `${label} at ${address}`;
+	if (reason === "not reachable") return `${at} did not answer.`;
+	const within = /^no answer (within .+)$/.exec(reason);
+	if (within) return `${at} did not answer ${within[1]}.`;
+	if (reason === "no models") return `${at} has no models yet.`;
+	return `${at} answered with ${reason}.`;
 }
 
 export interface GuidancePath {
@@ -102,21 +107,24 @@ export interface GuidanceCopy {
 	label: string;
 	lead: string;
 	paths: GuidancePath[];
-	/** One line per path, for short terminals (see COMPACT_BELOW_ROWS). */
-	compact: string[];
+	/** The short-terminal form: lines per path, in path order (see COMPACT_BELOW_ROWS). */
+	compact: string[][];
 }
 
 /**
  * Below this many terminal rows the card takes its 3-line compact form. The
- * full card is 12 rows; with the header, input and footer around it, a
+ * full card is 13 rows; with the header, input and footer around it, a
  * shorter terminal would squeeze the input box (seen at 80x24).
  */
 export const COMPACT_BELOW_ROWS = 30;
 
 /**
- * The card's words. Commands are the real ones: the Ollama install script and
- * library tag were checked against ollama.com, the key file is the one
- * `loadEnvFile()` reads at start, and `/provider` names are the TUI's own.
+ * The card's words. Commands are the real ones and follow the published docs
+ * (8gent.dev models/ollama and models/hosted): the Ollama install script and
+ * library tag were checked against ollama.com, and qwen3.5 is the Ollama
+ * default model in packages/providers/index.ts. Keys go in ~/.8gent/keys.env
+ * via `8gent keys` (the file `8gent keys status` reads and bin/8gent.ts loads).
+ * Shell lines are pasteable as they stand: notes ride in `#` comments.
  */
 export function guidanceCopy(platform: NodeJS.Platform = process.platform): GuidanceCopy {
 	const install =
@@ -130,20 +138,24 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 			{
 				n: "1",
 				title: "Run a model on this machine (free, stays local)",
-				steps: [install, "ollama pull qwen3.5", "In 8gent: /provider ollama"],
+				steps: [install, "ollama pull qwen3.5   # about 7 GB", "In 8gent: /provider ollama"],
 			},
 			{
 				n: "2",
 				title: "Use a free hosted model, key from https://openrouter.ai/keys",
 				steps: [
-					"Add OPENROUTER_API_KEY=<your key> to ~/.8gent/.env",
-					"Restart 8gent. In 8gent: /provider openrouter-free",
+					"8gent keys   # opens ~/.8gent/keys.env",
+					"Set OPENROUTER_API_KEY=<your key>, save, restart 8gent",
+					"In 8gent: /provider openrouter, then /model auto:free",
 				],
 			},
 		],
 		compact: [
-			"Install Ollama (ollama.com), ollama pull qwen3.5, /provider ollama",
-			"Put OPENROUTER_API_KEY in ~/.8gent/.env, restart, use /provider",
+			["Install Ollama (ollama.com), ollama pull qwen3.5, /provider ollama"],
+			[
+				"8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent",
+				"/provider openrouter, then /model auto:free",
+			],
 		],
 	};
 }

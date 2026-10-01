@@ -61,9 +61,14 @@ describe("no-model card in the chat area (T5)", () => {
 		const out = await frame(bareMachine);
 		expect(out).toContain("NO MODEL");
 		expect(out).toContain("curl -fsSL https://ollama.com/install.sh | sh");
-		expect(out).toContain("ollama pull qwen3.5");
+		expect(out).toContain("ollama pull qwen3.5   # about 7 GB");
+		// The documented key flow (8gent.dev models/hosted): keys.env via
+		// `8gent keys`, then /provider openrouter and /model auto:free.
+		expect(out).toContain("8gent keys   # opens ~/.8gent/keys.env");
 		expect(out).toContain("OPENROUTER_API_KEY=<your key>");
-		expect(out).toContain("/provider openrouter-free");
+		expect(out).toContain("/provider openrouter, then /model auto:free");
+		expect(out).not.toContain("~/.8gent/.env");
+		expect(out).not.toContain("openrouter-free");
 		expect(out).toContain("Pick one, or type /provider.");
 		// Meaning is in text, not colour: the state word and numbered paths.
 		expect(out).toMatch(/│ 1\s+Run a model/);
@@ -74,30 +79,40 @@ describe("no-model card in the chat area (T5)", () => {
 	test("fits the chat column of an 80-column terminal: no line wraps or clips", async () => {
 		// The chat column is about 76 wide in an 80-column terminal; 72 leaves room.
 		const lines = (await frame(bareMachine, 72)).split("\n").filter(Boolean);
-		// Border, lead, 1 + 3 steps, 2 + 2 steps, border: ten rows, none wrapped.
-		expect(lines.length).toBe(10);
+		// Border, lead, 1 + 3 steps, 2 + 3 steps, border: eleven rows, none wrapped.
+		expect(lines.length).toBe(11);
 		for (const line of lines) expect(line.length).toBeLessThanOrEqual(72);
 	});
 
 	test("carries agent init's reason line in place of a chat notice", async () => {
-		const out = await frame({ ...bareMachine, unreachable: "LM Studio is not reachable." });
-		expect(out).toMatch(/│ {10}LM Studio is not reachable\.\s+│/);
+		const out = await frame({
+			...bareMachine,
+			unreachable: "LM Studio at localhost:1234 did not answer.",
+		});
+		expect(out).toMatch(/│ {10}LM Studio at localhost:1234 did not answer\.\s+│/);
 		expect(out).toMatchSnapshot();
 	});
 
-	test("short terminal (80x24): compact form, three text rows, nothing wraps", async () => {
+	test("short terminal (80x24): compact form keeps the reason, nothing wraps", async () => {
 		const lines = (
-			await frame({ ...bareMachine, compact: true, unreachable: "Ollama is not reachable." }, 76)
+			await frame(
+				{ ...bareMachine, compact: true, unreachable: "Ollama at 127.0.0.1:11434 did not answer." },
+				76,
+			)
 		)
 			.split("\n")
 			.filter(Boolean);
-		expect(lines.length).toBe(5);
+		// Border, reason, path 1, path 2 on two lines, border.
+		expect(lines.length).toBe(6);
 		for (const line of lines) expect(line.length).toBeLessThanOrEqual(76);
 		const out = lines.join("\n");
 		expect(out).toMatch(
 			/│ 1\s+Install Ollama \(ollama\.com\), ollama pull qwen3\.5, \/provider ollama/,
 		);
-		expect(out).toMatch(/│ 2\s+Put OPENROUTER_API_KEY in ~\/\.8gent\/\.env/);
+		// After onboarding nothing else says why, so the compact form keeps it.
+		expect(out).toMatch(/│ NO MODEL Ollama at 127\.0\.0\.1:11434 did not answer\./);
+		expect(out).toMatch(/│ 2\s+8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent/);
+		expect(out).toMatch(/│\s{4}\/provider openrouter, then \/model auto:free/);
 		expect(out).toMatchSnapshot();
 	});
 
@@ -130,6 +145,11 @@ describe("no-model card in the chat area (T5)", () => {
 	test("before the first probe lands: nothing renders (no flash)", async () => {
 		const out = await frame({ ...bareMachine, checked: false });
 		expect(out).toBe("");
+	});
+
+	test("compact form with no reason falls back to the lead", async () => {
+		const out = await frame({ ...bareMachine, compact: true }, 76);
+		expect(out).toContain("NO MODEL 8gent needs a model to answer.");
 	});
 
 	test("copy names no AI vendor and uses no em dash", () => {
