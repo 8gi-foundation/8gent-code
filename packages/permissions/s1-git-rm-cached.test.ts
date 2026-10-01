@@ -15,7 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readOnlyAllowlist } from "../decide/allowlist";
@@ -91,7 +92,89 @@ describe("allowlist: git rm --cached (#3298)", () => {
 		expect(passes("git rm --cached $(cat list)")).toBe(false);
 		expect(passes("git rm --cached `ls`")).toBe(false);
 	});
+
+	// #3299 review: each of these deleted a tracked file under sh -c, because
+	// the parser saw different words from the ones sh hands to git.
+	test("words the parser could misread are no-opinion (#3299 review)", () => {
+		for (const c of BYPASSES) expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
+		// A `#` or brace anywhere in the segment, or a glob before `--`.
+		for (const c of [
+			"git rm --cached a#b",
+			"git rm --cached '#notes'",
+			"git rm --cached {a,b}",
+			"git rm --cached a}",
+			"git rm --cached a?",
+			"git rm --cached [ab]",
+			"git rm -r --cached src/*.ts",
+		])
+			expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
+		// After `--` every word is a path, so a glob there is safe.
+		expect(passes("git rm --cached -- *")).toBe(true);
+		expect(passes("git rm -r --cached -- src/*.ts")).toBe(true);
+	});
 });
+
+/** The three commands from the #3299 review that deleted a file at afcbf699. */
+const BYPASSES = [
+	"git rm --cached a#b --no-cached", // mid-word `#`: the parser saw a comment
+	"git rm --cached {a,--no-cached}", // brace: bash expands it to a flag
+	"git rm --cached *", // glob: matches a planted file named --no-cached
+];
+
+/** Tracked files in the throwaway repo: `a`, `a#b`, `sub/c`, plus a planted `--no-cached`. */
+function throwawayRepo(): string {
+	const dir = mkdtempSync(join(tmpdir(), "s1-git-rm-real-"));
+	const git = (...args: string[]) => {
+		const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+		if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+	};
+	git("init", "-q");
+	git("config", "user.email", "t@example.invalid");
+	git("config", "user.name", "t");
+	mkdirSync(join(dir, "sub"));
+	for (const f of ["a", "a#b", "sub/c", "--no-cached"]) writeFileSync(join(dir, f), f);
+	git("add", "--", ".");
+	git("commit", "-q", "-m", "seed");
+	return dir;
+}
+
+const SHELLS = ["sh", "bash"].filter((s) => spawnSync(s, ["-c", "true"]).status === 0);
+const hasGit = spawnSync("git", ["--version"]).status === 0;
+
+describe.skipIf(!hasGit)(
+	"real git: whatever the allowlist passes leaves every file on disk",
+	() => {
+		const corpus = [
+			"git rm --cached a",
+			"git rm -r --cached sub",
+			"git rm --cached -r sub",
+			"git rm -rf --cached .",
+			"git rm --cached -q -- a sub/c",
+			"git rm --cached -- *",
+			...BYPASSES,
+		];
+		for (const shell of SHELLS) {
+			for (const c of corpus) {
+				test(`${shell} -c ${c}`, () => {
+					const dir = throwawayRepo();
+					try {
+						const passed = passes(c);
+						spawnSync(shell, ["-c", c], { cwd: dir, encoding: "utf8" });
+						const gone = ["a", "a#b", "sub/c", "--no-cached"].filter(
+							(f) => !existsSync(join(dir, f)),
+						);
+						// Passed without the judge implies nothing was deleted. A bypass
+						// may delete (that is why it must not pass).
+						if (passed) expect({ c, gone }).toEqual({ c, gone: [] });
+						if (BYPASSES.includes(c)) expect({ c, passed }).toEqual({ c, passed: false });
+					} finally {
+						rmSync(dir, { recursive: true, force: true });
+					}
+				});
+			}
+		}
+	},
+);
 
 // A judge that answers "yes, harmful" to everything and counts how often it is asked.
 class BlockingBackend implements DecideBackend {
@@ -139,10 +222,19 @@ describe("gate: git rm --cached (#3298)", () => {
 		expect(backend.asks).toBe(0);
 	});
 
-	test("plain git rm still goes past the allowlist and is not run by it", async () => {
+	test("plain git rm goes to the judge, and a refusing judge stops it", async () => {
 		const r = await systemOneGate("git rm a.txt", env);
+		expect(backend.asks).toBe(1);
 		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
+	});
+
+	test("the three review bypasses go to the judge (#3299 review)", async () => {
+		for (const c of BYPASSES) {
+			const before = backend.asks;
+			const r = await systemOneGate(c, env);
+			expect({ c, asked: backend.asks - before, run: r.run }).toEqual({ c, asked: 1, run: false });
+		}
 	});
 
 	test("the chained rm is still stopped", async () => {

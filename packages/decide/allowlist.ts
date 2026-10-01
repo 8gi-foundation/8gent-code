@@ -26,14 +26,19 @@
  *   - `mkdir [-p] [-v] <path>...` where every path is relative, inside the
  *     working directory (no leading /, ~ or -, no `..`, no glob or `$`). It
  *     only creates; on an existing directory it does nothing or fails.
- *   - `git rm --cached [-r] [-f] [-q] [-n] [--ignore-unmatch] [--] <path>...`
- *     (#3298). It only untracks: the files stay on disk. Plain `git rm`
- *     deletes from the working tree and is never passed.
  *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
  *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
  *     `ffmpeg -version`). A known set, never "any binary": some system tools
  *     read -h or an unknown flag as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
+ *
+ * Index-only git (#3298): `git rm --cached` with flags only from `-r`, `-f`,
+ * `-q`, `-n` (combinable), `--force`, `--quiet`, `--dry-run`,
+ * `--ignore-unmatch` and `--`. It untracks and leaves the files on disk.
+ * Plain `git rm` deletes from the working tree and is never passed. git
+ * honours `--no-cached` anywhere before `--`, so a word this parser cannot
+ * see exactly defeats the check: any `#`, `{` or `}` in the segment, or a
+ * glob character (`*?[`) in a word before `--`, is no-opinion.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
  * and stays off unless the caller opts in. Callers pass the options; the env
@@ -143,7 +148,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (b === "cd") return null;
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
-	if (b === "git") return gitOk(args);
+	if (b === "git") return gitOk(args, stripped);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";
 		return opts.bunTest ? null : "bun test is not enabled (EIGHT_S1_ALLOWLIST_BUN_TEST)";
@@ -164,7 +169,10 @@ const GIT_RM_CACHED_FLAG = /^(-[rfqn]+|--force|--quiet|--dry-run|--ignore-unmatc
  * never passed here. Any flag outside GIT_RM_CACHED_FLAG (an abbreviation, a
  * `--no-` negation, `--pathspec-from-file`) is no-opinion and goes to the judge.
  */
-function gitRmCachedOk(rest: string[]): string | null {
+function gitRmCachedOk(rest: string[], raw: string): string | null {
+	// A word the parser does not see as sh does (a mid-word `#` it reads as a
+	// comment, a brace sh expands) could carry `--no-cached` (#3299 review).
+	if (/[#{}]/.test(raw)) return "git rm with # or a brace: the words may not be what sh runs";
 	let cached = false;
 	let paths = 0;
 	let endOfOptions = false;
@@ -173,6 +181,8 @@ function gitRmCachedOk(rest: string[]): string | null {
 			endOfOptions = true;
 			continue;
 		}
+		// A glob before `--` can expand to a planted file named `--no-cached`.
+		if (!endOfOptions && /[*?[]/.test(a)) return "git rm with a glob before --";
 		if (!endOfOptions && a.startsWith("-")) {
 			if (a === "--cached") cached = true;
 			else if (!GIT_RM_CACHED_FLAG.test(a)) return `git rm with ${a}`;
@@ -185,7 +195,7 @@ function gitRmCachedOk(rest: string[]): string | null {
 	return null;
 }
 
-function gitOk(args: string[]): string | null {
+function gitOk(args: string[], raw: string): string | null {
 	let i = 0;
 	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
 	const sub = args[i];
@@ -194,7 +204,7 @@ function gitOk(args: string[]): string | null {
 	if (sub && GIT_READ.has(sub)) return null;
 	if (sub === "branch" && rest.every((a) => GIT_BRANCH_READ.test(a))) return null;
 	if (sub === "remote" && rest.every((a) => a === "-v" || a === "--verbose")) return null;
-	if (sub === "rm") return gitRmCachedOk(rest);
+	if (sub === "rm") return gitRmCachedOk(rest, raw);
 	return `git ${sub ?? ""} is not a read-only git subcommand`.trim();
 }
 
