@@ -183,6 +183,18 @@ const GIT_RM_CACHED_FLAGS: ReadonlySet<string> = new Set([
  * `git rm --cached <path>...` only removes paths from the index (#3298).
  * Decided on the raw command text, tokenised here on spaces, never through
  * shellWords: anything the shell could read differently is no-opinion.
+ *
+ * Why each restriction exists. git honours `--no-cached` anywhere before
+ * `--`, so one word the shell sees differently turns this into plain
+ * `git rm`, which deletes the file. Each of these was shown to delete a
+ * tracked file under a real shell in review of #3299:
+ *   - mid-word `#`, braces, globs: the parser and sh disagree on the words;
+ *   - `>&2--cached`: a redirect the parser split into a separate flag;
+ *   - backslash-newline, CR, TAB: whitespace the parser and sh treat apart.
+ * GIT_RM_RAW therefore admits only plain spaces and characters with no
+ * meaning to any shell. `git` and `rm` must be the first two words (no
+ * global options, which could shift the subcommand), `--cached` must appear
+ * exactly once, flags come before paths, and only `--` may end the flags.
  */
 function gitRmCachedOk(raw: string): string | null {
 	if (!GIT_RM_RAW.test(raw)) return "git rm with a character outside the plain set";

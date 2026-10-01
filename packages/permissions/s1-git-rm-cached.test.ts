@@ -11,14 +11,18 @@
  * treatment: no allowlist pass, the judge decides. A chained `rm` is still
  * caught by the rules.
  *
- * Commands here are parser text only. Nothing is executed.
+ * Most commands here are parser text only. The real-git suites DO execute
+ * commands: each runs `git` and `sh`/`bash`/`zsh -c` inside a throwaway repo
+ * under the OS temp dir, with a hermetic environment (no inherited GIT_*
+ * variables, no system or global git config, no hooks, HOME in a temp dir).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { readOnlyAllowlist } from "../decide/allowlist";
 import { type Decider, createDecider } from "../decide/index";
 import { decideRules } from "../decide/rules";
@@ -71,6 +75,9 @@ describe("allowlist: git rm --cached (#3298)", () => {
 			"git rm --cached a.txt --no-cached",
 			"git rm --cached 'a.txt'", // quoting
 			"git rm --cached a\\ b",
+			"git -C --cached rm a", // pins the `git rm` first-words check
+			"git --no-pager rm --cached a",
+			"git rm --cached --", // no path after --
 			"git rm --cached ~/a.txt",
 			"git rm\t--cached a.txt",
 			" git rm --cached a.txt\n",
@@ -146,62 +153,175 @@ const BYPASSES = [
 	"git rm a\\\n--cached", // backslash-newline: sh makes the word `a--cached`
 	"git rm a\r--cached", // CR: sh keeps it inside the word
 	"git rm --cached\r a", // CR glued to the flag
+	// #3299 code review: a TAB is a word break to sh, so `--no-cached` is a flag.
+	"git rm --cached a\t--no-cached",
 ];
+
+// ------------------------------------------------------------------ real git
+//
+// Hermetic: every spawn gets HERMETIC_ENV (process.env minus every GIT_*
+// variable, BASH_ENV and ENV, with no system or global git config, no
+// templates, and HOME in a temp dir). git exports GIT_DIR and GIT_INDEX_FILE
+// to hooks, so a `bun test` started from a hook would otherwise point every
+// command below at the real checkout (#3299 code review, C1).
+
+const SANDBOX_ROOT = realpathSync(tmpdir());
+const FAKE_HOME = realpathSync(tempDir("s1-git-rm-home-"));
+
+function hermeticEnv(): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [k, v] of Object.entries(process.env)) {
+		if (v === undefined || k.startsWith("GIT_") || k === "BASH_ENV" || k === "ENV") continue;
+		env[k] = v;
+	}
+	return {
+		...env,
+		GIT_CONFIG_NOSYSTEM: "1",
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_TEMPLATE_DIR: "",
+		HOME: FAKE_HOME,
+	};
+}
+
+/** Run a program in `dir` with the hermetic env; refuse any dir outside the temp root. */
+function run(file: string, args: string[], dir: string) {
+	const real = realpathSync(dir);
+	if (!real.startsWith(`${SANDBOX_ROOT}/`))
+		throw new Error(`refusing to run outside ${SANDBOX_ROOT}: ${real}`);
+	const r = spawnSync(file, args, { cwd: real, encoding: "utf8", env: hermeticEnv() });
+	if (r.error || r.status === null)
+		throw new Error(`${file} did not run: ${r.error?.message ?? r.signal}`);
+	return r;
+}
+
+function git(dir: string, ...args: string[]): string {
+	const r = run("git", args, dir);
+	if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+	return r.stdout;
+}
+
+const FILES = ["a", "a#b", "sub/c", "--no-cached"];
 
 /** Tracked files in the throwaway repo: `a`, `a#b`, `sub/c`, plus a planted `--no-cached`. */
 function throwawayRepo(): string {
-	const dir = mkdtempSync(join(tmpdir(), "s1-git-rm-real-"));
-	const git = (...args: string[]) => {
-		const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
-		if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
-	};
-	git("init", "-q");
-	git("config", "user.email", "t@example.invalid");
-	git("config", "user.name", "t");
+	const dir = realpathSync(tempDir("s1-git-rm-real-"));
+	git(dir, "init", "-q");
 	mkdirSync(join(dir, "sub"));
-	for (const f of ["a", "a#b", "sub/c", "--no-cached"]) writeFileSync(join(dir, f), f);
-	git("add", "--", ".");
-	git("commit", "-q", "-m", "seed");
+	for (const f of FILES) writeFileSync(join(dir, f), f);
+	git(dir, "add", "--", ".");
+	git(
+		dir,
+		"-c",
+		"core.hooksPath=/dev/null",
+		"-c",
+		"commit.gpgsign=false",
+		"-c",
+		"user.email=t@example.invalid",
+		"-c",
+		"user.name=t",
+		"commit",
+		"-q",
+		"-m",
+		"seed",
+	);
+	// The repo git sees is this one, not one named by an inherited variable.
+	if (git(dir, "rev-parse", "--show-toplevel").trim() !== dir)
+		throw new Error("throwaway repo is not isolated");
 	return dir;
 }
 
-const SHELLS = ["sh", "bash", "zsh"].filter((s) => spawnSync(s, ["-c", "true"]).status === 0);
+const tracked = (dir: string) => git(dir, "ls-files", "-z").split("\0").filter(Boolean);
+
+/** Each corpus line, and what it must untrack if the allowlist passes it. */
+const CORPUS: { c: string; untracks?: string[] }[] = [
+	{ c: "git rm --cached a", untracks: ["a"] },
+	{ c: "git rm -r --cached sub", untracks: ["sub/c"] },
+	{ c: "git rm --cached -r sub", untracks: ["sub/c"] },
+	{ c: "git rm --cached -q -- a sub/c", untracks: ["a", "sub/c"] },
+	{ c: "git rm --cached -- --no-cached", untracks: ["--no-cached"] },
+	{ c: "git rm -r -f --cached --force --quiet -- sub a", untracks: ["sub/c", "a"] },
+	{ c: "git rm --cached -n a", untracks: [] }, // dry run
+	{ c: "git rm -rf --cached ." }, // cluster: no-opinion
+	{ c: "git rm --cached -- *" }, // glob: no-opinion
+	...BYPASSES.map((c) => ({ c })),
+];
+
 const hasGit = spawnSync("git", ["--version"]).status === 0;
+const hasShell = (s: string) => spawnSync(s, ["-c", "true"]).status === 0;
+
+afterAll(cleanupTempDirs);
+
+for (const shell of ["sh", "bash", "zsh"]) {
+	describe.skipIf(!hasGit || !hasShell(shell))(`real git under ${shell} -c`, () => {
+		// Positive control: the harness can see a deletion. Without it, a broken
+		// spawn would make every "nothing deleted" assertion pass.
+		test("control: plain git rm a deletes a", () => {
+			const dir = throwawayRepo();
+			run(shell, ["-c", "git rm -q a"], dir);
+			expect(existsSync(join(dir, "a"))).toBe(false);
+		});
+
+		for (const { c, untracks } of CORPUS) {
+			test(JSON.stringify(c), () => {
+				const dir = throwawayRepo();
+				const passed = passes(c);
+				const before = tracked(dir);
+				run(shell, ["-c", c], dir);
+				if (passed) {
+					// Passed without the judge: it only untracks, it never deletes.
+					expect({ c, gone: FILES.filter((f) => !existsSync(join(dir, f))) }).toEqual({
+						c,
+						gone: [],
+					});
+					expect(untracks).toBeDefined();
+					const lost = before.filter((f) => !tracked(dir).includes(f)).sort();
+					expect({ c, lost }).toEqual({ c, lost: [...(untracks ?? [])].sort() });
+				}
+				if (BYPASSES.includes(c)) expect({ c, passed }).toEqual({ c, passed: false });
+			});
+		}
+	});
+}
 
 describe.skipIf(!hasGit)(
-	"real git: whatever the allowlist passes leaves every file on disk",
+	"isolation: an inherited GIT_DIR cannot reach a real repo (#3299 C1)",
 	() => {
-		const corpus = [
-			"git rm --cached a",
-			"git rm -r --cached sub",
-			"git rm --cached -r sub",
-			"git rm -rf --cached .",
-			"git rm --cached -q -- a sub/c",
-			"git rm --cached -- *",
-			"git rm --cached -- --no-cached",
-			"git rm -r -f --cached --force --quiet -- sub a",
-			...BYPASSES,
-		];
-		for (const shell of SHELLS) {
-			for (const c of corpus) {
-				test(`${shell} -c ${c}`, () => {
-					const dir = throwawayRepo();
-					try {
-						const passed = passes(c);
-						spawnSync(shell, ["-c", c], { cwd: dir, encoding: "utf8" });
-						const gone = ["a", "a#b", "sub/c", "--no-cached"].filter(
-							(f) => !existsSync(join(dir, f)),
-						);
-						// Passed without the judge implies nothing was deleted. A bypass
-						// may delete (that is why it must not pass).
-						if (passed) expect({ c, gone }).toEqual({ c, gone: [] });
-						if (BYPASSES.includes(c)) expect({ c, passed }).toEqual({ c, passed: false });
-					} finally {
-						rmSync(dir, { recursive: true, force: true });
-					}
-				});
+		test("with GIT_DIR and GIT_WORK_TREE pointing at a decoy, the decoy is untouched", () => {
+			const decoy = throwawayRepo();
+			const configBefore = readFileSync(join(decoy, ".git", "config"), "utf8");
+			const headBefore = git(decoy, "rev-parse", "HEAD");
+			const saved = {
+				dir: process.env.GIT_DIR,
+				tree: process.env.GIT_WORK_TREE,
+				index: process.env.GIT_INDEX_FILE,
+			};
+			process.env.GIT_DIR = join(decoy, ".git");
+			process.env.GIT_WORK_TREE = decoy;
+			process.env.GIT_INDEX_FILE = join(decoy, ".git", "index");
+			try {
+				const dir = throwawayRepo();
+				run("sh", ["-c", "git rm -q a"], dir);
+				run("sh", ["-c", "git rm -r -f --cached --force --quiet -- sub"], dir);
+			} finally {
+				for (const [k, v] of [
+					["GIT_DIR", saved.dir],
+					["GIT_WORK_TREE", saved.tree],
+					["GIT_INDEX_FILE", saved.index],
+				] as const) {
+					if (v === undefined) Reflect.deleteProperty(process.env, k);
+					else process.env[k] = v;
+				}
 			}
-		}
+			expect(readFileSync(join(decoy, ".git", "config"), "utf8")).toBe(configBefore);
+			expect(git(decoy, "rev-parse", "HEAD")).toBe(headBefore);
+			expect(git(decoy, "log", "--oneline").trim().split("\n").length).toBe(1);
+			expect(tracked(decoy).sort()).toEqual([...FILES].sort());
+			expect(FILES.filter((f) => !existsSync(join(decoy, f)))).toEqual([]);
+		});
+
+		test("run() refuses a directory outside the temp root", () => {
+			expect(() => run("sh", ["-c", "true"], "/")).toThrow(/refusing to run outside/);
+		});
 	},
 );
 
@@ -230,19 +350,24 @@ class BlockingBackend implements DecideBackend {
 
 describe("gate: git rm --cached (#3298)", () => {
 	let backend: BlockingBackend;
+	let calDir: string;
 	// The pilot's setting: EIGHT_SYSTEM_ONE=1, allowlist on by default.
 	const env = { [SYSTEM_ONE_FLAG]: "1" };
 
 	beforeEach(() => {
 		_resetSystemOne();
 		backend = new BlockingBackend();
+		calDir = tempDir("s1-git-rm-cached-");
 		_setSystemOneOverridesForTests({
 			createDecider: (): Decider => createDecider({ backend, cacheSize: 0 }),
 			askHuman: async () => null,
-			calibrationDir: mkdtempSync(join(tmpdir(), "s1-git-rm-cached-")),
+			calibrationDir: calDir,
 		});
 	});
-	afterEach(() => _resetSystemOne());
+	afterEach(() => {
+		_resetSystemOne();
+		rmSync(calDir, { recursive: true, force: true });
+	});
 
 	test("the pilot command runs and the judge is not asked", async () => {
 		const r = await systemOneGate(PILOT, env);
