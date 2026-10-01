@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security - four write paths no longer skip the System One judge (#3306)
+- A redirect to `/tmp/../<anywhere>` passed the read-only allowlist as a temp-file write, which made it an arbitrary file write with no judge. Redirect targets are now decoded as sh would, must be one word with no `..` segment, and must normalise to a path under `/tmp` or `/private/tmp` (or be `/dev/null` or an fd).
+- Writing flags are now refused in every getopt spelling: attached values and clusters (`sort -oout.txt`, `sort -ro x`, `tree -ox`, `date -s2026...`) and long-option abbreviations (`sort --outp=x`, `date --se`). `file -C` / `--compile` (writes `<name>.mgc`) and `tree -R` (writes `00Tree.html` in every directory) are refused too. A real-shell test runs each case in a throwaway directory: on main, all four wrote a file.
+
 ### Fixed - the Linux login service installs where systemd looks (#3293)
 - `8gent daemon install` wrote the systemd unit (and on macOS the launchd plist) under `HOME` or `EIGHT_HOME`, so with either pointing elsewhere `systemctl --user enable` failed with "Unit file com.8gent.daemon.service does not exist". The service definition now goes under the account's own home, the one the service manager searches and the daemon runs with.
 

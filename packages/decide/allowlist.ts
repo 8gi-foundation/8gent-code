@@ -40,6 +40,7 @@
  * Pure, synchronous, never throws. Prompt text only: nothing is executed.
  */
 
+import * as path from "node:path";
 import { promptControlText } from "./guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "./rules";
 
@@ -63,14 +64,35 @@ export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
 	"cmp", "nl", "tree", "jq", "sort", "uniq", "find", "test",
 ]);
 
-/** Arguments that make an otherwise read-only binary write, delete or run something. */
-const WRITING_ARGS: Record<string, RegExp> = {
-	find: /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/,
-	sort: /^(-o|--output(=.*)?|-[a-zA-Z]*o)$/,
-	tree: /^(-o|-[a-zA-Z]*o)$/,
-	date: /^(-s|--set(=.*)?|-[a-zA-Z]*s)$/,
-	rg: /^(--pre(=.*)?|--pre-glob(=.*)?)$/,
+/**
+ * Arguments that make an otherwise read-only binary write, delete or run
+ * something (#3306). `short` letters are refused anywhere in a single-dash
+ * argument, so attached values (`-ofile`) and clusters (`-ro`) are caught.
+ * `long` names are refused with any getopt abbreviation (`--out`, `--outp=x`).
+ * `exact` is for single-dash long options such as find's.
+ */
+const WRITING_ARGS: Record<string, { short?: string; long?: string[]; exact?: RegExp }> = {
+	find: { exact: /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/ },
+	sort: { short: "o", long: ["output"] },
+	// -R re-runs tree in every directory with `-o 00Tree.html`.
+	tree: { short: "oR", long: ["output"] },
+	date: { short: "s", long: ["set"] },
+	// -C compiles a magic file and writes <name>.mgc.
+	file: { short: "C", long: ["compile"] },
+	rg: { long: ["pre", "pre-glob"] },
 };
+
+function writingArg(b: string, a: string): boolean {
+	const w = WRITING_ARGS[b];
+	if (!w) return false;
+	if (w.exact?.test(a)) return true;
+	if (w.short && /^-[^-]/.test(a) && [...a.slice(1)].some((c) => w.short?.includes(c))) return true;
+	if (w.long && a.startsWith("--") && a.length > 2) {
+		const name = a.slice(2).split("=")[0];
+		if (name && w.long.some((l) => l.startsWith(name))) return true;
+	}
+	return false;
+}
 
 const GIT_READ = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"]);
 const GIT_BRANCH_READ = /^(-a|-r|-v|-vv|--all|--list|--remotes|--show-current|--no-color|--color)$/;
@@ -111,7 +133,23 @@ const SECRET_ARG =
 
 /** Redirect in masked text: fd, operator, optional noclobber bar, target. */
 const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?|<)(\|?)\s*(&\d+|[^\s;|&<>()]+)/g;
-const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
+/**
+ * A redirect target the allowlist may write: an fd, /dev/null, or a path
+ * under /tmp or /private/tmp (#3306). The target is decoded as sh would
+ * (quotes, backslashes) and must be one word; a `..` segment, or anything
+ * that normalises outside the temp root, is refused (`/tmp/../x` was an
+ * arbitrary write). A symlink already inside /tmp is not resolved here: a
+ * pure parser cannot, and planting one needs a command the judge sees.
+ */
+function okTarget(raw: string): boolean {
+	if (/^&\d+$/.test(raw)) return true;
+	const words = shellWords(raw);
+	if (!words || words.length !== 1) return false;
+	const t = words[0];
+	if (t === "/dev/null") return true;
+	if (t.split("/").includes("..")) return false;
+	return /^\/(private\/)?tmp\/[^/]/.test(path.posix.normalize(t));
+}
 
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
@@ -121,11 +159,12 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	let last = 0;
 	for (const m of masked.matchAll(REDIR_RE)) {
 		const start = (m.index ?? 0) + m[0].length - m[4].length;
-		const target = text.slice(start, start + m[4].length).replace(/^['"]+|['"]+$/g, "");
+		const rawTarget = text.slice(start, start + m[4].length);
+		const target = rawTarget.replace(/^['"]+|['"]+$/g, "");
 		const op = m[2];
 		if (op === "<") {
 			if (SECRET_ARG.test(target)) return `reads a secret (${target})`;
-		} else if (!OK_TARGET.test(target)) return `writes to ${target}`;
+		} else if (!okTarget(rawTarget)) return `writes to ${target}`;
 		stripped += text.slice(last, m.index);
 		last = (m.index ?? 0) + m[0].length;
 	}
@@ -146,8 +185,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 		return opts.bunTest ? null : "bun test is not enabled (EIGHT_S1_ALLOWLIST_BUN_TEST)";
 	}
 	if (!READ_ONLY_BINS.has(b)) return `${b} is not on the read-only list`;
-	const bad = WRITING_ARGS[b];
-	if (bad && args.some((a) => bad.test(a))) return `${b} with an argument that writes or runs`;
+	if (args.some((a) => writingArg(b, a))) return `${b} with an argument that writes or runs`;
 	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return "uniq with an output file";
 	return null;
 }
