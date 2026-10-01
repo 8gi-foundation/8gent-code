@@ -55,6 +55,30 @@ export function needsProviderGuidance(input: GuidanceInput): boolean {
 }
 
 /**
+ * What the NOW strip says while the active tab's agent cannot run a turn
+ * (#3290). "none": nothing can answer, the same test as the card above, with
+ * the card's reason. "checking": no answer yet either way, so the strip says
+ * it is looking rather than READY. Null once the agent is ready.
+ */
+export interface NotReadyState {
+	kind: "none" | "checking";
+	reason: string;
+}
+
+export function notReadyState(input: GuidanceInput & { agentReady: boolean }): NotReadyState | null {
+	if (input.agentReady) return null;
+	if (needsProviderGuidance(input)) {
+		const reason =
+			input.unreachable ??
+			(input.keyStatus === "missing"
+				? `${input.provider} needs an API key.`
+				: "No local model is answering.");
+		return { kind: "none", reason };
+	}
+	return { kind: "checking", reason: "looking for a model" };
+}
+
+/**
  * Does `provider` need an API key, and is one set (env or saved)? The TUI-only
  * "openrouter-free" spelling uses the OpenRouter key. Never throws.
  */

@@ -123,3 +123,65 @@ describe("the NOW strip shows the state, not the ^Y mode (#3123)", () => {
 		expect(out).not.toContain("idle");
 	});
 });
+
+describe("no ready model: the strip never says READY or names a model (#3290)", () => {
+	const base = {
+		activeStep: "idle",
+		route: "ornith-1.0-9b",
+		tokens: "",
+		contextPct: 0,
+		animate: false,
+	};
+	const reason = "Ollama at http://127.0.0.1:11434 did not answer.";
+	const draw = (props: Partial<React.ComponentProps<typeof LiveFocalStrip>>, columns = 120) =>
+		renderToString(<LiveFocalStrip mode="Planning" {...base} width={columns} {...props} />, { columns });
+
+	test("nothing can answer: NO MODEL with the reason, no READY, no model name", () => {
+		for (const columns of [120, 80]) {
+			const out = draw({ notReady: { kind: "none", reason } }, columns);
+			expect(out).toContain("NO MODEL");
+			expect(out).toContain("Ollama at");
+			expect(out).not.toContain("READY");
+			expect(out).not.toContain("ornith");
+		}
+	});
+
+	test("the reason shows with no width given too", () => {
+		const out = renderToString(
+			<LiveFocalStrip mode="Planning" {...base} notReady={{ kind: "none", reason }} />,
+			{ columns: 120 },
+		);
+		expect(out).toContain("NO MODEL");
+		expect(out).not.toContain("ornith");
+	});
+
+	test("before the first probe: CHECK, looking for a model, no READY", () => {
+		const out = draw({ notReady: { kind: "checking", reason: "looking for a model" } });
+		expect(out).toContain("CHECK");
+		expect(out).toContain("looking for a model");
+		expect(out).not.toContain("READY");
+		expect(out).not.toContain("ornith");
+	});
+
+	test("a finished turn whose model then went away is not DONE either", () => {
+		const out = draw({
+			notReady: { kind: "none", reason },
+			lastTurnEndedAt: Date.now() - 60_000,
+			lastTurnSuccess: true,
+		});
+		expect(out).toContain("NO MODEL");
+		expect(out).not.toContain("DONE");
+		expect(out).not.toContain("finished");
+	});
+
+	test("a ready agent still reads READY and names its model", () => {
+		const out = draw({ notReady: null });
+		expect(out).toContain("READY");
+		expect(out).toContain("ornith-1.0-9b");
+	});
+
+	test("NO MODEL keeps the frame border: no card waits on the person", () => {
+		const el = LiveFocalStrip({ mode: "Planning", ...base, notReady: { kind: "none", reason } });
+		expect(el.props.borderColor).toBe(t.frame);
+	});
+});

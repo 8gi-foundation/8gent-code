@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - the TUI header no longer says READY or names a model when none can answer (#3290)
+- With no reachable provider, the NOW strip said `READY` beside a model name (for example `ornith-1.0-9b`) while the NO MODEL card below said the opposite. The strip now reads the active tab's agent readiness: it shows `NO MODEL` with the reason (the same one the card gives) and leaves the model slot empty. Before the first provider probe lands it shows `CHECK` and "looking for a model". A running turn or a pending approval still wins, and a ready agent reads exactly as before.
+
 ### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
 - In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.
 

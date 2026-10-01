@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	needsProviderGuidance,
+	notReadyState,
 	providerKeyStatus,
 	unreachableLine,
 } from "./no-provider-guidance.js";
@@ -102,5 +103,44 @@ describe("unreachableLine", () => {
 		expect(unreachableLine("Ollama", "127.0.0.1:11434", "no models")).toBe(
 			"Ollama at 127.0.0.1:11434 has no models yet.",
 		);
+	});
+});
+
+describe("notReadyState: what the NOW strip says while no agent is ready (#3290)", () => {
+	const bare = {
+		checked: true,
+		liveLocal: 0,
+		provider: "8gent",
+		keyStatus: "not-needed" as const,
+		unreachable: null,
+	};
+
+	test("a ready agent needs no state", () => {
+		expect(notReadyState({ ...bare, agentReady: true })).toBeNull();
+	});
+
+	test("nothing answering: NO MODEL with the probe's reason", () => {
+		expect(notReadyState({ ...bare, agentReady: false })).toEqual({
+			kind: "none",
+			reason: "No local model is answering.",
+		});
+		const unreachable = "Ollama at http://127.0.0.1:11434 did not answer.";
+		expect(notReadyState({ ...bare, agentReady: false, unreachable })).toEqual({
+			kind: "none",
+			reason: unreachable,
+		});
+	});
+
+	test("a hosted provider with no key says so", () => {
+		expect(
+			notReadyState({ ...bare, agentReady: false, provider: "openrouter", keyStatus: "missing" }),
+		).toEqual({ kind: "none", reason: "openrouter needs an API key." });
+	});
+
+	test("before the first probe lands it is checking, never NO MODEL and never ready", () => {
+		expect(notReadyState({ ...bare, agentReady: false, checked: false })).toEqual({
+			kind: "checking",
+			reason: "looking for a model",
+		});
 	});
 });

@@ -230,7 +230,7 @@ import {
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
-import { COMPACT_BELOW_ROWS, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
+import { COMPACT_BELOW_ROWS, notReadyState, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
 // the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
@@ -6172,6 +6172,16 @@ export function App({
 		routed: agent ? routedModelRef.current.get(agent) : undefined,
 	});
 	const shownProvider = shownModel.provider;
+	// The NOW strip never says READY or names a model while the active tab's
+	// agent cannot run a turn (#3290). Same inputs as the NO MODEL card.
+	const stripNotReady = notReadyState({
+		agentReady,
+		checked: providerHealth.checked,
+		liveLocal: providerHealth.live,
+		provider: currentProvider,
+		keyStatus: providerKeyState,
+		unreachable: unreachableNote,
+	});
 	const providerRows = deriveProviders({
 		primary: currentModel
 			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
@@ -6278,6 +6288,7 @@ export function App({
 							lastTurnSuccess={lastTurnSuccess}
 							animate={showAnimations}
 							width={chatWidth}
+							notReady={stripNotReady}
 						/>
 
 						<NoProviderNotice
