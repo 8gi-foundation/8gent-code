@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/voice",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"description": "Speech-to-Text for 8gent Code — local Whisper transcription via whisper.cpp, sox mic recording",
 	"main": "index.ts",
 	"types": "index.ts",

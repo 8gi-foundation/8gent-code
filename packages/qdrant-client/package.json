@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/qdrant-client",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"private": true,
 	"description": "Thin typed seam around a local-only Qdrant instance for 8gent Computer. Stubs only in v0. See #1756 and parent PRD #1746.",
 	"main": "index.ts",

@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/table",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"private": true,
 	"type": "module",
 	"description": "8gent Table - sovereign human+agent workspace. Channels + members + messages on bun:sqlite + FTS5, every mutation appended to the signed goal ledger, ed25519 per-participant identity, ToolG8-gated agent posting.",

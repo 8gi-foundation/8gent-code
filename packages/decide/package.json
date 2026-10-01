@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/decide",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"private": true,
 	"type": "module",
 	"description": "Eight System One: local decision engine. Typed questions in, calibrated probabilities out; code owns thresholds.",

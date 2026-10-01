@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/telemetry",
-	"version": "0.17.3",
+	"version": "0.18.0",
 	"type": "module",
 	"main": "index.ts",
 	"description": "Per-tenant attribution telemetry for LLM, vessel, and storage operations. Emits structured JSON for Vector + Loki. OpenTelemetry-compatible spans.",
