@@ -6,7 +6,8 @@
  * at the single cloud-egress chokepoint (`packages/providers/index.ts`).
  *
  * Design contract:
- *   - LOCAL ONLY. Pure string transforms. No network, no disk, no telemetry.
+ *   - LOCAL ONLY. Pure string transforms. No network, no telemetry. The only
+ *     read is the running user's own identity (./owner-identity), never written.
  *   - DETERMINISTIC per request: the same raw value maps to the same pseudonym
  *     within one request, so the cloud model still sees a coherent conversation.
  *   - FAIL-SAFE: over-redact rather than under. A false positive (masking a
@@ -17,40 +18,104 @@
  *
  * Detection coverage (in priority order, longest/most-specific first):
  *   emails, IBANs, credit-card numbers, SSNs, phone numbers, physical
- *   addresses, and full names - including the owner's known identity, which is
- *   always masked even when it would not otherwise look name-shaped.
+ *   addresses, and full names - including the running user's own name and
+ *   email, which are always masked even when they would not otherwise look
+ *   name-shaped.
  *
  * This module is additive. It does NOT modify the policy engine. The egress
  * chokepoint imports `anonymize` / `deanonymize` / `verifyClean`; the privacy
  * router can import `containsPii` for fail-closed routing decisions.
  */
 
+import { loadOwnerIdentity } from "./owner-identity";
+
 // ============================================
 // Owner identity (known PII that must always be masked)
 // ============================================
 
 /**
- * The owner's known identity. These are masked unconditionally - even bare
- * first names or an email that would otherwise slip past the generic patterns.
- * Pulled from the local profile (CLAUDE.md / contacts). Extendable at runtime
- * via `registerOwnerIdentity()` so callers can fold in values discovered from
- * the local contacts store without persisting anything here.
+ * The owner is the person running this copy of 8gent. Their name and email are
+ * masked unconditionally - even a bare first name or an email that would
+ * otherwise slip past the generic patterns. Nothing about any real person is
+ * hardcoded here: the identity is read at runtime from the user's own profile
+ * and git config (see `./owner-identity`). With no configured owner, no name
+ * is special-cased. Callers can fold in more values (e.g. from the local
+ * contacts store) with `registerOwnerIdentity()`; those are held in memory only.
  */
-const OWNER_IDENTITY: { value: string; type: PiiType }[] = [
-	{ value: "James Spalding", type: "PERSON" },
-	{ value: "jamesspaldingles@gmail.com", type: "EMAIL" },
-	{ value: "James Spalding", type: "PERSON" },
-];
-
-/**
- * Bare owner first/last names. Masked as PERSON even when standing alone.
- * Kept separate so we only fire on whole-word matches (avoid mangling
- * substrings like "james" inside "jamestown").
- */
-const OWNER_NAME_TOKENS = ["James", "Spalding"];
-
 const runtimeOwnerIdentity: { value: string; type: PiiType }[] = [];
 const runtimeOwnerTokens: string[] = [];
+
+/** Bare owner name words shorter than this are never token-masked. */
+const MIN_OWNER_TOKEN = 3;
+
+/**
+ * Words that are first names or account names but also everyday English or
+ * system words. Masking them as bare words would hide ordinary text ("Will
+ * this work?", "/root/"), so they are never token-masked. A full name that
+ * contains one is still masked as a whole, and the surname still is.
+ */
+const COMMON_WORD_NAMES = new Set([
+	// first names that are common words
+	"will", "mark", "may", "grace", "bill", "hope", "joy", "faith", "rose", "king",
+	"page", "field", "grant", "art", "frank", "june", "april", "august", "dawn",
+	"guy", "jack", "max", "rich", "ray", "pat", "sue", "summer", "sunny", "chase",
+	"drew", "iris", "lily", "miles", "rob", "sky", "victor", "earnest",
+	"autumn", "amber", "ruby", "pearl", "harmony", "honor", "justice", "royal",
+	// account / system names
+	"root", "admin", "administrator", "user", "users", "dev", "developer", "test",
+	"tester", "build", "builder", "runner", "ubuntu", "debian", "guest", "default",
+	"owner", "bot", "actions", "docker", "jenkins", "vagrant", "node", "git", "github",
+	"local", "localhost", "home",
+]);
+
+/**
+ * The owner-identity values in force right now: the running user's identity
+ * plus anything registered at runtime.
+ *
+ * `literals` are matched as exact substrings (full names with a space, emails).
+ * `tokens` are bare name words matched whole-word only, so a name inside a
+ * longer word ("jamestown") is never mangled. Bare tokens come only from the
+ * onboarding profile name or from a git name with a space (a real full name,
+ * the same rule as the release gate), are at least MIN_OWNER_TOKEN long, and
+ * skip a first name that is also a common word (COMMON_WORD_NAMES). The
+ * surname of a profile full name is always token-masked; a git name's last
+ * word is checked against COMMON_WORD_NAMES too, since git names are often
+ * accounts ("GitHub Actions"). A one-word profile name is token-masked unless
+ * it is a common word: "Ada" is protected bare, "Will" is not (by design, so
+ * "Will this work?" survives). The full-name literal is always masked.
+ */
+function ownerIdentity(): { literals: { value: string; type: PiiType }[]; tokens: string[] } {
+	const literals = [...runtimeOwnerIdentity];
+	const tokens = [...runtimeOwnerTokens];
+	const owner = loadOwnerIdentity();
+	const name = owner.name?.trim() ?? "";
+	if (name) {
+		const words = name.split(/\s+/);
+		const fullName = words.length > 1;
+		if (fullName) literals.push({ value: name, type: "PERSON" });
+		if (owner.nameSource === "profile" || fullName) {
+			words.forEach((word, i) => {
+				// A git name may be an account ("GitHub Actions", "Ubuntu User"), so its
+				// last word only gets surname treatment when it is not a common word.
+				const isSurname = fullName && i === words.length - 1 && owner.nameSource !== "git";
+				if (word.length < MIN_OWNER_TOKEN) return;
+				if (!isSurname && COMMON_WORD_NAMES.has(word.toLowerCase())) return;
+				if (!tokens.includes(word)) tokens.push(word);
+			});
+		}
+	}
+	const email = owner.email?.trim() ?? "";
+	if (email.length >= 3) literals.push({ value: email, type: "EMAIL" });
+	return { literals, tokens };
+}
+
+/**
+ * A whole-word matcher that understands accented letters: `\b` without the
+ * `u` flag treats "é" as a non-word character, so "José" was never matched.
+ */
+function wholeWord(tok: string, flags = ""): RegExp {
+	return new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(tok)}(?![\\p{L}\\p{N}_])`, `u${flags}`);
+}
 
 /**
  * Fold additional owner-identity values (e.g. from the local contacts store)
@@ -230,12 +295,13 @@ export function anonymize(text: string): AnonymizeResult {
 	const spans: Span[] = [];
 
 	// 1. Owner identity first - unconditional, highest priority, exact substring.
-	for (const { value, type } of [...OWNER_IDENTITY, ...runtimeOwnerIdentity]) {
+	const owner = ownerIdentity();
+	for (const { value, type } of owner.literals) {
 		collectLiteral(text, value, type, spans);
 	}
-	for (const tok of [...OWNER_NAME_TOKENS, ...runtimeOwnerTokens]) {
+	for (const tok of owner.tokens) {
 		// whole-word only
-		const re = new RegExp(`\\b${escapeRegExp(tok)}\\b`, "g");
+		const re = wholeWord(tok, "g");
 		for (let m = re.exec(text); m; m = re.exec(text)) {
 			spans.push({
 				start: m.index,
@@ -381,11 +447,12 @@ export function deanonymize(text: string, map: Map<string, string>): string {
  */
 export function containsPii(text: string): boolean {
 	if (!text) return false;
-	for (const { value } of [...OWNER_IDENTITY, ...runtimeOwnerIdentity]) {
-		if (value.length >= 2 && text.includes(value)) return true;
+	const owner = ownerIdentity();
+	for (const { value } of owner.literals) {
+		if (value.length >= 2 && text.toLowerCase().includes(value.toLowerCase())) return true;
 	}
-	for (const tok of [...OWNER_NAME_TOKENS, ...runtimeOwnerTokens]) {
-		if (new RegExp(`\\b${escapeRegExp(tok)}\\b`).test(text)) return true;
+	for (const tok of owner.tokens) {
+		if (wholeWord(tok).test(text)) return true;
 	}
 	for (const det of DETECTORS) {
 		det.re.lastIndex = 0;

@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - the anonymizer masks the running user's identity, not a fixed one (#3283)
+- The owner identity is now read at runtime from the git config and the OS account, then cached on the git config's change time, so a mid-session `git config --global` change is picked up. Account-like names (admin, ubuntu, GitHub Actions) are not treated as a person's name.
+
 ### Fixed - CI Validate is green on GitHub-hosted ubuntu again (#3287, #3288)
 - The type-check and lint errors on main are fixed. The Validate job now installs ripgrep before the Test step: the `locate` tool runs `rg`, and the ubuntu runner does not have it, which broke 16 locate tests. Without rg, `locate` still says so in its answer, and that path keeps its own tests. `tools-open-on-write.test.ts` now restores `process.stdout.isTTY` to its original descriptor. Before, it left behind a read-only copy on a non-TTY stdout, so `auto-tune.test.ts` failed 15 tests whenever it ran later in the same process.
 
