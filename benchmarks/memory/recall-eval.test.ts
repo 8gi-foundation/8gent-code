@@ -48,17 +48,17 @@ import {
 // ── The harness ───────────────────────────────────────────────────────
 
 /** The seam a future reranker plugs into: query in, ranked ids out. */
-export type Retriever = (
+type Retriever = (
   query: string,
   options: { limit: number; sessionContext?: string[] }
 ) => Promise<Array<{ id: string; score: number }>>;
 
-export interface EvalRow {
+interface EvalRow {
   label: QueryLabel;
   ranked: string[];
 }
 
-export interface Metrics {
+interface Metrics {
   queries: number;
   recallAt1: number;
   recallAt3: number;
@@ -66,12 +66,12 @@ export interface Metrics {
 }
 
 /** 1-based rank of `id` in `ranked`, or 0 when absent (cutoff K). */
-export function rankOf(ranked: string[], id: string): number {
+function rankOf(ranked: string[], id: string): number {
   const index = ranked.slice(0, K).indexOf(id);
   return index === -1 ? 0 : index + 1;
 }
 
-export function computeMetrics(rows: EvalRow[]): Metrics {
+function computeMetrics(rows: EvalRow[]): Metrics {
   if (rows.length === 0) return { queries: 0, recallAt1: 0, recallAt3: 0, mrr: 0 };
   let hit1 = 0;
   let hit3 = 0;
@@ -95,7 +95,7 @@ export function computeMetrics(rows: EvalRow[]): Metrics {
  * label's `sessionContext` is handed to the retriever, so the baseline metrics
  * are not silently measured with the re-ranker switched on.
  */
-export async function runEval(
+async function runEval(
   retrieve: Retriever,
   labels: QueryLabel[],
   options: { useSessionContext?: boolean } = {}
@@ -111,11 +111,11 @@ export async function runEval(
   return rows;
 }
 
-export function formatMetrics(name: string, m: Metrics): string {
+function formatMetrics(name: string, m: Metrics): string {
   return `[recall-eval] ${name}: n=${m.queries} Recall@1=${m.recallAt1.toFixed(3)} Recall@3=${m.recallAt3.toFixed(3)} MRR@${K}=${m.mrr.toFixed(3)}`;
 }
 
-export function formatRanks(rows: EvalRow[]): string {
+function formatRanks(rows: EvalRow[]): string {
   return `[recall-eval] per-query rank:\n${rows
     .map((row) => `  ${row.label.id} rank=${rankOf(row.ranked, row.label.primary)} ${row.label.kind} :: ${row.label.query}`)
     .join("\n")}`;

@@ -1269,16 +1269,23 @@ interface OpenRouterModel {
 
 let cachedFreeModel: { model: string; timestamp: number } | null = null;
 const FREE_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+/** Used only when the live list cannot be read and the caller is not strict. */
+const FREE_MODEL_FALLBACK = "meta-llama/llama-3-8b-instruct:free";
+/** The model-list request never holds the agent build longer than this. */
+const FREE_MODEL_FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * Query OpenRouter API to find the best currently-available free model.
- * Filters for models with `:free` suffix, sorts by context length.
- * Results are cached for 1 hour.
+ * Ask OpenRouter for its live model list and pick the free model (`:free`
+ * suffix) with the largest context window. Returns the reason instead of a
+ * guess when the list cannot be read or holds no free model. Successful
+ * picks are cached for an hour; failures are never cached.
  */
-export async function getBestFreeModel(): Promise<string> {
-	// Return cached result if still fresh
+export async function findBestFreeModel(
+	fetchImpl: typeof fetch = fetch,
+	timeoutMs: number = FREE_MODEL_FETCH_TIMEOUT_MS,
+): Promise<{ model: string } | { error: string }> {
 	if (cachedFreeModel && Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL) {
-		return cachedFreeModel.model;
+		return { model: cachedFreeModel.model };
 	}
 
 	// Load API key from environment or .env file
@@ -1304,51 +1311,73 @@ export async function getBestFreeModel(): Promise<string> {
 	}
 
 	try {
-		const response = await fetch("https://openrouter.ai/api/v1/models", {
+		const response = await fetchImpl("https://openrouter.ai/api/v1/models", {
 			headers,
+			signal: AbortSignal.timeout(timeoutMs),
 		});
-		if (!response.ok) {
-			throw new Error(`OpenRouter models API error: ${response.status}`);
-		}
+		if (!response.ok) return { error: `OpenRouter model list answered http ${response.status}` };
 
-		const data = (await response.json()) as { data: OpenRouterModel[] };
-		const freeModels = (data.data || [])
-			.filter((m: OpenRouterModel) => m.id.endsWith(":free"))
+		let data: { data?: OpenRouterModel[] };
+		try {
+			data = (await response.json()) as { data?: OpenRouterModel[] };
+		} catch {
+			return { error: "OpenRouter model list was a bad response" };
+		}
+		const freeModels = (Array.isArray(data?.data) ? data.data : [])
+			.filter((m: OpenRouterModel) => typeof m?.id === "string" && m.id.endsWith(":free"))
 			.sort(
 				(a: OpenRouterModel, b: OpenRouterModel) =>
 					(b.context_length || 0) - (a.context_length || 0),
 			);
-
-		if (freeModels.length === 0) {
-			// Fallback if no free models found
-			const fallback = "meta-llama/llama-3-8b-instruct:free";
-			cachedFreeModel = { model: fallback, timestamp: Date.now() };
-			return fallback;
-		}
+		if (freeModels.length === 0) return { error: "OpenRouter lists no free models right now" };
 
 		// Pick the model with the largest context window (proxy for quality)
 		const best = freeModels[0].id;
 		cachedFreeModel = { model: best, timestamp: Date.now() };
-		return best;
+		return { model: best };
 	} catch (err) {
-		// On network error, return a known-good fallback
-		const fallback = "meta-llama/llama-3-8b-instruct:free";
-		cachedFreeModel = { model: fallback, timestamp: Date.now() };
-		return fallback;
+		const timedOut = (err as { name?: string } | null)?.name === "TimeoutError";
+		return {
+			error: `could not reach OpenRouter to list its free models${timedOut ? " (timed out)" : ""}`,
+		};
 	}
 }
 
 /**
+ * Query OpenRouter API to find the best currently-available free model.
+ * Filters for models with `:free` suffix, sorts by context length.
+ * Results are cached for 1 hour. Falls back to a fixed free id when the list
+ * cannot be read; callers that must not guess use `resolveModel(m, { strict })`.
+ */
+export async function getBestFreeModel(): Promise<string> {
+	const found = await findBestFreeModel();
+	return "model" in found ? found.model : FREE_MODEL_FALLBACK;
+}
+
+/**
  * Resolve a model string. If "auto:free", dynamically pick the best free model.
+ * With `strict`, an unresolvable "auto:free" throws with the reason instead of
+ * returning a fallback id, so a caller never runs on a model it did not choose.
  */
 export async function resolveModel(
 	model: string,
+	opts: { strict?: boolean; fetchImpl?: typeof fetch } = {},
 ): Promise<{ model: string; provider?: ProviderName }> {
 	if (model === "auto:free") {
+		if (opts.strict) {
+			const found = await findBestFreeModel(opts.fetchImpl);
+			if ("error" in found) throw new Error(found.error);
+			return { model: found.model, provider: "openrouter" };
+		}
 		const best = await getBestFreeModel();
 		return { model: best, provider: "openrouter" };
 	}
 	return { model };
+}
+
+/** Test hook: forget the cached free-model pick. */
+export function resetFreeModelCache(): void {
+	cachedFreeModel = null;
 }
 
 // ============================================

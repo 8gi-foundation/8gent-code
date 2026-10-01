@@ -46,6 +46,11 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
+      # Without rg, locate degrades to a stated note, which its own tests cover.
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep && rg --version
+
       - name: Test
         run: bun run test
 
@@ -69,6 +74,10 @@ jobs:
 
       - name: npm pack-and-install smoke
         run: bun scripts/pack-smoke.ts --skip-build
+        env:
+          # Comma-separated owner names/emails the bundle must never contain.
+          # Held in a repository secret, never in the repo.
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
 
       - name: Verify version sync
         run: |
