@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - `git add .` no longer stages the agent's state DB (#3302)
+- Starting the TUI in a project creates `.8gent/state.db` and its `-wal`/`-shm` files, and nothing ignored them, so `git add .` committed them (seen in the l5 pilot, #3298). When the DB path is resolved, 8gent now writes `.8gent/.gitignore` with `state.db*` if that folder has no `.gitignore`. An existing one is never changed. Only the DB files are ignored, so `.8gent/config.json` can still be committed. Storage paths are unchanged. This repo now tracks the same `.8gent/.gitignore`.
+
 ### Fixed - the Linux login service installs where systemd looks (#3293)
 - `8gent daemon install` wrote the systemd unit (and on macOS the launchd plist) under `HOME` or `EIGHT_HOME`, so with either pointing elsewhere `systemctl --user enable` failed with "Unit file com.8gent.daemon.service does not exist". The service definition now goes under the account's own home, the one the service manager searches and the daemon runs with.
 

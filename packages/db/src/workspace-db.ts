@@ -107,14 +107,36 @@ export interface WorkspaceDbOptions {
 // ── Path resolution ───────────────────────────────────────────────────
 
 /**
+ * Ignore rules written next to the DB. Only the DB and its WAL/SHM sidecars:
+ * projects may commit other `.8gent/` files (vision-router reads config.json).
+ */
+const DOT_DIR_GITIGNORE =
+	"# Written by 8gent: the workspace state DB and its WAL/SHM files are local.\nstate.db*\n";
+
+/**
+ * Write `.8gent/.gitignore` if there is none, so `git add .` never stages the
+ * DB (#3302). An existing file is the project's and is never touched.
+ * Best effort: a read-only checkout must not stop the DB from opening.
+ */
+function ensureDotDirGitignore(dotDir: string): void {
+	try {
+		fs.writeFileSync(path.join(dotDir, ".gitignore"), DOT_DIR_GITIGNORE, { flag: "wx" });
+	} catch {
+		// EEXIST (project owns it) or unwritable: leave it.
+	}
+}
+
+/**
  * Resolve the workspace state DB path for a given workspace root.
- * The `.8gent/` parent directory is created if it does not exist.
+ * The `.8gent/` parent directory is created if it does not exist, with a
+ * `.gitignore` covering `state.db*` unless one is already there.
  */
 export function resolveWorkspaceDbPath(workspaceRoot: string): string {
 	const dotDir = path.join(workspaceRoot, ".8gent");
 	if (!fs.existsSync(dotDir)) {
 		fs.mkdirSync(dotDir, { recursive: true });
 	}
+	ensureDotDirGitignore(dotDir);
 	return path.join(dotDir, "state.db");
 }
 

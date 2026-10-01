@@ -59,6 +59,89 @@ describe("resolveWorkspaceDbPath", () => {
 	});
 });
 
+// ── git hygiene (#3302) ───────────────────────────────────────────────
+
+function git(cwd: string, ...args: string[]): string {
+	const r = Bun.spawnSync(["git", ...args], {
+		cwd,
+		env: {
+			...process.env,
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			GIT_CONFIG_NOSYSTEM: "1",
+		},
+	});
+	if (r.exitCode !== 0) {
+		throw new Error(`git ${args.join(" ")} failed: ${r.stderr.toString()}`);
+	}
+	return r.stdout.toString();
+}
+
+describe("state.db is git-ignored (#3302)", () => {
+	it("a fresh workspace gets .8gent/.gitignore covering state.db*", () => {
+		resolveWorkspaceDbPath(tmpRoot);
+		const ignore = path.join(tmpRoot, ".8gent", ".gitignore");
+		expect(fs.existsSync(ignore)).toBe(true);
+		const lines = fs.readFileSync(ignore, "utf8").split("\n").map((l) => l.trim());
+		expect(lines).toContain("state.db*");
+	});
+
+	it("an existing .8gent/ without a .gitignore gets one", () => {
+		fs.mkdirSync(path.join(tmpRoot, ".8gent"), { recursive: true });
+		resolveWorkspaceDbPath(tmpRoot);
+		const ignore = path.join(tmpRoot, ".8gent", ".gitignore");
+		expect(fs.readFileSync(ignore, "utf8")).toContain("state.db*");
+	});
+
+	it("never overwrites an existing .8gent/.gitignore", () => {
+		const dotDir = path.join(tmpRoot, ".8gent");
+		fs.mkdirSync(dotDir, { recursive: true });
+		const ignore = path.join(dotDir, ".gitignore");
+		const mine = "# project owned\nsecrets.json\n";
+		fs.writeFileSync(ignore, mine);
+		const before = fs.statSync(ignore).mtimeMs;
+
+		resolveWorkspaceDbPath(tmpRoot);
+		new WorkspaceDb(tmpRoot).close();
+
+		expect(fs.readFileSync(ignore, "utf8")).toBe(mine);
+		expect(fs.statSync(ignore).mtimeMs).toBe(before);
+	});
+
+	it("does not ignore .8gent/config.json", () => {
+		resolveWorkspaceDbPath(tmpRoot);
+		const content = fs.readFileSync(path.join(tmpRoot, ".8gent", ".gitignore"), "utf8");
+		const rules = content
+			.split("\n")
+			.map((l) => l.trim())
+			.filter((l) => l && !l.startsWith("#"));
+		expect(rules).toEqual(["state.db*"]);
+	});
+
+	it("in a real git repo, opening the DB leaves no state.db files in git status", () => {
+		git(tmpRoot, "init", "-q");
+		fs.writeFileSync(path.join(tmpRoot, "README.md"), "hello\n");
+
+		// Keep the DB open so the WAL and SHM sidecars exist while git looks.
+		const db = new WorkspaceDb(tmpRoot);
+		db.kvSet("k", { v: 1 });
+		fs.writeFileSync(path.join(tmpRoot, ".8gent", "config.json"), "{}\n");
+		expect(fs.existsSync(`${db.path}-wal`)).toBe(true);
+
+		const status = git(tmpRoot, "status", "--porcelain", "--untracked-files=all");
+
+		git(tmpRoot, "add", ".");
+		const staged = git(tmpRoot, "diff", "--cached", "--name-only");
+		db.close();
+
+		expect(status).not.toContain("state.db");
+		// config.json stays committable, and so does the .gitignore itself.
+		expect(status).toContain(".8gent/config.json");
+		expect(status).toContain(".8gent/.gitignore");
+		expect(staged).not.toContain("state.db");
+		expect(staged).toContain(".8gent/config.json");
+	});
+});
+
 // ── Schema / migrations ───────────────────────────────────────────────
 
 describe("schema and migrations", () => {
