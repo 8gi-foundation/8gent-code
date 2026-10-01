@@ -30,3 +30,22 @@ export function providerConfigForStep(session: ProviderConfig, step: FailoverSte
 	}
 	return { name: step.provider as ProviderName, model: step.model };
 }
+
+/**
+ * The apiKey a host should put on an AgentConfig for `runtime` (#3261).
+ *
+ * AgentConfig.apiKey is the session provider's own key: the native path sends
+ * it to the session endpoint on every leg of that provider. Hosts used to pass
+ * OPENROUTER_API_KEY whatever the runtime, so an ollama or lmstudio session
+ * would have sent the OpenRouter key to the ollama or LM Studio host (which
+ * can be remote). Only an openrouter session gets the OpenRouter key here;
+ * every other runtime gets none, and each provider then resolves its own key
+ * from its own env var (createModel, createClient, VisionInterpreter all
+ * fall back to the env themselves).
+ */
+export function sessionApiKey(
+	runtime: string,
+	env: Record<string, string | undefined> = process.env,
+): string | undefined {
+	return runtime === "openrouter" ? env.OPENROUTER_API_KEY || undefined : undefined;
+}

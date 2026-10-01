@@ -6,6 +6,7 @@
  */
 
 import { Agent } from "../eight/agent";
+import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
@@ -515,13 +516,16 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 		// No config file - use env vars and defaults
 	}
 
+	const runtime = (process.env.DEFAULT_RUNTIME ||
+		fileConfig?.runtime ||
+		fileConfig?.provider) as PoolConfig["runtime"];
 	return {
 		model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
-		runtime: (process.env.DEFAULT_RUNTIME ||
-			fileConfig?.runtime ||
-			fileConfig?.provider) as PoolConfig["runtime"],
+		runtime,
 		workingDirectory: fileConfig?.workingDirectory || process.cwd(),
-		apiKey: process.env.OPENROUTER_API_KEY || fileConfig?.apiKey,
+		// The OpenRouter env key only for an openrouter runtime (#3261).
+		// fileConfig.apiKey names no provider; it is passed through as before.
+		apiKey: sessionApiKey(runtime) || fileConfig?.apiKey,
 		maxTurns: fileConfig?.maxTurns,
 	};
 }

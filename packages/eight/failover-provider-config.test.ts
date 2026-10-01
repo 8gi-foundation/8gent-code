@@ -12,6 +12,9 @@
  *   session's baseURL was dropped. For a failover INTO ollama from another
  *   provider it is the right endpoint, and it must arrive without the
  *   session's key (ollama takes none).
+ * - openrouter: stands in for https://openrouter.ai. globalThis.fetch is
+ *   wrapped so openrouter.ai requests land here, and any other non-local host
+ *   is refused, so the test can never reach the real network.
  *
  * The failover chain is the test's own (ModelFailover's loader is stubbed: Bun's
  * os.homedir() ignores a runtime $HOME, so a fake failover.json would not be
@@ -28,13 +31,15 @@ import { join } from "node:path";
 let Agent: typeof import("./agent").Agent;
 
 interface Seen {
-	server: "session" | "ollamaDefault";
+	server: "session" | "ollamaDefault" | "openrouter";
 	path: string;
 	model: string;
 	auth: string | null;
 }
 
 const SESSION_KEY = "sk-session-3261";
+/** OPENROUTER_API_KEY in the env, the way the TUI and daemon have it. */
+const OR_KEY = "sk-or-env-3261";
 
 const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
@@ -42,17 +47,28 @@ const ENV: Record<string, string> = {
 	EIGHT_TEXT_TOOLS: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TURN_TIMEOUT_MS: "20000",
+	OPENROUTER_API_KEY: OR_KEY,
 };
 let home: string;
 let repo: string;
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 const seen: Seen[] = [];
 let sessionPort = 0;
+let fetchSpy: { mockRestore: () => void } | undefined;
+let chainSpy: { mockRestore: () => void } | undefined;
 
 /** Models each endpoint rejects with a non-rate-limit 500, so the chain advances. */
 const FAILING: Record<Seen["server"], Set<string>> = {
-	session: new Set(["primary-a", "primary-b"]),
-	ollamaDefault: new Set(["primary-a", "backup-a", "primary-b"]),
+	session: new Set(["primary-a", "primary-b", "primary-c", "primary-d"]),
+	ollamaDefault: new Set([
+		"primary-a",
+		"backup-a",
+		"primary-b",
+		"primary-c",
+		"primary-d",
+		"backup-d",
+	]),
+	openrouter: new Set(),
 };
 
 function fake(name: Seen["server"]): ReturnType<typeof Bun.serve> {
@@ -96,7 +112,25 @@ beforeAll(async () => {
 
 	const session = fake("session");
 	const ollamaDefault = fake("ollamaDefault");
+	const openrouter = fake("openrouter");
 	sessionPort = session.port ?? 0;
+
+	// openrouter.ai goes to the fake; any other non-local host is refused.
+	const realFetch = globalThis.fetch;
+	fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		if (url.hostname === "openrouter.ai") {
+			const path = url.pathname.replace(/^\/api/, "");
+			return realFetch(`http://127.0.0.1:${openrouter.port}${path}${url.search}`, init);
+		}
+		if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+			return Promise.reject(new Error(`test blocks network to ${url.hostname}`));
+		}
+		return realFetch(input, init);
+	}) as typeof fetch);
 
 	const chains = {
 		text: {
@@ -114,13 +148,32 @@ beforeAll(async () => {
 					{ model: "other-b", provider: "ollama" },
 				],
 			},
+			// Cross-provider failover into a provider that needs its own env key.
+			"primary-c": {
+				models: [
+					{ model: "primary-c", provider: "ollama" },
+					{ model: "or-c", provider: "openrouter" },
+				],
+			},
+			// TUI-style session: same-provider failover with no key of its own.
+			"primary-d": {
+				models: [
+					{ model: "primary-d", provider: "ollama" },
+					{ model: "backup-d", provider: "ollama" },
+				],
+			},
+			// Hedge: resolve("hedge-h") names a sibling on another provider.
+			"hedge-h": { models: [{ model: "sib-h", provider: "openrouter" }] },
 			"backup-a": { models: [{ model: "backup-a", provider: "ollama" }] },
 			"other-b": { models: [{ model: "other-b", provider: "ollama" }] },
+			"or-c": { models: [{ model: "or-c", provider: "openrouter" }] },
+			"backup-d": { models: [{ model: "backup-d", provider: "ollama" }] },
+			"sib-h": { models: [{ model: "sib-h", provider: "openrouter" }] },
 		},
 		computer: {},
 	};
 	const { ModelFailover } = await import("../providers/failover");
-	spyOn(
+	chainSpy = spyOn(
 		ModelFailover.prototype as unknown as { loadChains: () => unknown },
 		"loadChains",
 	).mockReturnValue(chains);
@@ -137,6 +190,9 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+	// Bun shares globals and modules across test files: put both back.
+	fetchSpy?.mockRestore();
+	chainSpy?.mockRestore();
 	for (const s of servers) s.stop(true);
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
@@ -146,15 +202,22 @@ afterAll(() => {
 	rmSync(repo, { recursive: true, force: true });
 });
 
-async function turn(runtime: "ollama" | "lmstudio", model: string): Promise<Seen[]> {
+async function turn(
+	runtime: "ollama" | "lmstudio",
+	model: string,
+	opts: { apiKey?: string; prep?: (agent: import("./agent").Agent) => void } = {
+		apiKey: SESSION_KEY,
+	},
+): Promise<Seen[]> {
 	const start = seen.length;
 	const agent = new Agent({
 		model,
 		runtime,
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${sessionPort}`,
-		apiKey: SESSION_KEY,
+		apiKey: opts.apiKey,
 	} as ConstructorParameters<typeof import("./agent").Agent>[0]);
+	opts.prep?.(agent);
 	try {
 		await agent.chat("say done");
 	} catch {
@@ -202,6 +265,88 @@ describe("native failover provider config (#3261)", () => {
 		const leaked = seen.filter((r) => r.server !== "session" && r.auth?.includes(SESSION_KEY));
 		expect(leaked).toEqual([]);
 	}, 30000);
+
+	test("cross-provider failover into openrouter applies openrouter's own env key", async () => {
+		const reqs = await turn("ollama", "primary-c");
+		const or = reqs.filter((r) => r.model === "or-c");
+		expect(or.length).toBeGreaterThan(0);
+		for (const r of or) {
+			expect(r.server).toBe("openrouter");
+			expect(r.path).toBe("/v1/chat/completions");
+			expect(r.auth).toBe(`Bearer ${OR_KEY}`);
+		}
+		const leaked = seen.filter((r) => r.server !== "session" && r.auth?.includes(SESSION_KEY));
+		expect(leaked).toEqual([]);
+	}, 30000);
+
+	test("TUI-style ollama session with an OpenRouter env key sends that key to no ollama host", async () => {
+		const { sessionApiKey } = await import("./failover-provider-config");
+		// Exactly what the TUI and daemon hosts now build for an ollama runtime.
+		const reqs = await turn("ollama", "primary-d", { apiKey: sessionApiKey("ollama") });
+		const models = reqs.map((r) => r.model);
+		expect(models).toContain("primary-d"); // step 0
+		expect(models).toContain("backup-d"); // the failover leg
+		for (const r of reqs) {
+			expect(r.server).toBe("session");
+			expect(r.auth).toBeNull();
+		}
+		const leaked = seen.filter((r) => r.server !== "openrouter" && r.auth?.includes(OR_KEY));
+		expect(leaked).toEqual([]);
+	}, 30000);
+
+	test("hedge path: each candidate gets its own provider's endpoint and key", async () => {
+		const { DEFAULT_HEDGE_CONFIG, HedgeExecutor } = await import("../kernel/hedge-executor");
+		const reqs = await turn("ollama", "hedge-h", {
+			apiKey: SESSION_KEY,
+			prep: (agent) => {
+				(agent as unknown as { kernel: { hedgeExecutor: unknown } }).kernel.hedgeExecutor =
+					new HedgeExecutor({
+						...DEFAULT_HEDGE_CONFIG,
+						enabled: true,
+						signalPath: join(home, "hedge-signal.jsonl"),
+					});
+			},
+		});
+		const head = reqs.filter((r) => r.model === "hedge-h");
+		const sib = reqs.filter((r) => r.model === "sib-h");
+		expect(head.length).toBeGreaterThan(0);
+		expect(sib.length).toBeGreaterThan(0);
+		for (const r of head) {
+			expect(r.server).toBe("session");
+			expect(r.auth).toBe(`Bearer ${SESSION_KEY}`);
+		}
+		for (const r of sib) {
+			expect(r.server).toBe("openrouter");
+			expect(r.auth).toBe(`Bearer ${OR_KEY}`);
+		}
+	}, 30000);
+});
+
+describe("sessionApiKey", () => {
+	test("only an openrouter runtime gets the OpenRouter env key", async () => {
+		const { sessionApiKey } = await import("./failover-provider-config");
+		const env = { OPENROUTER_API_KEY: "k" };
+		expect(sessionApiKey("openrouter", env)).toBe("k");
+		for (const rt of ["ollama", "lmstudio", "apfel", "llama-server", "anthropic", "deepseek"]) {
+			expect(sessionApiKey(rt, env)).toBeUndefined();
+		}
+		expect(sessionApiKey("openrouter", {})).toBeUndefined();
+	});
+
+	test("no host passes the OpenRouter env key whatever the runtime", async () => {
+		const { readFileSync } = await import("node:fs");
+		const root = join(import.meta.dir, "..", "..");
+		for (const f of [
+			"apps/tui/src/app.tsx",
+			"apps/tui/src/hooks/useChatTabState.ts",
+			"packages/daemon/agent-pool.ts",
+			"packages/daemon/telegram-bridge.ts",
+		]) {
+			const src = readFileSync(join(root, f), "utf8");
+			const hit = /apiKey:\s*process\.env\.OPENROUTER_API_KEY/.test(src);
+			expect({ f, hit }).toEqual({ f, hit: false });
+		}
+	});
 });
 
 describe("providerConfigForStep", () => {
