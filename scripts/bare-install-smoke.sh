@@ -13,6 +13,8 @@
 #   3. dist/pty-bridge.cjs ships, and either opens a pty (node-pty built) or
 #      exits 66 with the "Terminal tabs are unavailable" message (skipped)
 #   4. 8gent tui --no-pet under a pty      renders its first screen
+#   5. the TUI header shows the folder it was launched from, not the
+#      install folder (#3264)
 #
 #   sh scripts/bare-install-smoke.sh <path/to/8gi-foundation-8gent-code-X.tgz>
 #
@@ -90,6 +92,22 @@ if screen | grep -aqE "I.m 8gent|8GENT FM"; then
   pass "TUI rendered its first screen"
 else
   fail "TUI rendered its first screen"
+  screen | tail -c 2000
+fi
+# The launch folder is the working folder (#3264). The TUI was spawned with
+# its cwd set to the install folder, so the header showed
+# ".../node_modules/@8gi-foundation/8gent-code/dist no repo" and .env and git
+# lookups ran against the package instead of the folder the user launched from.
+i=0
+while [ $i -lt 20 ]; do
+  if screen | grep -aq "/tmp/work"; then break; fi
+  sleep 0.5; i=$((i + 1))
+done
+if screen | grep -aq "/tmp/work" && ! screen | grep -aq "8gent-code/dist"; then
+  pass "TUI header shows the launch folder (/tmp/work)"
+else
+  fail "TUI header shows the launch folder (/tmp/work)"
+  screen | grep -ao "[^ ]*8gent-code/dist[^ ]*" | head -1
   screen | tail -c 2000
 fi
 # The TUI is still running; the container exits with this script and --init

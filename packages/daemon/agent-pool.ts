@@ -6,6 +6,7 @@
  */
 
 import { Agent } from "../eight/agent";
+import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
@@ -238,7 +239,10 @@ export class AgentPool {
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
 			systemPrompt: overrides?.systemPrompt,
 			workingDirectory: this.config.workingDirectory,
-			apiKey: this.config.apiKey,
+			// The pool key was resolved for the pool's default runtime. A session
+			// whose runtime differs (an override, or a Table session forced local)
+			// gets only its own runtime's key, never the pool's (#3261).
+			apiKey: runtime === this.config.runtime ? this.config.apiKey : sessionApiKey(runtime),
 			maxTurns,
 			events,
 			// Delegation is the personal-OS channel (phone/glasses relay). It needs
@@ -515,13 +519,18 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 		// No config file - use env vars and defaults
 	}
 
+	const runtime = (process.env.DEFAULT_RUNTIME ||
+		fileConfig?.runtime ||
+		fileConfig?.provider) as PoolConfig["runtime"];
 	return {
 		model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
-		runtime: (process.env.DEFAULT_RUNTIME ||
-			fileConfig?.runtime ||
-			fileConfig?.provider) as PoolConfig["runtime"],
+		runtime,
 		workingDirectory: fileConfig?.workingDirectory || process.cwd(),
-		apiKey: process.env.OPENROUTER_API_KEY || fileConfig?.apiKey,
+		// The OpenRouter env key only for an openrouter runtime (#3261).
+		// fileConfig.apiKey names no provider, so it is treated as the
+		// OpenRouter key it has always been used as, and only for openrouter.
+		apiKey:
+			sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
 		maxTurns: fileConfig?.maxTurns,
 	};
 }

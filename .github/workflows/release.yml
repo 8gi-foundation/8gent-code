@@ -46,6 +46,11 @@ jobs:
       # somewhere other than the build checkout.
       - name: npm pack-and-install smoke
         run: bun scripts/pack-smoke.ts --skip-build
+        env:
+          # Comma-separated owner names/emails the bundle must never contain.
+          # Held in a repository secret, never in the repo.
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
+          PACK_SMOKE_REQUIRE_OWNER_IDENTITY: "1"
 
       - name: Extract version from tag
         id: version
@@ -72,7 +77,7 @@ jobs:
           body: |
             ## 8gent Code v${{ steps.version.outputs.version }}
 
-            Install: `npm install -g @podjamz/8gent-code`
+            Install: `npm install -g @8gi-foundation/8gent-code`
 
             ### Commits
             ${{ steps.notes.outputs.commits }}

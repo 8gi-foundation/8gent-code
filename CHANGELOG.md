@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
+- In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.
+
+### Fixed - the anonymizer masks the running user's identity, not a fixed one (#3283)
+- The owner identity is now read at runtime from the git config and the OS account, then cached on the git config's change time, so a mid-session `git config --global` change is picked up. Account-like names (admin, ubuntu, GitHub Actions) are not treated as a person's name.
+
+### Fixed - CI Validate is green on GitHub-hosted ubuntu again (#3287, #3288)
+- The type-check and lint errors on main are fixed. The Validate job now installs ripgrep before the Test step: the `locate` tool runs `rg`, and the ubuntu runner does not have it, which broke 16 locate tests. Without rg, `locate` still says so in its answer, and that path keeps its own tests. `tools-open-on-write.test.ts` now restores `process.stdout.isTTY` to its original descriptor. Before, it left behind a read-only copy on a non-TTY stdout, so `auto-tune.test.ts` failed 15 tests whenever it ran later in the same process.
+
 ## [0.18.0] - 2026-10-01
 
 ### Fixed - npm install works on a bare machine (#3259, #3256)
@@ -26,40 +35,40 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed - Linux CI builds no longer fail on the container path (#3257)
 - The build-path check matches a build root only at a path boundary, so `/work` no longer matches `/workspace` inside bundled dependencies.
 
-### Changed - an agent can remove its own scratch files without the System One judge (#3177)
+### Changed - an agent can remove its own scratch files without the System One judge (#3178, #3177)
 - A plain `rm -f` of files the same agent created this session (with `write_file`, or a `>` / `>>` redirect in `run_command`), untracked by git and inside the workspace, no longer goes to the judge. The pilot's `bun test > bunout.txt` then `rm -f bunout.txt` now passes System One. Files it only modified, files another tab made, tracked files, `rm -r` and globs are judged as before. The record is in memory, per agent.
 
-### Changed - System One on by default, one shared judge per machine (#3048)
+### Changed - System One on by default, one shared judge per machine (#3176, #3048)
 - System One now checks every agent shell command unless `EIGHT_SYSTEM_ONE=0`. Unset, it asks only a calibrated judge (Selene today) and, when there is none or it cannot answer in time, checks with the safety rules and the read-only allowlist alone, saying so once. `EIGHT_SYSTEM_ONE=1` (and Guarded) is strict: any judge found is asked; when none can answer, a block rule still blocks and everything else goes to the person on the normal card, never an allow (#3193). Headless, with no person, that stays a refusal. Every refusal now tells the agent not to run the same command again, which stops the retry loop.
 - The shared judge (`EIGHT_S1_SHARED_JUDGE`) is on by default, so a machine loads Selene once in its local Ollama rather than once per tab; `EIGHT_S1_SHARED_JUDGE=0` opts out. Before the first judge load, one line names the model, where it loads and its size.
 
-### Added - permission modes on Shift+Tab (#3170, #3174)
+### Added - permission modes on Shift+Tab (#3173, #3175, #3170, #3174)
 - Shift+Tab cycles the focused tab through Plan (reads and plans, changes nothing), Ask (the default, unchanged), Guarded (System One checks every shell command; safe steps run, risky ones still ask) and Infinite (never asks, except the always-blocked list; back to Ask after 30 minutes). Each tab keeps its own mode. A child agent gets the stricter of its parent's mode and the one it asked for. The footer, tab tags, header chip and a one-line chat note show the mode. Shift+Tab no longer moves to the previous tab; Ctrl+1 to Ctrl+9 still do. Guide: `docs/guides/permission-modes.md`.
 
-### Added - one shared System One judge per machine (#3162)
+### Added - one shared System One judge per machine (#3163, #3162)
 - On by default since #3176 (`EIGHT_S1_SHARED_JUDGE=0` opts out). The shared judge lets every 8gent process on a machine use one copy of System One's model on the local Ollama server (`EIGHT_DECIDE_OLLAMA_HOST`, default `http://localhost:11434`) instead of loading one each. Same model, same verdicts. If the shared server stops answering mid-session, that session loads its own copy and carries on; it never falls back to another server or model. Off by default. Guide: `docs/guides/system-one-shared-judge.md`.
 
-### Fixed - NO_COLOR is honoured across the whole interface (#3171)
+### Fixed - NO_COLOR is honoured across the whole interface (#3172, #3171)
 - `NO_COLOR=1` now turns colour off everywhere, keeping bold, dim and inverse so the cursor stays visible. `FORCE_COLOR` still wins over it. The dark theme's danger red is brighter so it meets contrast guidelines. Guide: `docs/guides/no-color.md`.
 
-### Fixed - Ctrl+letter shortcuts no longer type their letter (#3166)
+### Fixed - Ctrl+letter shortcuts no longer type their letter (#3167, #3166)
 - Pressing a shortcut such as Ctrl+P also typed `p` into the chat box, hidden until the palette closed. The chat box now ignores Ctrl+letter as text.
 
-### Fixed - one Ollama host resolver (#3149)
+### Fixed - one Ollama host resolver (#3157, #3149)
 - System One (`packages/decide`) and the rest of the harness resolved `OLLAMA_HOST` differently: a bare host with no port (`gpu-box`, which the ollama CLI accepts) got `:11434` for chat and no port (so port 80) for System One. Both now use one resolver, `packages/local-model-server/ollama-host.ts`.
 
-### Added - llama-server as a local server, phase 2 of #3149
+### Added - llama-server as a local server, phase 2 of #3149 (#3155)
 - `EIGHT_LOCAL_SERVER=llama-server` runs 8gent Code on llama.cpp's `llama-server` with no Ollama at all: a `llama-server` provider on the text-tool path (`LLAMA_SERVER_URL`, default `http://127.0.0.1:8080`), and nothing in the process probes, lists or calls Ollama (onboarding, health, readiness, task routing, System One). Unset, today's Ollama behaviour is unchanged. Guide: `docs/guides/llama-server.md`.
 - The llama-server adapter (`packages/local-model-server/llama-server.ts`) passes the same contract suite as the Ollama adapter.
 - System One finds its GGUF in `~/.8gent/models/decide/*.gguf` before the Ollama store, so a machine with no Ollama can still run it (or set `EIGHT_DECIDE_GGUF`).
 
-### Added
+### Added - local model server layer, phase 1 of #3149 (#3150)
 - Local model server layer, phase 1 of #3149 (`packages/local-model-server/`): a `LocalModelServer` interface with capability flags and an Ollama adapter, so Ollama becomes one server among equals rather than the assumed default. Eight model-list and health call sites (`/api/tags`) now go through it with no behaviour change, proven by a snapshot of their requests and results taken before the move. A contract suite holds every adapter to the same rules.
 
-### Changed
+### Changed - the working spinner traces a figure of eight (#2952)
 - Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
 
-### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2959)
+### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2960, #2959)
 
 - **Sender allowlist.** The bridge authenticated inbound updates by chat id
   only, and `dispatch-policy.ts` grants the `telegram` channel full
@@ -82,7 +91,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to the chat that raised them, and only `TELEGRAM_OPERATOR_USER_IDS` may
   decide. Conversation and consent are different powers.
 
-### Fixed - the repo lint passes, so the CI gate can gate (#2961)
+### Fixed - the repo lint passes, so the CI gate can gate (#2962, #2961)
 
 - `bun run lint` had exited 1 on `main` since at least 2026-08-25, so the
   `Validate` job failed on every pull request whatever it contained. Ten
@@ -91,10 +100,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carries a suppression with its reason. The 1417 warnings are untouched;
   this makes the gate work, it does not clean the repo.
 
-### Added
+### Added - `/retro` ships as a bundled skill (#2956)
 - `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
 
-### Added - Table: on-demand real-time message narration, never persisted (#2877)
+### Added - Table: on-demand real-time message narration, never persisted (#2878, #2877)
 
 - `packages/table/message-speak.ts` (new): a "play this message aloud"
   affordance for ANY Table message - synthesizes from the message's live
@@ -121,7 +130,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never failed, when it is not installed) proving genuine non-silent WAV
   bytes come back and no temp file survives.
 
-### Added - Table message narration: nullable audio_url/audio_duration_ms (#2875)
+### Added - Table message narration: nullable audio_url/audio_duration_ms (#2876, #2875)
 
 - `packages/table/schema.sql`: `messages` gains nullable `audio_url TEXT` and
   `audio_duration_ms INTEGER`. Additive only - a message without narration is
@@ -152,7 +161,7 @@ This is the daemon half of Table message narration; the relay proxy
 (8gent-glasses#pending) and Flow playback UI (8gent-flow#pending) land as
 their own repos' changes.
 
-### Added - Per-model benchmark attribution, step 4 (#2758)
+### Added - Per-model benchmark attribution, step 4 (#2772, #2758)
 
 - `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second
   aggregate, `computeModelCategoryAverages`, tracked in `scores/ledger.json`
@@ -168,7 +177,7 @@ their own repos' changes.
 - 13 new tests in `benchmarks/gate.test.ts` covering per-model averaging,
   ledger merge/round-trip, comparison, and report formatting.
 
-### Added - Continuous public benchmark gate, step 1 (#2758)
+### Added - Continuous public benchmark gate, step 1 (#2765, #2758)
 
 - `benchmarks/gate.ts`: compares fresh `benchmark:v2` category averages
   against the checked-in `scores/ledger.json` baseline and hard-fails on
@@ -193,17 +202,17 @@ their own repos' changes.
   `pty.spawn` on macOS failed with "posix_spawnp failed." - the 5
   PtySession test failures on any bun-installed tree.
 
-### Fixed - CI Test step green again, unblocking merges (#2741)
+### Fixed - CI Test step green again, unblocking merges (#2781, #2741)
 
 - The research-evaluate generator emitted unbuilt-utility specs as guaranteed-fail assertions (~68 across 14 modules), turning the whole suite red. They now generate as `test.todo` - pending work, never a fake pass and never a failure.
 - `isRemoteProvider` no longer treats the hyphenated `lm-studio` as a remote provider.
 - The Marlin capability tests take an injectable home directory, so the not-installed path is exercised against empty state instead of a developer's real `~/.8gent` venv.
 
-### Fixed - 8gent Computer voice loop and proof rail (#2722)
+### Fixed - 8gent Computer voice loop and proof rail (#2731, #2722)
 
 - Added an in-panel mic toggle that stops voice capture and keeps it off across panel opens until the user explicitly resumes it.
 - Kept completed tool-step proof visible after `done`, and brings the panel forward for live tool activity, approval prompts, errors, and completion.
-### Added - 8gent-flow Mac vision and control relay (#2718, #2720)
+### Added - 8gent-flow Mac vision and control relay (#2719, #2721, #2718, #2720)
 
 Introduced `@8gi-foundation/8gent-flow`, a Mac-first relay that reuses
 `@8gent/eyes` for local screen capture and exposes token-gated WebSocket frames
@@ -217,7 +226,7 @@ for iOS or browser clients on the same network.
 - Keeps control disabled on `--no-token` relays unless explicitly allowed.
 - Reports missing macOS Screen Recording and Accessibility grants explicitly.
 
-### Changed - GitHub Actions usage reduction
+### Changed - GitHub Actions usage reduction (#2679)
 
 Org-level Actions quota was hit (3,000 min/month). Workflow changes to bring usage well under cap:
 

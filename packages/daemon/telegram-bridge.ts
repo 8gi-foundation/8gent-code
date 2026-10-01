@@ -421,11 +421,14 @@ class TelegramDaemonBridge {
 			const { AgentPool } = await import("./agent-pool");
 
 			// Get the pool from the daemon (create a separate one for delegations)
+			const { sessionApiKey } = await import("../eight/failover-provider-config");
+			const cosRuntime = (process.env.DEFAULT_RUNTIME as any) || "openrouter";
 			const cosPool = new AgentPool({
 				model: process.env.DEFAULT_MODEL || "auto:free",
-				runtime: (process.env.DEFAULT_RUNTIME as any) || "openrouter",
+				runtime: cosRuntime,
 				workingDirectory: process.env.HOME ? `${process.env.HOME}/.8gent/workspace` : "/app",
-				apiKey: process.env.OPENROUTER_API_KEY,
+				// Only the runtime's own key (#3261).
+				apiKey: sessionApiKey(cosRuntime),
 			});
 
 			const notifications = new NotificationDispatcher(

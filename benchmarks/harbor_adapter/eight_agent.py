@@ -59,7 +59,7 @@ class EightAgent(BaseAgent):
 
         # Install 8gent-code globally from npm
         await environment.exec(
-            command="bun install -g @podjamz/8gent-code",
+            command="bun install -g @8gi-foundation/8gent-code",
             user="root",
             timeout_sec=120,
         )
