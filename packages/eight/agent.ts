@@ -1433,6 +1433,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
 			}
+			// The same post-turn compaction the native path runs. This branch
+			// returns before that block, so local sessions never compacted (#3267).
+			// A reroute may have moved the session to another local model; the
+			// summary call goes to the one that answered.
+			await this.compactAfterTurn({ ...providerConfig, model: this.config.model });
 			return textResult;
 		}
 
@@ -2220,31 +2225,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
-				try {
-					const stage = this.compaction.getStage(this.messageHistory);
-					const compactModel = createModel(providerConfig);
-					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
-					this.messageHistory = compacted;
-					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
-					);
-					this.events.onCompaction?.(compactionResult);
-				} catch (err) {
-					console.error("  [COMPRESSION] Failed:", (err as Error).message);
-				}
-			}
-
-			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%.
-			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				await this.observeTwoStage(providerConfig);
-			}
+			await this.compactAfterTurn(providerConfig);
 
 			// Move BMAD task to review/done if we had one
 			if (this.currentBmadTask) {
@@ -2515,6 +2496,38 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	getSessionEvidence(): Evidence[] {
 		return this.sessionEvidence;
+	}
+
+	/**
+	 * Post-turn compaction, shared by the native and text-tool turn paths (#3267).
+	 * Runs both compactors against the history the turn left. Never throws.
+	 */
+	private async compactAfterTurn(providerConfig: ProviderConfig): Promise<void> {
+		// Proactive context compression - Harbor Terminus-2 pattern (#1405)
+		// Monitors token pressure and escalates through 4 stages:
+		//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
+		if (this.compaction.shouldCompact(this.messageHistory)) {
+			try {
+				const stage = this.compaction.getStage(this.messageHistory);
+				const compactModel = createModel(providerConfig);
+				const { messages: compacted, result: compactionResult } =
+					await this.compaction.compactProactive(this.messageHistory, compactModel);
+				this.messageHistory = compacted;
+				console.log(
+					`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
+						`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
+				);
+				this.events.onCompaction?.(compactionResult);
+			} catch (err) {
+				console.error("  [COMPRESSION] Failed:", (err as Error).message);
+			}
+		}
+
+		// Two-stage compactor (#2467) - additive to the legacy ProactiveCompression
+		// above. Cheap checkpoint at 65%, hard compact at 80%.
+		if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
+			await this.observeTwoStage(providerConfig);
+		}
 	}
 
 	/**
