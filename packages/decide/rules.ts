@@ -855,6 +855,9 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	return b;
 }
 
+/** An unquoted `#` at the start of a word (what sh reads as a comment), in maskData text. */
+const SHELL_COMMENT_RE = /(^|[\s;&|()<>])#/;
+
 function analyse(text: string, r: Collector, depth = 0): void {
 	if (depth > MAX_DEPTH) {
 		r.d("nesting_too_deep");
@@ -864,6 +867,14 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	// Whole-command rules, on this level's text with quoted data masked.
 	const view = maskData(body);
 	if (REMOTE_EXEC_RE.test(view)) r.d("remote_code_substituted_into_shell");
+	// The quote masker and segment splitter do not model comments: a quote,
+	// backslash or `<<` inside a `#` comment desyncs them and can hide the
+	// next line, which sh still runs. With no judge (default mode) a rules
+	// pass runs the command, so any unquoted word-start `#` escalates (#3303).
+	if (SHELL_COMMENT_RE.test(view)) r.d("shell_comment");
+	// `$'...'` (ANSI-C) and `$"..."` (locale) quoting are decoded by bash, not
+	// by this parser: `$'\x2d...'` would hide a flag from every rule.
+	if (/\$['"]/.test(view)) r.d("ansi_c_or_locale_quote");
 	if (SECRET_READ.test(view)) r.secretRead = true;
 	if (NET_SINK.test(view)) r.netSink = true;
 
