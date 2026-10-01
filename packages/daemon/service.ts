@@ -14,7 +14,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveHome } from "../core/home";
 
 export const SERVICE_LABEL = "com.8gent.daemon";
 const DESCRIPTION = "Eight Agent Daemon - always-on AI agent process";
@@ -448,15 +447,20 @@ export function hostContext(program: string[]): ServiceContext {
 			`A background service is not supported on ${platform}. Run: 8gent daemon run`,
 		);
 	}
+	const account = os.userInfo();
 	return {
 		platform,
-		home: resolveHome(process.env, platform),
+		// The account's own home, not resolveHome(): launchd and systemd --user
+		// look for the definition under the home the OS has on record, whatever
+		// HOME or EIGHT_HOME say in this shell, and the daemon they launch runs
+		// with that home too (#3293).
+		home: account.homedir,
 		program,
 		uid: process.getuid?.() ?? 0,
 		user:
 			platform === "win32"
-				? `${process.env.USERDOMAIN ?? os.hostname()}\\${process.env.USERNAME ?? os.userInfo().username}`
-				: os.userInfo().username,
+				? `${process.env.USERDOMAIN ?? os.hostname()}\\${process.env.USERNAME ?? account.username}`
+				: account.username,
 	};
 }
 

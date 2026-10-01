@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type ServiceContext,
 	daemonCommand,
 	describeState,
+	hostContext,
 	launchdPlist,
 	parseStatus,
 	planFor,
@@ -357,5 +360,32 @@ describe("8gent daemon", () => {
 	test("an unknown subcommand prints usage and fails", async () => {
 		expect(await daemonCommand(["bogus"], [])).toBe(1);
 		expect(await daemonCommand([], [])).toBe(0);
+	});
+});
+
+describe("hostContext", () => {
+	// launchd and systemd --user only search the account's own home, so a
+	// HOME or EIGHT_HOME override (the test preload sets both) must not move
+	// the definition out of their sight (#3293).
+	test("the service definition lives under the account's home, not a HOME or EIGHT_HOME override", () => {
+		const saved = { HOME: process.env.HOME, EIGHT_HOME: process.env.EIGHT_HOME };
+		process.env.HOME = "/tmp/elsewhere";
+		process.env.EIGHT_HOME = "/tmp/elsewhere";
+		try {
+			const ctx = hostContext(["8gent", "daemon", "run"]);
+			const home = os.userInfo().homedir;
+			expect(ctx.home).toBe(home);
+			const write = planFor("install", { ...ctx, platform: "linux" }).find(
+				(s) => s.kind === "write",
+			);
+			expect(write).toMatchObject({
+				path: path.posix.join(home, ".config", "systemd", "user", "com.8gent.daemon.service"),
+			});
+		} finally {
+			for (const [k, v] of Object.entries(saved)) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+		}
 	});
 });
