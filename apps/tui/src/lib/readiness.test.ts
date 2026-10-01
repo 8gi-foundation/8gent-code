@@ -196,19 +196,55 @@ describe("build facts are keyed to their tab, provider and model", () => {
 	});
 });
 
-describe("classifyTurnError", () => {
-	test("key refusals", () => {
-		for (const s of ["[Error] 401 Unauthorized", "HTTP 403", "No auth credentials found", "Invalid API key"]) {
-			expect(classifyTurnError(s)).toBe("auth");
+describe("classifyTurnError: only the agent's own failure counts", () => {
+	const reply = (content: string) => ({ role: "assistant", content });
+	test("key refusals in the assistant's [Error] reply", () => {
+		for (const s of ["[Error] 401 Unauthorized", "[Error] HTTP 403", "[Error] No auth credentials found", "[Error] Invalid API key"]) {
+			expect(classifyTurnError(reply(s))).toBe("auth");
 		}
 	});
-	test("connection failures", () => {
-		for (const s of ["[Error] fetch failed", "connect ECONNREFUSED 127.0.0.1:11434", "Unable to connect"]) {
-			expect(classifyTurnError(s)).toBe("unreachable");
+	test("connection failures in the assistant's [Error] reply", () => {
+		for (const s of ["[Error] fetch failed", "[Error] connect ECONNREFUSED 127.0.0.1:11434", "[Error] Unable to connect"]) {
+			expect(classifyTurnError(reply(s))).toBe("unreachable");
 		}
+	});
+	test("a failed tool result is never a readiness fact, whatever it says", () => {
+		expect(classifyTurnError({ role: "tool", content: "gh: HTTP 401: Bad credentials" })).toBeNull();
+		expect(classifyTurnError({ role: "tool", content: "web_fetch: fetch failed" })).toBeNull();
+	});
+	test("generic system text and plain assistant prose are not either", () => {
+		expect(classifyTurnError({ role: "system", content: "Command failed: 401 from the API" })).toBeNull();
+		expect(classifyTurnError(reply("The server answered 401, so I stopped."))).toBeNull();
 	});
 	test("a model that answered badly is not a readiness fact", () => {
-		expect(classifyTurnError("[Error] the tool returned no output")).toBeNull();
-		expect(classifyTurnError("")).toBeNull();
+		expect(classifyTurnError(reply("[Error] the tool returned no output"))).toBeNull();
+		expect(classifyTurnError(undefined)).toBeNull();
+	});
+});
+
+describe("a failed tool never makes a healthy agent read NO MODEL", () => {
+	const from = (input: ReadinessInputs, last: { role: string; content: string }) => {
+		const kind = classifyTurnError(last);
+		return deriveReadiness({ ...input, turnError: kind ? { kind, provider: input.provider } : null });
+	};
+	test("a gh 401 tool result on a built Ollama agent: still ready", () => {
+		expect(from(ollama, { role: "tool", content: "gh: HTTP 401: Bad credentials" }).state).toBe("ready");
+	});
+	test("a failed web fetch tool result on built OpenRouter: still ready", () => {
+		expect(from(openrouter, { role: "tool", content: "web_fetch: fetch failed" }).state).toBe("ready");
+	});
+	test("a local provider can never read 'did not accept the API key'", () => {
+		for (const provider of ["ollama", "8gent", "lmstudio", ""]) {
+			const r = deriveReadiness({ ...ollama, provider, engines: { ollama: true, lmstudio: true }, turnError: { kind: "auth", provider } });
+			expect(r.reason).not.toContain("API key");
+			expect(r.state).toBe("ready");
+		}
+	});
+	test("a real [Error] reply carrying a 401 on OpenRouter still reads none", () => {
+		expect(from(openrouter, { role: "assistant", content: "[Error] OpenRouter API error: 401 Unauthorized" })).toEqual({
+			state: "none",
+			reason: "openrouter did not accept the API key.",
+			model: "",
+		});
 	});
 });

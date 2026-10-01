@@ -77,7 +77,10 @@ const none = (reason: string): Readiness => ({ state: "none", reason, model: "" 
 export function deriveReadiness(i: ReadinessInputs): Readiness {
 	if (i.keyStatus === "missing") return none(`${i.provider} needs an API key.`);
 	const turnError = i.turnError && i.turnError.provider === i.provider ? i.turnError : null;
-	if (turnError?.kind === "auth") return none(`${i.provider} did not accept the API key.`);
+	// Only a provider that takes a key can refuse one.
+	if (turnError?.kind === "auth" && i.keyStatus !== "not-needed") {
+		return none(`${i.provider} did not accept the API key.`);
+	}
 
 	const local = LOCAL_ENGINE_PROVIDERS.has(i.provider);
 	if (local && i.firstProbeLanded) {
@@ -102,10 +105,16 @@ export function deriveReadiness(i: ReadinessInputs): Readiness {
 
 /**
  * The transport failure a turn ended on, read from its last message. Only
- * refusals of the key and failures to connect count: a model that answered
- * badly is not a readiness fact.
+ * the agent's own failure counts: the assistant's "[Error]" reply. A tool
+ * result (a `gh` 401, a web fetch that failed) or a system line is about
+ * something else, never about whether the model can answer. Within that
+ * reply, only a refused key or a failed connection is a readiness fact.
  */
-export function classifyTurnError(lastContent: string): TurnError["kind"] | null {
+export function classifyTurnError(
+	last: { role: string; content: string } | undefined,
+): TurnError["kind"] | null {
+	if (!last || last.role !== "assistant" || !/^\s*\[Error\]/.test(last.content)) return null;
+	const lastContent = last.content;
 	if (/\b(401|403)\b|unauthori[sz]ed|invalid api key|no auth credentials|authentication/i.test(lastContent)) {
 		return "auth";
 	}

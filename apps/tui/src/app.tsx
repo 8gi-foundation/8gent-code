@@ -1687,7 +1687,7 @@ export function App({
 			// or was blocked mid-turn, then recovered from, is not an error.
 			const hadError = turnEndedInError(messages);
 			setLastTurnSuccess(!hadError);
-			const errKind = hadError ? classifyTurnError(messages[messages.length - 1]?.content ?? "") : null;
+			const errKind = hadError ? classifyTurnError(messages[messages.length - 1]) : null;
 			setTurnError(errKind ? { kind: errKind, provider: currentProvider } : null);
 			if (errKind === "unreachable") setProbeNonce((n) => n + 1);
 			// The plan settles: nothing is still in progress, and the turn's
