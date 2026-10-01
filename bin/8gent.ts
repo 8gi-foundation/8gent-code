@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.18.0";
+const VERSION = "0.19.0";
 
 // Two different "here" directories matter, and conflating them is what broke
 // the compiled build:
