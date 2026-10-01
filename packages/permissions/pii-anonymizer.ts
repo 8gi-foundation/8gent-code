@@ -64,8 +64,8 @@ const COMMON_WORD_NAMES = new Set([
 	// account / system names
 	"root", "admin", "administrator", "user", "users", "dev", "developer", "test",
 	"tester", "build", "builder", "runner", "ubuntu", "debian", "guest", "default",
-	"owner", "ci", "bot", "docker", "jenkins", "vagrant", "node", "git", "github",
-	"local", "localhost", "home", "me", "you",
+	"owner", "bot", "actions", "docker", "jenkins", "vagrant", "node", "git", "github",
+	"local", "localhost", "home",
 ]);
 
 /**
@@ -78,7 +78,11 @@ const COMMON_WORD_NAMES = new Set([
  * onboarding profile name or from a git name with a space (a real full name,
  * the same rule as the release gate), are at least MIN_OWNER_TOKEN long, and
  * skip a first name that is also a common word (COMMON_WORD_NAMES). The
- * surname of a full name is always token-masked.
+ * surname of a profile full name is always token-masked; a git name's last
+ * word is checked against COMMON_WORD_NAMES too, since git names are often
+ * accounts ("GitHub Actions"). A one-word profile name is token-masked unless
+ * it is a common word: "Ada" is protected bare, "Will" is not (by design, so
+ * "Will this work?" survives). The full-name literal is always masked.
  */
 function ownerIdentity(): { literals: { value: string; type: PiiType }[]; tokens: string[] } {
 	const literals = [...runtimeOwnerIdentity];
@@ -91,7 +95,9 @@ function ownerIdentity(): { literals: { value: string; type: PiiType }[]; tokens
 		if (fullName) literals.push({ value: name, type: "PERSON" });
 		if (owner.nameSource === "profile" || fullName) {
 			words.forEach((word, i) => {
-				const isSurname = fullName && i === words.length - 1;
+				// A git name may be an account ("GitHub Actions", "Ubuntu User"), so its
+				// last word only gets surname treatment when it is not a common word.
+				const isSurname = fullName && i === words.length - 1 && owner.nameSource !== "git";
 				if (word.length < MIN_OWNER_TOKEN) return;
 				if (!isSurname && COMMON_WORD_NAMES.has(word.toLowerCase())) return;
 				if (!tokens.includes(word)) tokens.push(word);

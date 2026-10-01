@@ -113,3 +113,29 @@ describe("owner identity - accented names", () => {
 		expect(anonymize("Joséphine").text).toBe("Joséphine");
 	});
 });
+
+describe("owner identity - one-word names and account-like git names", () => {
+	test("a one-word profile name is bare-masked unless it is a common word (intended)", () => {
+		setProfileName("Ada");
+		expect(anonymize("ask Ada").text).not.toContain("Ada");
+		// By design: a one-word profile name that is a common word gets no bare
+		// protection, so ordinary sentences survive.
+		setProfileName("Will", 1_700_000_200);
+		expect(anonymize("Will this work?").text).toBe("Will this work?");
+		expect(containsPii("Will this work?")).toBe(false);
+	});
+
+	test('a git name like "GitHub Actions" or "Ubuntu User" masks only the full name', () => {
+		for (const name of ["GitHub Actions", "Ubuntu User"]) {
+			setGitConfig({ name });
+			const [first, last] = name.split(" ");
+			expect(anonymize(`${name} ran it`).text).not.toContain(name);
+			expect(anonymize(`the ${last} tab, ${first} box`).text).toBe(`the ${last} tab, ${first} box`);
+		}
+	});
+
+	test("a git full name keeps a non-common surname masked", () => {
+		setGitConfig({ name: "Will Smith" });
+		expect(anonymize("Smith says hi").text).not.toContain("Smith");
+	});
+});

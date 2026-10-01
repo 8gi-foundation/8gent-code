@@ -59,8 +59,8 @@ function readProfileName(home: string): string | null {
  * A minimal environment for the git child: enough to find git and resolve the
  * user's global config, nothing else from this process.
  */
-function gitEnv(home: string): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = { HOME: home };
+function gitEnv(home: string): Record<string, string> {
+	const env: Record<string, string> = { HOME: home };
 	for (const k of [
 		"PATH",
 		"USERPROFILE",
