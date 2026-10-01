@@ -12,6 +12,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed - `git add .` no longer stages the agent's state DB (#3302)
 - Starting the TUI in a project creates `.8gent/state.db` and its `-wal`/`-shm` files, and nothing ignored them, so `git add .` committed them (seen in the l5 pilot, #3298). When the DB path is resolved, 8gent now writes `.8gent/.gitignore` with `state.db*` if that folder has no `.gitignore`. An existing one is never changed. Only the DB files are ignored, so `.8gent/config.json` can still be committed. Storage paths are unchanged. This repo now tracks the same `.8gent/.gitignore`.
 
+### Fixed - the Linux login service installs where systemd looks (#3293)
+- `8gent daemon install` wrote the systemd unit (and on macOS the launchd plist) under `HOME` or `EIGHT_HOME`, so with either pointing elsewhere `systemctl --user enable` failed with "Unit file com.8gent.daemon.service does not exist". The service definition now goes under the account's own home, the one the service manager searches and the daemon runs with.
+
 ### Fixed - the test suite no longer leaves temp folders behind (#3285)
 - Test suites left about 24k folders and 11 GB in the OS temp folder, which pushed the Mac CI runner below its disk floor. A test run now keeps its temp files in one `8gent-test-tmp-<pid>-*` folder (TMPDIR, TEMP and TMP all point there, so Windows is covered too) and removes it afterwards. Folders left by an interrupted run are swept on the next run once their process is gone and they are 6 hours old. The 11 test files behind the biggest leaks make their temp folders with `tempDir()` from `tests/temp-dirs.ts` and clean them up, and the run fails if one of them leaks again. Other leftovers are listed in a `[temp-dirs]` line. `tests/preload-temp-dirs.test.ts` tests the guard and runs as part of `bun run test`.
 
