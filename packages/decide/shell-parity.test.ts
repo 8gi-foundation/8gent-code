@@ -18,7 +18,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readOnlyAllowlist } from "./allowlist";
@@ -142,5 +142,77 @@ describe("allowlist: no-opinion on unquoted globs and brace expansion (#3303)", 
 			"ls",
 		])
 			expect({ c, pass: passes(c) }).toEqual({ c, pass: true });
+	});
+});
+
+// `>&2` duplicates an fd only when the digits end the word. `>&2foo` is a
+// redirect to the FILE `2foo` (#3299 re-review). Both parsers read `&2` and
+// left `foo` behind as an argument, so the write was invisible.
+describe("redirect: >&<digits> is an fd only at a word boundary (#3303)", () => {
+	const WRITES = ["ls >&2foo", "ls 2>&1foo", "echo x >&2-out.txt"];
+
+	test("the allowlist refuses a >& redirect that names a file", () => {
+		for (const c of WRITES) expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
+	});
+
+	test("an fd duplication still passes", () => {
+		for (const c of ["ls >&2", "ls 2>&1", "ls 2>&1 | head", "ls >&2 2>/dev/null"])
+			expect({ c, pass: passes(c) }).toEqual({ c, pass: true });
+	});
+
+	test("the rules now see the file behind >&", () => {
+		expect(decideRules("echo x >&.zshrc").rules).toContain("truncate_sensitive_file");
+		expect(decideRules("echo x 2>&1").verdict).toBe("pass");
+	});
+
+	test.skipIf(!hasSh)("sh really writes the file (so the parsers must see it)", () => {
+		const dir = mkdtempSync(join(tmpdir(), "s1-redir-"));
+		try {
+			for (const [c, file] of [
+				// bash-as-sh calls `2>&1foo` an ambiguous redirect; zsh writes `1foo`.
+				["ls >&2foo", "2foo"],
+				["echo x >&2-out.txt", "2-out.txt"],
+			] as const) {
+				spawnSync("sh", ["-c", c], { cwd: dir });
+				expect({ c, written: existsSync(join(dir, file)) }).toEqual({ c, written: true });
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+// maskQuotes and splitSegments do not model comments: the apostrophe in
+// `# it's` opens a phantom quote that runs to the `'` in a trailing comment,
+// so line 2 vanished from the rules and the allowlist while sh ran it (#3303
+// review). The allowlist now refuses any comment, newline or CR.
+describe("comment desync: a quote inside a comment hides the next line (#3303)", () => {
+	const PROBES = [
+		"ls # it's\nfind . -delete #'",
+		"ls # it's\ncat * #'",
+		"ls # it's\ngit log --output=out.txt #'",
+		"ls # it's\nsort -o out.txt in.txt #'",
+	];
+
+	test("each probe is no-opinion", () => {
+		for (const c of PROBES) expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
+	});
+
+	test("comments, newlines and CRs are no-opinion; a mid-word # is not a comment", () => {
+		for (const c of ["ls # note", "ls;#x", "ls a\nls b", "ls a\rb", "ls\r", "echo 'a #b'"])
+			expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
+		for (const c of ["ls a#b", "echo $?", "ls -la"])
+			expect({ c, pass: passes(c) }).toEqual({ c, pass: true });
+	});
+
+	test("shellWords refuses a CR instead of splitting on it (sh keeps it in the word)", () => {
+		expect(shellWords("ls a\rb")).toBeNull();
+		expect(shellWords("git rm --cached\r a")).toBeNull();
+	});
+
+	test.skipIf(!hasSh)("sh really runs the line after the comment", () => {
+		const r = spawnSync("sh", ["-c", "true # it's\necho RAN-3303 #'"], { encoding: "utf8" });
+		expect(r.stdout).toContain("RAN-3303");
+		expect(passes("true # it's\necho RAN-3303 #'")).toBe(false);
 	});
 });
