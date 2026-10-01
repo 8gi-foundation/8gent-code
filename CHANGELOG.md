@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - System One no longer blocks `git rm --cached` (#3298)
+- `git rm --cached <path>...` only removes paths from the git index and leaves the files on disk, but the rules passed it to the Selene judge, which blocked it in pilot l5-feature-e2e (pYes 0.6764). The read-only allowlist now passes it without the judge, with `-r`, `-f`, `-q`, `-n`, `--dry-run`, `--ignore-unmatch` and `--` in any order. Plain `git rm` (which deletes from the working tree), abbreviated or negated flags, and anything chained with a rule-flagged command such as a recursive `rm` keep their current treatment.
+
 ### Fixed - /model auto:free runs a free model, never a paid one (#3289, #3292)
 - In the TUI, `/provider openrouter` then `/model auto:free` silently switched to a paid OpenRouter model. auto:free now resolves to a live `:free` id and refuses any paid id; if no free model is reachable, the tab says why and retries. Failed lookups are not cached, and the model list request gives up after 10 s.
 

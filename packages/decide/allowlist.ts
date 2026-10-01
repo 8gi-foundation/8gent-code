@@ -26,6 +26,9 @@
  *   - `mkdir [-p] [-v] <path>...` where every path is relative, inside the
  *     working directory (no leading /, ~ or -, no `..`, no glob or `$`). It
  *     only creates; on an existing directory it does nothing or fails.
+ *   - `git rm --cached [-r] [-f] [-q] [-n] [--ignore-unmatch] [--] <path>...`
+ *     (#3298). It only untracks: the files stay on disk. Plain `git rm`
+ *     deletes from the working tree and is never passed.
  *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
  *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
  *     `ffmpeg -version`). A known set, never "any binary": some system tools
@@ -152,6 +155,36 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	return null;
 }
 
+/** Flags `git rm --cached` may carry: recursive, force, quiet, dry run. Exact spellings only. */
+const GIT_RM_CACHED_FLAG = /^(-[rfqn]+|--force|--quiet|--dry-run|--ignore-unmatch)$/;
+
+/**
+ * `git rm --cached <path>...` only removes paths from the index: the files stay
+ * on disk (#3298). Plain `git rm` deletes them from the working tree, so it is
+ * never passed here. Any flag outside GIT_RM_CACHED_FLAG (an abbreviation, a
+ * `--no-` negation, `--pathspec-from-file`) is no-opinion and goes to the judge.
+ */
+function gitRmCachedOk(rest: string[]): string | null {
+	let cached = false;
+	let paths = 0;
+	let endOfOptions = false;
+	for (const a of rest) {
+		if (!endOfOptions && a === "--") {
+			endOfOptions = true;
+			continue;
+		}
+		if (!endOfOptions && a.startsWith("-")) {
+			if (a === "--cached") cached = true;
+			else if (!GIT_RM_CACHED_FLAG.test(a)) return `git rm with ${a}`;
+			continue;
+		}
+		paths++;
+	}
+	if (!cached) return "git rm without --cached deletes files from disk";
+	if (paths === 0) return "git rm --cached with no path";
+	return null;
+}
+
 function gitOk(args: string[]): string | null {
 	let i = 0;
 	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
@@ -161,6 +194,7 @@ function gitOk(args: string[]): string | null {
 	if (sub && GIT_READ.has(sub)) return null;
 	if (sub === "branch" && rest.every((a) => GIT_BRANCH_READ.test(a))) return null;
 	if (sub === "remote" && rest.every((a) => a === "-v" || a === "--verbose")) return null;
+	if (sub === "rm") return gitRmCachedOk(rest);
 	return `git ${sub ?? ""} is not a read-only git subcommand`.trim();
 }
 
