@@ -11,13 +11,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isOpenByThisProcess } from "./open-files";
+import { isOpenByThisProcess, removeWhenReleased } from "./open-files";
 import { SqliteDatabase, reclaimSweep } from "./sqlite";
 
 let dir: string;
 
 afterEach(() => {
-	fs.rmSync(dir, { recursive: true, force: true });
+	// The file is released (each test checks that); Windows can still hold
+	// the directory for a moment after heavy I/O, so wait that out.
+	removeWhenReleased(dir);
 });
 
 function freshDb(): { file: string; db: SqliteDatabase } {
@@ -136,7 +138,8 @@ describe("reclaimed but unswept statements (Windows sweep)", () => {
 
 	test("statements dropped by the 512-prepare cleanup are still swept at close()", async () => {
 		const { file, db } = freshDb();
-		for (let i = 0; i < 511; i++) db.prepare("INSERT INTO t (x) VALUES (?)").run(i);
+		// Reads, not inserts: 511 autocommit writes took 18 s on windows-latest.
+		for (let i = 0; i < 511; i++) db.prepare("SELECT x FROM t").all();
 		await Bun.sleep(1);
 		Bun.gc(false);
 		// The 512th prepare runs the cleanup, which drops the 511 reclaimed
