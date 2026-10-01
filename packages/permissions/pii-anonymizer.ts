@@ -45,29 +45,70 @@ import { loadOwnerIdentity } from "./owner-identity";
 const runtimeOwnerIdentity: { value: string; type: PiiType }[] = [];
 const runtimeOwnerTokens: string[] = [];
 
+/** Bare owner name words shorter than this are never token-masked. */
+const MIN_OWNER_TOKEN = 3;
+
+/**
+ * Words that are first names or account names but also everyday English or
+ * system words. Masking them as bare words would hide ordinary text ("Will
+ * this work?", "/root/"), so they are never token-masked. A full name that
+ * contains one is still masked as a whole, and the surname still is.
+ */
+const COMMON_WORD_NAMES = new Set([
+	// first names that are common words
+	"will", "mark", "may", "grace", "bill", "hope", "joy", "faith", "rose", "king",
+	"page", "field", "grant", "art", "frank", "june", "april", "august", "dawn",
+	"guy", "jack", "max", "rich", "ray", "pat", "sue", "summer", "sunny", "chase",
+	"drew", "iris", "lily", "miles", "rob", "sky", "victor", "earnest",
+	"autumn", "amber", "ruby", "pearl", "harmony", "honor", "justice", "royal",
+	// account / system names
+	"root", "admin", "administrator", "user", "users", "dev", "developer", "test",
+	"tester", "build", "builder", "runner", "ubuntu", "debian", "guest", "default",
+	"owner", "ci", "bot", "docker", "jenkins", "vagrant", "node", "git", "github",
+	"local", "localhost", "home", "me", "you",
+]);
+
 /**
  * The owner-identity values in force right now: the running user's identity
  * plus anything registered at runtime.
  *
  * `literals` are matched as exact substrings (full names with a space, emails).
  * `tokens` are bare name words matched whole-word only, so a name inside a
- * longer word ("jamestown") is never mangled.
+ * longer word ("jamestown") is never mangled. Bare tokens come only from the
+ * onboarding profile name or from a git name with a space (a real full name,
+ * the same rule as the release gate), are at least MIN_OWNER_TOKEN long, and
+ * skip a first name that is also a common word (COMMON_WORD_NAMES). The
+ * surname of a full name is always token-masked.
  */
 function ownerIdentity(): { literals: { value: string; type: PiiType }[]; tokens: string[] } {
 	const literals = [...runtimeOwnerIdentity];
 	const tokens = [...runtimeOwnerTokens];
 	const owner = loadOwnerIdentity();
-	if (owner.name) {
-		const name = owner.name.trim();
-		if (/\s/.test(name)) literals.push({ value: name, type: "PERSON" });
-		for (const word of name.split(/\s+/)) {
-			if (word.length >= 2 && !tokens.includes(word)) tokens.push(word);
+	const name = owner.name?.trim() ?? "";
+	if (name) {
+		const words = name.split(/\s+/);
+		const fullName = words.length > 1;
+		if (fullName) literals.push({ value: name, type: "PERSON" });
+		if (owner.nameSource === "profile" || fullName) {
+			words.forEach((word, i) => {
+				const isSurname = fullName && i === words.length - 1;
+				if (word.length < MIN_OWNER_TOKEN) return;
+				if (!isSurname && COMMON_WORD_NAMES.has(word.toLowerCase())) return;
+				if (!tokens.includes(word)) tokens.push(word);
+			});
 		}
 	}
-	if (owner.email && owner.email.length >= 3) {
-		literals.push({ value: owner.email.trim(), type: "EMAIL" });
-	}
+	const email = owner.email?.trim() ?? "";
+	if (email.length >= 3) literals.push({ value: email, type: "EMAIL" });
 	return { literals, tokens };
+}
+
+/**
+ * A whole-word matcher that understands accented letters: `\b` without the
+ * `u` flag treats "é" as a non-word character, so "José" was never matched.
+ */
+function wholeWord(tok: string, flags = ""): RegExp {
+	return new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(tok)}(?![\\p{L}\\p{N}_])`, `u${flags}`);
 }
 
 /**
@@ -254,7 +295,7 @@ export function anonymize(text: string): AnonymizeResult {
 	}
 	for (const tok of owner.tokens) {
 		// whole-word only
-		const re = new RegExp(`\\b${escapeRegExp(tok)}\\b`, "g");
+		const re = wholeWord(tok, "g");
 		for (let m = re.exec(text); m; m = re.exec(text)) {
 			spans.push({
 				start: m.index,
@@ -405,7 +446,7 @@ export function containsPii(text: string): boolean {
 		if (value.length >= 2 && text.toLowerCase().includes(value.toLowerCase())) return true;
 	}
 	for (const tok of owner.tokens) {
-		if (new RegExp(`\\b${escapeRegExp(tok)}\\b`).test(text)) return true;
+		if (wholeWord(tok).test(text)) return true;
 	}
 	for (const det of DETECTORS) {
 		det.re.lastIndex = 0;

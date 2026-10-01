@@ -129,10 +129,10 @@ export function findOwnerIdentity(src: string, identities: string[]): string[] {
 	});
 }
 
-/** Mask an identity for logs: keep two characters, hide the rest. */
+/** Mask an identity for logs: keep two characters (and two of an email domain). */
 export function maskIdentity(value: string): string {
 	const at = value.indexOf("@");
-	if (at > 0) return `${value.slice(0, 2)}***@${value.slice(at + 1)}`;
+	if (at > 0) return `${value.slice(0, 2)}***@${value.slice(at + 1, at + 3)}***`;
 	return `${value.slice(0, 2)}***`;
 }
 

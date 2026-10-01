@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -46,24 +46,28 @@ describe("owner-identity scan - identity collection", () => {
 
 	test("masks values for logs", () => {
 		expect(maskIdentity("Ada Quill")).toBe("Ad***");
-		expect(maskIdentity("ada@example.test")).toBe("ad***@example.test");
+		expect(maskIdentity("ada@example.test")).toBe("ad***@ex***");
 	});
 });
 
 describe("owner-identity scan - the shipped anonymizer", () => {
-	test("bundling the PII anonymizer bakes in no commit author's name or email", async () => {
-		const identities = repoAuthorIdentities(ROOT);
-		// The checkout must have at least one author for the gate to mean anything.
-		expect(identities.length).toBeGreaterThan(0);
+	// A source tarball or shallow export has no history to take authors from.
+	test.skipIf(!existsSync(join(ROOT, ".git")))(
+		"bundling the PII anonymizer bakes in no commit author's name or email",
+		async () => {
+			const identities = repoAuthorIdentities(ROOT);
+			// The checkout must have at least one author for the gate to mean anything.
+			expect(identities.length).toBeGreaterThan(0);
 
-		const built = await Bun.build({
-			entrypoints: [join(ROOT, "packages", "permissions", "pii-anonymizer.ts")],
-			target: "bun",
-		});
-		expect(built.success).toBe(true);
-		const src = await built.outputs[0].text();
-		expect(findOwnerIdentity(src, identities).map(maskIdentity)).toEqual([]);
-	});
+			const built = await Bun.build({
+				entrypoints: [join(ROOT, "packages", "permissions", "pii-anonymizer.ts")],
+				target: "bun",
+			});
+			expect(built.success).toBe(true);
+			const src = await built.outputs[0].text();
+			expect(findOwnerIdentity(src, identities).map(maskIdentity)).toEqual([]);
+		},
+	);
 });
 
 describe("owner-identity scan - identities that are not commit authors", () => {
@@ -80,7 +84,9 @@ describe("owner-identity scan - identities that are not commit authors", () => {
 	test("an email-only identity from PACK_SMOKE_OWNER_IDENTITY is caught", () => {
 		const home = mkdtempSync(join(tmpdir(), "8gent-owner-scan-"));
 		try {
-			expect(repoAuthorIdentities(ROOT)).not.toContain("ada.quill@example.test");
+			if (existsSync(join(ROOT, ".git"))) {
+				expect(repoAuthorIdentities(ROOT)).not.toContain("ada.quill@example.test");
+			}
 			const env = { ...isolatedGit(home), PACK_SMOKE_OWNER_IDENTITY: "ada.quill@example.test" };
 			const ids = collectOwnerIdentities({ root: ROOT, home, env });
 			expect(findOwnerIdentity(BUNDLE, ids)).toEqual(["ada.quill@example.test"]);

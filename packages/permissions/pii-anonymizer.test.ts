@@ -7,6 +7,10 @@ import {
 	registerOwnerIdentity,
 	verifyClean,
 } from "./pii-anonymizer";
+import { isolateOwnerIdentity } from "./__tests__/isolated-owner-identity";
+
+// Never read the developer's own profile or git config.
+isolateOwnerIdentity();
 
 // Officer-chat-shaped input: a system prompt + a conversation that mentions the
 // owner, a third party, contact details, and financial identifiers.

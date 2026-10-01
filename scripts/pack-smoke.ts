@@ -155,6 +155,12 @@ async function main(): Promise<void> {
 	const home = homedir();
 	// The owner identity is read from the running user at runtime; no real
 	// person's name or email may be baked into a bundle (v0.18.0 shipped one).
+	// Keep each secret entry out of the Actions log, whatever prints it.
+	if (process.env.GITHUB_ACTIONS === "true") {
+		for (const v of envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY)) {
+			console.log(`::add-mask::${v}`);
+		}
+	}
 	const ownerIdentities = collectOwnerIdentities({ root: ROOT, home });
 	check(ownerIdentities.length > 0, "owner-identity scan has identities to look for");
 	// The release job sets this so the gate never rests on who happens to build.

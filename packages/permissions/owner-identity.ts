@@ -13,8 +13,9 @@
  *   - email: `git config --global user.email` (the email onboarding detects;
  *            the profile does not store one).
  *
- * Read-only and local: one small file read and at most two `git config` calls,
- * no shell, no network. The result is cached and re-read only when HOME, the
+ * Read-only and local: one small file read and at most two `git config` calls
+ * (no shell, a minimal environment), no network. The result is cached and
+ * re-read only when HOME, the
  * git global config path, or the profile file's mtime changes, so a name given
  * during onboarding is picked up without a restart. Nothing is written.
  */
@@ -26,6 +27,8 @@ import { join } from "node:path";
 export interface OwnerIdentity {
 	/** The owner's name as they gave it, or null when none is configured. */
 	name: string | null;
+	/** Where the name came from: the onboarding profile or git config. */
+	nameSource: "profile" | "git" | null;
 	/** The owner's email, or null when none is configured. */
 	email: string | null;
 }
@@ -52,13 +55,33 @@ function readProfileName(home: string): string | null {
 	}
 }
 
+/**
+ * A minimal environment for the git child: enough to find git and resolve the
+ * user's global config, nothing else from this process.
+ */
+function gitEnv(home: string): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { HOME: home };
+	for (const k of [
+		"PATH",
+		"USERPROFILE",
+		"SYSTEMROOT",
+		"GIT_CONFIG_GLOBAL",
+		"GIT_CONFIG_NOSYSTEM",
+		"XDG_CONFIG_HOME",
+	]) {
+		const v = process.env[k];
+		if (v !== undefined) env[k] = v;
+	}
+	return env;
+}
+
 function readGitGlobal(key: "user.name" | "user.email", home: string): string | null {
 	try {
 		const out = execFileSync("git", ["config", "--global", key], {
 			encoding: "utf-8",
 			timeout: GIT_TIMEOUT_MS,
 			stdio: ["ignore", "pipe", "ignore"],
-			env: { ...process.env, HOME: home },
+			env: gitEnv(home),
 		});
 		return out.trim() || null;
 	} catch {
@@ -81,15 +104,13 @@ export function loadOwnerIdentity(): OwnerIdentity {
 	].join("\0");
 	if (cache?.key === key) return cache.identity;
 
+	const profileName = readProfileName(home);
+	const gitName = profileName ? null : readGitGlobal("user.name", home);
 	const identity: OwnerIdentity = {
-		name: readProfileName(home) ?? readGitGlobal("user.name", home),
+		name: profileName ?? gitName,
+		nameSource: profileName ? "profile" : gitName ? "git" : null,
 		email: readGitGlobal("user.email", home),
 	};
 	cache = { key, identity };
 	return identity;
-}
-
-/** Drop the cached identity (tests, or after the profile is rewritten). */
-export function resetOwnerIdentityCache(): void {
-	cache = null;
 }

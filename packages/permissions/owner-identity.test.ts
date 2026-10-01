@@ -6,50 +6,11 @@
  * These import only the anonymizer's public API, so they exercise the same
  * path the cloud-egress chokepoint uses.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { isolateOwnerIdentity } from "./__tests__/isolated-owner-identity";
 import { anonymize, containsPii, deanonymize } from "./pii-anonymizer";
 
-const ENV_KEYS = ["HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "XDG_CONFIG_HOME"] as const;
-const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-let home = "";
-
-function setProfileName(name: string, mtimeSec?: number): void {
-	const dir = join(home, ".8gent");
-	mkdirSync(dir, { recursive: true });
-	const file = join(dir, "user.json");
-	writeFileSync(file, JSON.stringify({ identity: { name } }));
-	if (mtimeSec !== undefined) utimesSync(file, mtimeSec, mtimeSec);
-}
-
-function setGitConfig(user: { name?: string; email?: string }): void {
-	const lines = ["[user]"];
-	if (user.name) lines.push(`\tname = ${user.name}`);
-	if (user.email) lines.push(`\temail = ${user.email}`);
-	writeFileSync(join(home, "isolated.gitconfig"), `${lines.join("\n")}\n`);
-}
-
-beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "8gent-owner-identity-"));
-	process.env.HOME = home;
-	process.env.GIT_CONFIG_GLOBAL = join(home, "isolated.gitconfig");
-	process.env.GIT_CONFIG_NOSYSTEM = "1";
-	process.env.XDG_CONFIG_HOME = join(home, ".config");
-	writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
-});
-
-afterEach(() => {
-	rmSync(home, { recursive: true, force: true });
-});
-
-afterAll(() => {
-	for (const k of ENV_KEYS) {
-		if (saved[k] === undefined) delete process.env[k];
-		else process.env[k] = saved[k];
-	}
-});
+const { setProfileName, setGitConfig } = isolateOwnerIdentity();
 
 describe("owner identity - no configured owner", () => {
 	test("no maintainer name is redacted or special-cased", () => {
@@ -106,5 +67,49 @@ describe("owner identity - configured owner", () => {
 	test("the configured owner is the only owner", () => {
 		setProfileName("Ada Quill");
 		expect(anonymize("ask James").text).toBe("ask James");
+	});
+});
+
+describe("owner identity - no over-redaction", () => {
+	test('a git user.name of "root" masks nothing ordinary', () => {
+		setGitConfig({ name: "root" });
+		const text = "cd /root/app and run it as root";
+		expect(anonymize(text).text).toBe(text);
+		expect(containsPii(text)).toBe(false);
+	});
+
+	test("single-word git names are never bare-masked (admin, ubuntu, Grace)", () => {
+		for (const name of ["admin", "ubuntu", "Grace"]) {
+			setGitConfig({ name });
+			expect(anonymize(`ask ${name} first`).text).toBe(`ask ${name} first`);
+		}
+	});
+
+	test('"Will Smith" masks the full name and the surname, not "Will this work?"', () => {
+		setGitConfig({ name: "Will Smith" });
+		const r = anonymize("Will Smith wrote it. Smith says hi.");
+		expect(r.text).not.toContain("Will Smith");
+		expect(r.text).not.toMatch(/\bSmith\b/);
+		expect(anonymize("Will this work?").text).toBe("Will this work?");
+		expect(containsPii("Will this work?")).toBe(false);
+	});
+
+	test("name words shorter than 3 characters are not bare-masked", () => {
+		setProfileName("Bo Li");
+		expect(anonymize("Bo Li shipped it").text).not.toContain("Bo Li");
+		expect(anonymize("go to Li or Bo").text).toBe("go to Li or Bo");
+	});
+});
+
+describe("owner identity - accented names", () => {
+	test("bare accented names are masked as whole words", () => {
+		setProfileName("José Ólafsson");
+		const r = anonymize("José asked Ólafsson to review.");
+		expect(r.text).not.toContain("José");
+		expect(r.text).not.toContain("Ólafsson");
+		expect(containsPii("ping José")).toBe(true);
+		expect(containsPii("ping Ólafsson")).toBe(true);
+		// Not inside a longer accented word.
+		expect(anonymize("Joséphine").text).toBe("Joséphine");
 	});
 });
