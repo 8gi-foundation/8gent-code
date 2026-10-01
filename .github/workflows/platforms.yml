@@ -15,7 +15,18 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - name: memory and eight with retry probe
-        run: bun test --preload ./diag/retry-probe.ts packages/memory/ packages/eight/ 2>&1 | grep -E "RETRY| fail$| pass$" || true
-      - name: full suite with retry probe
-        run: bun test --preload ./diag/retry-probe.ts packages/ apps/ 2>&1 | grep -E "RETRY| fail$| pass$" || true
+      - name: maxRetries support
+        run: bun diag/maxretries.ts || true
+      - name: bisect store.test
+        run: |
+          echo "BISECT bus: $(bun test packages/memory/bus.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT concept-linker: $(bun test packages/memory/concept-linker.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT entity-dedup: $(bun test packages/memory/entity-dedup.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT file-handles: $(bun test packages/memory/file-handles.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT flow-sync-client: $(bun test packages/memory/flow-sync-client.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT flow-sync: $(bun test packages/memory/flow-sync.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT graph-project-scope: $(bun test packages/memory/graph-project-scope.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT lint: $(bun test packages/memory/lint.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT store-versioning: $(bun test packages/memory/store-versioning.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT all-before: $(bun test packages/memory/bus.test.ts packages/memory/concept-linker.test.ts packages/memory/entity-dedup.test.ts packages/memory/file-handles.test.ts packages/memory/flow-sync-client.test.ts packages/memory/flow-sync.test.ts packages/memory/graph-project-scope.test.ts packages/memory/lint.test.ts packages/memory/store-versioning.test.ts packages/memory/store.test.ts 2>&1 | grep -cE 'unlink .*memory-store-test')"
+          echo "BISECT dir: $(bun test packages/memory/ 2>&1 | grep -cE 'unlink .*memory-store-test')"
