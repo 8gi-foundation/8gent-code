@@ -53,10 +53,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The llama-server adapter (`packages/local-model-server/llama-server.ts`) passes the same contract suite as the Ollama adapter.
 - System One finds its GGUF in `~/.8gent/models/decide/*.gguf` before the Ollama store, so a machine with no Ollama can still run it (or set `EIGHT_DECIDE_GGUF`).
 
-### Added
+### Added (#3150)
 - Local model server layer, phase 1 of #3149 (`packages/local-model-server/`): a `LocalModelServer` interface with capability flags and an Ollama adapter, so Ollama becomes one server among equals rather than the assumed default. Eight model-list and health call sites (`/api/tags`) now go through it with no behaviour change, proven by a snapshot of their requests and results taken before the move. A contract suite holds every adapter to the same rules.
 
-### Changed
+### Changed (#2952)
 - Working spinner traces a figure of eight instead of the stock braille square; frames are a pure, tested path and hold still when animations are off (`apps/tui/src/lib/figure-eight.ts`).
 
 ### Fixed - Telegram bridge: who may drive it, where it answers, who may consent (#2959)
@@ -91,7 +91,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carries a suppression with its reason. The 1417 warnings are untouched;
   this makes the gate work, it does not clean the repo.
 
-### Added
+### Added (#2956)
 - `/retro` ships as a bundled skill, so the session retrospective is available out of the box: a short Socratic interview, a determinism table sorting friction into hook, command, advice or decision record, and a cap of one adopted change per retro.
 
 ### Added - Table: on-demand real-time message narration, never persisted (#2877)
@@ -217,7 +217,7 @@ for iOS or browser clients on the same network.
 - Keeps control disabled on `--no-token` relays unless explicitly allowed.
 - Reports missing macOS Screen Recording and Accessibility grants explicitly.
 
-### Changed - GitHub Actions usage reduction
+### Changed - GitHub Actions usage reduction (#2679)
 
 Org-level Actions quota was hit (3,000 min/month). Workflow changes to bring usage well under cap:
 
