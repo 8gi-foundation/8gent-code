@@ -1,4 +1,4 @@
-import { getProviderManager } from "../../../../packages/providers/index.js";
+import { getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
 
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
@@ -156,11 +156,43 @@ export function autoSelectModel(opts: {
 }): string | null {
 	const { current, currentProvider, available, explicit } = opts;
 	if (available.length === 0) return null;
+	// "auto:free" is an alias, never a list entry: the OpenRouter list holds
+	// real ids. Swapping it for the list's best pick ran a PAID model while
+	// the user had asked for a free one (#3289). It is resolved to a real
+	// ":free" id when the agent is built (resolveAgentModel).
+	if (current === AUTO_FREE && providerToRuntime(currentProvider) === "openrouter") return null;
 	if (explicit && current && explicit.model === current && explicit.provider === currentProvider) return null;
 	const inList = Boolean(current && available.includes(current));
 	if (current && inList && !isLikelyEmbeddingModelId(current)) return null;
 	const next = pickBestChatModel(available, { preference: explicit?.model || undefined });
 	return next && next !== current ? next : null;
+}
+
+/** The OpenRouter alias for "the best free model right now". */
+export const AUTO_FREE = "auto:free";
+
+/**
+ * The model id an agent is actually built with. `auto:free` on OpenRouter
+ * becomes a real free id from the live list (#3289): the TUI's OpenRouter
+ * client would otherwise send the literal alias. It never falls back to a
+ * paid id: if no free id can be found the result says why, and the caller
+ * shows that instead of running.
+ */
+export async function resolveAgentModel(
+	provider: string,
+	model: string,
+	resolve: (m: string) => Promise<{ model: string }> = (m) => resolveModel(m, { strict: true }),
+): Promise<{ ok: true; model: string } | { ok: false; reason: string }> {
+	if (model !== AUTO_FREE || providerToRuntime(provider) !== "openrouter")
+		return { ok: true, model };
+	try {
+		const { model: id } = await resolve(model);
+		if (!id.endsWith(":free"))
+			return { ok: false, reason: `the best match, ${id}, is not a free model` };
+		return { ok: true, model: id };
+	} catch (err) {
+		return { ok: false, reason: (err as Error)?.message || "no free model could be found" };
+	}
 }
 
 /**
