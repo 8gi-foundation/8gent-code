@@ -10,31 +10,35 @@
  *   afterAll(cleanupTempDirs);
  *   const dir = tempDir("my-prefix-");
  *
- * Every directory tempDir() makes is recorded and removed by
- * cleanupTempDirs(). preload-temp-dirs.ts also calls it once after the whole
- * run, so a file that forgets the afterAll still does not leak past the run.
+ * The record is process-wide, not per file: every test file in a `bun test`
+ * run shares this module, so cleanupTempDirs() removes every directory
+ * tempDir() has made so far in the run, from any file. Files run one after
+ * another, so in practice a file's afterAll removes that file's own dirs.
+ * preload-temp-dirs.ts calls it once more after the whole run.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 const made = new Set<string>();
 
-/** mkdtempSync under os.tmpdir(), recorded for cleanupTempDirs(). */
+/** mkdtempSync under the absolute os.tmpdir(), recorded for cleanupTempDirs(). */
 export function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
+	// resolve(): a relative $TMPDIR must not make the path depend on the cwd.
+	const dir = mkdtempSync(join(resolve(tmpdir()), prefix));
 	made.add(dir);
 	return dir;
 }
 
-/** Remove every directory tempDir() has made and not yet removed. */
+/** Remove every directory tempDir() has recorded in this process and not yet removed. */
 export function cleanupTempDirs(): void {
 	for (const dir of made) {
+		made.delete(dir);
+		if (!isAbsolute(dir)) continue;
 		try {
 			rmSync(dir, { recursive: true, force: true });
 		} catch {
 			// Best effort: a cleanup error (EIO on a full disk) must not fail the test it follows.
 		}
-		made.delete(dir);
 	}
 }

@@ -33,7 +33,7 @@ import { ToolExecutor } from "../eight/tools";
 import { addPolicy, loadPolicies } from "./policy-engine";
 import { ToolG8, getAuditPath } from "./toolg8";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 function lastAuditEntry(): Record<string, any> {

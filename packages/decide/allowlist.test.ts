@@ -31,7 +31,7 @@ import { type Decider, createDecider } from "./index";
 import { decideRules } from "./rules";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "./types";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 const MUST_NOT_ALLOW: string[] = [

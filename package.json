@@ -44,7 +44,7 @@
     "package:windows": "pwsh scripts/package-windows.ps1",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.js",
-    "test": "bun test packages/ apps/",
+    "test": "bun test packages/ apps/ tests/preload-temp-dirs.test.ts",
     "test:benchmarks": "bun test benchmarks/",
     "test:security": "bun test tests/security",
     "test:models": "bun scripts/test-models.ts",

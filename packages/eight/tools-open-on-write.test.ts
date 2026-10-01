@@ -15,7 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 // Stub `open` at the OS level: a fake `open` first on PATH that only records

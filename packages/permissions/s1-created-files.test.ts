@@ -38,7 +38,7 @@ import {
 } from "./system-one-gate";
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 class RmIsDangerous implements DecideBackend {

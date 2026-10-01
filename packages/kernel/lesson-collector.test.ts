@@ -12,7 +12,7 @@ import {
 } from "./lesson-collector";
 import { KernelManager } from "./manager";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 function freshRoot(): string {

@@ -6,7 +6,7 @@ import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { KernelManager } from "./manager";
 import { TraceCapture, type Trajectory } from "./trace-capture";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 function freshRoot(): string {

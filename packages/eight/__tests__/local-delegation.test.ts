@@ -15,7 +15,7 @@ import { DELEGATION_TOOLS, localCatalogOmissions, localDelegationTools } from ".
 import { buildToolCatalogSegment } from "../prompts/system-prompt";
 import { TOOL_CATEGORIES } from "../tool-registry";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 const ORCHESTRATION_ONLY = (TOOL_CATEGORIES.orchestration ?? []).filter((t) => !DELEGATION_TOOLS.includes(t));

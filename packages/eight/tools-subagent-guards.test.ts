@@ -14,7 +14,7 @@ import { agentTools, getToolContext, setToolContext } from "../ai/tools";
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { ToolExecutor } from "./tools";
 
-// Every temp dir this file makes is removed after it (#3285).
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
 afterAll(cleanupTempDirs);
 
 const WORDCOUNT = 'export function wordCount(text: string): number {\n\treturn text.split(" ").length;\n}\n';
