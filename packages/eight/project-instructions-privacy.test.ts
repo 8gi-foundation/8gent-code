@@ -11,9 +11,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeWhenReleased } from "../core/open-files";
 import { Agent } from "./agent";
 
 const STANDING = "STANDING_SENTINEL_private_operator_rule";
@@ -37,10 +38,13 @@ beforeAll(() => {
 	process.env.HOME = home;
 });
 
-afterAll(() => {
+afterAll(async () => {
+	// Close the memory databases the agents opened under the temp home first:
+	// Windows refuses to delete a directory holding an open file.
+	(await import("../memory")).resetMemoryManager();
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
-	rmSync(home, { recursive: true, force: true });
+	removeWhenReleased(home);
 });
 
 function systemPrompt(runtime: string, baseUrl?: string): string {

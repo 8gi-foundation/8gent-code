@@ -13,9 +13,9 @@
  * 8. writeToDirectory creates files on disk
  */
 
-import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync } from "node:fs";
+import { SqliteDatabase as Database } from "../core/sqlite";
 import { KnowledgeGraph } from "./graph.js";
 import { WikiGenerator, slugify } from "./wiki.js";
 

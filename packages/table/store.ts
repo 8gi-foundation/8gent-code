@@ -17,11 +17,12 @@
  *   - duplicate channel name -> TableConflictError.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SqliteDatabase } from "../core/sqlite";
 import { Ledger, canonical } from "../goal/ledger.js";
 import { loadOrCreateKey } from "../permissions/goal-state-hmac.js";
 import { newChannelId, newMessageId } from "./ids.js";
@@ -184,7 +185,7 @@ export class TableStore {
 		if (dbPath !== ":memory:") {
 			fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		}
-		this.db = new Database(dbPath, { create: true });
+		this.db = new SqliteDatabase(dbPath, { create: true });
 
 		try {
 			this.db.exec("PRAGMA journal_mode = WAL");

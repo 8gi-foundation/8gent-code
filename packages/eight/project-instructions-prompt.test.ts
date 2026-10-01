@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeWhenReleased } from "../core/open-files";
 import { Agent } from "./agent";
 import { PROJECT_INSTRUCTIONS_CAP, projectInstructionsSection } from "./instruction-loader";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -31,8 +32,8 @@ beforeAll(() => {
 afterAll(() => {
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	removeWhenReleased(home);
+	removeWhenReleased(repo);
 });
 
 function systemPrompt(runtime: string, extra: Record<string, unknown> = {}): string {

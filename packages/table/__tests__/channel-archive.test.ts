@@ -13,10 +13,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SqliteDatabase as Database } from "../../core/sqlite";
 import { Ledger } from "../../goal/ledger.js";
 import { TableStore } from "../store.js";
 import { TableAuthError, TableNotFoundError } from "../types.js";

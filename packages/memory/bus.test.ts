@@ -34,6 +34,7 @@ describe("SharedMemoryBus", () => {
 	});
 
 	afterEach(() => {
+		bus.close();
 		cleanup();
 	});
 

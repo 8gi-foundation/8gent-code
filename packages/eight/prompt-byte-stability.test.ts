@@ -14,9 +14,10 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeWhenReleased } from "../core/open-files";
 import type { Agent as AgentT } from "./agent";
 
 // Loaded in beforeAll, after $HOME and EIGHT_DATA_DIR point at a temp dir: the
@@ -83,15 +84,18 @@ beforeAll(async () => {
 	});
 });
 
-afterAll(() => {
+afterAll(async () => {
 	server?.stop(true);
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
 	tools?.resetRuntimeParams();
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	// Close the memory databases the agents opened under the temp home first:
+	// Windows refuses to delete a directory holding an open file.
+	(await import("../memory")).resetMemoryManager();
+	removeWhenReleased(home);
+	removeWhenReleased(repo);
 });
 
 function build(): AgentT {

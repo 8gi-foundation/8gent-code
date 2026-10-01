@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { asSchema } from "ai";
+import { removeWhenReleased } from "../core/open-files";
 
 const DASH = /[–—]/g;
 
@@ -76,8 +77,8 @@ function runTurn(runtime: string, role?: string, scope?: string): string {
 		// string in every request, tool definitions included.
 		return JSON.stringify(out);
 	} finally {
-		fs.rmSync(dir, { recursive: true, force: true });
-		fs.rmSync(home, { recursive: true, force: true });
+		removeWhenReleased(dir);
+		removeWhenReleased(home);
 	}
 }
 

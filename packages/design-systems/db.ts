@@ -3,9 +3,10 @@
  * Uses bun:sqlite for synchronous operations (built-in, no native deps)
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { SqliteDatabase } from "../core/sqlite";
 import { SCHEMA } from "./schema";
 import type {
 	ColorPalette,
@@ -34,7 +35,7 @@ export function initDatabase(dbPath: string = DEFAULT_DB_PATH): Database {
 		fs.mkdirSync(dir, { recursive: true });
 	}
 
-	db = new Database(dbPath);
+	db = new SqliteDatabase(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA foreign_keys = ON");
 

@@ -80,6 +80,9 @@ export interface SharedMemoryBus {
 
 	/** Get the underlying database (for advanced queries) */
 	database(): Database;
+
+	/** Close the database and release its files (Windows locks open files). */
+	close(): void;
 }
 
 // ── Schema ───────────────────────────────────────────────────────────
@@ -341,6 +344,10 @@ export function createSharedMemoryBus(dbPath: string): SharedMemoryBus {
 		database(): Database {
 			return db;
 		},
+
+		close(): void {
+			store.close();
+		},
 	};
 }
 
@@ -357,5 +364,6 @@ export function getSharedMemoryBus(dbPath?: string): SharedMemoryBus {
 }
 
 export function resetSharedMemoryBus(): void {
+	_bus?.close();
 	_bus = null;
 }
