@@ -6,6 +6,7 @@
  * Before this gate the agent init awaited that forever.
  */
 
+import type { TCPSocketListener } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
 	createReadinessCache,
@@ -16,7 +17,7 @@ import {
 	withTimeout,
 } from "./provider-readiness.js";
 
-let silent: ReturnType<typeof Bun.listen>;
+let silent: TCPSocketListener<undefined>;
 let empty: ReturnType<typeof Bun.serve>;
 let emptyUrl = "";
 let healthy: ReturnType<typeof Bun.serve>;
