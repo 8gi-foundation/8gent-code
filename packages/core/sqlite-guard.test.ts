@@ -24,7 +24,7 @@ const ALLOWED_PATTERNS = [
 ];
 
 /**
- * The wrapper itself, plus known stragglers left for a follow-up (#3275).
+ * The wrapper itself, plus known stragglers left for a follow-up (#3310).
  * Remove an entry when its file moves to SqliteDatabase; never add one.
  */
 const ALLOWED_FILES = new Set([
