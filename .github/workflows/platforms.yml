@@ -50,6 +50,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # The locate tool shells out to ripgrep, which neither hosted image ships (#3287).
+      - name: Install ripgrep
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then choco install ripgrep -y --no-progress; else sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; fi
+          rg --version
+
       - name: Test
         run: bun run test
 
