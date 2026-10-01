@@ -401,7 +401,8 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 
 /**
  * POSIX shell-word split (quotes removed, backslash escapes applied, `#`
- * comments dropped). Returns null on an unclosed quote or trailing escape.
+ * comments dropped: only a `#` at the start of a word starts one, #3303).
+ * Returns null on an unclosed quote, a trailing escape or a CR.
  */
 export function shellWords(s: string): string[] | null {
 	const out: string[] = [];
@@ -410,20 +411,25 @@ export function shellWords(s: string): string[] | null {
 	let i = 0;
 	while (i < s.length) {
 		const c = s[i];
-		if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+		// sh does not split on CR; it stays inside the word. Refuse rather
+		// than guess (#3303). Callers fall back to their own handling.
+		if (c === "\r") return null;
+		if (c === " " || c === "\t" || c === "\n") {
 			if (has) out.push(tok);
 			tok = "";
 			has = false;
 			i++;
-		} else if (c === "#") {
-			if (has) out.push(tok);
-			tok = "";
-			has = false;
+		} else if (c === "#" && !has) {
+			// POSIX: `#` starts a comment only at the beginning of a word.
+			// Mid-word (`a#b`) it is an ordinary character (#3303).
 			while (i < s.length && s[i] !== "\n") i++;
 		} else if (c === "\\") {
 			if (i + 1 >= s.length) return null;
-			tok += s[i + 1];
-			has = true;
+			// Backslash-newline is a line continuation: both vanish.
+			if (s[i + 1] !== "\n") {
+				tok += s[i + 1];
+				has = true;
+			}
 			i += 2;
 		} else if (c === "'") {
 			const j = s.indexOf("'", i + 1);
@@ -444,7 +450,8 @@ export function shellWords(s: string): string[] | null {
 				if (d === "\\") {
 					if (i + 1 >= s.length) return null;
 					const e = s[i + 1];
-					tok += e === '"' || e === "\\" ? e : `\\${e}`;
+					// Inside double quotes a backslash escapes only $ ` " \ and newline.
+					if (e !== "\n") tok += e === '"' || e === "\\" || e === "$" || e === "`" ? e : `\\${e}`;
 					i += 2;
 					continue;
 				}
@@ -464,7 +471,11 @@ export function shellWords(s: string): string[] | null {
 const tokens = (seg: string) => shellWords(seg) ?? seg.split(/\s+/).filter(Boolean);
 
 /** Global: only ever used through matchAll, which clones it, so lastIndex never leaks. */
-const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?)(\|?)\s*([^\s;|&<>()]+)/g;
+// The target may start with `&`: `>&2` duplicates an fd only when the digits
+// end the word. `>&2foo` is a redirect to the file `2foo` in sh (#3303).
+const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?)(\|?)\s*(&?[^\s;|&<>()]+)/g;
+/** An fd duplication or close (`&2`, `&-`), not a file. */
+const FD_TARGET = /^&(\d+|-)$/;
 
 function redirects(seg: string): { op: string; target: string }[] {
 	if (!seg.includes(">")) return [];
@@ -473,8 +484,8 @@ function redirects(seg: string): { op: string; target: string }[] {
 	for (const mm of m.matchAll(REDIR_RE)) {
 		const start = (mm.index ?? 0) + mm[0].length - mm[4].length;
 		const target = seg.slice(start, start + mm[4].length).replace(/^['"]+|['"]+$/g, "");
-		if (target.startsWith("&")) continue;
-		outs.push({ op: mm[2], target });
+		if (FD_TARGET.test(target)) continue;
+		outs.push({ op: mm[2], target: target.startsWith("&") ? target.slice(1) : target });
 	}
 	return outs;
 }
