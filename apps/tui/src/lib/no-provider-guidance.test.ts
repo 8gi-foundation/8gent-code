@@ -1,53 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-	needsProviderGuidance,
 	providerKeyStatus,
 	unreachableLine,
 } from "./no-provider-guidance.js";
-
-describe("needsProviderGuidance (T5)", () => {
-	const base = {
-		checked: true,
-		liveLocal: 0,
-		provider: "ollama",
-		keyStatus: "not-needed" as const,
-	};
-
-	test("local provider, no engine answering: show", () => {
-		for (const provider of ["", "8gent", "ollama", "lmstudio", "llama-server", "apfel"]) {
-			expect(needsProviderGuidance({ ...base, provider })).toBe(true);
-		}
-	});
-
-	test("local provider, an engine answering: hide", () => {
-		expect(needsProviderGuidance({ ...base, liveLocal: 1 })).toBe(false);
-	});
-
-	test("not checked yet: hide, so it never flashes", () => {
-		expect(needsProviderGuidance({ ...base, checked: false })).toBe(false);
-	});
-
-	test("hosted provider: shows only when its key is missing", () => {
-		const hosted = { ...base, provider: "openrouter" };
-		expect(needsProviderGuidance({ ...hosted, keyStatus: "missing" })).toBe(true);
-		expect(needsProviderGuidance({ ...hosted, keyStatus: "present" })).toBe(false);
-		// The bare-Linux default is openrouter auto:free; a live Ollama alone
-		// does not make it runnable, so the card stays until /provider ollama.
-		expect(needsProviderGuidance({ ...hosted, liveLocal: 1, keyStatus: "missing" })).toBe(true);
-	});
-
-	test("agent init found the local provider unreachable: show, even before the probe lands", () => {
-		const unreachable = "Ollama at 127.0.0.1:11434 did not answer.";
-		expect(needsProviderGuidance({ ...base, checked: false, unreachable })).toBe(true);
-		// apfel answering the status probe does not make Ollama runnable.
-		expect(needsProviderGuidance({ ...base, liveLocal: 1, unreachable })).toBe(true);
-		expect(needsProviderGuidance({ ...base, liveLocal: 1, unreachable: null })).toBe(false);
-	});
-
-	test("provider needing no key and no engine (host CLI): never show", () => {
-		expect(needsProviderGuidance({ ...base, provider: "host-cli-primary" })).toBe(false);
-	});
-});
 
 describe("providerKeyStatus", () => {
 	const lookup =

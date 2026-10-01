@@ -11,7 +11,8 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
-import { type GuidanceInput, guidanceCopy } from "../../lib/no-provider-guidance.js";
+import { guidanceCopy } from "../../lib/no-provider-guidance.js";
+import { type ReadinessInputs, deriveReadiness } from "../../lib/readiness.js";
 import { palettes } from "../../theme.js";
 import { NO_PROVIDER_TONES, NoProviderNotice } from "../NoProviderCard.js";
 
@@ -34,14 +35,19 @@ function fakeStdout(cols: number, rows: number) {
 	return out;
 }
 
-async function frame(props: GuidanceInput & { compact?: boolean }, cols = 80): Promise<string> {
+// The card renders from the same readiness answer as the header strip (#3290).
+async function frame(props: ReadinessInputs & { compact?: boolean }, cols = 80): Promise<string> {
 	const stdout = fakeStdout(cols, 40);
-	const app = render(<NoProviderNotice {...props} copy={guidanceCopy("linux")} />, {
+	const { compact, ...inputs } = props;
+	const app = render(
+		<NoProviderNotice readiness={deriveReadiness(inputs)} compact={compact} copy={guidanceCopy("linux")} />,
+		{
 		stdout: stdout as unknown as NodeJS.WriteStream,
 		debug: true,
 		patchConsole: false,
 		exitOnCtrlC: false,
-	});
+		},
+	);
 	await new Promise((r) => setTimeout(r, 30));
 	app.unmount();
 	const last = stdout.frames.at(-1) ?? "";
@@ -49,12 +55,17 @@ async function frame(props: GuidanceInput & { compact?: boolean }, cols = 80): P
 	return last.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\s+$/, "");
 }
 
-const bareMachine: GuidanceInput = {
-	checked: true,
-	liveLocal: 0,
+const bareMachine: ReadinessInputs = {
 	provider: "ollama",
+	model: "qwen3.5",
+	firstProbeLanded: true,
+	engines: { apfel: false, lmstudio: false, ollama: false },
 	keyStatus: "not-needed",
+	unreachable: null,
+	build: { kind: "pending" },
+	turnError: null,
 };
+const ollamaUp = { ...bareMachine, engines: { ...bareMachine.engines, ollama: true }, build: { kind: "built" as const } };
 
 describe("no-model card in the chat area (T5)", () => {
 	test("providers 0/3: the card shows both paths and /provider", async () => {
@@ -79,8 +90,9 @@ describe("no-model card in the chat area (T5)", () => {
 	test("fits the chat column of an 80-column terminal: no line wraps or clips", async () => {
 		// The chat column is about 76 wide in an 80-column terminal; 72 leaves room.
 		const lines = (await frame(bareMachine, 72)).split("\n").filter(Boolean);
-		// Border, lead, 1 + 3 steps, 2 + 3 steps, border: eleven rows, none wrapped.
-		expect(lines.length).toBe(11);
+		// Border, lead, reason, 1 + 3 steps, 2 + 3 steps, border: twelve rows,
+		// none wrapped. The reason always shows now: readiness always has one.
+		expect(lines.length).toBe(12);
 		for (const line of lines) expect(line.length).toBeLessThanOrEqual(72);
 	});
 
@@ -117,39 +129,36 @@ describe("no-model card in the chat area (T5)", () => {
 	});
 
 	test("hosted provider with no key: the card shows", async () => {
-		const out = await frame({
-			checked: true,
-			liveLocal: 0,
-			provider: "openrouter",
-			keyStatus: "missing",
-		});
+		const out = await frame({ ...bareMachine, provider: "openrouter", keyStatus: "missing" });
 		expect(out).toContain("NO MODEL");
+		expect(out).toContain("openrouter needs an API key.");
 	});
 
 	test("one provider ready: nothing renders", async () => {
-		const out = await frame({ ...bareMachine, liveLocal: 1 });
+		const out = await frame(ollamaUp);
 		expect(out).not.toContain("NO MODEL");
 		expect(out).toMatchSnapshot();
 	});
 
 	test("hosted provider with its key: nothing renders", async () => {
-		const out = await frame({
-			checked: true,
-			liveLocal: 0,
-			provider: "openrouter",
-			keyStatus: "present",
-		});
+		const out = await frame({ ...ollamaUp, provider: "openrouter", keyStatus: "present" });
 		expect(out).toBe("");
 	});
 
 	test("before the first probe lands: nothing renders (no flash)", async () => {
-		const out = await frame({ ...bareMachine, checked: false });
+		const out = await frame({ ...bareMachine, firstProbeLanded: false });
 		expect(out).toBe("");
 	});
 
-	test("compact form with no reason falls back to the lead", async () => {
+	test("compact form carries the readiness reason in the header row", async () => {
 		const out = await frame({ ...bareMachine, compact: true }, 76);
-		expect(out).toContain("NO MODEL 8gent needs a model to answer.");
+		expect(out).toContain("NO MODEL Ollama is not answering.");
+	});
+
+	test("a built agent whose engine is lost mid-session: the card shows (#3290)", async () => {
+		const out = await frame({ ...ollamaUp, engines: { ...ollamaUp.engines, ollama: false } });
+		expect(out).toContain("NO MODEL");
+		expect(out).toContain("Ollama is not answering.");
 	});
 
 	test("copy names no AI vendor and uses no em dash", () => {

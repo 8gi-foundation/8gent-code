@@ -122,9 +122,17 @@ export class OpenRouterClient implements LLMClient {
 		return response.message.content;
 	}
 
+	/**
+	 * Ready means a turn could run. OpenRouter's /models is public and answers
+	 * 200 with no key or a bad one, so on openrouter.ai the check is /key,
+	 * which only answers 200 for a key it accepts (#3290). Other OpenAI-style
+	 * hosts keep /models, which they guard with the key.
+	 */
 	async isAvailable(): Promise<boolean> {
+		const openRouter = /(^|\.)openrouter\.ai$/.test(hostOf(this.baseUrl));
+		if (openRouter && !this.apiKey) return false;
 		try {
-			const response = await fetch(`${this.baseUrl}/models`, {
+			const response = await fetch(`${this.baseUrl}/${openRouter ? "key" : "models"}`, {
 				headers: {
 					Authorization: `Bearer ${this.apiKey}`,
 				},
@@ -133,5 +141,13 @@ export class OpenRouterClient implements LLMClient {
 		} catch {
 			return false;
 		}
+	}
+}
+
+function hostOf(url: string): string {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return "";
 	}
 }
