@@ -9,16 +9,20 @@
  * while these tests run, on the old code or the new.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
+
+// Every temp dir this file makes is removed after it (#3285).
+afterAll(cleanupTempDirs);
 
 // Stub `open` at the OS level: a fake `open` first on PATH that only records
 // its argument. Whatever way the code under test reaches child_process
 // (static import, dynamic import, require), the real /usr/bin/open never runs
 // and no window can appear, on the old code or the new.
-const stubBin = fs.mkdtempSync(path.join(os.tmpdir(), "open-stub-"));
+const stubBin = tempDir("open-stub-");
 const openLog = path.join(stubBin, "opened.log");
 fs.writeFileSync(path.join(stubBin, "open"), `#!/bin/sh\necho "$1" >> "${openLog}"\n`, { mode: 0o755 });
 process.env.PATH = `${stubBin}${path.delimiter}${process.env.PATH ?? ""}`;
@@ -56,7 +60,7 @@ afterEach(() => {
 	else process.env.EIGHT_NO_OPEN = realNoOpen;
 });
 
-const workdir = () => fs.mkdtempSync(path.join(os.tmpdir(), "open-on-write-"));
+const workdir = () => tempDir("open-on-write-");
 const MARP = "---\nmarp: true\ntheme: default\n---\n\n# Slide 1\n";
 
 describe("write_file opens only deliverables (#3107)", () => {

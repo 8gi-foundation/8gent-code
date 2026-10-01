@@ -1,13 +1,16 @@
-import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { KernelManager } from "./manager";
 import { TraceCapture, type Trajectory } from "./trace-capture";
 
+// Every temp dir this file makes is removed after it (#3285).
+afterAll(cleanupTempDirs);
+
 function freshRoot(): string {
-	return mkdtempSync(join(tmpdir(), "trace-capture-"));
+	return tempDir("trace-capture-");
 }
 
 const TURN = {

@@ -5,13 +5,17 @@
  * src/wordcount.ts with oldText "" and prepended "# twofix" to it.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, getToolContext, setToolContext } from "../ai/tools";
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { ToolExecutor } from "./tools";
+
+// Every temp dir this file makes is removed after it (#3285).
+afterAll(cleanupTempDirs);
 
 const WORDCOUNT = 'export function wordCount(text: string): number {\n\treturn text.split(" ").length;\n}\n';
 const CLAMP = "export function clamp(n: number, min: number, max: number): number {\n\treturn Math.max(max, Math.min(n, min));\n}\n";
@@ -19,7 +23,7 @@ const README = "# twofix\n\nTwo small helpers.\n";
 
 /** The twofix fixture in a fresh temp dir. */
 function twofix(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-guards-"));
+	const dir = tempDir("subagent-guards-");
 	fs.mkdirSync(path.join(dir, "src"));
 	fs.writeFileSync(path.join(dir, "src", "wordcount.ts"), WORDCOUNT);
 	fs.writeFileSync(path.join(dir, "src", "clamp.ts"), CLAMP);
@@ -173,7 +177,7 @@ describe("edit-guards helpers", () => {
  */
 function spawnProbe(allowedPaths: string[] | undefined) {
 	const dir = twofix();
-	const home = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-guards-home-"));
+	const home = tempDir("subagent-guards-home-");
 	const r = Bun.spawnSync(
 		[
 			"bun",

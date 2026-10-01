@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
 	LessonCollector,
 	lessonsToGrpoPairs,
@@ -12,8 +12,11 @@ import {
 } from "./lesson-collector";
 import { KernelManager } from "./manager";
 
+// Every temp dir this file makes is removed after it (#3285).
+afterAll(cleanupTempDirs);
+
 function freshRoot(): string {
-	return mkdtempSync(join(tmpdir(), "lesson-collector-"));
+	return tempDir("lesson-collector-");
 }
 
 // Mirrors the real ledger format written by livedemo.py: a failing check,
@@ -157,7 +160,7 @@ describe("lessonsToGrpoPairs", () => {
 
 /** Write fixture sources into a temp dir and return LessonSources paths. */
 function fixtureSources(ledger: string = LEDGER, report: string = REPORT) {
-	const dir = mkdtempSync(join(tmpdir(), "lesson-sources-"));
+	const dir = tempDir("lesson-sources-");
 	const liveDemoLedgerPath = join(dir, "livedemo-ledger.jsonl");
 	const selfHealReportsDir = join(dir, "reports");
 	writeFileSync(liveDemoLedgerPath, ledger);

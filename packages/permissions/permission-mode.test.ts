@@ -20,14 +20,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readFileSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools } from "../ai/tools";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
@@ -67,6 +66,9 @@ import {
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
 } from "./system-one-gate";
+
+// Every temp dir this file makes is removed after it (#3285).
+afterAll(cleanupTempDirs);
 
 // ── Unit ──────────────────────────────────────────────────────────────
 
@@ -242,7 +244,7 @@ let stub: StubBackend;
 
 beforeAll(() => {
 	for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
-	dataDir = mkdtempSync(join(tmpdir(), "perm-mode-data-"));
+	dataDir = tempDir("perm-mode-data-");
 });
 afterAll(() => {
 	for (const k of ENV_KEYS) {
@@ -270,9 +272,9 @@ function freshWorld(): { dir: string; asked: string[]; humanAsked: string[] } {
 			humanAsked.push(req.command);
 			return false;
 		},
-		calibrationDir: mkdtempSync(join(tmpdir(), "perm-mode-nocal-")),
+		calibrationDir: tempDir("perm-mode-nocal-"),
 	});
-	return { dir: mkdtempSync(join(tmpdir(), "perm-mode-")), asked: [], humanAsked };
+	return { dir: tempDir("perm-mode-"), asked: [], humanAsked };
 }
 
 /** Record approval cards on the shared manager and answer them `answer`. */
@@ -436,7 +438,7 @@ describe("Ask with System One on by default (EIGHT_SYSTEM_ONE unset) behaves as 
 	beforeEach(() => {
 		w = freshWorld();
 		// Default mode asks only a calibrated judge; give the stub one.
-		const cal = mkdtempSync(join(tmpdir(), "perm-mode-cal-"));
+		const cal = tempDir("perm-mode-cal-");
 		writeFileSync(
 			join(cal, "stub-stub-model.json"),
 			JSON.stringify({
@@ -469,7 +471,7 @@ describe("Ask with System One on by default (EIGHT_SYSTEM_ONE unset) behaves as 
 	async function askRun(flag: string | undefined) {
 		if (flag === undefined) Reflect.deleteProperty(process.env, SYSTEM_ONE_FLAG);
 		else process.env[SYSTEM_ONE_FLAG] = flag;
-		const dir = mkdtempSync(join(tmpdir(), "perm-mode-ask-"));
+		const dir = tempDir("perm-mode-ask-");
 		writeFileSync(join(dir, "victim.txt"), "v");
 		const cardsBefore = w.asked.length;
 		const del = await executorIn(dir, "ask").execute("run_command", {
@@ -531,7 +533,7 @@ describe("headless (the pilot): Guarded behaves exactly like today's EIGHT_SYSTE
 		// A headless denial is remembered for the session; each side starts clean.
 		resetPermissionManager();
 		for (const command of CASES) {
-			const dir = mkdtempSync(join(tmpdir(), "perm-mode-headless-"));
+			const dir = tempDir("perm-mode-headless-");
 			writeFileSync(join(dir, "victim.txt"), "v");
 			mkdirSync(join(dir, "build"));
 			const before = statSync(join(dir, "build")).mode & 0o777;
