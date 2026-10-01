@@ -225,6 +225,8 @@ export class Agent {
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
 	private twoStageCompactor: TwoStageCompactor | null = null;
+	/** The provider the current post-turn pass summarises with (#3267). */
+	private twoStageProvider: ProviderConfig | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
@@ -649,7 +651,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		localCoreTools: string[];
 		chatStartTime: number;
 		textForAgent: string;
-	}): Promise<string> {
+	}): Promise<{ content: string; provider: string; model: string; baseURL: string }> {
 		const {
 			providerName,
 			providerModel,
@@ -904,6 +906,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// The provider and model this turn last ran on. Either reroute below can
+		// cross providers (ollama, lmstudio, apple-foundation), so the caller's
+		// post-turn compaction must use this pair, not the session's pin (#3267).
+		const route = { provider: effectiveProvider, model: effectiveModel };
+		// The reply plus the route, with the endpoint runTurn sent it to (the
+		// same resolution buildTextToolCall makes), as an OpenAI "/v1" base.
+		const answered = (content: string) => ({
+			content,
+			...route,
+			baseURL: toOpenAiV1Base(resolveTextToolEndpoint(route.provider, this.config.baseUrl)),
+		});
+
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
 		const recordFailedRun = (reason: string) => {
@@ -941,6 +955,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: effectiveModel,
 				run: runTurn,
 				onReroute: (missing, chosen) => {
+					route.provider = chosen.provider;
+					route.model = chosen.model;
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
 					);
@@ -951,7 +967,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
 				recordFailedRun(`no local model: ${outcome.message}`);
-				return outcome.message;
+				return answered(outcome.message);
 			}
 			if (outcome.rerouted) {
 				// Self-correct the session so subsequent turns skip the dead model
@@ -970,7 +986,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
 			recordFailedRun(failure.reason);
-			return failure.message;
+			return answered(failure.message);
 		}
 		this.abortController = null;
 
@@ -1068,7 +1084,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			/* journal is best-effort; never break the turn */
 		}
 
-		return flavoredContent;
+		return answered(flavoredContent);
 	}
 
 	/**
@@ -1435,10 +1451,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 			// The same post-turn compaction the native path runs. This branch
 			// returns before that block, so local sessions never compacted (#3267).
-			// A reroute may have moved the session to another local model; the
-			// summary call goes to the one that answered.
-			await this.compactAfterTurn({ ...providerConfig, model: this.config.model });
-			return textResult;
+			// A reroute can move the turn to another local provider, so the
+			// summary call goes to the provider, model and endpoint the turn ran
+			// on. The session's API key belongs to the pinned provider only.
+			await this.compactAfterTurn({
+				name: textResult.provider as ProviderName,
+				model: textResult.model,
+				baseURL: textResult.baseURL,
+				apiKey: textResult.provider === providerConfig.name ? providerConfig.apiKey : undefined,
+			});
+			return textResult.content;
 		}
 
 		let agentConfig: EightAgentConfig = {
@@ -2538,9 +2560,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
 		try {
+			// The compactor is built once, so its summariser reads this turn's
+			// provider from a field rather than closing over the first turn's: a
+			// reroute moves later turns to another provider (#3267).
+			this.twoStageProvider = providerConfig;
 			if (!this.twoStageCompactor) {
 				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
-					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
+					this.generateCheckpoint(
+						this.twoStageProvider ?? providerConfig,
+						twoStageCheckpointPrompt(msgs, previousSummary),
+					);
 				this.twoStageCompactor = new TwoStageCompactor({
 					checkpointPct: 0.65,
 					compactPct: 0.8,

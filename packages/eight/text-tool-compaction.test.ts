@@ -14,7 +14,7 @@
  * $HOME is faked so the operator's memories, sessions and config stay out.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ let ProactiveCompression: typeof import("./compaction").ProactiveCompression;
 let twoStageTokens: typeof import("./two-stage-compactor").estimateMessageTokens;
 
 type Msg = { role: string; content: unknown };
-type Body = { messages: Msg[] };
+type Body = { model?: string; messages: Msg[]; auth?: string | null };
 
 const SUMMARY = "SENTINEL_3267_text_tool_summary";
 
@@ -39,6 +39,13 @@ let home: string;
 let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 const bodies: Body[] = [];
+
+// Cross-provider reroute (#3267): the fake endpoint 404s `goneModel` as Ollama
+// does for a model that is not pulled, and local model detection reports one
+// LM Studio model while `lmStudioOnly` is set. Otherwise both behave as normal.
+let goneModel: string | null = null;
+let lmStudioOnly = false;
+const LM_MODEL = "lm-studio-model";
 
 /** A summariser call: a bare prompt (no system message) over a serialised conversation. */
 function isSummaryRequest(body: Body): boolean {
@@ -61,12 +68,30 @@ beforeAll(async () => {
 	({ Agent } = await import("./agent"));
 	({ ProactiveCompression } = await import("./compaction"));
 	({ estimateMessageTokens: twoStageTokens } = await import("./two-stage-compactor"));
+	// Delegates to the real detector unless a test sets the flag, so the mock
+	// cannot change any other test file sharing this process.
+	const detect = await import("../orchestration/local-model-detect");
+	const real = { ...detect };
+	mock.module("../orchestration/local-model-detect", () => ({
+		...real,
+		detectLocalModels: async () =>
+			lmStudioOnly
+				? [{ provider: "lmstudio", model: LM_MODEL, score: 10, toolCapable: true }]
+				: real.detectLocalModels(),
+	}));
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
 			if (req.method !== "POST") return Response.json({ models: [], data: [] });
 			const body = (await req.json()) as Body;
+			body.auth = req.headers.get("authorization");
 			bodies.push(body);
+			if (goneModel && body.model === goneModel) {
+				return Response.json(
+					{ error: { message: `model '${goneModel}' not found, try pulling it first` } },
+					{ status: 404 },
+				);
+			}
 			const content = isSummaryRequest(body) ? SUMMARY : "Done.";
 			return Response.json({
 				id: "c1",
@@ -181,6 +206,60 @@ describe("text-tool turns run the post-turn compaction (#3267)", () => {
 			const used = twoStageTokens(agent.getMessageHistory());
 			Reflect.set(agent, "compactionContextWindow", Math.floor(used / 0.85));
 			await compactsAndCarries(agent);
+		} finally {
+			process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
+		}
+	}, 60_000);
+});
+
+describe("text-tool compaction follows a cross-provider reroute (#3267)", () => {
+	/**
+	 * The pinned Ollama model disappears mid-session, so the compacting turn
+	 * reroutes to LM Studio. Its summary request must go to LM Studio with the
+	 * model that answered (LM Studio's client sends its bearer key; Ollama's
+	 * sends none), not to the pinned Ollama model, which would 404 and leave
+	 * the session uncompacted.
+	 */
+	async function reroutesThenCompacts(agent: AgentT): Promise<void> {
+		goneModel = "m";
+		lmStudioOnly = true;
+		const start = bodies.length;
+		try {
+			await compactsAndCarries(agent);
+		} finally {
+			goneModel = null;
+			lmStudioOnly = false;
+		}
+		const summaries = bodies.slice(start).filter(isSummaryRequest);
+		expect(summaries.length).toBeGreaterThan(0);
+		for (const s of summaries) {
+			expect(s.model).toBe(LM_MODEL);
+			expect(s.auth).toBe("Bearer lm-studio");
+		}
+	}
+
+	test("ProactiveCompression summarises on the provider that answered", async () => {
+		const agent = build();
+		await longSession(agent);
+		const used = proactiveTokens(agent.getMessageHistory());
+		Reflect.set(
+			agent,
+			"compaction",
+			new ProactiveCompression({ contextWindow: Math.floor(used / 0.82), keepRecentTokens: 200 }),
+		);
+		await reroutesThenCompacts(agent);
+	}, 60_000);
+
+	test("the two-stage summariser follows the reroute, not the first turn's provider", async () => {
+		process.env["8GENT_TWO_STAGE_COMPACT"] = "1";
+		try {
+			const agent = build();
+			// The long session builds the two-stage compactor on the pinned Ollama provider.
+			await longSession(agent);
+			Reflect.set(agent, "compaction", new ProactiveCompression({ enabled: false }));
+			const used = twoStageTokens(agent.getMessageHistory());
+			Reflect.set(agent, "compactionContextWindow", Math.floor(used / 0.85));
+			await reroutesThenCompacts(agent);
 		} finally {
 			process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
 		}
