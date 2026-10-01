@@ -234,9 +234,9 @@ import { COMPACT_BELOW_ROWS, providerKeyStatus, unreachableLine } from "./lib/no
 import {
 	type TurnError,
 	buildResultFor,
-	classifyTurnError,
 	deriveReadiness,
 	readinessBuildKey,
+	turnEndFacts,
 } from "./lib/readiness.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
@@ -866,6 +866,7 @@ export function App({
 	// Bumped when a turn fails to reach its engine, so the probe runs now
 	// rather than on its next 8 s tick (#3290).
 	const [probeNonce, setProbeNonce] = useState(0);
+	const probeInFlightRef = useRef(false);
 	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
 	// run and once after each update only (lib/intro-gate.ts); the
 	// performance.introBanner setting ("on" / "off") and 8GENT_NO_INTRO=1 /
@@ -1275,6 +1276,7 @@ export function App({
 	useEffect(() => {
 		let cancelled = false;
 		const tick = async () => {
+			probeInFlightRef.current = true;
 			try {
 				const { live, total, statuses } = await probeProviders();
 				const engines = Object.fromEntries(statuses.map((s) => [s.name, s.live]));
@@ -1291,6 +1293,8 @@ export function App({
 					);
 			} catch {
 				// best-effort - status bar can stay stale rather than crash
+			} finally {
+				probeInFlightRef.current = false;
 			}
 		};
 		tick();
@@ -1650,6 +1654,12 @@ export function App({
 	// The transport failure the last turn ended on, a readiness fact (#3290).
 	// A turn that ends cleanly clears it.
 	const [turnError, setTurnError] = useState<TurnError | null>(null);
+	// Read by the init effect without re-running it on every turn error.
+	const turnErrorRef = useRef<TurnError | null>(null);
+	turnErrorRef.current = turnError;
+	// The provider the running turn started on: a switch mid-turn must not
+	// pin this turn's failure on the new provider.
+	const turnProviderRef = useRef(currentProvider);
 
 	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
 	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
@@ -1680,6 +1690,7 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const justFinished = wasProcessingRef.current && !isProcessing;
+		if (isProcessing && !wasProcessingRef.current) turnProviderRef.current = currentProvider;
 		wasProcessingRef.current = isProcessing;
 		if (justFinished) {
 			setLastTurnEndedAt(Date.now());
@@ -1687,9 +1698,14 @@ export function App({
 			// or was blocked mid-turn, then recovered from, is not an error.
 			const hadError = turnEndedInError(messages);
 			setLastTurnSuccess(!hadError);
-			const errKind = hadError ? classifyTurnError(messages[messages.length - 1]) : null;
-			setTurnError(errKind ? { kind: errKind, provider: currentProvider } : null);
-			if (errKind === "unreachable") setProbeNonce((n) => n + 1);
+			const facts = turnEndFacts(
+				hadError ? messages[messages.length - 1] : undefined,
+				turnProviderRef.current,
+				probeInFlightRef.current,
+			);
+			setTurnError(facts.turnError);
+			if (facts.probeNow) setProbeNonce((n) => n + 1);
+			if (facts.retryBuild) setInitRetry((n) => n + 1);
 			// The plan settles: nothing is still in progress, and the turn's
 			// wall time goes into the summary line.
 			setPlanSteps((prev) => (prev.length > 0 ? settlePlan(prev) : prev));
@@ -2572,9 +2588,20 @@ export function App({
 			});
 		};
 		const initAgent = async () => {
-			const buildKey = readinessBuildKey(workspaceTabs.activeTab?.id || "default", currentProvider, currentModel);
-			const built = () => setBuildFact({ key: buildKey, notice: null });
-			const waiting = (notice: string) => setBuildFact({ key: buildKey, notice });
+			// Same tab id as the render-side key, so the two always match.
+			const buildKey = readinessBuildKey(activeTabId, currentProvider, currentModel);
+			// A cancelled (superseded) attempt writes nothing: a late, stale
+			// result must not overwrite the current attempt's slot.
+			const built = () => {
+				if (cancelled) return;
+				setBuildFact({ key: buildKey, notice: null });
+				// A build that checked this provider supersedes its last turn error.
+				setTurnError((prev) => (prev?.provider === currentProvider ? null : prev));
+			};
+			const waiting = (notice: string) => {
+				if (cancelled) return;
+				setBuildFact({ key: buildKey, notice });
+			};
 			try {
 				// Bounded readiness gate. A local provider whose port accepts TCP
 				// but never answers used to leave this init awaiting forever, so
@@ -2606,6 +2633,7 @@ export function App({
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
 					const _changes = await router.autoAssign();
+					if (cancelled) return;
 					// If current model is empty, use whatever autoAssign found
 					if (!currentModel) {
 						const cfg = router.getConfig();
@@ -2636,6 +2664,17 @@ export function App({
 					// discarded the finished turn's reply (#3084).
 					const _built = builtSpecRef.current.get(_existing) ?? { model: _cfg?.model, runtime: _cfg?.runtime };
 					if (canReuseTabAgent(_built, { model: currentModel, runtime: _wantRuntime })) {
+						// After a hosted turn could not reach the provider, a reused
+						// agent is checked again rather than taken on trust (#3290).
+						if (turnErrorRef.current?.provider === currentProvider) {
+							const check = await withTimeout(_existing.readiness(), PROBE_TIMEOUT_MS * 2, { ok: false });
+							if (cancelled) return;
+							if (!check.ok) {
+								waiting(`${currentProvider} ${check.reason ?? "did not report ready."}`);
+								retryLater();
+								return;
+							}
+						}
 						setAgent(_existing);
 						setAgentReady(true);
 						built();
@@ -2680,9 +2719,9 @@ export function App({
 				});
 				builtSpecRef.current.set(newAgent, { model: currentModel, runtime });
 				// Belt and braces: the client's own check has no bound, so cap it.
-				const _readyOuter = await withTimeout(newAgent.isReady(), PROBE_TIMEOUT_MS * 2, false);
+				const _check = await withTimeout(newAgent.readiness(), PROBE_TIMEOUT_MS * 2, { ok: false });
 				if (cancelled) return;
-				if (_readyOuter) {
+				if (_check.ok) {
 					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
@@ -2714,7 +2753,7 @@ export function App({
 				} else {
 					setAgent(null);
 					setAgentReady(false);
-					waiting(`${currentProvider} did not report ready.`);
+					waiting(`${currentProvider} ${_check.reason ?? "did not report ready."}`);
 					retryLater();
 					notify(
 						_initTabId,

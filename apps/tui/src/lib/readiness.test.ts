@@ -3,11 +3,13 @@ import {
 	type BuildResult,
 	CHECKING_REASON,
 	type ReadinessInputs,
+	type ReadinessState,
 	type TurnError,
 	buildResultFor,
 	classifyTurnError,
 	deriveReadiness,
 	readinessBuildKey,
+	turnEndFacts,
 } from "./readiness.js";
 
 /**
@@ -35,64 +37,145 @@ const openrouter: ReadinessInputs = {
 	keyStatus: "present",
 };
 
-describe("deriveReadiness: every combination", () => {
-	const builds: BuildResult[] = [{ kind: "built" }, { kind: "wait", notice: "openrouter did not report ready." }, { kind: "pending" }];
+describe("deriveReadiness: every combination, against a golden table", () => {
+	// Each row's expected {state, reason} is pinned in the snapshot file next
+	// to this test, one line per row, so swapping two rules changes lines and
+	// fails. The invariants below hold for every row on their own.
+	const NOTE = "Ollama at 127.0.0.1:11434 did not answer.";
+	const builds: BuildResult[] = [
+		{ kind: "built" },
+		{ kind: "wait", notice: "openrouter did not report ready." },
+		{ kind: "pending" },
+	];
 	const rows: Array<{ name: string; input: ReadinessInputs }> = [];
-	for (const base of [ollama, openrouter])
-		for (const engineUp of [true, false])
-			for (const key of base === ollama ? (["not-needed"] as const) : (["present", "missing", "invalid"] as const))
-				for (const build of builds)
-					for (const firstProbeLanded of [false, true])
-						for (const unreachableTurn of [false, true]) {
-							const turnError: TurnError | null =
-								key === "invalid"
-									? { kind: "auth", provider: base.provider }
-									: unreachableTurn
-										? { kind: "unreachable", provider: base.provider }
-										: null;
-							rows.push({
-								name: `${base.provider} engine=${engineUp ? "up" : "down"} key=${key} build=${build.kind} probe=${firstProbeLanded ? "landed" : "pending"} turnError=${turnError?.kind ?? "none"}`,
-								input: {
-									...base,
-									engines: { ...base.engines, ollama: engineUp },
-									keyStatus: key === "invalid" ? "present" : key,
-									build,
-									firstProbeLanded,
-									turnError,
-								},
-							});
-						}
+	for (const provider of ["ollama", "8gent", "", "lmstudio", "openrouter"])
+		for (const ollamaUp of [true, false])
+			for (const lmstudioUp of [true, false])
+				for (const key of provider === "openrouter"
+					? (["present", "missing", "invalid"] as const)
+					: (["not-needed"] as const))
+					for (const build of builds)
+						for (const firstProbeLanded of [false, true])
+							for (const unreachableTurn of [false, true])
+								for (const unreachable of [null, NOTE]) {
+									const turnError: TurnError | null =
+										key === "invalid"
+											? { kind: "auth", provider }
+											: unreachableTurn
+												? { kind: "unreachable", provider }
+												: null;
+									rows.push({
+										name: [
+											`provider=${provider || "(none)"}`,
+											`ollama=${ollamaUp ? "up" : "down"}`,
+											`lmstudio=${lmstudioUp ? "up" : "down"}`,
+											`key=${key}`,
+											`build=${build.kind}`,
+											`probe=${firstProbeLanded ? "landed" : "pending"}`,
+											`turnError=${turnError?.kind ?? "none"}`,
+											`initNote=${unreachable ? "yes" : "no"}`,
+										].join(" "),
+										input: {
+											provider,
+											model: "m",
+											firstProbeLanded,
+											engines: { apfel: false, lmstudio: lmstudioUp, ollama: ollamaUp },
+											keyStatus: key === "invalid" ? "present" : key,
+											unreachable,
+											build,
+											turnError,
+										},
+									});
+								}
 
-	test("the sweep covers 2 x 1 x 3 x 2 x 2 local and 2 x 3 x 3 x 2 x 2 hosted rows", () => {
-		expect(rows.length).toBe(24 + 72);
+	test("the sweep covers 4 local providers x 96 and openrouter x 288", () => {
+		expect(rows.length).toBe(4 * (4 * 3 * 2 * 2 * 2) + 4 * 3 * 3 * 2 * 2 * 2);
 	});
 
-	for (const { name, input } of rows) {
+	test("golden table: every row's state and reason", () => {
+		const table = rows
+			.map(({ name, input }) => {
+				const r = deriveReadiness(input);
+				return `${name} -> ${r.state}${r.reason ? ` "${r.reason}"` : ""}`;
+			})
+			.join("\n");
+		expect(table).toMatchSnapshot();
+	});
+
+	test("invariants hold on every row", () => {
+		for (const { name, input } of rows) {
+			const r = deriveReadiness(input);
+			const fail = (why: string) => {
+				throw new Error(`${name}: ${why}`);
+			};
+			const local = input.provider !== "openrouter";
+			if (r.state === "ready") {
+				if (input.build.kind !== "built") fail("ready without a build");
+				if (!input.firstProbeLanded) fail("ready before the first probe");
+				if (input.keyStatus === "missing") fail("ready with no key");
+				if (input.unreachable) fail("ready over an init note");
+				if (!local && input.turnError) fail("hosted ready over a turn error");
+				if (r.model !== "m" || r.reason !== "") fail("ready must name the model, with no reason");
+			} else {
+				if (r.model !== "") fail("not ready but names a model");
+				if (!r.reason) fail("not ready without a reason");
+			}
+			if (r.state === "checking" && input.firstProbeLanded && input.build.kind !== "pending") {
+				fail("checking after the probe and the build both landed");
+			}
+			if (local && r.reason.includes("API key")) fail("a local provider read a key reason");
+			if (input.unreachable && r.state !== "none") fail("an init note did not read none");
+		}
+	});
+});
+
+describe("deriveReadiness: rule order, pinned where two facts conflict", () => {
+	const NOTE = "Ollama at 127.0.0.1:11434 did not answer.";
+	const cases: Array<[string, ReadinessInputs, { state: ReadinessState; reason: string }]> = [
+		[
+			"1 before 2: a missing key outranks a refused one",
+			{ ...openrouter, keyStatus: "missing", turnError: { kind: "auth", provider: "openrouter" } },
+			{ state: "none", reason: "openrouter needs an API key." },
+		],
+		[
+			"3 prefers the init note over the generic line",
+			{ ...ollama, engines: { ollama: false }, unreachable: NOTE },
+			{ state: "none", reason: NOTE },
+		],
+		[
+			"4: an init note reads none before the first probe",
+			{ ...ollama, firstProbeLanded: false, unreachable: NOTE },
+			{ state: "none", reason: NOTE },
+		],
+		[
+			"4: an init note reads none while apfel and ollama are both up",
+			{ ...ollama, engines: { apfel: true, lmstudio: false, ollama: true }, unreachable: NOTE },
+			{ state: "none", reason: NOTE },
+		],
+		[
+			"5 before 6: an unreachable hosted turn outranks a build notice",
+			{
+				...openrouter,
+				build: { kind: "wait", notice: "w" },
+				turnError: { kind: "unreachable", provider: "openrouter" },
+			},
+			{ state: "none", reason: "openrouter could not be reached." },
+		],
+		[
+			"6 before 7: a build notice reads none even before the first probe",
+			{ ...openrouter, firstProbeLanded: false, build: { kind: "wait", notice: "w" } },
+			{ state: "none", reason: "w" },
+		],
+		[
+			"3: an engine the probe did not report on is not down",
+			{ ...ollama, provider: "llama-server", engines: { apfel: false, lmstudio: false, ollama: false } },
+			{ state: "ready", reason: "" },
+		],
+	];
+	for (const [name, input, want] of cases) {
 		test(name, () => {
 			const r = deriveReadiness(input);
-			// Same inputs, same answer.
-			expect(deriveReadiness(structuredClone(input))).toEqual(r);
-			const local = input.provider === "ollama";
-			if (r.state === "ready") {
-				expect(input.build.kind).toBe("built");
-				expect(input.firstProbeLanded).toBe(true);
-				expect(input.keyStatus).not.toBe("missing");
-				expect(input.turnError?.kind).not.toBe("auth");
-				if (local) expect(input.engines.ollama).toBe(true);
-				else expect(input.turnError).toBeNull();
-				expect(r.model).toBe(input.model);
-				expect(r.reason).toBe("");
-			} else {
-				// Never names a model it cannot run on, never says nothing about why.
-				expect(r.model).toBe("");
-				expect(r.reason.length).toBeGreaterThan(0);
-			}
-			if (r.state === "checking") {
-				expect(!input.firstProbeLanded || input.build.kind === "pending").toBe(true);
-				expect(r.reason).toBe(CHECKING_REASON);
-			}
-			if (input.keyStatus === "missing") expect(r).toEqual({ state: "none", reason: "openrouter needs an API key.", model: "" });
-			if (input.turnError?.kind === "auth") expect(r.reason).toBe("openrouter did not accept the API key.");
+			expect({ state: r.state, reason: r.reason }).toEqual(want);
 		});
 	}
 });
@@ -198,15 +281,24 @@ describe("build facts are keyed to their tab, provider and model", () => {
 
 describe("classifyTurnError: only the agent's own failure counts", () => {
 	const reply = (content: string) => ({ role: "assistant", content });
-	test("key refusals in the assistant's [Error] reply", () => {
-		for (const s of ["[Error] 401 Unauthorized", "[Error] HTTP 403", "[Error] No auth credentials found", "[Error] Invalid API key"]) {
-			expect(classifyTurnError(reply(s))).toBe("auth");
-		}
-	});
-	test("connection failures in the assistant's [Error] reply", () => {
-		for (const s of ["[Error] fetch failed", "[Error] connect ECONNREFUSED 127.0.0.1:11434", "[Error] Unable to connect"]) {
-			expect(classifyTurnError(reply(s))).toBe("unreachable");
-		}
+	const auth = ["401", "403", "unauthorized", "Unauthorised", "invalid api key", "no auth credentials", "authentication"];
+	const connect = [
+		"ECONNREFUSED",
+		"connection refused",
+		"fetch failed",
+		"unable to connect",
+		"ENOTFOUND",
+		"EHOSTUNREACH",
+		"timed out",
+	];
+	for (const word of auth) {
+		test(`auth: ${word}`, () => expect(classifyTurnError(reply(`[Error] ${word}`))).toBe("auth"));
+	}
+	for (const word of connect) {
+		test(`connect: ${word}`, () => expect(classifyTurnError(reply(`[Error] ${word}`))).toBe("unreachable"));
+	}
+	test("auth and connect words together: the key refusal wins", () => {
+		expect(classifyTurnError(reply("[Error] 401 Unauthorized after connection refused"))).toBe("auth");
 	});
 	test("a failed tool result is never a readiness fact, whatever it says", () => {
 		expect(classifyTurnError({ role: "tool", content: "gh: HTTP 401: Bad credentials" })).toBeNull();
@@ -219,6 +311,47 @@ describe("classifyTurnError: only the agent's own failure counts", () => {
 	test("a model that answered badly is not a readiness fact", () => {
 		expect(classifyTurnError(reply("[Error] the tool returned no output"))).toBeNull();
 		expect(classifyTurnError(undefined)).toBeNull();
+	});
+});
+
+describe("turnEndFacts: what a finished turn changes, and what to do now", () => {
+	const err = (content: string) => ({ role: "assistant", content: `[Error] ${content}` });
+	test("a clean turn clears the last error and does nothing else", () => {
+		expect(turnEndFacts(undefined, "ollama", false)).toEqual({ turnError: null, probeNow: false, retryBuild: false });
+		expect(turnEndFacts({ role: "assistant", content: "done" }, "openrouter", false).turnError).toBeNull();
+	});
+	test("a local engine that could not be reached is probed now", () => {
+		for (const p of ["ollama", "8gent", "lmstudio", ""]) {
+			expect(turnEndFacts(err("fetch failed"), p, false)).toEqual({
+				turnError: { kind: "unreachable", provider: p },
+				probeNow: true,
+				retryBuild: false,
+			});
+		}
+	});
+	test("no second probe while one is already running", () => {
+		expect(turnEndFacts(err("fetch failed"), "ollama", true).probeNow).toBe(false);
+	});
+	test("a hosted provider that could not be reached gets its build retried, not a probe", () => {
+		expect(turnEndFacts(err("fetch failed"), "openrouter", false)).toEqual({
+			turnError: { kind: "unreachable", provider: "openrouter" },
+			probeNow: false,
+			retryBuild: true,
+		});
+	});
+	test("a refused key is recorded against the provider the turn ran on, with no probe", () => {
+		expect(turnEndFacts(err("401 Unauthorized"), "openrouter", false)).toEqual({
+			turnError: { kind: "auth", provider: "openrouter" },
+			probeNow: false,
+			retryBuild: false,
+		});
+	});
+	test("a failed tool result changes nothing", () => {
+		expect(turnEndFacts({ role: "tool", content: "web_fetch: fetch failed" }, "ollama", false)).toEqual({
+			turnError: null,
+			probeNow: false,
+			retryBuild: false,
+		});
 	});
 });
 

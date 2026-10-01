@@ -41,7 +41,7 @@ import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
-import type { Readiness } from "../lib/readiness.js";
+import type { Readiness, ReadinessState } from "../lib/readiness.js";
 import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
 import { FigureEight } from "./figure-eight-spinner.js";
@@ -178,7 +178,7 @@ export function LiveFocalStrip({
 					lastTurnEndedAt={lastTurnEndedAt}
 					done={done}
 					animate={animate}
-					notReady={blocked?.state === "ready" ? undefined : blocked?.state}
+					notReady={blocked?.state}
 				/>
 			</Box>
 
@@ -241,7 +241,7 @@ export function TurnStateLabel({
 	animate: boolean;
 	/** The agent cannot run a turn (#3290): NO MODEL, or CHECK while the
 	 *  first probe is out. Never READY, never the spinner. */
-	notReady?: "none" | "checking";
+	notReady?: ReadinessState;
 }) {
 	const moving = motionEnabled(animate);
 	const [settlingFor, setSettlingFor] = useState<number | null>(null);

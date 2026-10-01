@@ -10,9 +10,16 @@
  *
  * Same inputs, same answer. The rules, in order:
  *  1. A provider that needs a key and has none: none, before any network.
- *  2. The last turn on this provider was refused for its key: none.
- *  3. A local engine provider whose engine the latest probe found down: none.
- *  4. Agent init's readiness gate found the configured engine unreachable: none.
+ *  2. The last turn on this provider was refused for its key, and the
+ *     provider takes a key: none.
+ *  3. A local engine provider, once the first probe has landed:
+ *     - its own engine reported down: none, with agent init's note when
+ *       there is one, else "<engine> is not answering.";
+ *     - no single engine serves it (provider not chosen yet, or one the probe
+ *       does not count): none when no engine at all answers.
+ *     An engine the probe did not report on is not treated as down.
+ *  4. Agent init's readiness gate found the configured engine unreachable:
+ *     none, even before the first probe and even if other engines are up.
  *  5. The last turn on a hosted provider could not reach it: none.
  *  6. The agent build ended not ready (its notice is the reason): none.
  *  7. The first probe has not landed, or the build is still in flight:
@@ -85,11 +92,11 @@ export function deriveReadiness(i: ReadinessInputs): Readiness {
 	const local = LOCAL_ENGINE_PROVIDERS.has(i.provider);
 	if (local && i.firstProbeLanded) {
 		const mapped = ENGINE_FOR[i.provider];
+		// `=== false`: an engine the probe did not report on is not down.
 		if (mapped && i.engines[mapped.engine] === false) {
 			return none(i.unreachable ?? `${mapped.label} is not answering.`);
 		}
-		// No single engine serves it (not chosen yet, or one the probe does not
-		// count): any engine answering will do.
+		// No single engine serves it: any engine answering will do.
 		if (!mapped && !Object.values(i.engines).some(Boolean)) return none("No local model is answering.");
 	}
 	if (i.unreachable) return none(i.unreachable);
@@ -118,10 +125,32 @@ export function classifyTurnError(
 	if (/\b(401|403)\b|unauthori[sz]ed|invalid api key|no auth credentials|authentication/i.test(lastContent)) {
 		return "auth";
 	}
-	if (/ECONNREFUSED|connection refused|fetch failed|unable to connect|ENOTFOUND|EHOSTUNREACH/i.test(lastContent)) {
+	if (/ECONNREFUSED|connection refused|fetch failed|unable to connect|ENOTFOUND|EHOSTUNREACH|timed out/i.test(lastContent)) {
 		return "unreachable";
 	}
 	return null;
+}
+
+/**
+ * What a finished turn means for readiness, and what to do about it now.
+ * `turnError` replaces the last one (a clean turn clears it). A local engine
+ * that could not be reached is re-probed at once, unless a probe is already
+ * running; a hosted one has no probe, so its build is retried, which checks
+ * it again.
+ */
+export function turnEndFacts(
+	last: { role: string; content: string } | undefined,
+	provider: string,
+	probeInFlight: boolean,
+): { turnError: TurnError | null; probeNow: boolean; retryBuild: boolean } {
+	const kind = classifyTurnError(last);
+	const unreachable = kind === "unreachable";
+	const local = LOCAL_ENGINE_PROVIDERS.has(provider);
+	return {
+		turnError: kind ? { kind, provider } : null,
+		probeNow: unreachable && local && !probeInFlight,
+		retryBuild: unreachable && !local,
+	};
 }
 
 /** What a build result was for. A result keyed for another tab or spec is "pending". */

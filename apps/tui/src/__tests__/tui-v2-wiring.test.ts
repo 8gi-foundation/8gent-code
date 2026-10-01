@@ -391,3 +391,52 @@ describe("tui-approval-channel", () => {
 		expect(await requestTuiApproval({ action: "x", details: "y" })).toBe(null);
 	});
 });
+
+// ============================================
+// Readiness wiring in app.tsx (#3290)
+// ============================================
+// deriveReadiness is pure and tested on its own (lib/readiness.test.ts). These
+// read app.tsx itself, so the facts it feeds that function cannot be quietly
+// unplugged: each assertion below fails if one wire is cut.
+describe("readiness wiring in app.tsx (#3290)", () => {
+	const app = require("node:fs").readFileSync(require("node:path").join(import.meta.dir, "..", "app.tsx"), "utf8") as string;
+	const initAgent = app.slice(app.indexOf("const initAgent = async () => {"), app.indexOf("initAgent();"));
+
+	test("the engine probe re-runs when the nonce is bumped", () => {
+		expect(app).toMatch(/setInterval\(tick, 8000\);[\s\S]{0,160}?\}, \[probeNonce\]\);/);
+	});
+
+	test("a finished turn records its fact and acts on it", () => {
+		expect(app).toMatch(/const facts = turnEndFacts\(/);
+		expect(app).toContain("setTurnError(facts.turnError);");
+		expect(app).toContain("if (facts.probeNow) setProbeNonce((n) => n + 1);");
+		expect(app).toContain("if (facts.retryBuild) setInitRetry((n) => n + 1);");
+	});
+
+	test("built() and waiting() write the build fact, and only for a live attempt", () => {
+		expect(initAgent).toMatch(/const built = \(\) => \{\s*if \(cancelled\) return;\s*setBuildFact\(\{ key: buildKey, notice: null \}\);/);
+		expect(initAgent).toMatch(/const waiting = \(notice: string\) => \{\s*if \(cancelled\) return;\s*setBuildFact\(\{ key: buildKey, notice \}\);/);
+	});
+
+	test("both success paths call built()", () => {
+		// The reused agent and the newly built one.
+		expect(initAgent.match(/setAgentReady\(true\);\s*built\(\);/g)?.length).toBe(2);
+	});
+
+	test("a superseded attempt stops after autoAssign", () => {
+		expect(initAgent).toMatch(/await router\.autoAssign\(\);\s*if \(cancelled\) return;/);
+	});
+
+	test("the build key uses the same tab id as the render-side key", () => {
+		expect(initAgent).toContain("readinessBuildKey(activeTabId, currentProvider, currentModel)");
+		expect(app).toContain("buildResultFor(buildFact, readinessBuildKey(activeTabId, currentProvider, currentModel))");
+	});
+
+	test("the header strip and the NO MODEL card render from the one readiness", () => {
+		// The strip's own element only: up to its first "/>".
+		const strip = app.slice(app.indexOf("<LiveFocalStripWithGoal"));
+		expect(strip.slice(0, strip.indexOf("/>"))).toContain("readiness={readiness}");
+		expect(app).toMatch(/<NoProviderNotice\s+readiness=\{readiness\}/);
+		expect(app).toContain("route={readiness.model || \"-\"}");
+	});
+});

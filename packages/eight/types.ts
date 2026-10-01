@@ -204,4 +204,15 @@ export interface LLMClient {
 	chat(messages: Message[], tools?: object[]): Promise<LLMResponse>;
 	generate(prompt: string): Promise<string>;
 	isAvailable(): Promise<boolean>;
+	/**
+	 * Optional: isAvailable() with the reason when not, as a predicate phrase
+	 * ("did not accept the API key."), so a caller can say why (#3290).
+	 */
+	readiness?(): Promise<ReadyCheck>;
+}
+
+export interface ReadyCheck {
+	ok: boolean;
+	/** Why not, e.g. "did not accept the API key." Absent when ok. */
+	reason?: string;
 }

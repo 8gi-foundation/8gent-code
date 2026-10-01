@@ -86,7 +86,7 @@ import {
 	TwoStageCompactor,
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
-import type { AgentConfig, AgentEventCallbacks } from "./types";
+import type { AgentConfig, AgentEventCallbacks, ReadyCheck } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
@@ -2468,6 +2468,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	async isReady(): Promise<boolean> {
 		const client = createClient(this.config);
 		return client.isAvailable();
+	}
+
+	/** isReady() with why not, when the client can say (#3290). */
+	async readiness(): Promise<ReadyCheck> {
+		const client = createClient(this.config);
+		if (client.readiness) return client.readiness();
+		return { ok: await client.isAvailable() };
 	}
 
 	clearHistory(): void {

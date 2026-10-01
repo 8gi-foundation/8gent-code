@@ -17,7 +17,7 @@
  */
 
 import { isCloudProvider } from "../../providers";
-import type { LLMClient, LLMResponse, Message } from "../types";
+import type { LLMClient, LLMResponse, Message, ReadyCheck } from "../types";
 import { anonymizeOutbound, deanonymizeResponse, resolveLocalFallback } from "./pii-gate";
 
 export class OpenRouterClient implements LLMClient {
@@ -129,19 +129,37 @@ export class OpenRouterClient implements LLMClient {
 	 * hosts keep /models, which they guard with the key.
 	 */
 	async isAvailable(): Promise<boolean> {
+		return (await this.readiness()).ok;
+	}
+
+	/** isAvailable() with why not: a refused key, a busy host, or no answer. */
+	async readiness(): Promise<ReadyCheck> {
 		const openRouter = /(^|\.)openrouter\.ai$/.test(hostOf(this.baseUrl));
-		if (openRouter && !this.apiKey) return false;
+		if (openRouter && !this.apiKey) return { ok: false, reason: "has no API key." };
 		try {
 			const response = await fetch(`${this.baseUrl}/${openRouter ? "key" : "models"}`, {
 				headers: {
 					Authorization: `Bearer ${this.apiKey}`,
 				},
+				signal: AbortSignal.timeout(READY_CHECK_TIMEOUT_MS),
 			});
-			return response.ok;
+			return readyFromStatus(response.status);
 		} catch {
-			return false;
+			return { ok: false, reason: "could not be reached." };
 		}
 	}
+}
+
+/** Bound on the readiness call; the TUI's own probe uses the same 3 s. */
+export const READY_CHECK_TIMEOUT_MS = 3000;
+
+/** A readiness answer from the HTTP status alone. */
+export function readyFromStatus(status: number): ReadyCheck {
+	if (status >= 200 && status < 300) return { ok: true };
+	if (status === 401 || status === 403) return { ok: false, reason: "did not accept the API key." };
+	if (status === 429) return { ok: false, reason: "is busy (rate limited)." };
+	if (status >= 500) return { ok: false, reason: `is busy (http ${status}).` };
+	return { ok: false, reason: `answered with http ${status}.` };
 }
 
 function hostOf(url: string): string {
