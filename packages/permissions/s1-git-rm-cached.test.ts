@@ -47,14 +47,35 @@ describe("allowlist: git rm --cached (#3298)", () => {
 		for (const c of [
 			"git rm -r --cached .8gent",
 			"git rm --cached -r .8gent",
-			"git rm -rf --cached node_modules",
-			"git rm --cached -rq --ignore-unmatch dist",
+			"git rm -r -f --cached node_modules",
+			"git rm --cached -q --ignore-unmatch dist",
 			"git rm --cached -- .8gent/state.db",
+			"git rm --cached -- --no-cached", // after `--` it is a path
 			"git rm --cached --dry-run -r .",
-			"git -C ../other rm --cached a.txt",
-			"git rm --cached a.txt && git status",
+			"git rm --cached --force --quiet -n a.txt",
+			"git rm --cached a@b.txt c+d=e,f:g%h.txt",
 		])
 			expect({ c, pass: passes(c) }).toEqual({ c, pass: true });
+	});
+
+	// Deny-by-default on the raw text (#3299 re-review): anything outside the
+	// plain shape goes to the judge, even when it would have been safe.
+	test("anything outside the plain shape is no-opinion", () => {
+		for (const c of [
+			"git rm -rf --cached node_modules", // flag cluster
+			"git rm --cached -rq dist",
+			"git -C ../other rm --cached a.txt", // not `git rm` first
+			"git rm --cached a.txt && git status", // more than one command
+			"git rm --cached --cached a.txt", // --cached twice
+			"git rm --cached a.txt -r", // flag after a path
+			"git rm --cached a.txt --no-cached",
+			"git rm --cached 'a.txt'", // quoting
+			"git rm --cached a\\ b",
+			"git rm --cached ~/a.txt",
+			"git rm\t--cached a.txt",
+			" git rm --cached a.txt\n",
+		])
+			expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
 	});
 
 	test("plain git rm, which deletes from disk, is never passed", () => {
@@ -108,17 +129,23 @@ describe("allowlist: git rm --cached (#3298)", () => {
 			"git rm -r --cached src/*.ts",
 		])
 			expect({ c, pass: passes(c) }).toEqual({ c, pass: false });
-		// After `--` every word is a path, so a glob there is safe.
-		expect(passes("git rm --cached -- *")).toBe(true);
-		expect(passes("git rm -r --cached -- src/*.ts")).toBe(true);
+		// Even after `--`, where it would be safe, a glob is outside the plain set.
+		expect(passes("git rm --cached -- *")).toBe(false);
+		expect(passes("git rm -r --cached -- src/*.ts")).toBe(false);
 	});
 });
 
-/** The three commands from the #3299 review that deleted a file at afcbf699. */
+/** Commands from the #3299 reviews that the allowlist passed at afcbf699 or 9f31891c. */
 const BYPASSES = [
 	"git rm --cached a#b --no-cached", // mid-word `#`: the parser saw a comment
 	"git rm --cached {a,--no-cached}", // brace: bash expands it to a flag
 	"git rm --cached *", // glob: matches a planted file named --no-cached
+	// #3299 re-review, at 9f31891c:
+	"git rm a >&2--cached", // sh redirects to the file `2--cached`, runs plain git rm a
+	"git rm a 2>&1--cached", // zsh does the same
+	"git rm a\\\n--cached", // backslash-newline: sh makes the word `a--cached`
+	"git rm a\r--cached", // CR: sh keeps it inside the word
+	"git rm --cached\r a", // CR glued to the flag
 ];
 
 /** Tracked files in the throwaway repo: `a`, `a#b`, `sub/c`, plus a planted `--no-cached`. */
@@ -138,7 +165,7 @@ function throwawayRepo(): string {
 	return dir;
 }
 
-const SHELLS = ["sh", "bash"].filter((s) => spawnSync(s, ["-c", "true"]).status === 0);
+const SHELLS = ["sh", "bash", "zsh"].filter((s) => spawnSync(s, ["-c", "true"]).status === 0);
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
 describe.skipIf(!hasGit)(
@@ -151,6 +178,8 @@ describe.skipIf(!hasGit)(
 			"git rm -rf --cached .",
 			"git rm --cached -q -- a sub/c",
 			"git rm --cached -- *",
+			"git rm --cached -- --no-cached",
+			"git rm -r -f --cached --force --quiet -- sub a",
 			...BYPASSES,
 		];
 		for (const shell of SHELLS) {
@@ -229,7 +258,7 @@ describe("gate: git rm --cached (#3298)", () => {
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 
-	test("the three review bypasses go to the judge (#3299 review)", async () => {
+	test("every review bypass goes to the judge (#3299 reviews)", async () => {
 		for (const c of BYPASSES) {
 			const before = backend.asks;
 			const r = await systemOneGate(c, env);

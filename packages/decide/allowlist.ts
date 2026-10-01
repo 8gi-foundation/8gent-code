@@ -32,13 +32,17 @@
  *     read -h or an unknown flag as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
- * Index-only git (#3298): `git rm --cached` with flags only from `-r`, `-f`,
- * `-q`, `-n` (combinable), `--force`, `--quiet`, `--dry-run`,
- * `--ignore-unmatch` and `--`. It untracks and leaves the files on disk.
- * Plain `git rm` deletes from the working tree and is never passed. git
- * honours `--no-cached` anywhere before `--`, so a word this parser cannot
- * see exactly defeats the check: any `#`, `{` or `}` in the segment, or a
- * glob character (`*?[`) in a word before `--`, is no-opinion.
+ * Index-only git (#3298): `git rm --cached` only untracks and leaves the
+ * files on disk; plain `git rm` deletes from the working tree. git honours
+ * `--no-cached` anywhere before `--`, so any word this parser reads
+ * differently from the shell would defeat a parsed check (review of #3299
+ * found six: mid-word `#`, braces, globs, `>&2--cached`, backslash-newline,
+ * CR). So it is deny-by-default on the RAW command text, never on parsed
+ * words: the whole command is `git rm` and nothing else, every character is
+ * in [A-Za-z0-9 ._/@+=,:%-] (plain spaces only), flags come only from
+ * `--cached` (exactly once), `-r`, `-q`, `--quiet`, `-n`, `--dry-run`,
+ * `--ignore-unmatch`, `-f`, `--force`, then an optional `--`, then one or
+ * more paths. Before `--` no path may start with `-`.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
  * and stays off unless the caller opts in. Callers pass the options; the env
@@ -123,7 +127,7 @@ const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
 
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
-function segmentOk(text: string, opts: AllowlistOptions): string | null {
+function segmentOk(text: string, opts: AllowlistOptions, whole: string): string | null {
 	const masked = maskQuotes(text);
 	let stripped = "";
 	let last = 0;
@@ -148,7 +152,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (b === "cd") return null;
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
-	if (b === "git") return gitOk(args, stripped);
+	if (b === "git") return gitOk(args, whole);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";
 		return opts.bunTest ? null : "bun test is not enabled (EIGHT_S1_ALLOWLIST_BUN_TEST)";
@@ -160,42 +164,45 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	return null;
 }
 
-/** Flags `git rm --cached` may carry: recursive, force, quiet, dry run. Exact spellings only. */
-const GIT_RM_CACHED_FLAG = /^(-[rfqn]+|--force|--quiet|--dry-run|--ignore-unmatch)$/;
+/** Characters the raw `git rm --cached` command may contain. No quoting, expansion, redirect or separator. */
+const GIT_RM_RAW = /^[A-Za-z0-9 ._/@+=,:%-]+$/;
+/** Flags `git rm --cached` may carry, exact spellings only (no clusters, no abbreviations). */
+const GIT_RM_CACHED_FLAGS: ReadonlySet<string> = new Set([
+	"--cached",
+	"-r",
+	"-q",
+	"--quiet",
+	"-n",
+	"--dry-run",
+	"--ignore-unmatch",
+	"-f",
+	"--force",
+]);
 
 /**
- * `git rm --cached <path>...` only removes paths from the index: the files stay
- * on disk (#3298). Plain `git rm` deletes them from the working tree, so it is
- * never passed here. Any flag outside GIT_RM_CACHED_FLAG (an abbreviation, a
- * `--no-` negation, `--pathspec-from-file`) is no-opinion and goes to the judge.
+ * `git rm --cached <path>...` only removes paths from the index (#3298).
+ * Decided on the raw command text, tokenised here on spaces, never through
+ * shellWords: anything the shell could read differently is no-opinion.
  */
-function gitRmCachedOk(rest: string[], raw: string): string | null {
-	// A word the parser does not see as sh does (a mid-word `#` it reads as a
-	// comment, a brace sh expands) could carry `--no-cached` (#3299 review).
-	if (/[#{}]/.test(raw)) return "git rm with # or a brace: the words may not be what sh runs";
-	let cached = false;
-	let paths = 0;
-	let endOfOptions = false;
-	for (const a of rest) {
-		if (!endOfOptions && a === "--") {
-			endOfOptions = true;
-			continue;
-		}
-		// A glob before `--` can expand to a planted file named `--no-cached`.
-		if (!endOfOptions && /[*?[]/.test(a)) return "git rm with a glob before --";
-		if (!endOfOptions && a.startsWith("-")) {
-			if (a === "--cached") cached = true;
-			else if (!GIT_RM_CACHED_FLAG.test(a)) return `git rm with ${a}`;
-			continue;
-		}
-		paths++;
+function gitRmCachedOk(raw: string): string | null {
+	if (!GIT_RM_RAW.test(raw)) return "git rm with a character outside the plain set";
+	const words = raw.split(" ").filter((w) => w !== "");
+	if (words[0] !== "git" || words[1] !== "rm") return "git rm must be the whole command";
+	let cached = 0;
+	let i = 2;
+	for (; i < words.length && words[i] !== "--" && words[i].startsWith("-"); i++) {
+		if (!GIT_RM_CACHED_FLAGS.has(words[i])) return `git rm with ${words[i]}`;
+		if (words[i] === "--cached") cached++;
 	}
-	if (!cached) return "git rm without --cached deletes files from disk";
-	if (paths === 0) return "git rm --cached with no path";
+	if (cached !== 1) return cached === 0 ? "git rm without --cached deletes files from disk" : "git rm with --cached twice";
+	const afterDashDash = words[i] === "--";
+	const paths = words.slice(afterDashDash ? i + 1 : i);
+	if (paths.length === 0) return "git rm --cached with no path";
+	if (!afterDashDash && paths.some((p) => p.startsWith("-"))) return "git rm with a flag after a path";
 	return null;
 }
 
-function gitOk(args: string[], raw: string): string | null {
+function gitOk(args: string[], whole: string): string | null {
 	let i = 0;
 	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
 	const sub = args[i];
@@ -204,7 +211,7 @@ function gitOk(args: string[], raw: string): string | null {
 	if (sub && GIT_READ.has(sub)) return null;
 	if (sub === "branch" && rest.every((a) => GIT_BRANCH_READ.test(a))) return null;
 	if (sub === "remote" && rest.every((a) => a === "-v" || a === "--verbose")) return null;
-	if (sub === "rm") return gitRmCachedOk(rest, raw);
+	if (sub === "rm") return gitRmCachedOk(whole);
 	return `git ${sub ?? ""} is not a read-only git subcommand`.trim();
 }
 
@@ -220,7 +227,7 @@ export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}):
 		const { segs, subs } = splitSegments(command);
 		if (subs.length) return none("has a substitution");
 		for (const { text } of segs) {
-			const why = segmentOk(text, opts);
+			const why = segmentOk(text, opts, command);
 			if (why) return none(why);
 		}
 		return { verdict: "pass-without-model", reason: opts.bunTest ? "read-only or bun test" : "read-only" };
