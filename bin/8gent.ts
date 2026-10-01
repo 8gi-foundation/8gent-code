@@ -1210,12 +1210,24 @@ async function tuiCommand(args: string[]) {
 		process.exit(1);
 	}
 
-	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", tuiPath, ...filteredArgs], {
-		stdio: "inherit",
-		cwd: path.dirname(tuiPath),
-	});
+	await spawnTui(tuiPath, filteredArgs);
+}
 
+/**
+ * Run the TUI in the folder the user launched `8gent` from (#3264).
+ *
+ * The child used to get `cwd: path.dirname(tuiPath)`. For an npm install that
+ * is `.../node_modules/@8gi-foundation/8gent-code/dist`, so the header showed
+ * the install folder with "no repo", and `.env`, git and project skill lookups
+ * all ran against the package. Bundled assets resolve from `import.meta.url`,
+ * not the working folder, so nothing needs the child to sit in `dist/`.
+ */
+async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
+	const { spawn } = await import("node:child_process");
+	const proc = spawn("bun", ["run", tuiPath, ...args], {
+		stdio: "inherit",
+		cwd: process.cwd(),
+	});
 	proc.on("exit", (code) => process.exit(code || 0));
 }
 
@@ -2046,12 +2058,7 @@ async function sessionCommand(args: string[]) {
 				);
 				process.exit(1);
 			}
-			const { spawn } = await import("node:child_process");
-			const proc = spawn("bun", ["run", tuiPath, "--resume", nameOrId], {
-				stdio: "inherit",
-				cwd: path.dirname(tuiPath),
-			});
-			proc.on("exit", (code) => process.exit(code || 0));
+			await spawnTui(tuiPath, ["--resume", nameOrId]);
 			break;
 		}
 
