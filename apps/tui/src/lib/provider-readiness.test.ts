@@ -18,6 +18,8 @@ import {
 } from "./provider-readiness.js";
 
 let silent: TCPSocketListener<undefined>;
+let empty: ReturnType<typeof Bun.serve>;
+let emptyUrl = "";
 let healthy: ReturnType<typeof Bun.serve>;
 let silentUrl = "";
 let healthyUrl = "";
@@ -44,6 +46,9 @@ beforeAll(() => {
 		},
 	});
 	healthyUrl = `http://127.0.0.1:${healthy.port}`;
+	// A fresh Ollama before any `ollama pull`: answers, lists nothing.
+	empty = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ models: [] }) });
+	emptyUrl = `http://127.0.0.1:${empty.port}`;
 	const tmp = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 	deadUrl = `http://127.0.0.1:${tmp.port}`;
 	tmp.stop(true);
@@ -52,6 +57,7 @@ beforeAll(() => {
 afterAll(() => {
 	silent.stop(true);
 	healthy.stop(true);
+	empty.stop(true);
 });
 
 const ollamaExtract = (d: any) => (d?.models || []).map((m: any) => String(m?.name ?? ""));
@@ -126,6 +132,34 @@ describe("resolveReadyProvider", () => {
 		expect(d.kind).toBe("none");
 		if (d.kind === "none") expect(d.notice).toContain("/provider");
 	}, 4000);
+
+	test("engine answers but lists no models -> not ready, says so, names the address (T5)", async () => {
+		const d = await resolveReadyProvider(
+			{ provider: "ollama", model: "qwen3.5:latest" },
+			{ timeoutMs: 1000, endpoints: endpoints(deadUrl, emptyUrl) },
+		);
+		expect(d.kind).toBe("none");
+		if (d.kind === "none") {
+			expect(d.reason).toBe("no models");
+			expect(d.fromAddress).toBe(emptyUrl.replace("http://", ""));
+			expect(d.notice).toContain("Ollama has no models");
+		}
+	});
+
+	test("engine with no models falls back to one that has them", async () => {
+		const d = await resolveReadyProvider(
+			{ provider: "lmstudio", model: "" },
+			{
+				timeoutMs: 1000,
+				endpoints: [
+					{ provider: "lmstudio", label: "LM Studio", modelsUrl: `${emptyUrl}/api/tags`, extract: ollamaExtract },
+					{ provider: "ollama", label: "Ollama", modelsUrl: `${healthyUrl}/api/tags`, extract: ollamaExtract },
+				],
+			},
+		);
+		expect(d.kind).toBe("fallback");
+		if (d.kind === "fallback") expect(d.notice).toContain("LM Studio has no models. Using Ollama");
+	});
 
 	test("non-local providers are not probed", async () => {
 		const d = await resolveReadyProvider(

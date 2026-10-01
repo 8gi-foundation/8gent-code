@@ -153,6 +153,8 @@ npm install -g @8gi-foundation/8gent-code
 
 That's it. 8gent uses an adaptive 11-provider router. Two run locally and are on by default: `8gent` (model `eight-1.0-q3:14b`) and `ollama`. The other nine are hosted providers, each opt-in with your own API key; the registry in `packages/providers/` is the list. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
+**No model yet?** On a machine with no local model and no key, the chat area shows a short card with both ways to connect one: install Ollama and run `ollama pull qwen3.5`, or run `8gent keys` to add `OPENROUTER_API_KEY` to `~/.8gent/keys.env` and then use `/provider openrouter` with `/model auto:free`. `/provider` lists every option. The card goes away once a model is reachable.
+
 **Ollama is optional.** To run on llama.cpp's `llama-server` instead, set `EIGHT_LOCAL_SERVER=llama-server` and start with `8gent --provider=llama-server`. 8gent then never contacts Ollama. See [docs/guides/llama-server.md](docs/guides/llama-server.md).
 
 **First keys to know:**

@@ -141,6 +141,7 @@ import {
 	PROBE_TIMEOUT_MS,
 	READINESS_RETRY_MS,
 	createReadinessCache,
+	localProviderEndpoints,
 	withTimeout,
 } from "./lib/provider-readiness.js";
 import * as bgPool from "./lib/background-pool.js";
@@ -228,6 +229,8 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import { NoProviderNotice } from "./components/NoProviderCard.js";
+import { COMPACT_BELOW_ROWS, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
 // the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
@@ -838,9 +841,16 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [bgRunning, setBgRunning] = useState(0);
-	const [providerHealth, setProviderHealth] = useState<{ live: number; total: number }>({
+	// `checked` stays false until the first probe lands, so the first-run
+	// "no model" card (T5) never flashes on a machine where a model is up.
+	const [providerHealth, setProviderHealth] = useState<{
+		live: number;
+		total: number;
+		checked: boolean;
+	}>({
 		live: 0,
 		total: 1,
+		checked: false,
 	});
 	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
 	// run and once after each update only (lib/intro-gate.ts); the
@@ -1257,7 +1267,9 @@ export function App({
 				// re-renders App when the X/Y figure actually changes.
 				if (!cancelled)
 					setProviderHealth((prev) =>
-						prev.live === live && prev.total === total ? prev : { live, total },
+						prev.checked && prev.live === live && prev.total === total
+							? prev
+							: { live, total, checked: true },
 					);
 			} catch {
 				// best-effort - status bar can stay stale rather than crash
@@ -1341,6 +1353,13 @@ export function App({
 	const [currentProvider, setCurrentProvider] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).provider,
 	);
+	// Whether the active provider needs a key and has one. Keys load at start
+	// (loadEnvFile), so this only changes when the provider does.
+	const providerKeyState = React.useMemo(
+		() => providerKeyStatus(currentProvider),
+		[currentProvider],
+	);
+
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
@@ -2491,6 +2510,10 @@ export function App({
 	// config.model can self-correct after a reroute; reuse compares against this.
 	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
 	const lastReadinessNoticeRef = useRef("");
+	// Set when agent init found no local provider answering (T5). The "no
+	// model" card shows it as its reason line, in place of the chat notice
+	// that used to repeat on each provider and push the setup card away.
+	const [unreachableNote, setUnreachableNote] = useState<string | null>(null);
 	// Bumped to retry agent init after an attempt ended not ready, so a
 	// provider started after launch is still picked up. Until #3087 that
 	// happened by accident: the effect re-ran on every render.
@@ -2531,6 +2554,7 @@ export function App({
 					model: currentModel,
 				});
 				if (cancelled) return;
+				if (decision.kind !== "none") setUnreachableNote(null);
 				if (decision.kind === "fallback") {
 					notify(_gateTabId, decision.notice);
 					setCurrentProvider(decision.provider);
@@ -2539,7 +2563,9 @@ export function App({
 				}
 				if (decision.kind === "none") {
 					setAgentReady(false);
-					notify(_gateTabId, decision.notice);
+					const label =
+						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ?? decision.from;
+					setUnreachableNote(unreachableLine(label, decision.fromAddress, decision.reason));
 					retryLater();
 					return;
 				}
@@ -6238,6 +6264,15 @@ export function App({
 							lastTurnSuccess={lastTurnSuccess}
 							animate={showAnimations}
 							width={chatWidth}
+						/>
+
+						<NoProviderNotice
+							checked={providerHealth.checked}
+							liveLocal={providerHealth.live}
+							provider={currentProvider}
+							keyStatus={providerKeyState}
+							unreachable={unreachableNote}
+							compact={viewport.height < COMPACT_BELOW_ROWS}
 						/>
 
 						<Box
