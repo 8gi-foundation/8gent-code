@@ -112,7 +112,10 @@ export class CompactionEngine {
 
 	private findCutPoint(messages: Message[]): number {
 		let accumulated = 0;
-		let cutIdx = messages.length;
+		// 1 means "summarise nothing". It stands when the history after the
+		// system prompt never reaches keepRecentTokens, which used to leave
+		// cutIdx at messages.length and read messages[length].role (#3268).
+		let cutIdx = 1;
 		for (let i = messages.length - 1; i > 0; i--) {
 			accumulated += estimateTokens(messages[i].content) + 4;
 			if (accumulated >= this.config.keepRecentTokens) {
@@ -140,6 +143,20 @@ export class CompactionEngine {
 	): Promise<{ messages: Message[]; result: CompactionResult }> {
 		const tokensBefore = estimateMessageTokens(messages);
 		const cutPoint = this.findCutPoint(messages);
+		// Nothing older than the recent window: no summary call, history unchanged.
+		if (cutPoint <= 1) {
+			return {
+				messages,
+				result: {
+					summary: this.previousSummary ?? "",
+					tokensBefore,
+					tokensAfter: tokensBefore,
+					messagesRemoved: 0,
+					filesRead: Array.from(this.fileTracker.read),
+					filesModified: Array.from(this.fileTracker.modified),
+				},
+			};
+		}
 		const systemMsg = messages[0];
 		const toSummarize = messages.slice(1, cutPoint);
 		const toKeep = messages.slice(cutPoint);
