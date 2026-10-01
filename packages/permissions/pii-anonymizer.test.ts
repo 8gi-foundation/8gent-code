@@ -64,12 +64,8 @@ describe("PII anonymizer - detection coverage", () => {
 		expect(r.text).toMatch(/\[PERSON_\d+\]/);
 	});
 
-	test("masks the owner's known identity unconditionally", () => {
-		const r = anonymize("James Spalding owns this. Email jamesspaldingles@gmail.com.");
-		expect(r.text).not.toContain("James Spalding");
-		expect(r.text).not.toContain("jamesspaldingles@gmail.com");
-		expect(r.text).not.toMatch(/\bJames\b/);
-	});
+	// The running user's own identity is covered in owner-identity.test.ts,
+	// against an isolated HOME and git config.
 });
 
 describe("PII anonymizer - stability and reversibility", () => {
@@ -151,10 +147,6 @@ describe("PII anonymizer - verifier / fail-closed signal", () => {
 
 	test("verifyClean is true for benign code text", () => {
 		expect(verifyClean("const total = a + b; return total;")).toBe(true);
-	});
-
-	test("containsPii detects the owner identity even bare", () => {
-		expect(containsPii("ask James about it")).toBe(true);
 	});
 
 	test("registerOwnerIdentity folds in extra contacts at runtime", () => {

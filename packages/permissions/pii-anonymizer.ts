@@ -6,7 +6,8 @@
  * at the single cloud-egress chokepoint (`packages/providers/index.ts`).
  *
  * Design contract:
- *   - LOCAL ONLY. Pure string transforms. No network, no disk, no telemetry.
+ *   - LOCAL ONLY. Pure string transforms. No network, no telemetry. The only
+ *     read is the running user's own identity (./owner-identity), never written.
  *   - DETERMINISTIC per request: the same raw value maps to the same pseudonym
  *     within one request, so the cloud model still sees a coherent conversation.
  *   - FAIL-SAFE: over-redact rather than under. A false positive (masking a
@@ -17,40 +18,57 @@
  *
  * Detection coverage (in priority order, longest/most-specific first):
  *   emails, IBANs, credit-card numbers, SSNs, phone numbers, physical
- *   addresses, and full names - including the owner's known identity, which is
- *   always masked even when it would not otherwise look name-shaped.
+ *   addresses, and full names - including the running user's own name and
+ *   email, which are always masked even when they would not otherwise look
+ *   name-shaped.
  *
  * This module is additive. It does NOT modify the policy engine. The egress
  * chokepoint imports `anonymize` / `deanonymize` / `verifyClean`; the privacy
  * router can import `containsPii` for fail-closed routing decisions.
  */
 
+import { loadOwnerIdentity } from "./owner-identity";
+
 // ============================================
 // Owner identity (known PII that must always be masked)
 // ============================================
 
 /**
- * The owner's known identity. These are masked unconditionally - even bare
- * first names or an email that would otherwise slip past the generic patterns.
- * Pulled from the local profile (CLAUDE.md / contacts). Extendable at runtime
- * via `registerOwnerIdentity()` so callers can fold in values discovered from
- * the local contacts store without persisting anything here.
+ * The owner is the person running this copy of 8gent. Their name and email are
+ * masked unconditionally - even a bare first name or an email that would
+ * otherwise slip past the generic patterns. Nothing about any real person is
+ * hardcoded here: the identity is read at runtime from the user's own profile
+ * and git config (see `./owner-identity`). With no configured owner, no name
+ * is special-cased. Callers can fold in more values (e.g. from the local
+ * contacts store) with `registerOwnerIdentity()`; those are held in memory only.
  */
-const OWNER_IDENTITY: { value: string; type: PiiType }[] = [
-	{ value: "James Spalding", type: "PERSON" },
-	{ value: "jamesspaldingles@gmail.com", type: "EMAIL" },
-	{ value: "James Spalding", type: "PERSON" },
-];
-
-/**
- * Bare owner first/last names. Masked as PERSON even when standing alone.
- * Kept separate so we only fire on whole-word matches (avoid mangling
- * substrings like "james" inside "jamestown").
- */
-const OWNER_NAME_TOKENS = ["James", "Spalding"];
-
 const runtimeOwnerIdentity: { value: string; type: PiiType }[] = [];
 const runtimeOwnerTokens: string[] = [];
+
+/**
+ * The owner-identity values in force right now: the running user's identity
+ * plus anything registered at runtime.
+ *
+ * `literals` are matched as exact substrings (full names with a space, emails).
+ * `tokens` are bare name words matched whole-word only, so a name inside a
+ * longer word ("jamestown") is never mangled.
+ */
+function ownerIdentity(): { literals: { value: string; type: PiiType }[]; tokens: string[] } {
+	const literals = [...runtimeOwnerIdentity];
+	const tokens = [...runtimeOwnerTokens];
+	const owner = loadOwnerIdentity();
+	if (owner.name) {
+		const name = owner.name.trim();
+		if (/\s/.test(name)) literals.push({ value: name, type: "PERSON" });
+		for (const word of name.split(/\s+/)) {
+			if (word.length >= 2 && !tokens.includes(word)) tokens.push(word);
+		}
+	}
+	if (owner.email && owner.email.length >= 3) {
+		literals.push({ value: owner.email.trim(), type: "EMAIL" });
+	}
+	return { literals, tokens };
+}
 
 /**
  * Fold additional owner-identity values (e.g. from the local contacts store)
@@ -230,10 +248,11 @@ export function anonymize(text: string): AnonymizeResult {
 	const spans: Span[] = [];
 
 	// 1. Owner identity first - unconditional, highest priority, exact substring.
-	for (const { value, type } of [...OWNER_IDENTITY, ...runtimeOwnerIdentity]) {
+	const owner = ownerIdentity();
+	for (const { value, type } of owner.literals) {
 		collectLiteral(text, value, type, spans);
 	}
-	for (const tok of [...OWNER_NAME_TOKENS, ...runtimeOwnerTokens]) {
+	for (const tok of owner.tokens) {
 		// whole-word only
 		const re = new RegExp(`\\b${escapeRegExp(tok)}\\b`, "g");
 		for (let m = re.exec(text); m; m = re.exec(text)) {
@@ -381,10 +400,11 @@ export function deanonymize(text: string, map: Map<string, string>): string {
  */
 export function containsPii(text: string): boolean {
 	if (!text) return false;
-	for (const { value } of [...OWNER_IDENTITY, ...runtimeOwnerIdentity]) {
-		if (value.length >= 2 && text.includes(value)) return true;
+	const owner = ownerIdentity();
+	for (const { value } of owner.literals) {
+		if (value.length >= 2 && text.toLowerCase().includes(value.toLowerCase())) return true;
 	}
-	for (const tok of [...OWNER_NAME_TOKENS, ...runtimeOwnerTokens]) {
+	for (const tok of owner.tokens) {
 		if (new RegExp(`\\b${escapeRegExp(tok)}\\b`).test(text)) return true;
 	}
 	for (const det of DETECTORS) {

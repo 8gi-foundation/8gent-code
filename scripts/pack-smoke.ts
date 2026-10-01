@@ -9,7 +9,10 @@
  *
  *   1. bun run build                     (skip with --skip-build)
  *   2. npm pack                          -> tarball must contain dist/cli.js, dist/tui.js
- *   3. scan the packed bundles           -> no build root, no builder home, no "/Users/<name>/
+ *   3. scan the packed bundles           -> no build root, no builder home, no "/Users/<name>/,
+ *                                           no hardcoded owner identity (any commit author's
+ *                                           full name or email, the builder's profile name,
+ *                                           or PACK_SMOKE_OWNER_IDENTITY)
  *   4. npm install -g --prefix <tmp>     with an isolated HOME and a minimal PATH
  *   5. 8gent --version                   must print this package.json version
  *   6. 8gent tui --no-pet under a pty    must render its first screen (greeting or status bar)
@@ -43,6 +46,13 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+	envIdentities,
+	findOwnerIdentity,
+	maskIdentity,
+	profileIdentity,
+	repoAuthorIdentities,
+} from "./lib/owner-identity-scan";
 
 const ROOT = realpathSync(join(import.meta.dir, ".."));
 const args = process.argv.slice(2);
@@ -144,6 +154,14 @@ async function main(): Promise<void> {
 		buildRoots.add(dirname(realpathSync(join(ROOT, "node_modules"))));
 	} catch {}
 	const home = homedir();
+	// The owner identity is read from the running user at runtime; no real
+	// person's name or email may be baked into a bundle (v0.18.0 shipped one).
+	const ownerIdentities = [
+		...repoAuthorIdentities(ROOT),
+		...profileIdentity(home),
+		...envIdentities(process.env.PACK_SMOKE_OWNER_IDENTITY),
+	];
+	check(ownerIdentities.length > 0, "owner-identity scan has identities to look for");
 	for (const f of ["dist/cli.js", "dist/tui.js"]) {
 		const p = join(EXTRACT, "package", f);
 		if (!existsSync(p)) continue;
@@ -156,6 +174,12 @@ async function main(): Promise<void> {
 		);
 		for (const r of buildRoots) check(!src.includes(r), `${f} has no build root ${r}`);
 		if (home.length > 1) check(!src.includes(`"${home}/`), `${f} has no builder home ${home}`);
+		const baked = findOwnerIdentity(src, ownerIdentities);
+		check(
+			baked.length === 0,
+			`${f} has no hardcoded owner name or email`,
+			baked.map(maskIdentity).join(", "),
+		);
 	}
 	rmSync(EXTRACT, { recursive: true, force: true });
 
