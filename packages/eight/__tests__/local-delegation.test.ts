@@ -7,19 +7,22 @@
  * category while none of them registered it, so qwen3.8 called spawn_agent
  * and got "no tool named spawn_agent" (pilot l4-spawn-parallel-m5, #3091).
  */
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { buildToolCatalogSegment } from "../prompts/system-prompt";
+import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { DELEGATION_TOOLS, localCatalogOmissions, localDelegationTools } from "../local-tool-scope";
+import { buildToolCatalogSegment } from "../prompts/system-prompt";
 import { TOOL_CATEGORIES } from "../tool-registry";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 const ORCHESTRATION_ONLY = (TOOL_CATEGORIES.orchestration ?? []).filter((t) => !DELEGATION_TOOLS.includes(t));
 
 /** One real Agent turn in a child process with HOME in a temp dir and the network stubbed. */
 function probeTurn(role: string | undefined): { tools: string[]; system: string } {
-	const root = mkdtempSync(join(tmpdir(), "local-delegation-"));
+	const root = tempDir("local-delegation-");
 	mkdirSync(join(root, "home"));
 	mkdirSync(join(root, "work"));
 	const r = Bun.spawnSync(

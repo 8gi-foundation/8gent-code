@@ -12,9 +12,9 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
@@ -28,6 +28,9 @@ import {
 	_setSystemOneOverridesForTests,
 	systemOneGate,
 } from "./system-one-gate";
+
+// Remove the temp dirs tempDir() has recorded, this file's included (#3285).
+afterAll(cleanupTempDirs);
 
 class AlwaysDangerous implements DecideBackend {
 	readonly name = "stub";
@@ -75,8 +78,8 @@ afterAll(() => {
 });
 
 beforeEach(() => {
-	ws = mkdtempSync(join(tmpdir(), "s1-rm-ws-"));
-	outside = mkdtempSync(join(tmpdir(), "s1-rm-out-"));
+	ws = tempDir("s1-rm-ws-");
+	outside = tempDir("s1-rm-out-");
 	// The pilot's scratch file, as the agent made it: a shell redirect.
 	execFileSync("sh", ["-c", "echo '7 pass' > bunout.txt"], { cwd: ws });
 	// A tracked file.
@@ -96,7 +99,7 @@ beforeEach(() => {
 	_setSystemOneOverridesForTests({
 		createDecider: () => createDecider({ backend: judge, cacheSize: 0 }),
 		askHuman: async () => null,
-		calibrationDir: mkdtempSync(join(tmpdir(), "s1-rm-nocal-")),
+		calibrationDir: tempDir("s1-rm-nocal-"),
 	});
 	process.env[SYSTEM_ONE_FLAG] = "1";
 });
