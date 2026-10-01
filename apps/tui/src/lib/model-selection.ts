@@ -195,6 +195,29 @@ export async function resolveAgentModel(
 	}
 }
 
+/** What the agent-init step does with the active spec (#3289). */
+export type AgentBuildPlan = { kind: "build"; model: string } | { kind: "wait"; notice: string };
+
+/**
+ * Spec in, the model to build the agent with or a notice-and-retry out. The
+ * TUI builds its agent from `plan.model`, never from the raw spec: for
+ * `auto:free` the spec is an alias, and the only safe id is a live ":free"
+ * one. When none can be found the tab shows `notice` and retries; nothing
+ * runs, and nothing paid is substituted.
+ */
+export async function planAgentBuild(
+	provider: string,
+	model: string,
+	resolve?: (m: string) => Promise<{ model: string }>,
+): Promise<AgentBuildPlan> {
+	const r = await resolveAgentModel(provider, model, resolve);
+	if (r.ok) return { kind: "build", model: r.model };
+	return {
+		kind: "wait",
+		notice: `No free OpenRouter model to run: ${r.reason}. Nothing will run until one is found. Pick a model with /model, or another provider with /provider.`,
+	};
+}
+
 /**
  * Whether a tab's existing agent can keep serving the active spec. Compare the
  * spec the agent was BUILT for, not its live config: the agent self-corrects

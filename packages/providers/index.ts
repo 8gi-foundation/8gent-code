@@ -1271,6 +1271,8 @@ let cachedFreeModel: { model: string; timestamp: number } | null = null;
 const FREE_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 /** Used only when the live list cannot be read and the caller is not strict. */
 const FREE_MODEL_FALLBACK = "meta-llama/llama-3-8b-instruct:free";
+/** The model-list request never holds the agent build longer than this. */
+const FREE_MODEL_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Ask OpenRouter for its live model list and pick the free model (`:free`
@@ -1280,6 +1282,7 @@ const FREE_MODEL_FALLBACK = "meta-llama/llama-3-8b-instruct:free";
  */
 export async function findBestFreeModel(
 	fetchImpl: typeof fetch = fetch,
+	timeoutMs: number = FREE_MODEL_FETCH_TIMEOUT_MS,
 ): Promise<{ model: string } | { error: string }> {
 	if (cachedFreeModel && Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL) {
 		return { model: cachedFreeModel.model };
@@ -1310,13 +1313,18 @@ export async function findBestFreeModel(
 	try {
 		const response = await fetchImpl("https://openrouter.ai/api/v1/models", {
 			headers,
-			signal: AbortSignal.timeout(10_000),
+			signal: AbortSignal.timeout(timeoutMs),
 		});
 		if (!response.ok) return { error: `OpenRouter model list answered http ${response.status}` };
 
-		const data = (await response.json()) as { data: OpenRouterModel[] };
-		const freeModels = (data.data || [])
-			.filter((m: OpenRouterModel) => typeof m.id === "string" && m.id.endsWith(":free"))
+		let data: { data?: OpenRouterModel[] };
+		try {
+			data = (await response.json()) as { data?: OpenRouterModel[] };
+		} catch {
+			return { error: "OpenRouter model list was a bad response" };
+		}
+		const freeModels = (Array.isArray(data?.data) ? data.data : [])
+			.filter((m: OpenRouterModel) => typeof m?.id === "string" && m.id.endsWith(":free"))
 			.sort(
 				(a: OpenRouterModel, b: OpenRouterModel) =>
 					(b.context_length || 0) - (a.context_length || 0),
@@ -1327,8 +1335,11 @@ export async function findBestFreeModel(
 		const best = freeModels[0].id;
 		cachedFreeModel = { model: best, timestamp: Date.now() };
 		return { model: best };
-	} catch {
-		return { error: "could not reach OpenRouter to list its free models" };
+	} catch (err) {
+		const timedOut = (err as { name?: string } | null)?.name === "TimeoutError";
+		return {
+			error: `could not reach OpenRouter to list its free models${timedOut ? " (timed out)" : ""}`,
+		};
 	}
 }
 

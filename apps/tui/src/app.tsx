@@ -319,8 +319,8 @@ import {
 	normalizeProviderId,
 	declaredModels,
 	pickBestChatModel,
+	planAgentBuild,
 	providerToRuntime,
-	resolveAgentModel,
 	specForActivatedTab,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
@@ -2619,20 +2619,18 @@ export function App({
 
 				// auto:free names no real model: resolve it to a live ":free" id,
 				// and stop with the reason rather than run a paid one (#3289).
-				const _resolved = await resolveAgentModel(currentProvider, currentModel);
+				const _plan = await planAgentBuild(currentProvider, currentModel);
 				if (cancelled) return;
-				if (!_resolved.ok) {
+				if (_plan.kind === "wait") {
+					setAgent(null);
 					setAgentReady(false);
-					notify(
-						_initTabId,
-						`No free OpenRouter model to run: ${_resolved.reason}. Nothing will run until one is found. Pick a model with /model, or another provider with /provider.`,
-					);
+					notify(_initTabId, _plan.notice);
 					retryLater();
 					return;
 				}
 
 				const newAgent = new Agent({
-					model: _resolved.model,
+					model: _plan.model,
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
@@ -2680,6 +2678,7 @@ export function App({
 						}
 					} catch {}
 				} else {
+					setAgent(null);
 					setAgentReady(false);
 					retryLater();
 					notify(
