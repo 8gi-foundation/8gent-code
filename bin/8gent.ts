@@ -2689,7 +2689,9 @@ async function doctorCommand() {
 		}
 	}
 	// Paths mirror the stores that write them (#3328): packages/memory/index.ts,
-	// packages/self-autonomy/onboarding.ts, packages/settings/store.ts. Read only.
+	// packages/self-autonomy/onboarding.ts, packages/settings/store.ts. These checks
+	// only read; they never create these files. (The NemoClaw check below still
+	// writes ~/.8gent/policy-checksum on first run, tracked in #3344.)
 	const eightDir = path.join(process.env.HOME || require("node:os").homedir(), ".8gent");
 	const dbPath = path.join(process.env.EIGHT_DATA_DIR || eightDir, "memory", "memory.db");
 	console.log(
