@@ -177,3 +177,14 @@ describe("detectBuildIntent - genuinely new apps and games still reach /build (#
 		});
 	}
 });
+
+describe("detectBuildIntent - long input cannot freeze the submit path (#3325)", () => {
+	test("200 KB spaceless hyphenated input returns null in under 50 ms", () => {
+		const msg = "build a landing page " + "a-".repeat(100000);
+		const start = performance.now();
+		const result = detectBuildIntent(msg);
+		const elapsed = performance.now() - start;
+		expect(result).toBeNull();
+		expect(elapsed).toBeLessThan(50);
+	});
+});

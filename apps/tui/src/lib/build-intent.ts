@@ -73,6 +73,9 @@ export function detectBuildIntent(message: string): string | null {
 	if (!trimmed || trimmed.startsWith("/")) return null;
 	// A real build spec carries detail; a terse line almost never does.
 	if (trimmed.length < 15) return null;
+	// The regexes below are quadratic on long spaceless input; a real build
+	// ask is never this long, so bail before they run (#3325).
+	if (trimmed.length > 4000) return null;
 
 	const lower = trimmed.toLowerCase();
 	// Informational questions are not build commands ("how do I build ...").
