@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
 import { Box, type Instance, Text, render, useInput } from "ink";
 import type React from "react";
+import { useEffect, useState } from "react";
 import {
 	clearTargets,
 	currentPressed,
@@ -24,7 +25,7 @@ import {
 import { keyBytes } from "../../lib/key-bytes.js";
 import { _disposeMouse, installMouse, onMouse } from "../../lib/mouse-input.js";
 import { InlineApprovalPrompt } from "../InlineApprovalPrompt.js";
-import { StatusSegments } from "../StatusFooter.js";
+import { DJ_HINT, FOOTER_HINTS, StatusSegments, fitFooterHints } from "../StatusFooter.js";
 import { TabBar } from "../TabBar.js";
 
 class FakeStdin extends EventEmitter {
@@ -43,10 +44,14 @@ class FakeStdin extends EventEmitter {
 	}
 }
 
+/** Called with each chunk Ink writes, as it writes it. */
+let onWrite: ((chunk: string) => void) | null = null;
+
 function makeStdout(columns: number) {
 	const out = new Writable({
 		write(chunk, _enc, cb) {
 			(out as unknown as { written: string }).written += chunk.toString();
+			onWrite?.(chunk.toString());
 			cb();
 		},
 	}) as Writable & { columns: number; rows: number; written: string };
@@ -60,6 +65,7 @@ const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 let instance: Instance | null = null;
 
 afterEach(() => {
+	onWrite = null;
 	instance?.unmount();
 	instance = null;
 	_disposeMouse();
@@ -67,7 +73,7 @@ afterEach(() => {
 });
 
 /** Mount with the mouse layer on the same stdin Ink reads, wired like startMouse. */
-async function mount(node: React.ReactElement, columns = 120) {
+async function mount(node: React.ReactElement, columns = 120, exitOnCtrlC = false) {
 	const stdin = new FakeStdin();
 	const stdout = makeStdout(columns);
 	installMouse(
@@ -82,7 +88,7 @@ async function mount(node: React.ReactElement, columns = 120) {
 		stdin: stdin as unknown as NodeJS.ReadStream,
 		stdout: stdout as unknown as NodeJS.WriteStream,
 		debug: false,
-		exitOnCtrlC: false,
+		exitOnCtrlC,
 		patchConsole: false,
 	});
 	await tick(80);
@@ -157,6 +163,142 @@ describe("footer clicks", () => {
 	});
 });
 
+/** The last frame Ink drew, ANSI stripped, as rows. */
+function lastRows(stdout: { written: string }): string[] {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
+	const plain = stdout.written.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+	const frames = plain.split("\n").filter((l) => l.includes("mode "));
+	return frames.slice(-1);
+}
+
+/** The key a footer item sends, as the Keys probe logs it. */
+function loggedKey(cap: string): string {
+	return cap === "⇧Tab" ? "⇧Tab" : cap;
+}
+
+describe("every footer item does what its key does (James, 2026-10-02: only plan worked)", () => {
+	test("every item, on every cell it draws, sends its own key and nothing else", async () => {
+		const log: string[] = [];
+		const { stdin, stdout } = await mount(
+			<Keys log={log}>
+				<StatusSegments width={179} dj data={{ mode: "Planning", sessionTime: "3m" }} />
+			</Keys>,
+			180,
+		);
+		const row = lastRows(stdout)[0] ?? "";
+		// The items James sees: the mode segment, then every key cap.
+		const items: Array<{ text: string; key: string }> = [
+			{ text: "mode Planning [^Y]", key: "^Y" },
+			...fitFooterHints(999, false, true).map((h) => {
+				const [cap = "", ...verb] = h.split(" ");
+				return { text: `[${cap}] ${verb.join(" ")}`, key: loggedKey(cap) };
+			}),
+		];
+		expect(items.map((i) => i.key)).toEqual(["^Y", "^P", "^X", "⇧Tab", "^D", "^A", "^S", "^C"]);
+		for (const item of items) {
+			const at = row.indexOf(item.text);
+			expect({ item: item.text, drawn: at >= 0 }).toEqual({ item: item.text, drawn: true });
+			for (let x = at; x < at + item.text.length; x++) {
+				log.length = 0;
+				clickAt(stdin, x, 0);
+				await tick(15);
+				expect({ item: item.text, x, keys: log }).toEqual({ item: item.text, x, keys: [item.key] });
+			}
+		}
+	});
+
+	test("the footer only teaches keys that do something", () => {
+		const verbs = [...FOOTER_HINTS, DJ_HINT].map((h) => h.split(" ").slice(1).join(" "));
+		// ^O, ^K and ^B change state nothing draws (their views have not
+		// rendered since #2350), so a click on them looked dead.
+		for (const dead of ["expand", "kanban", "processes"]) expect(verbs).not.toContain(dead);
+		// ^D only hands the deck the keyboard while a track is loaded.
+		expect(fitFooterHints(999)).not.toContain(DJ_HINT);
+		expect(fitFooterHints(999, false, true)).toContain(DJ_HINT);
+	});
+});
+
+describe("a key cap is clickable the moment it is drawn", () => {
+	test("hints coming back after a notice are targets in the frame that draws them", async () => {
+		// The App harness caught this: a click right after the hints came back
+		// hit nothing, because the spans were registered in a passive effect
+		// that ran after Ink had already painted the frame.
+		// As the app does it: a notice that a timer clears (a default-priority
+		// update, whose passive effects React runs in a later task).
+		function Footer() {
+			const [notice, setNotice] = useState<string | null>("sound on");
+			useEffect(() => {
+				const t = setTimeout(() => setNotice(null), 60);
+				return () => clearTimeout(t);
+			}, []);
+			return (
+				<Keys log={[]}>
+					<StatusSegments
+						width={119}
+						notice={notice}
+						data={{ mode: "Planning", sessionTime: "3m" }}
+					/>
+				</Keys>
+			);
+		}
+		const atPaint: Array<string | null> = [];
+		onWrite = (chunk) => {
+			if (!chunk.includes("^S")) return;
+			// The earliest a click could arrive: once this commit's synchronous
+			// work is done, before any input event is handled.
+			queueMicrotask(() => {
+				let id: string | null = null;
+				for (let x = 0; x < 120 && !id; x++) {
+					const t = hitTest(x, 0);
+					if (t?.id === "footer:hint:^S sound") id = t.id;
+				}
+				atPaint.push(id);
+			});
+		};
+		await mount(<Footer />);
+		await tick(150);
+		expect(atPaint.length).toBeGreaterThan(0);
+		expect(atPaint).toEqual(atPaint.map(() => "footer:hint:^S sound"));
+	});
+});
+
+describe("quit by click is exactly quit by key", () => {
+	async function exited(app: Instance | null, ms = 120): Promise<boolean> {
+		if (!app) return false;
+		return Promise.race([
+			app.waitUntilExit().then(() => true),
+			new Promise<boolean>((r) => setTimeout(() => r(false), ms)),
+		]);
+	}
+
+	test("typed ^C and a full click on [^C] quit both exit; a press dragged off it does not", async () => {
+		// Ink reads stdin only while something listens, as the app's useInput does.
+		const footer = (
+			<Keys log={[]}>
+				<StatusSegments width={179} data={{ mode: "Planning", sessionTime: "3m" }} />
+			</Keys>
+		);
+
+		let { stdin } = await mount(footer, 180, true);
+		stdin.feed("\x03");
+		expect(await exited(instance)).toBe(true);
+		instance = null;
+		_disposeMouse();
+		clearTargets();
+
+		({ stdin } = await mount(footer, 180, true));
+		let { x, y } = targetAt("footer:hint:^C quit");
+		stdin.feed(`\x1b[<0;${x + 2};${y + 1}M`);
+		stdin.feed(`\x1b[<32;${x - 20};${y + 1}M`);
+		stdin.feed(`\x1b[<0;${x - 20};${y + 1}m`);
+		expect(await exited(instance)).toBe(false);
+		({ x, y } = targetAt("footer:hint:^C quit"));
+		clickAt(stdin, x + 2, y);
+		expect(await exited(instance)).toBe(true);
+		instance = null;
+	});
+});
+
 describe("tab and card clicks", () => {
 	test("a click on a tab switches to it", async () => {
 		const switched: string[] = [];
@@ -190,6 +332,77 @@ describe("tab and card clicks", () => {
 		clickAt(stdin, x, y);
 		await tick();
 		expect(log).toEqual(["n"]);
+	});
+
+	// 8SO T4 review: approve is the one decision that runs a command, so on
+	// this row a miss must do nothing. The gaps between caps stay dead.
+	test("every gap cell on the approval card hits no target", async () => {
+		await mount(
+			<Keys log={[]}>
+				<InlineApprovalPrompt target="rm -rf build/" />
+			</Keys>,
+		);
+		const y = targetAt("card:Y").y;
+		const owners: (string | null)[] = [];
+		for (let x = 0; x < 120; x++) owners.push(hitTest(x, y)?.id ?? null);
+		// Cells left of [Y] and right of [S] belong to nobody either.
+		const first = owners.indexOf("card:Y");
+		const last = owners.lastIndexOf("card:S");
+		const runs: string[] = [];
+		for (let x = first; x <= last; x++) {
+			const id = owners[x] ?? "gap";
+			if (runs[runs.length - 1]?.split("x")[0] !== id) runs.push(`${id}x1`);
+			else {
+				const [, n] = (runs.pop() as string).split("x");
+				runs.push(`${id}x${Number(n) + 1}`);
+			}
+		}
+		// "[Y] approve  [N] deny  [E] edit  [S] skip": each two-cell gap is dead.
+		expect(runs).toEqual([
+			"card:Yx11",
+			"gapx2",
+			"card:Nx8",
+			"gapx2",
+			"card:Ex8",
+			"gapx2",
+			"card:Sx8",
+		]);
+		expect(owners[first - 1]).toBeNull();
+		expect(owners[last + 1]).toBeNull();
+	});
+
+	test("press on [Y], release in the gap: cancelled, nothing approved", async () => {
+		const log: string[] = [];
+		const { stdin } = await mount(
+			<Keys log={log}>
+				<InlineApprovalPrompt target="rm -rf build/" />
+			</Keys>,
+		);
+		const { x: yStart, y: row } = targetAt("card:Y");
+		let lastY = yStart;
+		while (hitTest(lastY + 1, row)?.id === "card:Y") lastY++;
+		const gapX = lastY + 1;
+		expect(hitTest(gapX, row)).toBeUndefined();
+		const ev = (kind: "press" | "release", x: number) => ({
+			kind,
+			button: 0,
+			x,
+			y: row,
+			shift: false,
+			alt: false,
+			ctrl: false,
+		});
+		// Straight through the click layer: the release reports a cancel.
+		expect(handleMouse(ev("press", lastY))).toBe("press");
+		expect(currentPressed()).toBe("card:Y");
+		expect(handleMouse(ev("release", gapX))).toBe("cancel");
+		expect(currentPressed()).toBeNull();
+		// And the way a terminal sends it: press on Y, release one cell past it.
+		stdin.feed(`\x1b[<0;${lastY + 1};${row + 1}M`);
+		stdin.feed(`\x1b[<0;${gapX + 1};${row + 1}m`);
+		await tick();
+		expect(currentPressed()).toBeNull();
+		expect(log).toEqual([]);
 	});
 });
 

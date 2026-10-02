@@ -73,7 +73,7 @@ describe("BottomBar renders one footer row, hints included (#3130, #3238)", () =
 		const row = lines[0] ?? "";
 		// Nothing plays: no station segment, the row starts with the mode.
 		expect(row.startsWith("mode Planning [^Y]")).toBe(true);
-		for (const part of ["session 8m 12s", "[^P] palette", "[^X] plan", "[^O] expand"]) {
+		for (const part of ["session 8m 12s", "[^P] palette", "[^X] plan", "[^C] quit"]) {
 			expect(row).toContain(part);
 		}
 		expect(row.indexOf("[^P] palette")).toBeGreaterThan(row.indexOf("session 8m 12s"));
