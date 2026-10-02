@@ -8,7 +8,18 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
 	NARRATOR,
@@ -16,14 +27,17 @@ import {
 	type NeuralDeps,
 	NeuralTtsError,
 	OFFICERS,
+	STDERR_MAX,
 	type SpawnResult,
 	defaultDeps,
+	findSupertonic,
 	kittenPythonCandidates,
 	resolveVoice,
 	spawnAsync,
 	supertonicCandidates,
 	synthesize,
 	synthesizeBatch,
+	whichOnPath,
 } from "./neural.ts";
 
 const HOME = "/Users/test";
@@ -32,7 +46,10 @@ interface Call {
 	cmd: string;
 	args: string[];
 	input?: string;
+	cwd?: string;
 }
+
+const TMP = "/tmp/neural-fake";
 
 /** A fake machine. `files` is what exists; `engines` says which engine works. */
 function fakeDeps(opts: {
@@ -40,30 +57,54 @@ function fakeDeps(opts: {
 	env?: Record<string, string>;
 	which?: Record<string, string>;
 	pyenvVersions?: string[];
+	links?: Record<string, string>;
 	supertonicWorks?: boolean;
 	kittenWorks?: boolean;
-}): NeuralDeps & { calls: Call[]; files: Set<string> } {
+	/** Default true: the interpreter accepts -P (Python 3.11+). */
+	pythonHasP?: boolean;
+}): NeuralDeps & {
+	calls: Call[];
+	files: Set<string>;
+	sizes: Map<string, number>;
+	trees: string[];
+} {
 	const files = new Set(opts.files ?? []);
+	const sizes = new Map<string, number>();
 	const calls: Call[] = [];
+	const trees: string[] = [];
 	const deps = {
 		calls,
 		files,
+		sizes,
+		trees,
 		env: opts.env ?? {},
 		home: HOME,
 		exists: (p: string) => files.has(p),
+		fileSize: (p: string) => (files.has(p) ? (sizes.get(p) ?? 1) : 0),
 		remove: (p: string) => {
 			files.delete(p);
+		},
+		realpath: (p: string) => opts.links?.[p] ?? p,
+		makeTempDir: () => TMP,
+		removeTree: (d: string) => {
+			trees.push(d);
 		},
 		which: (cmd: string) => opts.which?.[cmd] ?? null,
 		listDir: (dir: string) =>
 			dir === join(HOME, ".pyenv/versions") ? (opts.pyenvVersions ?? []) : [],
-		spawn: async (cmd: string, args: string[], o: { input?: string }): Promise<SpawnResult> => {
-			calls.push({ cmd, args, input: o.input });
+		spawn: async (
+			cmd: string,
+			args: string[],
+			o: { input?: string; cwd?: string },
+		): Promise<SpawnResult> => {
+			calls.push({ cmd, args, input: o.input, cwd: o.cwd });
 			if (basename(cmd) === "supertonic") {
 				if (!opts.supertonicWorks) return { status: 1, stderr: "model load failed" };
 				files.add(args[args.indexOf("-o") + 1]);
 				return { status: 0, stderr: "" };
 			}
+			// The -P capability probe.
+			if (args.at(-1) === "pass") return { status: opts.pythonHasP === false ? 2 : 0, stderr: "" };
 			// Kitten: a python interpreter running the batch script.
 			if (!opts.kittenWorks) return { status: 1, stderr: "No module named kittentts" };
 			const job = JSON.parse(o.input ?? "{}") as { items: { out: string }[] };
@@ -73,6 +114,10 @@ function fakeDeps(opts: {
 	};
 	return deps;
 }
+
+/** The calls that ran the Kitten batch script (not the -P probe). */
+const kittenRuns = (calls: Call[]) =>
+	calls.filter((c) => basename(c.cmd) !== "supertonic" && c.args.at(-1) !== "pass");
 
 const ST = "/opt/homebrew/bin/supertonic";
 const PY = "/opt/homebrew/bin/python3";
@@ -199,13 +244,14 @@ describe("engine discovery", () => {
 		expect(deps.calls[0].cmd).toBe(bin);
 		expect(deps.calls[0].args).toEqual([
 			"tts",
-			"hello",
 			"-o",
 			"/out/a.wav",
 			"--voice",
 			"M3",
 			"--steps",
 			"8",
+			"--",
+			"hello",
 		]);
 	});
 
@@ -248,19 +294,23 @@ describe("fallback order", () => {
 		const deps = both();
 		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
 		expect(r.ok && r.engine).toBe("kitten");
-		expect(deps.calls).toHaveLength(1);
-		const job = JSON.parse(deps.calls[0].input ?? "{}");
+		const runs = kittenRuns(deps.calls);
+		expect(runs).toHaveLength(1);
+		const job = JSON.parse(runs[0].input ?? "{}");
 		expect(job.model).toBe("KittenML/kitten-tts-nano-0.8");
 		expect(job.items).toEqual([{ text: "hi", out: "/o/a.wav", voice: "Bella" }]);
 	});
 
-	test("Supertonic failing falls back to Kitten with the canon fallback style", async () => {
+	test("opted in: Supertonic failing falls back to Kitten with the canon fallback style", async () => {
 		const deps = fakeDeps({
 			files: [ST, PY],
 			which: { supertonic: ST, python3: PY },
 			kittenWorks: true,
 		});
-		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		const r = await synthesize(
+			{ text: "hi", voice: "Rishi", outPath: "/o/r.wav", allowFallback: true },
+			deps,
+		);
 		expect(r.ok).toBe(true);
 		if (r.ok) {
 			expect(r.engine).toBe("kitten");
@@ -273,20 +323,26 @@ describe("fallback order", () => {
 		}
 	});
 
-	test("Kitten failing falls back to Supertonic with the canon fallback style", async () => {
+	test("opted in: Kitten failing falls back to Supertonic with the canon fallback style", async () => {
 		const deps = fakeDeps({
 			files: [ST, PY],
 			which: { supertonic: ST, python3: PY },
 			supertonicWorks: true,
 		});
-		const r = await synthesize({ text: "hi", voice: "Fred", outPath: "/o/f.wav" }, deps);
+		const r = await synthesize(
+			{ text: "hi", voice: "Fred", outPath: "/o/f.wav", allowFallback: true },
+			deps,
+		);
 		expect(r.ok && r.engine).toBe("supertonic");
 		expect(r.ok && r.style).toBe("M5");
 	});
 
-	test("both engines failing is a typed all_engines_failed error naming every attempt", async () => {
+	test("opted in: both engines failing is a typed all_engines_failed error naming every attempt", async () => {
 		const deps = fakeDeps({ files: [ST, PY], which: { supertonic: ST, python3: PY } });
-		const r = await synthesize({ text: "hi", voice: "Karen", outPath: "/o/k.wav" }, deps);
+		const r = await synthesize(
+			{ text: "hi", voice: "Karen", outPath: "/o/k.wav", allowFallback: true },
+			deps,
+		);
 		expect(r.ok).toBe(false);
 		if (!r.ok) {
 			expect(r.error).toBeInstanceOf(NeuralTtsError);
@@ -319,9 +375,121 @@ describe("fallback order", () => {
 			deps,
 		);
 		expect(rs.every((r) => r.ok)).toBe(true);
-		const kittenCalls = deps.calls.filter((c) => basename(c.cmd) !== "supertonic");
+		const kittenCalls = kittenRuns(deps.calls);
 		expect(kittenCalls).toHaveLength(1);
 		expect(JSON.parse(kittenCalls[0].input ?? "{}").items).toHaveLength(2);
+	});
+
+	test("by default a failed pinned engine is engine_failed: no other officer's voice stands in", async () => {
+		const deps = fakeDeps({
+			files: [ST, PY],
+			which: { supertonic: ST, python3: PY },
+			kittenWorks: true,
+		});
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		expect(r.ok).toBe(false);
+		if (!r.ok) {
+			expect(r.error).toBeInstanceOf(NeuralTtsError);
+			expect(r.error.code).toBe("engine_failed");
+			expect(r.error.attempts.map((a) => `${a.engine}:${a.style}`)).toEqual(["supertonic:M3"]);
+		}
+		// Kitten worked, but it was never asked: Jasper is Alex's pinned voice.
+		expect(kittenRuns(deps.calls)).toEqual([]);
+		expect(deps.files.has("/o/r.wav")).toBe(false);
+	});
+
+	test("by default a failed Kitten voice does not borrow a Supertonic style", async () => {
+		const deps = fakeDeps({
+			files: [ST, PY],
+			which: { supertonic: ST, python3: PY },
+			supertonicWorks: true,
+		});
+		const r = await synthesize({ text: "hi", voice: "Victoria", outPath: "/o/v.wav" }, deps);
+		expect(!r.ok && r.error.code).toBe("engine_failed");
+		// F3 is Karen's pinned style; a degraded Victoria must not sound like 8SO.
+		expect(deps.calls.filter((c) => basename(c.cmd) === "supertonic")).toEqual([]);
+	});
+
+	test("a missing pinned engine is engine_failed by default even when the other is installed", async () => {
+		const deps = fakeDeps({ files: [PY], which: { python3: PY }, kittenWorks: true });
+		const r = await synthesize({ text: "hi", voice: "Karen", outPath: "/o/k.wav" }, deps);
+		expect(!r.ok && r.error.code).toBe("engine_failed");
+		expect(!r.ok && r.error.attempts[0]?.reason).toBe("Supertonic not found");
+	});
+
+	test("a Kitten batch killed at the timeout fails every line and removes the partial WAVs", async () => {
+		const deps = both();
+		deps.spawn = async (cmd, args, o) => {
+			deps.calls.push({ cmd, args, input: o.input, cwd: o.cwd });
+			if (args.at(-1) === "pass") return { status: 0, stderr: "" };
+			const job = JSON.parse(o.input ?? "{}") as { items: { out: string }[] };
+			for (const it of job.items) deps.files.add(it.out); // half-written, then SIGKILL
+			return { status: null, stderr: "timed out after 90000 ms" };
+		};
+		const rs = await synthesizeBatch(
+			[
+				{ text: "one", voice: "Ava", outPath: "/o/1.wav" },
+				{ text: "two", voice: "Kathy", outPath: "/o/2.wav" },
+			],
+			deps,
+		);
+		expect(rs.map((r) => r.ok)).toEqual([false, false]);
+		expect(deps.files.has("/o/1.wav")).toBe(false);
+		expect(deps.files.has("/o/2.wav")).toBe(false);
+	});
+
+	test("Kitten exiting non-zero is a failure even if the file is on disk", async () => {
+		const deps = both();
+		deps.spawn = async (cmd, args, o) => {
+			deps.calls.push({ cmd, args, input: o.input, cwd: o.cwd });
+			if (args.at(-1) === "pass") return { status: 0, stderr: "" };
+			deps.files.add("/o/a.wav");
+			return { status: 1, stderr: "Traceback" };
+		};
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		expect(r.ok).toBe(false);
+		expect(deps.files.has("/o/a.wav")).toBe(false);
+	});
+
+	test("an empty output file is a failure for either engine, and it is removed", async () => {
+		for (const voice of ["Daniel", "Ava"]) {
+			const deps = both();
+			const real = deps.spawn;
+			deps.spawn = async (cmd, args, o) => {
+				const r = await real(cmd, args, o);
+				for (const f of deps.files) if (f.startsWith("/o/")) deps.sizes.set(f, 0);
+				return r;
+			};
+			const r = await synthesize({ text: "hi", voice, outPath: "/o/z.wav" }, deps);
+			expect(r.ok).toBe(false);
+			expect(deps.files.has("/o/z.wav")).toBe(false);
+		}
+	});
+
+	test("a failed Supertonic line leaves no partial output behind", async () => {
+		const deps = fakeDeps({ files: [ST], which: { supertonic: ST } });
+		deps.spawn = async (cmd, args, o) => {
+			deps.calls.push({ cmd, args, input: o.input });
+			deps.files.add(args[args.indexOf("-o") + 1]);
+			return { status: 1, stderr: "boom" };
+		};
+		const r = await synthesize({ text: "hi", voice: "Daniel", outPath: "/o/d.wav" }, deps);
+		expect(r.ok).toBe(false);
+		expect(deps.files.has("/o/d.wav")).toBe(false);
+	});
+
+	test("hostile lines go to Supertonic as text after --, never as options", async () => {
+		const hostile = ["--help", "-o/x", "--custom-style-path=/tmp/x.json", "--voice=M1 hi", "-"];
+		for (const text of hostile) {
+			const deps = both();
+			const r = await synthesize({ text, voice: "Rishi", outPath: "/o/h.wav" }, deps);
+			expect(r.ok).toBe(true);
+			const args = deps.calls[0].args;
+			expect(args.at(-1)).toBe(text);
+			expect(args.at(-2)).toBe("--");
+			expect(args.indexOf("--")).toBe(args.length - 2);
+			expect(args.slice(0, 7)).toEqual(["tts", "-o", "/o/h.wav", "--voice", "M3", "--steps", "8"]);
+		}
 	});
 
 	test("empty text is a typed error, not a silent clip", async () => {
@@ -354,6 +522,36 @@ describe("macOS say is unreachable", () => {
 		expect(r.ok).toBe(false);
 		expect(deps.calls).toEqual([]);
 	});
+
+	test("a binary that resolves to say through a symlink is refused by realpath", async () => {
+		const deps = fakeDeps({
+			files: ["/opt/x/supertonic", "/opt/x/python3", "/usr/bin/say"],
+			env: { EIGHT_SUPERTONIC_BIN: "/opt/x/supertonic", EIGHT_TTS_PYTHON: "/opt/x/python3" },
+			links: { "/opt/x/supertonic": "/usr/bin/say", "/opt/x/python3": "/usr/bin/say" },
+			supertonicWorks: true,
+			kittenWorks: true,
+		});
+		expect(findSupertonic(deps)).toBeNull();
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		expect(r.ok).toBe(false);
+		expect(deps.calls).toEqual([]);
+	});
+
+	test.skipIf(!existsSync("/usr/bin/say"))(
+		"on the real filesystem a symlink named supertonic pointing at say is refused",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "neural-saylink-"));
+			try {
+				const link = join(dir, "supertonic");
+				symlinkSync("/usr/bin/say", link);
+				const deps = { ...defaultDeps(), env: { EIGHT_SUPERTONIC_BIN: link } };
+				expect(deps.realpath(link)).toBe(realpathSync("/usr/bin/say"));
+				expect(findSupertonic(deps)).not.toBe(link);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+	);
 
 	test("the module source has no say code path", () => {
 		const src = readFileSync(join(import.meta.dir, "neural.ts"), "utf8");
@@ -457,5 +655,190 @@ describe("synthesis does not block the event loop", () => {
 	test("the module source has no synchronous process call", () => {
 		const src = readFileSync(join(import.meta.dir, "neural.ts"), "utf8");
 		expect(src).not.toMatch(/spawnSync|execSync|execFileSync|Bun\.spawnSync/);
+	});
+});
+
+describe("the Kitten interpreter cannot import from the caller's cwd (F1)", () => {
+	test("the batch runs in a fresh temp dir with -P, and the temp dir is removed", async () => {
+		const deps = both();
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		expect(r.ok).toBe(true);
+		const pyCalls = deps.calls.filter((c) => basename(c.cmd) !== "supertonic");
+		expect(pyCalls.length).toBe(2); // the -P probe, then the batch
+		for (const c of pyCalls) expect(c.cwd).toBe(TMP);
+		const [run] = kittenRuns(deps.calls);
+		expect(run.args[0]).toBe("-P");
+		expect(run.args.slice(1, 2)).toEqual(["-c"]);
+		expect(deps.trees).toEqual([TMP]);
+	});
+
+	test("an interpreter without -P still runs in the temp dir, and the script strips the cwd first", async () => {
+		const deps = fakeDeps({
+			files: [PY],
+			which: { python3: PY },
+			kittenWorks: true,
+			pythonHasP: false,
+		});
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		expect(r.ok).toBe(true);
+		const [run] = kittenRuns(deps.calls);
+		expect(run.args[0]).toBe("-c");
+		expect(run.cwd).toBe(TMP);
+		const script = run.args[1].split("\n");
+		expect(script[0]).toBe("import sys");
+		expect(script[1]).toBe('sys.path[:] = [p for p in sys.path if p not in ("", ".")]');
+	});
+
+	const realPythons = [
+		...new Set(
+			[
+				"/usr/local/bin/python3",
+				"/opt/homebrew/bin/python3",
+				"/usr/bin/python3",
+				whichOnPath("python3"),
+			]
+				.filter((p): p is string => !!p && existsSync(p))
+				.map((p) => realpathSync(p)),
+		),
+	];
+
+	const plant = () => {
+		const dir = mkdtempSync(join(tmpdir(), "neural-planted-"));
+		const marker = join(dir, "HIJACKED");
+		for (const mod of ["json", "kittentts"]) {
+			writeFileSync(
+				join(dir, `${mod}.py`),
+				`open(${JSON.stringify(marker)}, "a").write("${mod}\\n")\n`,
+			);
+		}
+		return { dir, marker };
+	};
+
+	for (const py of realPythons) {
+		test(`control: the planted json.py does run under a naive spawn (${py})`, () => {
+			const { dir, marker } = plant();
+			try {
+				Bun.spawnSync([py, "-c", "import json"], { cwd: dir });
+				expect(existsSync(marker)).toBe(true);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		test(`a planted json.py or kittentts.py in the caller's cwd never runs (${py})`, async () => {
+			const { dir, marker } = plant();
+			const prev = process.cwd();
+			process.chdir(dir);
+			try {
+				const deps = { ...defaultDeps(), env: { EIGHT_TTS_PYTHON: py } };
+				await synthesize({ text: "hi", voice: "Ava", outPath: join(dir, "out.wav") }, deps);
+			} finally {
+				process.chdir(prev);
+			}
+			try {
+				expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toBe("");
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}, 30_000);
+	}
+});
+
+describe("Supertonic argv takes hostile text as text (F2)", () => {
+	const py = ["/usr/local/bin/python3", "/opt/homebrew/bin/python3", "/usr/bin/python3"].find((p) =>
+		existsSync(p),
+	);
+	/** argparse with Supertonic 1.2.3's tts shape: one positional, then options. */
+	const PARSER = [
+		"import argparse, json, sys",
+		"p = argparse.ArgumentParser()",
+		"s = p.add_subparsers(dest='cmd').add_parser('tts')",
+		"s.add_argument('text')",
+		"s.add_argument('-o', '--output')",
+		"s.add_argument('--voice')",
+		"s.add_argument('--steps', type=int)",
+		"s.add_argument('--custom-style-path')",
+		"a = p.parse_args(sys.argv[1:])",
+		"print(json.dumps([a.text, a.output, a.voice]))",
+	].join("\n");
+
+	test.skipIf(!py)(
+		"an argparse parser of the same shape reads every hostile line as the text",
+		async () => {
+			for (const text of ["--help", "-o/x", "--custom-style-path=/tmp/x.json", "--voice=M1 hi"]) {
+				const deps = both();
+				await synthesize({ text, voice: "Rishi", outPath: "/o/h.wav" }, deps);
+				const r = Bun.spawnSync([py as string, "-c", PARSER, ...deps.calls[0].args]);
+				expect(r.exitCode).toBe(0);
+				expect(JSON.parse(r.stdout.toString())).toEqual([text, "/o/h.wav", "M3"]);
+			}
+		},
+	);
+});
+
+describe("PATH lookup (L1)", () => {
+	const setup = () => {
+		const dir = mkdtempSync(join(tmpdir(), "neural-path-"));
+		const exe = join(dir, "bin");
+		mkdirSync(exe);
+		writeFileSync(join(exe, "supertonic"), "#!/bin/sh\nexit 0\n");
+		chmodSync(join(exe, "supertonic"), 0o755);
+		return { dir, exe };
+	};
+
+	test("a relative or '.' PATH entry is skipped, even when it holds a supertonic", () => {
+		const { dir, exe } = setup();
+		const prev = process.cwd();
+		process.chdir(dir);
+		try {
+			expect(whichOnPath("supertonic", ["", ".", "bin", "./bin"].join(":"))).toBeNull();
+			process.chdir(exe);
+			expect(whichOnPath("supertonic", ".")).toBeNull();
+		} finally {
+			process.chdir(prev);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("only a regular executable file counts", () => {
+		const { dir, exe } = setup();
+		try {
+			const notExec = join(dir, "noexec");
+			mkdirSync(notExec);
+			writeFileSync(join(notExec, "supertonic"), "x");
+			chmodSync(join(notExec, "supertonic"), 0o644);
+			const isDir = join(dir, "isdir");
+			mkdirSync(join(isDir, "supertonic"), { recursive: true });
+			expect(whichOnPath("supertonic", `${notExec}:${isDir}`)).toBeNull();
+			expect(whichOnPath("supertonic", `${notExec}:${isDir}:${exe}`)).toBe(join(exe, "supertonic"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("spawn stderr is bounded (L2)", () => {
+	test("a child flooding stderr is capped to the last STDERR_MAX characters", async () => {
+		const r = await spawnAsync(
+			process.execPath,
+			["-e", "process.stderr.write('x'.repeat(2_000_000) + 'END')"],
+			{ timeoutMs: 20_000 },
+		);
+		expect(r.status).toBe(0);
+		expect(r.stderr.length).toBeLessThanOrEqual(STDERR_MAX + 200);
+		expect(r.stderr.endsWith("END")).toBe(true);
+	});
+
+	test("spawnAsync honours cwd", async () => {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "neural-cwd-")));
+		try {
+			const r = await spawnAsync(process.execPath, ["-e", "process.stderr.write(process.cwd())"], {
+				timeoutMs: 10_000,
+				cwd: dir,
+			});
+			expect(r.stderr).toBe(dir);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
