@@ -11,3 +11,13 @@
  * themselves; an explicit EIGHT_SYSTEM_ONE in the environment is kept.
  */
 if (process.env.EIGHT_SYSTEM_ONE === undefined) process.env.EIGHT_SYSTEM_ONE = "0";
+
+/**
+ * Agent depth (#3341) is also a property of the test process. A `bun test` an
+ * agent starts from its shell carries the agent's EIGHT_AGENT_DEPTH; inherited
+ * here, it would make the runner a depth-N agent, shift every depth assertion
+ * and, past MAX_AGENT_DEPTH, refuse every Agent the suite builds. Deleted
+ * before any test module loads, so packages/orchestration reads depth 0. Tests
+ * that need a process depth start a subprocess with the value set.
+ */
+delete process.env.EIGHT_AGENT_DEPTH;

@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - agent depth helpers for child processes (#3341)
+- `packages/orchestration` gains `childAgentEnv()` (the env a process an agent starts must carry: its depth, one deeper than the agent), `processAgentDepth()`, `processAgentDepthRefusal()`, `AgentDepthError` and `AGENT_DEPTH_EXIT_CODE` (77). Nothing calls them yet; `run_command` and the entrypoint refusal follow in later PRs. The test preload now clears `EIGHT_AGENT_DEPTH`, so a `bun test` started from an agent's shell runs at depth 0.
+
 ### Fixed - spawn_agent cannot recurse past depth 3 (#3331)
 - An agent could start agents that started agents with no limit. `spawn_agent` (both tool surfaces) and `AgentPool.spawnAgent` now refuse once an agent is at `MAX_AGENT_DEPTH` (3), before anything starts. Depth follows each async context and passes to child processes in `EIGHT_AGENT_DEPTH`. A malformed `EIGHT_AGENT_DEPTH` counts as the maximum, not as 0. The refusal reads `[AGENT DEPTH BLOCKED]`, so the TUI tool trail shows it as blocked instead of "Started agent". Depth is not yet passed through `run_command` or `WorktreePoolAgent` (#3341, #3342).
 
