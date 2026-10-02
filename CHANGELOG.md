@@ -9,6 +9,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - agent depth helpers for child processes (#3341)
+- `packages/orchestration` gains `childAgentEnv()` (the env a process an agent starts must carry: its depth, one deeper than the agent), `processAgentDepth()`, `processAgentDepthRefusal()`, `AgentDepthError` and `AGENT_DEPTH_EXIT_CODE` (77). Nothing calls them yet; `run_command` and the entrypoint refusal follow in later PRs. The test preload now clears `EIGHT_AGENT_DEPTH`, so a `bun test` started from an agent's shell runs at depth 0.
 ### Fixed - `8gent onboard --yes` marks onboarding complete (#3329)
 - `8gent onboard --yes` set the completion flag on a copy of the profile, so it never reached `~/.8gent/user.json`: `preferences get` kept saying "Onboarded: no", `status` said `onboarded: false`, and the command still printed "Run with --yes". It now completes onboarding through the onboarding manager, which writes the flag and confidence score to disk. The interactive path is unchanged. `packages/self-autonomy/onboard-yes.test.ts` runs the real command in a throwaway home.
 ### Fixed - `8gent doctor` checks the files 8gent actually writes (#3328)

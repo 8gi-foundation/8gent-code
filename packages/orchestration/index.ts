@@ -70,6 +70,44 @@ export function agentDepthRefusal(): string | null {
 	return `[AGENT DEPTH BLOCKED] spawn_agent did NOT run: this agent is at depth ${depth} and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}, so it may not start another agent. Do the work yourself, or finish and report back to the agent that started you.`;
 }
 
+/**
+ * Env to merge LAST into any process an agent starts (#3341): the child's
+ * depth, one deeper than the agent whose call is in flight. Spread after
+ * process.env and after any caller env, so neither can lower it.
+ *
+ * Fails closed: if the child's depth would not be a safe non-negative integer
+ * (NaN, Infinity, past 2^53), the child would parse it as MAX_AGENT_DEPTH and
+ * run, so it is given MAX_AGENT_DEPTH + 1 instead and refuses.
+ */
+export function childAgentEnv(): { [AGENT_DEPTH_ENV]: string } {
+	const child = currentAgentDepth() + 1;
+	const safe = Number.isSafeInteger(child) && child >= 0;
+	return { [AGENT_DEPTH_ENV]: String(safe ? child : MAX_AGENT_DEPTH + 1) };
+}
+
+/** This process's inherited depth, as parsed fail-closed at load. */
+export function processAgentDepth(): number {
+	return PROCESS_AGENT_DEPTH;
+}
+
+/**
+ * Null when this process may run a model loop; otherwise the message to print.
+ * A process at MAX_AGENT_DEPTH runs (its spawns are refused by
+ * agentDepthRefusal); one deeper than that does not start at all.
+ */
+export function processAgentDepthRefusal(): string | null {
+	if (PROCESS_AGENT_DEPTH <= MAX_AGENT_DEPTH) return null;
+	return `[AGENT DEPTH BLOCKED] 8gent did NOT start: this process was started by an agent at depth ${PROCESS_AGENT_DEPTH - 1} (${AGENT_DEPTH_ENV}=${PROCESS_AGENT_DEPTH}) and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}. Do the work in the calling agent instead.`;
+}
+
+/** Thrown where a model loop would start in a process deeper than MAX_AGENT_DEPTH. */
+export class AgentDepthError extends Error {
+	override name = "AgentDepthError";
+}
+
+/** Exit code for a refused start: sysexits EX_NOPERM, distinct from a crash (1). */
+export const AGENT_DEPTH_EXIT_CODE = 77;
+
 // ============================================
 // Types
 // ============================================

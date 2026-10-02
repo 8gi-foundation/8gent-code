@@ -18,12 +18,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnAgentTool } from "./delegation-tools";
 import {
+	AGENT_DEPTH_EXIT_CODE,
+	AgentDepthError,
 	type AgentPool,
 	MAX_AGENT_DEPTH,
+	childAgentEnv,
 	currentAgentDepth,
 	getAgentPool,
 	getCLIAgentStatus,
 	listCLIAgents,
+	processAgentDepth,
+	processAgentDepthRefusal,
 	resetOrchestration,
 	runAtAgentDepth,
 } from "./index";
@@ -207,5 +212,144 @@ describe("MAX_AGENT_DEPTH (#3331)", () => {
 			status = getCLIAgentStatus(out.agentId);
 		}
 		expect(status?.result?.stdout).toBe("3");
+	});
+});
+
+/** Run `script` in a fresh bun process whose inherited EIGHT_AGENT_DEPTH is replaced by `value`. */
+function inFreshProcess(value: string | undefined, script: string): string {
+	const { EIGHT_AGENT_DEPTH: _inherited, ...rest } = process.env;
+	const env = { ...rest, ...(value === undefined ? {} : { EIGHT_AGENT_DEPTH: value }) };
+	const proc = Bun.spawnSync([process.execPath, "-e", script], {
+		env,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	return proc.stdout.toString().trim().split("\n").pop() ?? "";
+}
+
+const INDEX = JSON.stringify(join(import.meta.dir, "index.ts"));
+
+describe("childAgentEnv and the process refusal (#3341)", () => {
+	test("a process an agent starts is one deeper than the agent", () => {
+		expect(childAgentEnv()).toEqual({ EIGHT_AGENT_DEPTH: "1" });
+		expect(runAtAgentDepth(2, () => childAgentEnv())).toEqual({ EIGHT_AGENT_DEPTH: "3" });
+		expect(runAtAgentDepth(3, () => childAgentEnv())).toEqual({ EIGHT_AGENT_DEPTH: "4" });
+	});
+
+	test("nothing the agent writes to the env lowers its child's depth", () => {
+		try {
+			process.env.EIGHT_AGENT_DEPTH = "0";
+			const env = runAtAgentDepth(2, () => ({
+				...process.env,
+				...{ EIGHT_AGENT_DEPTH: "0" },
+				...childAgentEnv(),
+			}));
+			expect(env.EIGHT_AGENT_DEPTH).toBe("3");
+		} finally {
+			delete process.env.EIGHT_AGENT_DEPTH;
+		}
+	});
+
+	test("the process's inherited depth carries into its children", () => {
+		const got = JSON.parse(
+			inFreshProcess(
+				"2",
+				`const m = await import(${INDEX}); console.log(JSON.stringify({ depth: m.processAgentDepth(), child: m.childAgentEnv() }));`,
+			),
+		);
+		expect(got).toEqual({ depth: 2, child: { EIGHT_AGENT_DEPTH: "3" } });
+		expect(processAgentDepth()).toBe(0);
+	});
+
+	test("a fail-closed parent (unreadable EIGHT_AGENT_DEPTH) gives its child 4, which is refused", () => {
+		const got = JSON.parse(
+			inFreshProcess(
+				"abc",
+				`const m = await import(${INDEX}); console.log(JSON.stringify({ depth: m.processAgentDepth(), child: m.childAgentEnv() }));`,
+			),
+		);
+		expect(got).toEqual({ depth: MAX_AGENT_DEPTH, child: { EIGHT_AGENT_DEPTH: "4" } });
+		const child = JSON.parse(
+			inFreshProcess(
+				got.child.EIGHT_AGENT_DEPTH,
+				`const m = await import(${INDEX}); console.log(JSON.stringify({ refused: m.processAgentDepthRefusal() !== null }));`,
+			),
+		);
+		expect(child).toEqual({ refused: true });
+	});
+
+	test("a depth that is not a safe non-negative integer gives the child MAX + 1, never a value it would read as MAX", () => {
+		// The child parses NaN, Infinity or anything past 2^53 as MAX (3) and would
+		// run a model loop. Emitting MAX + 1 makes the child refuse instead.
+		for (const depth of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, 2 ** 60]) {
+			expect({ depth, env: runAtAgentDepth(depth, () => childAgentEnv()) }).toEqual({
+				depth,
+				env: { EIGHT_AGENT_DEPTH: String(MAX_AGENT_DEPTH + 1) },
+			});
+		}
+	});
+
+	test("a process deeper than MAX_AGENT_DEPTH is refused; up to MAX it runs", () => {
+		const script = `const m = await import(${INDEX}); console.log(JSON.stringify({ depth: m.processAgentDepth(), refusal: m.processAgentDepthRefusal() }));`;
+		const cases: Array<[string | undefined, number, boolean]> = [
+			[undefined, 0, false],
+			["0", 0, false],
+			["3", 3, false],
+			["4", 4, true],
+			["99", 99, true],
+			// #3331 parses an unreadable value as MAX: the process runs but cannot spawn.
+			["abc", MAX_AGENT_DEPTH, false],
+		];
+		for (const [value, depth, refused] of cases) {
+			const got = JSON.parse(inFreshProcess(value, script)) as {
+				depth: number;
+				refusal: string | null;
+			};
+			expect({ value, depth: got.depth, refused: got.refusal !== null }).toEqual({
+				value,
+				depth,
+				refused,
+			});
+			if (refused) {
+				expect(got.refusal).toStartWith("[AGENT DEPTH BLOCKED]");
+				expect(got.refusal).toContain(`EIGHT_AGENT_DEPTH=${value}`);
+				expect(got.refusal).toContain("MAX_AGENT_DEPTH is 3");
+			}
+		}
+		expect(processAgentDepthRefusal()).toBeNull();
+	});
+
+	test("the refusal has its own error class and exit code", () => {
+		const e = new AgentDepthError("[AGENT DEPTH BLOCKED] x");
+		expect(e).toBeInstanceOf(Error);
+		expect(e).toBeInstanceOf(AgentDepthError);
+		expect(e.name).toBe("AgentDepthError");
+		expect(e.message).toBe("[AGENT DEPTH BLOCKED] x");
+		expect(AGENT_DEPTH_EXIT_CODE).toBe(77);
+	});
+
+	test("a bun test started by an agent does not inherit the agent's depth (R1)", async () => {
+		const root = join(import.meta.dir, "..", "..");
+		const probeDir = mkdtempSync(join(tmpdir(), "depth-probe-"));
+		const probe = join(probeDir, "probe.test.ts");
+		await Bun.write(
+			probe,
+			`import { test } from "bun:test"; test("probe", async () => { const m = await import(${INDEX}); console.log("PROBE " + JSON.stringify({ env: process.env.EIGHT_AGENT_DEPTH ?? null, depth: m.currentAgentDepth() })); });`,
+		);
+		try {
+			const proc = Bun.spawnSync([process.execPath, "test", probe], {
+				cwd: root,
+				env: { ...process.env, EIGHT_AGENT_DEPTH: "4" },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const out = proc.stdout.toString() + proc.stderr.toString();
+			const line = out.split("\n").find((l) => l.startsWith("PROBE ")) ?? "";
+			expect(line).not.toBe("");
+			expect(JSON.parse(line.slice(6))).toEqual({ env: null, depth: 0 });
+			expect(proc.exitCode).toBe(0);
+		} finally {
+			rmSync(probeDir, { recursive: true, force: true });
+		}
 	});
 });
