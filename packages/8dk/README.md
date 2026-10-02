@@ -43,7 +43,7 @@ lower snake case without `__` (max 30), params are `string`, `number` or
 `boolean`. `confirm: true` asks the person on every call.
 
 Every manifest string reaches the consent prompt or the model, so it is
-bounded (`MANIFEST_LIMITS` in `manifest.ts`):
+bounded (`MANIFEST_LIMITS`, exported from the package):
 
 | Field | Limit |
 |-------|-------|
@@ -55,9 +55,22 @@ bounded (`MANIFEST_LIMITS` in `manifest.ts`):
 | capability description | 500 characters |
 | param description | 200 characters |
 
-Text containing control characters (newline, tab and ANSI escapes included),
-C1 controls, zero-width or directional marks, bidi embeddings, overrides or
-isolates is refused, not stripped.
+Text is refused, not stripped, if it contains a control character (Unicode
+category Cc: newline, tab, ANSI escapes, DEL, C1), any format character
+(category Cf: zero-width and directional marks, bidi embeddings, overrides and
+isolates, the word joiner, the soft hyphen, the Unicode tag block), a line or
+paragraph separator, the combining grapheme joiner, a Hangul filler, or a
+variation selector. These characters are invisible in a terminal, but a model
+reads them as text, so a device could show the person "Unlock the door" while
+the model's tool description carries hidden instructions. Accented letters,
+curly quotes and CJK text pass.
+
+One consequence: an emoji written with variation selector 16 (U+FE0F, the form
+most keyboards produce for symbols such as a heart or a thermometer) is refused
+in device text. A variation selector is invisible and can carry data, and
+telling a harmless one from a smuggled one needs the same judgement this rule
+exists to avoid. Emoji joined with a zero-width joiner were already refused.
+Use words, or the emoji's plain form without the selector.
 
 ## Pair, grant, call
 
