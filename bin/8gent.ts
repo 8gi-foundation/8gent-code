@@ -226,7 +226,41 @@ MACHINE INTEGRATION:
 Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
+/**
+ * Invocations a process past MAX_AGENT_DEPTH may still run (#3341): they never
+ * start a model loop. Deny by default, so a new subcommand is refused until it
+ * is added here. --rpc and --cli start model loops before any other check, so
+ * they are never exempt; --resume and --continue rewrite any command into a
+ * TUI launch, so a command carrying them is not exempt either.
+ */
+const DEPTH_EXEMPT_FLAGS = ["-h", "--help", "-v", "--version"];
+const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor"]);
+
+function depthExempt(args: string[]): boolean {
+	if (args.includes("--rpc") || args.includes("--cli")) return false;
+	if (DEPTH_EXEMPT_FLAGS.some((f) => args.includes(f))) return true;
+	if (args.includes("--resume") || args.includes("--continue")) return false;
+	return DEPTH_EXEMPT_COMMANDS.has(args[0] ?? "");
+}
+
 async function main() {
+	// A process started by an agent at MAX_AGENT_DEPTH does not start another
+	// model loop (#3341). First, before keys load and before --rpc / --cli,
+	// which start model loops without reaching the command switch.
+	// Unset or blank EIGHT_AGENT_DEPTH is depth 0 by the parser's own rule, so a
+	// user's session skips the import (about 20 ms); any other value, malformed
+	// included, goes through the fail-closed parse in orchestration.
+	if (process.env.EIGHT_AGENT_DEPTH?.trim()) {
+		const { AGENT_DEPTH_EXIT_CODE, processAgentDepthRefusal } = await import(
+			"../packages/orchestration/index.ts"
+		);
+		const depthRefusal = processAgentDepthRefusal();
+		if (depthRefusal && !depthExempt(process.argv.slice(2))) {
+			console.error(depthRefusal);
+			process.exit(AGENT_DEPTH_EXIT_CODE);
+		}
+	}
+
 	// Load API keys from ~/.8gent/keys.env into process.env BEFORE any
 	// subcommand reads provider config. Existing env vars win — a
 	// shell export or CI secret always overrides the file.
@@ -2748,7 +2782,16 @@ async function doctorCommand() {
 	);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+	// A refusal first seen at Agent construction (the backstop in
+	// packages/eight/agent.ts) exits like the entrypoint refusal: 77, clean message.
+	const { AGENT_DEPTH_EXIT_CODE, AgentDepthError } = await import(
+		"../packages/orchestration/index.ts"
+	).catch(() => ({ AGENT_DEPTH_EXIT_CODE: 1, AgentDepthError: null }));
+	if (AgentDepthError && error instanceof AgentDepthError) {
+		console.error(error.message);
+		process.exit(AGENT_DEPTH_EXIT_CODE);
+	}
 	console.error("Error:", error.message);
 	process.exit(1);
 });
