@@ -12,7 +12,12 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { selectBackend } from "./backend";
-import { DECK_TIMELINE, DECK_TIMELINE_SHIM, EightBrowserBackend } from "./eight-browser";
+import {
+	DECK_TIMELINE,
+	DECK_TIMELINE_SHIM,
+	EightBrowserBackend,
+	PROBE_TIMEOUT_MS,
+} from "./eight-browser";
 
 const TOKEN = "tok-3f1c9a7e-secret-never-printed";
 // A real 1x1 PNG, so capture() can check the signature.
@@ -34,6 +39,12 @@ interface MockOptions {
 	/** A hostile or buggy server that echoes the token in an error. */
 	leakToken?: boolean;
 	silentOn?: string;
+	/** A browser build from before PR #50: no render.* commands. */
+	oldBuild?: boolean;
+	/** Answer this cmd with a frame that is not JSON. */
+	garbageOn?: string;
+	/** Answer the auth frame with a frame that is not JSON. */
+	garbageAuth?: boolean;
 }
 
 /** Mirrors control-server.ts: refuse an Origin header, gate on the first frame. */
@@ -54,6 +65,10 @@ function mockServer(opts: MockOptions = {}) {
 				const msg = JSON.parse(String(raw)) as Frame;
 				frames.push(msg);
 				if (!ws.data.authed) {
+					if (opts.garbageAuth) {
+						ws.send("<html>not json</html>");
+						return;
+					}
 					if (msg.type === "auth" && msg.token === TOKEN) {
 						ws.data.authed = true;
 						ws.send(JSON.stringify({ type: "auth_ok" }));
@@ -65,6 +80,14 @@ function mockServer(opts: MockOptions = {}) {
 				}
 				const { id, cmd } = msg;
 				if (cmd === opts.silentOn) return;
+				if (cmd === opts.garbageOn) {
+					ws.send("<html>not json</html>");
+					return;
+				}
+				if (opts.oldBuild && String(cmd).startsWith("render.")) {
+					ws.send(JSON.stringify({ id, ok: false, error: `unknown cmd: ${cmd}` }));
+					return;
+				}
 				if (cmd === opts.failOn) {
 					ws.send(
 						JSON.stringify({
@@ -196,6 +219,21 @@ describe("8gent Browser backend: protocol", () => {
 		await s.close();
 	});
 
+	test("a non-JSON frame fails the pending call at once, during auth or after it", async () => {
+		const t0 = Date.now();
+		const auth = setup({ garbageAuth: true }, { callTimeoutMs: 5000, connectTimeoutMs: 5000 });
+		const r = await auth.backend.available();
+		expect(r.ok).toBe(false);
+		expect(r.reason).toMatch(/non-JSON frame during auth/);
+
+		const { backend } = setup({ garbageOn: "render.seek" }, { callTimeoutMs: 5000 });
+		const s = await backend.open(deck(), { width: 320, height: 180 });
+		await expect(s.show(0)).rejects.toThrow(/non-JSON frame/);
+		await s.close();
+		// Both failed on the frame, not on the 5 s timeouts.
+		expect(Date.now() - t0).toBeLessThan(2000);
+	});
+
 	test("a closed session refuses further work", async () => {
 		const { backend } = setup();
 		const s = await backend.open(deck(), { width: 320, height: 180 });
@@ -242,6 +280,32 @@ describe("8gent Browser backend: available()", () => {
 		expect(url.startsWith(roots) || url.startsWith(realpathSync(roots))).toBe(true);
 		expect(Number(frames[1].args?.width)).toBeGreaterThanOrEqual(16); // server minimum
 		expect(existsSync(url)).toBe(false);
+	});
+
+	test("an old browser build without render.* says which install to run", async () => {
+		const { backend } = setup({ oldBuild: true });
+		const r = await backend.available();
+		expect(r.ok).toBe(false);
+		expect(r.reason).toMatch(/unknown cmd: render\.open/);
+		expect(r.reason).toMatch(/#50 build/);
+		expect(r.reason).toMatch(/install-local\.sh/);
+		await expect(backend.open(deck(), { width: 320, height: 180 })).rejects.toThrow(
+			/install-local\.sh/,
+		);
+	});
+
+	test("the probe has its own short timeout, not the long call timeout", async () => {
+		expect(PROBE_TIMEOUT_MS).toBe(15_000);
+		expect(PROBE_TIMEOUT_MS).toBeLessThan(90_000); // the default call timeout
+		const t0 = Date.now();
+		const { backend } = setup(
+			{ silentOn: "render.open" },
+			{ callTimeoutMs: 60_000, probeTimeoutMs: 150 },
+		);
+		const r = await backend.available();
+		expect(r.ok).toBe(false);
+		expect(r.reason).toMatch(/render.open timed out after 150 ms/);
+		expect(Date.now() - t0).toBeLessThan(2000);
 	});
 
 	test("a wrong token is an honest reason that never contains either token", async () => {

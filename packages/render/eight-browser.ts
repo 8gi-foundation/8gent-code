@@ -40,6 +40,14 @@ export const DECK_TIMELINE_SHIM = `<script>(function(){window.__timelines=window
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 /** render-host.ts caps: dimensions 16-7680. */
 const MIN_DIM = 16;
+/**
+ * available() runs during backend selection, so a busy or hung browser must not
+ * stall it for the 90 s a deck's render.open may legitimately take.
+ */
+export const PROBE_TIMEOUT_MS = 15_000;
+/** A browser from before 8gent-browser PR #50 has no render.* commands. */
+const OLD_BUILD_HINT =
+	"this 8gent Browser predates render.*: install the 8gent-browser PR #50 build with its scripts/install-local.sh (~/.8gent/bin/install-8gent-browser.sh runs it)";
 
 export interface EightBrowserOptions {
 	env?: Env;
@@ -50,9 +58,21 @@ export interface EightBrowserOptions {
 	connectTimeoutMs?: number;
 	/** render.open waits up to 50 s for load and fonts on the server side. */
 	callTimeoutMs?: number;
+	/** Per-call timeout for the available() probe. Defaults to PROBE_TIMEOUT_MS. */
+	probeTimeoutMs?: number;
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Parse a server frame; null when it is not a JSON object. */
+function parseFrame<T>(raw: string): T | null {
+	try {
+		const v = JSON.parse(raw) as unknown;
+		return v !== null && typeof v === "object" ? (v as T) : null;
+	} catch {
+		return null;
+	}
+}
 
 /** One authenticated control connection. */
 class ControlClient {
@@ -98,8 +118,9 @@ class ControlClient {
 			ws.onclose = () => fail(new Error(`${url} closed the connection during auth`));
 			ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token: this.token }));
 			ws.onmessage = (ev) => {
-				const m = JSON.parse(String(ev.data)) as { type?: string; error?: string };
-				if (m.type === "auth_ok") {
+				const m = parseFrame<{ type?: string; error?: string }>(String(ev.data));
+				if (!m) fail(new Error("8gent Browser sent a non-JSON frame during auth"));
+				else if (m.type === "auth_ok") {
 					clearTimeout(timer);
 					ws.onmessage = (e2) => this.onMessage(String(e2.data));
 					ws.onclose = () => this.failAll(new Error("8gent Browser closed the control connection"));
@@ -112,12 +133,17 @@ class ControlClient {
 	}
 
 	private onMessage(raw: string): void {
-		const m = JSON.parse(raw) as { id?: number; ok?: boolean; result?: unknown; error?: string };
+		const m = parseFrame<{ id?: number; ok?: boolean; result?: unknown; error?: string }>(raw);
+		// No id to route it by, so fail everything in flight now rather than at the timeout.
+		if (!m) return this.failAll(new Error("8gent Browser sent a non-JSON frame on the control connection"));
 		const p = typeof m.id === "number" ? this.pending.get(m.id) : undefined;
 		if (!p) return;
 		this.pending.delete(m.id as number);
 		if (m.ok) p.ok(m.result);
-		else p.err(new Error(this.clean(String(m.error ?? "unknown error"))));
+		else {
+			const msg = this.clean(String(m.error ?? "unknown error"));
+			p.err(new Error(/^unknown cmd: render\./.test(msg) ? `${msg}; ${OLD_BUILD_HINT}` : msg));
+		}
 	}
 
 	private failAll(e: Error): void {
@@ -203,6 +229,7 @@ export class EightBrowserBackend implements RenderBackend {
 	readonly rendersRoot: string;
 	private readonly connectTimeoutMs: number;
 	private readonly callTimeoutMs: number;
+	private readonly probeTimeoutMs: number;
 
 	constructor(o: EightBrowserOptions = {}) {
 		const env = o.env ?? process.env;
@@ -213,10 +240,11 @@ export class EightBrowserBackend implements RenderBackend {
 		this.rendersRoot = resolve(o.rendersRoot ?? join(homedir(), ".8gent", "renders"));
 		this.connectTimeoutMs = o.connectTimeoutMs ?? 5000;
 		this.callTimeoutMs = o.callTimeoutMs ?? 90_000;
+		this.probeTimeoutMs = o.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
 	}
 
-	private client(): ControlClient {
-		return new ControlClient(this.port, this.tokenPath, this.connectTimeoutMs, this.callTimeoutMs);
+	private client(callTimeoutMs = this.callTimeoutMs): ControlClient {
+		return new ControlClient(this.port, this.tokenPath, this.connectTimeoutMs, callTimeoutMs);
 	}
 
 	/** Refuse what the browser would refuse, with a reason that says where decks go. */
@@ -242,7 +270,7 @@ export class EightBrowserBackend implements RenderBackend {
 	/** Auth, render.open of a tiny page under the root, render.close. The path that renders, nothing else. */
 	async available(): Promise<Availability> {
 		const dir = join(this.rendersRoot, `probe-${process.pid}-${Date.now()}`);
-		const c = this.client();
+		const c = this.client(this.probeTimeoutMs);
 		try {
 			await c.connect();
 			mkdirSync(dir, { recursive: true });
