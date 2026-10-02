@@ -154,6 +154,13 @@
         "typescript": "^5",
       },
     },
+    "packages/8dk": {
+      "name": "@8gent/8dk",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^5.3.0",
+      },
+    },
     "packages/audit": {
       "name": "@8gent/audit",
       "version": "0.17.3",
@@ -416,6 +423,8 @@
     },
   },
   "packages": {
+    "@8gent/8dk": ["@8gent/8dk@workspace:packages/8dk"],
+
     "@8gent/audit": ["@8gent/audit@workspace:packages/audit"],
 
     "@8gent/auth": ["@8gent/auth@workspace:packages/auth"],
