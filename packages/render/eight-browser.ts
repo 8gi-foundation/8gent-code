@@ -135,7 +135,10 @@ class ControlClient {
 	private onMessage(raw: string): void {
 		const m = parseFrame<{ id?: number; ok?: boolean; result?: unknown; error?: string }>(raw);
 		// No id to route it by, so fail everything in flight now rather than at the timeout.
-		if (!m) return this.failAll(new Error("8gent Browser sent a non-JSON frame on the control connection"));
+		if (!m) {
+			this.failAll(new Error("8gent Browser sent a non-JSON frame on the control connection"));
+			return;
+		}
 		const p = typeof m.id === "number" ? this.pending.get(m.id) : undefined;
 		if (!p) return;
 		this.pending.delete(m.id as number);
