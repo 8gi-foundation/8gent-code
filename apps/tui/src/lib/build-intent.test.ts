@@ -126,7 +126,7 @@ describe("detectBuildIntent - /build stays reachable for new one-page web things
 	];
 	for (const msg of newThings) {
 		test(`routed to /build: ${msg}`, () => {
-			expect(detectBuildIntent(msg)).not.toBeNull();
+			expect(detectBuildIntent(msg)).toBe(msg);
 		});
 	}
 });

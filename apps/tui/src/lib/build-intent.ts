@@ -51,9 +51,11 @@ const NON_HTML_FILE = /\b[\w-]+\.(?!html?\b)[a-z][a-z0-9]{0,4}\b/;
  *    ("sitemap xml", "slide deck", "docs"), with or without a file extension.
  *  - REPO_WORK: framework or git vocabulary, or "in the app/repo", which means
  *    work inside the user's codebase.
- *  - EXISTING_TARGET: "make the login page ..." / "create a PR for the
- *    dashboard changes" name a thing that already exists, so it is an edit.
- *    "rebuild the X" stays routable (an explicit rebuild of a page).
+ *  - EXISTING_TARGET: the verb is followed by the|our|my|this|these, as in
+ *    "make the login page match the new brand colours" or "build my
+ *    portfolio site with a contact form". That names a thing that already
+ *    exists, so it is an edit. "rebuild the X" stays routable (an explicit
+ *    rebuild of a page).
  */
 const NON_HTML_FORMAT =
 	/\b(xml|json|csv|ya?ml|markdown|md|pdf|marp|slides?|decks?|site ?maps?|readme|docs?|documentation)\b/;
