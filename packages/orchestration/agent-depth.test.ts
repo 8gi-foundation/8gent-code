@@ -81,7 +81,7 @@ describe("MAX_AGENT_DEPTH (#3331)", () => {
 		expect(results).toHaveLength(4);
 		const refused = results.filter((r) => !r.startsWith("{"));
 		expect(refused).toHaveLength(1);
-		expect(refused[0]).toStartWith("[AGENT DEPTH LIMIT]");
+		expect(refused[0]).toStartWith("[AGENT DEPTH BLOCKED]");
 		expect(refused[0]).toContain("MAX_AGENT_DEPTH is 3");
 		expect(refused[0]).toContain("depth 3");
 		for (const ok of results.filter((r) => r.startsWith("{")))
@@ -93,7 +93,7 @@ describe("MAX_AGENT_DEPTH (#3331)", () => {
 		const before = listCLIAgents().length;
 		for (const runtime of ["claude", "shell", "8gent"] as const) {
 			const out = await runAtAgentDepth(3, () => spawnAgentTool(dir, "true", runtime));
-			expect(out).toStartWith("[AGENT DEPTH LIMIT]");
+			expect(out).toStartWith("[AGENT DEPTH BLOCKED]");
 		}
 		expect(listCLIAgents().length).toBe(before);
 		expect(pool.listAgents()).toHaveLength(0);
@@ -153,9 +153,42 @@ describe("MAX_AGENT_DEPTH (#3331)", () => {
 		}
 		expect(results).toHaveLength(3);
 		expect(results[0]).toContain("MAX_AGENT_DEPTH is 3");
-		expect(results[1]).toStartWith("[AGENT DEPTH LIMIT]");
-		expect(results[2]).toStartWith("[AGENT DEPTH LIMIT]");
+		expect(results[1]).toStartWith("[AGENT DEPTH BLOCKED]");
+		expect(results[2]).toStartWith("[AGENT DEPTH BLOCKED]");
 		expect(pool.listAgents().map((a) => a.config.depth)).toEqual([3]);
+	});
+
+	test("EIGHT_AGENT_DEPTH is parsed fail-closed at load: unreadable means MAX, refused", () => {
+		// The value is read once at module load, so each case needs a fresh process.
+		const indexPath = join(import.meta.dir, "index.ts");
+		const script = `const m = await import(${JSON.stringify(indexPath)}); console.log(JSON.stringify({ depth: m.currentAgentDepth(), refused: m.agentDepthRefusal() !== null }));`;
+		const cases: Array<[string | undefined, number]> = [
+			[undefined, 0],
+			["", 0],
+			["2", 2],
+			["abc", MAX_AGENT_DEPTH],
+			["-1", MAX_AGENT_DEPTH],
+			["3.5", MAX_AGENT_DEPTH],
+			["1e309", MAX_AGENT_DEPTH],
+			["0x3", MAX_AGENT_DEPTH],
+			[" 3 ", 3],
+		];
+		for (const [value, expected] of cases) {
+			const { EIGHT_AGENT_DEPTH: _inherited, ...rest } = process.env;
+			const env = { ...rest, ...(value === undefined ? {} : { EIGHT_AGENT_DEPTH: value }) };
+			const proc = Bun.spawnSync([process.execPath, "-e", script], {
+				env,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const line = proc.stdout.toString().trim().split("\n").pop() ?? "";
+			const got = JSON.parse(line) as { depth: number; refused: boolean };
+			expect({ value, ...got }).toEqual({
+				value,
+				depth: expected,
+				refused: expected >= MAX_AGENT_DEPTH,
+			});
+		}
 	});
 
 	test("a process child (claude or shell runtime) is told its depth through EIGHT_AGENT_DEPTH", async () => {

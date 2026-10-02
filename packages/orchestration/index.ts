@@ -34,10 +34,17 @@ export const AGENT_DEPTH_ENV = "EIGHT_AGENT_DEPTH";
  * This process's own depth, read once at load: 0 for a user's session, N for
  * a process an agent at depth N-1 started. Read once, so nothing that runs in
  * the process later can lower it by changing the env.
+ *
+ * Fails closed: unset or empty is 0, but any value that is not a plain
+ * non-negative decimal integer (abc, -1, 3.5, 1e309, 0x3) is treated as
+ * MAX_AGENT_DEPTH, so a corrupted or tampered env can never reset the budget.
  */
 const PROCESS_AGENT_DEPTH = (() => {
-	const n = Number(process.env[AGENT_DEPTH_ENV]);
-	return Number.isInteger(n) && n > 0 ? n : 0;
+	const raw = process.env[AGENT_DEPTH_ENV]?.trim();
+	if (raw === undefined || raw === "") return 0;
+	if (!/^\d+$/.test(raw)) return MAX_AGENT_DEPTH;
+	const n = Number(raw);
+	return Number.isSafeInteger(n) ? n : MAX_AGENT_DEPTH;
 })();
 
 /** The depth of the agent whose call is in flight, bound by the pool around each child's run. */
@@ -60,7 +67,7 @@ export function runAtAgentDepth<T>(depth: number, fn: () => T): T {
 export function agentDepthRefusal(): string | null {
 	const depth = currentAgentDepth();
 	if (depth < MAX_AGENT_DEPTH) return null;
-	return `[AGENT DEPTH LIMIT] spawn_agent did NOT run: this agent is at depth ${depth} and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}, so it may not start another agent. Do the work yourself, or finish and report back to the agent that started you.`;
+	return `[AGENT DEPTH BLOCKED] spawn_agent did NOT run: this agent is at depth ${depth} and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}, so it may not start another agent. Do the work yourself, or finish and report back to the agent that started you.`;
 }
 
 // ============================================
