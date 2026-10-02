@@ -2381,12 +2381,14 @@ async function onboardCommand(args: string[]) {
 
 	// If --yes, auto-complete onboarding with defaults
 	if (flags.yes) {
+		// getUser() is a shallow copy: a top-level flag set on it never reaches
+		// disk (#3329). identity is a shared reference, so this default does.
 		const user = mgr.getUser();
 		if (!user.identity.communicationStyle) {
 			user.identity.communicationStyle = "concise";
 		}
-		user.onboardingComplete = true;
-		mgr.updatePreferences(user.preferences);
+		// skipAll() sets onboardingComplete and confidence, then writes user.json.
+		mgr.skipAll();
 	}
 
 	if (isJson) {
@@ -2688,22 +2690,39 @@ async function doctorCommand() {
 			issues++;
 		}
 	}
-	const dbPath = path.join(process.env.HOME || "", ".8gent", "memory.db");
+	// Paths mirror the stores that write them (#3328): packages/memory/index.ts,
+	// packages/self-autonomy/onboarding.ts, packages/settings/store.ts. These checks
+	// only read; they never create these files. (The NemoClaw check below still
+	// writes ~/.8gent/policy-checksum on first run, tracked in #3344.)
+	const eightDir = path.join(process.env.HOME || require("node:os").homedir(), ".8gent");
+	const dbPath = path.join(process.env.EIGHT_DATA_DIR || eightDir, "memory", "memory.db");
 	console.log(
 		fs.existsSync(dbPath)
 			? green(`Memory DB (${(fs.statSync(dbPath).size / 1024).toFixed(0)} KB)`)
 			: dim("  No memory DB yet"),
 	);
-	const cfgPath = path.join(process.env.HOME || "", ".8gent", "config.json");
+	const userPath = path.join(eightDir, "user.json");
+	if (fs.existsSync(userPath)) {
+		try {
+			const u = JSON.parse(fs.readFileSync(userPath, "utf-8"));
+			console.log(
+				green(`User profile (onboarding ${u.onboardingComplete ? "complete" : "incomplete"})`),
+			);
+		} catch {
+			console.log(red("User profile invalid JSON (~/.8gent/user.json)"));
+			issues++;
+		}
+	} else console.log(dim("  No user profile yet (run: 8gent onboard)"));
+	const cfgPath = path.join(eightDir, "settings.json");
 	if (fs.existsSync(cfgPath)) {
 		try {
 			JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-			console.log(green("Config valid"));
+			console.log(green("Settings valid"));
 		} catch {
-			console.log(red("Config invalid JSON"));
+			console.log(red("Settings invalid JSON (~/.8gent/settings.json)"));
 			issues++;
 		}
-	} else console.log(dim("  No config (using defaults)"));
+	} else console.log(dim("  No settings (using defaults)"));
 	try {
 		const { verifyPolicies } = await import("../packages/permissions/policy-engine.ts");
 		const r = verifyPolicies();
