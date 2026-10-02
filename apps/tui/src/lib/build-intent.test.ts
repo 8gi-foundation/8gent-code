@@ -93,6 +93,40 @@ describe("detectBuildIntent - repo tasks go to the agent, not the HTML pipeline 
 		expect(detectBuildIntent("make a short slide deck about the decide package")).toBeNull();
 		expect(detectBuildIntent("scaffold a new react component library")).toBeNull();
 		expect(detectBuildIntent("generate a sitemap xml for the marketing team")).toBeNull();
+		expect(detectBuildIntent("generate a sitemap xml for the marketing site")).toBeNull();
 		expect(detectBuildIntent("create a migration that adds an index to users")).toBeNull();
 	});
+});
+
+describe("detectBuildIntent - edits to existing code go to the agent loop (#3325)", () => {
+	const editAsks = [
+		"make the login page use dark mode",
+		"make the dashboard load faster",
+		"create a PR for the dashboard changes",
+		"build a demo of the new auth flow in the app",
+		"create a site map for the docs",
+		"build a react landing page with tailwind",
+	];
+	for (const msg of editAsks) {
+		test(`not routed to /build: ${msg}`, () => {
+			expect(detectBuildIntent(msg)).toBeNull();
+		});
+	}
+});
+
+describe("detectBuildIntent - /build stays reachable for new one-page web things (#3325)", () => {
+	const newThings = [
+		"make me a landing page for my bakery",
+		"build a snake game",
+		"create a portfolio website for a photographer",
+		"build a 3d solar system in three.js",
+		"make a 3D globe visualization",
+		"build a game in index.html",
+		"rebuild the dashboard with a dark theme",
+	];
+	for (const msg of newThings) {
+		test(`routed to /build: ${msg}`, () => {
+			expect(detectBuildIntent(msg)).not.toBeNull();
+		});
+	}
 });

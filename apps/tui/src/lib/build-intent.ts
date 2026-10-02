@@ -46,6 +46,22 @@ const REPO_PATH = /[\w.-]\/[\w.-]/;
 const NON_HTML_FILE = /\b[\w-]+\.(?!html?\b)[a-z][a-z0-9]{0,4}\b/;
 
 /**
+ * Other signals that the ask is not "a new one-page web thing" (#3323, #3325):
+ *  - NON_HTML_FORMAT: the output is a format the HTML pipeline can never emit
+ *    ("sitemap xml", "slide deck", "docs"), with or without a file extension.
+ *  - REPO_WORK: framework or git vocabulary, or "in the app/repo", which means
+ *    work inside the user's codebase.
+ *  - EXISTING_TARGET: "make the login page ..." / "create a PR for the
+ *    dashboard changes" name a thing that already exists, so it is an edit.
+ *    "rebuild the X" stays routable (an explicit rebuild of a page).
+ */
+const NON_HTML_FORMAT =
+	/\b(xml|json|csv|ya?ml|markdown|md|pdf|marp|slides?|decks?|site ?maps?|readme|docs?|documentation)\b/;
+const REPO_WORK =
+	/\b(react|vue|svelte|angular|next\.?js|tailwind|typescript|components?|prs?|pull requests?|commits?|branch(es)?|merge)\b|\b(in|into|inside) (the|our|my|this) (app|repo|codebase|project|code)\b/;
+const EXISTING_TARGET = /^[a-z]+\s+(the|our|my|this|these)\b/;
+
+/**
  * Returns the build task (the original message) when the message is a clear
  * imperative build request, or `null` when it is not and should go to the
  * normal agent.
@@ -76,6 +92,9 @@ export function detectBuildIntent(message: string): string | null {
 	if (!WEB_ARTIFACT.test(lower)) return null;
 	if (REPO_COMMAND.test(lower) || REPO_PATH.test(lower)) return null;
 	if (NON_HTML_FILE.test(lower.replace(/three\.js/g, "threejs"))) return null;
+
+	if (NON_HTML_FORMAT.test(lower) || REPO_WORK.test(lower)) return null;
+	if (firstWord !== "rebuild" && EXISTING_TARGET.test(stripped)) return null;
 
 	return trimmed;
 }
