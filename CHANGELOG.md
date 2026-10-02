@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - `8gent doctor` checks the files 8gent actually writes (#3328)
+- Doctor looked for `~/.8gent/memory.db` and `~/.8gent/config.json`, which the memory, onboarding and settings stores do not write, so it reported "No memory DB yet" and "No config" on a set-up machine. It now checks `~/.8gent/memory/memory.db` (or `$EIGHT_DATA_DIR/memory/memory.db`), `~/.8gent/user.json` with its onboarding state, and `~/.8gent/settings.json`. It still only reads; it creates nothing. `packages/settings/doctor-paths.test.ts` drives the CLI in a throwaway HOME before and after `onboard --yes` and `memory stats`.
+
 ### Fixed - spawn_agent cannot recurse past depth 3 (#3331)
 - An agent could start agents that started agents with no limit. `spawn_agent` (both tool surfaces) and `AgentPool.spawnAgent` now refuse once an agent is at `MAX_AGENT_DEPTH` (3), before anything starts. Depth follows each async context and passes to child processes in `EIGHT_AGENT_DEPTH`. A malformed `EIGHT_AGENT_DEPTH` counts as the maximum, not as 0. The refusal reads `[AGENT DEPTH BLOCKED]`, so the TUI tool trail shows it as blocked instead of "Started agent". Depth is not yet passed through `run_command` or `WorktreePoolAgent` (#3341, #3342).
 
