@@ -272,6 +272,229 @@ describe("Chrome backend: pure parts", () => {
 	});
 });
 
+/**
+ * A stand-in Chrome: a shell script that takes Chrome's argv, records it next to
+ * itself, writes a PNG header to --screenshot= and then behaves as `tail` says.
+ * It runs the real spawn, process-group and temp-dir code with no Chrome at all,
+ * so these tests run inside the sandbox and on CI.
+ */
+function fakeChrome(dir: string, tail: string): string {
+	const script = join(dir, "fake-chrome.sh");
+	writeFileSync(
+		script,
+		`#!/bin/sh
+here="$(cd "$(dirname "$0")" && pwd)"
+for a in "$@"; do
+	case "$a" in
+		--screenshot=*) png="\${a#--screenshot=}" ;;
+		--user-data-dir=*) prof="\${a#--user-data-dir=}" ;;
+	esac
+done
+printf '%s\\n' "$@" > "$here/args.txt"
+printf '%s' "$prof" > "$here/profile.txt"
+printf '%s' "$$" > "$here/leader.pid"
+mkdir -p "$prof"
+printf '\\211PNG' > "$png"
+${tail}
+`,
+		{ mode: 0o755 },
+	);
+	return script;
+}
+
+function alive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function waitUntil(cond: () => boolean, ms: number): Promise<boolean> {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		if (cond()) return true;
+		await Bun.sleep(25);
+	}
+	return cond();
+}
+
+const NETWORK_FLAGS = [
+	"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost",
+	"--proxy-server=127.0.0.1:9",
+];
+
+describe("Chrome backend: deck network is blocked by default (8SO R1)", () => {
+	const size = { width: 8, height: 8 };
+
+	test("chromeArgs carries both network-block flags by default", () => {
+		const args = chromeArgs("file:///tmp/d.html", "/tmp/o.png", "/tmp/p", size);
+		for (const flag of NETWORK_FLAGS) expect(args).toContain(flag);
+		expect(args[args.length - 1]).toBe("file:///tmp/d.html");
+	});
+
+	test("chromeArgs drops them only when allowNetwork is true", () => {
+		const off = chromeArgs("file:///tmp/d.html", "/tmp/o.png", "/tmp/p", size, {
+			allowNetwork: false,
+		});
+		for (const flag of NETWORK_FLAGS) expect(off).toContain(flag);
+		const on = chromeArgs("file:///tmp/d.html", "/tmp/o.png", "/tmp/p", size, {
+			allowNetwork: true,
+		});
+		for (const flag of NETWORK_FLAGS) expect(on).not.toContain(flag);
+		expect(
+			on.some((a) => a.startsWith("--host-resolver-rules") || a.startsWith("--proxy-server")),
+		).toBe(false);
+	});
+
+	test("the flags reach the launched process; allowNetwork on the backend removes them", async () => {
+		const work = mkdtempSync(join(tmpdir(), "render-net-"));
+		try {
+			const deck = join(work, "d.html");
+			writeFileSync(deck, "<html></html>");
+			const script = fakeChrome(work, "exit 0");
+			const argv = () => readFileSync(join(work, "args.txt"), "utf8").split("\n");
+
+			const locked = await new ChromeHeadlessBackend({ env: { EIGHT_CHROME_PATH: script } }).open(
+				deck,
+				size,
+			);
+			try {
+				await locked.capture();
+			} finally {
+				await locked.close();
+			}
+			for (const flag of NETWORK_FLAGS) expect(argv()).toContain(flag);
+
+			const open = await new ChromeHeadlessBackend({
+				env: { EIGHT_CHROME_PATH: script },
+				allowNetwork: true,
+			}).open(deck, size);
+			try {
+				await open.capture();
+			} finally {
+				await open.close();
+			}
+			for (const flag of NETWORK_FLAGS) expect(argv()).not.toContain(flag);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("Chrome backend: process and temp-dir edges (8SO R3)", () => {
+	const size = { width: 8, height: 8 };
+
+	test("helpers left in the group are killed even after the leader has exited", async () => {
+		const work = mkdtempSync(join(tmpdir(), "render-grp-"));
+		try {
+			const deck = join(work, "d.html");
+			writeFileSync(deck, "<html></html>");
+			// The leader exits on its own (no "bytes written" line), leaving a helper behind.
+			const script = fakeChrome(
+				work,
+				`sleep 30 >/dev/null 2>&1 &
+printf '%s' "$!" > "$here/helper.pid"
+exit 0`,
+			);
+			const session = await new ChromeHeadlessBackend({ env: { EIGHT_CHROME_PATH: script } }).open(
+				deck,
+				size,
+			);
+			try {
+				await session.capture();
+			} finally {
+				await session.close();
+			}
+			const helper = Number(readFileSync(join(work, "helper.pid"), "utf8"));
+			expect(helper).toBeGreaterThan(0);
+			expect(await waitUntil(() => !alive(helper), 2000)).toBe(true);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+
+	test("a Chrome that ignores SIGTERM is hard-killed, and capture waits for it to exit", async () => {
+		const work = mkdtempSync(join(tmpdir(), "render-kill-"));
+		try {
+			const deck = join(work, "d.html");
+			writeFileSync(deck, "<html></html>");
+			// Like recent macOS Chrome: prints, then lingers. This one also ignores SIGTERM.
+			const script = fakeChrome(
+				work,
+				`trap '' TERM
+echo "4 bytes written to file $png"
+while :; do sleep 0.1; done`,
+			);
+			const session = await new ChromeHeadlessBackend({ env: { EIGHT_CHROME_PATH: script } }).open(
+				deck,
+				size,
+			);
+			const started = Date.now();
+			try {
+				const png = await session.capture();
+				expect([...png.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+			} finally {
+				await session.close();
+			}
+			// Resolved only once the SIGKILL landed, not straight after the SIGTERM.
+			expect(Date.now() - started).toBeGreaterThanOrEqual(2500);
+			const leader = Number(readFileSync(join(work, "leader.pid"), "utf8"));
+			expect(alive(leader)).toBe(false);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	test("the probe waits for Chrome to exit before deleting its temp dir", async () => {
+		const work = mkdtempSync(join(tmpdir(), "render-probe-"));
+		try {
+			// On SIGTERM it keeps writing into its profile for a moment, as a dying Chrome can.
+			const script = fakeChrome(
+				work,
+				`trap 'sleep 0.3; mkdir -p "$prof/late"; : > "$prof/late/x"; exit 0' TERM
+echo "4 bytes written to file $png"
+while :; do sleep 0.05 & wait $!; done`,
+			);
+			const r = await new ChromeHeadlessBackend({ env: { EIGHT_CHROME_PATH: script } }).available();
+			expect(r).toEqual({ ok: true });
+			const profile = readFileSync(join(work, "profile.txt"), "utf8");
+			expect(profile).toContain("8gent-render-probe-");
+			await Bun.sleep(700);
+			expect(existsSync(profile)).toBe(false);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	test("a session dir is removed when the caller throws before close()", () => {
+		const work = mkdtempSync(join(tmpdir(), "render-throw-"));
+		try {
+			const deck = join(work, "d.html");
+			writeFileSync(deck, "<html></html>");
+			const main = join(work, "caller.ts");
+			writeFileSync(
+				main,
+				`import { ChromeHeadlessBackend } from ${JSON.stringify(join(import.meta.dir, "chrome.ts"))};
+const backend = new ChromeHeadlessBackend({ env: { EIGHT_CHROME_PATH: "/bin/sh" } });
+const session = await backend.open(${JSON.stringify(deck)}, { width: 1, height: 1 });
+console.log((session as unknown as { workDir: string }).workDir);
+throw new Error("caller failed before close");
+`,
+			);
+			const run = Bun.spawnSync([process.execPath, main], { stdout: "pipe", stderr: "pipe" });
+			expect(run.exitCode).not.toBe(0);
+			expect(run.stderr.toString()).toContain("caller failed before close");
+			const dir = run.stdout.toString().trim();
+			expect(dir).toContain("8gent-render-");
+			expect(existsSync(dir)).toBe(false);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
 // Real path. Outside the sandbox: EIGHT_RENDER_E2E=1 bun test packages/render
 describe.skipIf(process.env.EIGHT_RENDER_E2E !== "1")(
 	"Chrome backend: real launch (EIGHT_RENDER_E2E=1)",

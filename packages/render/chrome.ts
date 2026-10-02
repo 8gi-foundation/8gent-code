@@ -16,6 +16,17 @@
  *
  * Chrome has no seek, so a session is one launch per capture, with the slide
  * passed as `#slide=k` (the deck2video capture-shim convention).
+ *
+ * Trust boundary. This backend renders only HTML our own pipeline generated,
+ * never HTML taken straight from a model or a third party. The page loads from
+ * file://, and while its scripts cannot read other files, Chrome still lets a
+ * file:// page embed other local files for display (an <iframe> or <img> of any
+ * path), and that content lands in the PNG, which becomes a posted video frame.
+ * No flag closes that. TODO(#3352): serve the deck from a loopback HTTP origin
+ * that serves only the deck directory, so file:// is never the page origin.
+ *
+ * Network. The page gets no network unless the caller passes allowNetwork: every
+ * host but localhost resolves to nothing, and a dead proxy catches literal IPs.
  */
 
 import { spawn } from "node:child_process";
@@ -42,6 +53,22 @@ const CHROME_CANDIDATES = [
 /** Settle time before the shot, in virtual ms. Same value bake.ts uses. */
 export const SETTLE_MS = 2000;
 const SHOT_TIMEOUT_MS = 60_000;
+/** SIGTERM to SIGKILL. */
+const HARD_KILL_MS = 3000;
+/** How long to wait for the leader to exit after the SIGKILL before giving up. */
+const EXIT_WAIT_MS = HARD_KILL_MS + 2000;
+
+/** Blocks the page's own network. Chrome's background traffic is off separately. */
+export const NETWORK_BLOCK_ARGS: readonly string[] = [
+	"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost",
+	// Belt and braces for literal IPs, which skip the resolver: port 9 is discard.
+	"--proxy-server=127.0.0.1:9",
+];
+
+export interface ChromeOptions {
+	/** Let the deck reach the network. Off by default; a caller that needs it says so. */
+	allowNetwork?: boolean;
+}
 
 export function findChrome(env: Env = process.env): string | null {
 	const override = env.EIGHT_CHROME_PATH?.trim();
@@ -55,7 +82,13 @@ export function slideUrl(htmlPath: string, slide: number | null): string {
 	return slide === null ? href : `${href}#slide=${slide}`;
 }
 
-export function chromeArgs(url: string, png: string, profile: string, size: RenderSize): string[] {
+export function chromeArgs(
+	url: string,
+	png: string,
+	profile: string,
+	size: RenderSize,
+	options: ChromeOptions = {},
+): string[] {
 	return [
 		"--headless=new",
 		"--disable-gpu",
@@ -64,6 +97,7 @@ export function chromeArgs(url: string, png: string, profile: string, size: Rend
 		"--no-default-browser-check",
 		"--disable-extensions",
 		"--disable-background-networking",
+		...(options.allowNetwork === true ? [] : NETWORK_BLOCK_ARGS),
 		"--disable-component-update",
 		"--disable-sync",
 		"--disable-breakpad",
@@ -78,10 +112,23 @@ export function chromeArgs(url: string, png: string, profile: string, size: Rend
 	];
 }
 
+/** Signal every process in the group. False once the group is empty. */
+function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+	try {
+		process.kill(-pid, signal);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * One screenshot. Resolves once the PNG exists. Chrome prints "bytes written to
- * file" and may then linger, so we end the process group we started ourselves.
- * Only our own child is signalled, never a name match.
+ * One screenshot. Chrome prints "bytes written to file" and may then linger, so
+ * once the PNG exists we end the process group we started ourselves, even if the
+ * leader already exited (its helpers can outlive it). Only our own group is
+ * signalled, never a name match. Resolves only after the leader has exited (or
+ * EXIT_WAIT_MS has passed), so callers can delete the profile without a live
+ * Chrome writing into it again.
  */
 function screenshot(
 	chrome: string,
@@ -89,37 +136,41 @@ function screenshot(
 	png: string,
 	profile: string,
 	size: RenderSize,
+	options: ChromeOptions,
 ): Promise<void> {
 	return new Promise((resolvePromise, reject) => {
-		const child = spawn(chrome, chromeArgs(url, png, profile, size), {
+		const child = spawn(chrome, chromeArgs(url, png, profile, size, options), {
 			detached: true,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let log = "";
+		let outcome: { err?: Error } | null = null;
+		let exited = false;
 		let settled = false;
+		let hard: ReturnType<typeof setTimeout> | undefined;
+		let exitWait: ReturnType<typeof setTimeout> | undefined;
+
+		const settle = () => {
+			if (settled || !outcome) return;
+			settled = true;
+			clearTimeout(exitWait);
+			if (outcome.err) reject(outcome.err);
+			else resolvePromise();
+		};
 		const stop = () => {
-			if (child.pid === undefined || child.exitCode !== null) return;
-			try {
-				process.kill(-child.pid, "SIGTERM");
-			} catch {
-				// Already gone.
-			}
-			const hard = setTimeout(() => {
-				try {
-					if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
-				} catch {
-					// Already gone.
-				}
-			}, 3000);
-			hard.unref();
+			const pid = child.pid;
+			if (pid === undefined) return;
+			signalGroup(pid, "SIGTERM");
+			// Not unref'd: a short-lived CLI must not exit before the SIGKILL lands.
+			hard = setTimeout(() => signalGroup(pid, "SIGKILL"), HARD_KILL_MS);
 		};
 		const finish = (err?: Error) => {
-			if (settled) return;
-			settled = true;
+			if (outcome) return;
+			outcome = { err };
 			clearTimeout(timer);
 			stop();
-			if (err) reject(err);
-			else resolvePromise();
+			if (exited || child.pid === undefined) settle();
+			else exitWait = setTimeout(settle, EXIT_WAIT_MS);
 		};
 		const timer = setTimeout(
 			() => finish(new Error("headless Chrome timed out taking a screenshot")),
@@ -133,6 +184,7 @@ function screenshot(
 		child.stderr?.on("data", onData);
 		child.on("error", (err) => finish(new Error(`could not start Chrome: ${err.message}`)));
 		child.on("exit", (code) => {
+			exited = true;
 			if (existsSync(png)) finish();
 			else {
 				const tail = log.trim().split("\n").slice(-2).join(" ");
@@ -142,7 +194,25 @@ function screenshot(
 					),
 				);
 			}
+			// The group is empty once the leader and every helper are gone: skip the SIGKILL.
+			if (child.pid !== undefined && !signalGroup(child.pid, 0)) clearTimeout(hard);
+			settle();
 		});
+	});
+}
+
+/**
+ * Session dirs not yet closed. Removed at process exit, so a caller that throws
+ * before close() does not leak one. Callers should still close() in a finally.
+ */
+const openDirs = new Set<string>();
+let exitHookInstalled = false;
+function trackDir(dir: string): void {
+	openDirs.add(dir);
+	if (exitHookInstalled) return;
+	exitHookInstalled = true;
+	process.on("exit", () => {
+		for (const d of openDirs) rmSync(d, { recursive: true, force: true });
 	});
 }
 
@@ -157,7 +227,10 @@ export class ChromeSession implements RenderSession {
 		private readonly size: RenderSize,
 		/** Owned by this session; close() removes it. */
 		readonly workDir: string,
-	) {}
+		private readonly options: ChromeOptions = {},
+	) {
+		trackDir(workDir);
+	}
 
 	async show(slide: number): Promise<void> {
 		if (this.closed) throw new Error("render session is closed");
@@ -173,6 +246,7 @@ export class ChromeSession implements RenderSession {
 			png,
 			join(this.workDir, "profile"),
 			this.size,
+			this.options,
 		);
 		const bytes = readFileSync(png);
 		rmSync(png, { force: true });
@@ -182,16 +256,19 @@ export class ChromeSession implements RenderSession {
 	async close(): Promise<void> {
 		this.closed = true;
 		rmSync(this.workDir, { recursive: true, force: true });
+		openDirs.delete(this.workDir);
 	}
 }
 
 export class ChromeHeadlessBackend implements RenderBackend {
 	readonly name = "chrome-headless" as const;
 	private readonly env: Env;
+	private readonly options: ChromeOptions;
 	private probed: Promise<Availability> | null = null;
 
-	constructor(options: { env?: Env } = {}) {
+	constructor(options: { env?: Env } & ChromeOptions = {}) {
 		this.env = options.env ?? process.env;
+		this.options = { allowNetwork: options.allowNetwork === true };
 	}
 
 	/** A real 1x1 launch, memoised per instance. Finding the binary is not enough. */
@@ -224,6 +301,7 @@ export class ChromeHeadlessBackend implements RenderBackend {
 					width: 1,
 					height: 1,
 				},
+				this.options,
 			);
 			return { ok: true };
 		} catch (err) {
@@ -241,6 +319,12 @@ export class ChromeHeadlessBackend implements RenderBackend {
 		if (!chrome) throw new Error("no Chrome binary found; set EIGHT_CHROME_PATH");
 		const abs = resolve(htmlPath);
 		if (!existsSync(abs)) throw new Error(`no such document: ${abs}`);
-		return new ChromeSession(chrome, abs, size, mkdtempSync(join(tmpdir(), "8gent-render-")));
+		return new ChromeSession(
+			chrome,
+			abs,
+			size,
+			mkdtempSync(join(tmpdir(), "8gent-render-")),
+			this.options,
+		);
 	}
 }

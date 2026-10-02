@@ -43,7 +43,11 @@ export interface RenderSession {
 	show(slide: number): Promise<void>;
 	/** PNG bytes of what is currently shown. */
 	capture(): Promise<Uint8Array>;
-	/** Release everything the session holds. Safe to call more than once. */
+	/**
+	 * Release everything the session holds. Safe to call more than once. Callers
+	 * close in a finally: a backend may clean up at process exit as a backstop,
+	 * but a long-lived process that drops a session without close() leaks it.
+	 */
 	close(): Promise<void>;
 }
 
