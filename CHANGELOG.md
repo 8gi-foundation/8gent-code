@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - `8gent onboard --yes` marks onboarding complete (#3329)
+- `8gent onboard --yes` set the completion flag on a copy of the profile, so it never reached `~/.8gent/user.json`: `preferences get` kept saying "Onboarded: no", `status` said `onboarded: false`, and the command still printed "Run with --yes". It now completes onboarding through the onboarding manager, which writes the flag and confidence score to disk. The interactive path is unchanged. `packages/self-autonomy/onboard-yes.test.ts` runs the real command in a throwaway home.
+
 ### Fixed - spawn_agent cannot recurse past depth 3 (#3331)
 - An agent could start agents that started agents with no limit. `spawn_agent` (both tool surfaces) and `AgentPool.spawnAgent` now refuse once an agent is at `MAX_AGENT_DEPTH` (3), before anything starts. Depth follows each async context and passes to child processes in `EIGHT_AGENT_DEPTH`. A malformed `EIGHT_AGENT_DEPTH` counts as the maximum, not as 0. The refusal reads `[AGENT DEPTH BLOCKED]`, so the TUI tool trail shows it as blocked instead of "Started agent". Depth is not yet passed through `run_command` or `WorktreePoolAgent` (#3341, #3342).
 
