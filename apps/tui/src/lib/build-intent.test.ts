@@ -130,3 +130,50 @@ describe("detectBuildIntent - /build stays reachable for new one-page web things
 		});
 	}
 });
+
+describe("detectBuildIntent - the exact l2-solo-deck pilot prompt stays with the agent loop (#3325)", () => {
+	// Verbatim from the Rishi pilot scenario l2-solo-deck. On main 818d48f7 it
+	// was routed to /build, the engineer tried to emit an HTML file, and the
+	// turn timed out at 900 s without writing deck/ (run 2026-10-02_221808).
+	const pilotPrompt =
+		"Make a short slide deck about the package in packages/decide. First read packages/decide to understand it. " +
+		"Then write a 5 point outline to deck/outline.md. Then write the deck as Marp markdown to deck/deck.md, " +
+		"with marp: true in the front matter and at least 5 slides separated by ---. " +
+		"Then run `ls deck` and `wc -l deck/deck.md` and tell me what you made.";
+
+	test("the verbatim pilot prompt is not routed", () => {
+		expect(detectBuildIntent(pilotPrompt)).toBeNull();
+	});
+
+	test("the pilot prompt is not routed with polite framing either", () => {
+		expect(detectBuildIntent(`can you ${pilotPrompt.charAt(0).toLowerCase()}${pilotPrompt.slice(1)}`)).toBeNull();
+	});
+
+	const namedFilesAndCommands = [
+		"create notes/summary.md from the README and run `cat notes/summary.md`",
+		"make a CHANGELOG.md entry for the dashboard fix and run `git diff`",
+		"generate docs for the landing page in docs/landing.md",
+		"build the demo page again and run `bun test` afterwards",
+		"make the hero page title bigger in src/pages/hero.tsx",
+	];
+	for (const msg of namedFilesAndCommands) {
+		test(`named files or commands stay with the agent: ${msg}`, () => {
+			expect(detectBuildIntent(msg)).toBeNull();
+		});
+	}
+});
+
+describe("detectBuildIntent - genuinely new apps and games still reach /build (#3325)", () => {
+	const newAppsAndGames = [
+		"build a new pomodoro timer web app as a single page",
+		"make me a tetris game",
+		"create a breakout game with neon colours",
+		"build an interactive 3d demo of the solar system",
+		"make me a landing page for a dog walking business",
+	];
+	for (const msg of newAppsAndGames) {
+		test(`routed to /build: ${msg}`, () => {
+			expect(detectBuildIntent(msg)).toBe(msg);
+		});
+	}
+});
