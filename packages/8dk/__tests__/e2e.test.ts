@@ -197,3 +197,167 @@ describe("8DK end to end", () => {
 		]);
 	});
 });
+
+describe("state is re-read after the approval prompt (8SO F1)", () => {
+	const strobe = (id: string) => deviceToolName(id, "strobe");
+
+	test("revoke during the confirm prompt denies, and the device is never called", async () => {
+		const { lamp, registry, adapter } = await setup("revoke-lamp", ["strobe"]);
+		const res = await adapter.execute(
+			strobe("revoke-lamp"),
+			{},
+			{
+				...ctx,
+				approve: async () => {
+					registry.revoke("revoke-lamp", "strobe");
+					return true;
+				},
+			},
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.reason).toMatch(/\[8dk-deny\].*revoked before the call/);
+		expect(lamp.state.calls).toEqual([]);
+	});
+
+	test("unpair during the confirm prompt denies, and the device is never called", async () => {
+		const { lamp, registry, adapter } = await setup("unpair-lamp", ["strobe"]);
+		const res = await adapter.execute(
+			strobe("unpair-lamp"),
+			{},
+			{
+				...ctx,
+				approve: async () => {
+					registry.unpair("unpair-lamp");
+					return true;
+				},
+			},
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.reason).toMatch(/\[8dk-deny\].*unpaired or paired again/);
+		expect(lamp.state.calls).toEqual([]);
+	});
+
+	test("re-pair during the confirm prompt denies, even with the same grant", async () => {
+		const { lamp, registry, adapter } = await setup("repair-lamp", ["strobe"]);
+		const res = await adapter.execute(
+			strobe("repair-lamp"),
+			{},
+			{
+				...ctx,
+				approve: async () => {
+					const again = await registry.pair(lamp.device.manifest, {
+						consent: async () => ({ approved: true, grant: ["strobe"] }),
+					});
+					expect(again.ok).toBe(true);
+					expect(registry.isGranted("repair-lamp", "strobe")).toBe(true);
+					return true;
+				},
+			},
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.reason).toMatch(/\[8dk-deny\].*unpaired or paired again/);
+		expect(lamp.state.calls).toEqual([]);
+	});
+
+	test("revoke during a require_approval prompt denies too", async () => {
+		addPolicy({
+			name: "test-approve-toctou-lamp",
+			action: "device_use",
+			condition: "deviceId equals toctou-lamp",
+			decision: "require_approval",
+			message: "toctou-lamp needs a yes",
+		});
+		const { lamp, registry, adapter } = await setup("toctou-lamp", ["set_light"]);
+		const res = await adapter.execute(
+			deviceToolName("toctou-lamp", "set_light"),
+			{ on: true },
+			{
+				...ctx,
+				approve: async () => {
+					registry.revoke("toctou-lamp", "set_light");
+					return true;
+				},
+			},
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.reason).toMatch(/revoked before the call/);
+		expect(lamp.state.calls).toEqual([]);
+	});
+});
+
+describe("the person approves exactly what is sent (8SO F4)", () => {
+	addPolicy({
+		name: "test-approve-vet-lamp",
+		action: "device_use",
+		condition: "deviceId equals vet-lamp",
+		decision: "require_approval",
+		message: "vet-lamp needs a yes",
+	});
+	const setLight = deviceToolName("vet-lamp", "set_light");
+
+	test("invalid input is refused before anyone is asked", async () => {
+		const { lamp, adapter } = await setup("vet-lamp", ["set_light"]);
+		const asked: unknown[] = [];
+		const approve = async (req: { input: unknown }) => {
+			asked.push(req.input);
+			return true;
+		};
+		for (const input of [
+			{ on: "yes" },
+			{ on: true, colour: "red" },
+			{ on: true, constructor: "x" },
+			JSON.parse('{"on":true,"__proto__":{"polluted":1}}'),
+			{},
+		]) {
+			const res = await adapter.execute(setLight, input, { ...ctx, approve });
+			expect(res.ok).toBe(false);
+			if (!res.ok) expect(res.reason).toMatch(/^\[8dk-deny\]/);
+		}
+		const fn = await adapter.execute(setLight, { on: true, cb: () => 1 } as never, {
+			...ctx,
+			approve,
+		});
+		expect(fn).toEqual({ ok: false, reason: "[8dk-deny] input must be plain data" });
+		expect(asked).toEqual([]);
+		expect(lamp.state.calls).toEqual([]);
+	});
+
+	test("the approver sees a validated copy, and changing the original after the call starts changes nothing", async () => {
+		const { lamp, adapter } = await setup("vet-lamp", ["set_light"]);
+		const original: Record<string, unknown> = { on: true, brightness: 80 };
+		let seen: unknown;
+		const res = await adapter.execute(setLight, original, {
+			...ctx,
+			approve: async (req) => {
+				seen = req.input;
+				// The caller still holds the reference and changes it while the prompt is open.
+				original.on = false;
+				original.brightness = 5;
+				return true;
+			},
+		});
+		expect(seen).not.toBe(original);
+		expect(seen).toEqual({ on: true, brightness: 80 });
+		expect(Object.isFrozen(seen)).toBe(true);
+		expect(res).toEqual({ ok: true, result: { on: true, brightness: 80 } });
+		expect(lamp.state).toMatchObject({ on: true, brightness: 80, calls: ["set_light"] });
+	});
+
+	test("an approver cannot rewrite what it approved", async () => {
+		const { lamp, adapter } = await setup("vet-lamp", ["set_light"]);
+		const res = await adapter.execute(
+			setLight,
+			{ on: true },
+			{
+				...ctx,
+				approve: async (req) => {
+					(req.input as Record<string, unknown>).on = false;
+					return true;
+				},
+			},
+		);
+		// Strict-mode write to a frozen object throws, the approval rejects, and the call is denied.
+		expect(res.ok).toBe(false);
+		expect(lamp.state.calls).toEqual([]);
+	});
+});

@@ -123,8 +123,11 @@ export class CallCorrelator implements DeviceLink {
 export function serveDevice(device: DeviceDefinition, send: (frame: DeviceFrame) => void) {
 	return async (frame: VesselFrame): Promise<void> => {
 		if (frame.type !== "device:invoke") return;
-		const handler = device.handlers[frame.capability];
-		if (!handler) {
+		// Own properties only: "constructor" or "toString" must never reach Object.prototype.
+		const handler = Object.hasOwn(device.handlers, frame.capability)
+			? device.handlers[frame.capability]
+			: undefined;
+		if (typeof handler !== "function") {
 			send({
 				type: "device:result",
 				callId: frame.callId,

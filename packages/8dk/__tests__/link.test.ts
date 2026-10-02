@@ -68,3 +68,33 @@ describe("call correlation over frames", () => {
 		expect(c.handle({ type: "device:result", callId, ok: true, result: 1 })).toBe(false);
 	});
 });
+
+describe("serveDevice only runs own handlers (8SO F2)", () => {
+	// A DeviceDefinition built by hand, as a third-party device might, with an
+	// ordinary object of handlers. Inherited names must not resolve to Object.prototype.
+	const lamp = createFakeLamp().device;
+	const handBuilt = { manifest: lamp.manifest, handlers: { ...lamp.handlers } };
+
+	for (const capability of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+		test(`an invoke for "${capability}" is an unknown capability, not Object(input)`, async () => {
+			for (const device of [handBuilt, lamp]) {
+				const sent: unknown[] = [];
+				const serve = serveDevice(device, (frame) => sent.push(frame));
+				await serve({
+					type: "device:invoke",
+					callId: "c1",
+					capability,
+					input: { probe: 1 },
+				});
+				expect(sent).toEqual([
+					{
+						type: "device:result",
+						callId: "c1",
+						ok: false,
+						error: `unknown capability "${capability}"`,
+					},
+				]);
+			}
+		});
+	}
+});
