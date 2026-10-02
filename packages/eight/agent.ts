@@ -26,6 +26,7 @@ import {
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
+import { AgentDepthError, processAgentDepthRefusal } from "../orchestration/index";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
@@ -249,6 +250,11 @@ export class Agent {
 	});
 
 	constructor(config: AgentConfig) {
+		// Backstop for #3341: no model loop in a process past MAX_AGENT_DEPTH,
+		// whichever entrypoint built it. Reads the PROCESS depth only, so an
+		// in-process pool child at MAX (bound by runAtAgentDepth) still runs.
+		const depthRefusal = processAgentDepthRefusal();
+		if (depthRefusal) throw new AgentDepthError(depthRefusal);
 		this.config = config;
 		this.events = config.events || {};
 		this.executor = new ToolExecutor(

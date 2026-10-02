@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - 8gent does not start a model loop past depth 3 (#3341)
+- A process started with `EIGHT_AGENT_DEPTH` above 3 (by an agent already at the maximum) now exits with code 77 and an `[AGENT DEPTH BLOCKED]` message on stderr instead of starting. This covers the TUI, `--cli`, `--rpc` and every other command. `--help`, `--version`, `outline`, `symbol`, `search` and `doctor` still run, since they never start a model. The `Agent` constructor refuses too, so entrypoints other than `8gent` are covered. A process at depth 3 still runs. `run_command` does not pass depth to its children yet; that follows in a later PR.
+
 ### Added - agent depth helpers for child processes (#3341)
 - `packages/orchestration` gains `childAgentEnv()` (the env a process an agent starts must carry: its depth, one deeper than the agent), `processAgentDepth()`, `processAgentDepthRefusal()`, `AgentDepthError` and `AGENT_DEPTH_EXIT_CODE` (77). Nothing calls them yet; `run_command` and the entrypoint refusal follow in later PRs. The test preload now clears `EIGHT_AGENT_DEPTH`, so a `bun test` started from an agent's shell runs at depth 0.
 
