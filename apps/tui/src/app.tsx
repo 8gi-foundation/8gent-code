@@ -158,6 +158,7 @@ import {
 	contextMeter,
 	resolveContextWindow,
 	stepContextUsed,
+	UNKNOWN_WINDOW,
 } from "./lib/context-window.js";
 import { formatSessionTime, formatTokens, hudTokens, msUntilSessionTimeChanges } from "./lib/format.js";
 import { truncate } from "./lib/text.js";
@@ -1404,17 +1405,23 @@ export function App({
 	useEffect(() => {
 		if (!windowTarget) return;
 		let cancelled = false;
+		const inFlight = new AbortController();
 		setContextWindow(null);
 		resolveContextWindow({
 			...windowTarget,
 			ollamaBaseUrl: resolveOllamaBaseUrl(),
 			llamaServerUrl: resolveLlamaServerUrl(),
-			openRouterKey: process.env.OPENROUTER_API_KEY,
-		}).then((w) => {
-			if (!cancelled) setContextWindow(w);
-		});
+			signal: inFlight.signal,
+		})
+			.then((w) => {
+				if (!cancelled) setContextWindow(w);
+			})
+			.catch(() => {
+				if (!cancelled) setContextWindow(UNKNOWN_WINDOW);
+			});
 		return () => {
 			cancelled = true;
+			inFlight.abort();
 		};
 	}, [windowTarget]);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);

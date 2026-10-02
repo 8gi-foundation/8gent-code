@@ -21,23 +21,30 @@ export interface ResolveContextWindowOptions {
 	fetchImpl?: typeof fetch;
 	ollamaBaseUrl?: string;
 	llamaServerUrl?: string;
-	openRouterKey?: string;
 	timeoutMs?: number;
+	/** Aborts in-flight requests, e.g. when the model changes or the HUD unmounts. */
+	signal?: AbortSignal;
 }
 
 export const UNKNOWN_WINDOW: ContextWindow = { window: null, source: "unknown" };
 
+/** Above any shipping model (10M tokens) with headroom. A larger value is
+ *  junk from the wire, not a reading, so it falls to unknown. */
+export const MAX_PLAUSIBLE_WINDOW = 100_000_000;
+
 const positive = (n: unknown): number | null =>
-	typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+	typeof n === "number" && Number.isFinite(n) && n >= 1 && n <= MAX_PLAUSIBLE_WINDOW ? Math.floor(n) : null;
 
 async function getJson(
 	fetchImpl: typeof fetch,
 	url: string,
 	init: RequestInit,
 	timeoutMs: number,
+	signal?: AbortSignal,
 ): Promise<unknown> {
 	try {
-		const res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+		const timeout = AbortSignal.timeout(timeoutMs);
+		const res = await fetchImpl(url, { ...init, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
 		return res.ok ? await res.json() : null;
 	} catch {
 		return null;
@@ -45,16 +52,20 @@ async function getJson(
 }
 
 /** OpenRouter lists `context_length` per model. Exact id match only: a near
- *  miss must never lend another model's window. */
+ *  miss must never lend another model's window. The catalogue is public, so
+ *  no key is sent. The body is untrusted: validate its shape, never cast it
+ *  (same guard as packages/providers/index.ts). */
 async function fromProviderMetadata(o: ResolveContextWindowOptions, f: typeof fetch, t: number) {
 	if (o.provider !== "openrouter") return null;
-	const json = (await getJson(
-		f,
-		"https://openrouter.ai/api/v1/models",
-		{ headers: o.openRouterKey ? { Authorization: `Bearer ${o.openRouterKey}` } : {} },
-		t,
-	)) as { data?: { id?: string; context_length?: number }[] } | null;
-	const entry = json?.data?.find((m) => m.id === o.model);
+	const json = (await getJson(f, "https://openrouter.ai/api/v1/models", {}, t, o.signal)) as {
+		data?: unknown;
+	} | null;
+	const list: unknown[] = Array.isArray(json?.data) ? json.data : [];
+	const entry = list.find(
+		(m): m is { id: string; context_length?: unknown } =>
+			typeof m === "object" && m !== null && typeof (m as { id?: unknown }).id === "string" &&
+			(m as { id: string }).id === o.model,
+	);
 	return positive(entry?.context_length);
 }
 
@@ -75,17 +86,19 @@ async function fromLocalServer(o: ResolveContextWindowOptions, f: typeof fetch, 
 				body: JSON.stringify({ model: o.model }),
 			},
 			t,
+			o.signal,
 		)) as { parameters?: string; model_info?: Record<string, unknown> } | null;
 		if (!json) return null;
-		const numCtx = /^\s*num_ctx\s+(\d+)/m.exec(json.parameters ?? "");
-		if (numCtx) return positive(Number(numCtx[1]));
+		const numCtx = /^\s*num_ctx\s+(\d+)/m.exec(typeof json.parameters === "string" ? json.parameters : "");
+		const loaded = numCtx ? positive(Number(numCtx[1])) : null;
+		if (loaded) return loaded;
 		for (const [k, v] of Object.entries(json.model_info ?? {})) {
 			if (k.endsWith(".context_length")) return positive(v);
 		}
 		return null;
 	}
 	if (o.provider === "llama-server" && o.llamaServerUrl) {
-		const json = (await getJson(f, `${o.llamaServerUrl.replace(/\/+$/, "")}/props`, {}, t)) as {
+		const json = (await getJson(f, `${o.llamaServerUrl.replace(/\/+$/, "")}/props`, {}, t, o.signal)) as {
 			default_generation_settings?: { n_ctx?: number };
 		} | null;
 		return positive(json?.default_generation_settings?.n_ctx);
@@ -93,15 +106,21 @@ async function fromLocalServer(o: ResolveContextWindowOptions, f: typeof fetch, 
 	return null;
 }
 
+/** Never rejects: any failure, including a parser bug on a hostile body, is
+ *  an unknown window, not a crashed TUI. */
 export async function resolveContextWindow(o: ResolveContextWindowOptions): Promise<ContextWindow> {
-	if (!o.model) return UNKNOWN_WINDOW;
-	const f = o.fetchImpl ?? fetch;
-	const t = o.timeoutMs ?? 4000;
-	const fromProvider = await fromProviderMetadata(o, f, t);
-	if (fromProvider) return { window: fromProvider, source: "provider" };
-	const fromServer = await fromLocalServer(o, f, t);
-	if (fromServer) return { window: fromServer, source: "server" };
-	return UNKNOWN_WINDOW;
+	try {
+		if (!o.model) return UNKNOWN_WINDOW;
+		const f = o.fetchImpl ?? fetch;
+		const t = o.timeoutMs ?? 4000;
+		const fromProvider = await fromProviderMetadata(o, f, t);
+		if (fromProvider) return { window: fromProvider, source: "provider" };
+		const fromServer = await fromLocalServer(o, f, t);
+		if (fromServer) return { window: fromServer, source: "server" };
+		return UNKNOWN_WINDOW;
+	} catch {
+		return UNKNOWN_WINDOW;
+	}
 }
 
 /**
