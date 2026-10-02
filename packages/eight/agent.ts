@@ -225,6 +225,8 @@ export class Agent {
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
 	private twoStageCompactor: TwoStageCompactor | null = null;
+	/** The provider the current post-turn pass summarises with (#3267). */
+	private twoStageProvider: ProviderConfig | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
@@ -649,7 +651,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		localCoreTools: string[];
 		chatStartTime: number;
 		textForAgent: string;
-	}): Promise<string> {
+	}): Promise<{ content: string; ok: boolean; provider: string; model: string; baseURL: string }> {
 		const {
 			providerName,
 			providerModel,
@@ -904,6 +906,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// The provider and model this turn last ran on. Either reroute below can
+		// cross providers (ollama, lmstudio, apple-foundation), so the caller's
+		// post-turn compaction must use this pair, not the session's pin (#3267).
+		const route = { provider: effectiveProvider, model: effectiveModel };
+		// The reply plus the route, with the endpoint runTurn sent it to (the
+		// same resolution buildTextToolCall makes), as an OpenAI "/v1" base.
+		// `ok` is false on the failed exits, which skip post-turn compaction.
+		const answered = (content: string, ok: boolean) => ({
+			content,
+			ok,
+			...route,
+			baseURL: toOpenAiV1Base(resolveTextToolEndpoint(route.provider, this.config.baseUrl)),
+		});
+
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
 		const recordFailedRun = (reason: string) => {
@@ -941,6 +957,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: effectiveModel,
 				run: runTurn,
 				onReroute: (missing, chosen) => {
+					route.provider = chosen.provider;
+					route.model = chosen.model;
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
 					);
@@ -951,7 +969,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
 				recordFailedRun(`no local model: ${outcome.message}`);
-				return outcome.message;
+				return answered(outcome.message, false);
 			}
 			if (outcome.rerouted) {
 				// Self-correct the session so subsequent turns skip the dead model
@@ -966,11 +984,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// instead of throwing a raw fetch error up through the surface. A slow
 			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
-			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
+			const endpoint = resolveTextToolEndpoint(route.provider, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
 			recordFailedRun(failure.reason);
-			return failure.message;
+			return answered(failure.message, false);
 		}
 		this.abortController = null;
 
@@ -1068,7 +1086,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			/* journal is best-effort; never break the turn */
 		}
 
-		return flavoredContent;
+		return answered(flavoredContent, true);
 	}
 
 	/**
@@ -1433,7 +1451,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
 			}
-			return textResult;
+			// The same post-turn compaction the native path runs. This branch
+			// returns before that block, so local sessions never compacted (#3267).
+			// A reroute can move the turn to another local provider, so the
+			// summary call goes to the provider, model and endpoint the turn ran
+			// on. The turn itself sends no session key, and hosts still pass a
+			// cloud key whatever the runtime, so the compaction call sends none
+			// either: createModel falls back to the provider's own env key.
+			// A failed turn (no model, timeout, abort) shows its error at once.
+			if (textResult.ok) {
+				await this.compactAfterTurn({
+					name: textResult.provider as ProviderName,
+					model: textResult.model,
+					baseURL: textResult.baseURL,
+					apiKey: undefined,
+				});
+			}
+			return textResult.content;
 		}
 
 		let agentConfig: EightAgentConfig = {
@@ -2220,31 +2254,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
-				try {
-					const stage = this.compaction.getStage(this.messageHistory);
-					const compactModel = createModel(providerConfig);
-					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
-					this.messageHistory = compacted;
-					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
-					);
-					this.events.onCompaction?.(compactionResult);
-				} catch (err) {
-					console.error("  [COMPRESSION] Failed:", (err as Error).message);
-				}
-			}
-
-			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%.
-			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				await this.observeTwoStage(providerConfig);
-			}
+			await this.compactAfterTurn(providerConfig);
 
 			// Move BMAD task to review/done if we had one
 			if (this.currentBmadTask) {
@@ -2518,6 +2528,38 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Post-turn compaction, shared by the native and text-tool turn paths (#3267).
+	 * Runs both compactors against the history the turn left. Never throws.
+	 */
+	private async compactAfterTurn(providerConfig: ProviderConfig): Promise<void> {
+		// Proactive context compression - Harbor Terminus-2 pattern (#1405)
+		// Monitors token pressure and escalates through 4 stages:
+		//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
+		if (this.compaction.shouldCompact(this.messageHistory)) {
+			try {
+				const stage = this.compaction.getStage(this.messageHistory);
+				const compactModel = createModel(providerConfig);
+				const { messages: compacted, result: compactionResult } =
+					await this.compaction.compactProactive(this.messageHistory, compactModel);
+				this.messageHistory = compacted;
+				console.log(
+					`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
+						`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
+				);
+				this.events.onCompaction?.(compactionResult);
+			} catch (err) {
+				console.error("  [COMPRESSION] Failed:", (err as Error).message);
+			}
+		}
+
+		// Two-stage compactor (#2467) - additive to the legacy ProactiveCompression
+		// above. Cheap checkpoint at 65%, hard compact at 80%.
+		if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
+			await this.observeTwoStage(providerConfig);
+		}
+	}
+
+	/**
 	 * One pass of the two-stage compactor (#2467) after a turn. Thresholds
 	 * resolve against the provider's known context window, the same one
 	 * ProactiveCompression uses (#3237: this used to read a `contextSize` that
@@ -2525,9 +2567,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
 		try {
+			// The compactor is built once, so its summariser reads this turn's
+			// provider from a field rather than closing over the first turn's: a
+			// reroute moves later turns to another provider (#3267).
+			this.twoStageProvider = providerConfig;
 			if (!this.twoStageCompactor) {
 				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
-					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
+					this.generateCheckpoint(
+						this.twoStageProvider ?? providerConfig,
+						twoStageCheckpointPrompt(msgs, previousSummary),
+					);
 				this.twoStageCompactor = new TwoStageCompactor({
 					checkpointPct: 0.65,
 					compactPct: 0.8,

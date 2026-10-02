@@ -172,24 +172,12 @@ function carrying(body: Body, needle: string): Msg[] {
 const system = (b: Body) => JSON.stringify(b.messages.filter((m) => m.role === "system"));
 
 /**
- * Run the compacting turn, then the turn that must carry the summary on the
- * path under test. Only the native path compacts (the text-tool turn returns
- * before the post-turn block), so the compacting turn always runs native; the
- * history it leaves is what either request builder sends next.
+ * Run the compacting turn, then the turn that must carry the summary, both on
+ * the path under test. Each turn path runs the post-turn compactors (#3267).
  */
-async function compactThenAsk(
-	agent: AgentT,
-	marker: string,
-	textTools: string,
-	prefix: Body,
-): Promise<void> {
+async function compactThenAsk(agent: AgentT, marker: string, prefix: Body): Promise<void> {
 	const start = bodies.length;
-	process.env.EIGHT_TEXT_TOOLS = "0";
-	try {
-		await turn(agent, "Using typescript, list the open release risks for the team.");
-	} finally {
-		process.env.EIGHT_TEXT_TOOLS = textTools;
-	}
+	await turn(agent, "Using typescript, list the open release risks for the team.");
 	// The compactor ran after that turn and asked the fake endpoint for a summary.
 	expect(bodies.slice(start).some(isSummaryRequest)).toBe(true);
 	const after = await turn(agent, "Using typescript, what is the next release step for the team?");
@@ -223,14 +211,14 @@ for (const [label, textTools] of [
 			const agent = build();
 			const prefix = await warmUp(agent);
 			pressProactive(agent, 0.82);
-			await compactThenAsk(agent, "[Proactive Compression: Terminus-2]", textTools, prefix);
+			await compactThenAsk(agent, "[Proactive Compression: Terminus-2]", prefix);
 		}, 60_000);
 
 		test("simplify stage (single-pass summary)", async () => {
 			const agent = build();
 			const prefix = await warmUp(agent);
 			pressProactive(agent, 0.91);
-			await compactThenAsk(agent, "[Context Compaction Summary]", textTools, prefix);
+			await compactThenAsk(agent, "[Context Compaction Summary]", prefix);
 		}, 60_000);
 
 		test("two-stage compactor", async () => {
@@ -242,7 +230,7 @@ for (const [label, textTools] of [
 				Reflect.set(agent, "compaction", new ProactiveCompression({ enabled: false }));
 				const used = twoStageTokens(agent.getMessageHistory());
 				Reflect.set(agent, "compactionContextWindow", Math.floor(used / 0.85));
-				await compactThenAsk(agent, "[Two-Stage Compaction Summary]", textTools, prefix);
+				await compactThenAsk(agent, "[Two-Stage Compaction Summary]", prefix);
 			} finally {
 				process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
 			}
