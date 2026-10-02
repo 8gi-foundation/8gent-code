@@ -237,6 +237,78 @@ export function absoluteRect(
 }
 
 /**
+ * The widest gap two neighbouring targets share. Every row of targets in the
+ * HUD is separated by at most three cells (two between key caps, three
+ * between tabs, " │ " between footer segments), so a gap this size or less
+ * is padding. A wider gap holds something that is not a target (a footer
+ * segment with no key) and stays nobody's.
+ */
+export const MAX_SHARED_GAP = 3;
+
+/**
+ * Close the dead cells between neighbouring spans on the same row, so a
+ * click just outside a cap's bracket still lands on a cap (James,
+ * 2026-10-02: clicks only worked near the middle). The left span takes the
+ * floor of the gap, the right span the ceiling; an overlap is trimmed so
+ * no cell belongs to two spans. Pure; returns new spans in input order.
+ */
+export function closeGaps(spans: ClickSpan[], maxGap = MAX_SHARED_GAP): ClickSpan[] {
+	const out = spans.map((s) => ({ ...s }));
+	const rowKey = (s: ClickSpan) => `${s.dy ?? 0}:${s.h ?? 1}`;
+	const rows = new Map<string, ClickSpan[]>();
+	for (const s of out) {
+		const k = rowKey(s);
+		rows.set(k, [...(rows.get(k) ?? []), s]);
+	}
+	for (const row of rows.values()) {
+		row.sort((a, b) => a.dx - b.dx);
+		for (let i = 0; i + 1 < row.length; i++) {
+			const a = row[i] as ClickSpan;
+			const b = row[i + 1] as ClickSpan;
+			const gap = b.dx - (a.dx + a.w);
+			if (gap < 0) {
+				a.w = Math.max(0, b.dx - a.dx);
+			} else if (gap > 0 && gap <= maxGap) {
+				const left = Math.floor(gap / 2);
+				const right = gap - left;
+				a.w += left;
+				b.dx -= right;
+				b.w += right;
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * Register spans for a box at `rect`: gaps closed, each span clipped to the
+ * box's width so a truncated row never claims cells it did not draw.
+ * Returns the ids registered.
+ */
+export function placeSpans(
+	rect: { x: number; y: number; w: number; h: number },
+	spans: ClickSpan[],
+	z = 0,
+): string[] {
+	const ids: string[] = [];
+	for (const s of closeGaps(spans)) {
+		const w = Math.min(s.w, rect.w - s.dx);
+		if (w <= 0 || s.dx < 0) continue;
+		setTarget({
+			id: s.id,
+			x: rect.x + s.dx,
+			y: rect.y + (s.dy ?? 0),
+			w,
+			h: s.h ?? 1,
+			z,
+			action: s.action,
+		});
+		ids.push(s.id);
+	}
+	return ids;
+}
+
+/**
  * Register click spans for a box after every render, and drop them on
  * unmount. The spans are cheap to rebuild; the layout is read from Yoga,
  * so the rectangles follow the box wherever it lands.
@@ -245,21 +317,7 @@ export function useClickSpans(ref: { current: unknown }, spans: ClickSpan[], z =
 	const ids = useRef<string[]>([]);
 	useEffect(() => {
 		const rect = ref.current ? absoluteRect(ref.current as NodeLike) : null;
-		const next: string[] = [];
-		if (rect) {
-			for (const s of spans) {
-				setTarget({
-					id: s.id,
-					x: rect.x + s.dx,
-					y: rect.y + (s.dy ?? 0),
-					w: s.w,
-					h: s.h ?? 1,
-					z,
-					action: s.action,
-				});
-				next.push(s.id);
-			}
-		}
+		const next: string[] = rect ? placeSpans(rect, spans, z) : [];
 		for (const id of ids.current) if (!next.includes(id)) removeTarget(id);
 		ids.current = next;
 	});
