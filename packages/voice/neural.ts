@@ -4,8 +4,15 @@
  * Every spoken deliverable (deck videos, huddles, officer updates) casts its
  * speakers from NEURAL_VOICE below and synthesises through Supertonic or
  * KittenTTS. There is deliberately no macOS say code path in this module: if
- * both neural engines fail, the caller gets a typed NeuralTtsError and decides
+ * the pinned engine fails, the caller gets a typed NeuralTtsError and decides
  * what to do. A deliverable never silently degrades to a system voice.
+ *
+ * Fallback to the other neural engine is opt-in (SynthRequest.allowFallback,
+ * default false). The fallback styles collide with other officers' pinned
+ * voices (every Supertonic voice falls back to Kitten Jasper, which is Alex;
+ * Victoria falls back to Supertonic F3, which is Karen), so a silent fallback
+ * would misattribute who said what. A caller that opts in must label the output
+ * from SynthResult.fellBack.
  *
  * Canon: NEURAL_VOICE in 8gent-glasses mac/scripts/deck2video.py and the
  * DeckToVideo skill table, ruled canonical by James on 2026-10-02.
@@ -33,9 +40,18 @@
  */
 
 import { spawn as spawnChild } from "node:child_process";
-import { existsSync, readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, delimiter, dirname, join } from "node:path";
+import {
+	constants,
+	accessSync,
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	statSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 
 export type NeuralEngine = "supertonic" | "kitten";
 
@@ -43,7 +59,10 @@ export interface NeuralVoice {
 	engine: NeuralEngine;
 	/** Supertonic style (F1-F5, M1-M5) or KittenTTS voice name. */
 	style: string;
-	/** Style on the OTHER engine, used only when the pinned engine fails. */
+	/**
+	 * Style on the OTHER engine, used only when the pinned engine fails AND the
+	 * caller set allowFallback. These collide with other officers' voices.
+	 */
 	fallback: string;
 }
 
@@ -85,10 +104,17 @@ export const OFFICERS: Readonly<Record<string, { name: string; voice: string }>>
 };
 
 export const KITTEN_MODEL = "KittenML/kitten-tts-nano-0.8";
-/** The guard: any binary with this basename is refused before it can run. */
+/** The guard: a binary with this basename, or resolving to it, is refused before it can run. */
 const MAC_SAY_BASENAME = "say";
 
-export type NeuralErrorCode = "unpinned_voice" | "empty_text" | "no_engine" | "all_engines_failed";
+export type NeuralErrorCode =
+	| "unpinned_voice"
+	| "empty_text"
+	| "no_engine"
+	/** The pinned engine failed and the caller did not allow fallback. */
+	| "engine_failed"
+	/** The pinned engine and the opted-in fallback both failed. */
+	| "all_engines_failed";
 
 export interface Attempt {
 	engine: NeuralEngine;
@@ -154,23 +180,44 @@ export interface NeuralDeps {
 	env: Record<string, string | undefined>;
 	home: string;
 	exists(path: string): boolean;
+	/** Bytes in a regular file; 0 when it is missing, empty or not a file. */
+	fileSize(path: string): number;
 	remove(path: string): void;
+	/** The path with symlinks resolved; the input when it cannot be resolved. */
+	realpath(path: string): string;
+	/** A fresh private directory, used as the engines' cwd. */
+	makeTempDir(): string;
+	removeTree(dir: string): void;
 	which(cmd: string): string | null;
 	listDir(dir: string): string[];
 	spawn(
 		cmd: string,
 		args: string[],
-		opts: { input?: string; timeoutMs: number },
+		opts: { input?: string; timeoutMs: number; cwd?: string },
 	): Promise<SpawnResult>;
 }
 
-/** PATH lookup without a subprocess: the first PATH entry where cmd exists. */
-function whichOnPath(cmd: string, path = process.env.PATH ?? ""): string | null {
+/**
+ * PATH lookup without a subprocess: the first ABSOLUTE PATH entry holding a
+ * regular executable file named cmd. Empty, "." and relative entries are
+ * skipped, so a supertonic in whatever directory 8gent was started from (an
+ * untrusted clone, say) is never picked up.
+ */
+export function whichOnPath(cmd: string, path = process.env.PATH ?? ""): string | null {
 	for (const dir of path.split(delimiter)) {
-		if (dir && existsSync(join(dir, cmd))) return join(dir, cmd);
+		if (!dir || !isAbsolute(dir)) continue;
+		const p = join(dir, cmd);
+		try {
+			if (!statSync(p).isFile()) continue;
+			accessSync(p, constants.X_OK);
+			return p;
+		} catch {}
 	}
 	return null;
 }
+
+/** Most stderr kept from one child; the tail, where tracebacks end. */
+export const STDERR_MAX = 16_384;
 
 /**
  * Run argv without a shell and without blocking. Resolves (never rejects) with
@@ -179,12 +226,12 @@ function whichOnPath(cmd: string, path = process.env.PATH ?? ""): string | null 
 export function spawnAsync(
 	cmd: string,
 	args: string[],
-	opts: { input?: string; timeoutMs: number },
+	opts: { input?: string; timeoutMs: number; cwd?: string },
 ): Promise<SpawnResult> {
 	return new Promise((resolve) => {
 		let stderr = "";
 		let settled = false;
-		const child = spawnChild(cmd, args, { stdio: ["pipe", "ignore", "pipe"] });
+		const child = spawnChild(cmd, args, { stdio: ["pipe", "ignore", "pipe"], cwd: opts.cwd });
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			done(null, `timed out after ${opts.timeoutMs} ms`);
@@ -198,6 +245,7 @@ export function spawnAsync(
 		child.stderr?.setEncoding("utf8");
 		child.stderr?.on("data", (d: string) => {
 			stderr += d;
+			if (stderr.length > STDERR_MAX) stderr = stderr.slice(-STDERR_MAX);
 		});
 		child.on("error", (e) => done(null, String(e)));
 		child.on("close", (code) => done(code));
@@ -211,7 +259,24 @@ export function defaultDeps(): NeuralDeps {
 		env: process.env,
 		home: homedir(),
 		exists: existsSync,
+		fileSize: (p) => {
+			try {
+				const s = statSync(p);
+				return s.isFile() ? s.size : 0;
+			} catch {
+				return 0;
+			}
+		},
 		remove: (p) => rmSync(p, { force: true }),
+		realpath: (p) => {
+			try {
+				return realpathSync(p);
+			} catch {
+				return p;
+			}
+		},
+		makeTempDir: () => mkdtempSync(join(tmpdir(), "8gent-neural-")),
+		removeTree: (d) => rmSync(d, { recursive: true, force: true }),
 		which: (cmd) => whichOnPath(cmd),
 		listDir: (dir) => {
 			try {
@@ -233,7 +298,11 @@ function pyenvBins(deps: NeuralDeps, exe: string): string[] {
 		.map((v) => join(root, v, "bin", exe));
 }
 
-const usable = (deps: NeuralDeps, p: string) => basename(p) !== MAC_SAY_BASENAME && deps.exists(p);
+/** Refuses say by name and by what the path really is (a renamed symlink to say). */
+const usable = (deps: NeuralDeps, p: string) =>
+	basename(p) !== MAC_SAY_BASENAME &&
+	deps.exists(p) &&
+	basename(deps.realpath(p)) !== MAC_SAY_BASENAME;
 const dedupe = (xs: (string | null | undefined)[]) => [
 	...new Set(xs.filter((x): x is string => !!x)),
 ];
@@ -268,15 +337,29 @@ export const findKittenPython = (deps: NeuralDeps) =>
 
 // ── Synthesis ─────────────────────────────────────────────────────────────
 
-/** Loads the model once and writes every item; per-item failures go to stderr. */
-const KITTEN_SCRIPT = [
-	"import json, sys",
+/**
+ * Loads the model once and writes every item. A failed item reports to stderr
+ * and deletes its partial file, so on exit 0 a non-empty file means done.
+ *
+ * Under -c, Python puts the cwd first on sys.path, so a json.py or
+ * kittentts.py in the caller's directory would run as code. Three guards:
+ * the interpreter runs in a fresh temp dir, gets -P when it supports it
+ * (3.11+), and this script drops "" and "." from sys.path before any other
+ * import (sys is built in, so it cannot itself be shadowed).
+ */
+export const KITTEN_SCRIPT = [
+	"import sys",
+	'sys.path[:] = [p for p in sys.path if p not in ("", ".")]',
+	"import json, os",
 	"from kittentts import KittenTTS",
 	"job = json.load(sys.stdin)",
 	"m = KittenTTS(job['model'])",
 	"for it in job['items']:",
 	"    try: m.generate_to_file(it['text'], it['out'], voice=it['voice'])",
-	"    except Exception as e: print(it['out'], e, file=sys.stderr)",
+	"    except Exception as e:",
+	"        print(it['out'], e, file=sys.stderr)",
+	"        try: os.remove(it['out'])",
+	"        except OSError: pass",
 ].join("\n");
 
 export interface SynthRequest {
@@ -288,6 +371,12 @@ export interface SynthRequest {
 	strict?: boolean;
 	/** Supertonic diffusion steps. Default 8, as deck2video. */
 	steps?: number;
+	/**
+	 * Default false: a failed pinned engine is NeuralTtsError("engine_failed").
+	 * True retries on the other engine with the table's fallback style, which
+	 * may be another officer's pinned voice; label such output from fellBack.
+	 */
+	allowFallback?: boolean;
 }
 
 export type SynthResult =
@@ -303,9 +392,11 @@ export type SynthResult =
 	| { ok: false; error: NeuralTtsError };
 
 /**
- * Synthesise many lines. Each line tries its pinned engine, then the other
- * neural engine with its fallback style. Kitten lines in a pass share one
- * interpreter, so the model loads once per pass rather than once per line.
+ * Synthesise many lines. Each line tries its pinned engine, then, only with
+ * allowFallback, the other neural engine with its fallback style. Kitten lines
+ * in a pass share one interpreter, so the model loads once per pass rather
+ * than once per line. A line succeeds only on exit 0 AND a non-empty output
+ * file; a failed attempt leaves no output file behind.
  */
 export async function synthesizeBatch(
 	reqs: SynthRequest[],
@@ -335,13 +426,13 @@ export async function synthesizeBatch(
 			steps: req.steps ?? 8,
 			order: [
 				{ engine: v.engine, style: v.style },
-				{ engine: other, style: v.fallback },
+				...(req.allowFallback ? [{ engine: other, style: v.fallback }] : []),
 			],
 		};
 	});
 
 	for (const pass of [0, 1]) {
-		const pending = reqs.map((_, i) => i).filter((i) => !results[i]);
+		const pending = reqs.map((_, i) => i).filter((i) => !results[i] && plans[i].order[pass]);
 		for (const i of pending) deps.remove(reqs[i].outPath);
 		const kittenIdx: number[] = [];
 		for (const i of pending) {
@@ -354,18 +445,22 @@ export async function synthesizeBatch(
 				attempts[i].push({ engine, style, ok: false, reason: "Supertonic not found" });
 				continue;
 			}
+			// Options first, then "--", then the text: a line such as "--help" or
+			// "-o/x" is spoken, never parsed as an option.
 			const args = [
 				"tts",
-				reqs[i].text,
 				"-o",
 				reqs[i].outPath,
 				"--voice",
 				style,
 				"--steps",
 				String(plans[i].steps),
+				"--",
+				reqs[i].text,
 			];
 			const r = await deps.spawn(stBin, args, { timeoutMs: 120_000 });
-			const ok = r.status === 0 && deps.exists(reqs[i].outPath);
+			const ok = r.status === 0 && deps.fileSize(reqs[i].outPath) > 0;
+			if (!ok) deps.remove(reqs[i].outPath);
 			attempts[i].push({
 				engine,
 				style,
@@ -380,13 +475,13 @@ export async function synthesizeBatch(
 				voice: plans[i].order[pass].style,
 			}));
 			const r = py
-				? await deps.spawn(py, ["-c", KITTEN_SCRIPT], {
-						input: JSON.stringify({ model: KITTEN_MODEL, items }),
-						timeoutMs: 60_000 + 30_000 * items.length,
-					})
+				? await runKitten(deps, py, items)
 				: { status: null, stderr: "KittenTTS python not found" };
 			kittenIdx.forEach((i, j) => {
-				const ok = !!py && deps.exists(items[j].out);
+				// Exit 0 means the batch finished; a SIGKILL at the timeout is
+				// status null, so a half-written WAV never counts.
+				const ok = !!py && r.status === 0 && deps.fileSize(items[j].out) > 0;
+				if (!ok) deps.remove(items[j].out);
 				attempts[i].push({
 					engine: "kitten",
 					style: items[j].voice,
@@ -413,15 +508,49 @@ export async function synthesizeBatch(
 
 	return reqs.map(
 		(req, i) =>
-			results[i] ?? {
-				ok: false,
-				error: new NeuralTtsError(
-					"all_engines_failed",
-					`both neural engines failed for "${req.voice}" (${req.outPath})`,
-					attempts[i],
-				),
-			},
+			results[i] ??
+			(plans[i].order.length > 1
+				? {
+						ok: false,
+						error: new NeuralTtsError(
+							"all_engines_failed",
+							`both neural engines failed for "${req.voice}" (${req.outPath})`,
+							attempts[i],
+						),
+					}
+				: {
+						ok: false,
+						error: new NeuralTtsError(
+							"engine_failed",
+							`pinned engine ${plans[i].order[0].engine} failed for "${req.voice}" (${req.outPath}); fallback is off (allowFallback)`,
+							attempts[i],
+						),
+					}),
 	);
+}
+
+/**
+ * Run the Kitten batch in a fresh temp dir, with -P when the interpreter
+ * takes it. The probe is `python -P -c pass`: exit 0 on 3.11+, exit 2
+ * ("Unknown option") before. Both spawns use the temp dir as cwd.
+ */
+async function runKitten(
+	deps: NeuralDeps,
+	py: string,
+	items: { text: string; out: string; voice: string }[],
+): Promise<SpawnResult> {
+	const cwd = deps.makeTempDir();
+	try {
+		const probe = await deps.spawn(py, ["-P", "-c", "pass"], { timeoutMs: 15_000, cwd });
+		const flags = probe.status === 0 ? ["-P"] : [];
+		return await deps.spawn(py, [...flags, "-c", KITTEN_SCRIPT], {
+			input: JSON.stringify({ model: KITTEN_MODEL, items }),
+			timeoutMs: 60_000 + 30_000 * items.length,
+			cwd,
+		});
+	} finally {
+		deps.removeTree(cwd);
+	}
 }
 
 export async function synthesize(
