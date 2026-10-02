@@ -38,7 +38,7 @@ import {
 	synthesize,
 	synthesizeBatch,
 	whichOnPath,
-} from "./neural.ts";
+} from "./neural";
 
 const HOME = "/Users/test";
 
