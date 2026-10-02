@@ -42,6 +42,23 @@ Rules: ids are lower case words joined by `-` (max 24), capability names are
 lower snake case without `__` (max 30), params are `string`, `number` or
 `boolean`. `confirm: true` asks the person on every call.
 
+Every manifest string reaches the consent prompt or the model, so it is
+bounded (`MANIFEST_LIMITS` in `manifest.ts`):
+
+| Field | Limit |
+|-------|-------|
+| capabilities per device | 32 |
+| params per capability | 16 |
+| device name | 80 characters |
+| kind, version | 40 characters |
+| capability name, param name | 30 characters |
+| capability description | 500 characters |
+| param description | 200 characters |
+
+Text containing control characters (newline, tab and ANSI escapes included),
+C1 controls, zero-width or directional marks, bidi embeddings, overrides or
+isolates is refused, not stripped.
+
 ## Pair, grant, call
 
 ```ts
@@ -64,7 +81,13 @@ await adapter.execute("device__desk_lamp__read_light", {}, { agentId, sessionId,
 - Every call runs `evaluatePolicy("device_use", ...)`: shadow agents are hard
   denied, and YAML `block` / `require_approval` rules can match `deviceId`,
   `capability` and `capabilityKind`.
-- Revoke and unpair take effect on the next call.
+- Revoke and unpair take effect on the next call, and on a call waiting for
+  approval: after the prompt the adapter re-reads the pairing (a re-pair
+  counts as a change) and the grant before anything is sent.
+- The tool input is copied on entry and validated before anyone is asked, so
+  the person approves exactly the values the device receives.
+- Input keys and handler lookups use own properties only: `constructor`,
+  `toString` and `__proto__` are unknown names, never `Object.prototype`.
 
 ## Frames
 

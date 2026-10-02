@@ -5,13 +5,16 @@
  * function shape. Ungranted capabilities are not listed, and are denied if the
  * model names them anyway. The execute path mirrors
  * packages/daemon/tools/hands.ts: decide, ask when the policy says so, then
- * dispatch. Gates, in order:
+ * dispatch. The input is deep-copied on entry, and only that copy is checked,
+ * shown and sent. Gates, in order:
  *   1. the tool name resolves to a paired device and a real capability
  *   2. the person granted that capability (8DK hard gate; no YAML rule lifts it)
  *   3. evaluatePolicy("device_use"): shadow hard-deny, YAML block / require_approval
- *   4. a `confirm` capability asks the person on every call
- *   5. the input matches the capability's params
- *   6. the device is connected and answers in time
+ *   4. the input copy matches the capability's params (a person only ever
+ *      approves a well-formed request)
+ *   5. require_approval, or a `confirm` capability, asks the person
+ *   6. after any wait: the device is still the same pairing and still granted
+ *   7. the device is connected and answers in time
  */
 import { evaluatePolicy } from "../permissions/policy-engine";
 import type { DeviceLink } from "./link";
@@ -106,6 +109,14 @@ export class DeviceToolAdapter {
 		input: Record<string, unknown>,
 		ctx: DeviceToolCtx = {},
 	): Promise<DeviceToolResult> {
+		// Copy first: nothing the caller does to `input` after this line reaches
+		// the approver or the device.
+		let safe: Record<string, unknown> | undefined;
+		try {
+			safe = structuredClone(input);
+		} catch {
+			safe = undefined;
+		}
 		const parsed = parseDeviceToolName(tool);
 		const finish = (allowed: boolean, reason: string) => {
 			this.options.onDecision?.({
@@ -140,15 +151,24 @@ export class DeviceToolAdapter {
 			capability,
 			capabilityKind: cap.kind,
 		});
+		if (!decision.allowed && !decision.requiresApproval) {
+			return deny(`[policy] ${decision.reason}`);
+		}
+
+		if (safe === undefined) return deny("[8dk-deny] input must be plain data");
+		const bad = validateInput(cap, safe);
+		if (bad) return deny(`[8dk-deny] ${bad}`);
+		// Validated values are primitives, so a shallow freeze makes the copy final.
+		const checked = Object.freeze(safe);
+
 		const ask = async (reason: string): Promise<string | null> => {
 			if (!ctx.approve) return `[policy] ${reason} (no approver wired)`;
 			const yes = await ctx
-				.approve({ tool, deviceId, capability, input, reason })
+				.approve({ tool, deviceId, capability, input: checked, reason })
 				.catch(() => false);
 			return yes ? null : `[policy] the person said no: ${reason}`;
 		};
 		if (!decision.allowed) {
-			if (!decision.requiresApproval) return deny(`[policy] ${decision.reason}`);
 			const refused = await ask(decision.reason ?? "approval required");
 			if (refused) return deny(refused);
 		} else if (cap.confirm) {
@@ -156,12 +176,21 @@ export class DeviceToolAdapter {
 			if (refused) return deny(refused);
 		}
 
-		const bad = validateInput(cap, input);
-		if (bad) return deny(`[8dk-deny] ${bad}`);
+		// An approval can sit open for minutes. Re-read the pairing and the grant
+		// after the last await: an unpair, a re-pair (a new PairedDevice) or a
+		// revoke during the prompt denies the call.
+		if (this.registry.get(deviceId) !== device) {
+			return deny(`[8dk-deny] device "${deviceId}" was unpaired or paired again before the call`);
+		}
+		if (!this.registry.isGranted(deviceId, capability)) {
+			return deny(
+				`[8dk-deny] capability "${capability}" on "${deviceId}" was revoked before the call`,
+			);
+		}
 
 		const link = this.linkFor(deviceId);
 		if (!link) return deny(`[8dk-deny] device "${deviceId}" is not connected`);
-		const res = await link.invoke(capability, input, ctx.timeoutMs ?? 10_000);
+		const res = await link.invoke(capability, checked, ctx.timeoutMs ?? 10_000);
 		if (!res.ok) {
 			finish(true, `device error: ${res.error}`);
 			return { ok: false, reason: `device error: ${res.error}` };

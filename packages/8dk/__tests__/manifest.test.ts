@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ManifestError, defineDevice, validateInput, validateManifest } from "../manifest";
+import {
+	MANIFEST_LIMITS,
+	ManifestError,
+	defineDevice,
+	validateInput,
+	validateManifest,
+} from "../manifest";
 import { createFakeLamp } from "./fake-device";
 
 const base = {
@@ -75,5 +81,194 @@ describe("validateInput", () => {
 		expect(validateInput(setLight, { on: true, brightness: Number.NaN })).toMatch(
 			/"brightness" must be number/,
 		);
+	});
+});
+
+describe("inherited property names (8SO F2)", () => {
+	const setLight = createFakeLamp().device.manifest.capabilities[1];
+	const readLight = createFakeLamp().device.manifest.capabilities[0];
+
+	test("constructor, toString and __proto__ are extra keys", () => {
+		for (const cap of [setLight, readLight]) {
+			const on = cap === setLight ? { on: true } : {};
+			expect(validateInput(cap, { ...on, constructor: "x" })).toMatch(
+				/unknown param "constructor"/,
+			);
+			expect(validateInput(cap, { ...on, toString: 1 })).toMatch(/unknown param "toString"/);
+			const proto = JSON.parse(
+				`{${cap === setLight ? '"on":true,' : ""}"__proto__":{"polluted":1}}`,
+			);
+			expect(validateInput(cap, proto)).toMatch(/unknown param "__proto__"/);
+			expect(validateInput(cap, { ...on, hasOwnProperty: 1 })).toMatch(/unknown param/);
+		}
+	});
+
+	test("a hand-built capability with an ordinary params object is safe too", () => {
+		const handBuilt = {
+			name: "set_light",
+			kind: "actuator" as const,
+			description: "d",
+			params: { on: { type: "boolean" as const } },
+		};
+		expect(validateInput(handBuilt, { constructor: "x" })).toMatch(/unknown param "constructor"/);
+		expect(validateInput(handBuilt, { toString: 1 })).toMatch(/unknown param "toString"/);
+	});
+
+	test("an inherited value never satisfies a required param", () => {
+		expect(validateInput(setLight, Object.create({ on: true }))).toMatch(/missing required "on"/);
+	});
+
+	test("a capability named constructor with no handler fails defineDevice", () => {
+		const manifest = {
+			...base,
+			capabilities: [{ name: "constructor", kind: "actuator", description: "probe" }],
+		};
+		expect(() => defineDevice(manifest as never, {})).toThrow(
+			/no handler for capability "constructor"/,
+		);
+		const ok = defineDevice(manifest as never, { constructor: () => "mine" } as never);
+		expect(Object.getPrototypeOf(ok.handlers)).toBeNull();
+		expect(ok.handlers.constructor()).toBe("mine");
+	});
+
+	test("validated params have no prototype", () => {
+		expect(Object.getPrototypeOf(setLight.params)).toBeNull();
+	});
+});
+
+describe("untrusted manifest text and size (8SO F3)", () => {
+	const cap = (over: Record<string, unknown> = {}) => ({
+		name: "read_temp",
+		kind: "sensor",
+		description: "Temperature in C",
+		...over,
+	});
+	const withParams = (n: number, description = "d") =>
+		Object.fromEntries(
+			Array.from({ length: n }, (_, i) => [`p${i}`, { type: "string", description }]),
+		);
+
+	const unsafe = [
+		["ANSI clear screen", "Front door\x1b[2J"],
+		["newline", "Front door\nApprove"],
+		["carriage return", "Front door\rApprove"],
+		["tab", "Front\tdoor"],
+		["NUL", "Front\u0000door"],
+		["DEL", "Front\u007fdoor"],
+		["C1 CSI", "Front\u009b2Jdoor"],
+		["right-to-left override", "Front door\u202eklof"],
+		["left-to-right embedding", "Front\u202adoor"],
+		["right-to-left isolate", "Front\u2067door"],
+		["pop directional isolate", "Front\u2069door"],
+		["zero-width space", "Front\u200bdoor"],
+		["right-to-left mark", "Front\u200fdoor"],
+		["line separator", "Front\u2028door"],
+		["arabic letter mark", "Front\u061cdoor"],
+		["zero-width no-break space", "Front\ufeffdoor"],
+	] as const;
+
+	test("8SO probe name is refused", () => {
+		expect(() =>
+			validateManifest({ ...base, name: "Front door\u202eklof\x1b[2J\nApprove" }),
+		).toThrow(/control, escape or bidirectional/);
+	});
+
+	for (const [label, bad] of unsafe) {
+		test(`${label} is refused in every device-supplied text field`, () => {
+			expect(() => validateManifest({ ...base, name: bad })).toThrow(/manifest name contains/);
+			expect(() => validateManifest({ ...base, kind: bad })).toThrow(/manifest kind contains/);
+			expect(() => validateManifest({ ...base, version: bad })).toThrow(
+				/manifest version contains/,
+			);
+			expect(() =>
+				validateManifest({ ...base, capabilities: [cap({ description: bad })] }),
+			).toThrow(/description contains/);
+			expect(() =>
+				validateManifest({
+					...base,
+					capabilities: [cap({ params: { x: { type: "string", description: bad } } })],
+				}),
+			).toThrow(/param "x" description contains/);
+		});
+	}
+
+	test("ordinary punctuation and non-Latin text still pass", () => {
+		const m = validateManifest({
+			...base,
+			name: "Cuisine - four (rez-de-chaussee) 'A' & B, 20 C / 68 F: ok?",
+			capabilities: [cap({ description: "Temperatur in Grad, Celsius. Nihongo: 温度" })],
+		});
+		expect(m.name).toContain("Cuisine");
+	});
+
+	test("5000 capabilities are refused; the limit itself is accepted", () => {
+		const many = (n: number) => Array.from({ length: n }, (_, i) => cap({ name: `c${i}` }));
+		expect(MANIFEST_LIMITS.capabilities).toBe(32);
+		expect(() => validateManifest({ ...base, capabilities: many(5000) })).toThrow(
+			/more than 32 capabilities/,
+		);
+		expect(() => validateManifest({ ...base, capabilities: many(33) })).toThrow(/more than 32/);
+		expect(validateManifest({ ...base, capabilities: many(32) }).capabilities).toHaveLength(32);
+	});
+
+	test("params per capability are capped", () => {
+		expect(MANIFEST_LIMITS.paramsPerCapability).toBe(16);
+		expect(() =>
+			validateManifest({ ...base, capabilities: [cap({ params: withParams(17) })] }),
+		).toThrow(/more than 16 params/);
+		const ok = validateManifest({ ...base, capabilities: [cap({ params: withParams(16) })] });
+		expect(Object.keys(ok.capabilities[0].params ?? {})).toHaveLength(16);
+	});
+
+	test("a 1,000,000 character param description is refused; 200 is accepted", () => {
+		expect(MANIFEST_LIMITS.paramDescriptionLength).toBe(200);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [cap({ params: withParams(1, "x".repeat(1_000_000)) })],
+			}),
+		).toThrow(/at most 200 characters/);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [cap({ params: withParams(1, "x".repeat(201)) })],
+			}),
+		).toThrow(/at most 200/);
+		validateManifest({ ...base, capabilities: [cap({ params: withParams(1, "x".repeat(200)) })] });
+	});
+
+	test("every name and description is length capped", () => {
+		const L = MANIFEST_LIMITS;
+		expect(() => validateManifest({ ...base, name: "x".repeat(L.nameLength + 1) })).toThrow(/name/);
+		expect(() => validateManifest({ ...base, kind: "x".repeat(L.kindLength + 1) })).toThrow(/kind/);
+		expect(() => validateManifest({ ...base, version: "1".repeat(L.versionLength + 1) })).toThrow(
+			/version/,
+		);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [cap({ name: "c".repeat(L.capabilityNameLength + 1) })],
+			}),
+		).toThrow(/capability name/);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [cap({ description: "x".repeat(L.capabilityDescriptionLength + 1) })],
+			}),
+		).toThrow(/description/);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [
+					cap({ params: { ["p".repeat(L.paramNameLength + 1)]: { type: "string" } } }),
+				],
+			}),
+		).toThrow(/param/);
+		expect(() =>
+			validateManifest({
+				...base,
+				capabilities: [cap({ params: { ok: { type: "string", description: 42 } } })],
+			}),
+		).toThrow(/description must be a non-empty string/);
 	});
 });
