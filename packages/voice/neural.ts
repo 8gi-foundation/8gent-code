@@ -51,7 +51,7 @@ import {
 	statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 export type NeuralEngine = "supertonic" | "kitten";
 
@@ -114,7 +114,9 @@ export type NeuralErrorCode =
 	/** The pinned engine failed and the caller did not allow fallback. */
 	| "engine_failed"
 	/** The pinned engine and the opted-in fallback both failed. */
-	| "all_engines_failed";
+	| "all_engines_failed"
+	/** outPath is a directory, or a file there cannot be replaced. */
+	| "bad_out_path";
 
 export interface Attempt {
 	engine: NeuralEngine;
@@ -366,6 +368,11 @@ export interface SynthRequest {
 	text: string;
 	/** Table name, officer code or officer first name. */
 	voice: string;
+	/**
+	 * Where the WAV goes. A relative path is resolved against the caller's cwd
+	 * (process.cwd()) before any engine runs, so both engines write to the same
+	 * place; the result's path is always that absolute path.
+	 */
 	outPath: string;
 	/** Default true: an unpinned voice is an error rather than the narrator. */
 	strict?: boolean;
@@ -399,9 +406,13 @@ export type SynthResult =
  * file; a failed attempt leaves no output file behind.
  */
 export async function synthesizeBatch(
-	reqs: SynthRequest[],
+	input: SynthRequest[],
 	deps: NeuralDeps = defaultDeps(),
 ): Promise<SynthResult[]> {
+	// Kitten runs with its cwd set to a temp dir that is then deleted, so a
+	// relative outPath must be pinned to the caller's cwd first, or Kitten
+	// would write inside the temp dir and the line would silently fail.
+	const reqs = input.map((r) => ({ ...r, outPath: resolve(r.outPath) }));
 	const stBin = findSupertonic(deps);
 	const py = findKittenPython(deps);
 	const results: (SynthResult | undefined)[] = [];
@@ -411,7 +422,9 @@ export async function synthesizeBatch(
 
 	reqs.forEach((req, i) => {
 		const r = resolveVoice(req.voice, { strict: req.strict ?? true });
+		const badOut = r.ok ? clearOutPath(deps, req.outPath) : null;
 		if (!r.ok) results[i] = r;
+		else if (badOut) results[i] = { ok: false, error: badOut };
 		else if (!req.text.trim())
 			results[i] = { ok: false, error: new NeuralTtsError("empty_text", "text is empty") };
 		else if (!stBin && !py)
@@ -527,6 +540,24 @@ export async function synthesizeBatch(
 						),
 					}),
 	);
+}
+
+/**
+ * Clear any stale file at outPath, so only this run's output can count. A
+ * directory (or anything else that cannot be removed) is a typed bad_out_path
+ * error rather than a thrown EISDIR. Null when the path is usable.
+ */
+function clearOutPath(deps: NeuralDeps, outPath: string): NeuralTtsError | null {
+	try {
+		deps.remove(outPath);
+		return null;
+	} catch (e) {
+		const code = (e as { code?: string }).code ?? "";
+		const why = /EISDIR/.test(code)
+			? "is a directory"
+			: `cannot be replaced (${code || String(e)})`;
+		return new NeuralTtsError("bad_out_path", `outPath ${outPath} ${why}`);
+	}
 }
 
 /**

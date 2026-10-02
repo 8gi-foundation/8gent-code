@@ -842,3 +842,136 @@ describe("spawn stderr is bounded (L2)", () => {
 		}
 	});
 });
+
+describe("output paths (N1, L3)", () => {
+	test("a relative outPath is resolved against the caller's cwd before Kitten runs", async () => {
+		const deps = both();
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "rel-out.wav" }, deps);
+		const job = JSON.parse(kittenRuns(deps.calls)[0].input ?? "{}") as { items: { out: string }[] };
+		expect(job.items[0].out).toBe(join(process.cwd(), "rel-out.wav"));
+		expect(r.ok && r.path).toBe(join(process.cwd(), "rel-out.wav"));
+	});
+
+	test("a relative outPath is resolved the same way for Supertonic", async () => {
+		const deps = both();
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "rel-out.wav" }, deps);
+		const args = deps.calls[0].args;
+		expect(args[args.indexOf("-o") + 1]).toBe(join(process.cwd(), "rel-out.wav"));
+		expect(r.ok && r.path).toBe(join(process.cwd(), "rel-out.wav"));
+	});
+
+	test("a directory outPath is a typed bad_out_path error, not a thrown EISDIR", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "neural-dir-out-"));
+		try {
+			const deps = { ...defaultDeps(), spawn: both().spawn };
+			const [r] = await synthesizeBatch([{ text: "hi", voice: "Rishi", outPath: dir }], deps);
+			expect(r.ok).toBe(false);
+			if (!r.ok) {
+				expect(r.error).toBeInstanceOf(NeuralTtsError);
+				expect(r.error.code).toBe("bad_out_path");
+				expect(r.error.message).toContain("is a directory");
+			}
+			expect(existsSync(dir)).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("one bad outPath does not sink the other lines in the batch", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "neural-dir-out-"));
+		try {
+			const fake = both();
+			const deps = {
+				...fake,
+				remove: (p: string) => (p === dir ? defaultDeps().remove(p) : fake.remove(p)),
+			};
+			const [bad, good] = await synthesizeBatch(
+				[
+					{ text: "hi", voice: "Ava", outPath: dir },
+					{ text: "hi", voice: "Ava", outPath: "/o/good.wav" },
+				],
+				deps,
+			);
+			expect(bad.ok).toBe(false);
+			expect(good.ok).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("Kitten on a real interpreter with a fake kittentts (N1, N2)", () => {
+	const py = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"].find((p) =>
+		existsSync(p),
+	);
+
+	/**
+	 * A kittentts package on an absolute PYTHONPATH (the sys.path strip only
+	 * drops "" and "."). generate_to_file writes bytes, then raises for any
+	 * line whose text is "boom", leaving a non-empty partial WAV.
+	 */
+	const fixture = () => {
+		const root = mkdtempSync(join(tmpdir(), "neural-fake-kitten-"));
+		mkdirSync(join(root, "lib", "kittentts"), { recursive: true });
+		writeFileSync(
+			join(root, "lib", "kittentts", "__init__.py"),
+			[
+				"class KittenTTS:",
+				"    def __init__(self, model): pass",
+				"    def generate_to_file(self, text, out, voice=None):",
+				"        with open(out, 'wb') as f: f.write(b'RIFF' + b'\\0' * 64)",
+				"        if text == 'boom': raise RuntimeError('synthesis blew up mid-file')",
+			].join("\n"),
+		);
+		const work = join(root, "work");
+		mkdirSync(work);
+		return { root, lib: join(root, "lib"), work };
+	};
+
+	const run = async (lib: string, cwd: string, reqs: Parameters<typeof synthesizeBatch>[0]) => {
+		const prevPath = process.env.PYTHONPATH;
+		const prevCwd = process.cwd();
+		process.env.PYTHONPATH = lib;
+		process.chdir(cwd);
+		try {
+			return await synthesizeBatch(reqs, { ...defaultDeps(), env: { EIGHT_TTS_PYTHON: py } });
+		} finally {
+			process.chdir(prevCwd);
+			if (prevPath === undefined) delete process.env.PYTHONPATH;
+			else process.env.PYTHONPATH = prevPath;
+		}
+	};
+
+	test.skipIf(!py)("a relative outPath lands in the caller's cwd, not the deleted temp dir", async () => {
+		const { root, lib, work } = fixture();
+		try {
+			const [r] = await run(lib, work, [{ text: "hi", voice: "Ava", outPath: "rel-out.wav" }]);
+			expect(r.ok).toBe(true);
+			expect(existsSync(join(work, "rel-out.wav"))).toBe(true);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test.skipIf(!py)("a line that raises mid-write fails and its partial WAV is deleted", async () => {
+		const { root, lib, work } = fixture();
+		try {
+			const good = join(work, "good.wav");
+			const bad = join(work, "bad.wav");
+			const [g, b] = await run(lib, work, [
+				{ text: "hi", voice: "Ava", outPath: good },
+				{ text: "boom", voice: "Ava", outPath: bad },
+			]);
+			expect(g.ok).toBe(true);
+			expect(existsSync(good)).toBe(true);
+			expect(b.ok).toBe(false);
+			if (!b.ok) {
+				expect(b.error.code).toBe("engine_failed");
+				expect(b.error.attempts[0].reason).toContain("synthesis blew up mid-file");
+			}
+			expect(existsSync(bad)).toBe(false);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
