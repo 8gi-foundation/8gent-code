@@ -155,7 +155,6 @@ import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import {
 	type ContextWindow,
-	UNKNOWN_WINDOW,
 	contextMeter,
 	resolveContextWindow,
 	stepContextUsed,
@@ -1110,7 +1109,8 @@ export function App({
 	const [contextUsed, setContextUsed] = useState(0);
 	// Window of the model that ran the turn (#3321). Null until resolved; the
 	// HUD shows "unknown", never a guessed number.
-	const [contextWindow, setContextWindow] = useState<ContextWindow>(UNKNOWN_WINDOW);
+	// Null while the resolver runs: the slot shows "--", not "? unknown".
+	const [contextWindow, setContextWindow] = useState<ContextWindow | null>(null);
 	// The model whose window is shown: the asked one, or the one a reroute ran.
 	const [windowTarget, setWindowTarget] = useState<{ provider: string; model: string } | null>(null);
 
@@ -1404,7 +1404,7 @@ export function App({
 	useEffect(() => {
 		if (!windowTarget) return;
 		let cancelled = false;
-		setContextWindow(UNKNOWN_WINDOW);
+		setContextWindow(null);
 		resolveContextWindow({
 			...windowTarget,
 			ollamaBaseUrl: resolveOllamaBaseUrl(),
@@ -2345,11 +2345,14 @@ export function App({
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
 				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
-				setWindowTarget((prev) =>
-					prev?.provider === event.provider && prev.model === event.used
-						? prev
-						: { provider: event.provider, model: event.used },
-				);
+				// Only the visible tab moves the bar: its reading is gated the same way.
+				if (tabId === activeTabId) {
+					setWindowTarget((prev) =>
+						prev?.provider === event.provider && prev.model === event.used
+							? prev
+							: { provider: event.provider, model: event.used },
+					);
+				}
 				setRoutedTick((n) => n + 1);
 			},
 			onToolStart: (event: AgentToolStartEvent) => {
@@ -6369,7 +6372,9 @@ export function App({
 		Boolean(voice?.isAvailable) &&
 		(voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
-	const ctxMeter = contextMeter(contextUsed > 0 ? contextUsed : null, contextWindow);
+	const ctxMeter = contextWindow
+		? contextMeter(contextUsed > 0 ? contextUsed : null, contextWindow)
+		: ({ kind: "fresh" } as const);
 	const contextPct = ctxMeter.kind === "measured" ? ctxMeter.pct : null;
 	const contextState = ctxMeter.kind === "measured" ? ctxMeter.source : ctxMeter.kind;
 	void sessionTick;

@@ -58,10 +58,14 @@ async function fromProviderMetadata(o: ResolveContextWindowOptions, f: typeof fe
 	return positive(entry?.context_length);
 }
 
+/** Providers served by the local Ollama. `8gent` is the out-of-box default
+ *  and runs on the same Ollama host (packages/providers/index.ts). */
+const OLLAMA_PROVIDERS = new Set(["ollama", "8gent"]);
+
 /** What the running local server says: Ollama's loaded num_ctx (else the
  *  model's trained length), or llama-server's n_ctx. */
 async function fromLocalServer(o: ResolveContextWindowOptions, f: typeof fetch, t: number) {
-	if (o.provider === "ollama" && o.ollamaBaseUrl) {
+	if (OLLAMA_PROVIDERS.has(o.provider) && o.ollamaBaseUrl) {
 		const json = (await getJson(
 			f,
 			`${o.ollamaBaseUrl.replace(/\/+$/, "")}/api/show`,

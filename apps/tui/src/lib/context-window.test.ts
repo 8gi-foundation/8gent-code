@@ -71,6 +71,21 @@ describe("resolveContextWindow", () => {
 		});
 		expect(w).toEqual({ window: 8192, source: "server" });
 	});
+	test("8gent: the default provider is the local Ollama, read via /api/show", async () => {
+		const calls: string[] = [];
+		const fetchImpl = (async (url: string) => {
+			calls.push(String(url));
+			return new Response(JSON.stringify({ parameters: "num_ctx 8192", model_info: {} }));
+		}) as unknown as typeof fetch;
+		const w = await resolveContextWindow({
+			provider: "8gent",
+			model: "eight-1.0-q3:14b",
+			ollamaBaseUrl: "http://localhost:11434",
+			fetchImpl,
+		});
+		expect(w).toEqual({ window: 8192, source: "server" });
+		expect(calls).toEqual(["http://localhost:11434/api/show"]);
+	});
 	test("ollama: falls back to the model's trained length", async () => {
 		const fetchImpl = json({ model_info: { "qwen3.context_length": 40960 } });
 		const w = await resolveContextWindow({
