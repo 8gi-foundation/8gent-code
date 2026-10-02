@@ -11,7 +11,7 @@
  * affordance at rest.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { cellWidth } from "./header-layout.js";
 import type { MouseEvent } from "./mouse-input.js";
 
@@ -314,6 +314,11 @@ export function placeSpans(
  * Register click spans for a box after every render, and drop them on
  * unmount. The spans are cheap to rebuild; the layout is read from Yoga,
  * so the rectangles follow the box wherever it lands.
+ *
+ * A layout effect, not a passive one: Ink computes Yoga layout in its
+ * commit, before layout effects run, and paints in that same commit. A
+ * passive effect runs later, so a cap could be on screen with no target
+ * under it, and a click in that window hit nothing (James, 2026-10-02).
  */
 export function useClickSpans(
 	ref: { current: unknown },
@@ -322,13 +327,13 @@ export function useClickSpans(
 	maxGap = MAX_SHARED_GAP,
 ): void {
 	const ids = useRef<string[]>([]);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const rect = ref.current ? absoluteRect(ref.current as NodeLike) : null;
 		const next: string[] = rect ? placeSpans(rect, spans, z, maxGap) : [];
 		for (const id of ids.current) if (!next.includes(id)) removeTarget(id);
 		ids.current = next;
 	});
-	useEffect(
+	useLayoutEffect(
 		() => () => {
 			for (const id of ids.current) removeTarget(id);
 			ids.current = [];

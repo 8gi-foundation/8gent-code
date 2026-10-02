@@ -1638,20 +1638,23 @@ export function App({
 	// Headless callers see no handler and PermissionManager falls back to stdin.
 	const approvalPending = useApprovalCard();
 
-	// A mouse selection copied text (#3239): the footer says so for 2 s.
+	// A short confirmation in the footer's hint slot for 2 s: a mouse
+	// selection copied text (#3239), or a toggle that draws nothing else
+	// changed (^A motion, ^S sound), so its key cap never looks dead.
 	const [copyNotice, setCopyNotice] = useState<string | null>(null);
+	const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const flashNotice = useCallback((text: string) => {
+		setCopyNotice(text);
+		if (noticeTimer.current) clearTimeout(noticeTimer.current);
+		noticeTimer.current = setTimeout(() => setCopyNotice(null), 2000);
+	}, []);
 	useEffect(() => {
-		let timer: ReturnType<typeof setTimeout> | null = null;
-		const off = onCopied((chars) => {
-			setCopyNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`);
-			if (timer) clearTimeout(timer);
-			timer = setTimeout(() => setCopyNotice(null), 2000);
-		});
+		const off = onCopied((chars) => flashNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`));
 		return () => {
 			off();
-			if (timer) clearTimeout(timer);
+			if (noticeTimer.current) clearTimeout(noticeTimer.current);
 		};
-	}, []);
+	}, [flashNotice]);
 
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
@@ -1969,7 +1972,8 @@ export function App({
 
 		// Toggle animations with Ctrl+A
 		if (key.ctrl && input === "a") {
-			setShowAnimations((prev) => !prev);
+			setShowAnimations(!showAnimations);
+			flashNotice(showAnimations ? "motion off" : "motion on");
 		}
 
 		// Toggle sound with Ctrl+S
@@ -1980,6 +1984,7 @@ export function App({
 				if (next) playSound("success");
 				return next;
 			});
+			flashNotice(soundEnabled ? "sound off" : "sound on");
 		}
 
 		// Toggle kanban with Ctrl+K (overlay, not a tab)
