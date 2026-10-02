@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - a repo task that says "build" or "make" goes to the agent, not the HTML pipeline (#3323)
+- The TUI build-intent detector sent any message with a build verb to the single-file HTML artifact pipeline, so a repo task such as "make deck/outline.md and deck/deck.md (Marp) about packages/decide" came back as a web page instead of files in the repo. It now auto-routes only requests for a web artifact (a page, site, dashboard, game or animation). A message that names a repo path, a non-HTML file, or a backtick command, or asks for no web artifact, stays with the agent.
+
 ### Fixed - the Linux login service installs where systemd looks (#3293)
 - `8gent daemon install` wrote the systemd unit (and on macOS the launchd plist) under `HOME` or `EIGHT_HOME`, so with either pointing elsewhere `systemctl --user enable` failed with "Unit file com.8gent.daemon.service does not exist". The service definition now goes under the account's own home, the one the service manager searches and the daemon runs with.
 
