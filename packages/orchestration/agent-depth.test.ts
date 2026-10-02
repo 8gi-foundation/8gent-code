@@ -353,3 +353,22 @@ describe("childAgentEnv and the process refusal (#3341)", () => {
 		}
 	});
 });
+
+describe("agent-depth.ts is a leaf (#3341, 8SO finding A)", () => {
+	// bin/8gent.ts imports it statically on every start, so it must stay cheap:
+	// no imports at all, and the same module instance index.ts re-exports.
+	test("it imports nothing", async () => {
+		const src = await Bun.file(join(import.meta.dir, "agent-depth.ts")).text();
+		expect(src).not.toMatch(/^\s*import\s/m);
+		expect(src).not.toMatch(/\bimport\(|\brequire\(/);
+	});
+
+	test("index.ts re-exports the leaf's bindings, not copies", async () => {
+		const leaf = await import("./agent-depth");
+		expect(AgentDepthError).toBe(leaf.AgentDepthError);
+		expect(processAgentDepthRefusal).toBe(leaf.processAgentDepthRefusal);
+		expect(processAgentDepth).toBe(leaf.processAgentDepth);
+		expect(MAX_AGENT_DEPTH).toBe(leaf.MAX_AGENT_DEPTH);
+		expect(AGENT_DEPTH_EXIT_CODE).toBe(leaf.AGENT_DEPTH_EXIT_CODE);
+	});
+});

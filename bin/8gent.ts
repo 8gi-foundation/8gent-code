@@ -9,6 +9,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+// Static and first, so the depth is parsed when this module loads, before
+// main() reads ~/.8gent/keys.env (#3341). The leaf has no imports.
+import {
+	AGENT_DEPTH_EXIT_CODE,
+	AgentDepthError,
+	processAgentDepthRefusal,
+} from "../packages/orchestration/agent-depth.ts";
 
 const VERSION = "0.18.0";
 
@@ -246,19 +253,13 @@ function depthExempt(args: string[]): boolean {
 async function main() {
 	// A process started by an agent at MAX_AGENT_DEPTH does not start another
 	// model loop (#3341). First, before keys load and before --rpc / --cli,
-	// which start model loops without reaching the command switch.
-	// Unset or blank EIGHT_AGENT_DEPTH is depth 0 by the parser's own rule, so a
-	// user's session skips the import (about 20 ms); any other value, malformed
-	// included, goes through the fail-closed parse in orchestration.
-	if (process.env.EIGHT_AGENT_DEPTH?.trim()) {
-		const { AGENT_DEPTH_EXIT_CODE, processAgentDepthRefusal } = await import(
-			"../packages/orchestration/index.ts"
-		);
-		const depthRefusal = processAgentDepthRefusal();
-		if (depthRefusal && !depthExempt(process.argv.slice(2))) {
-			console.error(depthRefusal);
-			process.exit(AGENT_DEPTH_EXIT_CODE);
-		}
+	// which start model loops without reaching the command switch. The depth
+	// was parsed (fail closed) when the static import above loaded, so nothing
+	// keys.env sets can change this decision or any later one.
+	const depthRefusal = processAgentDepthRefusal();
+	if (depthRefusal && !depthExempt(process.argv.slice(2))) {
+		console.error(depthRefusal);
+		process.exit(AGENT_DEPTH_EXIT_CODE);
 	}
 
 	// Load API keys from ~/.8gent/keys.env into process.env BEFORE any
@@ -2763,13 +2764,10 @@ async function doctorCommand() {
 	);
 }
 
-main().catch(async (error) => {
+main().catch((error) => {
 	// A refusal first seen at Agent construction (the backstop in
 	// packages/eight/agent.ts) exits like the entrypoint refusal: 77, clean message.
-	const { AGENT_DEPTH_EXIT_CODE, AgentDepthError } = await import(
-		"../packages/orchestration/index.ts"
-	).catch(() => ({ AGENT_DEPTH_EXIT_CODE: 1, AgentDepthError: null }));
-	if (AgentDepthError && error instanceof AgentDepthError) {
+	if (error instanceof AgentDepthError) {
 		console.error(error.message);
 		process.exit(AGENT_DEPTH_EXIT_CODE);
 	}

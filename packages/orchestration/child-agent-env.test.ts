@@ -9,7 +9,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../eight/agent";
@@ -42,14 +42,18 @@ afterAll(() => {
 
 type Run = { code: number | null; stdout: string; stderr: string; ms: number };
 
-/** Run argv in a fresh bun process whose inherited EIGHT_AGENT_DEPTH is replaced by `depth`. */
-function fresh(depth: string | undefined, argv: string[]): Run {
+/**
+ * Run argv in a fresh bun process whose inherited EIGHT_AGENT_DEPTH is replaced
+ * by `depth`. `extra` overrides the env last (HOME, OLLAMA_HOST).
+ */
+function fresh(depth: string | undefined, argv: string[], extra: Record<string, string> = {}): Run {
 	const { EIGHT_AGENT_DEPTH: _inherited, ...rest } = process.env;
 	const env = {
 		...rest,
 		HOME: home,
 		NO_COLOR: "1",
 		...(depth === undefined ? {} : { EIGHT_AGENT_DEPTH: depth }),
+		...extra,
 	};
 	const start = performance.now();
 	const proc = Bun.spawnSync([process.execPath, ...argv], {
@@ -112,6 +116,8 @@ describe("bin/8gent.ts refuses to start past MAX_AGENT_DEPTH (#3341)", () => {
 			["--cli --version", ["--cli", "--version"]],
 			// --resume rewrites any command into a TUI launch, so it is not exempt.
 			["outline --resume", ["outline", "x.ts", "--resume"]],
+			// So does --continue <id>, the other rewrite into a TUI launch.
+			["outline --continue <id>", ["outline", "x.ts", "--continue", "abc"]],
 		];
 		for (const [label, args] of cases) expectRefused(fresh("4", [BIN, ...args]), label);
 	});
@@ -169,6 +175,54 @@ describe("bin/8gent.ts refuses to start past MAX_AGENT_DEPTH (#3341)", () => {
 
 	test("the bin reads the value through the same parse as the library: padded 4 is refused", () => {
 		expectRefused(fresh(" 4 ", [BIN, "--cli", "hi"]), "padded 4");
+	});
+});
+
+describe("~/.8gent/keys.env cannot set the depth (#3341, 8SO finding A)", () => {
+	// keys.env fills any env var that is unset, with no allowlist. The depth is
+	// parsed once, when the bin statically imports orchestration/agent-depth.ts,
+	// which is before main() loads keys. So a stray EIGHT_AGENT_DEPTH line there
+	// must decide nothing: every outcome matches a session with no keys file.
+	let keysHome: string;
+	// Nothing listens on port 9 (discard), so `run` fails fast at the model call
+	// and never needs a real one.
+	const NO_MODEL = { OLLAMA_HOST: "http://127.0.0.1:9" };
+	const RUN = ["run", "--provider", "ollama", "--model", "depth-probe", "x"];
+
+	beforeAll(() => {
+		keysHome = mkdtempSync(join(tmpdir(), "child-agent-env-keys-"));
+		mkdirSync(join(keysHome, ".8gent"));
+		writeFileSync(join(keysHome, ".8gent", "keys.env"), "EIGHT_AGENT_DEPTH=4\n");
+	});
+
+	afterAll(() => {
+		rmSync(keysHome, { recursive: true, force: true });
+	});
+
+	test("the throwaway keys.env really carries EIGHT_AGENT_DEPTH=4", () => {
+		expect(readFileSync(join(keysHome, ".8gent", "keys.env"), "utf8")).toContain(
+			"EIGHT_AGENT_DEPTH=4",
+		);
+	});
+
+	test("run, --cli and --version with EIGHT_AGENT_DEPTH=4 only in keys.env behave as unset", () => {
+		const cases: Array<[string, string[]]> = [
+			["run", RUN],
+			["--cli", ["--cli"]],
+			["--version", ["--version"]],
+		];
+		for (const [label, args] of cases) {
+			const unset = fresh(undefined, [BIN, ...args], NO_MODEL);
+			const keyed = fresh(undefined, [BIN, ...args], { ...NO_MODEL, HOME: keysHome });
+			expectNotRefused(keyed);
+			expect({ label, code: keyed.code }).toEqual({ label, code: unset.code });
+		}
+	});
+
+	test("run with a keys.env depth gets past the Agent backstop to the model call", () => {
+		const keyed = fresh(undefined, [BIN, ...RUN], { ...NO_MODEL, HOME: keysHome });
+		expectNotRefused(keyed);
+		expect(keyed.stdout + keyed.stderr).toContain("127.0.0.1:9");
 	});
 });
 
