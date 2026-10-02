@@ -261,6 +261,34 @@ describe("childAgentEnv and the process refusal (#3341)", () => {
 		expect(processAgentDepth()).toBe(0);
 	});
 
+	test("a fail-closed parent (unreadable EIGHT_AGENT_DEPTH) gives its child 4, which is refused", () => {
+		const got = JSON.parse(
+			inFreshProcess(
+				"abc",
+				`const m = await import(${INDEX}); console.log(JSON.stringify({ depth: m.processAgentDepth(), child: m.childAgentEnv() }));`,
+			),
+		);
+		expect(got).toEqual({ depth: MAX_AGENT_DEPTH, child: { EIGHT_AGENT_DEPTH: "4" } });
+		const child = JSON.parse(
+			inFreshProcess(
+				got.child.EIGHT_AGENT_DEPTH,
+				`const m = await import(${INDEX}); console.log(JSON.stringify({ refused: m.processAgentDepthRefusal() !== null }));`,
+			),
+		);
+		expect(child).toEqual({ refused: true });
+	});
+
+	test("a depth that is not a safe non-negative integer gives the child MAX + 1, never a value it would read as MAX", () => {
+		// The child parses NaN, Infinity or anything past 2^53 as MAX (3) and would
+		// run a model loop. Emitting MAX + 1 makes the child refuse instead.
+		for (const depth of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, 2 ** 60]) {
+			expect({ depth, env: runAtAgentDepth(depth, () => childAgentEnv()) }).toEqual({
+				depth,
+				env: { EIGHT_AGENT_DEPTH: String(MAX_AGENT_DEPTH + 1) },
+			});
+		}
+	});
+
 	test("a process deeper than MAX_AGENT_DEPTH is refused; up to MAX it runs", () => {
 		const script = `const m = await import(${INDEX}); console.log(JSON.stringify({ depth: m.processAgentDepth(), refusal: m.processAgentDepthRefusal() }));`;
 		const cases: Array<[string | undefined, number, boolean]> = [

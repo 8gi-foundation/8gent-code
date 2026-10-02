@@ -74,9 +74,15 @@ export function agentDepthRefusal(): string | null {
  * Env to merge LAST into any process an agent starts (#3341): the child's
  * depth, one deeper than the agent whose call is in flight. Spread after
  * process.env and after any caller env, so neither can lower it.
+ *
+ * Fails closed: if the child's depth would not be a safe non-negative integer
+ * (NaN, Infinity, past 2^53), the child would parse it as MAX_AGENT_DEPTH and
+ * run, so it is given MAX_AGENT_DEPTH + 1 instead and refuses.
  */
 export function childAgentEnv(): { [AGENT_DEPTH_ENV]: string } {
-	return { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) };
+	const child = currentAgentDepth() + 1;
+	const safe = Number.isSafeInteger(child) && child >= 0;
+	return { [AGENT_DEPTH_ENV]: String(safe ? child : MAX_AGENT_DEPTH + 1) };
 }
 
 /** This process's inherited depth, as parsed fail-closed at load. */
