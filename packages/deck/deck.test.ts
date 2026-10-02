@@ -2,16 +2,27 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import {
+	type NeuralDeps,
+	NeuralTtsError,
+	type SpawnResult,
+	defaultDeps,
+	findKittenPython,
+	findSupertonic,
+} from "../voice/neural";
 import { deckVideoAfterWrite, deckVideoEnabled, shouldRenderDeckVideo } from "./auto";
 import { renderMarkdown, slideHtml } from "./html";
 import { isMarpDeck, parseDeck, plainInline, slideNarration } from "./parse";
 import {
 	MIN_SLIDE_SECONDS,
+	checkNeuralEngines,
 	concatArgs,
 	concatListLine,
 	findChrome,
+	narrateSlides,
 	renderDeckVideo,
+	resolveDeckVoice,
 	segmentArgs,
 	slideSeconds,
 } from "./render";
@@ -31,12 +42,15 @@ describe("isMarpDeck", () => {
 
 describe("isMarpDeck without marp: true", () => {
 	// Rishi pilot run 2026-09-29_221042: qwen wrote theme/paginate but no marp key.
-	const pilotDeck = "---\ntheme: default\ntitle: Eight System One\npaginate: true\n---\n\n# One\n\n---\n\n# Two\n\n---\n\n# Three\n";
+	const pilotDeck =
+		"---\ntheme: default\ntitle: Eight System One\npaginate: true\n---\n\n# One\n\n---\n\n# Two\n\n---\n\n# Three\n";
 	test("Marp-only directives plus slide breaks count as a deck", () => {
 		expect(isMarpDeck(pilotDeck)).toBe(true);
 	});
 	test("an explicit marp: false still opts out", () => {
-		expect(isMarpDeck(pilotDeck.replace("paginate: true", "paginate: true\nmarp: false"))).toBe(false);
+		expect(isMarpDeck(pilotDeck.replace("paginate: true", "paginate: true\nmarp: false"))).toBe(
+			false,
+		);
 	});
 	test("a blog post with only title/author is not a deck, even with rules", () => {
 		expect(isMarpDeck("---\ntitle: Post\nauthor: me\n---\n\n# A\n\n---\n\n# B\n")).toBe(false);
@@ -216,10 +230,9 @@ function commandExists(cmd: string): boolean {
 }
 
 const canRender =
-	process.platform === "darwin" &&
 	commandExists("ffmpeg") &&
 	commandExists("ffprobe") &&
-	commandExists("say") &&
+	(findSupertonic(defaultDeps()) !== null || findKittenPython(defaultDeps()) !== null) &&
 	findChrome() !== null;
 
 describe.skipIf(!canRender)("renderDeckVideo (integration)", () => {
@@ -251,4 +264,196 @@ describe.skipIf(!canRender)("renderDeckVideo (integration)", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	}, 300_000);
+});
+
+// ── Neural narration (#3346). Every spawn is faked; no engine is needed. ──
+
+interface Call {
+	cmd: string;
+	args: string[];
+	input?: string;
+}
+
+const ST = "/opt/homebrew/bin/supertonic";
+const PY = "/opt/homebrew/bin/python3";
+
+/** A fake machine: `files` is what exists, the flags say which engine works. */
+function fakeNeural(opts: {
+	files?: string[];
+	supertonicWorks?: boolean;
+	kittenWorks?: boolean;
+}): NeuralDeps & { calls: Call[] } {
+	const files = new Set(opts.files ?? []);
+	const calls: Call[] = [];
+	return {
+		calls,
+		env: {},
+		home: "/home/fake",
+		exists: (p) => files.has(p),
+		fileSize: (p) => (files.has(p) ? 1 : 0),
+		remove: (p) => {
+			files.delete(p);
+		},
+		realpath: (p) => p,
+		makeTempDir: () => "/tmp/neural-fake",
+		removeTree: () => {},
+		which: (cmd) =>
+			cmd === "supertonic" && files.has(ST) ? ST : cmd === "python3" && files.has(PY) ? PY : null,
+		listDir: () => [],
+		spawn: async (cmd, args, o): Promise<SpawnResult> => {
+			calls.push({ cmd, args, input: o.input });
+			if (basename(cmd) === "supertonic") {
+				if (!opts.supertonicWorks) return { status: 1, stderr: "model load failed" };
+				files.add(args[args.indexOf("-o") + 1]);
+				return { status: 0, stderr: "" };
+			}
+			// The -P capability probe, then the Kitten batch script.
+			if (args.at(-1) === "pass") return { status: 0, stderr: "" };
+			if (!opts.kittenWorks) return { status: 1, stderr: "No module named kittentts" };
+			const job = JSON.parse(o.input ?? "{}") as { items: { out: string }[] };
+			for (const it of job.items) files.add(it.out);
+			return { status: 0, stderr: "" };
+		},
+	};
+}
+
+/** The calls that ran the Kitten batch script (not the -P probe). */
+const kittenRuns = (calls: Call[]) =>
+	calls.filter((c) => basename(c.cmd) !== "supertonic" && c.args.at(-1) !== "pass");
+
+const slides = parseDeck(fixture).slides;
+
+describe("deck voice casting", () => {
+	test("default is the narrator; codes and first names resolve to the table name", () => {
+		expect(resolveDeckVoice(undefined, {})).toBe("Daniel");
+		expect(resolveDeckVoice("8TO", {})).toBe("Rishi");
+		expect(resolveDeckVoice("luis", {})).toBe("Fred");
+		expect(resolveDeckVoice(undefined, { EIGHT_DECK_VOICE: "Moira" })).toBe("Moira");
+		expect(resolveDeckVoice("Karen", { EIGHT_DECK_VOICE: "Moira" })).toBe("Karen");
+	});
+
+	test("an unpinned voice (a system voice name) fails instead of falling back", () => {
+		for (const name of ["Good News", "Zarvox"]) {
+			let err: unknown;
+			try {
+				resolveDeckVoice(name, {});
+			} catch (e) {
+				err = e;
+			}
+			expect(err).toBeInstanceOf(NeuralTtsError);
+			expect((err as NeuralTtsError).code).toBe("unpinned_voice");
+		}
+	});
+
+	test("the preflight needs the voice's pinned engine; the other engine does not count", () => {
+		expect(() => checkNeuralEngines(fakeNeural({}))).toThrow(NeuralTtsError);
+		// Daniel (the default) and Rishi are Supertonic; Fred (8CO) is Kitten.
+		expect(() => checkNeuralEngines(fakeNeural({ files: [ST] }))).not.toThrow();
+		expect(() => checkNeuralEngines(fakeNeural({ files: [ST] }), "Rishi")).not.toThrow();
+		expect(() => checkNeuralEngines(fakeNeural({ files: [PY] }), "Fred")).not.toThrow();
+		expect(() => checkNeuralEngines(fakeNeural({ files: [PY] }), "Rishi")).toThrow(
+			/pinned to supertonic M3/,
+		);
+		expect(() => checkNeuralEngines(fakeNeural({ files: [ST] }), "Fred")).toThrow(
+			/pinned to kitten Bruno/,
+		);
+	});
+});
+
+describe("narrateSlides", () => {
+	test("a Supertonic voice gets one spawn per slide with its pinned style", async () => {
+		const deps = fakeNeural({ files: [ST, PY], supertonicWorks: true });
+		const wavs = await narrateSlides(slides, "Rishi", "/w", deps);
+		expect(wavs).toEqual(["/w/slide-001.wav", "/w/slide-002.wav", "/w/slide-003.wav"]);
+		expect(deps.calls.length).toBe(3);
+		for (const c of deps.calls) {
+			expect(c.cmd).toBe(ST);
+			expect(c.args[c.args.indexOf("--voice") + 1]).toBe("M3");
+		}
+	});
+
+	test("a KittenTTS voice voices every slide in one python process", async () => {
+		const deps = fakeNeural({ files: [ST, PY], kittenWorks: true });
+		const wavs = await narrateSlides(slides, "Fred", "/w", deps);
+		expect(wavs.length).toBe(3);
+		const runs = kittenRuns(deps.calls);
+		expect(runs.length).toBe(1);
+		const job = JSON.parse(runs[0].input ?? "{}") as {
+			items: { voice: string; text: string }[];
+		};
+		expect(job.items.map((i) => i.voice)).toEqual(["Bruno", "Bruno", "Bruno"]);
+		expect(job.items[0].text.length).toBeGreaterThan(0);
+	});
+
+	test("a failed pinned engine fails the deck: the other engine's voice never stands in", async () => {
+		const deps = fakeNeural({ files: [ST, PY], supertonicWorks: false, kittenWorks: true });
+		await expect(narrateSlides(slides, "Rishi", "/w", deps)).rejects.toThrow(
+			/engine_failed|fallback is off/,
+		);
+		expect(kittenRuns(deps.calls)).toEqual([]);
+	});
+
+	test("a failed pinned engine fails the render, naming the slide and the attempt", async () => {
+		const deps = fakeNeural({ files: [ST, PY] });
+		let err: unknown;
+		try {
+			await narrateSlides(slides, "Rishi", "/w", deps);
+		} catch (e) {
+			err = e;
+		}
+		expect(err).toBeInstanceOf(NeuralTtsError);
+		const e = err as NeuralTtsError;
+		expect(e.code).toBe("engine_failed");
+		expect(e.message).toContain("slide 1");
+		expect(e.message).toContain("model load failed");
+		expect(e.attempts.length).toBe(1);
+	});
+});
+
+describe("renderDeckVideo neural preflight", () => {
+	test("an unpinned voice rejects before anything is spawned", async () => {
+		const deps = fakeNeural({ files: [ST, PY], supertonicWorks: true });
+		await expect(renderDeckVideo(FIXTURE, { voice: "Zarvox", neural: deps })).rejects.toThrow(
+			/not in NEURAL_VOICE/,
+		);
+		expect(deps.calls).toEqual([]);
+	});
+
+	test("no engine rejects with no_engine before Chrome or ffmpeg", async () => {
+		const deps = fakeNeural({});
+		await expect(
+			renderDeckVideo(FIXTURE, { neural: deps, chrome: "/nonexistent/chrome" }),
+		).rejects.toThrow(/no neural TTS engine found/);
+		expect(deps.calls).toEqual([]);
+	});
+});
+
+describe("macOS say is unreachable from the deck renderer", () => {
+	test("no narration scenario ever spawns say", async () => {
+		for (const [st, kt] of [
+			[true, true],
+			[false, true],
+			[true, false],
+			[false, false],
+		]) {
+			const deps = fakeNeural({
+				files: [ST, PY, "/usr/bin/say"],
+				supertonicWorks: st,
+				kittenWorks: kt,
+			});
+			try {
+				await narrateSlides(slides, "Daniel", "/w", deps);
+			} catch {
+				// Failure is expected in the both-fail case.
+			}
+			for (const c of deps.calls) expect(basename(c.cmd)).not.toBe("say");
+		}
+	});
+
+	test("render.ts source has no say code path", () => {
+		const src = readFileSync(join(import.meta.dir, "render.ts"), "utf8");
+		expect(src).not.toMatch(/\bsay\b/);
+		expect(src).not.toMatch(/aiff|voice-resolver|afplay|AVSpeech|NSSpeech/i);
+		expect(src).toContain("synthesizeBatch(");
+	});
 });

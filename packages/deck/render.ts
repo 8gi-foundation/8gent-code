@@ -3,10 +3,16 @@
  *
  * Deterministic path, no model anywhere in it:
  *   parse slides -> narration text -> HTML -> headless Chrome PNG (1920x1080)
- *   -> macOS `say` AIFF -> ffmpeg segment per slide -> concat -> deck.mp4
+ *   -> neural TTS WAV (Supertonic or KittenTTS, one batch for every slide)
+ *   -> ffmpeg segment per slide -> concat -> deck.mp4
  *
- * Missing Chrome, `say`, or ffmpeg fails the render with a clear reason.
- * A video is never faked.
+ * The voice is cast from the one neural table in packages/voice/neural.ts,
+ * strictly: a name that is not pinned there fails the render. There is no
+ * system-voice path, and no fallback to the other neural engine either: the
+ * fallback styles are other officers' voices, and a deck voice is identity.
+ * Missing Chrome, ffmpeg, or the voice's pinned engine, or a slide that engine
+ * could not voice, fails the render with a clear reason. A video is never
+ * faked.
  *
  * CLI: bun packages/deck/render.ts deck/deck.md
  */
@@ -18,11 +24,16 @@ import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-	FALLBACK_SYSTEM_VOICE,
-	listInstalledSystemVoices,
-	pickNaturalSystemVoice,
-	resolveSpeechVoice,
-} from "../voice/voice-resolver";
+	NARRATOR,
+	type NeuralDeps,
+	NeuralTtsError,
+	type SynthRequest,
+	defaultDeps,
+	findKittenPython,
+	findSupertonic,
+	resolveVoice,
+	synthesizeBatch,
+} from "../voice/neural";
 import { slideHtml } from "./html";
 import { type DeckSlide, parseDeck, slideNarration } from "./parse";
 
@@ -44,8 +55,13 @@ export interface DeckRenderResult {
 export interface DeckRenderOptions {
 	/** Output path. Default: the deck path with `.mp4`. */
 	output?: string;
-	/** `say` voice. Default: EIGHT_DECK_VOICE, else the voice resolver. */
+	/**
+	 * Neural voice: a NEURAL_VOICE name, officer code or officer first name.
+	 * Default: EIGHT_DECK_VOICE, else the narrator. Unpinned names fail.
+	 */
 	voice?: string;
+	/** Machine access for the neural engines. Default: the real machine. */
+	neural?: NeuralDeps;
 	/** Chrome binary. Default: EIGHT_CHROME_PATH, else the first found. */
 	chrome?: string;
 	/** Keep the working directory (for inspection). Default false. */
@@ -101,22 +117,74 @@ async function hasCommand(cmd: string): Promise<boolean> {
 	}
 }
 
-/** The narration voice: explicit, then EIGHT_DECK_VOICE, then the shared resolver. */
-export async function resolveDeckVoice(explicit?: string): Promise<string> {
-	const chosen = explicit?.trim() || process.env.EIGHT_DECK_VOICE?.trim();
-	if (chosen) return chosen;
-	let settingsVoice: string | null = null;
-	try {
-		const { loadSettings } = await import("../settings/store");
-		settingsVoice = loadSettings().voice?.ttsVoice ?? null;
-	} catch {
-		// Settings are optional here.
-	}
-	const installed = await listInstalledSystemVoices({ waitMs: 5000 });
-	const resolved = resolveSpeechVoice({ platform: "darwin", settingsVoice, installed });
-	// KittenTTS is a separate engine; decks always narrate through `say`.
-	if (resolved.engine === "system") return resolved.voice;
-	return (installed && pickNaturalSystemVoice(installed)) || FALLBACK_SYSTEM_VOICE;
+/**
+ * The narration voice as a NEURAL_VOICE table name: explicit, then
+ * EIGHT_DECK_VOICE, then the narrator. Strict: an unpinned name throws
+ * NeuralTtsError("unpinned_voice") rather than quietly becoming someone else.
+ */
+export function resolveDeckVoice(
+	explicit?: string,
+	env: Record<string, string | undefined> = process.env,
+): string {
+	const chosen = explicit?.trim() || env.EIGHT_DECK_VOICE?.trim() || NARRATOR;
+	const r = resolveVoice(chosen, { strict: true });
+	if (!r.ok) throw r.error;
+	return r.voice.name;
+}
+
+/**
+ * Fails before any work when the voice's pinned engine is not installed. The
+ * deck never falls back to the other engine, so the other one does not count.
+ */
+export function checkNeuralEngines(deps: NeuralDeps, voice: string = NARRATOR): void {
+	const r = resolveVoice(voice, { strict: true });
+	if (!r.ok) throw r.error;
+	const { engine, style } = r.voice;
+	if (engine === "supertonic" ? findSupertonic(deps) : findKittenPython(deps)) return;
+	const fix =
+		engine === "supertonic"
+			? "install Supertonic or set EIGHT_SUPERTONIC_BIN"
+			: "install KittenTTS or set EIGHT_TTS_PYTHON";
+	throw new NeuralTtsError(
+		"no_engine",
+		`no neural TTS engine found for voice "${r.voice.name}" (pinned to ${engine} ${style}; ${fix})`,
+	);
+}
+
+/**
+ * Voice every slide in one synthesizeBatch call, so KittenTTS loads its
+ * model once per deck. Returns the WAV path per slide, in slide order.
+ * Strict, no fallback: any slide its pinned engine could not voice throws
+ * its NeuralTtsError ("engine_failed"), naming the slide and the attempt.
+ */
+export async function narrateSlides(
+	slides: DeckSlide[],
+	voice: string,
+	work: string,
+	deps: NeuralDeps,
+): Promise<string[]> {
+	const reqs: SynthRequest[] = slides.map((slide) => ({
+		text: narrationFor(slide, slides.length),
+		voice,
+		outPath: join(work, `slide-${String(slide.index).padStart(3, "0")}.wav`),
+		strict: true,
+	}));
+	const results = await synthesizeBatch(reqs, deps);
+	const paths: string[] = [];
+	results.forEach((r, i) => {
+		if (!r.ok) {
+			const tried = r.error.attempts
+				.map((a) => `${a.engine} ${a.style}: ${a.reason ?? "failed"}`)
+				.join("; ");
+			throw new NeuralTtsError(
+				r.error.code,
+				`slide ${slides[i].index}: ${r.error.message}${tried ? ` (${tried})` : ""}`,
+				r.error.attempts,
+			);
+		}
+		paths.push(r.path);
+	});
+	return paths;
 }
 
 /** ffmpeg args for one slide: still image held for the audio plus padding. */
@@ -319,35 +387,38 @@ export async function renderDeckVideo(
 	const { slides } = parseDeck(markdown);
 	if (slides.length === 0) throw new Error("deck has no slides");
 
-	if (process.platform !== "darwin") throw new Error("narration needs macOS `say`");
+	// Voice and engines first: both are cheap, and neither needs a spawn.
+	const voice = resolveDeckVoice(options.voice);
+	const neural = options.neural ?? defaultDeps();
+	checkNeuralEngines(neural, voice);
 	const chrome = options.chrome ?? findChrome();
 	if (!chrome) {
 		throw new Error("no Chrome or Chromium found (install Google Chrome or set EIGHT_CHROME_PATH)");
 	}
-	for (const cmd of ["ffmpeg", "ffprobe", "say"]) {
+	for (const cmd of ["ffmpeg", "ffprobe"]) {
 		if (!(await hasCommand(cmd))) throw new Error(`${cmd} not found on PATH`);
 	}
-	const voice = await resolveDeckVoice(options.voice);
 	const output =
 		options.output ?? join(dirname(source), `${basename(source, extname(source))}.mp4`);
 
 	const work = mkdtempSync(join(tmpdir(), "8gent-deck-"));
 	try {
 		const profile = join(work, "chrome-profile");
-		const segments: string[] = [];
+		const pngs: string[] = [];
 		for (const slide of slides) {
 			const n = String(slide.index).padStart(3, "0");
 			const html = join(work, `slide-${n}.html`);
 			const png = join(work, `slide-${n}.png`);
-			const txt = join(work, `slide-${n}.txt`);
-			const aiff = join(work, `slide-${n}.aiff`);
-			const seg = join(work, `slide-${n}.mp4`);
 			writeFileSync(html, slideHtml(slide, slides.length));
 			await screenshot(chrome, html, png, profile);
-			writeFileSync(txt, narrationFor(slide, slides.length));
-			await run("say", ["-v", voice, "-f", txt, "-o", aiff], 120_000);
-			const seconds = slideSeconds(await probeDuration(aiff));
-			await run("ffmpeg", segmentArgs(png, aiff, seconds, seg), 180_000);
+			pngs.push(png);
+		}
+		const wavs = await narrateSlides(slides, voice, work, neural);
+		const segments: string[] = [];
+		for (const [i, slide] of slides.entries()) {
+			const seg = join(work, `slide-${String(slide.index).padStart(3, "0")}.mp4`);
+			const seconds = slideSeconds(await probeDuration(wavs[i]));
+			await run("ffmpeg", segmentArgs(pngs[i], wavs[i], seconds, seg), 180_000);
 			segments.push(seg);
 		}
 		const list = join(work, "segments.txt");
