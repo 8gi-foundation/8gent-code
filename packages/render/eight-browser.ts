@@ -18,6 +18,21 @@
  *
  * Decks have no timeline, so the capture copy registers one (DECK_TIMELINE_SHIM):
  * one render.open per deck, then show(k) is render.seek to t = k.
+ *
+ * Deck network policy is enforced in the browser, not here (8SO ruling, #3346).
+ * Unlike chrome.ts, this file passes no network flags, and that is deliberate.
+ * Each render window gets its own in-memory partition with every permission
+ * denied, and webRequest.onBeforeRequest plus the navigate/redirect/frame hooks
+ * cancel anything failing isAllowedRequest (8gent-browser src/main/render-window.ts,
+ * src/main/render-host.ts isAllowedRequest). That allows only eight-render:, data:
+ * and blob:, plus loopback http(s) for the exact origin a loopback render was
+ * opened on. servable() always sends a filesystem path, so every deck is a scheme
+ * render with no allowed origin: no external network and no loopback ports.
+ * This holds only on the 8gent-browser PR #50 build. An older build has no
+ * render.* commands, so it refuses render.* (OLD_BUILD_HINT) rather than
+ * rendering unfiltered. Do not describe this backend as network-safe on any
+ * other build. UDP (WebRTC ICE) and dns-prefetch are outside a request filter
+ * on both backends; the same 8SO ruling makes them a follow-up issue.
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
