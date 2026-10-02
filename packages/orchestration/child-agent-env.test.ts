@@ -252,6 +252,27 @@ describe("Agent constructor backstop (#3341)", () => {
 		expect(got.message).toContain("MAX_AGENT_DEPTH is 3");
 	});
 
+	test("`run` maps the backstop's AgentDepthError to exit 77, not 1 (8SO finding B)", () => {
+		// Called directly, past the bin gate: the one path where run.ts itself
+		// sees the refusal. Port 9 has no model, so a run that got past the
+		// backstop would fail at the model call instead.
+		const RUN = JSON.stringify(join(ROOT, "packages", "eight", "run.ts"));
+		for (const format of [[], ["--output-format", "stream-json"]]) {
+			const argv = JSON.stringify(["--provider", "ollama", "--model", "p", ...format, "x"]);
+			const run = fresh(
+				"4",
+				[
+					"-e",
+					`const { runRunCommand } = await import(${RUN}); process.exit(await runRunCommand(${argv}));`,
+				],
+				{ OLLAMA_HOST: "http://127.0.0.1:9" },
+			);
+			expect({ format, code: run.code }).toEqual({ format, code: AGENT_DEPTH_EXIT_CODE });
+			expect(run.stdout + run.stderr).toContain("[AGENT DEPTH BLOCKED]");
+			expect(run.stdout + run.stderr).not.toContain("127.0.0.1:9");
+		}
+	});
+
 	test("a process at depth 3 constructs an Agent", () => {
 		expect(construct("3")).toEqual({ constructed: true });
 	});

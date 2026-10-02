@@ -20,6 +20,7 @@
  * with this shape, the chosen shape is logged to stderr so the downstream
  * parser can be adjusted without a round-trip to the agent loop.
  */
+import { AGENT_DEPTH_EXIT_CODE, AgentDepthError } from "../orchestration/agent-depth";
 import type { AgentEventCallbacks } from "./types";
 
 export interface RunOptions {
@@ -365,7 +366,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 
 		await agent.cleanup();
 	} catch (err) {
-		exitCode = 1;
+		// A depth refusal from the Agent backstop (#3341) exits like the bin
+		// gate's: 77, distinct from a crash, so a calling agent can tell them apart.
+		exitCode = err instanceof AgentDepthError ? AGENT_DEPTH_EXIT_CODE : 1;
 		const msg = err instanceof Error ? err.message : String(err);
 		if (isStreamJson) {
 			emit({ type: "error", subtype: "agent", message: msg });
