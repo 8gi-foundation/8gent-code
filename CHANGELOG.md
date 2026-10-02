@@ -9,6 +9,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - `8gent onboard --yes` marks onboarding complete (#3329)
+- `8gent onboard --yes` set the completion flag on a copy of the profile, so it never reached `~/.8gent/user.json`: `preferences get` kept saying "Onboarded: no", `status` said `onboarded: false`, and the command still printed "Run with --yes". It now completes onboarding through the onboarding manager, which writes the flag and confidence score to disk. The interactive path is unchanged. `packages/self-autonomy/onboard-yes.test.ts` runs the real command in a throwaway home.
 ### Fixed - `8gent doctor` checks the files 8gent actually writes (#3328)
 - Doctor looked for `~/.8gent/memory.db` and `~/.8gent/config.json`, which the memory, onboarding and settings stores do not write, so it reported "No memory DB yet" and "No config" on a set-up machine. It now checks `~/.8gent/memory/memory.db` (or `$EIGHT_DATA_DIR/memory/memory.db`), `~/.8gent/user.json` with its onboarding state, and `~/.8gent/settings.json`. Doctor does not create the memory, profile or settings files. It does still write `~/.8gent/policy-checksum` on first run through the NemoClaw check; that is a separate issue (#3344). `packages/settings/doctor-paths.test.ts` drives the CLI in a throwaway HOME (with `EIGHT_HOME` and `EIGHT_DATA_DIR` cleared) before and after `onboard --yes` and `memory stats`, and covers the `EIGHT_DATA_DIR` memory path.
 

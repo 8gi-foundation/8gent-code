@@ -2381,12 +2381,14 @@ async function onboardCommand(args: string[]) {
 
 	// If --yes, auto-complete onboarding with defaults
 	if (flags.yes) {
+		// getUser() is a shallow copy: a top-level flag set on it never reaches
+		// disk (#3329). identity is a shared reference, so this default does.
 		const user = mgr.getUser();
 		if (!user.identity.communicationStyle) {
 			user.identity.communicationStyle = "concise";
 		}
-		user.onboardingComplete = true;
-		mgr.updatePreferences(user.preferences);
+		// skipAll() sets onboardingComplete and confidence, then writes user.json.
+		mgr.skipAll();
 	}
 
 	if (isJson) {
