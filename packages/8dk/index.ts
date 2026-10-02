@@ -12,6 +12,7 @@ export {
 	type DeviceDefinition,
 	type DeviceManifest,
 	defineDevice,
+	MANIFEST_LIMITS,
 	ManifestError,
 	manifestDigest,
 	type ParamSpec,

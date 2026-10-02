@@ -69,16 +69,24 @@ export const MANIFEST_LIMITS = Object.freeze({
 });
 
 /**
- * Characters refused in any device-supplied text: C0 controls (newline, tab and
- * ESC included, so no ANSI sequences), DEL, C1 controls, the Arabic letter mark,
- * zero-width and directional marks (U+200B-U+200F), line and paragraph
- * separators, bidi embeddings and overrides (U+202A-U+202E), bidi isolates
- * (U+2066-U+2069) and the zero-width no-break space. A terminal prompt or a
- * model prompt must show exactly the text a person would read.
+ * Characters refused in any device-supplied text, by Unicode category rather
+ * than by list (8SO F3b):
+ * - Cc: C0 controls (newline, tab and ESC included, so no ANSI sequences), DEL
+ *   and C1 controls.
+ * - Cf: every format character, which covers zero-width and directional marks,
+ *   bidi embeddings, overrides and isolates, the word joiner (U+2060), the soft
+ *   hyphen (U+00AD), U+180E, interlinear annotation (U+FFF9-U+FFFB) and the
+ *   Unicode tag block (U+E0000-U+E007F), the channel that hides instructions
+ *   from a person while a model still reads them.
+ * - Zl, Zp: line and paragraph separators.
+ * - Invisible characters outside those categories: the combining grapheme
+ *   joiner (U+034F), the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and the
+ *   variation selectors (U+FE00-U+FE0F, U+E0100-U+E01EF). An emoji written with
+ *   variation selector 16 is therefore refused; see the README.
+ * A terminal prompt or a model prompt must show exactly the text a person would read.
  */
 const UNSAFE_TEXT_RE =
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the purpose
-	/[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/;
+	/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/u;
 
 function text(value: unknown, field: string, max: number): string {
 	if (typeof value !== "string" || value.trim() === "" || value.length > max) {
@@ -88,7 +96,7 @@ function text(value: unknown, field: string, max: number): string {
 	}
 	if (UNSAFE_TEXT_RE.test(value)) {
 		throw new ManifestError(
-			`manifest ${field} contains control, escape or bidirectional characters`,
+			`manifest ${field} contains control, escape, invisible or bidirectional characters`,
 		);
 	}
 	return value;
