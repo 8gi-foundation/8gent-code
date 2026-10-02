@@ -9,11 +9,66 @@
  * - Background agent execution with /spawn, /agents, /join commands
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
+
+// ============================================
+// Agent depth (#3331, 8SO ruling msg 3552)
+// ============================================
+
+/**
+ * The deepest an agent may be. The user's own agent is depth 0; each spawn
+ * makes a child one deeper, and a spawn that would make a child deeper than
+ * this is refused at dispatch. Enforced in code, never in a prompt.
+ */
+export const MAX_AGENT_DEPTH = 3;
+
+/** Env var a process child (claude / shell runtime) is started with: its depth. */
+export const AGENT_DEPTH_ENV = "EIGHT_AGENT_DEPTH";
+
+/**
+ * This process's own depth, read once at load: 0 for a user's session, N for
+ * a process an agent at depth N-1 started. Read once, so nothing that runs in
+ * the process later can lower it by changing the env.
+ *
+ * Fails closed: unset or empty is 0, but any value that is not a plain
+ * non-negative decimal integer (abc, -1, 3.5, 1e309, 0x3) is treated as
+ * MAX_AGENT_DEPTH, so a corrupted or tampered env can never reset the budget.
+ */
+const PROCESS_AGENT_DEPTH = (() => {
+	const raw = process.env[AGENT_DEPTH_ENV]?.trim();
+	if (raw === undefined || raw === "") return 0;
+	if (!/^\d+$/.test(raw)) return MAX_AGENT_DEPTH;
+	const n = Number(raw);
+	return Number.isSafeInteger(n) ? n : MAX_AGENT_DEPTH;
+})();
+
+/** The depth of the agent whose call is in flight, bound by the pool around each child's run. */
+const _depth = new AsyncLocalStorage<number>();
+
+/** The depth of the agent making this call. Never below the process's own depth. */
+export function currentAgentDepth(): number {
+	return Math.max(_depth.getStore() ?? 0, PROCESS_AGENT_DEPTH);
+}
+
+/**
+ * Run fn as an agent at `depth`. It can only deepen: binding a shallower depth
+ * than the current one keeps the current one, so a child cannot reset itself.
+ */
+export function runAtAgentDepth<T>(depth: number, fn: () => T): T {
+	return _depth.run(Math.max(depth, currentAgentDepth()), fn);
+}
+
+/** Null when an agent at the current depth may spawn; otherwise the tool error to return. */
+export function agentDepthRefusal(): string | null {
+	const depth = currentAgentDepth();
+	if (depth < MAX_AGENT_DEPTH) return null;
+	return `[AGENT DEPTH BLOCKED] spawn_agent did NOT run: this agent is at depth ${depth} and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}, so it may not start another agent. Do the work yourself, or finish and report back to the agent that started you.`;
+}
 
 // ============================================
 // Types
@@ -47,6 +102,8 @@ export interface AgentConfig {
 	allowedPaths?: string[];
 	/** Its permission mode, clamped to and linked with its parent's (#3170); undefined = none. */
 	permission?: PermissionModeHolder;
+	/** Its depth: its spawner's depth + 1, set by the pool, never by the caller (#3331). */
+	depth: number;
 }
 
 export interface SpawnedAgent {
@@ -112,6 +169,11 @@ export class AgentPool extends EventEmitter {
 	 * Spawn a new background agent with a task
 	 */
 	async spawnAgent(taskDescription: string, config?: Partial<AgentConfig>): Promise<SpawnedAgent> {
+		// The backstop for every in-process spawn path (#3331). The depth comes
+		// from the spawner's bound context; a depth in config is ignored.
+		const refusal = agentDepthRefusal();
+		if (refusal) throw new Error(refusal);
+		const depth = currentAgentDepth() + 1;
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 
@@ -124,6 +186,7 @@ export class AgentPool extends EventEmitter {
 			capabilities: config?.capabilities || [],
 			allowedPaths: config?.allowedPaths,
 			permission: config?.permission,
+			depth,
 		};
 
 		const task: AgentTask = {
@@ -158,9 +221,17 @@ export class AgentPool extends EventEmitter {
 	}
 
 	/**
-	 * Execute an agent's task
+	 * Execute an agent's task at its own depth. Bound here, not inherited from
+	 * whoever calls: a queued agent is started from a sibling's finish, and must
+	 * still run at the depth it was spawned with.
 	 */
-	private async executeAgent(agentId: string): Promise<void> {
+	private executeAgent(agentId: string): Promise<void> {
+		const depth = this.agents.get(agentId)?.config.depth ?? MAX_AGENT_DEPTH;
+		return _depth.run(Math.max(depth, PROCESS_AGENT_DEPTH), () => this.runAgent(agentId));
+	}
+
+	/** The agent's model loop, run inside executeAgent's depth binding. */
+	private async runAgent(agentId: string): Promise<void> {
 		const spawnedAgent = this.agents.get(agentId);
 		if (!spawnedAgent) return;
 

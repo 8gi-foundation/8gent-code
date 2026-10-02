@@ -112,6 +112,11 @@ export async function spawnAgentTool(
 	permissionMode?: unknown,
 ): Promise<string> {
 	try {
+		// Recursion cap (#3331): refused before anything is resolved or started.
+		const { agentDepthRefusal, currentAgentDepth, AGENT_DEPTH_ENV } = await import("./index");
+		const depthRefusal = agentDepthRefusal();
+		if (depthRefusal) return depthRefusal;
+
 		const effectiveRuntime = runtime || "8gent";
 
 		// Permission modes (#3170). The child inherits the caller's mode and is
@@ -147,6 +152,8 @@ export async function spawnAgentTool(
 			const agent = spawnCLIAgent(effectiveRuntime, task, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
+				// A process child starts at this depth, so an 8gent it runs is capped too.
+				env: { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) },
 			});
 			return JSON.stringify(
 				{
