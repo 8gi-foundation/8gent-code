@@ -635,6 +635,8 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
 	"desktop_use",
 	// An MCP server can do anything its author wrote (#3230).
 	"mcp_call",
+	// A paired device can change the physical world (8DK, #3362).
+	"device_use",
 ]);
 
 /**

@@ -38,7 +38,9 @@ export type PolicyActionType =
 	| "email_receive"
 	| "issue_email_address"
 	/** Any call to a tool on an MCP server (#3230). Asks by default. */
-	| "mcp_call";
+	| "mcp_call"
+	/** A call to a paired device's granted capability (8DK, #3362). */
+	| "device_use";
 
 /** What the policy engine decides */
 export type PolicyDecision =
