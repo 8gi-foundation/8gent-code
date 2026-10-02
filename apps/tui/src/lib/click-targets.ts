@@ -281,17 +281,19 @@ export function closeGaps(spans: ClickSpan[], maxGap = MAX_SHARED_GAP): ClickSpa
 }
 
 /**
- * Register spans for a box at `rect`: gaps closed, each span clipped to the
- * box's width so a truncated row never claims cells it did not draw.
- * Returns the ids registered.
+ * Register spans for a box at `rect`: gaps up to `maxGap` closed, each span
+ * clipped to the box's width so a truncated row never claims cells it did
+ * not draw. `maxGap` 0 keeps every gap dead, for rows where a miss must do
+ * nothing (the approval card). Returns the ids registered.
  */
 export function placeSpans(
 	rect: { x: number; y: number; w: number; h: number },
 	spans: ClickSpan[],
 	z = 0,
+	maxGap = MAX_SHARED_GAP,
 ): string[] {
 	const ids: string[] = [];
-	for (const s of closeGaps(spans)) {
+	for (const s of closeGaps(spans, maxGap)) {
 		const w = Math.min(s.w, rect.w - s.dx);
 		if (w <= 0 || s.dx < 0) continue;
 		setTarget({
@@ -313,11 +315,16 @@ export function placeSpans(
  * unmount. The spans are cheap to rebuild; the layout is read from Yoga,
  * so the rectangles follow the box wherever it lands.
  */
-export function useClickSpans(ref: { current: unknown }, spans: ClickSpan[], z = 0): void {
+export function useClickSpans(
+	ref: { current: unknown },
+	spans: ClickSpan[],
+	z = 0,
+	maxGap = MAX_SHARED_GAP,
+): void {
 	const ids = useRef<string[]>([]);
 	useEffect(() => {
 		const rect = ref.current ? absoluteRect(ref.current as NodeLike) : null;
-		const next: string[] = rect ? placeSpans(rect, spans, z) : [];
+		const next: string[] = rect ? placeSpans(rect, spans, z, maxGap) : [];
 		for (const id of ids.current) if (!next.includes(id)) removeTarget(id);
 		ids.current = next;
 	});

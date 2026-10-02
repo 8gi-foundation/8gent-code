@@ -191,6 +191,77 @@ describe("tab and card clicks", () => {
 		await tick();
 		expect(log).toEqual(["n"]);
 	});
+
+	// 8SO T4 review: approve is the one decision that runs a command, so on
+	// this row a miss must do nothing. The gaps between caps stay dead.
+	test("every gap cell on the approval card hits no target", async () => {
+		await mount(
+			<Keys log={[]}>
+				<InlineApprovalPrompt target="rm -rf build/" />
+			</Keys>,
+		);
+		const y = targetAt("card:Y").y;
+		const owners: (string | null)[] = [];
+		for (let x = 0; x < 120; x++) owners.push(hitTest(x, y)?.id ?? null);
+		// Cells left of [Y] and right of [S] belong to nobody either.
+		const first = owners.indexOf("card:Y");
+		const last = owners.lastIndexOf("card:S");
+		const runs: string[] = [];
+		for (let x = first; x <= last; x++) {
+			const id = owners[x] ?? "gap";
+			if (runs[runs.length - 1]?.split("x")[0] !== id) runs.push(`${id}x1`);
+			else {
+				const [, n] = (runs.pop() as string).split("x");
+				runs.push(`${id}x${Number(n) + 1}`);
+			}
+		}
+		// "[Y] approve  [N] deny  [E] edit  [S] skip": each two-cell gap is dead.
+		expect(runs).toEqual([
+			"card:Yx11",
+			"gapx2",
+			"card:Nx8",
+			"gapx2",
+			"card:Ex8",
+			"gapx2",
+			"card:Sx8",
+		]);
+		expect(owners[first - 1]).toBeNull();
+		expect(owners[last + 1]).toBeNull();
+	});
+
+	test("press on [Y], release in the gap: cancelled, nothing approved", async () => {
+		const log: string[] = [];
+		const { stdin } = await mount(
+			<Keys log={log}>
+				<InlineApprovalPrompt target="rm -rf build/" />
+			</Keys>,
+		);
+		const { x: yStart, y: row } = targetAt("card:Y");
+		let lastY = yStart;
+		while (hitTest(lastY + 1, row)?.id === "card:Y") lastY++;
+		const gapX = lastY + 1;
+		expect(hitTest(gapX, row)).toBeUndefined();
+		const ev = (kind: "press" | "release", x: number) => ({
+			kind,
+			button: 0,
+			x,
+			y: row,
+			shift: false,
+			alt: false,
+			ctrl: false,
+		});
+		// Straight through the click layer: the release reports a cancel.
+		expect(handleMouse(ev("press", lastY))).toBe("press");
+		expect(currentPressed()).toBe("card:Y");
+		expect(handleMouse(ev("release", gapX))).toBe("cancel");
+		expect(currentPressed()).toBeNull();
+		// And the way a terminal sends it: press on Y, release one cell past it.
+		stdin.feed(`\x1b[<0;${lastY + 1};${row + 1}M`);
+		stdin.feed(`\x1b[<0;${gapX + 1};${row + 1}m`);
+		await tick();
+		expect(currentPressed()).toBeNull();
+		expect(log).toEqual([]);
+	});
 });
 
 describe("click-target rules", () => {

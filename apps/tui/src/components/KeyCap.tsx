@@ -81,15 +81,17 @@ export function keyCapSpans(
 /**
  * A row of key caps that are also click targets (#3239): a click injects the
  * cap's key, so it does exactly what the key does. `z` lifts a surface's caps
- * (palette, approval card) over the HUD's.
+ * (palette, approval card) over the HUD's. `sharedGap` is the widest gap
+ * between caps that the neighbours split; 0 keeps every gap cell dead.
  */
 export function KeyCapRow({
 	caps,
 	idPrefix,
 	z = 0,
-}: { caps: CapSpec[]; idPrefix: string; z?: number }) {
+	sharedGap,
+}: { caps: CapSpec[]; idPrefix: string; z?: number; sharedGap?: number }) {
 	const ref = useRef(null);
-	useClickSpans(ref, keyCapSpans(caps, idPrefix), z);
+	useClickSpans(ref, keyCapSpans(caps, idPrefix), z, sharedGap);
 	const pressed = usePressedIn(`${idPrefix}:`);
 	return (
 		<Box ref={ref} flexShrink={0}>

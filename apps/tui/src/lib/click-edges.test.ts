@@ -6,6 +6,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { APPROVAL_KEYS } from "../components/InlineApprovalPrompt.js";
 import { keyCapSpans } from "../components/KeyCap.js";
 import { cellSpans } from "../components/TabBar.js";
 import { type ClickSpan, clearTargets, closeGaps, hitTest, placeSpans } from "./click-targets.js";
@@ -110,6 +111,28 @@ describe("tab bar hit test", () => {
 		expect(at(16)).toBe("tab:1");
 		expect(at(17)).toBeNull();
 	});
+
+	test("emoji titles are measured the way Ink draws them, so later tabs keep their edges", () => {
+		// "1] 🚀 ship   2] 👨‍👩‍👧 fam   3] QA": the rocket is two cells, the
+		// ZWJ family is one two-cell glyph (8SO T4 review: cellWidth said 6 and 10).
+		const emoji = [
+			{ num: "1] ", title: "🚀 ship", active: true },
+			{ num: "2] ", title: "👨‍👩‍👧 fam", active: false },
+			{ num: "3] ", title: "QA", active: false },
+		];
+		const s = cellSpans(emoji);
+		expect(s).toEqual([
+			{ x: 0, width: 10 },
+			{ x: 13, width: 9 },
+			{ x: 25, width: 5 },
+		]);
+		register(s.map((c, i) => span(`tab:${i}`, c.x, c.width)));
+		expect(at(9)).toBe("tab:0"); // the "p" of "ship"
+		expect(at(13)).toBe("tab:1"); // "2" of the second tab
+		expect(at(25)).toBe("tab:2"); // "3" of the third tab
+		expect(at(29)).toBe("tab:2"); // the "A" of "QA"
+		expect(at(30)).toBeNull();
+	});
 });
 
 describe("key cap row hit test", () => {
@@ -148,6 +171,36 @@ describe("key cap row hit test", () => {
 		expect(s.map((x) => [x.dx, x.w])).toEqual([
 			[0, 9],
 			[11, 7],
+		]);
+	});
+});
+
+describe("approval card row (shared gap 0)", () => {
+	const card = () =>
+		keyCapSpans(
+			APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb })),
+			"card",
+			noop,
+		);
+
+	test("closeGaps with maxGap 0 leaves every span as drawn", () => {
+		const spans = card();
+		expect(closeGaps(spans, 0).map((s) => [s.dx, s.w])).toEqual(spans.map((s) => [s.dx, s.w]));
+	});
+
+	test("gap cells 11, 12, 21, 22, 31 and 32 hit nothing; the caps keep their edges", () => {
+		placeSpans({ x: 0, y: 0, w: 200, h: 1 }, card(), 10, 0);
+		for (const x of [11, 12, 21, 22, 31, 32]) expect(at(x)).toBeNull();
+		expect([at(0), at(10), at(13), at(20), at(23), at(30), at(33), at(40), at(41)]).toEqual([
+			"card:Y",
+			"card:Y",
+			"card:N",
+			"card:N",
+			"card:E",
+			"card:E",
+			"card:S",
+			"card:S",
+			null,
 		]);
 	});
 });
