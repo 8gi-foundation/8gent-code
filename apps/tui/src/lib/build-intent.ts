@@ -29,6 +29,23 @@ const REQUEST_PREFIX =
 	/^(please|hey|ok|okay|now|can you|could you|would you|will you|i want you to|i'?d like you to|i would like you to|i need you to|lets|let's)\s+/;
 
 /**
+ * Web artifacts the adaptive pipeline can actually produce. It writes one
+ * self-contained HTML file (packages/orchestration/adaptive-pipeline.ts), so
+ * only these route; any other build verb falls through to the agent (#3323).
+ */
+const WEB_ARTIFACT =
+	/\b(web ?pages?|pages?|(micro|web)?sites?|landing|homepage|hero|portfolio|dashboard|games?|demo|animations?|animated|visuali[sz]ations?|viz|html|canvas|three\.?js|webgl|shaders?|3d)\b/;
+
+/**
+ * Signals of a repo task the pipeline cannot do: a backtick command, a path
+ * ("deck/deck.md", "packages/decide") or a file extension other than .html.
+ * "three.js" is a library name, not a file, so it is removed first.
+ */
+const REPO_COMMAND = /`/;
+const REPO_PATH = /[\w.-]\/[\w.-]/;
+const NON_HTML_FILE = /\b[\w-]+\.(?!html?\b)[a-z][a-z0-9]{0,4}\b/;
+
+/**
  * Returns the build task (the original message) when the message is a clear
  * imperative build request, or `null` when it is not and should go to the
  * normal agent.
@@ -54,6 +71,11 @@ export function detectBuildIntent(message: string): string | null {
 	if (firstWord === "make" && (words[1] === "sure" || words[1] === "it")) {
 		return null;
 	}
+
+	// Only a web artifact with no repo paths, files or commands routes (#3323).
+	if (!WEB_ARTIFACT.test(lower)) return null;
+	if (REPO_COMMAND.test(lower) || REPO_PATH.test(lower)) return null;
+	if (NON_HTML_FILE.test(lower.replace(/three\.js/g, "threejs"))) return null;
 
 	return trimmed;
 }
