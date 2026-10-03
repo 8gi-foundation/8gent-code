@@ -147,6 +147,7 @@ import {
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { ArtifactStore } from "./artifact-store";
+import { CommitGate, isGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -349,6 +350,11 @@ export class ToolExecutor {
 	 */
 	readonly createdFiles = new CreatedFiles();
 	/**
+	 * Runs the repo's test script before a commit and refuses a red suite (#3402).
+	 * Per executor, so "unchanged since a green run" means this agent's session.
+	 */
+	private commitGate: CommitGate;
+	/**
 	 * This agent's permission mode (#3170), shared with its Agent and, in the
 	 * TUI, with its tab. Undefined: no mode, today's behaviour.
 	 */
@@ -371,6 +377,9 @@ export class ToolExecutor {
 		this.unattended = options.unattended ?? false;
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
 		this.openOnWrite = options.openOnWrite ?? true;
+		this.commitGate = new CommitGate(workingDirectory, (command, timeoutSec) =>
+			this.runCommand(command, timeoutSec),
+		);
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
@@ -1526,7 +1535,9 @@ export class ToolExecutor {
 				return spawnGit(["add", ...files], this.workingDirectory);
 			}
 			case "git_commit":
-				return spawnGit(["commit", "-m", String(args.message)], this.workingDirectory);
+				return this.gatedCommit(() =>
+					spawnGit(["commit", "-m", String(args.message)], this.workingDirectory),
+				);
 			case "git_push": {
 				const pushArgs = ["push"];
 				if (args.setUpstream) pushArgs.push("-u", "origin", "HEAD");
@@ -1560,8 +1571,14 @@ export class ToolExecutor {
 				]);
 
 			// Shell
-			case "run_command":
-				return this.runCommand(args.command as string, args.timeout as number | undefined);
+			case "run_command": {
+				const command = args.command as string;
+				const run = () => this.runCommand(command, args.timeout as number | undefined);
+				// A command the sanitizer refuses never commits, so it never runs the suite.
+				return isGitCommit(command) && sanitizeShellCommand(command).safe
+					? this.gatedCommit(run)
+					: run();
+			}
 
 			// Multi-agent orchestration
 			case "spawn_agent":
@@ -2203,6 +2220,14 @@ export class ToolExecutor {
 	// ============================================
 	// Shell Command Execution
 	// ============================================
+
+	/** Commit only past the test-suite gate (#3402); its note, if any, leads the result. */
+	private async gatedCommit(commit: () => Promise<string>): Promise<string> {
+		const gate = await this.commitGate.check();
+		if (!gate.commit) return gate.message;
+		const out = await commit();
+		return gate.note ? `${gate.note}\n${out}` : out;
+	}
 
 	async runCommand(command: string, timeoutSec?: number): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
