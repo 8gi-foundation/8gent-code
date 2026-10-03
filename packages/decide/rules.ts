@@ -166,6 +166,13 @@ const VAR_REF_RE = new RegExp(
 );
 const MAX_CANDIDATES = 64;
 const MAX_NESTING = 8;
+/** References in one argument; past this the argument is not judged (block). */
+const MAX_REFS = 64;
+function countDollars(p: string): number {
+	let n = 0;
+	for (let i = p.indexOf("$"); i >= 0 && n <= MAX_REFS; i = p.indexOf("$", i + 1)) n++;
+	return n;
+}
 /** A target that names the working directory itself or everything in it: `.`, `*`, `./*`, `.*`. */
 const CWD_TARGET_RE = /^(\.\/)*(\.|\*|\.\*)?\/?$/;
 const ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
@@ -191,7 +198,9 @@ class ExpansionOverflow extends Error {}
 function expandCandidates(p: string, vars: ReadonlyMap<string, string[] | null>, depth = 0): string[] {
 	const m = VAR_REF_RE.exec(p);
 	if (!m) return [p];
-	if (depth > MAX_NESTING) throw new ExpansionOverflow();
+	// The recursion is one frame per reference: refuse a long argument up front
+	// rather than let it overflow the stack (8SO M3). Counting every `$` over-counts.
+	if (depth > MAX_NESTING || countDollars(p) > MAX_REFS) throw new ExpansionOverflow();
 	const name = m[1] ?? m[4];
 	const op = m[2] ?? "";
 	const word = m[3] ?? "";
@@ -650,13 +659,13 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 	if (hasFlag(args, "rR", ["--recursive"])) {
 		const hits = (p: string) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p) || (r.cwdDanger && p !== "" && CWD_TARGET_RE.test(p));
 		// Each path as written, and every text it could expand to (#3314).
-		// Too many expansions to judge is a block: fail closed.
+		// Any failure to expand (overflow, or anything else) is a block: fail
+		// closed, and never rethrow, which would abort the rest of the analysis.
 		const expandHits = (p: string) => {
 			try {
 				return expandCandidates(p, r.vars).some(hits);
-			} catch (e) {
-				if (e instanceof ExpansionOverflow) return true;
-				throw e;
+			} catch {
+				return true;
 			}
 		};
 		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => hits(p) || expandHits(p));
