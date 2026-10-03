@@ -30,6 +30,8 @@
  * INVARIANT: rules only make the guard stricter. There is no allow path here.
  */
 
+import { homedir } from "node:os";
+
 export type RuleVerdict = "block" | "escalate" | "pass";
 
 export interface RuleResult {
@@ -135,9 +137,98 @@ class Collector {
 	secretRead = false;
 	/** A network sender appears somewhere in the command (any nesting level). */
 	netSink = false;
+	/**
+	 * Same-line `NAME=value` / `export NAME=value` assignments seen so far
+	 * (#3314). null = assigned something this text cannot resolve.
+	 */
+	readonly vars = new Map<string, string | null>();
+	/** The working directory is home or a system path (from the caller, or a `cd` on this line). */
+	cwdDanger = false;
 	d(rule: string, block = BLOCK_RULES.has(rule)): void {
 		this.fired.push({ rule, block });
 	}
+}
+
+// ------------------------------------------------------------------ variables (#3314)
+
+/** `$NAME`, `${NAME}`, `${NAME<op>word}` (one level of nested braces in word), `$0`..`$9`, `$@`, `$*`. */
+const VAR_REF_RE = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(?:(:?[-=?+])((?:[^{}]|\{[^{}]*\})*))?\}|([A-Za-z_][A-Za-z0-9_]*|[0-9@*]))/;
+const MAX_CANDIDATES = 64;
+/** A target that names the working directory itself or everything in it: `.`, `*`, `./*`, `.*`. */
+const CWD_TARGET_RE = /^(\.\/)*(\.|\*|\.\*)?\/?$/;
+const ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
+const DECLARERS = new Set(["export", "declare", "typeset", "local", "readonly"]);
+
+/**
+ * Every text a path argument could expand to, judged statically and failing
+ * closed. A variable assigned earlier on the line takes its value; `$HOME`
+ * always stays `$HOME` too (a reassigned HOME never loosens a match); any
+ * other variable stays as `$NAME` AND may be empty, unless `${NAME:?}`
+ * forbids the empty case. `${A:-w}` and `${A:=w}` may be either side;
+ * `${A:+w}` is empty or w. Only the text after a reference is re-scanned, so
+ * a `$NAME` placeholder is never expanded twice.
+ */
+function expandCandidates(p: string, vars: ReadonlyMap<string, string | null>, depth = 0): string[] {
+	const m = VAR_REF_RE.exec(p);
+	if (!m || depth > 8) return [p];
+	const name = m[1] ?? m[4];
+	const op = m[2] ?? "";
+	const word = m[3] ?? "";
+	const prefix = p.slice(0, m.index);
+	const suffix = p.slice(m.index + m[0].length);
+	const known = vars.get(name);
+	let values: string[];
+	if (name === "HOME") values = ["$HOME", ...(typeof known === "string" ? expandCandidates(known, vars, depth + 1) : [])];
+	else if (typeof known === "string") values = expandCandidates(known, vars, depth + 1);
+	else values = [`$${name}`, ""];
+	if (op === ":-" || op === "-" || op === ":=" || op === "=") values = [...values, ...expandCandidates(word, vars, depth + 1)];
+	else if (op === ":+" || op === "+") values = ["", ...expandCandidates(word, vars, depth + 1)];
+	else if (op === ":?") values = values.filter((v) => v !== "");
+	const out = new Set<string>();
+	const rest = expandCandidates(suffix, vars, depth + 1);
+	for (const v of values) {
+		for (const s of rest) {
+			out.add(prefix + v + s);
+			if (out.size >= MAX_CANDIDATES) return [...out];
+		}
+	}
+	return [...out];
+}
+
+/** Home, a home top-level folder, or a system path. */
+function dangerousDir(d: string): boolean {
+	const t = d.length > 1 ? d.replace(/\/+$/, "") : d;
+	return SYSTEM_PATH_RE.test(t) || HOME_TOP_RE.test(t) || t === homedir().replace(/\/+$/, "");
+}
+
+/** Record same-line assignments and `cd` targets, after the segment itself is analysed. */
+function trackShellState(tIn: string[], r: Collector): void {
+	let t = tIn;
+	while (t.length && CONTROL.has(t[0])) t = t.slice(1);
+	if (!t.length) return;
+	const declared = DECLARERS.has(t[0]);
+	const words = declared ? t.slice(1).filter((w) => !w.startsWith("-")) : t;
+	// `D=x` alone sets D. `D=x cmd` is a prefix assignment: the expansion in
+	// cmd never sees it, so it records nothing and $D stays unknown.
+	if (declared || words.every((w) => ASSIGN_RE.test(w))) {
+		for (const w of words) {
+			const a = ASSIGN_RE.exec(w);
+			if (a) r.vars.set(a[1], /\$\(|`|<\(/.test(a[2]) ? null : a[2]);
+		}
+		return;
+	}
+	const s = stripWrappers(t);
+	if (s[0] !== "cd" && s[0] !== "pushd") return;
+	const target = positional(s.slice(1))[0];
+	if (target === undefined) {
+		r.cwdDanger = true; // a bare cd goes home
+		return;
+	}
+	if (!/^[/~$]/.test(target)) return; // relative or `cd -`: keep the state (below home is still home's top level)
+	const cands = expandCandidates(target, r.vars);
+	if (cands.some(dangerousDir)) r.cwdDanger = true;
+	else if (cands.every((c) => c.startsWith("/") && !c.includes("$"))) r.cwdDanger = false;
+	// Anything else could not be resolved: keep the state (fail closed).
 }
 
 // ------------------------------------------------------------------ helpers
@@ -509,7 +600,9 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 		return;
 	}
 	if (hasFlag(args, "rR", ["--recursive"])) {
-		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p));
+		const hits = (p: string) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p) || (r.cwdDanger && p !== "" && CWD_TARGET_RE.test(p));
+		// Each path as written, and every text it could expand to (#3314).
+		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => hits(p) || expandCandidates(p, r.vars).some(hits));
 		r.d("rm_recursive", catastrophic);
 	} else if (!(paths.length && paths.every(isTemp))) {
 		r.d("rm_non_temp");
@@ -870,15 +963,27 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	let prev: string | null = null;
 	for (const { text: seg, piped } of segs) {
 		ruleRedirects(seg, r);
-		prev = analyseTokens(tokens(stripRedirects(seg)), piped, prev, r, depth);
+		const t = tokens(stripRedirects(seg));
+		prev = analyseTokens(t, piped, prev, r, depth);
+		trackShellState(t, r);
 	}
 	for (const s of subs) analyse(s, r, depth + 1);
 }
 
+export interface DecideRulesOptions {
+	/**
+	 * The directory the command runs in. When it is home or a system path, a
+	 * recursive delete of `*`, `.`, `./*` or `.*` blocks (#3314). Omitted:
+	 * only a `cd` on the same line can set it.
+	 */
+	cwd?: string;
+}
+
 /** Run the rule pre-filter on one command. Pure, synchronous, never throws. */
-export function decideRules(command: string): RuleResult {
+export function decideRules(command: string, opts: DecideRulesOptions = {}): RuleResult {
 	const r = new Collector();
 	try {
+		if (opts.cwd) r.cwdDanger = dangerousDir(opts.cwd);
 		analyse(command, r);
 		if (r.secretRead && r.netSink) r.d("secret_to_network");
 	} catch {

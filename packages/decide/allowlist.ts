@@ -164,6 +164,27 @@ function gitOk(args: string[]): string | null {
 	return `git ${sub ?? ""} is not a read-only git subcommand`.trim();
 }
 
+/**
+ * True when a `$` other than `$?` sits inside double quotes, unescaped (#3315).
+ * The shell still expands it there, so the allowlist cannot see the argument
+ * (`cat "$F"` may name a key file). A `$` in single quotes stays literal.
+ */
+function dollarInDoubleQuotes(s: string): boolean {
+	let q: string | null = null;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (q === "'") {
+			if (ch === "'") q = null;
+		} else if (ch === "\\") {
+			i++; // the next character is literal, in or out of double quotes
+		} else if (q === '"') {
+			if (ch === '"') q = null;
+			else if (ch === "$" && s[i + 1] !== "?") return true;
+		} else if (ch === "'" || ch === '"') q = ch;
+	}
+	return false;
+}
+
 /** Decide whether a command may run without asking the model. Never throws. */
 export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}): AllowlistResult {
 	try {
@@ -173,6 +194,7 @@ export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}):
 		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
 		if (/\$\(|`|<\(|>\(|<<|\$\[/.test(command)) return none("has a substitution or heredoc");
 		if (/\$(?!\?)/.test(maskQuotes(command))) return none("has an unquoted $ expansion");
+		if (dollarInDoubleQuotes(command)) return none("has a $ expansion inside double quotes");
 		const { segs, subs } = splitSegments(command);
 		if (subs.length) return none("has a substitution");
 		for (const { text } of segs) {
