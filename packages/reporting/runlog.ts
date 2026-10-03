@@ -72,9 +72,26 @@ function ensureDir() {
 	}
 }
 
+/** The quick line's claims are model output: at most this many, each at most CLAIM_MAX_CHARS. */
+export const CLAIMS_MAX = 5;
+export const CLAIM_MAX_CHARS = 120;
+
+/** Enforce the claims cap at the write, whatever the caller passed (#3411, 8SO L3). Pure. */
+export function capRunEntry(entry: RunLogEntry): RunLogEntry {
+	const claims = entry.quick?.claims;
+	if (!claims || !entry.quick) return entry;
+	return {
+		...entry,
+		quick: {
+			...entry.quick,
+			claims: claims.slice(0, CLAIMS_MAX).map((c) => String(c).slice(0, CLAIM_MAX_CHARS)),
+		},
+	};
+}
+
 export function appendRun(entry: RunLogEntry): void {
 	ensureDir();
-	fs.appendFileSync(LOG_PATH, `${JSON.stringify(entry)}\n`);
+	fs.appendFileSync(LOG_PATH, `${JSON.stringify(capRunEntry(entry))}\n`);
 }
 
 export function readRuns(limit = 20): RunLogEntry[] {

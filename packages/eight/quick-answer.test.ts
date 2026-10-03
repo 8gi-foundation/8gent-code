@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { TextTool, ToolSpec } from "../ai";
 import type { TextToolCall, TextToolMessage } from "../ai/text-tool-client";
+import { EMPTY_REPLY_STALL_PREFIX } from "../ai/text-tool-loop";
 import {
 	NEEDS_DEEP,
 	type PromptClass,
@@ -432,6 +433,100 @@ describe("runQuickAnswer (#3411)", () => {
 		});
 		expect(out.ok).toBe(false);
 		if (!out.ok) expect(out.reason).toBe("model said it could not answer");
+	});
+
+	for (const [shape, reply] of [
+		[
+			"name then arguments",
+			'Checking. {"name": "read_file", "arguments": {"path": "src/ports.ts"}}',
+		],
+		[
+			"arguments then name",
+			'Checking. {"arguments": {"path": "src/ports.ts"}, "name": "read_file"}',
+		],
+		["<tool_call> tags, bare args", "<tool_call>read_file src/ports.ts</tool_call>"],
+		["tool_call fence", '```tool_call\n{"name": "read_file"'],
+	] as const) {
+		test(`leftover tool-call markup is not an answer: ${shape} (8SO L2)`, async () => {
+			const m = fakeModel([toolCall("read_file", "src/server.ts"), `DONE: ${reply}`]);
+			const out = await runQuickAnswer({
+				messages: USER,
+				tools: [tool("read_file", [])],
+				makeCall: m.makeCall,
+			});
+			expect(out.ok).toBe(false);
+			if (!out.ok) expect(out.reason).toBe("tool-call markup in the answer");
+		});
+	}
+
+	test("<tool_call> tags around valid JSON are parsed by the loop as a call, so never shown as an answer", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "src/server.ts"),
+			'DONE: <tool_call>\n{"name": "read_file", "arguments": {"path": "src/ports.ts"}}\n</tool_call>',
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+	});
+
+	test("a tool call cut off in the last round is not shown as the answer", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "a.ts"),
+			'DONE: ```tool_call\n{"name": "read_file"',
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("tool-call markup in the answer");
+	});
+
+	// A request that names a command the lane cannot run: the loop's claim check flags it.
+	const CMD_USER: TextToolMessage[] = [
+		{ role: "user", content: "which port does staging use? run `ls src` first" },
+	];
+
+	test("a real flagged claim alone: unverified claims, not ok (8PO round 6)", async () => {
+		const m = fakeModel([toolCall("read_file", "src/server.ts"), "DONE: Staging uses 4100."]);
+		const out = await runQuickAnswer({
+			messages: CMD_USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (out.ok) return;
+		expect(out.reason).toBe("unverified claims");
+		expect(out.claims?.some((c) => c.includes("ls src"))).toBe(true);
+	});
+
+	test("a real flagged claim together with the empty-reply stall is still unverified claims", async () => {
+		const m = fakeModel([toolCall("read_file", "src/server.ts"), ""]);
+		const out = await runQuickAnswer({
+			messages: CMD_USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (out.ok) return;
+		expect(out.reason).toBe("unverified claims");
+		expect(out.claims?.some((c) => c.startsWith(EMPTY_REPLY_STALL_PREFIX))).toBe(true);
+		expect(out.claims?.some((c) => c.includes("ls src"))).toBe(true);
+	});
+
+	test("the stall alone is named as no answer", async () => {
+		const m = fakeModel([toolCall("read_file", "src/server.ts"), ""]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("no answer after 1 tool calls");
 	});
 
 	test("a plain answer is not mistaken for a non-answer", async () => {

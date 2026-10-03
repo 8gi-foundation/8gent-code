@@ -419,7 +419,15 @@ export function unknownToolResult(name: string, available: string[]): string {
  */
 export function emptyReplyStall(toolCalls: number): string {
 	const calls = toolCalls === 1 ? "1 tool call" : `${toolCalls} tool calls`;
-	return `the model ended the turn without an answer after ${calls}, so the task may be unfinished`;
+	return `${EMPTY_REPLY_STALL_PREFIX} ${calls}, so the task may be unfinished`;
+}
+
+/** The fixed start of every emptyReplyStall line. */
+export const EMPTY_REPLY_STALL_PREFIX = "the model ended the turn without an answer after";
+
+/** True for an `unverified` line that is the empty-reply stall, not a claim (#3411). */
+export function isEmptyReplyStall(line: string): boolean {
+	return line.startsWith(EMPTY_REPLY_STALL_PREFIX);
 }
 
 /** The answer shown in place of an empty reply after tool work. */

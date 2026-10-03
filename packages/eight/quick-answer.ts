@@ -10,6 +10,7 @@
 
 import { type TextTool, type TextToolAgentResult, type ToolSpec, runTextToolAgent } from "../ai";
 import type { TextToolCall, TextToolMessage } from "../ai/text-tool-client";
+import { cutOffToolCallMessage, isEmptyReplyStall } from "../ai/text-tool-loop";
 
 export type PromptClass = "quick" | "deep" | "unclear";
 
@@ -249,7 +250,16 @@ export const NON_ANSWER =
 	/\b(cannot|can'?t|could ?n[o']t|unable to|not able to) (give|provide|answer|determine|tell|say|confirm)\b|\bhaven'?t (read|seen|checked)\b|\bwithout (reading|checking|seeing)\b|\bI (would |still )?need to (read|check|look|see|find|search)\b|\blet me (search|check|read|look|find|try)\b/i;
 
 /** Tool-call markup left in the prose: a call the parser did not take, not an answer (round 5 repro). */
-export const LEFTOVER_CALL = /\{\s*"name"\s*:\s*"\w+"\s*,\s*"arguments"|```tool_call/;
+export const LEFTOVER_CALL =
+	/\{\s*"name"\s*:\s*"\w+"\s*,\s*"arguments"\s*:|\{\s*"arguments"\s*:[\s\S]{0,400}?"name"\s*:\s*"\w+"|```tool_call|<tool_call>[\s\S]*?<\/tool_call>/;
+
+/**
+ * The loop's note for a tool call cut off in the last round: the same for every tool name. A
+ * cut-off call is markup, not an answer (round 6: it was shown as "Quick answer: Error: ...").
+ */
+const CUT_OFF_CALL = cutOffToolCallMessage(null).slice(
+	cutOffToolCallMessage(null).indexOf(" was cut off"),
+);
 
 const BUDGET_ELAPSED = "The quick-answer time budget elapsed before this read finished.";
 
@@ -355,7 +365,7 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 		if (ac.signal.aborted || ms > budgetMs)
 			return { ok: false, reason: `over ${budgetMs} ms`, ms, tools: calls };
 		if (!text) return { ok: false, reason: "empty answer", ms, tools: calls };
-		if (LEFTOVER_CALL.test(text))
+		if (LEFTOVER_CALL.test(text) || text.includes(CUT_OFF_CALL))
 			return { ok: false, reason: "tool-call markup in the answer", ms, tools: calls };
 		if (NON_ANSWER.test(text))
 			return { ok: false, reason: "model said it could not answer", ms, tools: calls };
@@ -365,9 +375,7 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 			return {
 				ok: false,
 				// The loop's empty-reply stall is not a claim: name it for what it is.
-				reason: result.unverified.every((u) =>
-					u.startsWith("the model ended the turn without an answer"),
-				)
+				reason: result.unverified.every(isEmptyReplyStall)
 					? `no answer after ${calls} tool calls`
 					: "unverified claims",
 				ms,
