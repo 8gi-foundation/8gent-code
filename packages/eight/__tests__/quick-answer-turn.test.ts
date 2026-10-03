@@ -12,7 +12,15 @@ afterAll(cleanupTempDirs);
 
 type Probe = {
 	reply: string;
-	seen: Array<{ quick: boolean; tools: string[]; model: string; reasoningEffort: string | null }>;
+	seen: Array<{
+		quick: boolean;
+		tools: string[];
+		model: string;
+		reasoningEffort: string | null;
+		chars: number;
+		system: string;
+		roles: string[];
+	}>;
 	runs: Array<{
 		quick?: {
 			class: string;
@@ -22,6 +30,7 @@ type Probe = {
 			tools: number;
 			model?: string;
 			modelSource?: string;
+			promptTokens?: number[];
 		};
 	}>;
 	executed: string[];
@@ -70,6 +79,11 @@ function probe(
 }
 
 const QUESTION = "which port does the server listen on?";
+// The conv-quick-answer pilot prompt, verbatim from ~/.8gent/rishi-pilot/scenarios.json.
+const PILOT_PROMPT =
+	"Quick question, no need to change anything: if I start this server with APP_MODE=staging and no PORT set, which port does it listen on? And which one when APP_MODE isn't set at all? Just tell me in a sentence or two, then end your reply with exactly one line in this form: ANSWER: staging=<port> unset=<port>";
+/** Chars the endpoint must process for the lane's first request (round 4: ~400 tok/s on the 9B). */
+const LANE_FIRST_REQUEST_BUDGET = 4000;
 
 describe("quick-answer lane in a real turn (#3411)", () => {
 	test("flag on, quick prompt: labelled answer, read-only tools only, no full loop", () => {
@@ -161,5 +175,24 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		expect((q?.reason ?? "").length).toBeGreaterThan(0);
 		expect((q?.reason ?? "").length).toBeLessThanOrEqual(200);
 		expect(p.reply).toContain("full loop answer");
+	}, 60_000);
+
+	test("the lane's first request for the pilot prompt stays under the char budget, with no agent prompt or history", () => {
+		const p = probe("answer", PILOT_PROMPT, "1");
+		const quick = p.seen.filter((s) => s.quick);
+		expect(quick.length).toBeGreaterThan(0);
+		expect(quick[0].chars).toBeLessThan(LANE_FIRST_REQUEST_BUDGET);
+		expect(quick[0].roles).toEqual(["system", "user"]);
+		expect(quick[0].system).toContain("You are 8gent, answering a quick question");
+		const full = p.seen.find((s) => !s.quick && s.tools.includes("write_file"));
+		if (full) expect(full.system).not.toBe(quick[0].system);
+	}, 60_000);
+
+	test("prompt tokens per lane round go in the run log", () => {
+		const p = probe("answer", QUESTION, "1");
+		const q = p.runs.at(-1)?.quick;
+		const rounds = p.seen.filter((s) => s.quick).length;
+		expect(q?.promptTokens).toHaveLength(rounds);
+		for (const t of q?.promptTokens ?? []) expect(t).toBeGreaterThan(0);
 	}, 60_000);
 });

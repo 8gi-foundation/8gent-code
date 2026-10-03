@@ -55,6 +55,8 @@ export interface TextToolTurnOptions {
 	messages: TextToolMessage[];
 	tools: ToolSpec[];
 	call: TextToolCall;
+	/** Builds the tool instructions; default buildToolSystemPrompt. The quick-answer lane passes a short one (#3411). */
+	toolPrompt?: (tools: ToolSpec[]) => string;
 }
 
 /** Canonical JSON (object keys sorted) so equal arguments compare equal. */
@@ -111,6 +113,7 @@ export function mergeToolCalls(
 function withToolInstructions(
 	messages: TextToolMessage[],
 	tools: ToolSpec[],
+	toolPrompt: (tools: ToolSpec[]) => string = buildToolSystemPrompt,
 ): TextToolMessage[] {
 	if (tools.length === 0) {
 		// No instructions to add. Return a shallow copy so we never hand back the
@@ -118,7 +121,7 @@ function withToolInstructions(
 		return messages.slice();
 	}
 
-	const instructions = buildToolSystemPrompt(tools);
+	const instructions = toolPrompt(tools);
 	const first = messages[0];
 
 	if (first && first.role === "system") {
@@ -149,7 +152,7 @@ function withToolInstructions(
 export async function runTextToolTurn(
 	opts: TextToolTurnOptions,
 ): Promise<TextToolTurn> {
-	const messages = withToolInstructions(opts.messages, opts.tools);
+	const messages = withToolInstructions(opts.messages, opts.tools, opts.toolPrompt);
 	const reply = await opts.call(messages);
 	const raw = typeof reply === "string" ? reply : reply.content;
 	const structured = typeof reply === "string" ? [] : reply.toolCalls;

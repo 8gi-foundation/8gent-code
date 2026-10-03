@@ -94,6 +94,7 @@ import {
 	installedModelsFor,
 	pickQuickModel,
 	quickLaneEnabled,
+	quickMessages,
 	runQuickAnswer,
 } from "./quick-answer";
 
@@ -965,8 +966,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				installed: process.env.EIGHT_QUICK_MODEL ? [] : await installedModelsFor(effectiveProvider),
 			});
 			const quickModel = pick.model;
+			const laneTokens: number[] = [];
 			const quick = await runQuickAnswer({
-				messages,
+				// Its own small prompt and the user's message only (round 4): no agent
+				// system prompt, no history.
+				messages: quickMessages(this.config.workingDirectory || process.cwd(), textForAgent),
 				tools,
 				signal,
 				makeCall: (laneSignal, timeoutMs, laneSpecs) =>
@@ -978,7 +982,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						signal: laneSignal,
 						timeoutMs,
 						tools: laneSpecs,
-						onUsage,
+						onUsage: (usage) => {
+							laneTokens.push(usage.promptTokens);
+							onUsage(usage);
+						},
 						// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
 						noThink: true,
 					}),
@@ -989,6 +996,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				ok: quick.ok,
 				model: quickModel,
 				modelSource: pick.source,
+				...(laneTokens.length > 0 ? { promptTokens: laneTokens } : {}),
 				ms: quick.ms,
 				tools: quick.tools,
 				...(quick.ok ? {} : { reason: quick.reason.slice(0, 200) }),

@@ -56,6 +56,8 @@ export interface RunLogEntry {
 		/** The model the lane ran on, and why it was picked (EIGHT_QUICK_MODEL, preferred small model, session). */
 		model?: string;
 		modelSource?: "env" | "preferred" | "session";
+		/** Prompt tokens per lane round, as the endpoint reported them (absent when it reported none). */
+		promptTokens?: number[];
 	};
 }
 

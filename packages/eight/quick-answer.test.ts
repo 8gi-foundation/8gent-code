@@ -7,8 +7,11 @@ import {
 	QUESTION,
 	QUICK_LABEL,
 	classifyPrompt,
+	compactSpec,
 	pickQuickModel,
 	quickLaneEnabled,
+	quickMessages,
+	quickToolPrompt,
 	runQuickAnswer,
 } from "./quick-answer";
 
@@ -122,6 +125,43 @@ describe("classifyPrompt (#3411)", () => {
 		expect(QUESTION.source).toBe(
 			String.raw`\?|^\s*(what|which|where|when|who|whose|why|how|is|are|was|were|does|do|did|can|could|should|would|will|has|have)\b`,
 		);
+	});
+});
+
+describe("lane prompt size (round 4)", () => {
+	const spec = {
+		name: "read_file",
+		description:
+			"[FILE] Returns the text of a file at the given path, one line per row. Use offset and limit for big files.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "A long description of the path argument." },
+			},
+			required: ["path"],
+		},
+	};
+	test("compactSpec keeps the first sentence and param types only", () => {
+		const c = compactSpec(spec);
+		expect(c.description).toBe("Returns the text of a file at the given path, one line per row.");
+		expect(c.parameters).toEqual({
+			type: "object",
+			properties: { path: { type: "string" } },
+			required: ["path"],
+		});
+	});
+	test("quickToolPrompt teaches the tool_call fence in a few lines", () => {
+		const p = quickToolPrompt([compactSpec(spec)]);
+		expect(p).toContain("```tool_call");
+		expect(p).toContain("- read_file(path: string) - Returns the text");
+		expect(p.length).toBeLessThan(600);
+	});
+	test("quickMessages is the lane's system prompt and the user's message, nothing else", () => {
+		const m = quickMessages("/w", "which port?");
+		expect(m.map((x) => x.role)).toEqual(["system", "user"]);
+		expect(m[0].content).toContain("Working directory: /w");
+		expect(m[0].content.length).toBeLessThan(600);
+		expect(m[1].content).toBe("which port?");
 	});
 });
 

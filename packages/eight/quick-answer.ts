@@ -164,6 +164,81 @@ export const QUICK_INSTRUCTION = [
 	`If the message also asks you to do, change, send or check something you cannot do with read-only tools, reply with exactly ${NEEDS_DEEP}.`,
 ].join("\n");
 
+/**
+ * The lane's own system prompt (round 4). Prompt processing on the 9B runs at about 400
+ * tokens/s, so the full agent prompt (tens of thousands of chars) alone used the 15 s budget.
+ */
+export function quickSystemPrompt(cwd: string): string {
+	return [
+		"You are 8gent, answering a quick question about the code in this working directory.",
+		`Working directory: ${cwd}`,
+		"You can read files but not change anything.",
+		"Answer in a sentence or two of plain text. If the user asks for an exact output format, follow it exactly.",
+	].join("\n");
+}
+
+/** The lane's whole conversation: its system prompt and the user's message. No history. */
+export function quickMessages(cwd: string, prompt: string): TextToolMessage[] {
+	return [
+		{ role: "system", content: quickSystemPrompt(cwd) },
+		{ role: "user", content: prompt },
+	];
+}
+
+/** A tool spec cut down for the lane: first sentence of the description (90 chars), param types only. */
+export function compactSpec(spec: ToolSpec): ToolSpec {
+	const text = (spec.description ?? "").replace(/^\s*\[[A-Z]+\]\s*/, "");
+	const first = text.split(/(?<=\.)\s|\n/)[0]?.trim() ?? "";
+	const description = first.length > 90 ? `${first.slice(0, 87)}...` : first;
+	const params = (spec.parameters ?? {}) as {
+		properties?: Record<string, { type?: unknown; enum?: unknown }>;
+		required?: unknown;
+	};
+	const properties: Record<string, { type?: unknown; enum?: unknown }> = {};
+	for (const [name, node] of Object.entries(params.properties ?? {})) {
+		properties[name] = {
+			...(node?.type !== undefined ? { type: node.type } : {}),
+			...(Array.isArray(node?.enum) ? { enum: node.enum } : {}),
+		};
+	}
+	return {
+		...spec,
+		description,
+		parameters: {
+			type: "object",
+			properties,
+			...(Array.isArray(params.required) ? { required: params.required } : {}),
+		},
+	};
+}
+
+/** The lane's tool instructions: the same fenced tool_call protocol, in a few lines. */
+export function quickToolPrompt(tools: ToolSpec[]): string {
+	const lines = tools.map((t) => {
+		const p = (t.parameters ?? {}) as {
+			properties?: Record<string, { type?: unknown }>;
+			required?: unknown;
+		};
+		const req = new Set(Array.isArray(p.required) ? (p.required as string[]) : []);
+		const args = Object.entries(p.properties ?? {})
+			.map(
+				([k, v]) => `${k}${req.has(k) ? "" : "?"}: ${typeof v?.type === "string" ? v.type : "any"}`,
+			)
+			.join(", ");
+		return `- ${t.name}(${args}) - ${t.description}`;
+	});
+	return [
+		"To call a tool, reply with ONLY a fenced block like this, nothing else:",
+		"```tool_call",
+		'{"name": "read_file", "arguments": {"path": "src/server.ts"}}',
+		"```",
+		"The result comes back to you. Never guess what a file says: read it first.",
+		"A reply with no tool_call block is your final answer.",
+		"Tools:",
+		...lines,
+	].join("\n");
+}
+
 const BUDGET_ELAPSED = "The quick-answer time budget elapsed before this read finished.";
 
 /**
@@ -220,7 +295,7 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 	const tools: TextTool[] = opts.tools
 		.filter((t) => QUICK_TOOLS.has(t.spec.name))
 		.map((t) => ({
-			spec: t.spec,
+			spec: compactSpec(t.spec),
 			run: async (args: Record<string, unknown>) => {
 				if (calls >= maxCalls) {
 					overBudget = true;
@@ -260,6 +335,7 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 			call,
 			maxRounds: maxCalls + 1,
 			signal: ac.signal,
+			toolPrompt: quickToolPrompt,
 		});
 		const ms = elapsed();
 		const text = result.content.trim();

@@ -26,7 +26,15 @@ ToolExecutor.prototype.execute = function (name: string, args: Record<string, un
 	return realExecute.call(this, name, args);
 };
 
-type Seen = { quick: boolean; tools: string[]; model: string; reasoningEffort: string | null };
+type Seen = {
+	quick: boolean;
+	tools: string[];
+	model: string;
+	reasoningEffort: string | null;
+	chars: number;
+	system: string;
+	roles: string[];
+};
 const seen: Seen[] = [];
 let quickRequests = 0;
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
@@ -48,6 +56,12 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			tools: (body.tools ?? []).map((t) => t.function.name),
 			model: body.model ?? "",
 			reasoningEffort: body.reasoning_effort ?? null,
+			// What the endpoint has to process: every message plus the declared tool schemas.
+			chars:
+				(body.messages ?? []).reduce((n, m) => n + (m.content?.length ?? 0), 0) +
+				(body.tools ? JSON.stringify(body.tools).length : 0),
+			system: (body.messages ?? []).find((m) => m.role === "system")?.content ?? "",
+			roles: (body.messages ?? []).map((m) => m.role),
 		});
 		let content = "DONE: full loop answer.";
 		if (quick && mode === "long-error") {
@@ -68,6 +82,11 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 		}
 		return Response.json({
 			choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
+			usage: {
+				prompt_tokens: 100 + seen.length,
+				completion_tokens: 5,
+				total_tokens: 105 + seen.length,
+			},
 		});
 	}
 	return new Response("not found", { status: 404 });

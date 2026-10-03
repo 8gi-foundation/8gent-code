@@ -102,6 +102,8 @@ export interface TextToolAgentOptions {
 	 * request is torn down) and into long-running tools.
 	 */
 	signal?: AbortSignal;
+	/** Passed to every runTextToolTurn: builds the tool instructions (default buildToolSystemPrompt). */
+	toolPrompt?: (tools: ToolSpec[]) => string;
 }
 
 export interface TextToolAgentResult {
@@ -571,6 +573,7 @@ export async function runTextToolAgent(
 			messages,
 			tools: specs,
 			call: opts.call,
+			toolPrompt: opts.toolPrompt,
 		});
 		// Strip repetition degeneration before the reply is judged, fed back to
 		// the model as its own history, or kept as the turn's last prose, which
