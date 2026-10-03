@@ -23,6 +23,10 @@
  * with no embedding model) leaves the hybrid answer exactly as the rules
  * give it, with a note when semantic was the reason.
  *
+ * Trial (#3427), env EIGHT_LOCATE=1, off by default: a prose route that stays
+ * hybrid is answered by question narrowing (packages/repo-context/locate.ts),
+ * up to three "file:line passage" rows; no rows falls back to hybrid.
+ *
  * Grep is ripgrep with -F (the query is a literal, never a regex), spawned
  * with an argv array (never a shell string) and confined to the repo root.
  * The answer is at most five "file:line kind text" rows, about 300 tokens.
@@ -85,6 +89,8 @@ export interface LocateResult {
 	indexPending?: boolean;
 	/** Semantic mode was chosen but could not answer, so the rows are hybrid's. */
 	semantic?: Omit<SemanticAnswer, "hits">;
+	/** EIGHT_LOCATE=1 trial (#3427): the rows came from question narrowing; its judge note. */
+	narrowed?: string;
 }
 
 export const LOCATE_MAX_ROWS = 5;
@@ -521,6 +527,8 @@ interface RunState {
 	rgTimedOut: boolean;
 	/** Set when a kept semantic mode could not answer. */
 	semantic?: Omit<SemanticAnswer, "hits">;
+	/** EIGHT_LOCATE=1 trial: prose rows came from question narrowing; its judge note. */
+	narrowed?: string;
 }
 
 async function rg(
@@ -966,9 +974,33 @@ async function runRoute(
 		case "grep":
 			return grepRows(ctx, route.term);
 		case "hybrid":
-		case "semantic":
+		case "semantic": {
+			if (route.mode === "hybrid" && (route.rule === "prose" || route.rule === "system_one")) {
+				const rows = await narrowedRows(ctx, route.term);
+				if (rows.length > 0) return rows;
+			}
 			return hybridRows(ctx, route.terms ?? []);
+		}
 	}
+}
+
+/**
+ * Trial (#3427), only with env EIGHT_LOCATE=1: prose is answered by question
+ * narrowing (packages/repo-context/locate.ts), loaded on first use. No rows
+ * leaves the hybrid answer as it was.
+ */
+async function narrowedRows(ctx: RunCtx, question: string): Promise<LocateRow[]> {
+	if (process.env.EIGHT_LOCATE !== "1") return [];
+	const { locateCode } = await import("../repo-context/locate");
+	const r = await locateCode(question, { root: ctx.root, repoId: ctx.repoId, rg: ctx.state.bin });
+	if (r.passages.length === 0) return [];
+	ctx.state.narrowed = r.judge.note;
+	return r.passages.map((p) => ({
+		file: p.file,
+		line: p.line,
+		kind: "passage",
+		text: clip(p.symbol ? `${p.symbol}: ${p.text}` : p.text),
+	}));
 }
 
 const KEPT_MODES = new Set<string>(["symbol", "grep", "path", "semantic"]);
@@ -1049,6 +1081,7 @@ export async function locate(query: string, context: LocateContext): Promise<Loc
 	if (ctx.state.rgTimedOut) result.incomplete = true;
 	if (ctx.indexPending) result.indexPending = true;
 	if (ctx.state.semantic) result.semantic = ctx.state.semantic;
+	if (ctx.state.narrowed) result.narrowed = ctx.state.narrowed;
 	return result;
 }
 
@@ -1081,6 +1114,9 @@ export function formatLocate(result: LocateResult): string {
 		notes.push(
 			"ripgrep stopped after its time limit on this tree, so text and file search are partial. A longer term or a path narrows it.",
 		);
+	}
+	if (result.narrowed) {
+		notes.push(`Rows from question narrowing (EIGHT_LOCATE=1 trial; ${result.narrowed}).`);
 	}
 	if (result.indexPending) {
 		notes.push(
