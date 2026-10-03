@@ -13,6 +13,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -20,10 +21,13 @@ import { animate, packSpriteSheet } from "./animation-generator.js";
 import { sliceSpriteSheet } from "./sprite-slicer.js";
 import { buildSpritePrompt, type SpritePromptConfig } from "./prompts.js";
 import {
+	BodyTooLargeError,
 	isLoopbackUrl,
 	pickLocalModel,
 	probeLocalMediaCapabilities,
 	type ProbedModel,
+	readCapped,
+	safeForLog,
 } from "../local-model-server/media-probe";
 
 // ── Paths ───────────────────────────────────────────────────────
@@ -276,6 +280,13 @@ function spritePromptFor(options: GenerateOptions): string {
 
 /** Image generation on a local server can take a minute; bounded so a hung server cannot hold the call. */
 const LOCAL_IMAGE_TIMEOUT_MS = 180_000;
+/** Largest image response read: a 1024x1024 PNG as base64 in JSON is a few MB. */
+const MAX_LOCAL_IMAGE_BODY_BYTES = 32 * 1024 * 1024;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function isPng(bytes: Uint8Array): boolean {
+	return bytes.length > PNG_SIGNATURE.length && PNG_SIGNATURE.every((b, i) => bytes[i] === b);
+}
 
 /**
  * Ask a loopback model server for the sprite sheet, OpenAI images wire shape
@@ -303,16 +314,29 @@ async function generateLocalModel(options: GenerateOptions, model: ProbedModel):
 		if (!response.ok) {
 			return { success: false, reason: `Local image server answered HTTP ${response.status}`, path: "local" };
 		}
-		const data = (await response.json()) as { data?: { b64_json?: string }[] };
+		let raw: Uint8Array;
+		try {
+			raw = await readCapped(response, MAX_LOCAL_IMAGE_BODY_BYTES);
+		} catch (err) {
+			if (err instanceof BodyTooLargeError) {
+				return { success: false, reason: "Local image server response is too large", path: "local" };
+			}
+			throw err;
+		}
+		const data = JSON.parse(new TextDecoder().decode(raw)) as { data?: { b64_json?: unknown }[] };
 		const b64 = data.data?.[0]?.b64_json;
 		if (typeof b64 !== "string" || b64.length === 0) {
 			return { success: false, reason: "Local image server returned no image", path: "local" };
 		}
+		const png = Buffer.from(b64, "base64");
+		if (!isPng(png)) {
+			return { success: false, reason: "Local image server returned something that is not a PNG", path: "local" };
+		}
 
-		const id = `local-${Date.now()}`;
+		const id = `local-${Date.now()}-${randomUUID().slice(0, 8)}`;
 		mkdirSync(join(ASSET_DIR, id), { recursive: true });
 		const sheetPath = join(ASSET_DIR, id, "sheet.png");
-		await Bun.write(sheetPath, Buffer.from(b64, "base64"));
+		await Bun.write(sheetPath, png);
 
 		const manifest: MediaAssetManifest = {
 			frames: 1,
@@ -491,17 +515,23 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 	// Local model tier, flag-gated (#3422): ask loopback servers for an image
 	// model by capability. Off unless EIGHT_LOCAL_MEDIA is exactly "1"; when it
 	// finds nothing or fails, the cloud path below runs as before.
+	// localOutcome names what the local tier found, for the degraded reason.
+	let localOutcome: string | null = null;
 	if (!forceCloud && process.env.EIGHT_LOCAL_MEDIA === "1") {
 		const pick = pickLocalModel(await probeLocalMediaCapabilities(), "image");
 		if (pick.ok) {
+			const label = safeForLog(pick.model.id);
 			console.log(
-				`[media-harness] Using local image model ${pick.model.id} at ${pick.model.baseUrl}...`,
+				`[media-harness] Using local image model ${label} at ${safeForLog(pick.model.baseUrl)}...`,
 			);
 			const local = await generateLocalModel(options, pick.model);
 			if (local.success) return local;
-			console.log(`[media-harness] Local image model failed: ${local.reason}`);
+			const why = safeForLog(local.reason ?? "unknown error");
+			console.log(`[media-harness] Local image model failed: ${why}`);
+			localOutcome = `Local image model ${label} failed (${why})`;
 		} else {
 			console.log(`[media-harness] ${pick.reason}.`);
+			localOutcome = `No local image model found (${pick.answered} of ${pick.asked} local model servers answered)`;
 		}
 	}
 
@@ -513,6 +543,13 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
 	// Honest degradation
 	const id = `degraded-${Date.now()}`;
+	if (localOutcome !== null) {
+		return {
+			success: false,
+			reason: `${localOutcome} and no OPENAI_API_KEY. Start a local image server that lists an image model, or set OPENAI_API_KEY.`,
+			path: "degraded",
+		};
+	}
 	return {
 		success: false,
 		reason:

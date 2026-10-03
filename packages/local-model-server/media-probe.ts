@@ -8,9 +8,12 @@
  * nothing can do the job); no code is taken from it and nothing is installed.
  *
  * Rules this file keeps:
- *   - Loopback only. A non-loopback base URL is refused before any request,
- *     redirects are not followed, and a model whose `state` is "remote" is
- *     never picked, because its work would leave the machine.
+ *   - Loopback only. A non-loopback base URL is refused before any request
+ *     and redirects are not followed. A model whose `state` is "remote" is
+ *     never picked, but that field is mlx-serve's: a loopback server that
+ *     proxies to a cloud model without saying so cannot be detected here.
+ *   - Bounded reads: /v1/models bodies over 2 MB are refused (Content-Length
+ *     first, then a counting reader), as are oversized capability lists.
  *   - A declared `capabilities` list is authoritative. Without one, a model is
  *     classed by a short list of known media model names, and anything else is
  *     classed as nothing. A chat model is never assumed to make images.
@@ -50,7 +53,12 @@ export interface MediaProbeResult {
 	models: ProbedModel[];
 }
 
-export type LocalPick = { ok: true; model: ProbedModel } | { ok: false; reason: string };
+export type LocalPick =
+	| { ok: true; model: ProbedModel }
+	| { ok: false; reason: string; answered: number; asked: number };
+
+/** The capabilities this probe picks for. Chat discovery stays with orchestration/local-model-detect. */
+export const MEDIA_CAPABILITIES: readonly string[] = ["image", "music", "3d"];
 
 export const DEFAULT_MLX_SERVE_URL = "http://127.0.0.1:11234";
 export const DEFAULT_LM_STUDIO_URL = "http://localhost:1234";
@@ -58,6 +66,64 @@ export const DEFAULT_PROBE_TIMEOUT_MS = 1500;
 /** Upper bound on models read per endpoint, so a hostile or broken list costs bounded work. */
 const MAX_MODELS_PER_ENDPOINT = 500;
 const MAX_ID_LENGTH = 256;
+/** Largest /v1/models body read. A real list is a few KB. */
+export const MAX_MODELS_BODY_BYTES = 2 * 1024 * 1024;
+/** Capability entries kept per model, and the longest entry kept. */
+const MAX_CAPABILITIES = 32;
+const MAX_CAPABILITY_LENGTH = 32;
+
+export class BodyTooLargeError extends Error {
+	constructor(maxBytes: number) {
+		super(`response body over ${maxBytes} bytes`);
+		this.name = "BodyTooLargeError";
+	}
+}
+
+/**
+ * Read a response body into memory, refusing more than `maxBytes`: a
+ * Content-Length over the cap is refused before reading, and a counting
+ * reader cancels the stream as soon as the running total passes it, so a
+ * server that lies about (or omits) its length still costs at most the cap.
+ */
+export async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array> {
+	const declared = Number(res.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > maxBytes) {
+		await res.body?.cancel().catch(() => {});
+		throw new BodyTooLargeError(maxBytes);
+	}
+	if (!res.body) return new Uint8Array(0);
+	const reader = res.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	for (;;) {
+		const { value, done } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > maxBytes) {
+			await reader.cancel().catch(() => {});
+			throw new BodyTooLargeError(maxBytes);
+		}
+		chunks.push(value);
+	}
+	const out = new Uint8Array(total);
+	let at = 0;
+	for (const c of chunks) {
+		out.set(c, at);
+		at += c.byteLength;
+	}
+	return out;
+}
+
+/** A server-supplied string made safe for one log line: C0 and C1 control characters removed. */
+export function safeForLog(text: string): string {
+	let out = "";
+	for (const ch of text) {
+		const c = ch.charCodeAt(0);
+		if (c < 0x20 || (c >= 0x7f && c <= 0x9f)) continue;
+		out += ch;
+	}
+	return out;
+}
 
 /** Strip trailing slashes and a trailing "/v1" without a regex. */
 export function serverRoot(raw: string): string {
@@ -177,7 +243,8 @@ export function classifyModel(entry: unknown, baseUrl: string): ProbedModel | nu
 	const state = typeof e.state === "string" ? e.state : undefined;
 	if (Array.isArray(e.capabilities)) {
 		const capabilities = e.capabilities
-			.filter((c): c is string => typeof c === "string")
+			.slice(0, MAX_CAPABILITIES)
+			.filter((c): c is string => typeof c === "string" && c.length <= MAX_CAPABILITY_LENGTH)
 			.map((c) => c.toLowerCase());
 		return { id, baseUrl, capabilities, source: "declared", state };
 	}
@@ -221,9 +288,16 @@ async function probeOne(
 			models: [],
 		};
 	}
+	let bytes: Uint8Array;
+	try {
+		bytes = await readCapped(res, MAX_MODELS_BODY_BYTES);
+	} catch (err) {
+		const error = err instanceof BodyTooLargeError ? "body too large" : "body read failed";
+		return { report: { baseUrl, ok: false, error, modelCount: 0 }, models: [] };
+	}
 	let body: unknown;
 	try {
-		body = await res.json();
+		body = JSON.parse(new TextDecoder().decode(bytes));
 	} catch {
 		return { report: { baseUrl, ok: false, error: "body is not JSON", modelCount: 0 }, models: [] };
 	}
@@ -253,21 +327,35 @@ export async function probeLocalMediaCapabilities(
 }
 
 /**
- * Pick a local model for one capability. Ready models first, then unloaded
- * ones (they load on first request), never "remote". Endpoint order breaks
- * ties. When nothing fits, the reason says so plainly; no id is invented.
+ * Pick a local model for one media capability (image, music, 3d). Ready
+ * models first, then unloaded ones (they load on first request), never one
+ * mlx-serve marks "remote". Endpoint order breaks ties. When nothing fits, the
+ * reason says so plainly; no id is invented. Chat is not picked here: name
+ * matching never classes chat models, so "no local model can do chat" would
+ * be false. Use orchestration/local-model-detect for chat.
  */
 export function pickLocalModel(result: MediaProbeResult, capability: string): LocalPick {
 	const cap = capability.toLowerCase();
+	const answered = result.endpoints.filter((e) => e.ok).length;
+	const asked = result.endpoints.length;
+	if (!MEDIA_CAPABILITIES.includes(cap)) {
+		return {
+			ok: false,
+			reason: `${cap} is not a media capability this probe picks for (image, music, 3d)`,
+			answered,
+			asked,
+		};
+	}
 	const capable = result.models.filter((m) => m.capabilities.includes(cap) && m.state !== "remote");
 	const ready = capable.find(
 		(m) => m.state === undefined || m.state === "ready" || m.state === "loaded",
 	);
 	const pick = ready ?? capable[0];
 	if (pick) return { ok: true, model: pick };
-	const asked = result.endpoints.filter((e) => e.ok).length;
 	return {
 		ok: false,
-		reason: `no local model can do ${cap} (${asked} of ${result.endpoints.length} local servers answered)`,
+		reason: `no local model can do ${cap} (${answered} of ${asked} local model servers answered)`,
+		answered,
+		asked,
 	};
 }

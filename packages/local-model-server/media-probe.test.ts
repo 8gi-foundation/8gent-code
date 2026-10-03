@@ -6,12 +6,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+	MAX_MODELS_BODY_BYTES,
 	capabilitiesFromName,
 	classifyModel,
 	configuredLocalEndpoints,
 	isLoopbackUrl,
 	pickLocalModel,
 	probeLocalMediaCapabilities,
+	readCapped,
+	safeForLog,
 	serverRoot,
 } from "./media-probe";
 
@@ -62,6 +65,8 @@ let MLX = "";
 let SLOW = "";
 let REDIRECT = "";
 let CLOSED = "";
+let HUGE = "";
+let MANY_CAPS = "";
 
 function fake(body: unknown, opts: { delayMs?: number; redirectTo?: string } = {}): string {
 	const s = Bun.serve({
@@ -85,6 +90,35 @@ beforeAll(() => {
 	MLX = fake(MLX_SERVE_MODELS);
 	SLOW = fake(MLX_SERVE_MODELS, { delayMs: 2000 });
 	REDIRECT = fake(MLX_SERVE_MODELS, { redirectTo: `${MLX}/v1/models` });
+	// A /v1/models body that streams past the cap with no Content-Length.
+	const huge = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		fetch() {
+			let sent = 0;
+			const chunk = new Uint8Array(256 * 1024).fill(0x20);
+			return new Response(
+				new ReadableStream({
+					pull(c) {
+						if (sent > MAX_MODELS_BODY_BYTES * 4) return c.close();
+						sent += chunk.byteLength;
+						c.enqueue(chunk);
+					},
+				}),
+			);
+		},
+	});
+	servers.push(huge);
+	HUGE = `http://127.0.0.1:${huge.port}`;
+	// "image" listed only after 40 filler capabilities: past the per-model cap.
+	MANY_CAPS = fake({
+		data: [
+			{
+				id: "padded/model",
+				capabilities: [...Array.from({ length: 40 }, (_, i) => `c${i}`), "image"],
+			},
+		],
+	});
 	const closed = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("") });
 	CLOSED = `http://127.0.0.1:${closed.port}`;
 	closed.stop(true);
@@ -199,9 +233,12 @@ describe("probeLocalMediaCapabilities", () => {
 				state: "unloaded",
 			},
 		});
-		expect(pickLocalModel(r, "chat")).toMatchObject({
-			ok: true,
-			model: { id: "mlx-community/Qwen3-8B-4bit" },
+		// Chat is not picked here: name matching never classes chat models.
+		expect(pickLocalModel(r, "chat")).toEqual({
+			ok: false,
+			reason: "chat is not a media capability this probe picks for (image, music, 3d)",
+			answered: 3,
+			asked: 3,
 		});
 	});
 
@@ -209,7 +246,9 @@ describe("probeLocalMediaCapabilities", () => {
 		const r = await probeLocalMediaCapabilities({ endpoints: [MLX] });
 		expect(pickLocalModel(r, "music")).toEqual({
 			ok: false,
-			reason: "no local model can do music (1 of 1 local servers answered)",
+			reason: "no local model can do music (1 of 1 local model servers answered)",
+			answered: 1,
+			asked: 1,
 		});
 	});
 
@@ -218,7 +257,9 @@ describe("probeLocalMediaCapabilities", () => {
 		const p = pickLocalModel(r, "image");
 		expect(p).toEqual({
 			ok: false,
-			reason: "no local model can do image (2 of 2 local servers answered)",
+			reason: "no local model can do image (2 of 2 local model servers answered)",
+			answered: 2,
+			asked: 2,
 		});
 		expect(pickLocalModel(r, "3d").ok).toBe(false);
 	});
@@ -254,7 +295,37 @@ describe("probeLocalMediaCapabilities", () => {
 		expect(r.endpoints.map((e) => e.error)).toEqual(["timed out", "unreachable"]);
 		expect(pickLocalModel(r, "image")).toEqual({
 			ok: false,
-			reason: "no local model can do image (0 of 2 local servers answered)",
+			reason: "no local model can do image (0 of 2 local model servers answered)",
+			answered: 0,
+			asked: 2,
 		});
+	});
+});
+
+describe("bounded reads (8SO F1, F3)", () => {
+	test("a /v1/models body past 2 MB is refused while streaming", async () => {
+		const r = await probeLocalMediaCapabilities({ endpoints: [HUGE] });
+		expect(r.endpoints[0]).toMatchObject({ ok: false, error: "body too large" });
+		expect(r.models).toEqual([]);
+	});
+
+	test("a declared Content-Length over the cap is refused before reading", async () => {
+		const res = new Response("small", { headers: { "content-length": String(64 * 1024 * 1024) } });
+		await expect(readCapped(res, 1024)).rejects.toThrow("response body over 1024 bytes");
+	});
+
+	test("a body at the cap is read whole", async () => {
+		const bytes = await readCapped(new Response("x".repeat(1024)), 1024);
+		expect(bytes.byteLength).toBe(1024);
+	});
+
+	test("each model keeps at most 32 capabilities", async () => {
+		const r = await probeLocalMediaCapabilities({ endpoints: [MANY_CAPS] });
+		expect(r.models[0]?.capabilities.length).toBe(32);
+		expect(pickLocalModel(r, "image").ok).toBe(false);
+	});
+
+	test("safeForLog drops C0 and C1 control characters", () => {
+		expect(safeForLog("flux\u001b[2J\nfake\u0085line\u007f ok")).toBe("flux[2Jfakeline ok");
 	});
 });
