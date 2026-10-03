@@ -65,13 +65,28 @@ const CODE_FILE =
 
 const SKIP_ADDED =
 	/\b(?:test|it|describe)\.(?:skip|todo)\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.(?:skip|xfail)/;
-const SKIP_REPORTED = /(?:^|\s)([1-9]\d*)\s+(?:skip(?:ped)?|todo)\b/im;
+// A runner summary line that is only a count: bun prints " 1 skip" and
+// " 2 todo" on lines of their own. Anchored to the whole line so a test
+// name such as "renders 3 todo items" never counts.
+const SKIP_REPORTED = /^[ \t]*([1-9]\d*)[ \t]+(?:skip(?:ped)?|todo)[ \t]*$/m;
 // Terminal colour codes in captured output (ESC [ ... m).
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 // A guard refused the command: it never ran, so it is not a test run.
 const NOT_RUN = /^\[[A-Z0-9_ ]*(?:BLOCKED|DENIED)\]/;
 const EXIT_NONZERO = /^Exit code ([1-9]\d*)/;
-const WARNING_LINE = /^.*\bwarn(?:ing)?\b[:\]].*$/im;
+const WARNING = /\bwarn(?:ing)?\b[:\]]/i;
+/**
+ * Commands whose exit 1 is an answer, not a failure: grep/rg found no
+ * match, test/[ evaluated false, git diff --quiet saw a difference.
+ */
+const PROBE_COMMAND =
+	/^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:grep|egrep|fgrep|rg|test|\[\[?|git\s+grep|git\s+diff\b[^\n]*\s--(?:quiet|exit-code)\b)(?:\s|$)/;
+/** Only this much of any one input is scanned, so a huge value stays cheap. */
+const SCAN_LIMIT = 4000;
+const MAX_TOKEN = 256;
+/** File extensions a bare name (no slash) must carry to count as a path. */
+const NAMED_FILE_EXT =
+	/\.(?:[cm]?[jt]sx?|py|go|rs|swift|rb|java|kts?|c|cc|cpp|h|hpp|cs|php|scala|exs?|lua|dart|vue|svelte|md|mdx|txt|rst|json|jsonc|ya?ml|toml|ini|env|lock|sh|bash|zsh|html|css|scss|sql|csv|xml|svg|ipynb|gradle|plist)$/i;
 const REPLY_ADMITS =
 	/\b(?:error|errors|fail(?:ed|s|ing|ure)?|block(?:ed)?|warn(?:ing|ings)?|could not|couldn't|cannot|can't|unable|did not|didn't|not run|skipp?ed)\b/i;
 
@@ -82,7 +97,8 @@ function argPath(args: Record<string, unknown> | undefined): string | null {
 	if (!args) return null;
 	for (const key of ["path", "file_path", "filePath", "notebook_path"]) {
 		const v = args[key];
-		if (typeof v === "string" && v.trim()) return v.trim();
+		// An over-long "path" is not one a person would read; skip it to stay cheap.
+		if (typeof v === "string" && v.trim() && v.length <= 1024) return v.trim();
 	}
 	return null;
 }
@@ -96,28 +112,38 @@ function relPath(p: string, cwd: string | undefined): string {
 	return norm.replace(/^\.\//, "");
 }
 
-/** Path-like tokens the prompt names: "src/a.ts", "a.ts", "packages/verify/". */
+/**
+ * Path-like tokens the prompt names: "src/a.ts", "a.ts", "packages/verify/".
+ *
+ * Linear by construction: only the first SCAN_LIMIT characters are read, the
+ * text is split on whitespace first, and a token over MAX_TOKEN characters is
+ * skipped, so no regex ever runs over a long unbroken run.
+ */
 export function promptPaths(prompt: string): string[] {
 	const out = new Set<string>();
-	const re =
-		/[`'"(]?((?:[\w@~.-]+\/)+[\w@.-]*|[\w@-][\w@.-]*\.[A-Za-z][A-Za-z0-9]{0,5})(?=[`'")\s,;:!?]|$)/g;
-	for (const m of prompt.matchAll(re)) {
-		let token = m[1].replace(/[.:]+$/, "");
-		if (!token || /^\d+(?:\.\d+)*$/.test(token)) continue; // version numbers
-		if (/^(?:e\.g|i\.e|etc|vs)$/i.test(token)) continue;
-		if (/^https?:/.test(token) || token.includes("://")) continue;
-		token = token.replace(/^\.\//, "");
+	const words = prompt.slice(0, SCAN_LIMIT).split(/\s+/);
+	words.forEach((word, i) => {
+		if (!word || word.length > MAX_TOKEN) return;
+		const token = word
+			.replace(/^[`'"([{<]+/, "")
+			.replace(/[`'")\]}>,;:!?]+$/, "")
+			.replace(/\.+$/, "")
+			.replace(/^\.\//, "");
+		if (!token || token.includes("://")) return;
+		const hasSlash = token.includes("/");
+		const hasExt = NAMED_FILE_EXT.test(token);
+		// A bare word needs a known file extension; "e.g", "1.2.3" and "v2" do not.
+		if (!hasSlash && !hasExt) return;
+		// Product names, not files: "Next.js", "Node.js", "Vue.js".
+		if (!hasSlash && /^[A-Z][A-Za-z]*\.js$/.test(token)) return;
 		// A branch name ("a new branch called feat/todo-done") is not a file
 		// scope. Without this a prompt naming only its branch would flag every
-		// changed file as unasked.
-		const before = prompt.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0);
-		const looksLikeBranch =
-			BRANCH_PREFIX.test(token) &&
-			!token.endsWith("/") &&
-			!/\.[A-Za-z][A-Za-z0-9]{0,5}$/.test(token);
-		if (/\bbranch\b/i.test(before) || looksLikeBranch) continue;
+		// changed file as not asked for.
+		const before = words.slice(Math.max(0, i - 3), i).join(" ");
+		const looksLikeBranch = BRANCH_PREFIX.test(token) && !token.endsWith("/") && !hasExt;
+		if (/\bbranch\b/i.test(before) || looksLikeBranch) return;
 		out.add(token);
-	}
+	});
 	return [...out];
 }
 
@@ -151,20 +177,34 @@ function listNames(items: string[], max = 3): string {
 	return items.length > max ? `${shown} and ${items.length - max} more` : shown;
 }
 
-function firstLine(text: string, max = 70): string {
-	const raw =
-		text
-			.replace(ANSI, "")
-			.split("\n")
-			.map((l) => l.trim())
-			.find((l) => l.length > 0) ?? "";
-	// Scrub before truncating: a cut-off secret no longer matches its pattern.
-	const line = scrub(raw).scrubbed;
-	return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+/** The command a run_command call ran, scrubbed then clipped, for naming it. */
+function commandLabel(call: TurnReviewToolCall): string {
+	const cmd = typeof call.args?.command === "string" ? call.args.command : "";
+	// Scrub before clipping: a cut-off secret no longer matches its pattern.
+	const one = scrub(cmd.slice(0, SCAN_LIMIT).replace(/\s+/g, " ").trim()).scrubbed;
+	return one.length > 40 ? `${one.slice(0, 37)}...` : one;
+}
+
+/** How a call is named in a line: the tool, plus the command for run_command. Never its output. */
+function label(call: TurnReviewToolCall): string {
+	const cmd = call.name === "run_command" ? commandLabel(call) : "";
+	return cmd ? `run_command \`${cmd}\`` : call.name;
+}
+
+function isProbe(call: TurnReviewToolCall): boolean {
+	return (
+		call.name === "run_command" &&
+		typeof call.args?.command === "string" &&
+		PROBE_COMMAND.test(call.args.command.slice(0, SCAN_LIMIT))
+	);
 }
 
 function isFailure(call: TurnReviewToolCall): boolean {
-	return !call.success || EXIT_NONZERO.test((call.result ?? "").trimStart());
+	if (!call.success) return true;
+	const exit = EXIT_NONZERO.exec((call.result ?? "").trimStart());
+	if (!exit) return false;
+	// grep with no match, a false test: exit 1 is the answer, not a failure.
+	return !(exit[1] === "1" && isProbe(call));
 }
 
 function unaskedFiles(input: TurnReviewInput, changed: string[]): string | null {
@@ -173,7 +213,7 @@ function unaskedFiles(input: TurnReviewInput, changed: string[]): string | null 
 	if (named.length === 0 || changed.length === 0) return null;
 	const extra = changed.filter((f) => !isNamed(f, named));
 	if (extra.length === 0) return null;
-	return `Unasked: changed ${listNames(extra)}; the prompt named ${listNames(named)}.`;
+	return `Not asked for: changed ${listNames(extra)} (prompt named ${listNames(named)}).`;
 }
 
 function testGaps(input: TurnReviewInput, changedCodeIdx: Map<string, number>): string | null {
@@ -197,7 +237,7 @@ function testGaps(input: TurnReviewInput, changedCodeIdx: Map<string, number>): 
 		if (
 			c.name === "run_command" &&
 			typeof c.args?.command === "string" &&
-			TEST_COMMAND.test(c.args.command) &&
+			TEST_COMMAND.test(c.args.command.slice(0, SCAN_LIMIT)) &&
 			!NOT_RUN.test((c.result ?? "").trimStart())
 		) {
 			lastTest = i;
@@ -220,7 +260,7 @@ function testGaps(input: TurnReviewInput, changedCodeIdx: Map<string, number>): 
 		if (isFailure(last)) {
 			parts.push(`the last test run failed${exit ? ` (exit ${exit[1]})` : ""}`);
 		}
-		const skipped = SKIP_REPORTED.exec(out.replace(ANSI, ""));
+		const skipped = SKIP_REPORTED.exec(out.slice(0, SCAN_LIMIT).replace(ANSI, ""));
 		if (skipped) parts.push(`the last test run reported ${skipped[1]} skipped`);
 	}
 
@@ -230,7 +270,7 @@ function testGaps(input: TurnReviewInput, changedCodeIdx: Map<string, number>): 
 }
 
 function unmentionedProblems(input: TurnReviewInput): string | null {
-	if (REPLY_ADMITS.test(input.reply)) return null;
+	if (REPLY_ADMITS.test(input.reply.slice(0, SCAN_LIMIT * 4))) return null;
 	const calls = input.toolCalls;
 	const problems: string[] = [];
 	calls.forEach((c, i) => {
@@ -238,7 +278,7 @@ function unmentionedProblems(input: TurnReviewInput): string | null {
 		if (
 			c.name === "run_command" &&
 			typeof c.args?.command === "string" &&
-			TEST_COMMAND.test(c.args.command)
+			TEST_COMMAND.test(c.args.command.slice(0, SCAN_LIMIT))
 		)
 			return;
 		if (isFailure(c)) {
@@ -246,11 +286,14 @@ function unmentionedProblems(input: TurnReviewInput): string | null {
 			const recovered = calls
 				.slice(i + 1)
 				.some((later) => later.name === c.name && !isFailure(later));
-			if (!recovered) problems.push(`${c.name} failed ("${firstLine(c.result ?? "no output")}")`);
+			if (!recovered) problems.push(`${label(c)} failed`);
 			return;
 		}
-		const warn = WARNING_LINE.exec((c.result ?? "").replace(ANSI, ""));
-		if (warn) problems.push(`${c.name} warned ("${firstLine(warn[0])}")`);
+		// Warnings only from commands the agent ran: a file it read or a search
+		// it made may contain the word without anything being wrong.
+		const out = (c.result ?? "").slice(0, SCAN_LIMIT).replace(ANSI, "");
+		if (c.name === "run_command" && WARNING.test(out))
+			problems.push(`${label(c)} printed a warning`);
 	});
 	if (problems.length === 0) return null;
 	const shown = problems.slice(0, 2).join("; ");
