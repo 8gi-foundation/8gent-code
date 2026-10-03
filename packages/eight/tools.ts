@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { formatCommandOutput } from "./command-output";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
@@ -2187,11 +2188,7 @@ export class ToolExecutor {
 					workingDirectory: this.workingDirectory,
 				});
 
-				if (code === 0) {
-					safeResolve(stdout || stderr || "Command completed successfully.");
-				} else {
-					safeResolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
-				}
+				safeResolve(formatCommandOutput(code, stdout, stderr));
 			});
 
 			proc.on("error", (err) => {
