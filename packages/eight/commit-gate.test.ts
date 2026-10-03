@@ -321,7 +321,7 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(commits()).toBe(1);
 	}, 30_000);
 
-	test("`git -C` naming this repository (absolute, a subdirectory, ./) is gated as usual", async () => {
+	test("`git -C` naming this repository (absolute, a subdirectory, ./) is gated", async () => {
 		repo(BUN_PKG);
 		write("src/keep.ts", "export const k = 1;\n");
 		git("add", ".");
@@ -342,7 +342,7 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(commits()).toBe(2);
 	}, 30_000);
 
-	test("a -C value the gate cannot expand, or a missing directory, is gated, never a note", async () => {
+	test("a -C value with $, ~ or a missing directory is gated", async () => {
 		repo(BUN_PKG);
 		write("test/cli.test.ts", FAIL);
 		await ex.execute("git_add", { files: "." });
@@ -376,55 +376,30 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(commits()).toBe(1);
 	}, 30_000);
 
-	test("git's precedence: -C first, then the last --work-tree over GIT_WORK_TREE", async () => {
+	test("a commit aimed anywhere is checked against this repository's suite", async () => {
 		repo(BUN_PKG);
+		const outside = mkdtempSync(join(tmpdir(), "commit-gate-outside-"));
 		const other = mkdtempSync(join(tmpdir(), "commit-gate-other-"));
 		try {
 			Bun.spawnSync(["git", "init", "-q", "-b", "main"], { cwd: other });
 			write("test/cli.test.ts", FAIL);
-			const red = async () => formatCommandOutput(1, "(fail) x", "");
-			const check = (command: string) =>
-				new CommitGate(dir, red).check(parseGitCommit(command) ?? undefined);
-			// The last --work-tree names this repo: gated.
-			expect((await check(`git --work-tree ${other} --work-tree ${dir} commit`)).commit).toBe(
-				false,
-			);
-			// --work-tree overrides GIT_WORK_TREE: this repo, gated.
-			expect((await check(`GIT_WORK_TREE=${other} git --work-tree ${dir} commit`)).commit).toBe(
-				false,
-			);
-			// GIT_WORK_TREE=. after -C other is the other repo: a note.
-			const d = await check(`GIT_WORK_TREE=. git -C ${other} commit`);
-			expect(d.commit).toBe(true);
-			if (d.commit) expect(d.note).toContain(other);
-		} finally {
-			rmSync(other, { recursive: true, force: true });
-		}
-	}, 30_000);
-
-	test("`git -C` naming another repository is not verified, and the note names it", async () => {
-		repo(BUN_PKG);
-		const other = mkdtempSync(join(tmpdir(), "commit-gate-other-"));
-		try {
-			Bun.spawnSync(["git", "init", "-q", "-b", "main"], { cwd: other });
-			writeFileSync(join(other, "a.txt"), "a\n");
-			Bun.spawnSync(["git", "add", "."], { cwd: other });
-			write("test/cli.test.ts", FAIL);
-			const out = await ex.execute("run_command", {
-				command: `git -C ${other} -c user.name=t -c user.email=t@example.com commit -m x`,
-			});
-			expect(out).toStartWith(
-				`[COMMIT GATE] This commit targets \`${other}\`, not the repository in the working directory, so the test suite was not run for it`,
-			);
-			expect(runs()).toBe(0);
+			await ex.execute("git_add", { files: "." });
 			for (const command of [
-				"GIT_DIR=../x/.git git commit -m x",
-				"git --git-dir ../x/.git commit -m x",
+				`git --work-tree=${outside} commit -m x`,
+				`GIT_WORK_TREE=${outside} git commit -m x`,
+				"git --git-dir=.git commit -m x",
+				"GIT_DIR=.git git commit -m x",
+				`git --git-dir=${dir}/.git --work-tree=${dir} commit -m x`,
+				`git -C ${other} commit -m x`,
+				`git --git-dir=${other}/.git commit -m x`,
 			]) {
-				const note = await ex.execute("run_command", { command });
-				expect(note).toStartWith("[COMMIT GATE] This commit targets another git dir");
+				freshExecutor();
+				const out = await ex.execute("run_command", { command });
+				expect(out).toStartWith("[COMMIT BLOCKED]");
 			}
+			expect(commits()).toBe(1);
 		} finally {
+			rmSync(outside, { recursive: true, force: true });
 			rmSync(other, { recursive: true, force: true });
 		}
 	}, 30_000);
@@ -475,8 +450,8 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 });
 
 describe("parseGitCommit", () => {
-	type T = { all: boolean; cdirs: string[]; workTree: string | null; gitDir: boolean };
-	const plain: T = { all: false, cdirs: [], workTree: null, gitDir: false };
+	type T = { all: boolean };
+	const plain: T = { all: false };
 	const rows: Array<[string, T | null]> = [
 		['git commit -m "x"', plain],
 		["git commit", plain],
@@ -493,24 +468,24 @@ describe("parseGitCommit", () => {
 		["git -c 'k=v w' commit -m x", plain],
 		["git -p commit -m x", plain],
 		["git --no-pager commit -m x", plain],
-		["git --work-tree . commit -m x", { ...plain, workTree: "." }],
-		["git -C sub commit -m x", { ...plain, cdirs: ["sub"] }],
-		["git -C /abs/repo commit -m x", { ...plain, cdirs: ["/abs/repo"] }],
-		["git -C ~/repo commit -m x", { ...plain, cdirs: ["~/repo"] }],
-		['git -C "$PWD" commit -m x', { ...plain, cdirs: ["$PWD"] }],
-		["git -C ./ commit -m x", { ...plain, cdirs: ["./"] }],
-		["git -C a -C b commit", { ...plain, cdirs: ["a", "b"] }],
-		["git --work-tree=other commit", { ...plain, workTree: "other" }],
-		["git --work-tree a --work-tree b commit", { ...plain, workTree: "b" }],
-		["GIT_WORK_TREE=/w git commit", { ...plain, workTree: "/w" }],
-		["GIT_WORK_TREE=/w git --work-tree x commit", { ...plain, workTree: "x" }],
-		["GIT_WORK_TREE=sub git -C other commit", { ...plain, cdirs: ["other"], workTree: "sub" }],
-		["git --git-dir ../x/.git commit", { ...plain, gitDir: true }],
-		["GIT_DIR=../x/.git git commit", { ...plain, gitDir: true }],
-		["git commit -am x", { ...plain, all: true }],
-		["git commit --all -m x", { ...plain, all: true }],
-		["git commit -a", { ...plain, all: true }],
-		["git commit -qa -m x", { ...plain, all: true }],
+		["git --work-tree . commit -m x", plain],
+		["git -C sub commit -m x", plain],
+		["git -C /abs/repo commit -m x", plain],
+		["git -C ~/repo commit -m x", plain],
+		['git -C "$PWD" commit -m x', plain],
+		["git -C ./ commit -m x", plain],
+		["git -C a -C b commit", plain],
+		["git --work-tree=other commit", plain],
+		["git --work-tree a --work-tree b commit", plain],
+		["GIT_WORK_TREE=/w git commit", plain],
+		["GIT_WORK_TREE=/w git --work-tree x commit", plain],
+		["GIT_WORK_TREE=sub git -C other commit", plain],
+		["git --git-dir ../x/.git commit", plain],
+		["GIT_DIR=../x/.git git commit", plain],
+		["git commit -am x", { all: true }],
+		["git commit --all -m x", { all: true }],
+		["git commit -a", { all: true }],
+		["git commit -qa -m x", { all: true }],
 		["git commit -m '-a'", plain],
 		["git commit -m -a", plain],
 		["git commit -ma", plain],
