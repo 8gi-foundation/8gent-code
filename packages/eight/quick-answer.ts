@@ -17,7 +17,8 @@ export type PromptClass = "quick" | "deep" | "unclear";
 export const QUICK_MAX_TOOL_CALLS = 3;
 export const QUICK_BUDGET_MS = 15_000;
 export const QUICK_MAX_WORDS = 60;
-export const QUICK_LABEL = "Quick answer:";
+/** Shown on the provisional answer, which the full answer always follows and checks (#3416). */
+export const QUICK_LABEL = "Quick answer (still checking):";
 export const NEEDS_DEEP = "NEEDS_DEEP";
 
 /** Read-only tools the lane may use. Every one is inside the conv-quick-answer judge allowlist. */
@@ -100,23 +101,125 @@ function opensWithAction(clause: string): boolean {
 	return ACTION_VERBS.has(first);
 }
 
+function contentWords(words: string[]): string[] {
+	return words.map((w) => w.replace(/[^a-z0-9_#./-]/g, "")).filter((w) => w && !STOPWORDS.has(w));
+}
+
+// ── Context-dependent short questions (#3416, design R2.3 and R3.4) ───────
+// A follow-up such as "which port?" or "and on staging?" means something only
+// against the conversation, which the lane never sees. Those go to the full loop.
+
+/** S2, S4, (b) and (c) apply only to messages this short. */
+export const CONTEXT_MAX_WORDS = 12;
+
+/** S1: a continuation opener at the start of the message, after "ok", "okay" or "right". */
+const CONTINUATION =
+	/^(?:(?:ok|okay|right)\b[\s,.!]*)*(?:and|or|but|also|so|then|what about|how about|same for)\b/;
+/** S2: "it" or "that" as the subject, at the start or straight after an auxiliary. */
+const IT_SUBJECT =
+	/^(?:it|that)\b|\b(?:is|was|are|were|does|did|has|have|can|could|will|would|should) (?:it|that)\b/;
+/** S3: a question about the agent's own past turn ("what did you" is covered by "did you"). */
+const ABOUT_PAST_TURN = /\b(?:did you|have you|are you|you said)\b/;
+/** S4: session state the lane's read-only file tools cannot read. */
+const SESSION_STATE =
+	/\b(?:the logs|the diff|the output|the error|the build|git status|the last run)\b/;
+/** (b): a back-reference, once the phrases that name something in the repo are taken out. */
+const BACK_REFERENCE =
+	/\b(?:it|that|this|those|there|the other one|that one|the same|the (?:first|second|last) one)\b/;
+const NOT_A_BACK_REFERENCE =
+	/\b(?:this|the) (?:repo|project|codebase|branch)\b|\b(?:is|are) there\b/g;
+
+/** Longest token the anchor scan looks at: keeps every per-token test linear. */
+const ANCHOR_TOKEN_MAX = 100;
+const QUOTED_LITERAL =
+	/"[^"\n]{1,200}"|`[^`\n]{1,200}`|(?:^|[\s(])'[^'\s][^'\n]{0,198}'(?=$|[\s).,?!:;])/;
+
+/**
+ * An anchor names something concrete: a path-like token, a quoted or backticked literal, a
+ * camelCase, snake_case or ALL_CAPS identifier, a call `name()`, or a number. Read on the raw
+ * text, because lowercasing erases camelCase and ALL_CAPS.
+ */
+export function hasAnchor(raw: string): boolean {
+	if (QUOTED_LITERAL.test(raw)) return true;
+	for (const full of raw.split(/\s+/)) {
+		const t = full.slice(0, ANCHOR_TOKEN_MAX);
+		if (!t) continue;
+		if (
+			t.includes("/") ||
+			/\d/.test(t) ||
+			/\w\(\)/.test(t) ||
+			/[A-Za-z0-9-]\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(t) ||
+			/\b[a-z][a-z0-9]*[A-Z]/.test(t) ||
+			/[A-Za-z0-9]_[A-Za-z0-9]/.test(t) ||
+			/\b[A-Z][A-Z0-9_]{2,}\b/.test(t)
+		)
+			return true;
+	}
+	return false;
+}
+
+type ContextRule = "S1" | "S2" | "S3" | "S4" | "b" | "c";
+
+/** Which context rule sends this prompt to the full loop, if any. Pure. */
+export function contextRule(raw: string): ContextRule | null {
+	const text = raw.trim().toLowerCase().replace(/\s+/g, " ");
+	if (!text) return null;
+	// S1 and S3 apply at any length (R3.4).
+	if (CONTINUATION.test(text)) return "S1";
+	if (ABOUT_PAST_TURN.test(text)) return "S3";
+	const words = text.split(" ");
+	if (words.length > CONTEXT_MAX_WORDS) return null;
+	if (IT_SUBJECT.test(text)) return "S2";
+	if (SESSION_STATE.test(text)) return "S4";
+	if (hasAnchor(raw)) return null;
+	if (BACK_REFERENCE.test(text.replace(NOT_A_BACK_REFERENCE, " "))) return "b";
+	if (contentWords(words).length < 2) return "c";
+	return null;
+}
+
+/** True when the prompt only makes sense against the earlier conversation. */
+export function isContextDependent(raw: string): boolean {
+	return contextRule(raw) !== null;
+}
+
+function classify(raw: string): { cls: PromptClass; context: boolean } {
+	const text = raw.trim().toLowerCase();
+	if (!text) return { cls: "unclear", context: false };
+	const asked = text.replace(NEGATED_ACTION, " ");
+	if (clauses(asked).some(opensWithAction)) return { cls: "deep", context: false };
+	if (DISCUSSION.test(text)) return { cls: "deep", context: false };
+	const words = text.split(/\s+/).filter(Boolean);
+	if (words.length > QUICK_MAX_WORDS) return { cls: "deep", context: false };
+	if (QUESTION.test(text)) {
+		const rule = contextRule(raw);
+		if (contentWords(words).length === 0) {
+			// Zero content words stays unclear (PR1), so a first "why?" can still be asked
+			// about. "it"/"that" as subject or a question about our own turn is a follow-up.
+			return rule === "S2" || rule === "S3"
+				? { cls: "deep", context: true }
+				: { cls: "unclear", context: false };
+		}
+		return rule ? { cls: "deep", context: true } : { cls: "quick", context: false };
+	}
+	return { cls: words.length <= 2 ? "unclear" : "deep", context: false };
+}
+
 /** Deterministic classifier. Same input, same class. */
 export function classifyPrompt(raw: string): PromptClass {
-	const text = raw.trim().toLowerCase();
-	if (!text) return "unclear";
-	const asked = text.replace(NEGATED_ACTION, " ");
-	if (clauses(asked).some(opensWithAction)) return "deep";
-	if (DISCUSSION.test(text)) return "deep";
-	const words = text.split(/\s+/).filter(Boolean);
-	if (words.length > QUICK_MAX_WORDS) return "deep";
-	if (QUESTION.test(text)) {
-		const content = words
-			.map((w) => w.replace(/[^a-z0-9_#./-]/g, ""))
-			.filter((w) => w && !STOPWORDS.has(w));
-		return content.length === 0 ? "unclear" : "quick";
-	}
-	return words.length <= 2 ? "unclear" : "deep";
+	return classify(raw).cls;
 }
+
+/** True when the context rule (not an instruction) made this prompt deep. For the run log. */
+export function promptNeedsContext(raw: string): boolean {
+	return classify(raw).context;
+}
+
+/**
+ * The one question asked instead of answering: an unclear first message, nothing to
+ * resolve it against (#3416, section 3). Fixed text, no model call.
+ */
+export const CLARIFY_QUESTION =
+	"Quick question first: what do you want me to look into? A file, a command or a feature name is enough.";
 
 /**
  * Small local models the lane prefers over the session model when EIGHT_QUICK_MODEL is unset.
@@ -279,7 +382,7 @@ function withInstruction(messages: TextToolMessage[]): TextToolMessage[] {
 }
 
 export type QuickOutcome =
-	| { ok: true; result: TextToolAgentResult; ms: number; tools: number }
+	| { ok: true; result: TextToolAgentResult; answer: string; ms: number; tools: number }
 	| { ok: false; reason: string; ms: number; tools: number; claims?: string[] };
 
 export interface QuickLaneOptions {
@@ -387,17 +490,329 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 			// Nothing was read: that is the model's memory, not the source (8PO review, round 2).
 			return { ok: false, reason: "no source read", ms, tools: calls };
 		}
-		return { ok: true, result: { ...result, content: `${QUICK_LABEL} ${text}` }, ms, tools: calls };
+		return {
+			ok: true,
+			result: { ...result, content: `${QUICK_LABEL} ${text}` },
+			answer: text,
+			ms,
+			tools: calls,
+		};
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		return {
 			ok: false,
-			reason: ac.signal.aborted ? `over ${budgetMs} ms` : msg,
+			// ESC aborts the lane's own signal too: name it, so the turn ends (#3416).
+			reason: opts.signal?.aborted ? "aborted" : ac.signal.aborted ? `over ${budgetMs} ms` : msg,
 			ms: elapsed(),
 			tools: calls,
 		};
 	} finally {
 		clearTimeout(timer);
 		opts.signal?.removeEventListener("abort", onOuterAbort);
+	}
+}
+
+// ── Quick then full: checking the quick answer (#3416, design R2.1, R3.1, R3.2) ──
+// The full answer always runs after a shown quick answer. A deterministic fact
+// comparison labels it. A false "corrected" is acceptable; a false "confirmed" is the
+// failure that matters, so every rule below can only turn confirmed into corrected.
+
+export type QuickVerdict = "confirmed" | "corrected" | "unknown" | "unchecked" | "stopped" | "none";
+
+/** Each text is compared up to this many chars, so the scan stays bounded. */
+export const COMPARE_MAX_CHARS = 20_000;
+/** Facts named in a verdict line, and facts written to the run log (each FACT_LOG_CHARS at most). */
+export const VERDICT_FACTS_SHOWN = 4;
+export const FACTS_LOGGED = 8;
+export const FACT_LOG_CHARS = 40;
+export const PROVISIONAL_LOG_CHARS = 300;
+/** A quick answer with more facts than this is never confirmed (bounds the comparison). */
+export const COMPARE_MAX_FACTS = 32;
+
+const CUE_WORDS = new Set([
+	"not",
+	"legacy",
+	"old",
+	"wrong",
+	"was",
+	"deprecated",
+	"previously",
+	"formerly",
+	"unused",
+]);
+const CUE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+	["instead", "of"],
+	["rather", "than"],
+	["no", "longer"],
+	["used", "to"],
+];
+const WINDOW_WORDS = 3;
+
+type Tok = { text: string; start: number; end: number; word: boolean };
+
+/**
+ * Words (internal `_ ' / - .` kept, so paths and identifiers stay whole) and the
+ * punctuation the rules use. Every other character is skipped. One linear pass.
+ */
+const TOKEN = /[A-Za-z0-9_](?:[A-Za-z0-9_'’/-]|\.(?=[A-Za-z0-9_]))*|[,;.:=!?\n]/g;
+
+/** Index of the first token ending after `offset` (binary search). */
+function tokenIndexAt(toks: Tok[], offset: number): number {
+	let lo = 0;
+	let hi = toks.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (toks[mid].end <= offset) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
+function tokenize(text: string): Tok[] {
+	const out: Tok[] = [];
+	for (const m of text.slice(0, COMPARE_MAX_CHARS).matchAll(TOKEN)) {
+		const t = m[0];
+		const start = m.index ?? 0;
+		out.push({ text: t, start, end: start + t.length, word: /^[A-Za-z0-9_]/.test(t) });
+	}
+	return out;
+}
+
+const NUMBER_FACT = /^\d{2,}$/;
+const CAPS_FACT = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/;
+const PATH_LIKE = /\/|[A-Za-z0-9-]\.[A-Za-z][A-Za-z0-9]{0,7}$/;
+
+/** A token that states a fact: a number of 2 or more digits, or an ALL_CAPS identifier of 3 or more chars. */
+function factShaped(t: string): boolean {
+	return NUMBER_FACT.test(t) || (t.length >= 3 && CAPS_FACT.test(t) && /[A-Z]/.test(t));
+}
+
+/** The words of an identifier: split on `_` and camelCase, lowercased (LEGACY_PORTS, oldPort). */
+function subWords(t: string): string[] {
+	return t
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.split(/[_\s]+/)
+		.map((w) => w.toLowerCase())
+		.filter(Boolean);
+}
+
+/** Cue spans in a window of words: [first index, last index]. "isn't" spells `not`. */
+function cueSpans(words: string[]): Array<[number, number]> {
+	const spans: Array<[number, number]> = [];
+	for (let i = 0; i < words.length; i++) {
+		const w = words[i].toLowerCase();
+		if (/n['’]t$/.test(w) || subWords(words[i]).some((s) => CUE_WORDS.has(s))) {
+			spans.push([i, i]);
+			continue;
+		}
+		const next = words[i + 1]?.toLowerCase();
+		if (next && CUE_PAIRS.some(([a, b]) => a === w && b === next)) spans.push([i, i + 1]);
+	}
+	return spans;
+}
+
+const SENTENCE_END = new Set([";", ".", "!", "?", "\n"]);
+const isWindowStop = (t: Tok) =>
+	(!t.word && SENTENCE_END.has(t.text)) || (t.word && t.text.toLowerCase() === "but");
+const isClauseStop = (t: Tok) =>
+	(!t.word && (t.text === "," || SENTENCE_END.has(t.text))) ||
+	(t.word && /^(and|but)$/i.test(t.text));
+
+/** Up to WINDOW_WORDS words on one side of a token range, stopping at `;` `.` `but` (never at commas). */
+function windowWords(toks: Tok[], from: number, step: 1 | -1): string[] {
+	const out: string[] = [];
+	for (let i = from; i >= 0 && i < toks.length && out.length < WINDOW_WORDS; i += step) {
+		if (isWindowStop(toks[i])) break;
+		if (toks[i].word) out.push(toks[i].text);
+	}
+	return step === -1 ? out.reverse() : out;
+}
+
+/**
+ * Clean: no contrast cue within 3 words either side. A cue after the fact belongs to a
+ * later fact token in the same window ("4180 rather than 5180" refutes 5180, not 4180).
+ */
+function cleanAt(toks: Tok[], first: number, last: number): boolean {
+	if (cueSpans(windowWords(toks, first - 1, -1)).length > 0) return false;
+	const after = windowWords(toks, last + 1, 1);
+	return cueSpans(after).every(([, end]) => after.slice(end + 1).some(factShaped));
+}
+
+/** Pairing clause index of every token: clauses split on `,` `;` `.` `and` `but`. */
+function clauseIds(toks: Tok[]): number[] {
+	let id = 0;
+	return toks.map((t) => (isClauseStop(t) ? ++id : id));
+}
+
+type Fact = { value: string; label: string | null };
+
+const LABEL_SKIP = new Set(["=", ":", "is"]);
+
+/** The nearest content word within 2 tokens before index i (`=`, `:` and `is` skipped). */
+function labelBefore(toks: Tok[], i: number): string | null {
+	let seen = 0;
+	for (let k = i - 1; k >= 0 && seen < 2; k--) {
+		const t = toks[k].text;
+		if (LABEL_SKIP.has(t.toLowerCase())) continue;
+		seen++;
+		const w = t.toLowerCase();
+		if (toks[k].word && /^[a-z][a-z'-]*$/.test(w) && !STOPWORDS.has(w) && !factShaped(t)) return w;
+	}
+	return null;
+}
+
+const QUICK_LITERAL = /"([^"\n]{1,80})"|`([^`\n]{1,80})`/g;
+
+/** Strip the provisional label and a DONE marker, if present. */
+function answerText(text: string): string {
+	const t = text.trimStart();
+	const body = t.startsWith(QUICK_LABEL) ? t.slice(QUICK_LABEL.length) : t;
+	return body.replace(/^\s*\**DONE\**\s*:\s*\**\s*/, "");
+}
+
+/** The facts a quick answer states, in order: numbers, quoted or backticked literals, ALL_CAPS. Paths and prose are not facts. */
+export function quickFacts(text: string): Fact[] {
+	const src = answerText(text).slice(0, COMPARE_MAX_CHARS);
+	const toks = tokenize(src);
+	const found: Array<Fact & { at: number }> = [];
+	const seen = new Set<string>();
+	const inLiteral = new Array<boolean>(toks.length).fill(false);
+	for (const m of src.matchAll(QUICK_LITERAL)) {
+		const value = (m[1] ?? m[2] ?? "").trim();
+		const at = m.index ?? 0;
+		const ti = tokenIndexAt(toks, at);
+		for (let k = ti; k < toks.length && toks[k].end <= at + m[0].length; k++) inLiteral[k] = true;
+		if (!value || PATH_LIKE.test(value) || seen.has(value)) continue;
+		seen.add(value);
+		found.push({ value, at, label: ti < toks.length ? labelBefore(toks, ti) : null });
+	}
+	toks.forEach((t, i) => {
+		if (!t.word || inLiteral[i] || !factShaped(t.text) || seen.has(t.text)) return;
+		seen.add(t.text);
+		found.push({ value: t.text, at: t.start, label: labelBefore(toks, i) });
+	});
+	return found.sort((a, b) => a.at - b.at).map(({ value, label }) => ({ value, label }));
+}
+
+const WORD_CHAR = /[A-Za-z0-9_]/;
+
+/** Token ranges where `value` occurs in the deep text as a whole word or phrase. */
+function occurrences(deep: string, toks: Tok[], value: string): Array<[number, number]> {
+	const out: Array<[number, number]> = [];
+	for (let at = deep.indexOf(value); at >= 0; at = deep.indexOf(value, at + 1)) {
+		const end = at + value.length;
+		if (WORD_CHAR.test(value[0]) && at > 0 && WORD_CHAR.test(deep[at - 1])) continue;
+		if (WORD_CHAR.test(value[value.length - 1]) && end < deep.length && WORD_CHAR.test(deep[end]))
+			continue;
+		const first = tokenIndexAt(toks, at);
+		let last = first;
+		while (last + 1 < toks.length && toks[last + 1].start < end) last++;
+		if (first < toks.length) out.push([first, last]);
+	}
+	return out;
+}
+
+/**
+ * Pairing (R3.2, plus one rule of mine): when the fact's label is in the deep text, the
+ * occurrence's clause must hold it, and the nearest quick label before the occurrence in
+ * that clause (else the nearest after it) must be this one. The second rule stops
+ * "unset=3000 staging=4180" on one line from pairing 3000 with staging.
+ */
+function pairedAt(
+	toks: Tok[],
+	clause: number[],
+	first: number,
+	label: string,
+	labels: ReadonlySet<string>,
+): boolean {
+	const c = clause[first];
+	let nearest: string | null = null;
+	for (let k = first - 1; k >= 0 && clause[k] === c; k--) {
+		const w = toks[k].text.toLowerCase();
+		if (toks[k].word && labels.has(w)) {
+			nearest = w;
+			break;
+		}
+	}
+	if (nearest === null) {
+		for (let k = first + 1; k < toks.length && clause[k] === c; k++) {
+			const w = toks[k].text.toLowerCase();
+			if (toks[k].word && labels.has(w)) {
+				nearest = w;
+				break;
+			}
+		}
+	}
+	return nearest === label;
+}
+
+export type QuickComparison = {
+	verdict: Exclude<QuickVerdict, "stopped" | "none">;
+	/** The quick answer's facts, in order. */
+	facts: string[];
+};
+
+/**
+ * Compare the quick answer with the full answer. Deterministic.
+ * unchecked: the full answer is not clean (gated, unverified notes or failed).
+ * unknown: the quick answer stated no comparable fact.
+ * confirmed: every quick fact has a clean, correctly paired occurrence, in the same order.
+ * corrected: anything else.
+ */
+export function compareQuick(
+	quickText: string,
+	deepText: string,
+	deepClean = true,
+): QuickComparison {
+	const facts = quickFacts(quickText);
+	const values = facts.map((f) => f.value);
+	if (!deepClean) return { verdict: "unchecked", facts: values };
+	if (facts.length === 0) return { verdict: "unknown", facts: values };
+	if (facts.length > COMPARE_MAX_FACTS) return { verdict: "corrected", facts: values };
+	const deep = deepText.slice(0, COMPARE_MAX_CHARS);
+	const toks = tokenize(deep);
+	const clause = clauseIds(toks);
+	const deepWords = new Set(toks.filter((t) => t.word).map((t) => t.text.toLowerCase()));
+	const labels = new Set(facts.map((f) => f.label).filter((l): l is string => l !== null));
+	let lastAt = -1;
+	for (const fact of facts) {
+		const pair = fact.label !== null && deepWords.has(fact.label);
+		const hit = occurrences(deep, toks, fact.value).find(
+			([first, last]) =>
+				cleanAt(toks, first, last) &&
+				(!pair || pairedAt(toks, clause, first, fact.label as string, labels)),
+		);
+		if (!hit || hit[0] <= lastAt) return { verdict: "corrected", facts: values };
+		lastAt = hit[0];
+	}
+	return { verdict: "confirmed", facts: values };
+}
+
+function factList(facts: readonly string[]): string {
+	const shown = facts.slice(0, VERDICT_FACTS_SHOWN);
+	return shown.length > 0 ? ` (${shown.join(", ")})` : "";
+}
+
+/**
+ * The first line of the final answer (design R2.4, R3.5). Each line stands on its own: a
+ * channel that never showed the quick answer can still read it. No internal terms.
+ */
+export function verdictLine(
+	verdict: Exclude<QuickVerdict, "none">,
+	facts: readonly string[],
+	opts: { failed?: boolean } = {},
+): string {
+	const f = factList(facts);
+	switch (verdict) {
+		case "confirmed":
+			return `Checked: my quick answer${f} was right.`;
+		case "corrected":
+			return `Correction: my quick answer${f} did not match what I found when I checked. Use this instead:`;
+		case "unknown":
+			return "Full answer (I could not compare it with my quick answer):";
+		case "unchecked":
+			return `I could not check my quick answer${f}, so do not rely on it.${opts.failed ? " Try asking again, or narrow the question." : ""}`;
+		case "stopped":
+			return `Stopped before I could check my quick answer${f}, so do not rely on it.`;
 	}
 }

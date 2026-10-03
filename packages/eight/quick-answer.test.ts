@@ -3,11 +3,21 @@ import type { TextTool, ToolSpec } from "../ai";
 import type { TextToolCall, TextToolMessage } from "../ai/text-tool-client";
 import { EMPTY_REPLY_STALL_PREFIX } from "../ai/text-tool-loop";
 import {
+	CLARIFY_QUESTION,
+	COMPARE_MAX_FACTS,
 	NEEDS_DEEP,
 	type PromptClass,
+	type QuickComparison,
 	QUESTION,
 	QUICK_LABEL,
 	classifyPrompt,
+	compareQuick,
+	contextRule,
+	hasAnchor,
+	isContextDependent,
+	promptNeedsContext,
+	quickFacts,
+	verdictLine,
 	compactSpec,
 	pickQuickModel,
 	quickLaneEnabled,
@@ -87,11 +97,12 @@ const TABLE: Array<[string, PromptClass]> = [
 	["why don't you push it?", "deep"],
 	["git push --force?", "deep"],
 	// ...and their read-and-tell neighbours stay quick.
-	["have you pushed it?", "quick"],
 	["let me know which port staging uses?", "quick"],
-	["can you check the logs?", "quick"],
-	["can you show me the diff?", "quick"],
-	["did you push it?", "quick"],
+	// #3416 R2.3 re-pins (quick in PR1): these need the conversation or session state.
+	["have you pushed it?", "deep"], // S3
+	["can you check the logs?", "deep"], // S4: logs need run_command, outside QUICK_TOOLS
+	["can you show me the diff?", "deep"], // S4: the diff needs git
+	["did you push it?", "deep"], // S3
 	["Quick one, no need to change anything: is the daemon up?", "quick"],
 	// unclear: nothing to answer yet
 	["", "unclear"],
@@ -126,6 +137,269 @@ describe("classifyPrompt (#3411)", () => {
 		expect(QUESTION.source).toBe(
 			String.raw`\?|^\s*(what|which|where|when|who|whose|why|how|is|are|was|were|does|do|did|can|could|should|would|will|has|have)\b`,
 		);
+	});
+});
+
+// ── #3416: context-dependent short questions (design section 2, R2.3, R3.4) ──
+const CONTEXT_TABLE: Array<[string, PromptClass, string]> = [
+	// Round 1 table, as amended by round 2.
+	["which port?", "deep", "(c)"],
+	["and on staging?", "deep", "S1"],
+	["what about the other one?", "deep", "S1, (b)"],
+	["is it running?", "deep", "S2"],
+	["what does that return?", "deep", "S2, (b)"],
+	["what is the daemon port?", "quick", "2 content words, standalone (R2.3 reconsidered)"],
+	["why?", "unclear", "zero content words"],
+	[PILOT_PROMPT, "quick", "over 12 words; no S1 opener, no S3 phrase"],
+	['where is "apiKey" set?', "quick", "anchor"],
+	["which port does src/server.ts listen on?", "quick", "anchor"],
+	["what does parseConfig return?", "quick", "anchor"],
+	["what is the default for EIGHT_TURN_TIMEOUT_MS?", "quick", "anchor"],
+	["how does the failover chain work?", "quick", "3 content words"],
+	// R2.3 re-pinned PR1 rows.
+	["have you pushed it?", "deep", "S3"],
+	["did you push it?", "deep", "S3"],
+	["can you check the logs?", "deep", "S4"],
+	["can you show me the diff?", "deep", "S4"],
+	["how do I deploy the daemon?", "quick", "2 content words, (c) does not fire"],
+	["what's the default model in this repo?", "quick", "`this repo` is not a back-reference"],
+	// R2.3 new rows.
+	["so is it 4180 or 5180?", "deep", "S1, anchors ignored"],
+	["what about 3000?", "deep", "S1"],
+	["and in src/server.ts?", "deep", "S1"],
+	["is it set in config.ts?", "deep", "S2"],
+	["what did you find in agent.ts?", "deep", "S3"],
+	["same for prod?", "deep", "S1"],
+	["why not?", "deep", "(c)"],
+	["are you sure?", "deep", "S3"],
+	["really?", "deep", "(c)"],
+	["the second one?", "deep", "(b)"],
+	["ok and the timeout?", "deep", "S1 after ok"],
+	["what was it again?", "deep", "S2"],
+	["what about when it's unset?", "deep", "S1"],
+	["is there a test for parseConfig?", "quick", "`is there` excluded; anchor"],
+	// R3.4: S1 and S3 at any length.
+	[
+		"and what port does it use when APP_MODE is unset in the staging config?",
+		"deep",
+		"S1, 14 words",
+	],
+	// Section 3: the ask path's inputs, and the accepted flag-on change for a vague instruction.
+	["", "unclear", "empty"],
+	["hmm", "unclear", "non-question, 2 words or fewer"],
+	["make it better", "deep", "an instruction: no question with the flag on"],
+];
+
+describe("classifyPrompt: context-dependent follow-ups (#3416)", () => {
+	for (const [prompt, want, why] of CONTEXT_TABLE) {
+		test(`${want} (${why}): ${JSON.stringify(prompt.slice(0, 60))}`, () => {
+			expect(classifyPrompt(prompt)).toBe(want);
+		});
+	}
+
+	test("the run log's context flag is set only when the context rule decided", () => {
+		expect(promptNeedsContext("which port?")).toBe(true);
+		expect(promptNeedsContext("what was it again?")).toBe(true);
+		expect(promptNeedsContext("fix the failing test in auth.ts")).toBe(false);
+		expect(promptNeedsContext(PILOT_PROMPT)).toBe(false);
+		expect(promptNeedsContext("why?")).toBe(false);
+	});
+
+	test("S1 is start-of-message only: the pilot's mid-message 'And which one' does not fire", () => {
+		expect(contextRule(PILOT_PROMPT)).toBeNull();
+		expect(contextRule("and which one when APP_MODE isn't set?")).toBe("S1");
+	});
+
+	test("anchors are read before lowercasing", () => {
+		expect(hasAnchor("what does parseConfig return?")).toBe(true);
+		expect(hasAnchor("default for EIGHT_TURN_TIMEOUT_MS?")).toBe(true);
+		expect(hasAnchor("where is snake_case_name used?")).toBe(true);
+		expect(hasAnchor("what does run() do?")).toBe(true);
+		expect(hasAnchor("what's the default model in this repo?")).toBe(false);
+		expect(isContextDependent("what does that return?")).toBe(true);
+	});
+
+	test("the context and anchor scans stay linear on a huge prompt", () => {
+		const huge = [
+			"ok ".repeat(20_000),
+			"a".repeat(200_000),
+			`${"x/".repeat(50_000)}?`,
+			`"${"q".repeat(100_000)}`,
+			`${"is ".repeat(30_000)}it?`,
+			`'${"w ".repeat(50_000)}`,
+			`${"aB".repeat(100_000)}()`,
+		];
+		const t0 = performance.now();
+		for (const h of huge) {
+			classifyPrompt(h);
+			contextRule(h);
+			hasAnchor(h);
+		}
+		expect(performance.now() - t0).toBeLessThan(500);
+	});
+});
+
+// ── #3416: compareQuick (design R2.1, R3.1, R3.2, 8PO round 3) ─────────────
+const COMPARE_TABLE: Array<[string, string, QuickComparison["verdict"], string]> = [
+	// Round 1: the pilot pair.
+	["5180", "4180 ... 3000", "corrected", "round 1 pilot, wrong"],
+	["4180, 3000", "4180 ... 3000", "confirmed", "round 1 pilot, right"],
+	// R2.1.
+	[
+		"staging 4180, unset 3000",
+		"staging uses 4180; with no APP_MODE it uses 3000",
+		"confirmed",
+		"R2.1 row 1",
+	],
+	["staging 3000, unset 4180", "staging 4180, unset 3000", "corrected", "swap: order and pairing"],
+	[
+		"staging 3000, unset 4180",
+		"unset is 3000 and staging is 4180",
+		"corrected",
+		"swap: pairing alone",
+	],
+	["5180", "staging uses 4180, not 5180 (the legacy port)", "corrected", "refutation"],
+	["5180", "it was 5180 in the old config; now 4180", "corrected", "cue was/old"],
+	["4180", "staging uses 4,180", "corrected", "formatting: accepted false correction"],
+	[
+		"the server reads PORT first",
+		"PORT is read first, then APP_MODE",
+		"confirmed",
+		"literal present, clean",
+	],
+	["it is in src/server.ts", "anything", "unknown", "paths are not facts"],
+	// R3.1.
+	["5180", "5180 is the legacy port; staging uses 4180", "corrected", "after-window legacy"],
+	["5180", "5180 is wrong; it is 4180", "corrected", "after-window wrong"],
+	["4180", "staging uses 4180 rather than 5180", "confirmed", "cue owned by the later fact"],
+	["4180", "staging uses 4180 instead of 5180", "confirmed", "cue owned by the later fact"],
+	["5180", "staging uses 4180 rather than 5180", "corrected", "before-window rather than"],
+	["5180", "5180 was used previously; now 4180", "corrected", "after-window was/previously"],
+	["4180", "4180 is deprecated", "corrected", "after-window deprecated"],
+	// 8PO round 3: identifier sub-words, and a window that does not stop at commas.
+	["5180", "5180 comes from LEGACY_PORTS", "corrected", "sub-word LEGACY"],
+	["5180", "5180, the legacy port, is unused", "corrected", "window crosses commas"],
+	["5180", "5180 is the oldPort value", "corrected", "sub-word old (camelCase)"],
+	// Literals and env vars (round 1 test list).
+	[
+		'the key is read from "apiKey"',
+		"It reads apiKey from the config.",
+		"confirmed",
+		"quoted literal",
+	],
+	[
+		'the key is read from "apiKey"',
+		"It reads token from the config.",
+		"corrected",
+		"quoted literal missing",
+	],
+	["set EIGHT_QUICK_ANSWER to 1", "EIGHT_QUICK_ANSWER=1 turns it on", "confirmed", "env var"],
+	["set EIGHT_QUICK_ANSWER to 1", "set EIGHT_QUICK_MODEL", "corrected", "env var missing"],
+	[
+		"it is in src/server.ts",
+		"it is in src/app.ts",
+		"unknown",
+		"a path-only difference is not a correction",
+	],
+	// Builder additions, each one only able to turn confirmed into corrected.
+	[
+		"staging=3000 unset=4180",
+		"ANSWER: unset=3000 staging=4180",
+		"corrected",
+		"one clause: nearest label decides",
+	],
+	["5180", "staging isn't 5180, it is 4180", "corrected", "n't spells not"],
+	["Staging 4180, unset 3000", "Staging 4180, unset 3000", "confirmed", "identical"],
+];
+
+describe("compareQuick (#3416)", () => {
+	for (const [quick, deep, want, why] of COMPARE_TABLE) {
+		test(`${want} (${why}): ${JSON.stringify(quick)} vs ${JSON.stringify(deep.slice(0, 50))}`, () => {
+			expect(compareQuick(quick, deep).verdict).toBe(want);
+		});
+	}
+
+	test("a full answer that is not clean is never confirmed, whatever the facts", () => {
+		expect(compareQuick("4180", "staging uses 4180", false).verdict).toBe("unchecked");
+		expect(compareQuick("it is in src/server.ts", "anything", false).verdict).toBe("unchecked");
+	});
+
+	test("the provisional label and DONE marker are not facts", () => {
+		expect(quickFacts(`${QUICK_LABEL} DONE: Staging uses 4180.`).map((f) => f.value)).toEqual([
+			"4180",
+		]);
+	});
+
+	test("facts come out in order, deduplicated, with their labels", () => {
+		expect(quickFacts("staging=4180, unset=3000, staging=4180")).toEqual([
+			{ value: "4180", label: "staging" },
+			{ value: "3000", label: "unset" },
+		]);
+	});
+
+	test("more facts than COMPARE_MAX_FACTS is never confirmed", () => {
+		const many = Array.from({ length: COMPARE_MAX_FACTS + 1 }, (_, i) => String(1000 + i)).join(
+			" ",
+		);
+		expect(compareQuick(many, many).verdict).toBe("corrected");
+	});
+
+	test("the comparison stays linear on huge inputs", () => {
+		const quick = `${"4180 ".repeat(5_000)}"${"x".repeat(5_000)}`;
+		const deep = `${"not 4180 rather than ".repeat(20_000)}${"LEGACY_PORTS_oldPort ".repeat(10_000)}`;
+		const t0 = performance.now();
+		compareQuick(quick, deep);
+		compareQuick(`staging 4180, unset 3000 ${'"a" '.repeat(5_000)}`, deep);
+		compareQuick("4180", "4180 ".repeat(100_000));
+		expect(performance.now() - t0).toBeLessThan(1_000);
+	});
+});
+
+describe("user-facing wording (#3416 R2.4, R3.5, section 3)", () => {
+	test("exact strings", () => {
+		expect(QUICK_LABEL).toBe("Quick answer (still checking):");
+		expect(verdictLine("confirmed", ["4180", "3000"])).toBe(
+			"Checked: my quick answer (4180, 3000) was right.",
+		);
+		expect(verdictLine("corrected", ["5180"])).toBe(
+			"Correction: my quick answer (5180) did not match what I found when I checked. Use this instead:",
+		);
+		expect(verdictLine("unknown", [])).toBe(
+			"Full answer (I could not compare it with my quick answer):",
+		);
+		expect(verdictLine("unchecked", ["5180"])).toBe(
+			"I could not check my quick answer (5180), so do not rely on it.",
+		);
+		expect(verdictLine("unchecked", ["5180"], { failed: true })).toBe(
+			"I could not check my quick answer (5180), so do not rely on it. Try asking again, or narrow the question.",
+		);
+		expect(verdictLine("stopped", ["5180"])).toBe(
+			"Stopped before I could check my quick answer (5180), so do not rely on it.",
+		);
+		expect(CLARIFY_QUESTION).toBe(
+			"Quick question first: what do you want me to look into? A file, a command or a feature name is enough.",
+		);
+	});
+
+	test("at most 4 facts are named; none means no parentheses", () => {
+		expect(verdictLine("confirmed", ["11", "22", "33", "44", "55"])).toBe(
+			"Checked: my quick answer (11, 22, 33, 44) was right.",
+		);
+		expect(verdictLine("stopped", [])).toBe(
+			"Stopped before I could check my quick answer, so do not rely on it.",
+		);
+	});
+
+	test("no internal terms in any user-facing line", () => {
+		const lines = [
+			QUICK_LABEL,
+			CLARIFY_QUESTION,
+			...(["confirmed", "corrected", "unknown", "unchecked", "stopped"] as const).map((v) =>
+				verdictLine(v, ["5180"], { failed: true }),
+			),
+		];
+		for (const l of lines)
+			expect(l).not.toMatch(/lane|deep loop|harness|classifier|NEEDS_DEEP|gate|—/i);
 	});
 });
 
@@ -562,6 +836,22 @@ describe("runQuickAnswer (#3411)", () => {
 		const out = await runQuickAnswer({ messages: USER, tools: [], makeCall });
 		expect(out.ok).toBe(false);
 		if (!out.ok) expect(out.reason).toContain("404");
+	});
+
+	test("ESC while a lane request is in flight is reported as aborted, not as the budget (#3416)", async () => {
+		const ac = new AbortController();
+		const makeCall =
+			(signal: AbortSignal): TextToolCall =>
+			() =>
+				new Promise((_, reject) => {
+					signal.addEventListener("abort", () => reject(new Error("This operation was aborted")), {
+						once: true,
+					});
+					setTimeout(() => ac.abort(), 5);
+				});
+		const out = await runQuickAnswer({ messages: USER, tools: [], makeCall, signal: ac.signal });
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("aborted");
 	});
 
 	test("the turn's ESC aborts the lane", async () => {

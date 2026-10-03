@@ -9,6 +9,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (off by default) - the quick answer is provisional and the full answer always follows it, behind `EIGHT_QUICK_ANSWER=1` (#3416)
+- In the TUI, a quick answer is shown at once as its own grey message, "Quick answer (still checking): ...", and the full loop always runs afterwards without seeing it. The final answer opens with one line from a deterministic fact comparison: "Checked: ...", "Correction: ...", "Full answer (...)", "I could not check ..." or "Stopped before ...". Only the final answer goes to history.
+- The lane runs only on a surface that registers the new `onProvisional` callback (the TUI). Telegram, the daemon and Table get exactly the flag-off turn. Pressing ESC during the quick answer now ends the turn instead of starting a second, empty pass.
+- Short follow-ups that need the earlier conversation ("which port?", "and on staging?", "did you push it?", "can you check the logs?") now go to the full loop. With the lane on, an unclear first message ("why?") gets one fixed question and no model call. The `[PROACTIVE QUESTIONING]` gate is not used then (#3417).
+- The run log's `quick` record gains `shownMs`, `verdict`, `facts`, `text` and `context`.
+- Still do not enable. The flag stays off until the quick answer is right in at least 80% of 10 or more answered runs, and #3421 is closed. With the flag unset, a turn is byte-identical to before.
+
 ### Added (off by default) - a quick-answer lane for short read-only questions, behind `EIGHT_QUICK_ANSWER=1` (part of #3411)
 - `packages/eight/quick-answer.ts` classifies each prompt as quick or deep with a deterministic table. With the flag set, a quick prompt first runs a small read-only lane (3 tool calls, 15 s, own short prompt, thinking off) and falls through to the full loop on NEEDS_DEEP, zero reads, an unverified claim, a non-answer, or leftover tool-call markup. Each lane outcome, and up to 5 flagged claims of 120 characters, is written to the run log.
 - Do not enable. On qwen3.5:9b, 14 real runs gave 5 answers, 2 right and 3 wrong, and an accepted quick answer ends the turn. The lane sees no conversation history. #3416 makes the quick answer provisional with the full loop always following; the flag stays off until it lands.

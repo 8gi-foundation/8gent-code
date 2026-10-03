@@ -9,6 +9,15 @@
  * PROBE_TAGS (comma list) sets the installed Ollama models; default "probe:1b".
  * Every ToolExecutor.execute call is recorded, so a test can prove no
  * run_command ran outside the lane (8SO F1).
+ *
+ * #3416 knobs (all optional):
+ *   PROBE_NO_PROVISIONAL=1  register no onProvisional (a surface that cannot show it)
+ *   PROBE_QUICK_TEXT        the lane's final answer (default "DONE: It listens on 4100.")
+ *   PROBE_DEEP_TEXT         the full loop's answer (default "DONE: full loop answer.")
+ *   PROBE_DEEP_FAIL=1       the full loop's requests fail with HTTP 400
+ *   PROBE_ESC=lane|deep     press ESC (agent.abort()) on the first lane or full-loop request
+ *   PROBE_SECOND            a second prompt, sent after the first reply in the same session
+ * `timeline` records lane requests, full-loop requests and provisional messages in order.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -28,6 +37,7 @@ ToolExecutor.prototype.execute = function (name: string, args: Record<string, un
 
 type Seen = {
 	quick: boolean;
+	proactive: boolean;
 	tools: string[];
 	model: string;
 	reasoningEffort: string | null;
@@ -36,8 +46,22 @@ type Seen = {
 	roles: string[];
 };
 const seen: Seen[] = [];
+const timeline: string[] = [];
+const provisionals: string[] = [];
 let quickRequests = 0;
-globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+let escPressed = false;
+let agentRef: { abort: () => void } | null = null;
+/** ESC: abort the turn, and hang this request until the abort reaches it. */
+function pressEsc(signal: AbortSignal | undefined): Promise<Response> {
+	escPressed = true;
+	agentRef?.abort();
+	return new Promise((_, reject) => {
+		const fail = () => reject(new DOMException("This operation was aborted", "AbortError"));
+		if (!signal || signal.aborted) return fail();
+		signal.addEventListener("abort", fail, { once: true });
+	});
+}
+globalThis.fetch = (async (input: unknown, init?: { body?: string; signal?: AbortSignal }) => {
 	const url = String(
 		typeof input === "string" ? input : ((input as { url?: string })?.url ?? input),
 	);
@@ -51,8 +75,11 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			messages?: Array<{ role: string; content: string }>;
 		};
 		const quick = (body.messages ?? []).some((m) => m.content?.includes("[QUICK ANSWER]"));
+		const full = !quick && (body.tools ?? []).some((t) => t.function.name === "write_file");
+		timeline.push(quick ? "lane" : full ? "full" : "other");
 		seen.push({
 			quick,
+			proactive: (body.messages ?? []).some((m) => m.content?.includes("[PROACTIVE QUESTIONING]")),
 			tools: (body.tools ?? []).map((t) => t.function.name),
 			model: body.model ?? "",
 			reasoningEffort: body.reasoning_effort ?? null,
@@ -63,9 +90,15 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			system: (body.messages ?? []).find((m) => m.role === "system")?.content ?? "",
 			roles: (body.messages ?? []).map((m) => m.role),
 		});
-		let content = "DONE: full loop answer.";
+		let content = process.env.PROBE_DEEP_TEXT ?? "DONE: full loop answer.";
 		if (quick && mode === "long-error") {
 			return new Response(`upstream exploded: ${"x".repeat(1000)}`, { status: 400 });
+		}
+		if (!escPressed && process.env.PROBE_ESC === (quick ? "lane" : full ? "deep" : "")) {
+			return pressEsc(init?.signal);
+		}
+		if (full && process.env.PROBE_DEEP_FAIL === "1") {
+			return new Response("upstream exploded", { status: 400 });
 		}
 		if (quick) {
 			quickRequests++;
@@ -78,7 +111,7 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 								JSON.stringify({ name: "read_file", arguments: { path: "server.ts" } }),
 								"```",
 							].join("\n")
-						: "DONE: It listens on 4100.";
+						: (process.env.PROBE_QUICK_TEXT ?? "DONE: It listens on 4100.");
 		}
 		return Response.json({
 			choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
@@ -98,8 +131,24 @@ const agent = new Agent({
 	runtime: "ollama",
 	workingDirectory: workdir,
 	maxTurns: 4,
+	events:
+		process.env.PROBE_NO_PROVISIONAL === "1"
+			? {}
+			: {
+					onProvisional: (event: { text: string }) => {
+						timeline.push("provisional");
+						provisionals.push(event.text);
+					},
+				},
 });
+agentRef = agent;
 const reply = await agent.chat(prompt);
+const second = process.env.PROBE_SECOND ? await agent.chat(process.env.PROBE_SECOND) : null;
+const history = (
+	agent as unknown as { messageHistory: Array<{ role: string; content: string }> }
+).messageHistory
+	.filter((m) => m.role === "assistant")
+	.map((m) => m.content);
 const runLog = join(homedir(), ".8gent", "runs.jsonl");
 const runs = existsSync(runLog)
 	? readFileSync(runLog, "utf8")
@@ -107,6 +156,8 @@ const runs = existsSync(runLog)
 			.filter(Boolean)
 			.map((l) => JSON.parse(l))
 	: [];
-process.stdout.write(`\n@@PROBE@@${JSON.stringify({ reply, seen, runs, executed })}\n`);
+process.stdout.write(
+	`\n@@PROBE@@${JSON.stringify({ reply, second, seen, runs, executed, timeline, provisionals, history })}\n`,
+);
 await agent.cleanup?.();
 process.exit(0);

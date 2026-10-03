@@ -90,12 +90,20 @@ import {
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
 import {
+	CLARIFY_QUESTION,
+	FACTS_LOGGED,
+	FACT_LOG_CHARS,
+	PROVISIONAL_LOG_CHARS,
 	classifyPrompt,
+	compareQuick,
 	installedModelsFor,
 	pickQuickModel,
+	promptNeedsContext,
+	quickFacts,
 	quickLaneEnabled,
 	quickMessages,
 	runQuickAnswer,
+	verdictLine,
 } from "./quick-answer";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
@@ -950,16 +958,27 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		};
 
-		// ── Quick-answer fast lane (#3411, EIGHT_QUICK_ANSWER=1) ─────────────
+		// ── Quick-answer fast lane (#3411, #3416, EIGHT_QUICK_ANSWER=1) ──────
 		// A short question with no instruction in it is first answered by a
-		// bounded read-only run (3 tool calls, 15 s). A complete answer ends the
-		// turn through the same bookkeeping below; anything else falls through to
-		// the normal loop, which never sees the lane's messages.
-		let quickResult: Awaited<ReturnType<typeof runTextToolAgent>> | null = null;
+		// bounded read-only run (3 tool calls, 15 s). A complete answer is shown
+		// at once as a provisional message; the normal loop then ALWAYS runs,
+		// never sees the lane's messages, and its answer is labelled with how it
+		// compares. The lane runs only for a surface that can show the quick
+		// answer (events.onProvisional): every other surface gets the plain turn.
+		let provisional: { answer: string; facts: string[] } | null = null;
 		if (quickLaneEnabled() && !isTableSession) {
-			quickRecord = { class: classifyPrompt(textForAgent), ran: false, ok: false, ms: 0, tools: 0 };
+			quickRecord = {
+				class: classifyPrompt(textForAgent),
+				...(promptNeedsContext(textForAgent) ? { context: true } : {}),
+				ran: false,
+				ok: false,
+				ms: 0,
+				tools: 0,
+				verdict: "none",
+			};
 		}
-		if (quickRecord?.class === "quick" && !this.proactiveGatherer) {
+		const showProvisional = this.events.onProvisional;
+		if (quickRecord?.class === "quick" && !this.proactiveGatherer && showProvisional) {
 			const pick = pickQuickModel({
 				envModel: process.env.EIGHT_QUICK_MODEL,
 				sessionModel: effectiveModel,
@@ -1003,11 +1022,35 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				...(!quick.ok && quick.claims ? { claims: quick.claims } : {}),
 			};
 			if (quick.ok) {
-				quickResult = quick.result;
+				const facts = quickFacts(quick.answer).map((f) => f.value);
+				provisional = { answer: quick.answer, facts };
+				quickRecord = {
+					...quickRecord,
+					shownMs: Date.now() - chatStartTime,
+					facts: facts.slice(0, FACTS_LOGGED).map((f) => f.slice(0, FACT_LOG_CHARS)),
+					text: quick.answer.slice(0, PROVISIONAL_LOG_CHARS),
+				};
+				showProvisional({ text: quick.result.content });
+			} else if (quick.reason === "aborted") {
+				// ESC during the lane ends the turn here: no second, unasked-for pass.
+				this.abortController = null;
+				const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
+				const failure = describeLocalTurnFailure(signal.reason ?? new Error("aborted"), {
+					endpoint,
+					timeoutMs: attemptTimeoutMs,
+				});
+				this.messageHistory.push({ role: "assistant", content: failure.message });
+				recordFailedRun(`quick lane aborted: ${failure.reason}`);
+				return failure.message;
 			} else {
 				console.log(`[quick-answer] full loop after ${quick.ms} ms: ${quick.reason}`);
 			}
 		}
+		// The final line names the quick facts; the failure detail goes to the run log only.
+		const quickNotChecked = (verdict: "unchecked" | "stopped", failed: boolean): string => {
+			if (quickRecord) quickRecord = { ...quickRecord, verdict };
+			return verdictLine(verdict, provisional?.facts ?? [], { failed });
+		};
 
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
@@ -1016,24 +1059,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// found`). callLocalModelWithReroute probes what is actually installed
 			// and retries the turn on a real model; only a genuine no-model-anywhere
 			// case returns a clean human message.
-			const outcome = quickResult
-				? { ok: true as const, value: quickResult, rerouted: false, usedModel: effectiveModel }
-				: await callLocalModelWithReroute({
-					provider: effectiveProvider,
-					model: effectiveModel,
-					run: runTurn,
-					onReroute: (missing, chosen) => {
-						console.log(
-							`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
-						);
-						this.emitModelRouted(missing, chosen.model, chosen.provider);
-					},
-				});
+			const outcome = await callLocalModelWithReroute({
+				provider: effectiveProvider,
+				model: effectiveModel,
+				run: runTurn,
+				onReroute: (missing, chosen) => {
+					console.log(
+						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
+					);
+					this.emitModelRouted(missing, chosen.model, chosen.provider);
+				},
+			});
 			if (!outcome.ok) {
 				this.abortController = null;
-				this.messageHistory.push({ role: "assistant", content: outcome.message });
+				const reply = provisional ? quickNotChecked("unchecked", true) : outcome.message;
+				this.messageHistory.push({ role: "assistant", content: reply });
 				recordFailedRun(`no local model: ${outcome.message}`);
-				return outcome.message;
+				return reply;
 			}
 			if (outcome.rerouted) {
 				// Self-correct the session so subsequent turns skip the dead model
@@ -1050,9 +1092,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.abortController = null;
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
-			this.messageHistory.push({ role: "assistant", content: failure.message });
+			// ESC, the watchdog or the circuit breaker stopped it; a timeout is a failure.
+			const reply = provisional
+				? signal.aborted && failure.kind !== "timeout"
+					? quickNotChecked("stopped", false)
+					: quickNotChecked("unchecked", true)
+				: failure.message;
+			this.messageHistory.push({ role: "assistant", content: reply });
 			recordFailedRun(failure.reason);
-			return failure.message;
+			return reply;
 		}
 		this.abortController = null;
 
@@ -1074,7 +1122,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// onto the assistant history, with the post-turn bookkeeping the native
 		// path performs (session evidence summary, run log, journal). A reply the
 		// honesty gate rewrote is NOT flavored - no celebration on a failure.
-		const content = gated.content;
+		let content = gated.content;
+		if (provisional && quickRecord) {
+			// Only the checked answer goes to history: the next turn never sees a wrong quick one.
+			const clean = !gated.violated && agentResult.unverified.length === 0;
+			const verdict = signal.aborted
+				? "stopped"
+				: compareQuick(provisional.answer, content, clean).verdict;
+			quickRecord = { ...quickRecord, verdict };
+			const line = verdictLine(verdict, provisional.facts);
+			content = content.trim() ? `${line}\n\n${content}` : line;
+		}
 		const flavor = personalityVoice.getFlavor("complete");
 		// Never flavor a Table reply. The officer speaking is Karen or Rishi, not
 		// 8gent, and flavorResponse staples a random COMPLETION_PHRASE ("Consider
@@ -1090,7 +1148,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			gated.violated ||
 			agentResult.unverified.length > 0 ||
 			this.config.agentScope === "__table__" ||
-			quickResult !== null
+			provisional !== null
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1238,11 +1296,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		// A prompt the quick-answer lane takes (#3411) is a precise question; the
-		// gate's heuristic flags most short prompts, and its note would make the
-		// lane ask instead of answer. Unclear prompts still get the one question.
-		const quickPrompt = quickLaneEnabled() && classifyPrompt(textForAgent) === "quick";
-		if (needsClarification(textForAgent) && !imageBase64 && !quickPrompt) {
+		// With the quick-answer lane on for this surface (#3411, #3416: the flag
+		// AND an onProvisional callback), the gate's heuristic is not used: it
+		// flags most short prompts (#3417). Instead one fixed question is asked,
+		// only for an unclear first message with nothing to resolve it against.
+		// A surface with no callback keeps the flag-off gate.
+		const laneOn =
+			quickLaneEnabled() &&
+			this.events.onProvisional !== undefined &&
+			this.config.agentScope !== "__table__";
+		const promptClass = laneOn ? classifyPrompt(textForAgent) : null;
+		const quickPrompt = promptClass === "quick";
+		if (laneOn) {
+			this.proactiveGatherer = null;
+			if (
+				promptClass === "unclear" &&
+				!imageBase64 &&
+				!this.messageHistory.some((m) => m.role === "assistant")
+			) {
+				// Asked instead of answered: no model call. The reply to it is a turn in a
+				// session that now has an assistant message, so it is never asked twice.
+				this.messageHistory.push({ role: "user", content: textForAgent });
+				this.messageHistory.push({ role: "assistant", content: CLARIFY_QUESTION });
+				this.sessionWriter.writeUserMessage(textForAgent);
+				this.sessionWriter.writeAssistantContent(0, [{ type: "text", text: CLARIFY_QUESTION }]);
+				return CLARIFY_QUESTION;
+			}
+		} else if (needsClarification(textForAgent) && !imageBase64) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {

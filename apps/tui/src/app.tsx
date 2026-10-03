@@ -2258,6 +2258,16 @@ export function App({
 				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
 				setRoutedTick((n) => n + 1);
 			},
+			// The quick answer, shown while the full answer runs (#3416). Grey system
+			// bubble, uncapped: the final answer follows with a "Checked" line.
+			onProvisional: (event) => {
+				appendToTab(tabId, {
+					id: `provisional-${Date.now()}`,
+					role: "system" as const,
+					content: event.text,
+					timestamp: new Date(),
+				});
+			},
 			onToolStart: (event: AgentToolStartEvent) => {
 				const isActive = tabId === activeTabId;
 				// update_plan carries the agent's own step statuses: the only

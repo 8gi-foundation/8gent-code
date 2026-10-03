@@ -60,6 +60,16 @@ export interface RunLogEntry {
 		promptTokens?: number[];
 		/** The flagged claims when the lane was rejected as unverified: at most 5, 120 chars each. */
 		claims?: string[];
+		/** True when the prompt went to the full loop because it needs the earlier conversation (#3416). */
+		context?: boolean;
+		/** Submit to the moment the quick answer was shown, in ms (#3416). */
+		shownMs?: number;
+		/** How the full answer compared with the shown quick answer (#3416). */
+		verdict?: "confirmed" | "corrected" | "unknown" | "unchecked" | "stopped" | "none";
+		/** The shown quick answer's facts: at most 8, 40 chars each (#3416). */
+		facts?: string[];
+		/** The shown quick answer, at most 300 chars, so the judge can grade it (#3416). */
+		text?: string;
 	};
 }
 

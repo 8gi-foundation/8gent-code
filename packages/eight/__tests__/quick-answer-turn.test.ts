@@ -6,14 +6,19 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
-import { QUICK_LABEL, QUICK_TOOLS } from "../quick-answer";
+import { CLARIFY_QUESTION, QUICK_LABEL, QUICK_TOOLS } from "../quick-answer";
 
 afterAll(cleanupTempDirs);
 
 type Probe = {
 	reply: string;
+	second: string | null;
+	timeline: string[];
+	provisionals: string[];
+	history: string[];
 	seen: Array<{
 		quick: boolean;
+		proactive: boolean;
 		tools: string[];
 		model: string;
 		reasoningEffort: string | null;
@@ -22,6 +27,7 @@ type Probe = {
 		roles: string[];
 	}>;
 	runs: Array<{
+		status?: string;
 		quick?: {
 			class: string;
 			ran: boolean;
@@ -31,6 +37,11 @@ type Probe = {
 			model?: string;
 			modelSource?: string;
 			promptTokens?: number[];
+			context?: boolean;
+			shownMs?: number;
+			verdict?: string;
+			facts?: string[];
+			text?: string;
 		};
 	}>;
 	executed: string[];
@@ -45,12 +56,11 @@ function probe(
 	const root = tempDir("quick-answer-");
 	mkdirSync(join(root, "home"));
 	mkdirSync(join(root, "work"));
-	const {
-		EIGHT_QUICK_ANSWER: _flag,
-		EIGHT_QUICK_MODEL: _model,
-		PROBE_TAGS: _tags,
-		...base
-	} = process.env;
+	const base = Object.fromEntries(
+		Object.entries(process.env).filter(
+			([k]) => k !== "EIGHT_QUICK_ANSWER" && k !== "EIGHT_QUICK_MODEL" && !k.startsWith("PROBE_"),
+		),
+	);
 	const env = {
 		...base,
 		HOME: join(root, "home"),
@@ -86,24 +96,27 @@ const PILOT_PROMPT =
 const LANE_FIRST_REQUEST_BUDGET = 4000;
 
 describe("quick-answer lane in a real turn (#3411)", () => {
-	test("flag on, quick prompt: labelled answer, read-only tools only, no full loop", () => {
+	test("flag on, quick prompt: a labelled provisional answer from read-only tools, then the full loop (#3416)", () => {
 		const p = probe("answer", QUESTION, "1");
-		expect(p.reply.startsWith(QUICK_LABEL)).toBe(true);
-		expect(p.reply).toContain("4100");
+		expect(p.provisionals).toEqual([`${QUICK_LABEL} It listens on 4100.`]);
 		const quick = p.seen.filter((s) => s.quick);
 		expect(quick.length).toBeGreaterThan(0);
-		// No request outside the lane except the capability probe (a single "noop" tool).
-		expect(p.seen.every((s) => s.quick || s.tools.length <= 1)).toBe(true);
 		for (const s of quick) for (const t of s.tools) expect(QUICK_TOOLS.has(t)).toBe(true);
 		expect(quick[0].tools).toContain("read_file");
 		expect(quick[0].tools).not.toContain("write_file");
+		// PR1 ended the turn here; PR2 always runs the full loop after a shown quick answer.
+		expect(p.timeline).toContain("full");
+		expect(p.reply).toContain("full loop answer");
 		expect(p.runs.at(-1)?.quick).toMatchObject({ class: "quick", ran: true, ok: true, tools: 1 });
 	}, 60_000);
 
-	test("flag on, model says NEEDS_DEEP: the full loop answers, unlabelled", () => {
+	test("flag on, model says NEEDS_DEEP: the full loop answers, with no quick answer and no verdict line", () => {
 		const p = probe("needs-deep", QUESTION, "1");
 		expect(p.reply).toContain("full loop answer");
 		expect(p.reply).not.toContain(QUICK_LABEL);
+		expect(p.provisionals).toEqual([]);
+		expect(p.reply.startsWith("DONE") || p.reply.startsWith("full loop answer")).toBe(true);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("none");
 		expect(p.seen.some((s) => s.quick)).toBe(true);
 		expect(p.seen.some((s) => !s.quick && s.tools.includes("write_file"))).toBe(true);
 		expect(p.runs.at(-1)?.quick).toMatchObject({
@@ -195,4 +208,194 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		expect(q?.promptTokens).toHaveLength(rounds);
 		for (const t of q?.promptTokens ?? []) expect(t).toBeGreaterThan(0);
 	}, 60_000);
+});
+
+// ── #3416: quick then full ────────────────────────────────────────────────
+const CHECK_PROMPT = "which port does staging listen on?";
+const WRONG_QUICK = "DONE: Staging listens on 5180.";
+const RIGHT_QUICK = "DONE: Staging listens on 4180.";
+const DEEP = "DONE: Staging listens on 4180, and on 3000 when APP_MODE is unset.";
+
+describe("quick then full in a real turn (#3416)", () => {
+	test("the provisional answer is shown before the full loop's first model request", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: RIGHT_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		const shown = p.timeline.indexOf("provisional");
+		expect(shown).toBeGreaterThan(p.timeline.lastIndexOf("lane"));
+		expect(p.timeline.indexOf("full")).toBeGreaterThan(shown);
+	}, 60_000);
+
+	test("the full loop never sees the quick answer", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: WRONG_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		const full = p.seen.filter((s) => !s.quick && s.tools.includes("write_file"));
+		expect(full.length).toBeGreaterThan(0);
+		for (const s of full) expect(s.system).not.toContain("5180");
+	}, 60_000);
+
+	test("a wrong quick answer: the final answer opens with the correction, and history holds only it", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: WRONG_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		expect(p.provisionals).toEqual([`${QUICK_LABEL} Staging listens on 5180.`]);
+		expect(p.reply).toBe(
+			"Correction: my quick answer (5180) did not match what I found when I checked. Use this instead:\n\nStaging listens on 4180, and on 3000 when APP_MODE is unset.",
+		);
+		expect(p.history).toEqual([p.reply]);
+		expect(p.runs.at(-1)?.quick).toMatchObject({
+			verdict: "corrected",
+			facts: ["5180"],
+			text: "Staging listens on 5180.",
+		});
+		expect(typeof p.runs.at(-1)?.quick?.shownMs).toBe("number");
+	}, 60_000);
+
+	test("a right quick answer: the final answer opens with Checked", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: RIGHT_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		expect(p.reply).toBe(
+			"Checked: my quick answer (4180) was right.\n\nStaging listens on 4180, and on 3000 when APP_MODE is unset.",
+		);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("confirmed");
+	}, 60_000);
+
+	test("a quick answer with no comparable fact: the full answer is labelled as not compared", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: "DONE: It is set in src/server.ts.",
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		expect(p.reply.split("\n")[0]).toBe(
+			"Full answer (I could not compare it with my quick answer):",
+		);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("unknown");
+	}, 60_000);
+
+	test("ESC during the quick answer ends the turn: no full-loop request at all", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", { PROBE_ESC: "lane" });
+		expect(p.timeline).toContain("lane");
+		expect(p.timeline).not.toContain("full");
+		expect(p.provisionals).toEqual([]);
+		expect(p.runs.at(-1)?.quick).toMatchObject({ ran: true, ok: false, reason: "aborted" });
+		expect(p.runs.at(-1)).toMatchObject({ status: "error" });
+		expect(p.history).toEqual([p.reply]);
+	}, 60_000);
+
+	test("ESC during the full loop: the stopped line names the quick facts", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: WRONG_QUICK,
+			PROBE_ESC: "deep",
+		});
+		expect(p.provisionals.length).toBe(1);
+		expect(p.reply).toBe(
+			"Stopped before I could check my quick answer (5180), so do not rely on it.",
+		);
+		expect(p.history).toEqual([p.reply]);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("stopped");
+	}, 60_000);
+
+	test("the full loop fails: the unchecked line with a next step replaces the error text", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: WRONG_QUICK,
+			PROBE_DEEP_FAIL: "1",
+		});
+		expect(p.reply).toBe(
+			"I could not check my quick answer (5180), so do not rely on it. Try asking again, or narrow the question.",
+		);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("unchecked");
+	}, 60_000);
+
+	test("a full answer the honesty gate rewrites is never confirmed", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: RIGHT_QUICK,
+			PROBE_DEEP_TEXT: "DONE: The fix has been committed and pushed. Staging listens on 4180.",
+		});
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("unchecked");
+		expect(
+			p.reply.startsWith("I could not check my quick answer (4180), so do not rely on it."),
+		).toBe(true);
+		expect(p.reply).not.toContain("Try asking again");
+	}, 60_000);
+
+	test("flag on, `why?` as the first message: the one fixed question, no model request", () => {
+		const p = probe("answer", "why?", "1");
+		expect(p.reply).toBe(CLARIFY_QUESTION);
+		expect(p.seen).toEqual([]);
+		expect(p.history).toEqual([CLARIFY_QUESTION]);
+	}, 60_000);
+
+	test("the reply to the question is answered, never asked again", () => {
+		const p = probe("answer", "why?", "1", { PROBE_SECOND: "hmm" });
+		expect(p.reply).toBe(CLARIFY_QUESTION);
+		expect(p.second).not.toBe(CLARIFY_QUESTION);
+		expect(p.second).toContain("full loop answer");
+	}, 60_000);
+
+	test("flag on, `why?` after one exchange goes to the full loop with no question", () => {
+		const p = probe("needs-deep", QUESTION, "1", { PROBE_SECOND: "why?" });
+		expect(p.second).toContain("full loop answer");
+		expect(p.second).not.toBe(CLARIFY_QUESTION);
+		expect(p.seen.every((s) => !s.proactive)).toBe(true);
+	}, 60_000);
+
+	test("flag on, the pilot prompt gets no [PROACTIVE QUESTIONING] note", () => {
+		const p = probe("answer", PILOT_PROMPT, "1");
+		expect(p.runs.at(-1)?.quick?.class).toBe("quick");
+		expect(p.seen.length).toBeGreaterThan(0);
+		expect(p.seen.every((s) => !s.proactive)).toBe(true);
+	}, 60_000);
+
+	test("flag on, a context-dependent follow-up: classed deep, logged, and no lane request", () => {
+		const p = probe("answer", "which port?", "1");
+		expect(p.seen.some((s) => s.quick)).toBe(false);
+		expect(p.runs.at(-1)?.quick).toMatchObject({ class: "deep", context: true, ran: false });
+	}, 60_000);
+
+	test("flag on, no onProvisional (Telegram, the daemon): no lane request and no verdict line", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_NO_PROVISIONAL: "1",
+			PROBE_QUICK_TEXT: WRONG_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		expect(p.seen.some((s) => s.quick)).toBe(false);
+		expect(p.reply).not.toMatch(/quick answer/i);
+		expect(p.reply).toContain("Staging listens on 4180");
+		expect(p.runs.at(-1)?.quick).toMatchObject({ class: "quick", ran: false, verdict: "none" });
+	}, 60_000);
+
+	test("flag on, no onProvisional: a vague first message gets the flag-off gate's note (R3.3)", () => {
+		const on = probe("answer", "why?", "1", { PROBE_NO_PROVISIONAL: "1" });
+		const off = probe("answer", "why?", undefined, { PROBE_NO_PROVISIONAL: "1" });
+		expect(off.seen.some((s) => s.proactive)).toBe(true);
+		expect(on.seen.some((s) => s.proactive)).toBe(true);
+		expect(on.reply).not.toBe(CLARIFY_QUESTION);
+	}, 60_000);
+
+	for (const prompt of [
+		QUESTION,
+		"why?",
+		PILOT_PROMPT,
+		"fix the port in server.ts",
+		"which port?",
+	]) {
+		test(`flag off: byte-identical with or without onProvisional (${JSON.stringify(prompt.slice(0, 30))})`, () => {
+			const extra = { PROBE_QUICK_TEXT: WRONG_QUICK, PROBE_DEEP_TEXT: DEEP };
+			const withCb = probe("answer", prompt, undefined, extra);
+			const without = probe("answer", prompt, undefined, { ...extra, PROBE_NO_PROVISIONAL: "1" });
+			const zero = probe("answer", prompt, "0", extra);
+			for (const p of [withCb, zero]) {
+				expect(p.reply).toBe(without.reply);
+				expect(p.seen).toEqual(without.seen);
+				expect(p.executed).toEqual(without.executed);
+				expect(p.provisionals).toEqual([]);
+			}
+			expect(withCb.runs.map((r) => r.quick)).toEqual(without.runs.map(() => undefined));
+		}, 120_000);
+	}
 });
