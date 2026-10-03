@@ -44,21 +44,35 @@ const ACTION_VERBS = new Set(
 	rollback reset rebase apply configure enable disable set setup upgrade downgrade publish send
 	post schedule launch investigate research review audit debug compare analyse analyze profile
 	benchmark test retry rebuild document port scaffold convert format lint refresh sync record
-	render design plan look dig finish continue resume proceed go use try keep sort split`.split(
-		/\s+/,
-	),
+	render design plan look dig finish continue resume proceed go use try keep sort split
+	verify ping notify message handle get git`.split(/\s+/),
 );
 
 /** "do" is an instruction only before an object ("do it"), never as "do we/you/I". */
 const DO_OBJECT = /^do\s+(it|that|this|the|so|both|all|them|those|these)\b/;
 
-/** Reassurances that name a verb without asking for it. */
+/**
+ * Verbs that are instructions only in one shape (8PO review, round 2):
+ * "tell Rishi" / "let Kevin know" (not "tell me", "let me know": the answer is the telling),
+ * "take care of", and causative "have the officers review" (not "have you pushed it?").
+ */
+const SHAPED_ACTION =
+	/^(tell\s+(?!me\b|us\b)\S+|let\s+(?!me\b|us\b)\S+(\s+\S+)?\s+know\b|take\s+care\s+of\b|have\s+(?!you\b|we\b|they\b|i\b|it\b|he\b|she\b|there\b|any\w*\b|been\b)\S+)/;
+
+/** Discussion openers: judgement questions three file reads cannot answer. */
+const DISCUSSION =
+	/\b(what do you think|how should we|how would you approach|i want to understand|what'?s your (view|take|opinion))\b/;
+
+/**
+ * Reassurances that name a verb without asking for it. Never after "if" / "unless":
+ * "if not restart it" is a conditional instruction, not a reassurance.
+ */
 const NEGATED_ACTION =
-	/\b(no need to|don'?t|do not|never|without|not)\s+(\w+)(\s+(anything|it|that|this|them|a thing))?/g;
+	/(?<!\b(?:if|unless)\s+)\b(no need to|don'?t|do not|never|without|not)(?!\s+(?:you|we)\b)\s+(\w+)(\s+(anything|it|that|this|them|a thing))?/g;
 
 /** Leading words that sit in front of an instruction's verb. */
 const REQUEST_FILLER =
-	/^(please|pls|ok(ay)?|so|now|just|also|then|and|but|hey|right|eight|8gent|go ahead and|can you|could you|would you|will you|can u|i want you to|i need you to|i'?d like you to|let'?s|lets|you should|you need to|we should|we need to|need to|to)\b\s*/;
+	/^(please|pls|ok(ay)?|so|now|just|also|then|and|but|hey|right|eight|8gent|go ahead and|can you|could you|would you|will you|can u|i want you to|i need you to|i'?d like you to|let'?s|lets|you should|you need to|we should|we need to|need to|to|can we|could we|if not|if so|if yes|if it is|if it'?s not|otherwise|else|unless|why don'?t you|why don'?t we|why not|how about you)\b\s*/;
 
 const STOPWORDS = new Set(
 	`a an the and or but if then so of to in on at by for with about from this that these those it
@@ -80,7 +94,7 @@ function opensWithAction(clause: string): boolean {
 		prev = c;
 		c = c.replace(REQUEST_FILLER, "");
 	}
-	if (DO_OBJECT.test(c)) return true;
+	if (DO_OBJECT.test(c) || SHAPED_ACTION.test(c)) return true;
 	const first = c.split(/\s+/)[0]?.replace(/[^a-z-]/g, "") ?? "";
 	return ACTION_VERBS.has(first);
 }
@@ -91,6 +105,7 @@ export function classifyPrompt(raw: string): PromptClass {
 	if (!text) return "unclear";
 	const asked = text.replace(NEGATED_ACTION, " ");
 	if (clauses(asked).some(opensWithAction)) return "deep";
+	if (DISCUSSION.test(text)) return "deep";
 	const words = text.split(/\s+/).filter(Boolean);
 	if (words.length > QUICK_MAX_WORDS) return "deep";
 	if (QUESTION.test(text)) {
@@ -102,6 +117,41 @@ export function classifyPrompt(raw: string): PromptClass {
 	return words.length <= 2 ? "unclear" : "deep";
 }
 
+/**
+ * Small local models the lane prefers over the session model when EIGHT_QUICK_MODEL is unset.
+ * On the 27B session model the lane timed out at 15 s (A/B run 2026-10-03_214455).
+ */
+export const QUICK_MODEL_PREFERENCE: readonly string[] = ["qwen3.5:9b"];
+
+export type QuickModelPick = { model: string; source: "env" | "preferred" | "session" };
+
+/** EIGHT_QUICK_MODEL wins; else the first preferred model installed on the session's provider; else the session model. */
+export function pickQuickModel(opts: {
+	envModel?: string;
+	sessionModel: string;
+	installed: readonly string[];
+}): QuickModelPick {
+	const env = opts.envModel?.trim();
+	if (env) return { model: env, source: "env" };
+	const have = opts.installed.map((m) => m.toLowerCase());
+	for (const want of QUICK_MODEL_PREFERENCE) {
+		const i = have.findIndex((m) => m === want || m.startsWith(`${want}-`));
+		if (i >= 0) return { model: opts.installed[i], source: "preferred" };
+	}
+	return { model: opts.sessionModel, source: "session" };
+}
+
+let installedCache: Promise<Array<{ provider: string; model: string }>> | null = null;
+
+/** Models installed on `provider`, detected once per process (each probe is time-bounded). */
+export async function installedModelsFor(provider: string): Promise<string[]> {
+	installedCache ??= import("../orchestration/local-model-detect")
+		.then((m) => m.detectLocalModels())
+		.catch(() => []);
+	const all = await installedCache;
+	return all.filter((m) => m.provider === provider).map((m) => m.model);
+}
+
 export function quickLaneEnabled(env: Record<string, string | undefined> = process.env): boolean {
 	return env.EIGHT_QUICK_ANSWER === "1";
 }
@@ -110,11 +160,29 @@ export const QUICK_INSTRUCTION = [
 	"[QUICK ANSWER] This is a quick question. Answer it directly and briefly from the source.",
 	`You may use at most ${QUICK_MAX_TOOL_CALLS} read-only tool calls. Do not change anything.`,
 	`Start your answer with "DONE:". If you cannot answer within that budget, reply with exactly ${NEEDS_DEEP}.`,
+	`If the message also asks you to do, change, send or check something you cannot do with read-only tools, reply with exactly ${NEEDS_DEEP}.`,
 ].join("\n");
 
+const BUDGET_ELAPSED = "The quick-answer time budget elapsed before this read finished.";
+
+/**
+ * The lane instruction rides on the user's own message, not as a turn of its own, so the
+ * loop's claim check still reads the user's words as the request (8SO F2).
+ */
+function withInstruction(messages: TextToolMessage[]): TextToolMessage[] {
+	const out = messages.slice();
+	for (let i = out.length - 1; i >= 0; i--) {
+		if (out[i].role === "user") {
+			out[i] = { ...out[i], content: `${out[i].content}\n\n${QUICK_INSTRUCTION}` };
+			return out;
+		}
+	}
+	return [...out, { role: "user", content: QUICK_INSTRUCTION }];
+}
+
 export type QuickOutcome =
-	| { ok: true; result: TextToolAgentResult; ms: number }
-	| { ok: false; reason: string; ms: number };
+	| { ok: true; result: TextToolAgentResult; ms: number; tools: number }
+	| { ok: false; reason: string; ms: number; tools: number };
 
 export interface QuickLaneOptions {
 	/** The turn's conversation, ending with the user's prompt. Not mutated. */
@@ -158,7 +226,15 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 					return `Tool budget for a quick answer is used up (${maxCalls} calls). Answer now from what you have, or reply ${NEEDS_DEEP}.`;
 				}
 				calls++;
-				return t.run(args);
+				// The budget is a hard wall for a running tool too (8SO F3): a read that
+				// outlives it finishes in the background, as in the normal loop.
+				return Promise.race([
+					t.run(args),
+					new Promise<string>((resolve) => {
+						if (ac.signal.aborted) resolve(BUDGET_ELAPSED);
+						ac.signal.addEventListener("abort", () => resolve(BUDGET_ELAPSED), { once: true });
+					}),
+				]);
 			},
 		}));
 
@@ -178,7 +254,7 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 
 	try {
 		const result = await runTextToolAgent({
-			messages: [...opts.messages, { role: "user", content: QUICK_INSTRUCTION }],
+			messages: withInstruction(opts.messages),
 			tools,
 			call,
 			maxRounds: maxCalls + 1,
@@ -186,20 +262,31 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 		});
 		const ms = elapsed();
 		const text = result.content.trim();
-		if (opts.signal?.aborted) return { ok: false, reason: "aborted", ms };
-		if (ac.signal.aborted || ms > budgetMs) return { ok: false, reason: `over ${budgetMs} ms`, ms };
-		if (!text) return { ok: false, reason: "empty answer", ms };
+		if (opts.signal?.aborted) return { ok: false, reason: "aborted", ms, tools: calls };
+		if (ac.signal.aborted || ms > budgetMs)
+			return { ok: false, reason: `over ${budgetMs} ms`, ms, tools: calls };
+		if (!text) return { ok: false, reason: "empty answer", ms, tools: calls };
 		if (text.includes(NEEDS_DEEP))
-			return { ok: false, reason: "model asked for the full loop", ms };
-		if (result.unverified.length > 0) return { ok: false, reason: "unverified claims", ms };
+			return { ok: false, reason: "model asked for the full loop", ms, tools: calls };
+		if (result.unverified.length > 0)
+			return { ok: false, reason: "unverified claims", ms, tools: calls };
 		if (overBudget) {
 			// It asked for tools past the budget: the question needs the full loop.
-			return { ok: false, reason: `tool budget of ${maxCalls} calls exceeded`, ms };
+			return { ok: false, reason: `tool budget of ${maxCalls} calls exceeded`, ms, tools: calls };
 		}
-		return { ok: true, result: { ...result, content: `${QUICK_LABEL} ${text}` }, ms };
+		if (calls === 0) {
+			// Nothing was read: that is the model's memory, not the source (8PO review, round 2).
+			return { ok: false, reason: "no source read", ms, tools: calls };
+		}
+		return { ok: true, result: { ...result, content: `${QUICK_LABEL} ${text}` }, ms, tools: calls };
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, reason: ac.signal.aborted ? `over ${budgetMs} ms` : msg, ms: elapsed() };
+		return {
+			ok: false,
+			reason: ac.signal.aborted ? `over ${budgetMs} ms` : msg,
+			ms: elapsed(),
+			tools: calls,
+		};
 	} finally {
 		clearTimeout(timer);
 		opts.signal?.removeEventListener("abort", onOuterAbort);

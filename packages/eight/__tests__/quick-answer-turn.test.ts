@@ -10,17 +10,43 @@ import { QUICK_LABEL, QUICK_TOOLS } from "../quick-answer";
 
 afterAll(cleanupTempDirs);
 
-type Probe = { reply: string; seen: Array<{ quick: boolean; tools: string[] }> };
+type Probe = {
+	reply: string;
+	seen: Array<{ quick: boolean; tools: string[]; model: string }>;
+	runs: Array<{
+		quick?: {
+			class: string;
+			ran: boolean;
+			ok: boolean;
+			reason?: string;
+			tools: number;
+			model?: string;
+			modelSource?: string;
+		};
+	}>;
+	executed: string[];
+};
 
-function probe(mode: "answer" | "needs-deep", prompt: string, flag: string | undefined): Probe {
+function probe(
+	mode: "answer" | "needs-deep",
+	prompt: string,
+	flag: string | undefined,
+	extra: Record<string, string> = {},
+): Probe {
 	const root = tempDir("quick-answer-");
 	mkdirSync(join(root, "home"));
 	mkdirSync(join(root, "work"));
-	const { EIGHT_QUICK_ANSWER: _inherited, ...base } = process.env;
+	const {
+		EIGHT_QUICK_ANSWER: _flag,
+		EIGHT_QUICK_MODEL: _model,
+		PROBE_TAGS: _tags,
+		...base
+	} = process.env;
 	const env = {
 		...base,
 		HOME: join(root, "home"),
 		...(flag === undefined ? {} : { EIGHT_QUICK_ANSWER: flag }),
+		...extra,
 	};
 	const r = Bun.spawnSync(
 		[
@@ -57,6 +83,7 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		for (const s of quick) for (const t of s.tools) expect(QUICK_TOOLS.has(t)).toBe(true);
 		expect(quick[0].tools).toContain("read_file");
 		expect(quick[0].tools).not.toContain("write_file");
+		expect(p.runs.at(-1)?.quick).toMatchObject({ class: "quick", ran: true, ok: true, tools: 1 });
 	}, 60_000);
 
 	test("flag on, model says NEEDS_DEEP: the full loop answers, unlabelled", () => {
@@ -65,17 +92,55 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		expect(p.reply).not.toContain(QUICK_LABEL);
 		expect(p.seen.some((s) => s.quick)).toBe(true);
 		expect(p.seen.some((s) => !s.quick && s.tools.includes("write_file"))).toBe(true);
+		expect(p.runs.at(-1)?.quick).toMatchObject({
+			class: "quick",
+			ran: true,
+			ok: false,
+			reason: "model asked for the full loop",
+		});
 	}, 60_000);
 
 	test("flag on, an instruction: the lane never runs", () => {
 		const p = probe("answer", "fix the port in server.ts", "1");
 		expect(p.seen.some((s) => s.quick)).toBe(false);
+		expect(p.runs.at(-1)?.quick).toMatchObject({ class: "deep", ran: false });
 		expect(p.reply).not.toContain(QUICK_LABEL);
 	}, 60_000);
 
 	test("flag off (default): the lane never runs", () => {
 		const p = probe("answer", QUESTION, undefined);
 		expect(p.seen.some((s) => s.quick)).toBe(false);
+		expect(p.runs.at(-1)?.quick).toBeUndefined();
 		expect(p.reply).toContain("full loop answer");
+	}, 60_000);
+
+	test("flag on, a quoted quick prompt: no run_command runs, the pre-tool router stays off (8SO F1)", () => {
+		const p = probe("answer", 'where is "apiKey" set?', "1");
+		expect(p.runs.at(-1)?.quick?.class).toBe("quick");
+		expect(p.executed).not.toContain("run_command");
+		for (const name of p.executed) expect(QUICK_TOOLS.has(name)).toBe(true);
+	}, 60_000);
+
+	test("EIGHT_QUICK_MODEL unset: the lane runs on qwen3.5:9b when installed, and logs the pick", () => {
+		const p = probe("answer", QUESTION, "1", { PROBE_TAGS: "probe:1b,qwen3.5:9b" });
+		const quick = p.seen.filter((s) => s.quick);
+		expect(quick.length).toBeGreaterThan(0);
+		for (const s of quick) expect(s.model).toBe("qwen3.5:9b");
+		expect(p.runs.at(-1)?.quick).toMatchObject({ model: "qwen3.5:9b", modelSource: "preferred" });
+	}, 60_000);
+
+	test("EIGHT_QUICK_MODEL set: it wins over the preferred model", () => {
+		const p = probe("answer", QUESTION, "1", {
+			PROBE_TAGS: "probe:1b,qwen3.5:9b",
+			EIGHT_QUICK_MODEL: "probe:1b",
+		});
+		for (const s of p.seen.filter((x) => x.quick)) expect(s.model).toBe("probe:1b");
+		expect(p.runs.at(-1)?.quick).toMatchObject({ model: "probe:1b", modelSource: "env" });
+	}, 60_000);
+
+	test("nothing preferred installed: the lane uses the session model", () => {
+		const p = probe("answer", QUESTION, "1");
+		for (const s of p.seen.filter((x) => x.quick)) expect(s.model).toBe("probe:1b");
+		expect(p.runs.at(-1)?.quick).toMatchObject({ model: "probe:1b", modelSource: "session" });
 	}, 60_000);
 });

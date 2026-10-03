@@ -41,6 +41,22 @@ export interface RunLogEntry {
 	 * only when non-empty. See packages/ai/claim-check.ts.
 	 */
 	unverified?: string[];
+	/**
+	 * The quick-answer lane's outcome for this turn (#3411), present only when
+	 * EIGHT_QUICK_ANSWER=1: the prompt's class, whether the lane ran and answered,
+	 * why it fell through, its wall time and the read-only tool calls it used.
+	 */
+	quick?: {
+		class: string;
+		ran: boolean;
+		ok: boolean;
+		reason?: string;
+		ms: number;
+		tools: number;
+		/** The model the lane ran on, and why it was picked (EIGHT_QUICK_MODEL, preferred small model, session). */
+		model?: string;
+		modelSource?: "env" | "preferred" | "session";
+	};
 }
 
 const LOG_PATH = path.join(os.homedir(), ".8gent", "runs.jsonl");

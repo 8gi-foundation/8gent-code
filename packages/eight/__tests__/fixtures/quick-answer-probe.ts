@@ -5,14 +5,28 @@
  * each request declared. Run in a child process with HOME in a temp dir.
  *
  *   bun quick-answer-probe.ts <answer|needs-deep> <workdir> <prompt>
+ *
+ * PROBE_TAGS (comma list) sets the installed Ollama models; default "probe:1b".
+ * Every ToolExecutor.execute call is recorded, so a test can prove no
+ * run_command ran outside the lane (8SO F1).
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const [mode, workdir, prompt] = process.argv.slice(2);
 writeFileSync(join(workdir, "server.ts"), 'export const port = process.env.PORT ?? "4100";\n');
 
-type Seen = { quick: boolean; tools: string[] };
+const tags = (process.env.PROBE_TAGS ?? "probe:1b").split(",");
+const executed: string[] = [];
+const { ToolExecutor } = await import("../../tools");
+const realExecute = ToolExecutor.prototype.execute;
+ToolExecutor.prototype.execute = function (name: string, args: Record<string, unknown>) {
+	executed.push(name);
+	return realExecute.call(this, name, args);
+};
+
+type Seen = { quick: boolean; tools: string[]; model: string };
 const seen: Seen[] = [];
 let quickRequests = 0;
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
@@ -20,14 +34,19 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 		typeof input === "string" ? input : ((input as { url?: string })?.url ?? input),
 	);
 	if (url.endsWith("/api/tags"))
-		return Response.json({ models: [{ name: "probe:1b", model: "probe:1b" }] });
+		return Response.json({ models: tags.map((name) => ({ name, model: name })) });
 	if (url.includes("/chat/completions")) {
 		const body = JSON.parse(init?.body ?? "{}") as {
+			model?: string;
 			tools?: Array<{ function: { name: string } }>;
 			messages?: Array<{ role: string; content: string }>;
 		};
 		const quick = (body.messages ?? []).some((m) => m.content?.includes("[QUICK ANSWER]"));
-		seen.push({ quick, tools: (body.tools ?? []).map((t) => t.function.name) });
+		seen.push({
+			quick,
+			tools: (body.tools ?? []).map((t) => t.function.name),
+			model: body.model ?? "",
+		});
 		let content = "DONE: full loop answer.";
 		if (quick) {
 			quickRequests++;
@@ -57,6 +76,13 @@ const agent = new Agent({
 	maxTurns: 4,
 });
 const reply = await agent.chat(prompt);
-process.stdout.write(`\n@@PROBE@@${JSON.stringify({ reply, seen })}\n`);
+const runLog = join(homedir(), ".8gent", "runs.jsonl");
+const runs = existsSync(runLog)
+	? readFileSync(runLog, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l))
+	: [];
+process.stdout.write(`\n@@PROBE@@${JSON.stringify({ reply, seen, runs, executed })}\n`);
 await agent.cleanup?.();
 process.exit(0);

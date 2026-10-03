@@ -89,7 +89,13 @@ import {
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
-import { classifyPrompt, quickLaneEnabled, runQuickAnswer } from "./quick-answer";
+import {
+	classifyPrompt,
+	installedModelsFor,
+	pickQuickModel,
+	quickLaneEnabled,
+	runQuickAnswer,
+} from "./quick-answer";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -913,13 +919,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// The quick-answer lane's outcome (#3411), written to the run log so the
+		// A/B can report the fall-through rate. Set below when the flag is on.
+		let quickRecord: RunLogEntry["quick"];
+
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
 		const recordFailedRun = (reason: string) => {
 			if (!this.enableReporting) return;
 			try {
-				appendRun(
-					failedTurnRunEntry({
+				appendRun({
+					...failedTurnRunEntry({
 						model: this.config.model,
 						startedAt: chatStartTime,
 						tokens: usageTotals.totalTokens,
@@ -932,7 +942,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						prompt: textForAgent,
 						reason,
 					}),
-				);
+					...(quickRecord ? { quick: quickRecord } : {}),
+				});
 			} catch {
 				// The run log is best-effort; it must never mask the turn's reply.
 			}
@@ -944,13 +955,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// turn through the same bookkeeping below; anything else falls through to
 		// the normal loop, which never sees the lane's messages.
 		let quickResult: Awaited<ReturnType<typeof runTextToolAgent>> | null = null;
-		if (
-			quickLaneEnabled() &&
-			!isTableSession &&
-			!this.proactiveGatherer &&
-			classifyPrompt(textForAgent) === "quick"
-		) {
-			const quickModel = process.env.EIGHT_QUICK_MODEL || effectiveModel;
+		if (quickLaneEnabled() && !isTableSession) {
+			quickRecord = { class: classifyPrompt(textForAgent), ran: false, ok: false, ms: 0, tools: 0 };
+		}
+		if (quickRecord?.class === "quick" && !this.proactiveGatherer) {
+			const pick = pickQuickModel({
+				envModel: process.env.EIGHT_QUICK_MODEL,
+				sessionModel: effectiveModel,
+				installed: process.env.EIGHT_QUICK_MODEL ? [] : await installedModelsFor(effectiveProvider),
+			});
+			const quickModel = pick.model;
 			const quick = await runQuickAnswer({
 				messages,
 				tools,
@@ -967,6 +981,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						onUsage,
 					}),
 			});
+			quickRecord = {
+				...quickRecord,
+				ran: true,
+				ok: quick.ok,
+				model: quickModel,
+				modelSource: pick.source,
+				ms: quick.ms,
+				tools: quick.tools,
+				...(quick.ok ? {} : { reason: quick.reason }),
+			};
 			if (quick.ok) {
 				quickResult = quick.result;
 			} else {
@@ -1079,6 +1103,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				cwd: this.config.workingDirectory || process.cwd(),
 				prompt: textForAgent.slice(0, 120),
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
+				...(quickRecord ? { quick: quickRecord } : {}),
 			});
 		}
 
@@ -1238,8 +1263,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// pre-fetch the obvious retrieval (ast/grep/glob/vector/fileread)
 		// BEFORE the LLM turn. Model-agnostic — small local models get the
 		// same correct routing as frontier models. Skipped if the proactive
-		// gatherer already injected a clarifying question.
-		if (!this.proactiveGatherer) {
+		// gatherer already injected a clarifying question. Also skipped for a
+		// prompt the quick-answer lane takes (#3411, 8SO F1): its grep strategy
+		// runs run_command, outside the lane's read-only tools and budget.
+		if (!this.proactiveGatherer && !quickPrompt) {
 			await this.tryRunPreToolRouter(textForAgent);
 		}
 

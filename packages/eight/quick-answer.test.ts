@@ -7,6 +7,7 @@ import {
 	QUESTION,
 	QUICK_LABEL,
 	classifyPrompt,
+	pickQuickModel,
 	quickLaneEnabled,
 	runQuickAnswer,
 } from "./quick-answer";
@@ -57,12 +58,37 @@ const TABLE: Array<[string, PromptClass]> = [
 		"I want to understand how the daemon handles sessions across channels because I keep seeing duplicates in Telegram and I am not sure whether that is the agent pool or the relay or something in the way the TUI reconnects after sleep, which matters for the demo next week with Kevin and the board on Friday morning, what do you think is going on here?",
 		"deep",
 	],
-	// Known limit: an open-ended 57-word question with no instruction in it classifies quick.
-	// The lane then relies on the model replying NEEDS_DEEP within its budget.
+	// Discussion questions need judgement, not three reads (8PO review, round 2).
 	[
 		"I want to understand how the daemon handles sessions across channels because I keep seeing duplicates in Telegram and I am not sure whether that is the agent pool or the relay or something in the way the TUI reconnects after sleep, which matters for the demo next week, what do you think is going on here?",
-		"quick",
+		"deep",
 	],
+	["what do you think we should do about the onboarding flow?", "deep"],
+	["how should we structure the quick then deep answer flow?", "deep"],
+	// 8PO round 2: James-style instructions that came out quick in round 1.
+	["is the daemon up? if not restart it", "deep"],
+	["is the deploy green? if so, let Kevin know", "deep"],
+	["is it green? tell Rishi", "deep"],
+	["can you ping Rishi about T51?", "deep"],
+	["can you handle the merge for 3406?", "deep"],
+	["can you take care of #3406?", "deep"],
+	["can you get the tests passing?", "deep"],
+	["can we get this merged today?", "deep"],
+	["could you have the officers review this?", "deep"],
+	["can you get Samantha to review it?", "deep"],
+	["can you notify the board when it lands?", "deep"],
+	["can you message Kevin the link?", "deep"],
+	["can you verify the deploy is live?", "deep"],
+	// 8SO round 2: suggestion and command shapes.
+	["why don't you push it?", "deep"],
+	["git push --force?", "deep"],
+	// ...and their read-and-tell neighbours stay quick.
+	["have you pushed it?", "quick"],
+	["let me know which port staging uses?", "quick"],
+	["can you check the logs?", "quick"],
+	["can you show me the diff?", "quick"],
+	["did you push it?", "quick"],
+	["Quick one, no need to change anything: is the daemon up?", "quick"],
 	// unclear: nothing to answer yet
 	["", "unclear"],
 	["why?", "unclear"],
@@ -96,6 +122,33 @@ describe("classifyPrompt (#3411)", () => {
 		expect(QUESTION.source).toBe(
 			String.raw`\?|^\s*(what|which|where|when|who|whose|why|how|is|are|was|were|does|do|did|can|could|should|would|will|has|have)\b`,
 		);
+	});
+});
+
+describe("pickQuickModel", () => {
+	test("EIGHT_QUICK_MODEL wins", () => {
+		expect(
+			pickQuickModel({ envModel: "x:1b", sessionModel: "big:27b", installed: ["qwen3.5:9b"] }),
+		).toEqual({
+			model: "x:1b",
+			source: "env",
+		});
+	});
+	test("else qwen3.5:9b when installed", () => {
+		expect(
+			pickQuickModel({ sessionModel: "big:27b", installed: ["big:27b", "qwen3.5:9b"] }),
+		).toEqual({
+			model: "qwen3.5:9b",
+			source: "preferred",
+		});
+	});
+	test("else the session model", () => {
+		expect(
+			pickQuickModel({ envModel: " ", sessionModel: "big:27b", installed: ["llama3.1:8b"] }),
+		).toEqual({
+			model: "big:27b",
+			source: "session",
+		});
 	});
 });
 
@@ -207,6 +260,59 @@ describe("runQuickAnswer (#3411)", () => {
 		});
 		expect(out.ok).toBe(false);
 		if (!out.ok) expect(out.reason).toContain("over 50 ms");
+	});
+
+	test("an answer that read nothing falls through: memory is not the source", async () => {
+		const m = fakeModel(["DONE: Staging listens on 4100."]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("no source read");
+		expect(out.tools).toBe(0);
+	});
+
+	test("the outcome reports the tool calls used", async () => {
+		const m = fakeModel([toolCall("read_file", "server.ts"), "DONE: 4100."]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(true);
+		expect(out.tools).toBe(1);
+	});
+
+	test("the instruction tells the model to hand over any action", async () => {
+		const m = fakeModel([NEEDS_DEEP]);
+		await runQuickAnswer({ messages: USER, tools: [], makeCall: m.makeCall });
+		expect(m.seen[0].at(-1)?.content).toContain("asks you to do, change, send or check something");
+	});
+
+	test("a read that never finishes cannot hold the lane past its budget", async () => {
+		const hang: TextTool = { ...tool("read_file", []), run: () => new Promise<string>(() => {}) };
+		const m = fakeModel([toolCall("read_file", "server.ts"), "DONE: 4100."]);
+		const t0 = Date.now();
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [hang],
+			makeCall: m.makeCall,
+			budgetMs: 80,
+		});
+		expect(Date.now() - t0).toBeLessThan(1_000);
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toContain("over 80 ms");
+	});
+
+	test("the instruction rides on the user's message, so the claim check reads the question", async () => {
+		const m = fakeModel([NEEDS_DEEP]);
+		await runQuickAnswer({ messages: USER, tools: [], makeCall: m.makeCall });
+		const users = m.seen[0].filter((x) => x.role === "user");
+		expect(users).toHaveLength(1);
+		expect(users[0].content.startsWith("which port does staging use?")).toBe(true);
+		expect(users[0].content).toContain("[QUICK ANSWER]");
 	});
 
 	test("NEEDS_DEEP from the model falls through", async () => {
