@@ -272,10 +272,58 @@ describe("#3381: absent absolute paths under a temp root", () => {
 		expect(kind).toBe(existsSync("/tmp/todos.json") ? null : "nothing-temp");
 	});
 
-	test("absent paths in os.tmpdir(), including under an absent subdirectory", () => {
+	test("absent paths in os.tmpdir(), a uid-owned real directory chain", () => {
 		expect(rmOfNothingOrOwn(`rm -f ${tmp}/todos.json`, ws)).toBe("nothing-temp");
-		expect(rmOfNothingOrOwn(`rm -fv ${tmp}/gone/also/todos.json`, ws)).toBe("nothing-temp");
 		expect(rmOfNothingOrOwn(`rm ${tmp}/a.json ${tmp}/b.json`, ws)).toBe("nothing-temp");
+	});
+
+	test("an absent file in an existing uid-owned real subdirectory passes", () => {
+		mkdirSync(join(tmp, "sub", "deeper"), { recursive: true });
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/sub/todos.json`, ws)).toBe("nothing-temp");
+		expect(rmOfNothingOrOwn(`rm -fv ${tmp}/sub/deeper/todos.json`, ws)).toBe("nothing-temp");
+	});
+
+	// B1 (8SO, 2026-10-03): an absent intermediate directory could be planted as
+	// a symlink out of temp between the check and the rm.
+	test("refuses an absent intermediate directory", () => {
+		expect(rmOfNothingOrOwn(`rm -fv ${tmp}/gone/also/todos.json`, ws)).toBeNull();
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/gone/todos.json`, ws)).toBeNull();
+		expect(rmOfNothingOrOwn(`rm -f /tmp/${uniq()}/todos.json`, ws)).toBeNull();
+	});
+
+	test("refuses a symlinked intermediate directory, even one pointing inside temp", () => {
+		mkdirSync(join(tmp, "real"));
+		symlinkSync(join(tmp, "real"), join(tmp, "inlink"));
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/real/todos.json`, ws)).toBe("nothing-temp");
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/inlink/todos.json`, ws)).toBeNull();
+		mkdirSync(join(tmp, "real", "x"));
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/inlink/x/todos.json`, ws)).toBeNull();
+	});
+
+	test("refuses a parent that is a file, not a directory", () => {
+		writeFileSync(join(tmp, "afile"), "x");
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/afile/todos.json`, ws)).toBeNull();
+	});
+
+	describe("a parent owned by another uid (process.getuid stubbed)", () => {
+		const realGetuid = process.getuid;
+		beforeEach(() => {
+			const other = (realGetuid?.call(process) ?? 0) + 1;
+			process.getuid = () => other;
+		});
+		afterEach(() => {
+			process.getuid = realGetuid;
+		});
+
+		test("refuses an absent file under a directory this uid does not own", () => {
+			mkdirSync(join(tmp, "sub"));
+			expect(rmOfNothingOrOwn(`rm -f ${tmp}/todos.json`, ws)).toBeNull();
+			expect(rmOfNothingOrOwn(`rm -f ${tmp}/sub/todos.json`, ws)).toBeNull();
+		});
+
+		test("an absent file directly in /tmp still passes: the parent is the temp root", () => {
+			expect(rmOfNothingOrOwn(`rm -f /tmp/${uniq()}.json`, ws)).toBe("nothing-temp");
+		});
 	});
 
 	test("mixed with an absent workspace path (rm_non_temp fired)", () => {
