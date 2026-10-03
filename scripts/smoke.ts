@@ -25,10 +25,7 @@ import { generateText } from "ai";
 import { createModel, type ProviderName } from "../packages/ai/providers";
 import { agentTools } from "../packages/ai/tools";
 import { ROLE_REGISTRY } from "../packages/orchestration/role-registry";
-import {
-	BUILT_IN_SLASH_COMMANDS,
-	getBuiltInSlashCommands,
-} from "../apps/tui/src/lib/slash-commands";
+import { BUILT_IN_SLASH_COMMANDS } from "../apps/tui/src/lib/slash-commands";
 import {
 	EXTERNAL_AGENT_PRESETS,
 	getPreset,
@@ -61,6 +58,7 @@ import {
 	MAX_AUTO_SKILLS_PER_SESSION,
 } from "../packages/self-autonomy/skill-creator";
 import { ModelFailover } from "../packages/providers/failover";
+import { resolveHome } from "../packages/core/home";
 
 // ============================================================================
 // Types + helpers
@@ -288,7 +286,9 @@ async function testSettingsRoundTrip(): Promise<SmokeResult> {
 async function testSettingsPath(): Promise<SmokeResult> {
 	return timeIt("settings/path", async () => {
 		const p = getSettingsFilePath();
-		const expected = path.join(os.homedir(), ".8gent", "settings.json");
+		// The store resolves through resolveHome() (EIGHT_HOME, then HOME), not
+		// os.homedir(), so compare against the same resolver (#3393).
+		const expected = path.join(resolveHome(), ".8gent", "settings.json");
 		assert(p === expected, `got ${p}, want ${expected}`);
 		return { ok: true, detail: p };
 	});
@@ -373,6 +373,10 @@ const REQUIRED_SLASH_NAMES = [
 	"status",
 	"rename",
 ];
+
+// slash-commands.ts stopped exporting getBuiltInSlashCommands, which left
+// this whole harness failing at import. It only ever returned the constant.
+const getBuiltInSlashCommands = () => BUILT_IN_SLASH_COMMANDS;
 
 async function testSlashCount(): Promise<SmokeResult> {
 	return timeIt("slash/count", async () => {
@@ -1530,6 +1534,47 @@ async function main(): Promise<void> {
 
 	const results: SmokeResult[] = [];
 
+	// The settings checks save, overwrite and delete settings.json. Point the
+	// store at a throwaway EIGHT_HOME so they never read or write the
+	// operator's real ~/.8gent/settings.json, and remove it afterwards (#3393).
+	const priorEightHome = process.env.EIGHT_HOME;
+	const smokeHome = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-smoke-home-"));
+	process.env.EIGHT_HOME = smokeHome;
+	try {
+		await runChecks(flags, results);
+	} finally {
+		if (priorEightHome === undefined) delete process.env.EIGHT_HOME;
+		else process.env.EIGHT_HOME = priorEightHome;
+		fs.rmSync(smokeHome, { recursive: true, force: true });
+	}
+
+	const totalMs = Math.round(performance.now() - t0);
+
+	if (isTty) {
+		printTable(results);
+	} else {
+		printJsonl(results);
+	}
+
+	writeReport(results, totalMs);
+
+	const pass = results.filter((r) => r.ok && !r.skipped).length;
+	const fail = results.filter((r) => !r.ok).length;
+	const skip = results.filter((r) => r.skipped).length;
+
+	if (isTty) {
+		console.log("");
+		console.log(
+			`total: ${pass} pass / ${fail} fail / ${skip} skip in ${totalMs}ms`,
+		);
+		console.log(`report: ${path.join(os.homedir(), ".8gent", "smoke-report.json")}`);
+	}
+
+	if (fail > 0) process.exit(1);
+	if (flags.strict && skip > 0) process.exit(2);
+}
+
+async function runChecks(flags: CliFlags, results: SmokeResult[]): Promise<void> {
 	// A. Provider health
 	results.push(await testProviderHealth("apfel", flags.skipNetwork));
 	results.push(await testProviderHealth("lmstudio", flags.skipNetwork));
@@ -1629,31 +1674,6 @@ async function main(): Promise<void> {
 	// Bonus
 	results.push(await testRoleRegistry());
 	results.push(await testVoiceForRole());
-
-	const totalMs = Math.round(performance.now() - t0);
-
-	if (isTty) {
-		printTable(results);
-	} else {
-		printJsonl(results);
-	}
-
-	writeReport(results, totalMs);
-
-	const pass = results.filter((r) => r.ok && !r.skipped).length;
-	const fail = results.filter((r) => !r.ok).length;
-	const skip = results.filter((r) => r.skipped).length;
-
-	if (isTty) {
-		console.log("");
-		console.log(
-			`total: ${pass} pass / ${fail} fail / ${skip} skip in ${totalMs}ms`,
-		);
-		console.log(`report: ${path.join(os.homedir(), ".8gent", "smoke-report.json")}`);
-	}
-
-	if (fail > 0) process.exit(1);
-	if (flags.strict && skip > 0) process.exit(2);
 }
 
 await main();
