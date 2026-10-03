@@ -35,6 +35,20 @@
  * did not create, one it only modified, one another tab created, a tracked
  * one.
  *
+ * Absent temp paths (#3381, the narrow option James approved on 2026-10-03
+ * after the 8SO review): an ABSOLUTE path passes only when ALL of these hold:
+ *   - it is canonical text: no `..`, `.` or empty segment, no trailing slash;
+ *   - it is absent (lstat ENOENT, so a symlink or dangling symlink fails);
+ *   - the realpath of its nearest existing ancestor is inside a real temp root:
+ *     realpath("/tmp"), or realpath(os.tmpdir()) when that is itself under
+ *     realpath("/tmp") or is a macOS per-user /var/folders/../T directory.
+ * The text test `isTemp` in decide/rules.ts is never used here: it matches
+ * `/tmp-x`, `/tmp/../etc` and any path containing `/scratchpad`. When the
+ * rules fire nothing (every path looked temp to that text test), every path
+ * must be absolute and pass the realpath test above; a relative path there
+ * returns null. An existing file in a temp root is never passed: recording
+ * named temp files as the session's own is deferred.
+ *
  * Known window: a background process could create a target between this check
  * and the spawn. rm would then remove a file that appeared in those
  * milliseconds; the agent's own tool calls are serial, so only its background
@@ -45,6 +59,7 @@
 
 import { spawnSync } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -82,6 +97,53 @@ function nearestExisting(abs: string): string | null {
 	}
 }
 
+/** The macOS per-user temp directory, after realpath. */
+const MAC_USER_TMP = /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/;
+
+/**
+ * Real temp roots, after realpath: /tmp, and os.tmpdir() only when it is under
+ * /tmp or is the macOS per-user temp directory. A TMPDIR pointing anywhere
+ * else is not trusted as a temp root.
+ */
+function tempRoots(): string[] {
+	const roots: string[] = [];
+	let tmp: string | null = null;
+	try {
+		tmp = realpathSync("/tmp");
+		if (tmp === "/") tmp = null;
+		else roots.push(tmp);
+	} catch {
+		tmp = null;
+	}
+	try {
+		const own = realpathSync(tmpdir());
+		if (own !== "/" && ((tmp !== null && inside(own, tmp)) || MAC_USER_TMP.test(own)))
+			roots.push(own);
+	} catch {
+		// No usable os.tmpdir(): /tmp alone.
+	}
+	return roots;
+}
+
+/**
+ * True when `p` is a canonical absolute path that is absent and whose
+ * nearest existing ancestor resolves inside a real temp root.
+ */
+function absentInTemp(p: string): boolean {
+	if (!p.startsWith("/") || p.endsWith("/")) return false;
+	if (
+		p
+			.slice(1)
+			.split("/")
+			.some((s) => s === "" || s === "." || s === "..")
+	)
+		return false;
+	if (!absent(p)) return false;
+	const anchor = nearestExisting(p);
+	if (!anchor) return false;
+	return tempRoots().some((root) => inside(anchor, root));
+}
+
 /**
  * True when git tracks none of `rels` under `root`. A root outside any
  * repository tracks nothing. Git missing or failing otherwise: false.
@@ -104,27 +166,28 @@ export function rmOfNothing(command: string, cwd: string | undefined): boolean {
 }
 
 /**
- * "nothing" when `command` is a plain `rm` whose every path is absent;
- * "own-scratch" when every path is absent or an untracked file this session
+ * "nothing" when `command` is a plain `rm` whose every path is absent in the
+ * workspace; "nothing-temp" when every path is absent and at least one is an
+ * absolute path under a real temp root (#3381); "own-scratch" when every path is absent or an untracked file this session
  * created (and at least one is such a file); null otherwise.
  */
 export function rmOfNothingOrOwn(
 	command: string,
 	cwd: string | undefined,
 	created?: CreatedFiles,
-): "nothing" | "own-scratch" | null {
+): "nothing" | "nothing-temp" | "own-scratch" | null {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return null;
 		const text = command.trim();
 		if (!PLAIN.test(text)) return null;
 		if (promptControlText(text) !== null) return null;
 		const rules = decideRules(text);
-		if (
-			rules.verdict !== "escalate" ||
-			rules.rules.length !== 1 ||
-			rules.rules[0] !== "rm_non_temp"
-		)
-			return null;
+		// No rule fired: every path looked temp to the rules' text test. Only
+		// absolute paths that pass the realpath test below may then go on (#3381).
+		const noRules = rules.verdict === "pass" && rules.rules.length === 0;
+		const rmNonTemp =
+			rules.verdict === "escalate" && rules.rules.length === 1 && rules.rules[0] === "rm_non_temp";
+		if (!noRules && !rmNonTemp) return null;
 		const [bin, ...args] = text.split(/ +/);
 		if (bin !== "rm") return null;
 		const paths = args.filter((a) => !a.startsWith("-"));
@@ -132,8 +195,15 @@ export function rmOfNothingOrOwn(
 		if (paths.length === 0 || paths.length > MAX_PATHS) return null;
 		const root = realpathSync(cwd);
 		const own: string[] = [];
+		let temp = false;
 		for (const p of paths) {
-			if (p.startsWith("/") || p.split("/").includes("..")) return null;
+			if (p.startsWith("/")) {
+				// Absolute: only an absent path under a real temp root (#3381).
+				if (!absentInTemp(p)) return null;
+				temp = true;
+				continue;
+			}
+			if (noRules || p.split("/").includes("..")) return null;
 			const abs = path.resolve(root, p);
 			if (!inside(abs, root)) return null;
 			if (absent(abs)) {
@@ -146,7 +216,7 @@ export function rmOfNothingOrOwn(
 			if (!inside(realpathSync(path.dirname(abs)), root)) return null;
 			own.push(path.relative(root, path.join(realpathSync(path.dirname(abs)), path.basename(abs))));
 		}
-		if (own.length === 0) return "nothing";
+		if (own.length === 0) return temp ? "nothing-temp" : "nothing";
 		return noneTracked(root, own) ? "own-scratch" : null;
 	} catch {
 		return null;
