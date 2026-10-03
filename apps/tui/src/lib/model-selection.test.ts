@@ -19,6 +19,8 @@ import {
 	autoSelectModel,
 	canReuseTabAgent,
 	declaredModels,
+	listsInstalledOllamaModels,
+	missingModelNotice,
 	normalizeProviderId,
 	providerToRuntime,
 	specForActivatedTab,
@@ -260,5 +262,56 @@ describe("tabAgentRole (#3095)", () => {
 		expect(tabAgentRole(undefined)).toBeUndefined();
 		expect(tabAgentRole({})).toBeUndefined();
 		expect(tabAgentRole({ role: "admin" })).toBeUndefined();
+	});
+});
+
+// #3332: the 8gent provider IS the configured Ollama (localhost:11434), but the
+// TUI read its model list from the registry's declared list. That list holds
+// eight-1.0-q3:14b, which is not installed, so the missing default stayed the
+// session model and every turn asked Ollama for it, missed, and fell through to
+// OpenRouter with an id OpenRouter does not serve ("All providers exhausted").
+describe("a missing default model is swapped before the first turn (#3332)", () => {
+	const installed = ["qwen3.5:9b-32k", "qwen3.5:9b", "qwen3.8:27b-mlx", "nomic-embed-text:latest"];
+
+	test("8gent and ollama list what Ollama has installed; other providers do not", () => {
+		expect(listsInstalledOllamaModels("8gent")).toBe(true);
+		expect(listsInstalledOllamaModels("ollama")).toBe(true);
+		expect(listsInstalledOllamaModels("lmstudio")).toBe(false);
+		expect(listsInstalledOllamaModels("openrouter")).toBe(false);
+		expect(listsInstalledOllamaModels("")).toBe(false);
+	});
+
+	test("default absent: the installed list replaces it with an installed chat model", () => {
+		const next = autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: null });
+		expect(next).not.toBeNull();
+		expect(installed).toContain(next as string);
+		expect(next).not.toBe("nomic-embed-text:latest");
+	});
+
+	test("default present: it is kept and no notice is shown", () => {
+		const withDefault = [...installed, "eight-1.0-q3:14b"];
+		expect(
+			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: withDefault, explicit: null }),
+		).toBeNull();
+		expect(missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.5:9b", available: withDefault })).toBeNull();
+	});
+
+	test("an explicit --model still wins over the installed list (#3084 holds)", () => {
+		const pin: ModelSpec = { provider: "8gent", model: "eight-1.0-q3:14b" };
+		expect(
+			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: pin }),
+		).toBeNull();
+	});
+
+	test("the swap of a missing model says so in one line, naming both models", () => {
+		const notice = missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.8:27b-mlx", available: installed });
+		expect(notice).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.8:27b-mlx. Pick another with /model.");
+		expect(notice).not.toContain("\n");
+	});
+
+	test("no notice for a first pick, a non-Ollama provider, or a model that is installed", () => {
+		expect(missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed })).toBeNull();
+		expect(missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] })).toBeNull();
+		expect(missingModelNotice({ provider: "ollama", from: "qwen3.5:9b", to: "qwen3.8:27b-mlx", available: installed })).toBeNull();
 	});
 });
