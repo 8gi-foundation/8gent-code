@@ -23,8 +23,8 @@
 
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveHome } from "../core/home.js";
 
 export type SystemVoiceQuality = "premium" | "enhanced" | "siri" | "standard";
 
@@ -215,7 +215,6 @@ export interface ListSystemVoicesOptions {
 	read?: () => Promise<string>;
 }
 
-const DEFAULT_CACHE_PATH = join(homedir(), ".8gent", "cache", "system-voices.json");
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const refreshing = new Map<string, Promise<SystemVoice[] | null>>();
 
@@ -276,7 +275,9 @@ export async function listInstalledSystemVoices(
 ): Promise<SystemVoice[] | null> {
 	const platform = options.platform ?? process.platform;
 	if (platform !== "darwin") return null;
-	const path = options.cachePath ?? DEFAULT_CACHE_PATH;
+	// Resolved per call, not at module load, so EIGHT_HOME and a test HOME set
+	// after import are honoured.
+	const path = options.cachePath ?? join(resolveHome(), ".8gent", "cache", "system-voices.json");
 	const read = options.read ?? readSayVoiceList;
 	const cached = loadVoiceCache(path);
 	if (cached) {
