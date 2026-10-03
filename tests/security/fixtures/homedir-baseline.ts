@@ -17,7 +17,7 @@ export const HOMEDIR_BASELINE: Record<string, number> = {
 	"apps/debugger/app/api/sessions/[id]/stream/route.ts": 1,
 	"apps/debugger/app/api/sessions/route.ts": 1,
 	"apps/tui/src/app.tsx": 2,
-	"apps/tui/src/components/IntroBanner.tsx": 3,
+	"apps/tui/src/components/IntroBanner.tsx": 2,
 	"apps/tui/src/components/LiveFocalStrip.tsx": 1,
 	"apps/tui/src/hooks/useBodyParts.ts": 1,
 	"apps/tui/src/lib/visualiser-params.ts": 1,
