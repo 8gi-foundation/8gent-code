@@ -75,8 +75,36 @@ function toAgentRuntime(provider: string): TabAgentRuntime {
 	return providerToRuntime(provider);
 }
 
-/** Resolve provider/model for a chat tab: per-tab settings override -> ROLE_REGISTRY default. */
-export function resolveSpecForRole(role: string | undefined): TabAgentSpec | null {
+/** Host platform and arch, injectable so tests do not depend on the machine running them. */
+export interface HostInfo {
+	platform: string;
+	arch: string;
+}
+
+const APPLE_ONLY_PROVIDERS = new Set(["apfel", "apple-foundation"]);
+
+/**
+ * Resolve provider/model for a chat tab: per-tab settings override -> ROLE_REGISTRY default.
+ * Returns null for an Apple Foundation provider off darwin arm64 (#3390), so the
+ * caller keeps the current provider and model instead of switching to one that
+ * cannot run on this host.
+ */
+export function resolveSpecForRole(
+	role: string | undefined,
+	host: HostInfo = { platform: process.platform, arch: process.arch },
+): TabAgentSpec | null {
+	const spec = resolveSpecForRoleUnchecked(role);
+	if (!spec) return null;
+	if (
+		APPLE_ONLY_PROVIDERS.has(spec.provider) &&
+		!(host.platform === "darwin" && host.arch === "arm64")
+	) {
+		return null;
+	}
+	return spec;
+}
+
+function resolveSpecForRoleUnchecked(role: string | undefined): TabAgentSpec | null {
 	if (!role) return null;
 
 	// Per-tab settings override (matches the precedence already used in app.tsx
