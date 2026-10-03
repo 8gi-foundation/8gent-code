@@ -399,7 +399,7 @@ describe("user-facing wording (#3416 R2.4, R3.5, section 3)", () => {
 			),
 		];
 		for (const l of lines)
-			expect(l).not.toMatch(/lane|deep loop|harness|classifier|NEEDS_DEEP|gate|—/i);
+			expect(l).not.toMatch(/lane|deep loop|harness|classifier|NEEDS_DEEP|gate|\u2014/iu);
 	});
 });
 
