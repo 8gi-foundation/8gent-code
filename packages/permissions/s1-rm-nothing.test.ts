@@ -32,7 +32,12 @@ import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
 import { CreatedFiles } from "./s1-created-files";
-import { _setTempRootsForTests, rmOfNothing, rmOfNothingOrOwn } from "./s1-rm-nothing";
+import {
+	_setPlatformForTests,
+	_setTempRootsForTests,
+	rmOfNothing,
+	rmOfNothingOrOwn,
+} from "./s1-rm-nothing";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -635,7 +640,27 @@ describe("#3395: a temp file this session created", () => {
 	let tmp: string;
 	beforeEach(() => {
 		tmp = tempDir("s1-3395-tmp-");
+		// The rule runs on darwin only; these tests exercise that branch on any host.
+		_setPlatformForTests("darwin");
 	});
+	afterEach(() => {
+		_setPlatformForTests(null);
+	});
+
+	for (const platform of ["linux", "win32"]) {
+		test(`${platform}: an own temp file still goes to the judge; absent temp paths still pass`, async () => {
+			_setPlatformForTests(platform);
+			const rec = await openRecord();
+			const p = join(tmp, "tt.json");
+			execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
+			expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
+			expect(rmOfNothingOrOwn(`rm -f ${tmp}/absent.json`, ws, rec)).toBe("nothing-temp");
+			const g = await systemOneGate(`rm -f ${p}`, process.env, ws, rec);
+			expect(g.run).toBe(false);
+			expect(judge.asks).toBe(1);
+			expect(existsSync(p)).toBe(true);
+		});
+	}
 
 	test("the pilot case: rm -f of a temp file a child process made this session", async () => {
 		const rec = await openRecord();

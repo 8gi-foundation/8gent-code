@@ -62,7 +62,7 @@
  * must be absolute and pass the realpath test above; a relative path there
  * returns null.
  *
- * Own temp files (#3395): pilot l5-feature-e2e ran
+ * Own temp files (#3395, darwin only, see `birthTimeProven`): pilot l5-feature-e2e ran
  * `TODO_FILE=/tmp/tt.json bun src/cli.ts add ...`, so a child process made
  * /tmp/tt.json, then `rm -f /tmp/tt.json`, which the judge blocked. An
  * absolute path that EXISTS now also passes when ALL of these hold for it:
@@ -253,12 +253,32 @@ function absentInTemp(p: string): boolean {
 	}
 }
 
+let platformForTests: string | null = null;
+
+/** Tests only: pretend to run on `platform` for the own-temp-file rule, or restore with null. */
+export function _setPlatformForTests(platform: string | null): void {
+	platformForTests = platform;
+}
+
+/**
+ * Where birth time is proven to be a real creation time (#3395). Darwin only
+ * (APFS keeps it). On Linux a runtime without statx btime can report the
+ * change time as birth time, which would pass a pre-existing temp file whose
+ * metadata changed this session; until that is proven otherwise, every other
+ * platform keeps the #3381 absent-path rule and judges existing files.
+ */
+function birthTimeProven(): boolean {
+	return (platformForTests ?? process.platform) === "darwin";
+}
+
 /**
  * True when `p` is a canonical absolute path to a regular file (lstat), with
  * one link, owned by this uid, born after `created.startedNs`, whose parent
- * passes `parentSafe` (#3395). Any error, or no record, fails closed.
+ * passes `parentSafe` (#3395). Darwin only (`birthTimeProven`). Any error, or
+ * no record, fails closed.
  */
 function ownTempFile(p: string, created: CreatedFiles | undefined): boolean {
+	if (!birthTimeProven()) return false;
 	const since = created?.startedNs;
 	if (typeof since !== "bigint") return false;
 	if (!canonicalAbsolute(p)) return false;
