@@ -18,20 +18,21 @@ import {
 	linkSync,
 	lstatSync,
 	mkdirSync,
+	mkdtempSync,
 	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
 import type { CreatedFiles } from "./s1-created-files";
-import { rmOfNothing, rmOfNothingOrOwn } from "./s1-rm-nothing";
+import { _setTempRootsForTests, rmOfNothing, rmOfNothingOrOwn } from "./s1-rm-nothing";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -358,6 +359,109 @@ describe("#3381: absent absolute paths under a temp root", () => {
 			expect(lstatSync(realpathSync("/tmp")).mode & 0o022).not.toBe(0);
 			expect(rmOfNothingOrOwn(`rm -f /tmp/${uniq()}.json`, ws)).toBe("nothing-temp");
 		});
+	});
+
+	// B3 (8SO, 2026-10-03): the same hole ABOVE the temp root. Karen's probe: a
+	// uid-owned 0777 folder holding a symlink to /tmp returned nothing-temp, and
+	// another user could swap that link before the rm. Every component from /
+	// down to the temp root must be a real directory with (mode & 0o022) === 0;
+	// the temp root itself needs no group/other write or the sticky bit; the
+	// only symlinks allowed are macOS's /tmp and /var, by exact target.
+	describe("B3: components above the temp root", () => {
+		const uid = process.getuid?.();
+		// Positive controls need the checkout's own ancestors to pass the rule.
+		const chainSafe = (dir: string): boolean => {
+			for (let cur = dir; ; cur = dirname(cur)) {
+				const st = lstatSync(cur);
+				if (st.isSymbolicLink() || !st.isDirectory()) return false;
+				if (st.uid !== 0 && st.uid !== uid) return false;
+				if ((st.mode & 0o022) !== 0) return false;
+				if (dirname(cur) === cur) return true;
+			}
+		};
+		const here = realpathSync(import.meta.dir);
+		const hereSafe = chainSafe(here);
+		let base: string;
+		beforeEach(() => {
+			// Outside every temp root, so the walk meets it before any root.
+			base = mkdtempSync(join(here, ".s1-b3-"));
+		});
+		afterEach(() => {
+			_setTempRootsForTests(null);
+			rmSync(base, { recursive: true, force: true });
+		});
+		const dirMode = (rel: string, mode: number) => {
+			const d = join(base, rel);
+			mkdirSync(d, { recursive: true });
+			chmodSync(d, mode);
+			return d;
+		};
+
+		test("Karen's probe: a symlink to /tmp inside a uid-owned 0777 folder", () => {
+			const ww = dirMode("ww", 0o777);
+			symlinkSync("/tmp", join(ww, "l"));
+			expect(rmOfNothingOrOwn(`rm -f ${ww}/l/x.json`, ws)).toBeNull();
+			expect(rmOfNothingOrOwn(`rm -f ${ww}/l/${uniq()}.json`, ws)).toBeNull();
+		});
+
+		test("a stray symlink to a temp root inside a 0755 folder", () => {
+			const ok = dirMode("ok", 0o755);
+			symlinkSync("/tmp", join(ok, "l"));
+			symlinkSync(realpathSync("/tmp"), join(ok, "real"));
+			symlinkSync(tmp, join(ok, "mine"));
+			expect(rmOfNothingOrOwn(`rm -f ${ok}/l/${uniq()}.json`, ws)).toBeNull();
+			expect(rmOfNothingOrOwn(`rm -f ${ok}/real/${uniq()}.json`, ws)).toBeNull();
+			expect(rmOfNothingOrOwn(`rm -f ${ok}/mine/todos.json`, ws)).toBeNull();
+		});
+
+		test.each([
+			["0777", 0o777],
+			["0775", 0o775],
+			["0757", 0o757],
+			["1777 (sticky does not excuse an ancestor)", 0o1777],
+		])("refuses a %s directory above the temp root", (_label, mode) => {
+			dirMode("above", mode);
+			const root = dirMode("above/root", 0o755);
+			_setTempRootsForTests([root]);
+			expect(rmOfNothingOrOwn(`rm -f ${root}/todos.json`, ws)).toBeNull();
+		});
+
+		test.skipIf(!hereSafe)("allows a 0755 directory above the temp root (control)", () => {
+			dirMode("above", 0o755);
+			const root = dirMode("above/root", 0o755);
+			_setTempRootsForTests([root]);
+			expect(rmOfNothingOrOwn(`rm -f ${root}/todos.json`, ws)).toBe("nothing-temp");
+		});
+
+		test.each([
+			["0777", 0o777],
+			["0775", 0o775],
+			["0757", 0o757],
+		])("refuses a temp root that is %s without the sticky bit", (_label, mode) => {
+			const root = dirMode("root", mode);
+			_setTempRootsForTests([root]);
+			expect(rmOfNothingOrOwn(`rm -f ${root}/todos.json`, ws)).toBeNull();
+		});
+
+		test.skipIf(!hereSafe).each([
+			["1777 (sticky)", 0o1777],
+			["1775 (sticky)", 0o1775],
+			["0755", 0o755],
+			["0700", 0o700],
+		])("allows a temp root that is %s", (_label, mode) => {
+			const root = dirMode("root", mode);
+			_setTempRootsForTests([root]);
+			expect(rmOfNothingOrOwn(`rm -f ${root}/todos.json`, ws)).toBe("nothing-temp");
+		});
+
+		test.skipIf(process.platform !== "darwin")(
+			"macOS: /tmp and /var are the only links followed, by exact target",
+			() => {
+				expect(lstatSync("/tmp").isSymbolicLink()).toBe(true);
+				expect(rmOfNothingOrOwn(`rm -f /tmp/${uniq()}.json`, ws)).toBe("nothing-temp");
+				expect(rmOfNothingOrOwn(`rm -f /private/tmp/${uniq()}.json`, ws)).toBe("nothing-temp");
+			},
+		);
 	});
 
 	describe("a parent owned by another uid (process.getuid stubbed)", () => {

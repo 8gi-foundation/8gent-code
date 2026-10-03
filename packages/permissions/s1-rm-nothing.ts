@@ -39,18 +39,22 @@
  * after the 8SO review): an ABSOLUTE path passes only when ALL of these hold:
  *   - it is canonical text: no `..`, `.` or empty segment, no trailing slash;
  *   - it is absent (lstat ENOENT, so a symlink or dangling symlink fails);
- *   - its parent directory exists (no absent intermediate directories), and,
- *     walking the path as written, some prefix resolves to a real temp root:
- *     realpath("/tmp"), or realpath(os.tmpdir()) when that is a macOS
- *     per-user /var/folders/../T directory. Every component up to and
- *     including that prefix is owned by root or the current uid. Every
- *     component below it, down to the parent, is (by lstat) a real directory,
- *     not a symlink, owned by the current uid and not writable by group or
- *     others (mode & 0o022 is 0) (8SO B1: an absent or foreign-owned ancestor
- *     in a world-writable /tmp could be swapped for a symlink out of temp
- *     between this check and the rm; 8SO B2: so could the child of a
- *     uid-owned directory that group or others can write, sticky or not).
- *     The temp root's own mode is not checked: /tmp is 1777 by design.
+ *   - its parent directory exists (no absent intermediate directories), and
+ *     every component from "/" down to that parent, walked as written, is one
+ *     of: a real directory (lstat, not a symlink) above the temp root, owned
+ *     by root or the current uid, with (mode & 0o022) === 0; the temp root
+ *     itself (realpath("/tmp"), or realpath(os.tmpdir()) when that is a macOS
+ *     per-user /var/folders/../T directory), owned by root or the current
+ *     uid, with (mode & 0o022) === 0 or the sticky bit; a real directory
+ *     below the temp root owned by the current uid with (mode & 0o022) === 0,
+ *     sticky or not; or, on macOS only, the root-owned /tmp or /var link
+ *     whose exact target is private/tmp or private/var, walked in its place.
+ *     Any other symlink fails closed. (8SO B1: an absent or foreign-owned
+ *     ancestor in a world-writable /tmp could be swapped for a symlink out of
+ *     temp between this check and the rm; 8SO B2: so could the child of a
+ *     uid-owned directory that group or others can write, sticky or not;
+ *     8SO B3: so could a symlink, or any entry of a group- or world-writable
+ *     directory, above the temp root.)
  *     An os.tmpdir() under /tmp is reached by that walk from /tmp.
  * The text test `isTemp` in decide/rules.ts is never used here: it matches
  * `/tmp-x`, `/tmp/../etc` and any path containing `/scratchpad`. When the
@@ -62,16 +66,21 @@
  * Known window: another process (the agent's background tasks, any other
  * process of this uid, or, in a shared temp root, another user) could create
  * the leaf between this check and the spawn. Only the leaf can race: every
- * ancestor below the temp root is a real directory owned by this uid and not
- * writable by group or others, so no other user can rename or replace an entry
- * in it, and the delete stays in that directory. Under the sticky bit, rm
- * cannot unlink another user's file in the temp root itself.
+ * component from "/" to the parent is a real directory (or one of macOS's
+ * fixed root-owned /tmp and /var links) that group and others cannot write,
+ * the temp root excepted only under the sticky bit, so no other user can
+ * rename or replace an entry on the path, and the delete stays in that
+ * directory. Under the sticky bit, rm cannot unlink another user's file in
+ * the temp root itself. Not checked: macOS ACLs, which can grant add_file or
+ * delete_child on a 0755 directory and which node cannot read without
+ * spawning `ls -le`. Only a directory's owner or root can set one, and the
+ * temp roots here carry none.
  *
  * Synchronous, never throws.
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
@@ -113,6 +122,13 @@ function nearestExisting(abs: string): string | null {
 /** The macOS per-user temp directory, after realpath. */
 const MAC_USER_TMP = /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/;
 
+let rootsForTests: string[] | null = null;
+
+/** Tests only: replace the real temp roots (realpaths), or restore them with null. */
+export function _setTempRootsForTests(roots: string[] | null): void {
+	rootsForTests = roots;
+}
+
 /**
  * Real temp roots, after realpath: /tmp, and os.tmpdir() only when it is the
  * macOS per-user temp directory. A TMPDIR under /tmp is not a root of its own:
@@ -120,6 +136,7 @@ const MAC_USER_TMP = /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/;
  * pointing anywhere else is not trusted.
  */
 function tempRoots(): string[] {
+	if (rootsForTests) return rootsForTests;
 	const roots: string[] = [];
 	try {
 		const tmp = realpathSync("/tmp");
@@ -137,30 +154,63 @@ function tempRoots(): string[] {
 }
 
 /**
- * True when `dir` (canonical, absolute) exists and, walked component by
- * component as written, reaches a real temp root through components owned by
- * root or this uid, then descends from it only through real directories (lstat,
- * not symlinks) owned by this uid and not writable by group or others
- * (mode & 0o022 is 0; a sticky bit does not excuse it). `dir` may be the temp
- * root itself, whose own mode is not checked (8SO B1, B2).
+ * The only symlinks the walk follows (8SO B3): macOS's own links at "/" that
+ * lead to the temp roots, matched by exact readlink text and owner root.
+ * Any other symlink, anywhere on the path, fails closed.
+ */
+const OS_LINKS: Readonly<Record<string, string>> =
+	process.platform === "darwin" ? { tmp: "private/tmp", var: "private/var" } : {};
+
+/**
+ * True when `dir` (canonical, absolute) exists and every component from "/"
+ * down to it is one of (8SO B1, B2, B3):
+ *   - above the temp root: a real directory (lstat), owned by root or this
+ *     uid, with (mode & 0o022) === 0;
+ *   - the temp root itself: a real directory owned by root or this uid,
+ *     with (mode & 0o022) === 0 or the sticky bit (/tmp is 1777);
+ *   - below the temp root: a real directory owned by this uid with
+ *     (mode & 0o022) === 0 (a sticky bit does not excuse it);
+ *   - an OS_LINKS entry directly under "/", whose exact target is then walked
+ *     in its place.
+ * Anything else, a symlink above the root included, fails closed. So no other
+ * user can rename or replace any entry on the path between this check and
+ * the rm. `dir` may be the temp root itself.
  */
 function parentSafe(dir: string): boolean {
 	const uid = process.getuid?.();
 	if (uid === undefined || dir === "/") return false;
 	const roots = tempRoots();
+	const writable = (mode: number) => (mode & 0o022) !== 0;
+	const top = lstatSync("/");
+	if (!top.isDirectory() || top.uid !== 0 || writable(top.mode)) return false;
+	let segs = dir.slice(1).split("/");
+	const link = OS_LINKS[segs[0]];
+	if (link !== undefined) {
+		const ln = lstatSync(`/${segs[0]}`);
+		if (ln.isSymbolicLink()) {
+			if (ln.uid !== 0 || readlinkSync(`/${segs[0]}`) !== link) return false;
+			segs = [...link.split("/"), ...segs.slice(1)];
+		}
+	}
 	let cur = "";
 	let rooted = false;
-	for (const seg of dir.slice(1).split("/")) {
+	for (const seg of segs) {
 		cur += `/${seg}`;
 		const st = lstatSync(cur);
-		if (!rooted) {
-			if (st.uid !== 0 && st.uid !== uid) return false;
-			if (roots.includes(realpathSync(cur))) rooted = true;
+		if (st.isSymbolicLink() || !st.isDirectory()) return false;
+		if (rooted) {
+			if (st.uid !== uid || writable(st.mode)) return false;
 			continue;
 		}
-		if (st.isSymbolicLink() || !st.isDirectory() || st.uid !== uid) return false;
-		// 8SO B2: group- or world-writable lets another user swap a child.
-		if ((st.mode & 0o022) !== 0) return false;
+		if (st.uid !== 0 && st.uid !== uid) return false;
+		// No symlink has been followed except an exact OS_LINKS target, so
+		// `cur` is its own realpath and compares directly with the roots.
+		if (roots.includes(cur)) {
+			if (writable(st.mode) && (st.mode & 0o1000) === 0) return false;
+			rooted = true;
+			continue;
+		}
+		if (writable(st.mode)) return false;
 	}
 	return rooted;
 }
