@@ -89,6 +89,7 @@ import {
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
+import { classifyPrompt, quickLaneEnabled, runQuickAnswer } from "./quick-answer";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -137,6 +138,7 @@ import {
 } from "../ai";
 import {
 	type TextTool,
+	type TextToolUsage,
 	buildTextToolCall,
 	needsTextTools,
 	resolveTextToolEndpoint,
@@ -814,6 +816,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// no fabricated numbers, ever.
 		let usageStepNumber = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+		const onUsage = (usage: TextToolUsage) => {
+			usageTotals.promptTokens += usage.promptTokens;
+			usageTotals.completionTokens += usage.completionTokens;
+			usageTotals.totalTokens += usage.totalTokens;
+			this.events.onStepFinish?.({
+				stepNumber: usageStepNumber++,
+				finishReason: "stop",
+				text: "",
+				toolCalls: [],
+				usage,
+			});
+		};
 		const runTurn = (provider: string, model: string) => {
 			const rawCall = buildTextToolCall({
 				provider,
@@ -830,18 +844,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
 				tools: tools.map((t) => t.spec),
-				onUsage: (usage) => {
-					usageTotals.promptTokens += usage.promptTokens;
-					usageTotals.completionTokens += usage.completionTokens;
-					usageTotals.totalTokens += usage.totalTokens;
-					this.events.onStepFinish?.({
-						stepNumber: usageStepNumber++,
-						finishReason: "stop",
-						text: "",
-						toolCalls: [],
-						usage,
-					});
-				},
+				onUsage,
 			});
 			const call = (msgs: Parameters<typeof rawCall>[0]) =>
 				withTurnTimeout(
@@ -935,6 +938,42 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		};
 
+		// ── Quick-answer fast lane (#3411, EIGHT_QUICK_ANSWER=1) ─────────────
+		// A short question with no instruction in it is first answered by a
+		// bounded read-only run (3 tool calls, 15 s). A complete answer ends the
+		// turn through the same bookkeeping below; anything else falls through to
+		// the normal loop, which never sees the lane's messages.
+		let quickResult: Awaited<ReturnType<typeof runTextToolAgent>> | null = null;
+		if (
+			quickLaneEnabled() &&
+			!isTableSession &&
+			!this.proactiveGatherer &&
+			classifyPrompt(textForAgent) === "quick"
+		) {
+			const quickModel = process.env.EIGHT_QUICK_MODEL || effectiveModel;
+			const quick = await runQuickAnswer({
+				messages,
+				tools,
+				signal,
+				makeCall: (laneSignal, timeoutMs, laneSpecs) =>
+					buildTextToolCall({
+						provider: effectiveProvider,
+						model: quickModel,
+						baseUrl: this.config.baseUrl,
+						temperature: this.runtimeParams.temperature ?? 0.2,
+						signal: laneSignal,
+						timeoutMs,
+						tools: laneSpecs,
+						onUsage,
+					}),
+			});
+			if (quick.ok) {
+				quickResult = quick.result;
+			} else {
+				console.log(`[quick-answer] full loop after ${quick.ms} ms: ${quick.reason}`);
+			}
+		}
+
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
 			// A missing/unavailable local model must never surface a raw provider
@@ -942,17 +981,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// found`). callLocalModelWithReroute probes what is actually installed
 			// and retries the turn on a real model; only a genuine no-model-anywhere
 			// case returns a clean human message.
-			const outcome = await callLocalModelWithReroute({
-				provider: effectiveProvider,
-				model: effectiveModel,
-				run: runTurn,
-				onReroute: (missing, chosen) => {
-					console.log(
-						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
-					);
-					this.emitModelRouted(missing, chosen.model, chosen.provider);
-				},
-			});
+			const outcome = quickResult
+				? { ok: true as const, value: quickResult, rerouted: false, usedModel: effectiveModel }
+				: await callLocalModelWithReroute({
+					provider: effectiveProvider,
+					model: effectiveModel,
+					run: runTurn,
+					onReroute: (missing, chosen) => {
+						console.log(
+							`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
+						);
+						this.emitModelRouted(missing, chosen.model, chosen.provider);
+					},
+				});
 			if (!outcome.ok) {
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
@@ -1011,7 +1052,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Same for a reply carrying "[harness] Not verified" lines: the tool log
 		// contradicts part of it, so no completion tagline goes on the end.
 		const flavoredContent =
-			gated.violated || agentResult.unverified.length > 0 || this.config.agentScope === "__table__"
+			gated.violated ||
+			agentResult.unverified.length > 0 ||
+			this.config.agentScope === "__table__" ||
+			quickResult !== null
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1158,7 +1202,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		if (needsClarification(textForAgent) && !imageBase64) {
+		// A prompt the quick-answer lane takes (#3411) is a precise question; the
+		// gate's heuristic flags most short prompts, and its note would make the
+		// lane ask instead of answer. Unclear prompts still get the one question.
+		const quickPrompt = quickLaneEnabled() && classifyPrompt(textForAgent) === "quick";
+		if (needsClarification(textForAgent) && !imageBase64 && !quickPrompt) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {

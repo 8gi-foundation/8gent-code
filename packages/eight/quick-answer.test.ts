@@ -1,0 +1,263 @@
+import { describe, expect, test } from "bun:test";
+import type { TextTool, ToolSpec } from "../ai";
+import type { TextToolCall, TextToolMessage } from "../ai/text-tool-client";
+import {
+	NEEDS_DEEP,
+	type PromptClass,
+	QUESTION,
+	QUICK_LABEL,
+	classifyPrompt,
+	quickLaneEnabled,
+	runQuickAnswer,
+} from "./quick-answer";
+
+// The conv-quick-answer pilot prompt, verbatim from ~/.8gent/rishi-pilot/scenarios.json.
+const PILOT_PROMPT =
+	"Quick question, no need to change anything: if I start this server with APP_MODE=staging and no PORT set, which port does it listen on? And which one when APP_MODE isn't set at all? Just tell me in a sentence or two, then end your reply with exactly one line in this form: ANSWER: staging=<port> unset=<port>";
+
+const TABLE: Array<[string, PromptClass]> = [
+	// quick: short questions, nothing asked of the agent but an answer
+	[PILOT_PROMPT, "quick"],
+	["which port does staging use?", "quick"],
+	["What does classifyTaskSize return for a typo fix?", "quick"],
+	["where is the agent loop defined", "quick"],
+	["how do I deploy the daemon?", "quick"],
+	["is #3406 merged?", "quick"],
+	["what's the default model in this repo?", "quick"],
+	["does the TUI use Ink v6?", "quick"],
+	["can you tell me which file owns the failover chain?", "quick"],
+	["who owns the permissions package?", "quick"],
+	["why does agent.ts have two tool paths?", "quick"],
+	["Should we keep EIGHT_TEXT_TOOLS as an override?", "quick"],
+	["how many providers are wired in the registry?", "quick"],
+	["Quick one, don't edit anything: what's the session watchdog timeout?", "quick"],
+	["which test covers the text-tool cut-off case?", "quick"],
+	["has the pilot ever passed l5-feature-e2e?", "quick"],
+	// deep: James-style instructions, including ones phrased as questions
+	["fix the failing test in auth.ts", "deep"],
+	["can you merge #3406?", "deep"],
+	["why is CI red? fix it", "deep"],
+	["look into why the daemon crashes and ship a fix", "deep"],
+	["what's left on the board? then file issues for each", "deep"],
+	["push it", "deep"],
+	["ship it?", "deep"],
+	["is it merged? if not, merge it", "deep"],
+	["could you rename the flag to EIGHT_QUICK?", "deep"],
+	["should we refactor agent.ts? go ahead and do it", "deep"],
+	["Write the design doc for #3411 before any code", "deep"],
+	["how would you build the quick lane? build it with tests", "deep"],
+	["make the tests pass", "deep"],
+	["run the pilot on conv-quick-answer and post the gif", "deep"],
+	["please review PR 3406 and tell me if it is safe", "deep"],
+	["don't forget to push the branch", "deep"],
+	["Read the issue, design it, then build it in a worktree off origin/main.", "deep"],
+	["explain the agent loop end to end", "deep"],
+	["the TUI freezes when I paste a long prompt", "deep"],
+	[
+		"I want to understand how the daemon handles sessions across channels because I keep seeing duplicates in Telegram and I am not sure whether that is the agent pool or the relay or something in the way the TUI reconnects after sleep, which matters for the demo next week with Kevin and the board on Friday morning, what do you think is going on here?",
+		"deep",
+	],
+	// Known limit: an open-ended 57-word question with no instruction in it classifies quick.
+	// The lane then relies on the model replying NEEDS_DEEP within its budget.
+	[
+		"I want to understand how the daemon handles sessions across channels because I keep seeing duplicates in Telegram and I am not sure whether that is the agent pool or the relay or something in the way the TUI reconnects after sleep, which matters for the demo next week, what do you think is going on here?",
+		"quick",
+	],
+	// unclear: nothing to answer yet
+	["", "unclear"],
+	["why?", "unclear"],
+	["and that one?", "unclear"],
+	["what about this?", "unclear"],
+	["hmm", "unclear"],
+	["the tests", "unclear"],
+];
+
+describe("classifyPrompt (#3411)", () => {
+	test("table has 30+ cases covering all three classes", () => {
+		expect(TABLE.length).toBeGreaterThanOrEqual(30);
+		for (const c of ["quick", "deep", "unclear"] as const) {
+			expect(TABLE.some(([, want]) => want === c)).toBe(true);
+		}
+	});
+
+	for (const [prompt, want] of TABLE) {
+		test(`${want}: ${JSON.stringify(prompt.slice(0, 70))}`, () => {
+			expect(classifyPrompt(prompt)).toBe(want);
+		});
+	}
+
+	test("deterministic: same input, same class", () => {
+		for (const [prompt] of TABLE) {
+			expect(classifyPrompt(prompt)).toBe(classifyPrompt(prompt));
+		}
+	});
+
+	test("question shape matches sovereignty-index code_question", () => {
+		expect(QUESTION.source).toBe(
+			String.raw`\?|^\s*(what|which|where|when|who|whose|why|how|is|are|was|were|does|do|did|can|could|should|would|will|has|have)\b`,
+		);
+	});
+});
+
+describe("quickLaneEnabled", () => {
+	test("default off, on only for EIGHT_QUICK_ANSWER=1", () => {
+		expect(quickLaneEnabled({})).toBe(false);
+		expect(quickLaneEnabled({ EIGHT_QUICK_ANSWER: "0" })).toBe(false);
+		expect(quickLaneEnabled({ EIGHT_QUICK_ANSWER: "true" })).toBe(false);
+		expect(quickLaneEnabled({ EIGHT_QUICK_ANSWER: "1" })).toBe(true);
+	});
+});
+
+// ── Fast path against a fake model ─────────────────────────────────────
+
+function tool(name: string, log: string[]): TextTool {
+	return {
+		spec: {
+			name,
+			description: name,
+			parameters: { type: "object", properties: { path: { type: "string" } }, required: [] },
+		},
+		run: async (args) => {
+			log.push(`${name}:${String(args.path ?? "")}`);
+			return name === "read_file" ? `contents of ${String(args.path)}: PORT=4100` : "ok";
+		},
+	};
+}
+
+const toolCall = (name: string, path: string) =>
+	["```tool_call", JSON.stringify({ name, arguments: { path } }), "```"].join("\n");
+
+const USER: TextToolMessage[] = [{ role: "user", content: "which port does staging use?" }];
+
+/** A fake model: replies in order, records what it saw. */
+function fakeModel(replies: Array<string | (() => Promise<string>)>) {
+	const seen: TextToolMessage[][] = [];
+	const declared: string[][] = [];
+	let i = 0;
+	const makeCall =
+		(_signal: AbortSignal, _timeoutMs: number, specs: ToolSpec[]): TextToolCall =>
+		async (msgs) => {
+			declared.push(specs.map((s) => s.name));
+			seen.push(msgs);
+			const r = replies[Math.min(i++, replies.length - 1)];
+			return typeof r === "function" ? r() : r;
+		};
+	return { makeCall, seen, declared, calls: () => i };
+}
+
+describe("runQuickAnswer (#3411)", () => {
+	test("answers from a read-only tool, labelled, inside budget", async () => {
+		const ran: string[] = [];
+		const m = fakeModel([toolCall("read_file", "server.ts"), "DONE: Staging listens on 4100."]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", ran), tool("write_file", ran)],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(true);
+		if (!out.ok) return;
+		expect(out.result.content.startsWith(QUICK_LABEL)).toBe(true);
+		expect(out.result.content).toContain("4100");
+		expect(ran).toEqual(["read_file:server.ts"]);
+		// The lane instruction rides at the end; the caller's array is untouched.
+		expect(m.seen[0].at(-1)?.content).toContain("[QUICK ANSWER]");
+		expect(USER).toHaveLength(1);
+	});
+
+	test("write tools are never offered or run", async () => {
+		const ran: string[] = [];
+		const m = fakeModel([
+			toolCall("write_file", "x.ts"),
+			"DONE: Could not write, answering: 4100.",
+		]);
+		await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", ran), tool("write_file", ran), tool("run_command", ran)],
+			makeCall: m.makeCall,
+		});
+		expect(ran.filter((r) => !r.startsWith("read_file"))).toEqual([]);
+		// Only the read-only tools are declared to the model.
+		expect(m.declared[0]).toEqual(["read_file"]);
+	});
+
+	test("a 4th tool call never runs and sends the turn to the full loop", async () => {
+		const ran: string[] = [];
+		const m = fakeModel([
+			[toolCall("read_file", "a.ts"), toolCall("read_file", "b.ts")].join("\n"),
+			[toolCall("read_file", "c.ts"), toolCall("read_file", "d.ts")].join("\n"),
+			"DONE: 4100.",
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", ran)],
+			makeCall: m.makeCall,
+		});
+		expect(ran).toHaveLength(3);
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toContain("tool budget");
+	});
+
+	test("a model that stalls past the budget falls through", async () => {
+		const m = fakeModel([() => new Promise<string>((r) => setTimeout(() => r("DONE: late"), 200))]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [],
+			makeCall: m.makeCall,
+			budgetMs: 50,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toContain("over 50 ms");
+	});
+
+	test("NEEDS_DEEP from the model falls through", async () => {
+		const m = fakeModel([NEEDS_DEEP]);
+		const out = await runQuickAnswer({ messages: USER, tools: [], makeCall: m.makeCall });
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toContain("full loop");
+	});
+
+	test("an empty answer falls through", async () => {
+		const m = fakeModel(["   "]);
+		const out = await runQuickAnswer({ messages: USER, tools: [], makeCall: m.makeCall });
+		expect(out.ok).toBe(false);
+	});
+
+	test("a model error falls through instead of throwing", async () => {
+		const makeCall = (): TextToolCall => async () => {
+			throw new Error("ollama chat completions 404");
+		};
+		const out = await runQuickAnswer({ messages: USER, tools: [], makeCall });
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toContain("404");
+	});
+
+	test("the turn's ESC aborts the lane", async () => {
+		const ac = new AbortController();
+		ac.abort();
+		const m = fakeModel(["DONE: 4100."]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [],
+			makeCall: m.makeCall,
+			signal: ac.signal,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("aborted");
+	});
+
+	test("the pilot prompt's ANSWER line survives the label exactly once", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "server.ts"),
+			"DONE: Staging uses 4100 and unset uses 3000.\nANSWER: staging=4100 unset=3000",
+		]);
+		const out = await runQuickAnswer({
+			messages: [{ role: "user", content: PILOT_PROMPT }],
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(true);
+		if (!out.ok) return;
+		expect(out.result.content.match(/^ANSWER: /gm)).toHaveLength(1);
+		expect(out.result.content).toContain("ANSWER: staging=4100 unset=3000");
+	});
+});
