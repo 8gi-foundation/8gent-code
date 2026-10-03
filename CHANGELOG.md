@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (off by default) - a quick-answer lane for short read-only questions, behind `EIGHT_QUICK_ANSWER=1` (part of #3411)
+- `packages/eight/quick-answer.ts` classifies each prompt as quick or deep with a deterministic table. With the flag set, a quick prompt first runs a small read-only lane (3 tool calls, 15 s, own short prompt, thinking off) and falls through to the full loop on NEEDS_DEEP, zero reads, an unverified claim, a non-answer, or leftover tool-call markup. Each lane outcome, and up to 5 flagged claims of 120 characters, is written to the run log.
+- Do not enable. On qwen3.5:9b, 14 real runs gave 5 answers, 2 right and 3 wrong, and an accepted quick answer ends the turn. The lane sees no conversation history. #3416 makes the quick answer provisional with the full loop always following; the flag stays off until it lands.
+
 ### Fixed - the launch splash marker and the voice cache follow the resolved home directory (refs #3394)
 - `apps/tui/src/lib/intro-gate.ts` (`readSeenVersion`, `markIntroSeen`) and `packages/voice/voice-resolver.ts` (`listInstalledSystemVoices`) now default to `resolveHome()` from `packages/core/home.ts` instead of calling `os.homedir()`, so `EIGHT_HOME` redirects `~/.8gent/intro-seen` and `~/.8gent/cache/system-voices.json` like the other migrated paths. The voice cache path is resolved on each call rather than once at module load, so a home set after import is honoured. Behaviour is unchanged when `EIGHT_HOME` is not set.
 - Both files drop out of the home-resolver ratchet's "outside the baseline" list in `tests/security`. No committed test drives the default-home path; it was checked by hand with `EIGHT_HOME` set after import. Coverage is indirect: `intro-gate.test.ts` and `voice-resolver.test.ts` exercise the same functions with an explicit home or cache path, `packages/core/home.test.ts` pins `resolveHome()` precedence, and the ratchet pins that neither file calls `homedir()`.
