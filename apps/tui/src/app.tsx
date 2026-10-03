@@ -318,6 +318,8 @@ import {
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	declaredModels,
+	listsInstalledOllamaModels,
+	missingModelNotice,
 	pickBestChatModel,
 	planAgentBuild,
 	providerToRuntime,
@@ -1396,8 +1398,10 @@ export function App({
 		const fetchModels = async () => {
 			setModelsLoading(true);
 			try {
-				if (currentProvider === "ollama") {
-					// Fetch locally installed Ollama models — filter embedding models at source
+				if (listsInstalledOllamaModels(currentProvider)) {
+					// Fetch locally installed Ollama models - filter embedding models at source.
+					// The 8gent provider is this same Ollama, so it lists what is installed
+					// too, not the registry's declared default that may be absent (#3332).
 					// The configured ollama, which may be remote (#3080). Bounded: a
 					// down host left the model list loading for as long as TCP took (#3115).
 					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
@@ -1516,7 +1520,16 @@ export function App({
 			available: availableModels,
 			explicit,
 		});
-		if (next) setCurrentModel(next);
+		if (!next) return;
+		// Say so when the swapped-out model is simply not installed (#3332).
+		const notice = missingModelNotice({
+			provider: currentProvider,
+			from: currentModel,
+			to: next,
+			available: availableModels,
+		});
+		if (notice) addSystemMessage(notice);
+		setCurrentModel(next);
 	}, [modelsLoading, availableModels, currentProvider, currentModel]);
 
 	// If models have loaded and there's still no valid chat model, show provider selector
