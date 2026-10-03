@@ -47,8 +47,34 @@ describe("#3314 a recursive delete of a variable assigned earlier on the line", 
 	];
 	it("blocks every shape", () => expect(verdicts(corpus)).toEqual(all(corpus, "block")));
 
-	it("a reassigned HOME still blocks (assignments only add candidates)", () =>
+	it("a reassigned HOME still blocks ($HOME always stays a candidate)", () =>
 		expect(decideRules('HOME=/tmp/x; rm -rf "$HOME"').verdict).toBe("block"));
+
+	it("a later assignment adds a value, it never replaces one (8SO M1)", () => {
+		// The text cannot tell whether an assignment ran, so every value counts.
+		const cs = [
+			'D=$HOME; false && D=build; rm -rf "$D"',
+			'D=/; [ -n "$X" ] && D=build; rm -rf "$D"',
+			'D=/; true || D=build; rm -rf "$D"',
+			'D=/; if false; then D=build; fi; rm -rf "$D"',
+			'D=$HOME; echo "$(rm -rf "$D")"; D=/tmp/x',
+			'D=$HOME; D=$(pwd); rm -rf "$D"',
+			// accepted cost: the union keeps $HOME, so a single assignment is the rewrite
+			'D=$HOME; D=$D/code/app; rm -rf "$D"',
+		];
+		expect(verdicts(cs)).toEqual(all(cs, "block"));
+	});
+
+	it("a reassignment expands against the value before it", () => {
+		expect(decideRules('OUT=dist; OUT=$OUT/x; rm -rf "$OUT"').verdict).toBe("escalate");
+		expect(decideRules('D=/; D=$D/usr; rm -rf "$D"').verdict).toBe("block");
+	});
+
+	it("a first assignment on a conditional line may not run, so the unset value stays possible", () => {
+		const cs = ['false && D=build; rm -rf "$D"/*', 'if false; then D=build; fi; rm -rf "$D/"*'];
+		expect(verdicts(cs)).toEqual(all(cs, "block"));
+		expect(decideRules('D=build; rm -rf "$D"/*').verdict).toBe("escalate");
+	});
 
 	it("a harmless assignment stays escalate, never pass", () => {
 		const ok = ['D=build; rm -rf "$D"', 'D=./dist && rm -rf "$D"', "OUT=/tmp/x; rm -rf $OUT"];
@@ -138,6 +164,76 @@ describe("#3314 cwd-relative targets when the working directory is home or a sys
 		expect(verdicts(cs, { cwd: `${HOME}/code/project` })).toEqual(all(cs, "escalate"));
 		expect(verdicts(cs)).toEqual(all(cs, "escalate"));
 		expect(decideRules("cd ~ && cd /tmp/x && rm -rf *").verdict).toBe("escalate");
+	});
+});
+
+// ----- #3314: expansion overflow (8SO M2) -------------------------------------
+
+describe("#3314 too many expansions to judge is a block, never a partial list", () => {
+	it("blocks when the candidate or nesting cap is hit", () => {
+		const cs = [
+			'rm -rf "$A$B$C$D$E$F$G/"*',
+			'rm -rf "$A/$B/$C/$D/$E/$F/$G/usr"',
+			'rm -rf "$A$B$C$D$E$F$G${HOME}"',
+			'rm -rf "$A$A$A$A$A$A$A$A$A$A$HOME"',
+			'rm -rf "${A}${B}${C}${D}${E}${F}${G}${H}${I}${J}/"*',
+		];
+		expect(verdicts(cs)).toEqual(all(cs, "block"));
+	});
+	it("references in sequence do not spend the nesting budget", () =>
+		// 12 references to one assigned variable: one candidate, no overflow.
+		expect(decideRules('A=x; rm -rf "$A$A$A$A$A$A$A$A$A$A$A$A"').verdict).toBe("escalate"));
+});
+
+// ----- deliberate new hard blocks (8PO A5, 8SO ruling) ------------------------
+
+describe("#3314 intended friction: each was escalate on main and now blocks", () => {
+	it("pins the four fail-closed blocks; each has an escalating rewrite", () => {
+		// TMPDIR is unset on most Linux and CI hosts, so this is `rm -rf /*` there.
+		expect(decideRules('rm -rf "$TMPDIR"/*').verdict).toBe("block");
+		expect(decideRules('rm -rf "${TMPDIR:?}"/*').verdict).toBe("escalate");
+		expect(decideRules('rm -rf "$PWD"/*').verdict).toBe("block");
+		// An empty OUT gives /bin.
+		expect(decideRules('rm -rf "$OUT/bin"').verdict).toBe("block");
+		expect(decideRules('rm -rf "${OUT:?}/bin"').verdict).toBe("escalate");
+		// A relative cd cannot be resolved, so the home state is kept.
+		expect(decideRules("cd ~ && cd code/app && rm -rf *").verdict).toBe("block");
+		expect(decideRules(`cd ${HOME}/code/app && rm -rf *`).verdict).toBe("escalate");
+	});
+});
+
+describe("#3314 the 8PO developer commands keep their verdicts", () => {
+	it("still escalate, never block", () => {
+		const cs = [
+			'rm -rf "$BUILD_DIR"',
+			'BUILD_DIR=dist; rm -rf "$BUILD_DIR"',
+			"rm -rf ./dist",
+			"rm -rf dist",
+			"rm -rf node_modules",
+			'rm -rf "$OUT_DIR/build"',
+			'rm -rf "$PREFIX/lib"',
+			'rm -rf "$PWD/dist"',
+			'rm -rf "$TMPDIR/foo"',
+			'rm -rf "${BUILD_DIR:?}/"*',
+			'rm -rf "$HOME/.cache/foo"',
+			'rm -rf "$HOME/code/app/dist"',
+			"cd ~/code/app && rm -rf *",
+			"cd /tmp/build && rm -rf *",
+			'cd "$PROJECT" && rm -rf *',
+			"cd && rm -rf node_modules",
+			'rm -rf "$1"',
+			'rm -rf "$@"',
+			'rm -rf -- "$D"',
+			'OUT=dist; OUT=$OUT/x; rm -rf "$OUT"',
+		];
+		expect(verdicts(cs)).toEqual(all(cs, "escalate"));
+		for (const cwd of [`${HOME}/code/app`, HOME]) {
+			const local = ["rm -rf ./dist", "rm -rf dist", "rm -rf node_modules", "rm -rf ./build/*"];
+			expect(verdicts(local, { cwd })).toEqual(all(local, "escalate"));
+		}
+		const star = ["rm -rf *"];
+		for (const cwd of [`${HOME}/code/app`, "/tmp/x", "/opt/app"])
+			expect(verdicts(star, { cwd })).toEqual(all(star, "escalate"));
 	});
 });
 
