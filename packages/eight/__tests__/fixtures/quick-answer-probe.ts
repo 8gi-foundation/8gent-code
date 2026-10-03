@@ -4,7 +4,7 @@
  * other request with "DONE: full loop answer.", then prints the reply and what
  * each request declared. Run in a child process with HOME in a temp dir.
  *
- *   bun quick-answer-probe.ts <answer|needs-deep> <workdir> <prompt>
+ *   bun quick-answer-probe.ts <answer|needs-deep|long-error> <workdir> <prompt>
  *
  * PROBE_TAGS (comma list) sets the installed Ollama models; default "probe:1b".
  * Every ToolExecutor.execute call is recorded, so a test can prove no
@@ -26,7 +26,7 @@ ToolExecutor.prototype.execute = function (name: string, args: Record<string, un
 	return realExecute.call(this, name, args);
 };
 
-type Seen = { quick: boolean; tools: string[]; model: string };
+type Seen = { quick: boolean; tools: string[]; model: string; reasoningEffort: string | null };
 const seen: Seen[] = [];
 let quickRequests = 0;
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
@@ -38,6 +38,7 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 	if (url.includes("/chat/completions")) {
 		const body = JSON.parse(init?.body ?? "{}") as {
 			model?: string;
+			reasoning_effort?: string;
 			tools?: Array<{ function: { name: string } }>;
 			messages?: Array<{ role: string; content: string }>;
 		};
@@ -46,8 +47,12 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			quick,
 			tools: (body.tools ?? []).map((t) => t.function.name),
 			model: body.model ?? "",
+			reasoningEffort: body.reasoning_effort ?? null,
 		});
 		let content = "DONE: full loop answer.";
+		if (quick && mode === "long-error") {
+			return new Response(`upstream exploded: ${"x".repeat(1000)}`, { status: 400 });
+		}
 		if (quick) {
 			quickRequests++;
 			content =

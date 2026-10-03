@@ -1043,6 +1043,23 @@ describe("EIGHT_OLLAMA_NO_THINK turns thinking off per Ollama model", () => {
 		}
 	});
 
+	it("noThink turns thinking off for that call function only, and only on Ollama (#3411)", async () => {
+		const prev = process.env.EIGHT_OLLAMA_NO_THINK;
+		Reflect.deleteProperty(process.env, "EIGHT_OLLAMA_NO_THINK");
+		try {
+			const bodies = captureBodies();
+			const hi = [{ role: "user" as const, content: "hi" }];
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b", noThink: true })(hi);
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" })(hi);
+			await buildTextToolCall({ provider: "lmstudio", model: "qwen3.5:9b", noThink: true })(hi);
+			expect(bodies[0].reasoning_effort).toBe("none");
+			expect("reasoning_effort" in bodies[1]).toBe(false);
+			expect("reasoning_effort" in bodies[2]).toBe(false);
+		} finally {
+			if (prev !== undefined) process.env.EIGHT_OLLAMA_NO_THINK = prev;
+		}
+	});
+
 	it("renderQwenChatML with thinking off pre-closes the think block", () => {
 		expect(renderQwenChatML([{ role: "user", content: "q" }], "qwen3.5", true)).toBe(
 			"<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",

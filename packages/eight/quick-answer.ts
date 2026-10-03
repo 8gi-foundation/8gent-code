@@ -135,7 +135,8 @@ export function pickQuickModel(opts: {
 	if (env) return { model: env, source: "env" };
 	const have = opts.installed.map((m) => m.toLowerCase());
 	for (const want of QUICK_MODEL_PREFERENCE) {
-		const i = have.findIndex((m) => m === want || m.startsWith(`${want}-`));
+		// Exact name only: a "-cloud" tag is forwarded off the machine by Ollama (8SO Q-L1).
+		const i = have.findIndex((m) => m === want);
 		if (i >= 0) return { model: opts.installed[i], source: "preferred" };
 	}
 	return { model: opts.sessionModel, source: "session" };

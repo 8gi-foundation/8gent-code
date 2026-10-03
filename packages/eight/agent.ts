@@ -979,6 +979,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						timeoutMs,
 						tools: laneSpecs,
 						onUsage,
+						// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
+						noThink: true,
 					}),
 			});
 			quickRecord = {
@@ -989,7 +991,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				modelSource: pick.source,
 				ms: quick.ms,
 				tools: quick.tools,
-				...(quick.ok ? {} : { reason: quick.reason }),
+				...(quick.ok ? {} : { reason: quick.reason.slice(0, 200) }),
 			};
 			if (quick.ok) {
 				quickResult = quick.result;

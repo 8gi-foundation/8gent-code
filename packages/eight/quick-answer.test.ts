@@ -142,6 +142,11 @@ describe("pickQuickModel", () => {
 			source: "preferred",
 		});
 	});
+	test("a cloud tag of the preferred model is never picked (8SO Q-L1)", () => {
+		expect(
+			pickQuickModel({ sessionModel: "big:27b", installed: ["qwen3.5:9b-cloud", "qwen3.5:9b-q8"] }),
+		).toEqual({ model: "big:27b", source: "session" });
+	});
 	test("else the session model", () => {
 		expect(
 			pickQuickModel({ envModel: " ", sessionModel: "big:27b", installed: ["llama3.1:8b"] }),

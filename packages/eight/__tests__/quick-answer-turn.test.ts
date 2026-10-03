@@ -12,7 +12,7 @@ afterAll(cleanupTempDirs);
 
 type Probe = {
 	reply: string;
-	seen: Array<{ quick: boolean; tools: string[]; model: string }>;
+	seen: Array<{ quick: boolean; tools: string[]; model: string; reasoningEffort: string | null }>;
 	runs: Array<{
 		quick?: {
 			class: string;
@@ -28,7 +28,7 @@ type Probe = {
 };
 
 function probe(
-	mode: "answer" | "needs-deep",
+	mode: "answer" | "needs-deep" | "long-error",
 	prompt: string,
 	flag: string | undefined,
 	extra: Record<string, string> = {},
@@ -142,5 +142,24 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		const p = probe("answer", QUESTION, "1");
 		for (const s of p.seen.filter((x) => x.quick)) expect(s.model).toBe("probe:1b");
 		expect(p.runs.at(-1)?.quick).toMatchObject({ model: "probe:1b", modelSource: "session" });
+	}, 60_000);
+
+	test("lane requests turn thinking off; full-loop requests do not", () => {
+		const p = probe("needs-deep", QUESTION, "1");
+		const quick = p.seen.filter((s) => s.quick);
+		const full = p.seen.filter((s) => !s.quick && s.tools.includes("write_file"));
+		expect(quick.length).toBeGreaterThan(0);
+		expect(full.length).toBeGreaterThan(0);
+		for (const s of quick) expect(s.reasoningEffort).toBe("none");
+		for (const s of full) expect(s.reasoningEffort).toBeNull();
+	}, 60_000);
+
+	test("a long lane failure reason is capped at 200 chars in the run log (8SO Q-R1)", () => {
+		const p = probe("long-error", QUESTION, "1");
+		const q = p.runs.at(-1)?.quick;
+		expect(q).toMatchObject({ class: "quick", ran: true, ok: false });
+		expect((q?.reason ?? "").length).toBeGreaterThan(0);
+		expect((q?.reason ?? "").length).toBeLessThanOrEqual(200);
+		expect(p.reply).toContain("full loop answer");
 	}, 60_000);
 });
