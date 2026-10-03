@@ -15,7 +15,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,39 @@ let withImage: ReturnType<typeof Bun.serve>;
 let chatOnly: ReturnType<typeof Bun.serve>;
 let CLOSED = "";
 let caseNo = 0;
+/** How the fake answers POST /v1/images/generations. */
+let imageMode: "png" | "huge" | "notpng" | "redirect" = "png";
+
+function imageResponse(): Response {
+	switch (imageMode) {
+		case "png":
+			return Response.json({ created: 0, data: [{ b64_json: PNG_B64 }] });
+		case "notpng":
+			return Response.json({
+				created: 0,
+				data: [{ b64_json: Buffer.from("GIF89a not a png at all").toString("base64") }],
+			});
+		case "redirect":
+			return new Response(null, {
+				status: 307,
+				headers: { location: "/v1/images/generations-elsewhere" },
+			});
+		case "huge": {
+			// Streams past the 32 MB cap with no Content-Length.
+			let sent = 0;
+			const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+			return new Response(
+				new ReadableStream({
+					pull(c) {
+						if (sent > 40 * 1024 * 1024) return c.close();
+						sent += chunk.byteLength;
+						c.enqueue(chunk);
+					},
+				}),
+			);
+		}
+	}
+}
 
 function fakeServer(models: unknown[]): ReturnType<typeof Bun.serve> {
 	return Bun.serve({
@@ -39,7 +72,8 @@ function fakeServer(models: unknown[]): ReturnType<typeof Bun.serve> {
 			const path = new URL(req.url).pathname;
 			hits.push({ path, body: req.method === "POST" ? await req.text() : "" });
 			if (path === "/v1/models") return Response.json({ object: "list", data: models });
-			if (path === "/v1/images/generations")
+			if (path === "/v1/images/generations") return imageResponse();
+			if (path === "/v1/images/generations-elsewhere")
 				return Response.json({ created: 0, data: [{ b64_json: PNG_B64 }] });
 			return new Response("not found", { status: 404 });
 		},
@@ -70,8 +104,10 @@ type ChildOut = {
 async function runHarness(
 	env: Record<string, string | undefined>,
 	opts: Record<string, unknown> = {},
+	mode: typeof imageMode = "png",
 ): Promise<ChildOut> {
 	hits = [];
+	imageMode = mode;
 	const dir = join(root, `case-${caseNo++}`);
 	const home = join(dir, "home");
 	mkdirSync(home, { recursive: true });
@@ -148,6 +184,8 @@ describe("flag on", () => {
 		expect(r.result.path).toBe("local");
 		const sheet = r.result.sheetPath as string;
 		expect(sheet.startsWith(join(r.home, ".8gent", "assets", "media", "local-"))).toBe(true);
+		// 8SO F4: the asset folder carries a random suffix, not just a timestamp.
+		expect(sheet).toMatch(/local-\d+-[0-9a-f]{8}\/sheet\.png$/);
 		expect(readFileSync(sheet).equals(Buffer.from(PNG_B64, "base64"))).toBe(true);
 		expect(r.cloud).toEqual([]);
 
@@ -181,6 +219,75 @@ describe("flag on", () => {
 	test("forceCloud skips the probe", async () => {
 		const r = await runHarness({ EIGHT_LOCAL_MEDIA: "1" }, { forceCloud: true });
 		expect(r.result).toEqual(CLOUD_FAIL);
+		expect(hits).toEqual([]);
+	});
+});
+
+describe("8SO: hostile local image responses fall through to the cloud", () => {
+	test("F1: an image body past 32 MB is refused mid-stream", async () => {
+		const r = await runHarness({ EIGHT_LOCAL_MEDIA: "1" }, {}, "huge");
+		expect(r.result).toEqual(CLOUD_FAIL);
+		expect(r.cloud).toEqual(CLOUD_URLS);
+		expect(r.assets).toEqual([]);
+	});
+
+	test("F2: bytes without the PNG signature are never written", async () => {
+		const r = await runHarness({ EIGHT_LOCAL_MEDIA: "1" }, {}, "notpng");
+		expect(r.result).toEqual(CLOUD_FAIL);
+		expect(r.cloud).toEqual(CLOUD_URLS);
+		expect(r.assets).toEqual([]);
+		expect(existsSync(join(r.home, ".8gent", "assets", "media"))).toBe(true);
+		expect(
+			readdirSync(join(r.home, ".8gent", "assets", "media")).filter((f) => f.startsWith("local-")),
+		).toEqual([]);
+	});
+
+	test("I1: a redirect from the image POST is not followed", async () => {
+		const r = await runHarness({ EIGHT_LOCAL_MEDIA: "1" }, {}, "redirect");
+		expect(r.result).toEqual(CLOUD_FAIL);
+		expect(hits.map((h) => h.path)).not.toContain("/v1/images/generations-elsewhere");
+		expect(r.assets).toEqual([]);
+	});
+});
+
+describe("8PO: the degraded reason says what the local tier found", () => {
+	test("no local image model and no cloud key", async () => {
+		const r = await runHarness({
+			EIGHT_LOCAL_MEDIA: "1",
+			MLX_SERVE_URL: CLOSED,
+			OPENAI_API_KEY: undefined,
+		});
+		expect(r.result).toEqual({
+			success: false,
+			reason:
+				// MLX_SERVE_URL and OLLAMA_BASE_URL are the same closed port, so 2 servers after dedupe.
+				"No local image model found (1 of 2 local model servers answered) and no OPENAI_API_KEY. " +
+				"Start a local image server that lists an image model, or set OPENAI_API_KEY.",
+			path: "degraded",
+		});
+		expect(r.cloud).toEqual([]);
+	});
+
+	test("a local image model that failed, and no cloud key", async () => {
+		const r = await runHarness({ EIGHT_LOCAL_MEDIA: "1", OPENAI_API_KEY: undefined }, {}, "notpng");
+		expect(r.result).toEqual({
+			success: false,
+			reason:
+				"Local image model black-forest-labs/FLUX.1-schnell failed (Local image server returned something that is not a PNG) and no OPENAI_API_KEY. " +
+				"Start a local image server that lists an image model, or set OPENAI_API_KEY.",
+			path: "degraded",
+		});
+	});
+
+	test("flag off keeps the old degraded reason word for word", async () => {
+		const r = await runHarness({ OPENAI_API_KEY: undefined });
+		expect(r.result).toEqual({
+			success: false,
+			reason:
+				"Cannot generate: no local sharp (npm install sharp) and no OPENAI_API_KEY. " +
+				"Install sharp for local slicing, or set OPENAI_API_KEY for cloud generation.",
+			path: "degraded",
+		});
 		expect(hits).toEqual([]);
 	});
 });
