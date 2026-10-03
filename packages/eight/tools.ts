@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { formatLocateCode, locateCode, locateCodeEnabled } from "../repo-context/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
@@ -268,6 +269,23 @@ function positiveInt(value: unknown): number | undefined {
 	const n = Math.floor(Number(value));
 	return Number.isFinite(n) && n >= 1 ? n : undefined;
 }
+
+/** Listed by getToolDefinitions only when EIGHT_LOCATE=1 (#3427 trial). */
+const LOCATE_CODE_TOOL_DEF = {
+	type: "function",
+	function: {
+		name: "locate_code",
+		description:
+			'[CODE] Ask a plain question about where behaviour lives ("where are secrets scrubbed from tool output?") and get up to 3 passages with file:line. Read-only, runs on this machine. Use locate or search_symbols when you already know a name.',
+		parameters: {
+			type: "object",
+			properties: {
+				question: { type: "string", description: "A plain question about the code" },
+			},
+			required: ["question"],
+		},
+	},
+};
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1208,6 +1226,8 @@ export class ToolExecutor {
 			},
 			// Windowed-session orchestration (term_*) — see packages/eight/term-tools.ts
 			...getTermToolDefs(),
+			// Question-driven locator trial (#3427): listed only when EIGHT_LOCATE=1.
+			...(locateCodeEnabled() ? [LOCATE_CODE_TOOL_DEF] : []),
 		];
 	}
 
@@ -1404,6 +1424,9 @@ export class ToolExecutor {
 				return this.searchSymbols(args.query as string, args.kinds as string[]);
 			case "locate":
 				return this.locate(args.query as string);
+			case "locate_code":
+				if (!locateCodeEnabled()) return `Unknown tool: ${toolName}`;
+				return this.locateCode(args.question as string);
 			case "update_plan":
 				// Executes nothing: the plan event is the onToolStart the agent
 				// fires with these args; the TUI PLAN column reads it (#3035).
@@ -1878,6 +1901,24 @@ export class ToolExecutor {
 			indexPending,
 		});
 		return formatLocate(result);
+	}
+
+	/** Read-only plain-question locator (#3427 trial, EIGHT_LOCATE=1). */
+	private async locateCode(question: string): Promise<string> {
+		let repoId = this.astRepoId;
+		if (!this.astIndexReady && this.astIndexPromise) {
+			repoId = (
+				await awaitIndex(
+					this.astIndexPromise.then((index) => index?.id ?? null),
+					LOCATE_INDEX_WAIT_MS,
+				)
+			).repoId;
+		}
+		const result = await locateCode(typeof question === "string" ? question : "", {
+			root: this.workingDirectory,
+			repoId,
+		});
+		return formatLocateCode(result);
 	}
 
 	private async getProjectOutline(): Promise<string> {
