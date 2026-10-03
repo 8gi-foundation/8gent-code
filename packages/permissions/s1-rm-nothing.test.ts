@@ -13,8 +13,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	linkSync,
+	lstatSync,
 	mkdirSync,
 	realpathSync,
 	rmSync,
@@ -303,6 +305,59 @@ describe("#3381: absent absolute paths under a temp root", () => {
 	test("refuses a parent that is a file, not a directory", () => {
 		writeFileSync(join(tmp, "afile"), "x");
 		expect(rmOfNothingOrOwn(`rm -f ${tmp}/afile/todos.json`, ws)).toBeNull();
+	});
+
+	// B2 (8SO, 2026-10-03): a uid-owned directory that group or others can write
+	// lets another user rename a child and plant a symlink out of temp between
+	// the check and the rm. Every directory below the temp root must have
+	// (mode & 0o022) === 0.
+	describe("B2: directories below the temp root writable by group or others", () => {
+		const made: string[] = [];
+		// A 0555 directory would make the recursive cleanup fail; restore first.
+		afterEach(() => {
+			for (const d of made.splice(0)) chmodSync(d, 0o700);
+		});
+		const dirWithMode = (name: string, mode: number) => {
+			const d = join(tmp, name);
+			made.push(d);
+			mkdirSync(join(d, "inner"), { recursive: true });
+			chmodSync(join(d, "inner"), 0o700);
+			chmodSync(d, mode);
+			return d;
+		};
+
+		test.each([
+			["0777", 0o777],
+			["0775", 0o775],
+			["0757", 0o757],
+			["1777 (sticky is not enough)", 0o1777],
+		])("refuses a %s intermediate", (_label, mode) => {
+			const d = dirWithMode("ww", mode);
+			expect(rmOfNothingOrOwn(`rm -f ${d}/inner/todos.json`, ws)).toBeNull();
+		});
+
+		test.each([
+			["0777", 0o777],
+			["0775", 0o775],
+		])("refuses a %s parent", (_label, mode) => {
+			const d = dirWithMode("wp", mode);
+			expect(rmOfNothingOrOwn(`rm -f ${d}/todos.json`, ws)).toBeNull();
+		});
+
+		test.each([
+			["0755", 0o755],
+			["0700", 0o700],
+			["0555", 0o555],
+		])("allows a %s intermediate and parent", (_label, mode) => {
+			const d = dirWithMode("ok", mode);
+			expect(rmOfNothingOrOwn(`rm -f ${d}/inner/todos.json`, ws)).toBe("nothing-temp");
+			expect(rmOfNothingOrOwn(`rm -f ${d}/todos.json`, ws)).toBe("nothing-temp");
+		});
+
+		test("the temp root itself (/tmp, mode 1777 and root-owned) is unaffected", () => {
+			expect(lstatSync(realpathSync("/tmp")).mode & 0o022).not.toBe(0);
+			expect(rmOfNothingOrOwn(`rm -f /tmp/${uniq()}.json`, ws)).toBe("nothing-temp");
+		});
 	});
 
 	describe("a parent owned by another uid (process.getuid stubbed)", () => {

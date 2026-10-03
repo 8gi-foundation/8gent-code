@@ -45,9 +45,12 @@
  *     per-user /var/folders/../T directory. Every component up to and
  *     including that prefix is owned by root or the current uid. Every
  *     component below it, down to the parent, is (by lstat) a real directory,
- *     not a symlink, owned by the current uid (8SO B1: an absent or
- *     foreign-owned ancestor in a world-writable /tmp could be swapped for a
- *     symlink out of temp between this check and the rm).
+ *     not a symlink, owned by the current uid and not writable by group or
+ *     others (mode & 0o022 is 0) (8SO B1: an absent or foreign-owned ancestor
+ *     in a world-writable /tmp could be swapped for a symlink out of temp
+ *     between this check and the rm; 8SO B2: so could the child of a
+ *     uid-owned directory that group or others can write, sticky or not).
+ *     The temp root's own mode is not checked: /tmp is 1777 by design.
  *     An os.tmpdir() under /tmp is reached by that walk from /tmp.
  * The text test `isTemp` in decide/rules.ts is never used here: it matches
  * `/tmp-x`, `/tmp/../etc` and any path containing `/scratchpad`. When the
@@ -59,9 +62,10 @@
  * Known window: another process (the agent's background tasks, any other
  * process of this uid, or, in a shared temp root, another user) could create
  * the leaf between this check and the spawn. Only the leaf can race: every
- * ancestor below the temp root is a real directory this uid owns, so no other
- * user can swap it, and the delete stays in that directory. Under the sticky
- * bit, rm cannot unlink another user's file there.
+ * ancestor below the temp root is a real directory owned by this uid and not
+ * writable by group or others, so no other user can rename or replace an entry
+ * in it, and the delete stays in that directory. Under the sticky bit, rm
+ * cannot unlink another user's file in the temp root itself.
  *
  * Synchronous, never throws.
  */
@@ -136,7 +140,9 @@ function tempRoots(): string[] {
  * True when `dir` (canonical, absolute) exists and, walked component by
  * component as written, reaches a real temp root through components owned by
  * root or this uid, then descends from it only through real directories (lstat,
- * not symlinks) owned by this uid. `dir` may be the temp root itself (8SO B1).
+ * not symlinks) owned by this uid and not writable by group or others
+ * (mode & 0o022 is 0; a sticky bit does not excuse it). `dir` may be the temp
+ * root itself, whose own mode is not checked (8SO B1, B2).
  */
 function parentSafe(dir: string): boolean {
 	const uid = process.getuid?.();
@@ -153,6 +159,8 @@ function parentSafe(dir: string): boolean {
 			continue;
 		}
 		if (st.isSymbolicLink() || !st.isDirectory() || st.uid !== uid) return false;
+		// 8SO B2: group- or world-writable lets another user swap a child.
+		if ((st.mode & 0o022) !== 0) return false;
 	}
 	return rooted;
 }
