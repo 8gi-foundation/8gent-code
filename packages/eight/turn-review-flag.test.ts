@@ -5,15 +5,24 @@
  * Drives the shipping chat() path (text-tool, local provider) against a fake
  * OpenAI-compatible endpoint, like harness-notes-reach-model.test.ts. $HOME is
  * a temp folder so the operator's sessions and config stay out of the test.
+ * Temp dirs come from tests/temp-dirs.ts so none outlive the run (#3285).
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
+/**
+ * Each Agent starts OnboardingManager.detectIntegrations() without awaiting
+ * it, and that later writes <home>/.8gent/user.json. Left running, it
+ * recreated the temp home after cleanup (#3285), so the file waits for every
+ * one of them before removing its temp dirs.
+ */
+const pendingDetect: Promise<unknown>[] = [];
+let detectSpy: { mockRestore: () => void } | undefined;
 
 const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
@@ -45,8 +54,8 @@ const callWrite = (p: string) => ({
 });
 
 beforeAll(async () => {
-	home = mkdtempSync(join(tmpdir(), "turnreview3419-home-"));
-	repo = mkdtempSync(join(tmpdir(), "turnreview3419-repo-"));
+	home = tempDir("turnreview3419-home-");
+	repo = tempDir("turnreview3419-repo-");
 	mkdirSync(join(home, ".8gent", "memory"), { recursive: true });
 	ENV.HOME = home;
 	ENV.EIGHT_DATA_DIR = join(home, ".8gent");
@@ -56,7 +65,18 @@ beforeAll(async () => {
 	}
 	saved.EIGHT_TURN_REVIEW = process.env.EIGHT_TURN_REVIEW;
 	saved.OLLAMA_HOST = process.env.OLLAMA_HOST;
+	saved.EIGHT_TEXT_TOOLS = process.env.EIGHT_TEXT_TOOLS;
 	({ Agent } = await import("./agent"));
+	const { OnboardingManager } = await import("../self-autonomy/onboarding");
+	const realDetect = OnboardingManager.prototype.detectIntegrations;
+	detectSpy = spyOn(OnboardingManager.prototype, "detectIntegrations").mockImplementation(function (
+		this: InstanceType<typeof OnboardingManager>,
+		...args: Parameters<typeof realDetect>
+	) {
+		const p = realDetect.apply(this, args);
+		pendingDetect.push(p.catch(() => {}));
+		return p;
+	});
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
@@ -81,16 +101,19 @@ beforeAll(async () => {
 afterEach(() => {
 	if (saved.EIGHT_TURN_REVIEW === undefined) delete process.env.EIGHT_TURN_REVIEW;
 	else process.env.EIGHT_TURN_REVIEW = saved.EIGHT_TURN_REVIEW;
+	process.env.EIGHT_TEXT_TOOLS = ENV.EIGHT_TEXT_TOOLS;
+	rmSync(join(repo, "stray.ts"), { force: true });
 });
 
-afterAll(() => {
+afterAll(async () => {
+	await Promise.allSettled(pendingDetect);
+	detectSpy?.mockRestore();
 	server?.stop(true);
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	cleanupTempDirs();
 });
 
 function build(): AgentT {
@@ -107,6 +130,7 @@ async function turn(
 	flag: string | undefined,
 	prompt: string,
 	replies: Array<Record<string, unknown>>,
+	prepare?: (agent: AgentT) => void,
 ) {
 	if (flag === undefined) delete process.env.EIGHT_TURN_REVIEW;
 	else process.env.EIGHT_TURN_REVIEW = flag;
@@ -118,11 +142,25 @@ async function turn(
 		if (text.startsWith("[turn-review]")) lines.push(text);
 	});
 	try {
-		const reply = await build().chat(prompt);
+		const agent = build();
+		prepare?.(agent);
+		const reply = await agent.chat(prompt);
 		return { reply, lines };
 	} finally {
 		spy.mockRestore();
 	}
+}
+
+/** Count calls to the private turn body, still running the real one. */
+function countTurns(agent: AgentT): { n: number } {
+	const a = agent as unknown as { runChatTurn: (...args: unknown[]) => Promise<string> };
+	const counter = { n: 0 };
+	const real = a.runChatTurn.bind(agent);
+	a.runChatTurn = (...args: unknown[]) => {
+		counter.n++;
+		return real(...args);
+	};
+	return counter;
 }
 
 const UNASKED_TURN = () => [callWrite("stray.ts"), say("Updated the parser.")];
@@ -154,7 +192,11 @@ describe("turn-end side reviewer flag (#3419)", () => {
 	test("flag on: flags the unasked file and the missing test run, at most 3 lines", async () => {
 		const r = await turn("1", PROMPT, UNASKED_TURN());
 		expect(r.lines.length).toBeLessThanOrEqual(3);
-		expect(r.lines.some((l) => l.includes("Unasked: changed stray.ts"))).toBe(true);
+		expect(
+			r.lines.some((l) =>
+				l.includes("Not asked for: changed stray.ts (prompt named src/parse.ts)"),
+			),
+		).toBe(true);
 		expect(r.lines.some((l) => l.includes("no test command ran after editing stray.ts"))).toBe(
 			true,
 		);
@@ -165,5 +207,56 @@ describe("turn-end side reviewer flag (#3419)", () => {
 	test("flag on: a clean turn (no tools, plain answer) stays silent", async () => {
 		const r = await turn("1", "What does src/parse.ts do?", [say("It parses the config file.")]);
 		expect(r.lines).toEqual([]);
+	});
+
+	test("a turn the infinite-mode heal retries is reviewed exactly once", async () => {
+		// The heal retry only exists on the native path. The first model attempt
+		// throws a transient error from inside the turn's try block (the first
+		// abortController assignment); the real self-heal waits about 1 s and
+		// retries through runChatTurn. Were it to call chat() again, the review
+		// would print twice.
+		process.env.EIGHT_TEXT_TOOLS = "0";
+		let counter = { n: 0 };
+		const r = await turn("1", PROMPT, UNASKED_TURN(), (agent) => {
+			const a = agent as unknown as { infiniteModeActive: boolean };
+			a.infiniteModeActive = true;
+			let controller: AbortController | null = null;
+			let thrown = false;
+			Object.defineProperty(agent, "abortController", {
+				configurable: true,
+				get: () => controller,
+				set: (v: AbortController | null) => {
+					if (v && !thrown) {
+						thrown = true;
+						throw new Error("ETIMEDOUT simulated");
+					}
+					controller = v;
+				},
+			});
+			counter = countTurns(agent);
+		});
+		expect(counter.n).toBe(2); // the outer turn plus one heal retry
+		expect(r.reply).toBe("Updated the parser.");
+		expect(r.lines.filter((l) => l.includes("Not asked for: changed stray.ts"))).toHaveLength(1);
+		expect(r.lines.length).toBeLessThanOrEqual(3);
+	}, 20_000);
+
+	test("a turn that throws propagates the error and prints no review line", async () => {
+		process.env.EIGHT_TURN_REVIEW = "1";
+		const agent = build();
+		(agent as unknown as { runChatTurn: () => Promise<string> }).runChatTurn = async () => {
+			throw new Error("provider exploded");
+		};
+		const lines: string[] = [];
+		const spy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+			const text = args.map(String).join(" ");
+			if (text.startsWith("[turn-review]")) lines.push(text);
+		});
+		try {
+			await expect(agent.chat(PROMPT)).rejects.toThrow("provider exploded");
+		} finally {
+			spy.mockRestore();
+		}
+		expect(lines).toEqual([]);
 	});
 });
