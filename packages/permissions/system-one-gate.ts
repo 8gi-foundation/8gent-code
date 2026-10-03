@@ -540,8 +540,10 @@ export async function systemOneGate(
 		}
 		// An rm whose every target is absent inside the workspace deletes
 		// nothing (#3168); one whose targets are absent or untracked files this
-		// session created removes only its own scratch (#3177). Needs the
-		// caller's working directory (and record); without them, today's behaviour.
+		// session created removes only its own scratch (#3177); an absent
+		// absolute path under a real temp root also deletes nothing (#3381).
+		// Needs the caller's working directory (and record); without them,
+		// today's behaviour.
 		try {
 			const { rmOfNothingOrOwn } = await import("./s1-rm-nothing");
 			const kind = rmOfNothingOrOwn(command, cwd, created);
@@ -556,7 +558,9 @@ export async function systemOneGate(
 						reason:
 							kind === "nothing"
 								? "rm of paths that do not exist in the workspace: nothing to delete"
-								: "rm of untracked files this session created (or of absent paths): its own scratch",
+								: kind === "nothing-temp"
+									? "rm of paths that do not exist (absolute ones under a real temp root): nothing to delete"
+									: "rm of untracked files this session created (or of absent paths): its own scratch",
 					},
 				};
 			}

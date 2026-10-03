@@ -307,7 +307,20 @@ and replaces Selene.
   path that did not exist. A file the session only modified, one another
   tab created, a tracked one, or one since replaced (device and inode
   changed) still goes to the judge. The permission layer's own card for a
-  dangerous `rm` is unchanged.
+  dangerous `rm` is unchanged. An absolute path passes only when it is
+  absent, written without `..`, `.` or `//`, and its parent directory exists
+  and is either a real temp root (realpath of `/tmp`, or of `os.tmpdir()`
+  when that is the macOS per-user `T` dir) or reached from one only through
+  real directories, not symlinks, owned by the current uid and not
+  writable by group or others. Above the temp root every component must be
+  a real directory group and others cannot write, and the temp root itself
+  must be unwritable by them or sticky; the only symlinks followed are
+  macOS's `/tmp` and `/var`, by exact target. An absent, symlinked,
+  foreign-owned or group/other-writable directory anywhere on the path goes
+  to the judge. So
+  `rm -f /tmp/todos.json` with no such file skips the judge (#3381). The
+  rules' text test for temp paths is not trusted for this. An existing file
+  in a temp root always goes to the judge.
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.
