@@ -285,3 +285,35 @@ export function declaredModels(reader: ProviderModelsReader, provider: string): 
 		return [];
 	}
 }
+
+/**
+ * Whether the TUI should list a provider's models from the configured Ollama's
+ * installed models rather than from the registry (#3332). The `8gent` provider
+ * is Ollama at the same host (providerToRuntime maps it to "ollama"), so its
+ * declared list (`eight-1.0-q3:14b`, not installed on most machines) hid a
+ * missing default: the session kept it and every turn missed in Ollama, then
+ * went to OpenRouter with an id OpenRouter does not serve. With the installed
+ * list, autoSelectModel swaps the missing model once, before the first turn.
+ */
+export function listsInstalledOllamaModels(provider: string): boolean {
+	return provider === "ollama" || provider === "8gent";
+}
+
+/**
+ * The one-line notice for when autoSelectModel replaced a model Ollama does
+ * not have (#3332), or null when there is nothing to tell: a first pick (no
+ * previous model), a provider not backed by Ollama, or a model that is
+ * installed (an embedding-model swap is not a missing model).
+ */
+export function missingModelNotice(opts: {
+	provider: string;
+	from: string;
+	to: string;
+	available: string[];
+}): string | null {
+	const { provider, from, to, available } = opts;
+	if (!from || !to || from === to) return null;
+	if (!listsInstalledOllamaModels(provider)) return null;
+	if (available.includes(from)) return null;
+	return `${from} is not installed in Ollama, so this session uses ${to}. Pick another with /model.`;
+}
