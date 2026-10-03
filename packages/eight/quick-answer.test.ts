@@ -278,7 +278,7 @@ describe("runQuickAnswer (#3411)", () => {
 		expect(m.declared[0]).toEqual(["read_file"]);
 	});
 
-	test("a 4th tool call never runs and sends the turn to the full loop", async () => {
+	test("a 4th tool call never runs; told the budget is used, the model can still answer", async () => {
 		const ran: string[] = [];
 		const m = fakeModel([
 			[toolCall("read_file", "a.ts"), toolCall("read_file", "b.ts")].join("\n"),
@@ -291,8 +291,40 @@ describe("runQuickAnswer (#3411)", () => {
 			makeCall: m.makeCall,
 		});
 		expect(ran).toHaveLength(3);
+		expect(out.ok).toBe(true);
+		expect(out.tools).toBe(3);
+	});
+
+	test("one call per round for 3 reads, then a blocked 4th: the extra round still gets the answer (round 5 repro)", async () => {
+		const ran: string[] = [];
+		const m = fakeModel([
+			toolCall("search_symbols", "server"),
+			toolCall("read_file", "src/server.ts"),
+			toolCall("read_file", "src/ports.ts"),
+			toolCall("read_file", "src/env.ts"),
+			"DONE: staging listens on 4100.\nANSWER: staging=4100 unset=3000",
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", ran), tool("search_symbols", ran)],
+			makeCall: m.makeCall,
+		});
+		expect(ran).toHaveLength(3);
+		expect(out.ok).toBe(true);
+	});
+
+	test("a model that never stops calling tools falls through as 'no answer', with the stall logged", async () => {
+		const m = fakeModel([toolCall("read_file", "a.ts")]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
 		expect(out.ok).toBe(false);
-		if (!out.ok) expect(out.reason).toContain("tool budget");
+		if (out.ok) return;
+		expect(out.reason).toBe("no answer after 3 tool calls");
+		expect(out.claims?.[0]).toContain("without an answer");
+		for (const c of out.claims ?? []) expect(c.length).toBeLessThanOrEqual(120);
 	});
 
 	test("a model that stalls past the budget falls through", async () => {
@@ -358,6 +390,61 @@ describe("runQuickAnswer (#3411)", () => {
 		expect(users).toHaveLength(1);
 		expect(users[0].content.startsWith("which port does staging use?")).toBe(true);
 		expect(users[0].content).toContain("[QUICK ANSWER]");
+	});
+
+	test("an answer that says it cannot answer falls through (round 5 repro)", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "src/server.ts"),
+			"DONE: I need to recall the PORTS definition from src/ports.ts. Since I haven't read it yet, I cannot give an accurate answer without it.",
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("model said it could not answer");
+	});
+
+	test("a reply that is a malformed tool call is not an answer (round 5 repro)", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "src/server.ts"),
+			'I need to find the port mappings. Let me search for where PORTS is defined.\n\n\n{"name": "search_symbols", "arguments": {"query": "PORTS"}}\n```',
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("tool-call markup in the answer");
+	});
+
+	test("'let me check' prose is not an answer", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "src/server.ts"),
+			"DONE: Let me check ports.ts for the stage port.",
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(false);
+		if (!out.ok) expect(out.reason).toBe("model said it could not answer");
+	});
+
+	test("a plain answer is not mistaken for a non-answer", async () => {
+		const m = fakeModel([
+			toolCall("read_file", "src/server.ts"),
+			"DONE: Staging maps to the stage port, 4180; with APP_MODE unset it falls back to dev, 3000.\nANSWER: staging=4180 unset=3000",
+		]);
+		const out = await runQuickAnswer({
+			messages: USER,
+			tools: [tool("read_file", [])],
+			makeCall: m.makeCall,
+		});
+		expect(out.ok).toBe(true);
 	});
 
 	test("NEEDS_DEEP from the model falls through", async () => {

@@ -1000,6 +1000,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				ms: quick.ms,
 				tools: quick.tools,
 				...(quick.ok ? {} : { reason: quick.reason.slice(0, 200) }),
+				...(!quick.ok && quick.claims ? { claims: quick.claims } : {}),
 			};
 			if (quick.ok) {
 				quickResult = quick.result;

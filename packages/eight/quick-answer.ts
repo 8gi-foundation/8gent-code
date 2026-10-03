@@ -160,6 +160,7 @@ export function quickLaneEnabled(env: Record<string, string | undefined> = proce
 export const QUICK_INSTRUCTION = [
 	"[QUICK ANSWER] This is a quick question. Answer it directly and briefly from the source.",
 	`You may use at most ${QUICK_MAX_TOOL_CALLS} read-only tool calls. Do not change anything.`,
+	"Read the files you need together: put several tool_call blocks in one reply.",
 	`Start your answer with "DONE:". If you cannot answer within that budget, reply with exactly ${NEEDS_DEEP}.`,
 	`If the message also asks you to do, change, send or check something you cannot do with read-only tools, reply with exactly ${NEEDS_DEEP}.`,
 ].join("\n");
@@ -232,12 +233,23 @@ export function quickToolPrompt(tools: ToolSpec[]): string {
 		"```tool_call",
 		'{"name": "read_file", "arguments": {"path": "src/server.ts"}}',
 		"```",
-		"The result comes back to you. Never guess what a file says: read it first.",
+		"You may put several tool_call blocks in one reply; they all run.",
+		"The results come back to you. Never guess what a file says: read it first.",
 		"A reply with no tool_call block is your final answer.",
 		"Tools:",
 		...lines,
 	].join("\n");
 }
+
+/**
+ * A reply that says it has no answer is not a quick answer, whatever it is labelled
+ * (round 5 repro: "Since I haven't read it yet, I cannot give an accurate answer").
+ */
+export const NON_ANSWER =
+	/\b(cannot|can'?t|could ?n[o']t|unable to|not able to) (give|provide|answer|determine|tell|say|confirm)\b|\bhaven'?t (read|seen|checked)\b|\bwithout (reading|checking|seeing)\b|\bI (would |still )?need to (read|check|look|see|find|search)\b|\blet me (search|check|read|look|find|try)\b/i;
+
+/** Tool-call markup left in the prose: a call the parser did not take, not an answer (round 5 repro). */
+export const LEFTOVER_CALL = /\{\s*"name"\s*:\s*"\w+"\s*,\s*"arguments"|```tool_call/;
 
 const BUDGET_ELAPSED = "The quick-answer time budget elapsed before this read finished.";
 
@@ -258,7 +270,7 @@ function withInstruction(messages: TextToolMessage[]): TextToolMessage[] {
 
 export type QuickOutcome =
 	| { ok: true; result: TextToolAgentResult; ms: number; tools: number }
-	| { ok: false; reason: string; ms: number; tools: number };
+	| { ok: false; reason: string; ms: number; tools: number; claims?: string[] };
 
 export interface QuickLaneOptions {
 	/** The turn's conversation, ending with the user's prompt. Not mutated. */
@@ -291,14 +303,12 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 	const timer = setTimeout(() => ac.abort(), budgetMs);
 
 	let calls = 0;
-	let overBudget = false;
 	const tools: TextTool[] = opts.tools
 		.filter((t) => QUICK_TOOLS.has(t.spec.name))
 		.map((t) => ({
 			spec: compactSpec(t.spec),
 			run: async (args: Record<string, unknown>) => {
 				if (calls >= maxCalls) {
-					overBudget = true;
 					return `Tool budget for a quick answer is used up (${maxCalls} calls). Answer now from what you have, or reply ${NEEDS_DEEP}.`;
 				}
 				calls++;
@@ -333,7 +343,9 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 			messages: withInstruction(opts.messages),
 			tools,
 			call,
-			maxRounds: maxCalls + 1,
+			// One round past the call budget, so a model told "budget used" can still answer
+			// (round 5: qwen3.5:9b spent all 4 rounds on calls and never answered).
+			maxRounds: maxCalls + 2,
 			signal: ac.signal,
 			toolPrompt: quickToolPrompt,
 		});
@@ -343,14 +355,26 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 		if (ac.signal.aborted || ms > budgetMs)
 			return { ok: false, reason: `over ${budgetMs} ms`, ms, tools: calls };
 		if (!text) return { ok: false, reason: "empty answer", ms, tools: calls };
+		if (LEFTOVER_CALL.test(text))
+			return { ok: false, reason: "tool-call markup in the answer", ms, tools: calls };
+		if (NON_ANSWER.test(text))
+			return { ok: false, reason: "model said it could not answer", ms, tools: calls };
 		if (text.includes(NEEDS_DEEP))
 			return { ok: false, reason: "model asked for the full loop", ms, tools: calls };
 		if (result.unverified.length > 0)
-			return { ok: false, reason: "unverified claims", ms, tools: calls };
-		if (overBudget) {
-			// It asked for tools past the budget: the question needs the full loop.
-			return { ok: false, reason: `tool budget of ${maxCalls} calls exceeded`, ms, tools: calls };
-		}
+			return {
+				ok: false,
+				// The loop's empty-reply stall is not a claim: name it for what it is.
+				reason: result.unverified.every((u) =>
+					u.startsWith("the model ended the turn without an answer"),
+				)
+					? `no answer after ${calls} tool calls`
+					: "unverified claims",
+				ms,
+				tools: calls,
+				// What the loop flagged (model output, not the user's prompt), for the run log.
+				claims: result.unverified.slice(0, 5).map((c) => c.slice(0, 120)),
+			};
 		if (calls === 0) {
 			// Nothing was read: that is the model's memory, not the source (8PO review, round 2).
 			return { ok: false, reason: "no source read", ms, tools: calls };

@@ -58,6 +58,8 @@ export interface RunLogEntry {
 		modelSource?: "env" | "preferred" | "session";
 		/** Prompt tokens per lane round, as the endpoint reported them (absent when it reported none). */
 		promptTokens?: number[];
+		/** The flagged claims when the lane was rejected as unverified: at most 5, 120 chars each. */
+		claims?: string[];
 	};
 }
 
