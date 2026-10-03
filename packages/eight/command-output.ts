@@ -11,7 +11,13 @@
  * Success output is capped to the first HEAD_BYTES plus the last TAIL_BYTES. Anything over
  * ArtifactStore's 50,000-byte threshold is replaced by a 1,024-byte preview of its start,
  * which is exactly where bun's summary is not. Keeping the end keeps the summary.
+ *
+ * Secrets are scrubbed on the full text BEFORE the cut. ToolExecutor.execute scrubs again
+ * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
+ * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
+import { scrub } from "./secret-scanner";
+
 export const HEAD_BYTES = 2 * 1024;
 export const TAIL_BYTES = 12 * 1024;
 
@@ -22,8 +28,16 @@ function charBoundary(buf: Buffer, i: number, dir: 1 | -1): number {
 }
 
 export function capOutput(text: string): string {
-	const buf = Buffer.from(text);
-	if (buf.length <= HEAD_BYTES + TAIL_BYTES) return text;
+	if (Buffer.byteLength(text) <= HEAD_BYTES + TAIL_BYTES) return text;
+	const clean = scrub(text);
+	if (clean.redactedCount > 0) {
+		// Same telemetry line execute() emits; it would see nothing left to redact.
+		console.warn(
+			`[secret-scanner] tool=run_command redacted=${clean.redactedCount} rules=${clean.rules.join(",")}`,
+		);
+	}
+	const buf = Buffer.from(clean.scrubbed);
+	if (buf.length <= HEAD_BYTES + TAIL_BYTES) return clean.scrubbed;
 	const headEnd = charBoundary(buf, HEAD_BYTES, -1);
 	const tailStart = charBoundary(buf, buf.length - TAIL_BYTES, 1);
 	return `${buf.subarray(0, headEnd)}\n[${tailStart - headEnd} bytes omitted]\n${buf.subarray(tailStart)}`;

@@ -27,7 +27,6 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
-import { formatCommandOutput } from "./command-output";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
@@ -143,6 +142,7 @@ import {
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { ArtifactStore } from "./artifact-store";
+import { formatCommandOutput } from "./command-output";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
