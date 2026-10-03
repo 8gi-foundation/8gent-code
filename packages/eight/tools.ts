@@ -142,6 +142,7 @@ import {
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { ArtifactStore } from "./artifact-store";
+import { formatCommandOutput } from "./command-output";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
@@ -2261,11 +2262,7 @@ export class ToolExecutor {
 					workingDirectory: this.workingDirectory,
 				});
 
-				if (code === 0) {
-					safeResolve(stdout || stderr || "Command completed successfully.");
-				} else {
-					safeResolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
-				}
+				safeResolve(formatCommandOutput(code, stdout, stderr));
 			});
 
 			proc.on("error", (err) => {
