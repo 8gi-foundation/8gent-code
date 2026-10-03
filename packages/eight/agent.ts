@@ -59,6 +59,7 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
@@ -1105,6 +1106,29 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		const reply = await this.runChatTurn(userMessage, imageBase64, imageMimeType);
+		// Turn-end side reviewer (#3419): EIGHT_TURN_REVIEW=1 only. Reads the
+		// finished turn and prints at most three scrubbed lines about what the
+		// reply left unsaid. Display only: the reply is returned unchanged and a
+		// reviewer failure never reaches the turn.
+		if (turnReviewEnabled()) {
+			for (const line of reviewTurn({
+				prompt: userMessage,
+				toolCalls: this.turnToolLedger,
+				reply,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			})) {
+				console.log(`[turn-review] ${line}`);
+			}
+		}
+		return reply;
+	}
+
+	private async runChatTurn(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+	): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
@@ -2354,7 +2378,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.chat(textForAgent, imageBase64, imageMimeType),
+							() => this.runChatTurn(textForAgent, imageBase64, imageMimeType),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {
