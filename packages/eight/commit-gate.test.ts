@@ -321,20 +321,52 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(commits()).toBe(1);
 	}, 30_000);
 
-	test("`git -C <dir> commit` is not verified against the wrong tree", async () => {
+	test("`git -C` naming this repository (absolute, a subdirectory, ./) is gated as usual", async () => {
 		repo(BUN_PKG);
-		mkdirSync(join(dir, "sub"));
-		git("init", "-q", "-b", "main", "sub");
-		write("sub/a.txt", "a\n");
-		Bun.spawnSync(["git", "-C", "sub", "add", "."], { cwd: dir });
+		write("src/keep.ts", "export const k = 1;\n");
+		git("add", ".");
+		git("commit", "-q", "-m", "src");
 		write("test/cli.test.ts", FAIL);
-		const out = await ex.execute("run_command", {
-			command: "git -C sub -c user.name=t -c user.email=t@example.com commit -m x",
-		});
-		expect(out).toStartWith(
-			"[COMMIT GATE] This commit targets `sub`, not the working directory, so the test suite was not run for it",
-		);
-		expect(runs()).toBe(0);
+		await ex.execute("git_add", { files: "." });
+		for (const command of [
+			`git -C ${dir} commit -m x`,
+			`git --work-tree=${dir} commit -m x`,
+			`GIT_WORK_TREE=${dir} git commit -m x`,
+			"git -C src commit -m x",
+			"git -C ./ commit -m x",
+		]) {
+			freshExecutor();
+			const out = await ex.execute("run_command", { command });
+			expect(out).toStartWith("[COMMIT BLOCKED]");
+		}
+		expect(commits()).toBe(2);
+	}, 30_000);
+
+	test("`git -C` naming another repository is not verified, and the note names it", async () => {
+		repo(BUN_PKG);
+		const other = mkdtempSync(join(tmpdir(), "commit-gate-other-"));
+		try {
+			Bun.spawnSync(["git", "init", "-q", "-b", "main"], { cwd: other });
+			writeFileSync(join(other, "a.txt"), "a\n");
+			Bun.spawnSync(["git", "add", "."], { cwd: other });
+			write("test/cli.test.ts", FAIL);
+			const out = await ex.execute("run_command", {
+				command: `git -C ${other} -c user.name=t -c user.email=t@example.com commit -m x`,
+			});
+			expect(out).toStartWith(
+				`[COMMIT GATE] This commit targets \`${other}\`, not the repository in the working directory, so the test suite was not run for it`,
+			);
+			expect(runs()).toBe(0);
+			for (const command of [
+				"GIT_DIR=../x/.git git commit -m x",
+				"git --git-dir ../x/.git commit -m x",
+			]) {
+				const note = await ex.execute("run_command", { command });
+				expect(note).toStartWith("[COMMIT GATE] This commit targets another git dir");
+			}
+		} finally {
+			rmSync(other, { recursive: true, force: true });
+		}
 	}, 30_000);
 
 	test("green on the working tree with unstaged changes says what the commit holds is not verified", async () => {
@@ -383,33 +415,45 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 });
 
 describe("parseGitCommit", () => {
-	const rows: Array<[string, { all: boolean; dir: string; gitDir: boolean } | null]> = [
-		['git commit -m "x"', { all: false, dir: ".", gitDir: false }],
-		["git commit", { all: false, dir: ".", gitDir: false }],
-		["git -c user.name=a commit --amend", { all: false, dir: ".", gitDir: false }],
-		["VAR=x git commit -m x", { all: false, dir: ".", gitDir: false }],
-		[
-			"GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL=b git commit -m x",
-			{ all: false, dir: ".", gitDir: false },
-		],
-		["env git commit -m x", { all: false, dir: ".", gitDir: false }],
-		["env -u HOME A=1 git commit -m x", { all: false, dir: ".", gitDir: false }],
-		["command git commit -m x", { all: false, dir: ".", gitDir: false }],
-		["/usr/bin/git commit -m x", { all: false, dir: ".", gitDir: false }],
-		['git -c "k=v w" commit -m x', { all: false, dir: ".", gitDir: false }],
-		["git -c 'k=v w' commit -m x", { all: false, dir: ".", gitDir: false }],
-		["git -p commit -m x", { all: false, dir: ".", gitDir: false }],
-		["git --no-pager commit -m x", { all: false, dir: ".", gitDir: false }],
-		["git --work-tree . commit -m x", { all: false, dir: ".", gitDir: false }],
-		["git -C sub commit -m x", { all: false, dir: "sub", gitDir: false }],
-		["git -C a -C b commit", { all: false, dir: "a/b", gitDir: false }],
-		["git -C . commit", { all: false, dir: ".", gitDir: false }],
-		["git --work-tree=other commit", { all: false, dir: "other", gitDir: false }],
-		["git --git-dir ../x/.git commit", { all: false, dir: ".", gitDir: true }],
-		["git commit -am x", { all: true, dir: ".", gitDir: false }],
-		["git commit --all -m x", { all: true, dir: ".", gitDir: false }],
-		["git commit --amend -m x", { all: false, dir: ".", gitDir: false }],
-		["git add -A\ngit commit -m x", { all: false, dir: ".", gitDir: false }],
+	type T = { all: boolean; dirs: string[]; gitDir: boolean };
+	const plain: T = { all: false, dirs: [], gitDir: false };
+	const rows: Array<[string, T | null]> = [
+		['git commit -m "x"', plain],
+		["git commit", plain],
+		["git -c user.name=a commit --amend", plain],
+		["VAR=x git commit -m x", plain],
+		["GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL=b git commit -m x", plain],
+		["env git commit -m x", plain],
+		["env -u HOME A=1 git commit -m x", plain],
+		["command git commit -m x", plain],
+		["/usr/bin/git commit -m x", plain],
+		["Git commit -m x", plain],
+		["GIT commit -m x", plain],
+		['git -c "k=v w" commit -m x', plain],
+		["git -c 'k=v w' commit -m x", plain],
+		["git -p commit -m x", plain],
+		["git --no-pager commit -m x", plain],
+		["git --work-tree . commit -m x", { ...plain, dirs: ["."] }],
+		["git -C sub commit -m x", { ...plain, dirs: ["sub"] }],
+		["git -C /abs/repo commit -m x", { ...plain, dirs: ["/abs/repo"] }],
+		["git -C ./ commit -m x", { ...plain, dirs: ["./"] }],
+		["git -C a -C b commit", { ...plain, dirs: ["a", "b"] }],
+		["git --work-tree=other commit", { ...plain, dirs: ["other"] }],
+		["GIT_WORK_TREE=/w git commit", { ...plain, dirs: ["/w"] }],
+		["git --git-dir ../x/.git commit", { ...plain, gitDir: true }],
+		["GIT_DIR=../x/.git git commit", { ...plain, gitDir: true }],
+		["git commit -am x", { ...plain, all: true }],
+		["git commit --all -m x", { ...plain, all: true }],
+		["git commit -a", { ...plain, all: true }],
+		["git commit -qa -m x", { ...plain, all: true }],
+		["git commit -m '-a'", plain],
+		["git commit -m -a", plain],
+		["git commit -ma", plain],
+		["git commit --message -a", plain],
+		["git commit -F -a", plain],
+		["git commit --author '-a <a@b>' -m x", plain],
+		["git commit --amend -m x", plain],
+		["git add -A\ngit commit -m x", plain],
 		["git log --grep commit", null],
 		["git commit-tree abc", null],
 		["echo git commit", null],

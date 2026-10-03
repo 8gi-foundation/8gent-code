@@ -22,8 +22,10 @@
  *     gate recognises as a clean run is recorded green.
  *   - The suite does not finish in time, the runner cannot start (exit 126 or 127 with
  *     a "not found" or "cannot execute" line, such as no bun, yarn or pnpm on PATH), a
- *     gate stops it, or the commit targets another directory or git dir (`git -C`,
- *     `--work-tree`, `--git-dir`): commit, and say it was not verified.
+ *     gate stops it, or the commit targets another repository (`git -C`, `--work-tree`,
+ *     `GIT_WORK_TREE=` resolving outside this one) or another git dir (`--git-dir`,
+ *     `GIT_DIR=`): commit, and say it was not verified. `-C` naming this repository,
+ *     by absolute path or a subdirectory, is gated as usual.
  *   - Green, but tracked files have unstaged changes: the suite saw the working tree, not
  *     what the commit holds, so the commit says it is not fully verified.
  *   - EIGHT_COMMIT_GATE=0 turns it off. EIGHT_COMMIT_GATE_TIMEOUT_SEC bounds one run
@@ -31,7 +33,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { firstFailure } from "../orchestration/verify-scope";
 import { scrub } from "./secret-scanner";
@@ -57,9 +59,12 @@ export function commitGateTimeoutSec(): number {
 export type CommitTarget = {
 	/** `-a` / `--all`: the commit takes the working tree's tracked changes, not only the index. */
 	all: boolean;
-	/** The tree after `-C` and `--work-tree`, relative to the working directory ("." when unchanged). */
-	dir: string;
-	/** `--git-dir` was given: the index lives somewhere else. */
+	/**
+	 * The `-C`, `--work-tree` and `GIT_WORK_TREE=` values in order, as written. The gate
+	 * resolves them against its working directory, since the parser has none.
+	 */
+	dirs: string[];
+	/** `--git-dir` or `GIT_DIR=` was given: the index lives somewhere else. */
 	gitDir: boolean;
 };
 
@@ -123,35 +128,81 @@ const GIT_VALUE_OPTS = new Set([
 	"--exec-path",
 ]);
 
+/** `git commit` options that take a value; with a short option the value may be glued on. */
+const COMMIT_VALUE_OPTS = new Set([
+	"-m",
+	"-F",
+	"-C",
+	"-c",
+	"-t",
+	"--message",
+	"--file",
+	"--reuse-message",
+	"--reedit-message",
+	"--template",
+	"--author",
+	"--date",
+	"--fixup",
+	"--squash",
+	"--cleanup",
+	"--trailer",
+]);
+
+/** Whether `git commit`'s own arguments include -a / --all, never reading an option's value. */
+function commitsAll(rest: string[]): boolean {
+	for (let i = 0; i < rest.length; i++) {
+		const w = rest[i];
+		if (w === "--") return false;
+		if (w === "--all") return true;
+		if (w.startsWith("--")) {
+			if (!w.includes("=") && COMMIT_VALUE_OPTS.has(w)) i++;
+			continue;
+		}
+		if (!/^-[A-Za-z]/.test(w)) continue;
+		// A cluster such as -am: letters up to the first value-taking one, whose value is
+		// the rest of the word or, when nothing is left, the next word.
+		for (let j = 1; j < w.length; j++) {
+			if (w[j] === "a") return true;
+			if (COMMIT_VALUE_OPTS.has(`-${w[j]}`)) {
+				if (j === w.length - 1) i++;
+				break;
+			}
+		}
+	}
+	return false;
+}
+
 function commitInWords(words: string[]): CommitTarget | null {
 	let i = 0;
+	const dirs: string[] = [];
+	let gitDir = false;
 	// Leading NAME=value assignments and env/command-style wrappers (with env's own flags).
 	for (;;) {
 		const w = words[i];
 		if (w === undefined) return null;
-		if (ASSIGNMENT.test(w)) i++;
-		else if (WRAPPERS.has(w)) {
+		if (ASSIGNMENT.test(w)) {
+			if (w.startsWith("GIT_DIR=")) gitDir = true;
+			if (w.startsWith("GIT_WORK_TREE=")) dirs.push(w.slice("GIT_WORK_TREE=".length));
+			i++;
+		} else if (WRAPPERS.has(w)) {
 			i++;
 			while (words[i]?.startsWith("-")) i += words[i] === "-u" ? 2 : 1;
 		} else break;
 	}
+	// Case-insensitive: macOS runs `Git` or `GIT` as git.
 	const exe = words[i++];
-	if (exe !== "git" && !exe?.endsWith("/git")) return null;
-	let dir = ".";
-	let gitDir = false;
+	if (exe === undefined || path.basename(exe).toLowerCase() !== "git") return null;
 	for (; i < words.length; i++) {
 		const w = words[i];
 		if (!w.startsWith("-")) break;
 		const eq = w.indexOf("=");
 		const name = w.startsWith("--") && eq > 0 ? w.slice(0, eq) : w;
 		const value = name !== w ? w.slice(eq + 1) : GIT_VALUE_OPTS.has(w) ? words[++i] : undefined;
-		if (name === "-C" || name === "--work-tree") dir = path.join(dir, value ?? "");
+		if (name === "-C" || name === "--work-tree") dirs.push(value ?? "");
 		if (name === "--git-dir") gitDir = true;
 	}
 	if (words[i] !== "commit") return null;
-	const rest = words.slice(i + 1);
-	const all = rest.some((w) => w === "--all" || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
-	return { all, dir: path.normalize(dir), gitDir };
+	return { all: commitsAll(words.slice(i + 1)), dirs, gitDir };
 }
 
 /** The commit a shell command makes, or null when it makes none. */
@@ -190,6 +241,22 @@ export function detectTestCommand(cwd: string): string | null {
 // Prose only. A .txt file can be a test fixture and docs/ can hold code, so neither counts.
 const DOCS_ONLY = (p: string) =>
 	/\.(md|mdx)$/i.test(p) || /^(LICENSE|NOTICE)(\.txt)?$/i.test(path.basename(p));
+
+/** The real path of the repository that holds `dir`, or null when there is none. */
+function toplevel(dir: string): string | null {
+	if (!existsSync(dir)) return null;
+	const r = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	if (r.exitCode !== 0) return null;
+	try {
+		return realpathSync(r.stdout.toString().trim());
+	} catch {
+		return null;
+	}
+}
 
 /** Tracked files with changes that are not staged. */
 function hasUnstaged(cwd: string): boolean {
@@ -247,11 +314,12 @@ export class CommitGate {
 	/** `target` is the commit a run_command makes; git_commit passes none. */
 	async check(target?: CommitTarget): Promise<GateDecision> {
 		if (!commitGateEnabled()) return { commit: true };
-		if (target && (target.dir !== "." || target.gitDir)) {
-			const where = target.gitDir ? "another git dir" : `\`${target.dir}\``;
+		const elsewhere = target && this.elsewhere(target);
+		if (elsewhere) {
+			const where = elsewhere === "git-dir" ? "another git dir" : `\`${elsewhere}\``;
 			return {
 				commit: true,
-				note: `[COMMIT GATE] This commit targets ${where}, not the working directory, so the test suite was not run for it and the commit is not verified.`,
+				note: `[COMMIT GATE] This commit targets ${where}, not the repository in the working directory, so the test suite was not run for it and the commit is not verified.`,
 			};
 		}
 		const testCommand = detectTestCommand(this.cwd);
@@ -312,6 +380,19 @@ export class CommitGate {
 		}
 		this.last = { tree, result: "green", blocks: 0 };
 		return this.green(target);
+	}
+
+	/**
+	 * Null when the commit lands in the working directory's own repository (`-C` the
+	 * absolute cwd, `-C sub`, `-C ./` all do), so the gate runs as usual. Otherwise the
+	 * absolute directory it targets, or "git-dir" for --git-dir / GIT_DIR=.
+	 */
+	private elsewhere(target: CommitTarget): string | null {
+		if (target.gitDir) return "git-dir";
+		if (target.dirs.length === 0) return null;
+		const dir = target.dirs.reduce((cur, d) => path.resolve(cur, d), this.cwd);
+		const here = toplevel(this.cwd);
+		return here !== null && toplevel(dir) === here ? null : dir;
 	}
 
 	private green(target?: CommitTarget): GateDecision {
