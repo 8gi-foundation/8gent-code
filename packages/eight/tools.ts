@@ -246,7 +246,9 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 
 // read_file line numbers (#3375): the `cat -n` gutter, a right-aligned number
 // and a tab. Models cite line numbers from it instead of counting by hand.
-const GUTTER = /^ *\d+\t/;
+// Exactly what numberLines emits: the number right-aligned in 6 columns (or
+// wider past 999999), then a tab. A TSV row like "2024\tbudget" is not it.
+const GUTTER = /^(?: {5}\d| {4}\d{2}| {3}\d{3}| {2}\d{4}| \d{5}|\d{6,})\t/;
 
 /** Number `lines` as `cat -n` does, the first one being line `first`. */
 export function numberLines(lines: string[], first: number): string {
@@ -2078,6 +2080,18 @@ export class ToolExecutor {
 		}
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
+
+		// A gutter copied into newText would be written to disk as file text
+		// (#3375). Refuse it, never strip it: the bytes written must be the
+		// bytes the policy gate checked. Files that already hold gutter-shaped
+		// lines (oldText carries one, or the file has one) are left editable.
+		if (
+			hasLineNumberGutter(newText) &&
+			!hasLineNumberGutter(oldText) &&
+			!content.split("\n").some((l) => GUTTER.test(l))
+		) {
+			return `Error: newText starts each line with a read_file line-number prefix (number + tab). That prefix would be written into ${filePath} as file text. Nothing was written: send newText without the prefix.`;
+		}
 
 		// Literal replacement, so the bytes written are the bytes the policy
 		// gate checked (String.replace would expand `$&` etc. in newText).

@@ -124,6 +124,58 @@ describe("edit_file after a numbered read_file (#3375)", () => {
 		expect(fs.readFileSync(path.join(dir, file), "utf-8")).toBe(before);
 	});
 
+	test("newText pasted with the number prefix is refused, naming the prefix, and the file is untouched", async () => {
+		const file = writeLoadTs();
+		const before = fs.readFileSync(path.join(dir, file), "utf-8");
+		const out = (await executor.execute("edit_file", {
+			path: file,
+			oldText: "export const DEFAULT_TIMEOUT_MS = 5000;",
+			newText: "    16\texport const DEFAULT_TIMEOUT_MS = 8000;",
+		})) as string;
+		expect(out).toStartWith("Error:");
+		expect(out).toContain("newText");
+		expect(out).toContain("line-number prefix");
+		expect(fs.readFileSync(path.join(dir, file), "utf-8")).toBe(before);
+	});
+
+	test("multi-line newText with the prefix on every line is refused too", async () => {
+		const file = writeLoadTs();
+		const before = fs.readFileSync(path.join(dir, file), "utf-8");
+		const out = (await executor.execute("edit_file", {
+			path: file,
+			oldText: "export const DEFAULT_TIMEOUT_MS = 5000;\n// line 17",
+			newText: "    16\texport const DEFAULT_TIMEOUT_MS = 8000;\n    17\t// line 17",
+		})) as string;
+		expect(out).toStartWith("Error:");
+		expect(out).toContain("line-number prefix");
+		expect(fs.readFileSync(path.join(dir, file), "utf-8")).toBe(before);
+	});
+
+	test("newText with ordinary leading digits still edits", async () => {
+		const file = writeLoadTs();
+		for (const [oldText, newText] of [
+			["// line 1\n", "1. item\n"],
+			["// line 2\n", "2024 budget\n"],
+			["// line 3\n", "2024\tbudget\t12\n"], // a TSV row, not the 6-wide gutter
+		]) {
+			const out = await executor.execute("edit_file", { path: file, oldText, newText });
+			expect(out).toContain("File edited");
+		}
+		const disk = fs.readFileSync(path.join(dir, file), "utf-8").split("\n");
+		expect(disk.slice(0, 3)).toEqual(["1. item", "2024 budget", "2024\tbudget\t12"]);
+	});
+
+	test("a file that already holds gutter-shaped lines can still be edited with them", async () => {
+		fs.writeFileSync(path.join(dir, "fixture.txt"), "     1\talpha\n     2\tbeta\n");
+		const out = await executor.execute("edit_file", {
+			path: "fixture.txt",
+			oldText: "     2\tbeta",
+			newText: "     2\tgamma",
+		});
+		expect(out).toContain("File edited");
+		expect(fs.readFileSync(path.join(dir, "fixture.txt"), "utf-8")).toBe("     1\talpha\n     2\tgamma\n");
+	});
+
 	test("a plain miss keeps the plain error", async () => {
 		const file = writeLoadTs();
 		const out = (await executor.execute("edit_file", {
