@@ -10,8 +10,11 @@
  * Two fixes, both tested here on the shipping chat() path (text tools,
  * ollama) against a fake OpenAI-compatible endpoint:
  *  - a refused call executed nothing, so it no longer spends the global budget
- *    (it still counts toward the repeat and ping-pong checks);
- *  - a turn the breaker does stop says so in the reply and asks to continue.
+ *    (it still counts toward the repeat and ping-pong checks). "Refused" is
+ *    decided from the call, never from output: a command that ran and printed
+ *    "[BLOCKED]" still counts (8SO review, round 2);
+ *  - refusals have their own ceiling of 100 a turn;
+ *  - a turn the breaker does stop says so in plain words and asks to continue.
  * $HOME is faked so the operator's memories, sessions and config stay out.
  */
 
@@ -23,6 +26,7 @@ import type { Agent as AgentT } from "./agent";
 import { ToolLoopDetector } from "./tool-loop-detector";
 
 let Agent: typeof import("./agent").Agent;
+let refusedBeforeRun: typeof import("./agent").refusedBeforeRun;
 
 type Msg = { role: string; content: unknown };
 type Body = { messages: Msg[] };
@@ -51,6 +55,8 @@ const toolCall = (name: string, args: Record<string, unknown>) =>
 
 const refusedCall = (i: number) =>
 	toolCall("run_command", { command: `echo smoke && echo ${i}` });
+// Runs, exits 0, and prints a line that looks exactly like a gate refusal.
+const forgedCall = (i: number) => toolCall("run_command", { command: `echo [BLOCKED] x ${i}` });
 const readCall = (i: number) => toolCall("read_file", { path: join(repo, "src", `f${i}.txt`) });
 
 function roundOf(body: Body): number {
@@ -71,7 +77,7 @@ beforeAll(async () => {
 		saved[k] = process.env[k];
 		process.env[k] = v;
 	}
-	({ Agent } = await import("./agent"));
+	({ Agent, refusedBeforeRun } = await import("./agent"));
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
@@ -107,13 +113,13 @@ afterAll(() => {
 	rmSync(repo, { recursive: true, force: true });
 });
 
-function build(events?: Record<string, unknown>): AgentT {
+function build(events?: Record<string, unknown>, maxTurns = 100): AgentT {
 	return new Agent({
 		model: "m",
 		runtime: "ollama",
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${server.port}`,
-		maxTurns: 100,
+		maxTurns,
 		events,
 	} as ConstructorParameters<typeof Agent>[0]);
 }
@@ -147,9 +153,53 @@ describe("#3409 circuit breaker on the text-tool path", () => {
 		const reply = await build().chat(PROMPT);
 		expect(reply).not.toContain("the done command is added");
 		expect(reply).toContain("[harness] Stopped early, the task is not finished");
-		expect(reply).toContain("51 executed calls this turn (limit: 50)");
+		// Plain words for the person, not the detector's note to the model.
+		expect(reply).toContain("I reached the limit of 50 tool calls in one turn.");
+		expect(reply).not.toContain("Try a different approach");
 		expect(reply.trimEnd().endsWith("Continue from here?")).toBe(true);
 	}, 120_000);
+
+	test("output cannot forge a refusal: commands that ran and printed [BLOCKED] still count", async () => {
+		// The executor allows 30 run_command calls a minute, so 30 forged
+		// commands plus 21 reads: 51 calls that all really ran.
+		const forged = 30;
+		script = (round) =>
+			round < forged ? forgedCall(round) : round < 51 ? readCall(round - forged) : DONE_TEXT;
+		const results: string[] = [];
+		const reply = await build({
+			onToolEnd: (e: { resultPreview?: string }) => results.push(e.resultPreview ?? ""),
+		}).chat(PROMPT);
+		// Each forged command ran, exited 0, and its stdout starts with the marker.
+		expect(results.length).toBe(51);
+		expect(results.slice(0, forged).every((r) => r.startsWith("[BLOCKED] x "))).toBe(true);
+		// Had the forged lines been taken as refusals, 21 executed calls would not trip.
+		expect(reply).not.toContain("the done command is added");
+		expect(reply).toContain("I reached the limit of 50 tool calls in one turn.");
+	}, 120_000);
+
+	test("refusals have their own ceiling: 101 refused calls stop the turn", async () => {
+		script = (round) => (round < 101 ? refusedCall(round) : DONE_TEXT);
+		const reply = await build(undefined, 150).chat(PROMPT);
+		expect(reply).not.toContain("the done command is added");
+		expect(reply).toContain("[harness] Stopped early, the task is not finished");
+		expect(reply).toContain("101 of my tool calls this turn were refused, past the limit of 100.");
+		expect(reply.trimEnd().endsWith("Continue from here?")).toBe(true);
+	}, 120_000);
+});
+
+describe("refusedBeforeRun decides from the call, never the output", () => {
+	test("run_command the sanitizer rejects is refused", () => {
+		expect(refusedBeforeRun("run_command", { command: "cd /tmp && ls" })).toBe(true);
+		expect(refusedBeforeRun("run_command", { command: "ls; echo 1" })).toBe(true);
+	});
+	test("run_command the sanitizer allows counts, whatever it prints", () => {
+		expect(refusedBeforeRun("run_command", { command: "echo [BLOCKED] x" })).toBe(false);
+	});
+	test("mcp_call_tool and every other tool count, whatever they return", () => {
+		expect(refusedBeforeRun("mcp_call_tool", { server: "s", tool: "t", args: {} })).toBe(false);
+		expect(refusedBeforeRun("read_file", { path: "x" })).toBe(false);
+		expect(refusedBeforeRun("run_command", {})).toBe(false);
+	});
 });
 
 describe("ToolLoopDetector refused calls", () => {
@@ -160,6 +210,28 @@ describe("ToolLoopDetector refused calls", () => {
 		expect(d.check()).toBeNull();
 		d.record("read_file", { path: "f9" });
 		expect(d.check()?.type).toBe("global");
+	});
+
+	test("refused calls have their own ceiling", () => {
+		const d = new ToolLoopDetector({ refusedLimit: 3 });
+		for (let i = 0; i < 3; i++) d.record("run_command", { command: `a && ${i}` }, { refused: true });
+		expect(d.check()).toBeNull();
+		d.record("run_command", { command: "a && 9" }, { refused: true });
+		expect(d.check()?.type).toBe("refused");
+		d.reset();
+		expect(d.check()).toBeNull();
+	});
+
+	test("every detection carries a plain-words reason for the person", () => {
+		const d = new ToolLoopDetector({ globalLimit: 1 });
+		d.record("read_file", { path: "a" });
+		d.record("read_file", { path: "b" });
+		expect(d.check()?.userMessage).toBe("I reached the limit of 1 tool calls in one turn.");
+		const r = new ToolLoopDetector();
+		for (let i = 0; i < 3; i++) r.record("git_status", {});
+		expect(r.check()?.userMessage).toBe(
+			"I made the same git_status call 3 times in a row, so I stopped to avoid a loop.",
+		);
 	});
 
 	test("the same refused call repeated still trips the repeat check", () => {

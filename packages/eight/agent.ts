@@ -144,7 +144,23 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
-import { blockReason } from "../ai/text-tool-loop";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+
+/**
+ * Did the harness refuse this call before it ran (#3409)? Decided from the
+ * call itself, never from the tool's output: a command that ran can print
+ * "[BLOCKED] x" and an MCP server can return any text, so an output marker
+ * would let executed calls slip out of the circuit breaker's budget. Only
+ * run_command has a refusal decidable from its input: the shell sanitizer is
+ * a pure function of the command string, and both tool paths run it before
+ * executing anything (ToolExecutor.runCommand, packages/ai/tools.ts
+ * runCommand). Every other refusal still counts as a call, as before #3409.
+ */
+export function refusedBeforeRun(toolName: string, args: Record<string, unknown>): boolean {
+	if (toolName !== "run_command") return false;
+	const command = args.command;
+	return typeof command === "string" && !sanitizeShellCommand(command).safe;
+}
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -746,12 +762,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.turnToolLedger.push({ name: toolName, args, success, result: result.slice(0, 500) });
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
-				// A gate refusal ran nothing, so it does not spend the global budget (#3409).
-				this.loopDetector.record(toolName, args, { refused: blockReason(result) !== null });
+				// A call refused before it ran does not spend the global budget (#3409).
+				this.loopDetector.record(toolName, args, { refused: refusedBeforeRun(toolName, args) });
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
-					if (breakerStop === null) breakerStop = loopResult.message;
+					if (breakerStop === null) breakerStop = loopResult.userMessage;
 					this.abort();
 				}
 
@@ -1596,7 +1612,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Circuit breaker: record call and check for loop patterns
 				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
-					refused: blockReason(resultStr) !== null,
+					refused: refusedBeforeRun(event.toolName, event.args as Record<string, unknown>),
 				});
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
