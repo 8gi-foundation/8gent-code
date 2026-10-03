@@ -40,6 +40,10 @@ describe("settings store path follows $HOME (#3391)", () => {
 
 	test("saveSettings writes under HOME and loadSettings reads it back", () => {
 		const file = path.join(home, ".8gent", "settings.json");
+		// Guard first: if the store ever regresses to a path outside this temp
+		// HOME (under bun test that is the real home), abort here, before any
+		// load or save can touch the real settings file.
+		expect(getSettingsFilePath()).toBe(file);
 		expect(existsSync(file)).toBe(false);
 		expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -56,6 +60,7 @@ describe("settings store path follows $HOME (#3391)", () => {
 		try {
 			process.env.EIGHT_HOME = other;
 			expect(getSettingsFilePath()).toBe(path.join(other, ".8gent", "settings.json"));
+			expect(getSettingsFilePath().startsWith(home + path.sep)).toBe(false);
 		} finally {
 			rmSync(other, { recursive: true, force: true });
 		}
