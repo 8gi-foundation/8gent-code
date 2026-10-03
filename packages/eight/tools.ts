@@ -147,7 +147,7 @@ import {
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { ArtifactStore } from "./artifact-store";
-import { CommitGate, isGitCommit } from "./commit-gate";
+import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -1575,8 +1575,9 @@ export class ToolExecutor {
 				const command = args.command as string;
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
-				return isGitCommit(command) && sanitizeShellCommand(command).safe
-					? this.gatedCommit(run)
+				const target = parseGitCommit(command);
+				return target && sanitizeShellCommand(command).safe
+					? this.gatedCommit(run, target)
 					: run();
 			}
 
@@ -2222,8 +2223,11 @@ export class ToolExecutor {
 	// ============================================
 
 	/** Commit only past the test-suite gate (#3402); its note, if any, leads the result. */
-	private async gatedCommit(commit: () => Promise<string>): Promise<string> {
-		const gate = await this.commitGate.check();
+	private async gatedCommit(
+		commit: () => Promise<string>,
+		target?: CommitTarget,
+	): Promise<string> {
+		const gate = await this.commitGate.check(target);
 		if (!gate.commit) return gate.message;
 		const out = await commit();
 		return gate.note ? `${gate.note}\n${out}` : out;

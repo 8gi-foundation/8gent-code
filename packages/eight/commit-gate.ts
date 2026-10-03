@@ -11,15 +11,21 @@
  *
  * Rules, all deterministic:
  *   - No package.json test script (or npm's "no test specified" stub): commit as before.
- *   - Clean tree, or only docs changed (.md, .mdx, .txt, docs/): commit as before.
+ *   - Clean tree, or only docs changed (.md or .mdx files, LICENSE, NOTICE): commit as before.
  *   - Tree unchanged since a green run this session: commit without running again.
  *   - Red: refuse, return the first failing line and the end of the output. The same
  *     unchanged tree reuses that result without rerunning. After MAX_BLOCKS refusals on
  *     one unchanged tree the commit goes through, marked as committed red, so a suite
  *     that was already failing cannot trap the agent in a loop.
- *   - The suite does not finish in time, the runner cannot start (exit 126 or 127, such
- *     as no bun, yarn or pnpm on PATH), or a gate stops it: commit, and say the suite
- *     was not verified. The gate never blocks on something it could not measure.
+ *   - Red means any failing exit, including a suite killed by a signal (`Exit code null`)
+ *     and an exit 126/127 with no "not found" or "cannot execute" line. Only output the
+ *     gate recognises as a clean run is recorded green.
+ *   - The suite does not finish in time, the runner cannot start (exit 126 or 127 with
+ *     a "not found" or "cannot execute" line, such as no bun, yarn or pnpm on PATH), a
+ *     gate stops it, or the commit targets another directory or git dir (`git -C`,
+ *     `--work-tree`, `--git-dir`): commit, and say it was not verified.
+ *   - Green, but tracked files have unstaged changes: the suite saw the working tree, not
+ *     what the commit holds, so the commit says it is not fully verified.
  *   - EIGHT_COMMIT_GATE=0 turns it off. EIGHT_COMMIT_GATE_TIMEOUT_SEC bounds one run
  *     (default 120, at most 300, run_command's own cap).
  */
@@ -28,6 +34,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { firstFailure } from "../orchestration/verify-scope";
+import { scrub } from "./secret-scanner";
 
 /** Runs one command through the agent's own gated run_command and returns its output. */
 export type GatedRun = (command: string, timeoutSec: number) => Promise<string>;
@@ -46,9 +53,119 @@ export function commitGateTimeoutSec(): number {
 	return Number.isFinite(n) && n > 0 ? Math.min(n, 300) : 120;
 }
 
-/** True for a shell command that makes a commit: `git commit ...`, `git -c k=v commit ...`. */
+/** A commit found in a shell command: whether it commits every tracked change, and the directories it names. */
+export type CommitTarget = {
+	/** `-a` / `--all`: the commit takes the working tree's tracked changes, not only the index. */
+	all: boolean;
+	/** The tree after `-C` and `--work-tree`, relative to the working directory ("." when unchanged). */
+	dir: string;
+	/** `--git-dir` was given: the index lives somewhere else. */
+	gitDir: boolean;
+};
+
+/** Split a shell command into simple commands of words, honouring quotes and backslashes. */
+function shellSegments(command: string): string[][] {
+	const segments: string[][] = [];
+	let words: string[] = [];
+	let word = "";
+	let inWord = false;
+	let quote: "'" | '"' | null = null;
+	const endWord = () => {
+		if (inWord) words.push(word);
+		word = "";
+		inWord = false;
+	};
+	const endSegment = () => {
+		endWord();
+		if (words.length) segments.push(words);
+		words = [];
+	};
+	for (let i = 0; i < command.length; i++) {
+		const c = command[i];
+		if (quote === "'") {
+			if (c === "'") quote = null;
+			else word += c;
+		} else if (quote === '"') {
+			if (c === '"') quote = null;
+			else if (c === "\\" && i + 1 < command.length && '"\\$`'.includes(command[i + 1]))
+				word += command[++i];
+			else word += c;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+			inWord = true;
+		} else if (c === "\\" && i + 1 < command.length) {
+			if (command[i + 1] !== "\n") word += command[i + 1];
+			i++;
+			inWord = true;
+		} else if (c === " " || c === "\t") endWord();
+		else if (c === "\n" || c === ";" || c === "&" || c === "|" || c === "(" || c === ")")
+			endSegment();
+		else {
+			word += c;
+			inWord = true;
+		}
+	}
+	endSegment();
+	return segments;
+}
+
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "builtin"]);
+/** git's global options that take their value as the next word. */
+const GIT_VALUE_OPTS = new Set([
+	"-C",
+	"-c",
+	"--git-dir",
+	"--work-tree",
+	"--namespace",
+	"--config-env",
+	"--super-prefix",
+	"--exec-path",
+]);
+
+function commitInWords(words: string[]): CommitTarget | null {
+	let i = 0;
+	// Leading NAME=value assignments and env/command-style wrappers (with env's own flags).
+	for (;;) {
+		const w = words[i];
+		if (w === undefined) return null;
+		if (ASSIGNMENT.test(w)) i++;
+		else if (WRAPPERS.has(w)) {
+			i++;
+			while (words[i]?.startsWith("-")) i += words[i] === "-u" ? 2 : 1;
+		} else break;
+	}
+	const exe = words[i++];
+	if (exe !== "git" && !exe?.endsWith("/git")) return null;
+	let dir = ".";
+	let gitDir = false;
+	for (; i < words.length; i++) {
+		const w = words[i];
+		if (!w.startsWith("-")) break;
+		const eq = w.indexOf("=");
+		const name = w.startsWith("--") && eq > 0 ? w.slice(0, eq) : w;
+		const value = name !== w ? w.slice(eq + 1) : GIT_VALUE_OPTS.has(w) ? words[++i] : undefined;
+		if (name === "-C" || name === "--work-tree") dir = path.join(dir, value ?? "");
+		if (name === "--git-dir") gitDir = true;
+	}
+	if (words[i] !== "commit") return null;
+	const rest = words.slice(i + 1);
+	const all = rest.some((w) => w === "--all" || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
+	return { all, dir: path.normalize(dir), gitDir };
+}
+
+/** The commit a shell command makes, or null when it makes none. */
+export function parseGitCommit(command: string): CommitTarget | null {
+	for (const words of shellSegments(command)) {
+		const target = commitInWords(words);
+		if (target) return target;
+	}
+	return null;
+}
+
+/** True for a shell command that makes a commit. */
 export function isGitCommit(command: string): boolean {
-	return /^\s*git(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+commit(?:\s|$)/.test(command);
+	return parseGitCommit(command) !== null;
 }
 
 /** The command that runs this repo's test script, or null when it has none. */
@@ -70,7 +187,14 @@ export function detectTestCommand(cwd: string): string | null {
 	return "npm test";
 }
 
-const DOCS_ONLY = (p: string) => /\.(md|mdx|txt)$/i.test(p) || p.startsWith("docs/");
+// Prose only. A .txt file can be a test fixture and docs/ can hold code, so neither counts.
+const DOCS_ONLY = (p: string) =>
+	/\.(md|mdx)$/i.test(p) || /^(LICENSE|NOTICE)(\.txt)?$/i.test(path.basename(p));
+
+/** Tracked files with changes that are not staged. */
+function hasUnstaged(cwd: string): boolean {
+	return Bun.spawnSync(["git", "diff", "--quiet"], { cwd }).exitCode === 1;
+}
 
 /**
  * A hash of every changed or untracked path (ignored files excluded) and its content on
@@ -120,15 +244,23 @@ export class CommitGate {
 		private readonly run: GatedRun,
 	) {}
 
-	async check(): Promise<GateDecision> {
+	/** `target` is the commit a run_command makes; git_commit passes none. */
+	async check(target?: CommitTarget): Promise<GateDecision> {
 		if (!commitGateEnabled()) return { commit: true };
+		if (target && (target.dir !== "." || target.gitDir)) {
+			const where = target.gitDir ? "another git dir" : `\`${target.dir}\``;
+			return {
+				commit: true,
+				note: `[COMMIT GATE] This commit targets ${where}, not the working directory, so the test suite was not run for it and the commit is not verified.`,
+			};
+		}
 		const testCommand = detectTestCommand(this.cwd);
 		if (!testCommand) return { commit: true };
 		const tree = treeFingerprint(this.cwd);
 		if (!tree) return { commit: true };
 
 		const last = this.last?.tree === tree ? this.last : undefined;
-		if (last?.result === "green") return { commit: true };
+		if (last?.result === "green") return this.green(target);
 		if (last?.result === "red") {
 			if (last.blocks >= MAX_BLOCKS) {
 				return {
@@ -143,27 +275,28 @@ export class CommitGate {
 		const timeoutSec = commitGateTimeoutSec();
 		const output = await this.run(testCommand, timeoutSec);
 		const text = output.trimStart();
+		const unverified = (why: string): GateDecision => ({
+			commit: true,
+			note: `[COMMIT GATE] \`${testCommand}\` ${why}, so this commit is not verified by the test suite.`,
+		});
 
-		const exit = /^Exit code (-?\d+):/.exec(text);
-		// 126/127: the shell could not start the runner or a binary the script calls
-		// (no bun, yarn or pnpm on PATH). No test ran, so this is not a red suite.
-		if (exit && (exit[1] === "126" || exit[1] === "127")) {
-			const body = text.replace(/^Exit code -?\d+:\n?/, "");
-			const line =
-				body
-					.split("\n")
-					.map((l) => l.trim())
-					.find((l) => /not found|cannot execute|permission denied/i.test(l)) ?? `exit ${exit[1]}`;
-			return {
-				commit: true,
-				note: `[COMMIT GATE] \`${testCommand}\` could not run (${line.slice(0, 200)}), so this commit is not verified by the test suite.`,
-			};
-		}
+		// `Exit code null` is a suite killed by a signal: a crash, so red.
+		const exit = /^Exit code (-?\d+|null):\n?/.exec(text);
 		if (exit) {
-			const body = text.replace(/^Exit code -?\d+:\n?/, "");
+			// Scrub before any cut, so no secret survives as a fragment the scanner misses.
+			const body = scrub(text.slice(exit[0].length)).scrubbed;
+			// 126/127 with the shell saying so: the runner, or a binary the script calls,
+			// could not start. No test ran. Without that line it is an ordinary failure.
+			const cannotStart = body
+				.split("\n")
+				.map((l) => l.trim())
+				.find((l) => /not found|cannot execute/i.test(l));
+			if ((exit[1] === "126" || exit[1] === "127") && cannotStart)
+				return unverified(`could not run (${cannotStart.slice(0, 200)})`);
 			const tail = body.length > TAIL_CHARS ? `...\n${body.slice(-TAIL_CHARS)}` : body;
+			const how = exit[1] === "null" ? "was killed before it finished" : "fails";
 			const message = [
-				`[COMMIT BLOCKED] Not committed: \`${testCommand}\` fails. Fix the failing tests, run \`${testCommand}\` until it passes, then commit again.`,
+				`[COMMIT BLOCKED] Not committed: \`${testCommand}\` ${how}. Fix the failing tests, run \`${testCommand}\` until it passes, then commit again.`,
 				`First failure: ${firstFailure(body)}`,
 				"",
 				tail.trimEnd(),
@@ -171,20 +304,21 @@ export class CommitGate {
 			this.last = { tree, result: "red", message, blocks: 1 };
 			return { commit: false, message };
 		}
-		if (text.startsWith("TIMEOUT after")) {
-			return {
-				commit: true,
-				note: `[COMMIT GATE] \`${testCommand}\` did not finish in ${timeoutSec}s, so this commit is not verified by the test suite.`,
-			};
-		}
-		if (/^\[[A-Z0-9 -]*(BLOCKED|DENIED)[A-Z0-9 -]*\]/.test(text) || text.startsWith("Error:")) {
-			const first = text.split("\n")[0].slice(0, 200);
-			return {
-				commit: true,
-				note: `[COMMIT GATE] \`${testCommand}\` could not run (${first}), so this commit is not verified by the test suite.`,
-			};
+		if (text.startsWith("TIMEOUT after")) return unverified(`did not finish in ${timeoutSec}s`);
+		// A gate marker, an error, or nothing at all: the gate cannot call it a clean run.
+		if (!text || text.startsWith("[") || text.startsWith("Error")) {
+			const first = scrub(text.split("\n")[0] || "no output").scrubbed.slice(0, 200);
+			return unverified(`could not run (${first})`);
 		}
 		this.last = { tree, result: "green", blocks: 0 };
-		return { commit: true };
+		return this.green(target);
+	}
+
+	private green(target?: CommitTarget): GateDecision {
+		if (target?.all || !hasUnstaged(this.cwd)) return { commit: true };
+		return {
+			commit: true,
+			note: "[COMMIT GATE] The suite passed on the working tree, but some changes are not staged, so what this commit holds is not verified. Stage everything you mean to commit, or say so in your summary.",
+		};
 	}
 }

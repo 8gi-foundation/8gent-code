@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { isGitCommit } from "./commit-gate";
+import { formatCommandOutput } from "./command-output";
+import { CommitGate, isGitCommit, parseGitCommit } from "./commit-gate";
 import { isErrorToolResult } from "./honesty";
 import { ToolExecutor } from "./tools";
 
@@ -58,6 +59,11 @@ function repo(pkg: Record<string, unknown> | null) {
 	write("test/base.test.ts", PASS);
 	git("add", ".");
 	git("commit", "-q", "-m", "fixture");
+	freshExecutor();
+}
+
+/** A new executor: a new session, with no remembered gate result. */
+function freshExecutor() {
 	ex = new ToolExecutor(dir, "commit-gate-test");
 	const pm = (ex as unknown as { permissionManager: { checkPermission: () => string } })
 		.permissionManager;
@@ -221,6 +227,139 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		}
 	}, 30_000);
 
+	test("a suite killed by a signal (Exit code null) is red, never cached green", async () => {
+		repo(BUN_PKG);
+		write("test/cli.test.ts", FAIL);
+		git("add", ".");
+		let calls = 0;
+		const gate = new CommitGate(dir, async () => {
+			calls++;
+			return formatCommandOutput(null, "", "Segmentation fault");
+		});
+		const a = await gate.check();
+		expect(a.commit).toBe(false);
+		if (!a.commit)
+			expect(a.message).toStartWith("[COMMIT BLOCKED] Not committed: `bun run test` was killed");
+		const b = await gate.check();
+		expect(b.commit).toBe(false);
+		expect(calls).toBe(1);
+	}, 30_000);
+
+	test("a test script killed by a signal blocks the commit end to end", async () => {
+		repo({ name: "t", private: true, scripts: { test: "bun test; kill -9 $$" } });
+		write("bun.lock", "");
+		write("test/cli.test.ts", FAIL);
+		await ex.execute("git_add", { files: "." });
+		const out = await ex.execute("git_commit", { message: "x" });
+		expect(out).toStartWith("[COMMIT BLOCKED]");
+		expect(commits()).toBe(1);
+	}, 30_000);
+
+	test("output the gate does not recognise is unverified, not green", async () => {
+		repo(BUN_PKG);
+		write("test/more.test.ts", PASS);
+		git("add", ".");
+		for (const out of ["", "[SOMETHING ELSE] odd", "Error: spawn failed"]) {
+			const d = await new CommitGate(dir, async () => out).check();
+			expect(d.commit).toBe(true);
+			if (d.commit) expect(d.note).toContain("so this commit is not verified by the test suite.");
+		}
+	}, 30_000);
+
+	test("exit 127 with no not-found line is red (`|| exit 127`)", async () => {
+		repo({ name: "t", private: true, scripts: { test: "bun test || exit 127" } });
+		write("bun.lock", "");
+		write("test/cli.test.ts", FAIL);
+		await ex.execute("git_add", { files: "." });
+		const out = await ex.execute("git_commit", { message: "x" });
+		expect(out).toStartWith("[COMMIT BLOCKED] Not committed: `bun run test` fails.");
+		expect(commits()).toBe(1);
+	}, 30_000);
+
+	test("secrets are scrubbed before the tail is cut, so no fragment survives", async () => {
+		repo(BUN_PKG);
+		write("test/more.test.ts", PASS);
+		git("add", ".");
+		const token = `ghp_${"A1b2C3d4E5".repeat(3)}xyzXYZ`;
+		// Put the token across the 4000-character cut.
+		const body = `${"x".repeat(100)}\n${token}\n${"y".repeat(3990)}`;
+		const d = await new CommitGate(dir, async () => formatCommandOutput(1, body, "")).check();
+		expect(d.commit).toBe(false);
+		if (!d.commit) {
+			expect(d.message).not.toContain(token.slice(-20));
+			expect(d.message).not.toContain(token.slice(0, 12));
+		}
+		const first = await new CommitGate(dir, async () =>
+			formatCommandOutput(1, `(fail) leaked ${token}`, ""),
+		).check();
+		if (!first.commit) expect(first.message).not.toContain(token);
+		const notFound = await new CommitGate(dir, async () =>
+			formatCommandOutput(127, `sh: ${token}: command not found`, ""),
+		).check();
+		expect(notFound.commit).toBe(true);
+		if (notFound.commit) {
+			expect(notFound.note).toContain("[REDACTED:github_token]");
+			expect(notFound.note).not.toContain(token);
+		}
+	}, 30_000);
+
+	test("env-prefixed and quoted-option commits through run_command are gated", async () => {
+		repo(BUN_PKG);
+		write("test/cli.test.ts", FAIL);
+		await ex.execute("git_add", { files: "." });
+		for (const command of [
+			"GIT_AUTHOR_NAME=x git commit -m feat",
+			'git -c "user.name=a b" commit -m feat',
+			"env git commit -m feat",
+			"/usr/bin/git commit -m feat",
+		]) {
+			// A fresh session each time, so no attempt reuses another's refusal count.
+			freshExecutor();
+			const out = await ex.execute("run_command", { command });
+			expect(out).toStartWith("[COMMIT BLOCKED]");
+		}
+		expect(commits()).toBe(1);
+	}, 30_000);
+
+	test("`git -C <dir> commit` is not verified against the wrong tree", async () => {
+		repo(BUN_PKG);
+		mkdirSync(join(dir, "sub"));
+		git("init", "-q", "-b", "main", "sub");
+		write("sub/a.txt", "a\n");
+		Bun.spawnSync(["git", "-C", "sub", "add", "."], { cwd: dir });
+		write("test/cli.test.ts", FAIL);
+		const out = await ex.execute("run_command", {
+			command: "git -C sub -c user.name=t -c user.email=t@example.com commit -m x",
+		});
+		expect(out).toStartWith(
+			"[COMMIT GATE] This commit targets `sub`, not the working directory, so the test suite was not run for it",
+		);
+		expect(runs()).toBe(0);
+	}, 30_000);
+
+	test("green on the working tree with unstaged changes says what the commit holds is not verified", async () => {
+		repo(BUN_PKG);
+		write("test/b.test.ts", FAIL);
+		git("add", ".");
+		write("test/b.test.ts", PASS);
+		const out = await ex.execute("git_commit", { message: "x" });
+		expect(out).toStartWith(
+			"[COMMIT GATE] The suite passed on the working tree, but some changes are not staged",
+		);
+		expect(commits()).toBe(2);
+	}, 30_000);
+
+	test("a .txt test fixture or code under docs/ still runs the suite", async () => {
+		for (const file of ["test/fixtures/expected.txt", "docs/gen.ts"]) {
+			repo(BUN_PKG);
+			write(file, "x\n");
+			await ex.execute("git_add", { files: "." });
+			await ex.execute("git_commit", { message: "x" });
+			expect(runs()).toBe(1);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
 	test("only docs changed: no suite run", async () => {
 		repo(BUN_PKG);
 		write("README.md", "# t\n");
@@ -243,14 +382,43 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 	}, 30_000);
 });
 
-describe("isGitCommit", () => {
-	test("matches commits, not other git commands", () => {
-		expect(isGitCommit('git commit -m "x"')).toBe(true);
-		expect(isGitCommit("git -c user.name=a commit --amend")).toBe(true);
-		expect(isGitCommit("git -C sub commit")).toBe(true);
-		expect(isGitCommit("git commit")).toBe(true);
-		expect(isGitCommit("git log --grep commit")).toBe(false);
-		expect(isGitCommit("git commit-tree abc")).toBe(false);
-		expect(isGitCommit("echo git commit")).toBe(false);
+describe("parseGitCommit", () => {
+	const rows: Array<[string, { all: boolean; dir: string; gitDir: boolean } | null]> = [
+		['git commit -m "x"', { all: false, dir: ".", gitDir: false }],
+		["git commit", { all: false, dir: ".", gitDir: false }],
+		["git -c user.name=a commit --amend", { all: false, dir: ".", gitDir: false }],
+		["VAR=x git commit -m x", { all: false, dir: ".", gitDir: false }],
+		[
+			"GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL=b git commit -m x",
+			{ all: false, dir: ".", gitDir: false },
+		],
+		["env git commit -m x", { all: false, dir: ".", gitDir: false }],
+		["env -u HOME A=1 git commit -m x", { all: false, dir: ".", gitDir: false }],
+		["command git commit -m x", { all: false, dir: ".", gitDir: false }],
+		["/usr/bin/git commit -m x", { all: false, dir: ".", gitDir: false }],
+		['git -c "k=v w" commit -m x', { all: false, dir: ".", gitDir: false }],
+		["git -c 'k=v w' commit -m x", { all: false, dir: ".", gitDir: false }],
+		["git -p commit -m x", { all: false, dir: ".", gitDir: false }],
+		["git --no-pager commit -m x", { all: false, dir: ".", gitDir: false }],
+		["git --work-tree . commit -m x", { all: false, dir: ".", gitDir: false }],
+		["git -C sub commit -m x", { all: false, dir: "sub", gitDir: false }],
+		["git -C a -C b commit", { all: false, dir: "a/b", gitDir: false }],
+		["git -C . commit", { all: false, dir: ".", gitDir: false }],
+		["git --work-tree=other commit", { all: false, dir: "other", gitDir: false }],
+		["git --git-dir ../x/.git commit", { all: false, dir: ".", gitDir: true }],
+		["git commit -am x", { all: true, dir: ".", gitDir: false }],
+		["git commit --all -m x", { all: true, dir: ".", gitDir: false }],
+		["git commit --amend -m x", { all: false, dir: ".", gitDir: false }],
+		["git add -A\ngit commit -m x", { all: false, dir: ".", gitDir: false }],
+		["git log --grep commit", null],
+		["git commit-tree abc", null],
+		["echo git commit", null],
+		['echo "git commit"', null],
+		["gitx commit", null],
+		["git status", null],
+	];
+	test.each(rows)("%p", (command, expected) => {
+		expect(parseGitCommit(command)).toEqual(expected);
+		expect(isGitCommit(command)).toBe(expected !== null);
 	});
 });
