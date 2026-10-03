@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - `run_command` keeps stderr and the end of long output (#3373)
+- `run_command` now returns stderr on a successful exit too, labelled `[stderr]`. Output over 14 KB keeps the first 2 KB and the last 12 KB, and secrets are scrubbed before the cut.
+
 ### Added - 8DK, the 8gent Device Kit (#3362)
 - New `packages/8dk` (`@8gent/8dk`) gives a vessel a device of any kind. A device declares typed capabilities (sensors read, actuators act) with `defineDevice()`. Pairing needs the person's yes: they compare a 6-digit code shown on the device, see every capability, and choose which to grant; nothing is granted by default. The registry keeps only a SHA-256 of the device token, and a device whose manifest changes must pair again. `DeviceToolAdapter` turns each granted capability into an agent tool in the `tools.ts` shape (`device__<device>__<capability>`); ungranted ones are not listed and are denied by name. Every call goes through `evaluatePolicy("device_use")`, so YAML `block` and `require_approval` rules apply on top of the grant, and capabilities marked `confirm` ask on every call. Frames for the daemon WebSocket (`device:hello`, `device:invoke`, `device:result` and the rest) and a call correlator with timeouts are included. Revoking or unpairing takes effect on the next call. `packages/8dk/__tests__/e2e.test.ts` pairs a fake lamp, shows its tool denied before the grant, reaching the lamp and returning after it, and denied again after revocation. Not yet wired: the daemon `/device` route, BODY rail rows, saving pairings to `~/.8gent/devices/`, and decision-audit entries. Concept studied from Meta's Muse Gadget SDK (Apache 2.0); no code copied.
 - `device_use` is a policy action, and shadow (hedge) candidates are hard denied it, so a losing candidate can never touch a device.
