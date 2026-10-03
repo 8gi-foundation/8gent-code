@@ -17,7 +17,8 @@
  *     unchanged tree reuses that result without rerunning. After MAX_BLOCKS refusals on
  *     one unchanged tree the commit goes through, marked as committed red, so a suite
  *     that was already failing cannot trap the agent in a loop.
- *   - The suite does not finish in time, or a gate stops it: commit, and say the suite
+ *   - The suite does not finish in time, the runner cannot start (exit 126 or 127, such
+ *     as no bun, yarn or pnpm on PATH), or a gate stops it: commit, and say the suite
  *     was not verified. The gate never blocks on something it could not measure.
  *   - EIGHT_COMMIT_GATE=0 turns it off. EIGHT_COMMIT_GATE_TIMEOUT_SEC bounds one run
  *     (default 120, at most 300, run_command's own cap).
@@ -143,7 +144,22 @@ export class CommitGate {
 		const output = await this.run(testCommand, timeoutSec);
 		const text = output.trimStart();
 
-		if (/^Exit code -?\d+:/.test(text)) {
+		const exit = /^Exit code (-?\d+):/.exec(text);
+		// 126/127: the shell could not start the runner or a binary the script calls
+		// (no bun, yarn or pnpm on PATH). No test ran, so this is not a red suite.
+		if (exit && (exit[1] === "126" || exit[1] === "127")) {
+			const body = text.replace(/^Exit code -?\d+:\n?/, "");
+			const line =
+				body
+					.split("\n")
+					.map((l) => l.trim())
+					.find((l) => /not found|cannot execute|permission denied/i.test(l)) ?? `exit ${exit[1]}`;
+			return {
+				commit: true,
+				note: `[COMMIT GATE] \`${testCommand}\` could not run (${line.slice(0, 200)}), so this commit is not verified by the test suite.`,
+			};
+		}
+		if (exit) {
 			const body = text.replace(/^Exit code -?\d+:\n?/, "");
 			const tail = body.length > TAIL_CHARS ? `...\n${body.slice(-TAIL_CHARS)}` : body;
 			const message = [

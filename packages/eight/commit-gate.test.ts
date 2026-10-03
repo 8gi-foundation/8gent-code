@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isGitCommit } from "./commit-gate";
 import { isErrorToolResult } from "./honesty";
 import { ToolExecutor } from "./tools";
@@ -19,11 +19,19 @@ const FAIL =
 	'import { expect, test } from "bun:test";\ntest("cli prints", async () => {\n\tconst out = await $`echo hi`.text();\n\texpect(out).toBe("hi\\n");\n});\n';
 // Counts suite runs in .git/, which git status never sees, so counting does not change the tree.
 const COUNT =
-	'import { appendFileSync } from "node:fs";\nappendFileSync(".git/gate-runs", "x");\nconst r = Bun.spawnSync(["bun", "test"], { stdout: "inherit", stderr: "inherit" });\nprocess.exit(r.exitCode ?? 1);\n';
+	'import { appendFileSync } from "node:fs";\nappendFileSync(".git/gate-runs", "x");\nconst r = Bun.spawnSync([process.execPath, "test"], { stdout: "inherit", stderr: "inherit" });\nprocess.exit(r.exitCode ?? 1);\n';
 
 let dir: string;
 let ex: ToolExecutor;
-const saved = { gate: process.env.EIGHT_COMMIT_GATE, t: process.env.EIGHT_COMMIT_GATE_TIMEOUT_SEC };
+const saved = {
+	gate: process.env.EIGHT_COMMIT_GATE,
+	t: process.env.EIGHT_COMMIT_GATE_TIMEOUT_SEC,
+	path: process.env.PATH,
+};
+// The bun running these tests, first on PATH, so the suite runs the same whatever the shell's PATH is.
+const BUN_FIRST_PATH = `${dirname(process.execPath)}:${saved.path ?? "/usr/bin:/bin"}`;
+// A PATH with no bun, yarn or pnpm on it.
+const NO_RUNNER_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 function git(...args: string[]): string {
 	const r = Bun.spawnSync(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" });
@@ -61,11 +69,13 @@ const BUN_PKG = { name: "t", private: true, scripts: { test: "bun ./count.ts" } 
 beforeEach(() => {
 	delete process.env.EIGHT_COMMIT_GATE;
 	delete process.env.EIGHT_COMMIT_GATE_TIMEOUT_SEC;
+	process.env.PATH = BUN_FIRST_PATH;
 });
 afterEach(() => {
 	for (const [k, v] of [
 		["EIGHT_COMMIT_GATE", saved.gate],
 		["EIGHT_COMMIT_GATE_TIMEOUT_SEC", saved.t],
+		["PATH", saved.path],
 	] as const) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
@@ -171,6 +181,44 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(Date.now() - started).toBeLessThan(10_000);
 		expect(out).toContain("[COMMIT GATE] `bun run test` did not finish in 1s");
 		expect(commits()).toBe(2);
+	}, 30_000);
+
+	test("a test script that calls a missing binary: commits, unverified, never refused", async () => {
+		repo({ name: "t", private: true, scripts: { test: "nosuchbin-3402" } });
+		write("bun.lock", "");
+		write("test/cli.test.ts", FAIL);
+		await ex.execute("git_add", { files: "." });
+		const out = await ex.execute("git_commit", { message: "x" });
+		expect(out).toStartWith("[COMMIT GATE] `bun run test` could not run (");
+		expect(out).toContain("not found");
+		expect(out).toContain("so this commit is not verified by the test suite.");
+		expect(out).not.toContain("COMMIT BLOCKED");
+		expect(isErrorToolResult(out)).toBe(false);
+		expect(commits()).toBe(2);
+		expect(out).toContain("nosuchbin-3402");
+	}, 30_000);
+
+	test("the runner itself is not on PATH (bun, or yarn for a yarn.lock): commits, unverified", async () => {
+		const cases = [
+			{ lock: "bun.lock", script: "bun ./count.ts", runner: "bun run test" },
+			{ lock: "yarn.lock", script: "jest", runner: "yarn test" },
+		];
+		for (const { lock, script, runner } of cases) {
+			repo({ name: "t", private: true, scripts: { test: script } });
+			write(lock, "");
+			git("add", lock);
+			git("commit", "-q", "-m", "lock");
+			write("test/cli.test.ts", FAIL);
+			await ex.execute("git_add", { files: "." });
+			process.env.PATH = NO_RUNNER_PATH;
+			const out = await ex.execute("git_commit", { message: "x" });
+			process.env.PATH = BUN_FIRST_PATH;
+			expect(out).toStartWith(`[COMMIT GATE] \`${runner}\` could not run (`);
+			expect(out).toContain("command not found");
+			expect(commits()).toBe(3);
+			expect(runs()).toBe(0);
+			rmSync(dir, { recursive: true, force: true });
+		}
 	}, 30_000);
 
 	test("only docs changed: no suite run", async () => {
