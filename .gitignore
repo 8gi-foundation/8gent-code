@@ -135,3 +135,6 @@ celtic_hero_standalone.html
 
 # Linux packaging staging file (built by scripts/package-linux.sh)
 packaging/linux/staged-8gent
+
+# Failure ledger (#3420), written only with EIGHT_FAILURE_LEDGER=1
+benchmarks/autoresearch/failure-ledger.jsonl
