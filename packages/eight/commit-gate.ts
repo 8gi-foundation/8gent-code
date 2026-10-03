@@ -25,7 +25,9 @@
  *     gate stops it, or the commit targets another repository (`git -C`, `--work-tree`,
  *     `GIT_WORK_TREE=` resolving outside this one) or another git dir (`--git-dir`,
  *     `GIT_DIR=`): commit, and say it was not verified. `-C` naming this repository,
- *     by absolute path or a subdirectory, is gated as usual.
+ *     by absolute path or a subdirectory, is gated as usual. So is a `-C` value the gate
+ *     cannot expand (a `$` or backtick left after `~` and `$PWD`) or a path that does not
+ *     exist: unsure means gated, never a note.
  *   - Green, but tracked files have unstaged changes: the suite saw the working tree, not
  *     what the commit holds, so the commit says it is not fully verified.
  *   - EIGHT_COMMIT_GATE=0 turns it off. EIGHT_COMMIT_GATE_TIMEOUT_SEC bounds one run
@@ -34,6 +36,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { firstFailure } from "../orchestration/verify-scope";
 import { scrub } from "./secret-scanner";
@@ -59,11 +62,13 @@ export function commitGateTimeoutSec(): number {
 export type CommitTarget = {
 	/** `-a` / `--all`: the commit takes the working tree's tracked changes, not only the index. */
 	all: boolean;
+	/** The `-C` values in order, as written; git applies each from the one before. */
+	cdirs: string[];
 	/**
-	 * The `-C`, `--work-tree` and `GIT_WORK_TREE=` values in order, as written. The gate
-	 * resolves them against its working directory, since the parser has none.
+	 * The work tree as written: the last `--work-tree`, else `GIT_WORK_TREE=`. Git
+	 * resolves it from the directory the `-C` values lead to. Null when neither is given.
 	 */
-	dirs: string[];
+	workTree: string | null;
 	/** `--git-dir` or `GIT_DIR=` was given: the index lives somewhere else. */
 	gitDir: boolean;
 };
@@ -174,7 +179,9 @@ function commitsAll(rest: string[]): boolean {
 
 function commitInWords(words: string[]): CommitTarget | null {
 	let i = 0;
-	const dirs: string[] = [];
+	const cdirs: string[] = [];
+	let envWorkTree: string | null = null;
+	let flagWorkTree: string | null = null;
 	let gitDir = false;
 	// Leading NAME=value assignments and env/command-style wrappers (with env's own flags).
 	for (;;) {
@@ -182,7 +189,7 @@ function commitInWords(words: string[]): CommitTarget | null {
 		if (w === undefined) return null;
 		if (ASSIGNMENT.test(w)) {
 			if (w.startsWith("GIT_DIR=")) gitDir = true;
-			if (w.startsWith("GIT_WORK_TREE=")) dirs.push(w.slice("GIT_WORK_TREE=".length));
+			if (w.startsWith("GIT_WORK_TREE=")) envWorkTree = w.slice("GIT_WORK_TREE=".length);
 			i++;
 		} else if (WRAPPERS.has(w)) {
 			i++;
@@ -198,11 +205,18 @@ function commitInWords(words: string[]): CommitTarget | null {
 		const eq = w.indexOf("=");
 		const name = w.startsWith("--") && eq > 0 ? w.slice(0, eq) : w;
 		const value = name !== w ? w.slice(eq + 1) : GIT_VALUE_OPTS.has(w) ? words[++i] : undefined;
-		if (name === "-C" || name === "--work-tree") dirs.push(value ?? "");
+		if (name === "-C") cdirs.push(value ?? "");
+		// The last --work-tree wins, and it overrides GIT_WORK_TREE.
+		if (name === "--work-tree") flagWorkTree = value ?? "";
 		if (name === "--git-dir") gitDir = true;
 	}
 	if (words[i] !== "commit") return null;
-	return { all: commitsAll(words.slice(i + 1)), dirs, gitDir };
+	return {
+		all: commitsAll(words.slice(i + 1)),
+		cdirs,
+		workTree: flagWorkTree ?? envWorkTree,
+		gitDir,
+	};
 }
 
 /** The commit a shell command makes, or null when it makes none. */
@@ -386,13 +400,34 @@ export class CommitGate {
 	 * Null when the commit lands in the working directory's own repository (`-C` the
 	 * absolute cwd, `-C sub`, `-C ./` all do), so the gate runs as usual. Otherwise the
 	 * absolute directory it targets, or "git-dir" for --git-dir / GIT_DIR=.
+	 *
+	 * Fails closed: a value the gate cannot expand (any `$` or backtick left after `~`,
+	 * `$PWD` and `${PWD}`) or a path that does not exist is gated as this repository,
+	 * never waved through with a note.
 	 */
 	private elsewhere(target: CommitTarget): string | null {
 		if (target.gitDir) return "git-dir";
-		if (target.dirs.length === 0) return null;
-		const dir = target.dirs.reduce((cur, d) => path.resolve(cur, d), this.cwd);
+		const values = [...target.cdirs, ...(target.workTree === null ? [] : [target.workTree])];
+		if (values.length === 0) return null;
+		const expanded = values.map((v) => this.expand(v));
+		if (expanded.some((v) => v === null)) return null;
+		const [cdirs, workTree] = [
+			expanded.slice(0, target.cdirs.length) as string[],
+			target.workTree === null ? null : (expanded.at(-1) as string),
+		];
+		const base = cdirs.reduce((cur, d) => path.resolve(cur, d), this.cwd);
+		const dir = workTree === null ? base : path.resolve(base, workTree);
+		if (!existsSync(dir)) return null;
 		const here = toplevel(this.cwd);
 		return here !== null && toplevel(dir) === here ? null : dir;
+	}
+
+	/** The shell's expansion of a leading `~` and of `$PWD` / `${PWD}`; null for anything else it would expand. */
+	private expand(value: string): string | null {
+		let v = value;
+		if (v === "~" || v.startsWith("~/")) v = `${process.env.HOME ?? homedir()}${v.slice(1)}`;
+		v = v.replace(/\$\{PWD\}|\$PWD(?![A-Za-z0-9_])/g, () => this.cwd);
+		return /[$`]/.test(v) ? null : v;
 	}
 
 	private green(target?: CommitTarget): GateDecision {
