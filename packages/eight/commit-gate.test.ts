@@ -220,7 +220,7 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 			const out = await ex.execute("git_commit", { message: "x" });
 			process.env.PATH = BUN_FIRST_PATH;
 			expect(out).toStartWith(`[COMMIT GATE] \`${runner}\` could not run (`);
-			expect(out).toContain("command not found");
+			expect(out).toMatch(/not found/); // bash says "command not found", dash (Linux /bin/sh) says "bun: not found"
 			expect(commits()).toBe(3);
 			expect(runs()).toBe(0);
 			rmSync(dir, { recursive: true, force: true });
