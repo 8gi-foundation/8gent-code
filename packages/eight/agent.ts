@@ -144,6 +144,7 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
+import { blockReason } from "../ai/text-tool-loop";
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -688,6 +689,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		);
 
 		let stepNumber = 0;
+		// Set when the circuit breaker stops this turn. The loop then returns the
+		// last round's prose, which is usually a step announced and never taken
+		// ("Let me stage and commit."), so the reply must say the turn was cut off.
+		let breakerStop = null as string | null;
 		const tools: TextTool[] = specs.map((spec) => ({
 			spec,
 			run: async (args: Record<string, unknown>) => {
@@ -741,10 +746,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.turnToolLedger.push({ name: toolName, args, success, result: result.slice(0, 500) });
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
-				this.loopDetector.record(toolName, args);
+				// A gate refusal ran nothing, so it does not spend the global budget (#3409).
+				this.loopDetector.record(toolName, args, { refused: blockReason(result) !== null });
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
+					if (breakerStop === null) breakerStop = loopResult.message;
 					this.abort();
 				}
 
@@ -998,7 +1005,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// onto the assistant history, with the post-turn bookkeeping the native
 		// path performs (session evidence summary, run log, journal). A reply the
 		// honesty gate rewrote is NOT flavored - no celebration on a failure.
-		const content = gated.content;
+		// A turn the circuit breaker stopped is not finished: say so, and ask,
+		// instead of passing an announced-but-untaken step off as the answer
+		// (#3409). The question also keeps the TUI from appending its generic
+		// "where should we steer next" line to a cut-off turn.
+		const content = breakerStop
+			? [
+					gated.content.trimEnd(),
+					`[harness] Stopped early, the task is not finished: ${breakerStop} Continue from here?`,
+				]
+					.filter((p) => p.trim() !== "")
+					.join("\n\n")
+			: gated.content;
 		const flavor = personalityVoice.getFlavor("complete");
 		// Never flavor a Table reply. The officer speaking is Karen or Rishi, not
 		// 8gent, and flavorResponse staples a random COMPLETION_PHRASE ("Consider
@@ -1011,7 +1029,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Same for a reply carrying "[harness] Not verified" lines: the tool log
 		// contradicts part of it, so no completion tagline goes on the end.
 		const flavoredContent =
-			gated.violated || agentResult.unverified.length > 0 || this.config.agentScope === "__table__"
+			gated.violated ||
+			breakerStop !== null ||
+			agentResult.unverified.length > 0 ||
+			this.config.agentScope === "__table__"
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1574,7 +1595,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 
 				// Circuit breaker: record call and check for loop patterns
-				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>);
+				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
+					refused: blockReason(resultStr) !== null,
+				});
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);

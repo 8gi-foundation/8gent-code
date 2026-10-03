@@ -49,12 +49,20 @@ export class ToolLoopDetector {
 	}
 
 	/**
-	 * Record a tool call. Call this every time a tool executes.
+	 * Record a tool call. Call this every time a tool is called.
+	 *
+	 * A call a gate refused (`refused: true`, e.g. "[BLOCKED] Command chaining
+	 * with && is not allowed") still counts for the repeat and ping-pong checks,
+	 * since the same refused call over and over is a loop. It does not count
+	 * toward the global limit: that limit guards against runaway EXECUTION, and
+	 * a refused call executed nothing. Counting refusals ended real tasks one
+	 * step short (#3409: 51 calls, 7 of them refused chaining, the 51st was the
+	 * git_add before the commit). Rounds stay bounded by the loop's own maxRounds.
 	 */
-	record(toolName: string, args: Record<string, unknown>): void {
+	record(toolName: string, args: Record<string, unknown>, opts: { refused?: boolean } = {}): void {
 		const argsHash = JSON.stringify(args);
 		this.history.push({ toolName, argsHash });
-		this.totalCalls++;
+		if (!opts.refused) this.totalCalls++;
 
 		// Keep only the last N entries
 		if (this.history.length > this.windowSize) {
@@ -71,7 +79,7 @@ export class ToolLoopDetector {
 			return {
 				detected: true,
 				type: "global",
-				message: `Global tool call limit exceeded: ${this.totalCalls} calls this turn (limit: ${this.globalLimit}). Aborting to prevent runaway execution.`,
+				message: `Global tool call limit exceeded: ${this.totalCalls} executed calls this turn (limit: ${this.globalLimit}). Aborting to prevent runaway execution.`,
 			};
 		}
 
