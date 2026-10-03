@@ -34,6 +34,7 @@ import { Agent } from "../../../../packages/eight/index.js";
 import type { AgentEventCallbacks } from "../../../../packages/eight/index.js";
 import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.js";
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
+import type { Settings } from "../../../../packages/settings/index.js";
 import { providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
@@ -75,14 +76,50 @@ function toAgentRuntime(provider: string): TabAgentRuntime {
 	return providerToRuntime(provider);
 }
 
-/** Resolve provider/model for a chat tab: per-tab settings override -> ROLE_REGISTRY default. */
-export function resolveSpecForRole(role: string | undefined): TabAgentSpec | null {
+/** Host platform and arch, injectable so tests do not depend on the machine running them. */
+export interface HostInfo {
+	platform: string;
+	arch: string;
+}
+
+const APPLE_ONLY_PROVIDERS = new Set(["apfel", "apple-foundation"]);
+
+/**
+ * Resolve provider/model for a chat tab: per-tab settings override -> ROLE_REGISTRY default.
+ * Returns null for an Apple Foundation provider off darwin arm64 (#3390), so the
+ * caller keeps the current provider and model instead of switching to one that
+ * cannot run on this host. The provider is trimmed and lowercased before that
+ * check, so a hand-edited "Apfel" in settings.json is gated too.
+ *
+ * Host and settings loader are injectable so tests depend on neither the
+ * machine running them nor its ~/.8gent/settings.json.
+ */
+export function resolveSpecForRole(
+	role: string | undefined,
+	host: HostInfo = { platform: process.platform, arch: process.arch },
+	loadSettings: () => Settings = loadAppSettings,
+): TabAgentSpec | null {
+	const spec = resolveSpecForRoleUnchecked(role, loadSettings);
+	if (!spec) return null;
+	if (
+		APPLE_ONLY_PROVIDERS.has(spec.provider.trim().toLowerCase()) &&
+		!(host.platform === "darwin" && host.arch === "arm64")
+	) {
+		return null;
+	}
+	return spec;
+}
+
+function resolveSpecForRoleUnchecked(
+	role: string | undefined,
+	loadSettings: () => Settings,
+): TabAgentSpec | null {
 	if (!role) return null;
 
 	// Per-tab settings override (matches the precedence already used in app.tsx
 	// for the active-tab provider/model swap).
 	try {
-		const s = loadAppSettings();
+		const s = loadSettings();
 		const tabsMap = s?.models?.tabs as unknown as Record<
 			string,
 			{ provider?: string; model?: string }

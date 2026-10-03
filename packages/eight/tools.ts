@@ -245,6 +245,30 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 	});
 }
 
+// read_file line numbers (#3375): the `cat -n` gutter, a right-aligned number
+// and a tab. Models cite line numbers from it instead of counting by hand.
+// Exactly what numberLines emits: the number right-aligned in 6 columns (or
+// wider past 999999), then a tab. A TSV row like "2024\tbudget" is not it.
+const GUTTER = /^(?: {5}\d| {4}\d{2}| {3}\d{3}| {2}\d{4}| \d{5}|\d{6,})\t/;
+
+/** Number `lines` as `cat -n` does, the first one being line `first`. */
+export function numberLines(lines: string[], first: number): string {
+	return lines.map((line, i) => `${String(first + i).padStart(6)}\t${line}`).join("\n");
+}
+
+/** True when every non-empty line of `text` starts with a read_file gutter. */
+export function hasLineNumberGutter(text: string): boolean {
+	const rows = text.split("\n").filter((l) => l.trim() !== "");
+	return rows.length > 0 && rows.every((l) => GUTTER.test(l));
+}
+
+/** A positive integer from a model-supplied argument, or undefined. */
+function positiveInt(value: unknown): number | undefined {
+	if (value === undefined || value === null || value === "") return undefined;
+	const n = Math.floor(Number(value));
+	return Number.isFinite(n) && n >= 1 ? n : undefined;
+}
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -463,11 +487,19 @@ export class ToolExecutor {
 				function: {
 					name: "read_file",
 					description:
-						"[FILE] Returns the full text content of a file at the given path. Use when you need to see existing code before modifying it. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
+						"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`). The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
 					parameters: {
 						type: "object",
 						properties: {
 							path: { type: "string", description: "Path to the file to read" },
+							offset: {
+								type: "number",
+								description: "Line number to start reading from (1-based). Optional.",
+							},
+							limit: {
+								type: "number",
+								description: "How many lines to read from offset. Optional.",
+							},
 						},
 						required: ["path"],
 					},
@@ -1409,7 +1441,7 @@ export class ToolExecutor {
 			// File operations (with path traversal protection)
 			case "read_file": {
 				const safe = safePath(args.path as string, this.workingDirectory);
-				return this.readFile(safe);
+				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
 				const safe = safePath(args.path as string, this.workingDirectory);
@@ -1895,7 +1927,11 @@ export class ToolExecutor {
 	// File Operations
 	// ============================================
 
-	private async readFile(filePath: string): Promise<string> {
+	private async readFile(
+		filePath: string,
+		offsetArg?: unknown,
+		limitArg?: unknown,
+	): Promise<string> {
 		const absolutePath = path.isAbsolute(filePath)
 			? filePath
 			: path.join(this.workingDirectory, filePath);
@@ -1906,9 +1942,29 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		const lines = content.split("\n");
+		// A trailing newline ends the last line; it does not start another one.
+		if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+		if (content === "") return "";
+
+		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		const offset = positiveInt(offsetArg);
+		const limit = positiveInt(limitArg);
+
+		// A slice (#3375): the numbers stay the file's real line numbers.
+		if (offset !== undefined || limit !== undefined) {
+			const start = offset ?? 1;
+			if (start > lines.length) {
+				return `File has ${lines.length} lines; offset ${start} is past the end.`;
+			}
+			const count = limit ?? (isCodeFile ? 200 : lines.length);
+			const end = Math.min(lines.length, start - 1 + count);
+			const body = numberLines(lines.slice(start - 1, end), start);
+			return end < lines.length
+				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
+				: body;
+		}
 
 		// AST-first interception: for code files > 200 lines, prepend outline
-		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
 		if (isCodeFile && lines.length > 200) {
 			let outlineHeader = "";
 
@@ -1948,10 +2004,10 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${lines.slice(0, 200).join("\n")}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
+			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
-		return content;
+		return numberLines(lines, 1);
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
@@ -2026,10 +2082,28 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 
+		// A gutter copied into newText would be written to disk as file text
+		// (#3375). Refuse it, never strip it: the bytes written must be the
+		// bytes the policy gate checked. Files that already hold gutter-shaped
+		// lines (oldText carries one, or the file has one) are left editable.
+		if (
+			hasLineNumberGutter(newText) &&
+			!hasLineNumberGutter(oldText) &&
+			!content.split("\n").some((l) => GUTTER.test(l))
+		) {
+			return `Error: newText starts each line with a read_file line-number prefix (number + tab). That prefix would be written into ${filePath} as file text. Nothing was written: send newText without the prefix.`;
+		}
+
 		// Literal replacement, so the bytes written are the bytes the policy
 		// gate checked (String.replace would expand `$&` etc. in newText).
 		const newContent = applyEdit(content, oldText, newText);
 		if (newContent === null) {
+			// read_file numbers its rows (#3375). A model that copies the gutter
+			// into oldText gets told so. It is never stripped silently: the
+			// bytes written must be the bytes the policy gate checked.
+			if (hasLineNumberGutter(oldText)) {
+				return `Error: Could not find the text to replace in ${filePath}. oldText starts each line with a read_file line-number prefix (number + tab). That prefix is not in the file: send the line text only.`;
+			}
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		}
 
