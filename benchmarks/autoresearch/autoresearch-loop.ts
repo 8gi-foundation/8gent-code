@@ -23,7 +23,7 @@ import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
-import { gateMutations, recordRunError } from "./failure-ledger";
+import { gateMutations, recordRunError, runSummary } from "./failure-ledger";
 import { getFewShot } from "./few-shot";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
@@ -640,6 +640,9 @@ async function main(): Promise<void> {
 		};
 	}
 
+	// Failure-ledger scope (#3420): one loop run. A resumed run keeps its startedAt.
+	const ledgerRun = `autoresearch-${state.startedAt}`;
+
 	for (let iter = state.iteration; iter < MAX_ITERATIONS; iter++) {
 		log(`\n${"═".repeat(60)}`);
 		log(`  ITERATION ${iter + 1}/${MAX_ITERATIONS}`);
@@ -673,33 +676,49 @@ async function main(): Promise<void> {
 				);
 
 				// Analyze failures and derive mutations. With EIGHT_FAILURE_LEDGER=1 the
-				// failure is recorded and its mutations wait until the label is seen 3x;
-				// otherwise gateMutations hands back muts unchanged.
+				// failure is recorded and its mutations are applied only once this task
+				// has failed with this label 3x in this run (dropped below that);
+				// otherwise gateMutations hands back muts unchanged. A ledger error is
+				// logged and never reaches the score or this handler.
 				const muts = analyzeAndMutate(benchmark, run);
-				const gate = gateMutations({
-					ledgerPath: FAILURE_LEDGER,
-					runId: `autoresearch-${state.startedAt}-iter${iter + 1}`,
-					taskId: benchmark.id,
-					grade: run.grade,
-					hasTestHarness: Boolean(benchmark.testExecution && benchmark.testFile),
-					passThreshold: PASS_THRESHOLD,
-					mutations: muts,
-				});
-				if (gate.note) log(gate.note);
-				for (const m of gate.apply) {
+				let apply: string[] = muts;
+				try {
+					const gate = gateMutations({
+						ledgerPath: FAILURE_LEDGER,
+						run: ledgerRun,
+						runId: `${ledgerRun}-iter${iter + 1}`,
+						taskId: benchmark.id,
+						grade: run.grade,
+						hasTestHarness: Boolean(benchmark.testExecution && benchmark.testFile),
+						passThreshold: PASS_THRESHOLD,
+						mutations: muts,
+					});
+					if (gate.note) log(gate.note);
+					apply = gate.apply;
+				} catch (ledgerErr: any) {
+					log(`  │ ⚠ ledger error, mutations dropped: ${ledgerErr?.message ?? ledgerErr}`);
+					apply = [];
+				}
+				for (const m of apply) {
 					newMutations.push(m);
 					addMutation(m);
 				}
 			} catch (err: any) {
 				log(`  └─ ✗ FAILED: ${err.message}`);
 				scores[benchmark.id] = 0;
-				recordRunError(
-					process.env,
-					FAILURE_LEDGER,
-					`autoresearch-${state.startedAt}-iter${iter + 1}`,
-					benchmark.id,
-					err,
-				);
+				try {
+					const rec = recordRunError(
+						process.env,
+						FAILURE_LEDGER,
+						ledgerRun,
+						`${ledgerRun}-iter${iter + 1}`,
+						benchmark.id,
+						err,
+					);
+					if (rec.note) log(rec.note);
+				} catch (ledgerErr: any) {
+					log(`  │ ⚠ ledger error: ${ledgerErr?.message ?? ledgerErr}`);
+				}
 			}
 
 			log("");
@@ -774,6 +793,7 @@ async function main(): Promise<void> {
 		} else {
 			log("  No new mutations (all passing or no actionable failures)");
 		}
+		for (const line of runSummary(process.env, FAILURE_LEDGER, ledgerRun)) log(line);
 
 		// ── Convergence Check ─────────────────────────────────────────
 		if (passing === benchmarks.length) {
