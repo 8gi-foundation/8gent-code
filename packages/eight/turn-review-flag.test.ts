@@ -16,6 +16,14 @@ import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
 /**
+ * chat() appends a random completion phrase to every 3rd reply, counted by
+ * one process-wide Voice (packages/personality/voice.ts). In CI many test
+ * files share the process, so where these turns fall in that count depends on
+ * the files before them. Each turn resets it, so every turn here is the first
+ * completion and gets no phrase, in both the flag-off and flag-on runs.
+ */
+let personalityVoice: typeof import("../personality/voice").voice;
+/**
  * Each Agent starts OnboardingManager.detectIntegrations() without awaiting
  * it, and that later writes <home>/.8gent/user.json. Left running, it
  * recreated the temp home after cleanup (#3285), so the file waits for every
@@ -67,6 +75,7 @@ beforeAll(async () => {
 	saved.OLLAMA_HOST = process.env.OLLAMA_HOST;
 	saved.EIGHT_TEXT_TOOLS = process.env.EIGHT_TEXT_TOOLS;
 	({ Agent } = await import("./agent"));
+	({ voice: personalityVoice } = await import("../personality/voice"));
 	const { OnboardingManager } = await import("../self-autonomy/onboarding");
 	const realDetect = OnboardingManager.prototype.detectIntegrations;
 	detectSpy = spyOn(OnboardingManager.prototype, "detectIntegrations").mockImplementation(function (
@@ -136,6 +145,7 @@ async function turn(
 	else process.env.EIGHT_TURN_REVIEW = flag;
 	script = replies;
 	served = 0;
+	personalityVoice.reset();
 	const lines: string[] = [];
 	const spy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
 		const text = args.map(String).join(" ");
