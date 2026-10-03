@@ -23,6 +23,7 @@ import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
+import { gateMutations, recordRunError } from "./failure-ledger";
 import { getFewShot } from "./few-shot";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
@@ -56,6 +57,8 @@ const TEMPERATURES = [0.3, 0.5, 0.7];
 
 const STATE_FILE = join(ROOT, "autoresearch", "loop-state.json");
 const LOG_FILE = join(ROOT, "autoresearch", "autoresearch.log");
+// Written only when EIGHT_FAILURE_LEDGER=1 (#3420).
+const FAILURE_LEDGER = join(ROOT, "autoresearch", "failure-ledger.jsonl");
 
 // ── All Benchmarks ──────────────────────────────────────────────────
 
@@ -669,15 +672,34 @@ async function main(): Promise<void> {
 					`  └─ ${status} Best: score=${run.grade.score} temp=${run.temperature} model=${run.model} tokens=${tk?.totalTokens ?? "?"} ${run.durationMs}ms`,
 				);
 
-				// Analyze failures and derive mutations
+				// Analyze failures and derive mutations. With EIGHT_FAILURE_LEDGER=1 the
+				// failure is recorded and its mutations wait until the label is seen 3x;
+				// otherwise gateMutations hands back muts unchanged.
 				const muts = analyzeAndMutate(benchmark, run);
-				for (const m of muts) {
+				const gate = gateMutations({
+					ledgerPath: FAILURE_LEDGER,
+					runId: `autoresearch-${state.startedAt}-iter${iter + 1}`,
+					taskId: benchmark.id,
+					grade: run.grade,
+					hasTestHarness: Boolean(benchmark.testExecution && benchmark.testFile),
+					passThreshold: PASS_THRESHOLD,
+					mutations: muts,
+				});
+				if (gate.note) log(gate.note);
+				for (const m of gate.apply) {
 					newMutations.push(m);
 					addMutation(m);
 				}
 			} catch (err: any) {
 				log(`  └─ ✗ FAILED: ${err.message}`);
 				scores[benchmark.id] = 0;
+				recordRunError(
+					process.env,
+					FAILURE_LEDGER,
+					`autoresearch-${state.startedAt}-iter${iter + 1}`,
+					benchmark.id,
+					err,
+				);
 			}
 
 			log("");
