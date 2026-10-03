@@ -77,8 +77,21 @@ export function pathAbsent(abs: string): boolean {
 	}
 }
 
+/** Wall-clock now in nanoseconds, rounded UP to the next millisecond (fails closed). */
+function nowCeilNs(): bigint {
+	return (BigInt(Date.now()) + 1n) * 1_000_000n;
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
+
+	/**
+	 * When this record opened (one per ToolExecutor, so the agent session's
+	 * start), in nanoseconds, rounded up to the next millisecond. A temp file
+	 * born after it, owned by this uid, counts as this session's for `rm -f`
+	 * (#3395; see s1-rm-nothing.ts for every condition).
+	 */
+	readonly startedNs: bigint = nowCeilNs();
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {

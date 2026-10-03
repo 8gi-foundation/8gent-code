@@ -60,8 +60,23 @@
  * `/tmp-x`, `/tmp/../etc` and any path containing `/scratchpad`. When the
  * rules fire nothing (every path looked temp to that text test), every path
  * must be absolute and pass the realpath test above; a relative path there
- * returns null. An existing file in a temp root is never passed: recording
- * named temp files as the session's own is deferred.
+ * returns null.
+ *
+ * Own temp files (#3395, darwin only, see `birthTimeProven`): pilot l5-feature-e2e ran
+ * `TODO_FILE=/tmp/tt.json bun src/cli.ts add ...`, so a child process made
+ * /tmp/tt.json, then `rm -f /tmp/tt.json`, which the judge blocked. An
+ * absolute path that EXISTS now also passes when ALL of these hold for it:
+ *   - it is canonical text, as above, and its parent passes the same walk;
+ *   - lstat says a regular file (not a symlink, not a directory) with one
+ *     link, owned by the current uid;
+ *   - its birth time is after the caller's CreatedFiles record opened
+ *     (`startedNs`, the agent session's start, rounded up to the next ms).
+ *     Modifying an older file does not move its birth time, so a file that
+ *     was there before the session is never passed. No record, or a birth
+ *     time of 0 (a filesystem that keeps none), fails closed.
+ * The flags rule above still holds (-f and -v only, never -r), so this
+ * unlinks one name in a directory no other user can write, or in the sticky
+ * temp root.
  *
  * Known window: another process (the agent's background tasks, any other
  * process of this uid, or, in a shared temp root, another user) could create
@@ -215,21 +230,64 @@ function parentSafe(dir: string): boolean {
 	return rooted;
 }
 
+/** True when `p` is absolute with no `..`, `.` or empty segment and no trailing slash. */
+function canonicalAbsolute(p: string): boolean {
+	if (!p.startsWith("/") || p.endsWith("/")) return false;
+	return !p
+		.slice(1)
+		.split("/")
+		.some((s) => s === "" || s === "." || s === "..");
+}
+
 /**
  * True when `p` is a canonical absolute path that is absent and whose parent
  * directory exists and passes `parentSafe`. Any error fails closed.
  */
 function absentInTemp(p: string): boolean {
-	if (!p.startsWith("/") || p.endsWith("/")) return false;
-	if (
-		p
-			.slice(1)
-			.split("/")
-			.some((s) => s === "" || s === "." || s === "..")
-	)
-		return false;
+	if (!canonicalAbsolute(p)) return false;
 	if (!absent(p)) return false;
 	try {
+		return parentSafe(path.dirname(p));
+	} catch {
+		return false;
+	}
+}
+
+let platformForTests: string | null = null;
+
+/** Tests only: pretend to run on `platform` for the own-temp-file rule, or restore with null. */
+export function _setPlatformForTests(platform: string | null): void {
+	platformForTests = platform;
+}
+
+/**
+ * Where birth time is proven to be a real creation time (#3395). Darwin only
+ * (APFS keeps it). On Linux a runtime without statx btime can report the
+ * change time as birth time, which would pass a pre-existing temp file whose
+ * metadata changed this session; until that is proven otherwise, every other
+ * platform keeps the #3381 absent-path rule and judges existing files.
+ */
+function birthTimeProven(): boolean {
+	return (platformForTests ?? process.platform) === "darwin";
+}
+
+/**
+ * True when `p` is a canonical absolute path to a regular file (lstat), with
+ * one link, owned by this uid, born after `created.startedNs`, whose parent
+ * passes `parentSafe` (#3395). Darwin only (`birthTimeProven`). Any error, or
+ * no record, fails closed.
+ */
+function ownTempFile(p: string, created: CreatedFiles | undefined): boolean {
+	if (!birthTimeProven()) return false;
+	const since = created?.startedNs;
+	if (typeof since !== "bigint") return false;
+	if (!canonicalAbsolute(p)) return false;
+	try {
+		const uid = process.getuid?.();
+		const st = lstatSync(p, { bigint: true });
+		if (uid === undefined || !st.isFile() || st.nlink !== 1n || st.uid !== BigInt(uid))
+			return false;
+		if (st.birthtimeNs <= 0n || st.birthtimeNs < since) return false;
 		return parentSafe(path.dirname(p));
 	} catch {
 		return false;
@@ -260,8 +318,9 @@ export function rmOfNothing(command: string, cwd: string | undefined): boolean {
 /**
  * "nothing" when `command` is a plain `rm` whose every path is absent in the
  * workspace; "nothing-temp" when every path is absent and at least one is an
- * absolute path under a real temp root (#3381); "own-scratch" when every path is absent or an untracked file this session
- * created (and at least one is such a file); null otherwise.
+ * absolute path under a real temp root (#3381); "own-scratch" when every path
+ * is absent, an untracked file this session created, or a temp file this
+ * session made (#3395), and at least one is such a file; null otherwise.
  */
 export function rmOfNothingOrOwn(
 	command: string,
@@ -288,11 +347,14 @@ export function rmOfNothingOrOwn(
 		const root = realpathSync(cwd);
 		const own: string[] = [];
 		let temp = false;
+		let ownTemp = false;
 		for (const p of paths) {
 			if (p.startsWith("/")) {
-				// Absolute: only an absent path under a real temp root (#3381).
-				if (!absentInTemp(p)) return null;
-				temp = true;
+				// Absolute: an absent path under a real temp root (#3381), or a
+				// temp file this session made (#3395).
+				if (absentInTemp(p)) temp = true;
+				else if (ownTempFile(p, created)) ownTemp = true;
+				else return null;
 				continue;
 			}
 			if (noRules || p.split("/").includes("..")) return null;
@@ -308,7 +370,7 @@ export function rmOfNothingOrOwn(
 			if (!inside(realpathSync(path.dirname(abs)), root)) return null;
 			own.push(path.relative(root, path.join(realpathSync(path.dirname(abs)), path.basename(abs))));
 		}
-		if (own.length === 0) return temp ? "nothing-temp" : "nothing";
+		if (own.length === 0) return ownTemp ? "own-scratch" : temp ? "nothing-temp" : "nothing";
 		return noneTracked(root, own) ? "own-scratch" : null;
 	} catch {
 		return null;
