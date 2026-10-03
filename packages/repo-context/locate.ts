@@ -5,21 +5,30 @@
  *
  * Deterministic narrowing, every step bounded:
  *   1. terms    the question split on whitespace, each token cut to letters and
- *               digits, stop words dropped, a light suffix stem, at most 8.
- *   2. files    one literal, case-blind `rg -l` per term (argv, never a shell);
- *               a file scores per distinct term in its text, more when a term
- *               is in its path or in one of its declarations (ast-index).
+ *               digits, stop words dropped, a light suffix stem, at most 12.
+ *   2. files    one literal, case-blind `rg -l --null` per term (argv, never a
+ *               shell); rarer terms weigh more; a file scores more when a term
+ *               is in its path or in one of its declarations (ast-index). Every
+ *               path must resolve inside the root, real path included.
  *   3. folders  files grouped by their top two path segments; only the best
  *               folders keep their files.
- *   4. passage  in each kept file, the line holding the most distinct terms,
- *               shown with a few lines around it and its enclosing declaration.
+ *   4. passage  in each kept file, the line holding the most distinct terms
+ *               (comment and string-literal lines count less), shown with a
+ *               few lines around it and its enclosing declaration.
  *
  * Optional judge: ONE local System One choice call (packages/decide) over the
- * top files' previews, under a time cap, only when every model host the
- * decider could reach is loopback. Any failure keeps the deterministic order.
+ * top files' previews, under a time cap. Every host the decider could reach
+ * (shared judge, Ollama, Laya) must be loopback before it is built, and its
+ * fetch refuses any other URL at request time. In-process llama.cpp is off
+ * here: it cannot be aborted inside the time cap. Any failure keeps the
+ * deterministic order. Everything shown or sent to the judge is scrubbed.
+ *
+ * Reached through the existing `locate` tool: with EIGHT_LOCATE=1 its prose
+ * route (rule 6, hybrid) answers from here (packages/ast-index/locate.ts).
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isIP } from "node:net";
 import * as path from "node:path";
 import { getFileOutline, searchSymbols } from "../ast-index/index";
 import { runRg } from "../ast-index/locate";
@@ -96,6 +105,9 @@ export interface Passage {
 	line: number;
 	/** Enclosing declaration from the AST index, when there is one. */
 	symbol?: string;
+	/** The matched line, scrubbed and capped. */
+	text: string;
+	/** A few lines around it, each scrubbed and capped. */
 	excerpt: string;
 	score: number;
 }
@@ -119,6 +131,48 @@ export interface LocateCodeOptions {
 	judge?: Judge | null;
 	judgeTimeoutMs?: number;
 	env?: Record<string, string | undefined>;
+	/** ripgrep binary. Default "rg" from PATH. */
+	rg?: string;
+}
+
+/** Scrub, then cut: a secret is never half-shown by the cut. */
+function cleanLine(line: string): string {
+	const l = scrub(line).scrubbed;
+	return l.length > LINE_MAX ? `${l.slice(0, LINE_MAX)}...` : l;
+}
+
+/**
+ * The repo-relative "/" path for an rg result, or null when it resolves
+ * outside the root (a "..", an absolute path, or a symlink out).
+ */
+export function insideRoot(root: string, file: string): string | null {
+	if (!file || file.includes("\0")) return null;
+	const resolved = path.resolve(root, file);
+	const rel = path.relative(root, resolved);
+	if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+	try {
+		const realRoot = realpathSync(root);
+		const real = path.relative(realRoot, realpathSync(resolved));
+		if (!real || real.startsWith("..") || path.isAbsolute(real)) return null;
+	} catch {
+		return null;
+	}
+	return rel.split(path.sep).join("/");
+}
+
+/** Code lines outrank comment lines and lines that are mostly a string literal. */
+function proseWeight(line: string): number {
+	const t = line.trim();
+	if (/^(\/\/|\/\*|\*|#)/.test(t)) return 0.6;
+	let quoted = 0;
+	let open: string | null = null;
+	for (const ch of t) {
+		if (open) {
+			quoted++;
+			if (ch === open) open = null;
+		} else if (ch === '"' || ch === "'" || ch === "`") open = ch;
+	}
+	return quoted > t.length / 2 ? 0.6 : 1;
 }
 
 function isTest(file: string): boolean {
@@ -149,6 +203,7 @@ function bestPassage(
 ) {
 	let text: string;
 	try {
+		if (insideRoot(root, file) === null) return null;
 		if (statSync(path.join(root, file)).size > FILE_MAX_BYTES) return null;
 		text = readFileSync(path.join(root, file), "utf8");
 	} catch {
@@ -160,9 +215,10 @@ function bestPassage(
 	let best = -1;
 	let bestScore = 0;
 	for (let i = 0; i < lines.length; i++) {
-		const hits = lineHits(lines[i].slice(0, 400).toLowerCase(), terms, weight);
+		const head = lines[i].slice(0, 400);
+		const hits = lineHits(head.toLowerCase(), terms, weight);
 		if (hits === 0) continue;
-		const score = hits * (decls.has(i + 1) ? 1.25 : 1);
+		const score = hits * (decls.has(i + 1) ? 1.25 : 1) * proseWeight(head);
 		if (score > bestScore) {
 			best = i;
 			bestScore = score;
@@ -173,39 +229,73 @@ function bestPassage(
 	const to = Math.min(lines.length, best + PASSAGE_AFTER + 1);
 	const excerpt = lines
 		.slice(from, to)
-		.map((l, k) => `${from + k + 1}| ${l.length > LINE_MAX ? `${l.slice(0, LINE_MAX)}...` : l}`)
+		.map((l, k) => `${from + k + 1}| ${cleanLine(l)}`)
 		.join("\n");
 	const enclosing = (outline?.symbols ?? [])
 		.filter((s) => s.startLine <= best + 1 && s.endLine >= best + 1)
 		.sort((a, b) => b.startLine - a.startLine)[0];
-	return { line: best + 1, excerpt, symbol: enclosing?.name, lineScore: bestScore };
+	return {
+		line: best + 1,
+		text: cleanLine(lines[best].trim()),
+		excerpt,
+		symbol: enclosing?.name,
+		lineScore: bestScore,
+	};
 }
 
-function isLoopback(url: string): boolean {
+/** Only "localhost" or a literal loopback IP; every other name is refused, "127.x.example" too. */
+export function isLoopback(url: string): boolean {
+	let host: string;
 	try {
-		const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-		return host === "localhost" || host === "::1" || /^127\./.test(host);
+		host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
 	} catch {
 		return false;
 	}
+	if (host === "localhost") return true;
+	const kind = isIP(host);
+	if (kind === 4) return host.startsWith("127.");
+	if (kind === 6) return host === "::1" || host === "0:0:0:0:0:0:0:1";
+	return false;
 }
 
-let processDecider: Decider | null = null;
+/** fetch for the decider: refuses any URL that is not loopback, on every request (failover re-probes too). */
+export function loopbackFetch(input: string, init?: RequestInit): Promise<Response> {
+	if (!isLoopback(String(input))) {
+		return Promise.reject(new Error("refused: model host is not on this machine"));
+	}
+	return fetch(input, init);
+}
+
+const deciders = new Map<string, Decider>();
 
 /**
  * The local System One judge. packages/decide loads on first use, so the flag-off
- * path never imports it. Every host the decider could reach must be loopback,
- * checked before any request; otherwise the call throws and the order stays
- * deterministic.
+ * path never imports it. The shared judge, Ollama and Laya hosts must all be
+ * loopback before the decider is built, and its fetch checks again per request.
+ * llama.cpp in process is disabled (llamacppLoader: null): it cannot be aborted.
  */
 export function localJudge(env: Record<string, string | undefined> = process.env): Judge {
 	return async (question, options) => {
 		const decide = await import("../decide/index");
-		const hosts = [decide.resolveOllamaHost(env), decide.resolveLayaUrl(env)];
-		const remote = hosts.find((h) => !isLoopback(h));
-		if (remote) throw new Error("model host is not on this machine");
-		processDecider ??= decide.createDecider({ timeoutMs: JUDGE_TIMEOUT_MS, env });
-		const answer = await processDecider.choice(
+		const { resolveSharedJudgeHost } = await import("../decide/probe");
+		const hosts = [
+			resolveSharedJudgeHost(env),
+			decide.resolveOllamaHost(env),
+			decide.resolveLayaUrl(env),
+		];
+		if (hosts.some((h) => !isLoopback(h))) throw new Error("model host is not on this machine");
+		const key = hosts.join(" ");
+		let decider = deciders.get(key);
+		if (!decider) {
+			decider = decide.createDecider({
+				timeoutMs: JUDGE_TIMEOUT_MS,
+				env,
+				fetch: loopbackFetch,
+				llamacppLoader: null,
+			});
+			deciders.set(key, decider);
+		}
+		const answer = await decider.choice(
 			`Question about this codebase: ${question}`,
 			"Which file most likely holds the code that answers the question?",
 			options,
@@ -252,15 +342,16 @@ export async function locateCode(
 			notes.push("time budget reached, later words not searched");
 			break;
 		}
-		const out = await runRg(opts.root, ["-l", "-i", "-F", "--glob", CODE_GLOB, "--", t], {
+		const out = await runRg(opts.root, ["-l", "--null", "-i", "-F", "--glob", CODE_GLOB, "--", t], {
+			bin: opts.rg,
 			maxLines: 5000,
 			timeoutMs: 3000,
 		});
 		if (out.missing) rgMissing = true;
 		const holding = out.text
-			.split("\n")
-			.filter(Boolean)
-			.map((f) => f.replace(/^\.\//, ""));
+			.split("\0")
+			.map((f) => insideRoot(opts.root, f.replace(/^\.\//, "")))
+			.filter((f): f is string => f !== null);
 		const w = rarity(holding.length);
 		weight.set(t, w);
 		for (const file of holding) bump(file, w * (1 + (file.toLowerCase().includes(t) ? 1.5 : 0)));
@@ -301,6 +392,7 @@ export async function locateCode(
 				file,
 				line: p.line,
 				symbol: p.symbol,
+				text: p.text,
 				excerpt: p.excerpt,
 				score: s + p.lineScore,
 			});
@@ -316,15 +408,14 @@ export async function locateCode(
 	let used = false;
 	if (!judge) notes.push("no local model, deterministic order");
 	else if (ranked.length > 1 && left > 0) {
-		const options = ranked.map((p) => {
-			const lines = p.excerpt.split("\n");
-			const hit = lines[Math.min(PASSAGE_BEFORE, lines.length - 1)].slice(0, LINE_MAX);
-			return `${p.file}${p.symbol ? ` (${p.symbol})` : ""}: ${hit}`;
-		});
+		// Nothing reaches the judge unscrubbed: path, declaration and line alike.
+		const options = ranked.map(
+			(p) => scrub(`${p.file}${p.symbol ? ` (${p.symbol})` : ""}: ${p.text}`).scrubbed,
+		);
 		try {
 			calls++;
 			const timeoutMs = Math.min(opts.judgeTimeoutMs ?? JUDGE_TIMEOUT_MS, left);
-			const probs = await withTimeout(judge(q, options), timeoutMs);
+			const probs = await withTimeout(judge(scrub(q).scrubbed, options), timeoutMs);
 			if (probs.length === ranked.length && probs.every((p) => Number.isFinite(p))) {
 				const top = ranked[0].score || 1;
 				ranked = ranked
@@ -343,16 +434,4 @@ export async function locateCode(
 		calls,
 		note: notes.join("; ") || "deterministic order",
 	});
-}
-
-/** Tool text: header, then each passage with file:line. Scrubbed before it leaves. */
-export function formatLocateCode(r: LocateCodeResult): string {
-	const head = `locate_code: ${r.terms.join(" ") || "(no terms)"} [${r.judge.note}; ${r.ms} ms]`;
-	if (r.passages.length === 0)
-		return scrub(`${head}\nno passage holds these words. Try a symbol name with search_symbols.`)
-			.scrubbed;
-	const body = r.passages.map(
-		(p, i) => `${i + 1}. ${p.file}:${p.line}${p.symbol ? ` in ${p.symbol}` : ""}\n${p.excerpt}`,
-	);
-	return scrub([head, ...body].join("\n\n")).scrubbed;
 }

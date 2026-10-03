@@ -1,7 +1,9 @@
 /**
- * locate_code trial (#3427): term extraction stays linear, the narrowing finds
- * the passage, the judge is bounded and local-only, output is scrubbed and
- * capped, and with EIGHT_LOCATE unset the tool list is exactly what it was.
+ * #3427 trial: question narrowing behind EIGHT_LOCATE=1, reached through the
+ * existing `locate` tool's prose route. Term extraction stays linear, the
+ * narrowing finds the passage, rg paths cannot leave the root, the judge is
+ * bounded, local-only and sees only scrubbed text, and with the flag unset the
+ * tool list and the prose answer are exactly what they were.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -9,31 +11,54 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { clearIndex, ensureIndexed } from "../ast-index";
+import { formatLocate, locate } from "../ast-index/locate";
 import { ToolExecutor } from "../eight/tools";
 import {
 	type Judge,
 	MAX_RESULTS,
 	MAX_TERMS,
-	formatLocateCode,
+	insideRoot,
+	isLoopback,
 	localJudge,
 	locateCode,
 	locateCodeEnabled,
+	loopbackFetch,
 	questionTerms,
 } from "./locate";
 
+let parent: string;
 let root: string;
 let repoId: string;
-const savedFlag = process.env.EIGHT_LOCATE;
 // A provider-shaped key the secret scanner redacts; it lives only in the temp fixture.
 const FAKE_KEY = `AKIA${"ABCDEFGHIJKLMNOP"}`;
+const OUTSIDE_MARK = "outsidemarkerword";
+const ENV_KEYS = [
+	"EIGHT_LOCATE",
+	"EIGHT_S1_SHARED_JUDGE",
+	"EIGHT_DECIDE_OLLAMA_HOST",
+	"OLLAMA_HOST",
+	"OLLAMA_BASE_URL",
+	"LAYA_URL",
+] as const;
+const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
-function write(rel: string, body: string): void {
-	fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
-	fs.writeFileSync(path.join(root, rel), body);
+function write(rel: string, body: string, base = root): void {
+	fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true });
+	fs.writeFileSync(path.join(base, rel), body);
+}
+
+/** Every model host the decider could reach: a closed loopback port, so a judge fails fast and locally. */
+function closedLocalHosts(): void {
+	process.env.EIGHT_S1_SHARED_JUDGE = "0";
+	for (const k of ["EIGHT_DECIDE_OLLAMA_HOST", "OLLAMA_HOST", "LAYA_URL"])
+		process.env[k] = "http://127.0.0.1:9";
+	delete process.env.OLLAMA_BASE_URL;
 }
 
 beforeAll(async () => {
-	root = fs.mkdtempSync(path.join(os.tmpdir(), "locate-code-"));
+	parent = fs.mkdtempSync(path.join(os.tmpdir(), "locate-code-"));
+	root = path.join(parent, "repo");
+	fs.mkdirSync(root);
 	write(
 		"packages/guard/sanitizer.ts",
 		[
@@ -50,24 +75,28 @@ beforeAll(async () => {
 	write(
 		"packages/output/trim.ts",
 		[
-			"// Output helpers.",
 			"export function capOutput(text: string): string {",
-			"\t// long command output is truncated to head and tail",
-			`\tconst sample = "${FAKE_KEY}";`,
-			`\treturn text.slice(0, 10) + "${"y".repeat(400)}";`,
+			`\tconst truncated = text.slice(0, 10) + "${FAKE_KEY}" + "${"y".repeat(400)}"; // long output head tail`,
+			"\treturn truncated;",
 			"}",
 			"",
 		].join("\n"),
 	);
 	write("packages/other/noise.ts", "export const unrelated = 1;\n");
+	// Outside the root, and a directory whose name holds a newline and "..":
+	// with newline-split rg output this read ../outside.ts (8SO M1).
+	write("outside.ts", `export const ${OUTSIDE_MARK} = "${OUTSIDE_MARK} zebra";\n`, parent);
+	write(`x\n../outside.ts`, `export const inner = "zebra";\n`);
 	repoId = (await ensureIndexed(root)).id;
 });
 
 afterAll(() => {
 	clearIndex(root);
-	fs.rmSync(root, { recursive: true, force: true });
-	if (savedFlag === undefined) delete process.env.EIGHT_LOCATE;
-	else process.env.EIGHT_LOCATE = savedFlag;
+	fs.rmSync(parent, { recursive: true, force: true });
+	for (const k of ENV_KEYS) {
+		if (savedEnv[k] === undefined) delete process.env[k];
+		else process.env[k] = savedEnv[k];
+	}
 });
 
 describe("questionTerms", () => {
@@ -125,30 +154,53 @@ describe("locateCode, deterministic", () => {
 		expect(r.passages.length).toBeLessThanOrEqual(MAX_RESULTS);
 	});
 
-	test("caps passage lines and scrubs secrets from the tool text", async () => {
-		const r = await locateCode("where is long command output truncated to head and tail", {
+	test("scrubs before it caps: no line shows the key, whole or cut", async () => {
+		const r = await locateCode("where is long output truncated head tail", {
 			root,
 			repoId,
 			judge: null,
 		});
-		expect(r.passages[0].file).toBe("packages/output/trim.ts");
-		const lines = r.passages[0].excerpt.split("\n");
+		const p = r.passages.find((x) => x.file === "packages/output/trim.ts");
+		expect(p).toBeDefined();
+		const lines = (p?.excerpt ?? "").split("\n");
 		expect(lines.length).toBeLessThanOrEqual(8);
-		for (const l of lines) expect(l.length).toBeLessThanOrEqual(170);
-		const out = formatLocateCode(r);
-		expect(out).not.toContain(FAKE_KEY);
-		expect(out).toContain("[REDACTED:");
-		expect(out).toContain("packages/output/trim.ts:");
+		for (const l of [...lines, p?.text ?? ""]) {
+			expect(l.length).toBeLessThanOrEqual(170);
+			expect(l).not.toContain("AKIAABCD");
+		}
+		expect(p?.excerpt).toContain("[REDACTED:");
 	});
 
 	test("a question with no searchable words answers without searching", async () => {
 		const r = await locateCode("where is the", { root, repoId, judge: null });
 		expect(r.passages).toEqual([]);
-		expect(formatLocateCode(r)).toContain("no passage holds these words");
 	});
 });
 
-describe("locateCode, judge", () => {
+describe("paths stay inside the root (8SO M1)", () => {
+	test("a newline-and-dot-dot directory name cannot read outside the root", async () => {
+		const r = await locateCode("where is zebra", { root, repoId, judge: null });
+		for (const p of r.passages) {
+			expect(insideRoot(root, p.file)).toBe(p.file);
+			expect(`${p.text}\n${p.excerpt}`).not.toContain(OUTSIDE_MARK);
+		}
+		expect(r.passages.map((p) => p.file)).toContain("x\n../outside.ts");
+	});
+
+	test("insideRoot refuses .., absolute paths and symlinks out", () => {
+		expect(insideRoot(root, "../outside.ts")).toBeNull();
+		expect(insideRoot(root, path.join(parent, "outside.ts"))).toBeNull();
+		fs.symlinkSync(path.join(parent, "outside.ts"), path.join(root, "link.ts"));
+		try {
+			expect(insideRoot(root, "link.ts")).toBeNull();
+		} finally {
+			fs.unlinkSync(path.join(root, "link.ts"));
+		}
+		expect(insideRoot(root, "packages/other/noise.ts")).toBe("packages/other/noise.ts");
+	});
+});
+
+describe("judge", () => {
 	const q = "where is shell output";
 
 	test("one call reranks by the model's probabilities", async () => {
@@ -163,6 +215,21 @@ describe("locateCode, judge", () => {
 		expect(calls).toBe(1);
 		expect(r.judge.used).toBe(true);
 		expect(r.passages[0].file).toBe("packages/output/trim.ts");
+	});
+
+	test("the question and every option reach the judge scrubbed (8SO M2)", async () => {
+		const seen: string[] = [];
+		const judge: Judge = async (question, options) => {
+			seen.push(question, ...options);
+			return options.map(() => 1 / options.length);
+		};
+		await locateCode(`where is shell output truncated ${FAKE_KEY}`, {
+			root,
+			repoId,
+			judge,
+		});
+		expect(seen.length).toBeGreaterThan(2);
+		for (const s of seen) expect(s).not.toContain("AKIAABCD");
 	});
 
 	test("a failing, malformed or slow judge leaves the deterministic order", async () => {
@@ -182,18 +249,51 @@ describe("locateCode, judge", () => {
 			expect(r.passages.map((p) => p.file)).toEqual(order);
 		}
 	});
+});
 
-	test("the local judge refuses a model host that is not on this machine", async () => {
-		const judge = localJudge({ OLLAMA_HOST: "http://models.example.com:11434" });
-		await expect(judge("q", ["a", "b"])).rejects.toThrow("not on this machine");
-		const laya = localJudge({ LAYA_URL: "https://laya.example.com" });
-		await expect(laya("q", ["a", "b"])).rejects.toThrow("not on this machine");
+describe("loopback only (8SO H1, H2)", () => {
+	test("only localhost or a loopback IP literal counts", () => {
+		for (const ok of [
+			"http://localhost:11434",
+			"http://127.0.0.1:11434",
+			"http://127.3.2.1",
+			"http://[::1]:11434",
+		]) {
+			expect(isLoopback(ok)).toBe(true);
+		}
+		for (const bad of [
+			"http://127.evil.example",
+			"http://127.0.0.1.nip.io:11434",
+			"http://localhost.evil.example",
+			"http://10.0.0.5:11434",
+			"http://models.example.com",
+			"not a url",
+		]) {
+			expect(isLoopback(bad)).toBe(false);
+		}
+	});
+
+	test("the decider's fetch refuses a remote URL without sending it", async () => {
+		await expect(loopbackFetch("http://127.evil.example/api/tags")).rejects.toThrow(
+			"not on this machine",
+		);
+	});
+
+	test("a remote shared judge, Ollama or Laya host is refused before any request", async () => {
+		const remote = [
+			{ EIGHT_DECIDE_OLLAMA_HOST: "http://judge.example.com:11434" },
+			{ EIGHT_DECIDE_OLLAMA_HOST: "http://127.evil.example:11434" },
+			{ OLLAMA_HOST: "http://models.example.com:11434" },
+			{ LAYA_URL: "https://laya.example.com" },
+		];
+		for (const env of remote) {
+			await expect(localJudge(env)("q", ["a", "b"])).rejects.toThrow("not on this machine");
+		}
 	});
 });
 
-describe("locate_code tool flag", () => {
-	const names = (e: ToolExecutor) =>
-		e.getToolDefinitions().map((d) => (d as { function: { name: string } }).function.name);
+describe("EIGHT_LOCATE flag on the locate tool", () => {
+	const prose = "where is the shell command sanitizer";
 
 	test("only the exact value 1 turns it on", () => {
 		expect(locateCodeEnabled({})).toBe(false);
@@ -202,39 +302,47 @@ describe("locate_code tool flag", () => {
 		expect(locateCodeEnabled({ EIGHT_LOCATE: "1" })).toBe(true);
 	});
 
-	test("off: the tool list is identical and the tool is unknown", async () => {
+	test("off: tool list unchanged, prose answered by hybrid as before", async () => {
 		delete process.env.EIGHT_LOCATE;
 		const executor = new ToolExecutor(root);
 		const off = executor.getToolDefinitions();
-		expect(names(executor)).not.toContain("locate_code");
+		const r = await locate(prose, { root, repoId, systemOne: null, semantic: null });
+		expect(r.route.mode).toBe("hybrid");
+		expect(r.narrowed).toBeUndefined();
+		expect(r.rows.every((row) => row.kind !== "passage")).toBe(true);
 		process.env.EIGHT_LOCATE = "1";
-		const on = executor.getToolDefinitions();
-		expect(
-			on.filter((d) => (d as { function: { name: string } }).function.name !== "locate_code"),
-		).toEqual(off);
-		delete process.env.EIGHT_LOCATE;
-		expect(await executor.execute("locate_code", { question: "where is the sanitizer" })).toBe(
-			"Unknown tool: locate_code",
-		);
-	});
-
-	test("on: listed once and answers through the executor", async () => {
-		process.env.EIGHT_LOCATE = "1";
-		// No model in tests: point the judge at a closed loopback port so it fails fast and locally.
-		const savedHost = process.env.OLLAMA_HOST;
-		process.env.OLLAMA_HOST = "http://127.0.0.1:9";
 		try {
-			const executor = new ToolExecutor(root);
-			expect(names(executor).filter((n) => n === "locate_code")).toHaveLength(1);
-			const out = await executor.execute("locate_code", {
-				question: "where is the shell command sanitizer",
-			});
-			expect(out.split("\n")[0]).toStartWith("locate_code: shell command sanitiz [");
-			expect(out).toContain("packages/guard/sanitizer.ts:5 in sanitizeShellCommand");
+			expect(executor.getToolDefinitions()).toEqual(off);
 		} finally {
 			delete process.env.EIGHT_LOCATE;
-			if (savedHost === undefined) delete process.env.OLLAMA_HOST;
-			else process.env.OLLAMA_HOST = savedHost;
+		}
+	});
+
+	test("on: prose gets passage rows with file:line, hermetic (closed local hosts)", async () => {
+		closedLocalHosts();
+		process.env.EIGHT_LOCATE = "1";
+		try {
+			const r = await locate(prose, { root, repoId, systemOne: null, semantic: null });
+			expect(r.rows[0]).toMatchObject({
+				file: "packages/guard/sanitizer.ts",
+				line: 5,
+				kind: "passage",
+			});
+			expect(r.narrowed).toBeDefined();
+			const out = formatLocate(r);
+			expect(out).toContain("packages/guard/sanitizer.ts:5 passage sanitizeShellCommand:");
+			expect(out).toContain("Rows from question narrowing (EIGHT_LOCATE=1 trial;");
+			// Names still route to the symbol index, untouched by the flag.
+			const named = await locate("sanitizeShellCommand", {
+				root,
+				repoId,
+				systemOne: null,
+				semantic: null,
+			});
+			expect(named.route.mode).toBe("symbol");
+			expect(named.narrowed).toBeUndefined();
+		} finally {
+			delete process.env.EIGHT_LOCATE;
 		}
 	});
 });

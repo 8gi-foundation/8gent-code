@@ -74,7 +74,6 @@ import {
 	checkpointEveryFromEnv,
 } from "./timetravel/checkpoint-store";
 import { ToolLoopDetector } from "./tool-loop-detector";
-import { locateCodeEnabled } from "../repo-context/locate";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
@@ -1351,8 +1350,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...CORE_TOOLS,
 			...(cuaConfigured ? DESKTOP_TOOLS : []),
 			...localDelegationTools(this.config.role),
-			// #3427 trial: the text-tool path sees locate_code only with EIGHT_LOCATE=1.
-			...(locateCodeEnabled() ? ["locate_code"] : []),
 		];
 		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
