@@ -109,7 +109,6 @@ export const HOMEDIR_BASELINE: Record<string, number> = {
 	"packages/self-autonomy/evolution-db.ts": 1,
 	"packages/self-autonomy/onboarding.ts": 1,
 	"packages/self-autonomy/skill-creator.ts": 1,
-	"packages/settings/store.ts": 1,
 	"packages/skills/compound.ts": 1,
 	"packages/skills/creator.ts": 2,
 	"packages/skills/index.ts": 3,
