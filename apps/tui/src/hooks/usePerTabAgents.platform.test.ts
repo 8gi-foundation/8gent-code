@@ -10,9 +10,9 @@
  * Isolation: every call injects both the host (platform, arch) and the
  * settings loader. The loader returns a clone of DEFAULT_SETTINGS, or an
  * explicit override built from it, so no case reads this machine's
- * ~/.8gent/settings.json. The temp $HOME preload does not cover that file:
- * packages/settings/store.ts builds its path from os.homedir(), which Bun
- * fixes at process start.
+ * ~/.8gent/settings.json. The temp $HOME preload now covers that file too
+ * (packages/settings/store.ts resolves it through resolveHome() since #3391);
+ * the injected loader keeps each case independent of any settings on disk.
  */
 
 import { describe, expect, test } from "bun:test";
