@@ -11,6 +11,7 @@ import {
 	ResidencyBroker,
 	type Resident,
 	type ResidentKind,
+	isLoopbackUrl,
 	ollamaTurnResident,
 	residencyEnabled,
 } from "./model-residency";
@@ -185,6 +186,106 @@ describe("ollamaTurnResident against a fake Ollama", () => {
 		} finally {
 			o.server.stop(true);
 		}
+	});
+
+	test("a 500 on the snapshot unloads nothing and reports claim-failed", async () => {
+		let psCalls = 0;
+		const unloads: unknown[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(req) {
+				if (new URL(req.url).pathname === "/api/ps") {
+					psCalls++;
+					// A 500 whose body still parses: only the status says it failed.
+					if (psCalls === 1) return Response.json({ models: [] }, { status: 500 });
+					return Response.json({ models: [{ model: "other-session:7b", expires_at: "t0" }] });
+				}
+				unloads.push(await req.json());
+				return Response.json({ done: true });
+			},
+		});
+		try {
+			const events: string[] = [];
+			const broker = new ResidencyBroker([ollamaTurnResident(`http://127.0.0.1:${server.port}`)], {
+				onEvent: (e) => events.push(e),
+			});
+			await broker.enter("think");
+			await broker.enter("speak");
+			expect(events).toContain("claim-failed:llm");
+			expect(unloads).toEqual([]);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("a snapshot whose models is not an array unloads nothing", async () => {
+		const unloads: unknown[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(req) {
+				if (new URL(req.url).pathname === "/api/ps") return Response.json({ models: "nope" });
+				unloads.push(await req.json());
+				return Response.json({ done: true });
+			},
+		});
+		try {
+			const events: string[] = [];
+			const broker = new ResidencyBroker([ollamaTurnResident(`http://127.0.0.1:${server.port}`)], {
+				onEvent: (e) => events.push(e),
+			});
+			await broker.enter("think");
+			await broker.enter("speak");
+			expect(events).toContain("claim-failed:llm");
+			expect(unloads).toEqual([]);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("a non-loopback Ollama is never contacted, and the skip is logged once", async () => {
+		const realFetch = globalThis.fetch;
+		const fetched: string[] = [];
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			fetched.push(String(input));
+			return Response.json({ models: [] });
+		}) as typeof fetch;
+		try {
+			const warnings: string[] = [];
+			const resident = ollamaTurnResident("http://192.168.1.50:11434", 2000, (m) =>
+				warnings.push(m),
+			);
+			const broker = new ResidencyBroker([resident]);
+			for (let i = 0; i < 2; i++) {
+				await broker.enter("listen");
+				await broker.enter("think");
+				await broker.enter("speak");
+			}
+			expect(fetched).toEqual([]);
+			expect(warnings.length).toBe(1);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+
+	test("isLoopbackUrl accepts only 127.0.0.0/8, ::1 and localhost", () => {
+		for (const ok of [
+			"http://127.0.0.1:11434",
+			"http://127.8.9.10",
+			"http://localhost:11434",
+			"http://[::1]:11434",
+		])
+			expect(isLoopbackUrl(ok)).toBe(true);
+		for (const bad of [
+			"http://192.168.1.50:11434",
+			"http://ollama.example.com",
+			"http://128.0.0.1",
+			"http://127.0.0.1.evil.com",
+			"http://localhost.evil.com",
+			"not a url",
+		])
+			expect(isLoopbackUrl(bad)).toBe(false);
 	});
 
 	test("an unreachable Ollama fails the claim and unload without blocking the broker", async () => {
