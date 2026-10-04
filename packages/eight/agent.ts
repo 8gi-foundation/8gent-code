@@ -2770,6 +2770,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Replace the newest assistant message's text. Heard-only voice memory
+	 * (#3428) uses it so a cut-off spoken reply keeps only what was played.
+	 * Returns false when there is no assistant message to replace.
+	 */
+	amendLastAssistantMessage(content: string): boolean {
+		for (let i = this.messageHistory.length - 1; i >= 0; i--) {
+			const msg = this.messageHistory[i];
+			if (msg?.role === "assistant") {
+				this.messageHistory[i] = { ...msg, content };
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Get the orchestrator bus for multi-agent coordination.
 	 */
 	getOrchestratorBus(): OrchestratorBus {

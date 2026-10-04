@@ -990,6 +990,10 @@ export function App({
 		},
 		voice: "Daniel",
 		silenceMs: 1500,
+		// Heard-only voice memory (#3428): only fires with EIGHT_VOICE_HEARD_ONLY=1.
+		onAgentHeard: (heard) => {
+			agent?.amendLastAssistantMessage(heard);
+		},
 		onActiveChange: (active) => {
 			if (active) {
 				addSystemMessage(

@@ -27,6 +27,8 @@ export interface UseVoiceChatOptions {
 	silenceMs?: number;
 	/** Called when voice chat starts/stops */
 	onActiveChange?: (active: boolean) => void;
+	/** Heard-only mode (EIGHT_VOICE_HEARD_ONLY=1): a reply was cut off, this is what was played */
+	onAgentHeard?: (heard: string) => void;
 }
 
 export interface UseVoiceChatReturn {
@@ -114,6 +116,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 
 		loop.on("user-said", (text) => setLastUserSaid(text));
 		loop.on("agent-said", (text) => setLastAgentSaid(text));
+		loop.on("agent-heard", (text) => options.onAgentHeard?.(text));
 		loop.on("stopped", () => {
 			setIsActive(false);
 			options.onActiveChange?.(false);
