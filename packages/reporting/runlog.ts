@@ -32,7 +32,7 @@ export interface RunLogEntry {
 	session: string;
 	/** Working directory */
 	cwd: string;
-	/** First 120 chars of the prompt */
+	/** The prompt, redacted, then cut to PROMPT_MAX_CHARS by capRunEntry (pass it whole) */
 	prompt: string;
 	/** Error message if failed */
 	error?: string;
@@ -91,6 +91,8 @@ export const CLAIM_MAX_CHARS = 120;
 
 /** The quick line's facts and answer text: at most FACTS_MAX facts of FACT_MAX_CHARS, and QUICK_TEXT_MAX_CHARS (#3416). */
 export const FACTS_MAX = 8;
+/** The prompt is redacted whole, then cut to this many chars, so a cut never splits a secret (#3416). */
+export const PROMPT_MAX_CHARS = 120;
 export const FACT_MAX_CHARS = 40;
 export const QUICK_TEXT_MAX_CHARS = 300;
 
@@ -101,7 +103,8 @@ export const QUICK_TEXT_MAX_CHARS = 300;
  * nothing changes.
  */
 export function capRunEntry(entry: RunLogEntry): RunLogEntry {
-	const prompt = redact(entry.prompt);
+	// Redact before cutting: a secret split by the cut would no longer match a pattern.
+	const prompt = redact(entry.prompt).slice(0, PROMPT_MAX_CHARS);
 	const q = entry.quick;
 	const quickTouched =
 		q !== undefined && (q.claims !== undefined || q.facts !== undefined || q.text !== undefined);

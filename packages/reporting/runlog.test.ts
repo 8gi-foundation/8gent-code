@@ -1,12 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
 	CLAIMS_MAX,
 	CLAIM_MAX_CHARS,
 	FACTS_MAX,
 	FACT_MAX_CHARS,
+	PROMPT_MAX_CHARS,
 	QUICK_TEXT_MAX_CHARS,
 	type RunLogEntry,
 	capRunEntry,
@@ -26,6 +27,8 @@ const base: RunLogEntry = {
 	cwd: "/w",
 	prompt: "p",
 };
+afterAll(cleanupTempDirs);
+
 const long = (i: number) => `${i}:${"x".repeat(500)}`;
 
 describe("run log claims cap (#3411, 8SO L3)", () => {
@@ -53,7 +56,7 @@ describe("run log claims cap (#3411, 8SO L3)", () => {
 	});
 
 	test("appendRun writes the capped claims to runs.jsonl", () => {
-		const home = mkdtempSync(join(tmpdir(), "runlog-cap-"));
+		const home = tempDir("runlog-cap-");
 		const script = `const { appendRun } = await import(${JSON.stringify(join(import.meta.dir, "runlog.ts"))});
 appendRun(${JSON.stringify({ ...base, quick: { class: "quick", ran: true, ok: false, ms: 1, tools: 1, claims: [0, 1, 2, 3, 4, 5, 6].map(long) } })});`;
 		const r = Bun.spawnSync([process.execPath, "-e", script], {
@@ -122,6 +125,51 @@ describe("run log redaction at the write (#3416)", () => {
 	});
 
 	test("an entry with nothing to redact or cap is returned as is", () => {
+		const entry = { ...base, prompt: "which port does staging use?" };
+		expect(capRunEntry(entry)).toBe(entry);
+	});
+});
+
+describe("run log prompt: redacted before it is cut (#3416)", () => {
+	const SECRETS: Array<[string, string]> = [
+		["postgres URL credentials", "postgres://ops:Wy5Qz8Kp3Jv7@db.internal:5432/app"],
+		["sk-proj key", `sk-proj-${"Hq3Lm7Vt9".repeat(4)}`],
+	];
+	const secretPart = (s: string) =>
+		s.startsWith("postgres") ? "Wy5Qz8Kp3Jv7" : s.slice("sk-proj-".length);
+
+	test("PROMPT_MAX_CHARS is 120", () => {
+		expect(PROMPT_MAX_CHARS).toBe(120);
+	});
+
+	for (const [name, secret] of SECRETS) {
+		test(`a ${name} slid across the 120-char boundary leaves no fragment at any offset`, () => {
+			const part = secretPart(secret);
+			const fragments = new Set<string>();
+			for (let i = 0; i + 4 <= part.length; i++) fragments.add(part.slice(i, i + 4));
+			for (let offset = 0; offset <= PROMPT_MAX_CHARS + 5; offset++) {
+				const prompt = `${"x ".repeat(80).slice(0, offset)}${secret} and more words after it`;
+				const out = capRunEntry({ ...base, prompt });
+				expect(out.prompt.length).toBeLessThanOrEqual(PROMPT_MAX_CHARS);
+				for (const f of fragments) expect(out.prompt).not.toContain(f);
+			}
+		});
+	}
+
+	test("a claim cut only after redaction keeps no fragment either", () => {
+		const secret = `sk-proj-${"Hq3Lm7Vt9".repeat(4)}`;
+		for (let offset = 90; offset <= CLAIM_MAX_CHARS + 2; offset++) {
+			const claim = `${"y".repeat(offset)}${secret}`;
+			const out = capRunEntry({
+				...base,
+				quick: { class: "quick", ran: true, ok: false, ms: 1, tools: 1, claims: [claim] },
+			});
+			expect(out.quick?.claims?.[0]).not.toContain("Hq3L");
+			expect(out.quick?.claims?.[0]).not.toContain("Vt9");
+		}
+	});
+
+	test("a short prompt with nothing to redact is still returned as is", () => {
 		const entry = { ...base, prompt: "which port does staging use?" };
 		expect(capRunEntry(entry)).toBe(entry);
 	});

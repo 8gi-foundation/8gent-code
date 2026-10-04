@@ -1180,7 +1180,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				modified: Array.from(this.sessionWriter.getFilesModified()),
 				session: this.sessionId,
 				cwd: this.config.workingDirectory || process.cwd(),
-				prompt: textForAgent.slice(0, 120),
+				prompt: textForAgent,
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
 				...(quickRecord ? { quick: quickRecord } : {}),
 			});
@@ -1347,7 +1347,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							modified: [],
 							session: this.sessionId,
 							cwd: this.config.workingDirectory || process.cwd(),
-							prompt: textForAgent.slice(0, 120),
+							prompt: textForAgent,
 							quick: {
 								class: "unclear",
 								ran: false,
@@ -2487,7 +2487,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					modified: Array.from(this.sessionWriter.getFilesModified()),
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
-					prompt: textForAgent.slice(0, 120),
+					prompt: textForAgent,
 				});
 			}
 			const finalContent = flavoredContent;
@@ -2607,7 +2607,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					modified: Array.from(this.sessionWriter.getFilesModified()),
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
-					prompt: textForAgent.slice(0, 120),
+					prompt: textForAgent,
 					error: errMsg.slice(0, 200),
 				});
 			}

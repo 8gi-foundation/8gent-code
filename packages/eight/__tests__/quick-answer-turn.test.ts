@@ -422,6 +422,23 @@ describe("quick then full in a real turn (#3416)", () => {
 		}, 60_000);
 	}
 
+	test("the run log gets the whole prompt, redacted, then cut: a key near char 120 leaves no fragment", () => {
+		// The password starts before char 120 and the "@" lands after it: cut first, and
+		// the URL-credentials rule can no longer see the "@".
+		const url = "postgres://ops:Kd4Wn8Zr2Qp6@db.internal:5432/app";
+		const prompt = `which port does the server listen on when APP_MODE is staging and PORT is left unset here? the db is ${url}`;
+		const pw = prompt.indexOf("Kd4W");
+		expect(pw).toBeLessThanOrEqual(116);
+		expect(prompt.indexOf("@")).toBeGreaterThan(120);
+		for (const flag of ["1", undefined]) {
+			const p = probe("answer", prompt, flag);
+			const logged = JSON.stringify(p.runs);
+			expect(p.runs.length).toBeGreaterThan(0);
+			expect(logged).not.toContain("Kd4W");
+			expect(logged).not.toContain("Wn8Z");
+		}
+	}, 120_000);
+
 	test("verdict line names numbers first and drops ALL_CAPS words echoed from the prompt", () => {
 		const p = probe("answer", PILOT_PROMPT, "1", {
 			PROBE_QUICK_TEXT:

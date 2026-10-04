@@ -485,7 +485,8 @@ export async function runQuickAnswer(opts: QuickLaneOptions): Promise<QuickOutco
 				ms,
 				tools: calls,
 				// What the loop flagged (model output, not the user's prompt), for the run log.
-				claims: result.unverified.slice(0, 5).map((c) => c.slice(0, 120)),
+				// Cut to 120 chars by capRunEntry, after redaction, so a cut never splits a secret.
+				claims: result.unverified.slice(0, 5),
 			};
 		if (calls === 0) {
 			// Nothing was read: that is the model's memory, not the source (8PO review, round 2).
