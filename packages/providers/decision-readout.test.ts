@@ -12,7 +12,12 @@ import { SeleneJudge } from "./local-judge";
 
 // Fake llama-server /v1/systemone and fake Ollama /api/generate, loopback only.
 // The response is chosen per test through `reply`; requests are recorded.
-type Reply = { status?: number; body: string; delayMs?: number };
+type Reply = {
+	status?: number;
+	body: string;
+	delayMs?: number;
+	handler?: (req: Request) => Response;
+};
 let reply: Reply = { body: "{}" };
 const hits: { path: string; body: unknown }[] = [];
 let server: ReturnType<typeof Bun.serve>;
@@ -34,6 +39,7 @@ beforeAll(() => {
 			const path = new URL(req.url).pathname;
 			hits.push({ path, body: await req.json().catch(() => null) });
 			if (reply.delayMs) await Bun.sleep(reply.delayMs);
+			if (reply.handler) return reply.handler(req);
 			return new Response(reply.body, {
 				status: reply.status ?? 200,
 				headers: { "Content-Type": "application/json" },
@@ -329,5 +335,102 @@ describe("availability follows the judge in use (8PO must-fix 1)", () => {
 		await new SeleneJudge({ baseUrl: base }).isAvailable();
 		expect(hits.length).toBeGreaterThan(0);
 		expect(hits.every((h) => h.path.startsWith("/api/"))).toBe(true);
+	});
+});
+
+describe("8SO must-fixes: redirect, stalled body, chunked over cap", () => {
+	const redirectTo = (path: string) => () =>
+		new Response(null, { status: 302, headers: { Location: `${base}${path}` } });
+
+	it("a 302 on /v1/systemone is a FAIL and the redirect target is never hit", async () => {
+		reply = { body: "", handler: redirectTo("/target") };
+		const v = await new DecisionReadoutJudge({ baseUrl: base }).judge("out", "rubric");
+		expect(v.pass).toBe(false);
+		expect(v.source).toBe("fail-closed");
+		expect(hits.map((h) => h.path)).toEqual(["/v1/systemone"]);
+	});
+
+	it("a 302 on /health is unavailable and the redirect target is never hit", async () => {
+		reply = { body: "", handler: redirectTo("/target") };
+		expect(await new DecisionReadoutJudge({ baseUrl: base }).isAvailable()).toBe(false);
+		expect(hits.map((h) => h.path)).toEqual(["/health"]);
+	});
+
+	it("a body that stalls after the headers fails within the timeout", async () => {
+		reply = {
+			body: "",
+			handler: () =>
+				new Response(
+					new ReadableStream({
+						start(c) {
+							// Send part of a passing answer, then never finish.
+							c.enqueue(new TextEncoder().encode('{"answers":{"pass":{"type":"noul","noul":0.99'));
+						},
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+		};
+		const started = Date.now();
+		const v = await new DecisionReadoutJudge({ baseUrl: base, timeoutMs: 300 }).judge(
+			"out",
+			"rubric",
+		);
+		expect(v.pass).toBe(false);
+		expect(v.source).toBe("fail-closed");
+		expect(Date.now() - started).toBeLessThan(2000);
+	});
+
+	it("a chunked body over the cap with no Content-Length is a FAIL (streamed count)", async () => {
+		const chunk = new TextEncoder().encode(" ".repeat(512));
+		reply = {
+			body: "",
+			handler: () =>
+				new Response(
+					new ReadableStream({
+						pull(c) {
+							c.enqueue(chunk);
+						},
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+		};
+		// Prove the fake really omits Content-Length, so the header check cannot be what fails it.
+		const probe = await fetch(`${base}/probe`, { method: "POST", body: "{}" });
+		expect(probe.headers.get("content-length")).toBeNull();
+		await probe.body?.cancel();
+		hits.length = 0;
+		const v = await new DecisionReadoutJudge({ baseUrl: base, maxResponseBytes: 1024 }).judge(
+			"out",
+			"rubric",
+		);
+		expect(v.pass).toBe(false);
+		expect(v.source).toBe("fail-closed");
+		expect(v.rationale).toContain("exceeded 1024 bytes");
+	});
+});
+
+describe("threshold floor at 0.5 (8SO should-fix)", () => {
+	it.each([
+		["NaN", Number.NaN],
+		["negative", -0.2],
+		["above 1", 1.5],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["1e-9", 1e-9],
+		["just under the floor", 0.49],
+	])("falls back to 0.9 for %s", async (_label, threshold) => {
+		reply = { body: noul(0.6) };
+		const v = await new DecisionReadoutJudge({ baseUrl: base, threshold }).judge("out", "rubric");
+		expect(v.pass).toBe(false);
+		expect(v.rationale).toContain("threshold 0.9");
+	});
+
+	it("accepts 0.5 exactly", async () => {
+		reply = { body: noul(0.6) };
+		const v = await new DecisionReadoutJudge({ baseUrl: base, threshold: 0.5 }).judge(
+			"out",
+			"rubric",
+		);
+		expect(v.pass).toBe(true);
+		expect(v.rationale).toContain("threshold 0.5");
 	});
 });

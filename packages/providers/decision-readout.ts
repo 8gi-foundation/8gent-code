@@ -23,13 +23,14 @@ import type { JudgeVerdict } from "./local-judge";
 export const DECISION_QUESTION_ID = "pass";
 export const DEFAULT_DECISION_BASE_URL = "http://127.0.0.1:8080";
 export const DEFAULT_DECISION_THRESHOLD = 0.9;
+export const MIN_DECISION_THRESHOLD = 0.5;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 
 export interface DecisionReadoutConfig {
 	/** llama-server base URL. Must be loopback. */
 	baseUrl?: string;
-	/** P(yes) must be at least this to pass. Clamped to (0, 1]. */
+	/** P(yes) must be at least this to pass. Outside [0.5, 1] falls back to 0.9. */
 	threshold?: number;
 	/** Whole-request deadline, body read included. */
 	timeoutMs?: number;
@@ -134,9 +135,10 @@ export class DecisionReadoutJudge {
 	constructor(config: DecisionReadoutConfig = {}) {
 		this.baseUrl = (config.baseUrl ?? DEFAULT_DECISION_BASE_URL).replace(/\/$/, "");
 		const t = config.threshold;
-		// A threshold of 0 or below would pass everything; a non-number is a config error. Use the default.
+		// Below 0.5 the judge would pass outputs it thinks more likely fail than pass;
+		// that, a non-number, or above 1 is a config error. Use the default.
 		this.threshold =
-			typeof t === "number" && Number.isFinite(t) && t > 0 && t <= 1
+			typeof t === "number" && Number.isFinite(t) && t >= MIN_DECISION_THRESHOLD && t <= 1
 				? t
 				: DEFAULT_DECISION_THRESHOLD;
 		this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -158,6 +160,7 @@ export class DecisionReadoutJudge {
 				redirect: "error",
 			});
 			if (!res.ok) {
+				await res.body?.cancel();
 				return failClosed(`Decision judge endpoint error: ${res.status} ${res.statusText}`, "");
 			}
 			const body = await readCapped(res, this.maxResponseBytes);
