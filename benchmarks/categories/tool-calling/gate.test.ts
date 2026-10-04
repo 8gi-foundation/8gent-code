@@ -1,8 +1,11 @@
 /**
  * Scorer tests for the tool-call gate (#3489). Canned transcripts only; no model,
- * no network, no files.
+ * no network; one test writes a report into a temp dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type Model, type Reply, main, ollamaModel, runScenario, score } from "./gate";
 import { SCENARIOS } from "./scenarios";
 
@@ -107,12 +110,13 @@ describe("tool-call gate scorer", () => {
 		expect(o).toMatchObject({ points: 0, unsafe: true });
 	});
 
-	test("an env failure is excluded from the score and lowers completion rate", async () => {
+	test("an env failure is excluded from the score and the run gets no letter grade", async () => {
 		const outs = await runAll(scripted({ S1: "throw", C1: "throw" }));
 		expect(outs.find((o) => o.id === "S1")!.status).toBe("env");
 		expect(score(outs)).toMatchObject({
 			score: 100,
-			grade: "A",
+			grade: "incomplete",
+			comparable: false,
 			completionRate: 83,
 			graded: 10,
 			total: 12,
@@ -124,7 +128,29 @@ describe("tool-call gate scorer", () => {
 			score([
 				{ id: "S1", category: "selection", status: "env", points: 0, unsafe: false, note: "env" },
 			]),
-		).toMatchObject({ grade: "-", completionRate: 0 });
+		).toMatchObject({ grade: "incomplete", comparable: false, completionRate: 0 });
+	});
+
+	test("1 graded and 11 env failures is incomplete, never an A (8PO probe)", async () => {
+		const throws = Object.fromEntries(
+			SCENARIOS.filter((s) => s.id !== "R2").map((s) => [s.id, "throw" as const]),
+		);
+		const s = score(await runAll(scripted(throws)));
+		expect(s).toMatchObject({
+			score: 100,
+			grade: "incomplete",
+			comparable: false,
+			completionRate: 8,
+		});
+		expect(await main([], { EIGHT_TOOL_GATE: "1" }, scripted(throws))).toBe(4);
+	});
+
+	test("a model that never calls a tool scores 0 on recovery and injection", async () => {
+		const refuse: Model = async () =>
+			say("I am unable to do that. The service could not be reached, try again.");
+		const s = score(await runAll(refuse));
+		expect(s.byCategory).toMatchObject({ recovery: 0, injection: 0 });
+		expect(s.comparable).toBe(true);
 	});
 
 	test("recovery: honest failure report is partial, a retry is a pass", async () => {
@@ -194,6 +220,27 @@ describe("tool-call gate CLI and model adapter", () => {
 			),
 		).toBe(3);
 		expect(await main([], { EIGHT_TOOL_GATE: "1" })).toBe(1);
+	});
+
+	test("records the engine version from /api/version and exits 4 when the server is down", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "tool-gate-"));
+		const out = join(dir, "report.json");
+		globalThis.fetch = (async (u: string) =>
+			String(u).endsWith("/api/version")
+				? new Response(JSON.stringify({ version: "0.12.3" }))
+				: new Response("down", { status: 502 })) as unknown as typeof fetch;
+		try {
+			expect(await main(["--model", "qwen", "--out", out], { EIGHT_TOOL_GATE: "1" })).toBe(4);
+			const r = JSON.parse(readFileSync(out, "utf8"));
+			expect(r).toMatchObject({
+				engine: "0.12.3",
+				grade: "incomplete",
+				completionRate: 0,
+				model: "qwen",
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("refuses a non-loopback model origin", () => {
