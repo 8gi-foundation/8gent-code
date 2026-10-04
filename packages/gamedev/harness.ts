@@ -13,12 +13,22 @@
  */
 
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { animate, packSpriteSheet } from "./animation-generator.js";
 import { sliceSpriteSheet } from "./sprite-slicer.js";
 import { buildSpritePrompt, type SpritePromptConfig } from "./prompts.js";
+import {
+	BodyTooLargeError,
+	isLoopbackUrl,
+	pickLocalModel,
+	probeLocalMediaCapabilities,
+	type ProbedModel,
+	readCapped,
+	safeForLog,
+} from "../local-model-server/media-probe";
 
 // ── Paths ───────────────────────────────────────────────────────
 const ASSET_DIR = join(homedir(), ".8gent", "assets", "media");
@@ -252,6 +262,110 @@ async function generateLocalFromImage(
 	}
 }
 
+/** The sprite-sheet prompt both image tiers send. */
+function spritePromptFor(options: GenerateOptions): string {
+	const cfg: SpritePromptConfig = {
+		subject: options.prompt,
+		style: options.style || "pixel-art",
+		cols: options.frameCount || 8,
+		rows: 1,
+		frameSize: 128,
+		background: "transparent",
+		animation: "idle",
+	};
+	return buildSpritePrompt(cfg);
+}
+
+// ── Local Model Tier (EIGHT_LOCAL_MEDIA=1, #3422) ────────────────
+
+/** Image generation on a local server can take a minute; bounded so a hung server cannot hold the call. */
+const LOCAL_IMAGE_TIMEOUT_MS = 180_000;
+/** Largest image response read: a 1024x1024 PNG as base64 in JSON is a few MB. */
+const MAX_LOCAL_IMAGE_BODY_BYTES = 32 * 1024 * 1024;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function isPng(bytes: Uint8Array): boolean {
+	return bytes.length > PNG_SIGNATURE.length && PNG_SIGNATURE.every((b, i) => bytes[i] === b);
+}
+
+/**
+ * Ask a loopback model server for the sprite sheet, OpenAI images wire shape
+ * (`POST /v1/images/generations`, `b64_json` back). Only called with a model
+ * the probe found by capability; never with a guessed id.
+ */
+async function generateLocalModel(options: GenerateOptions, model: ProbedModel): Promise<GenerateResult> {
+	if (!isLoopbackUrl(model.baseUrl)) {
+		return { success: false, reason: "local media server is not on loopback", path: "local" };
+	}
+	try {
+		const response = await fetch(`${model.baseUrl}/v1/images/generations`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			redirect: "manual",
+			signal: AbortSignal.timeout(LOCAL_IMAGE_TIMEOUT_MS),
+			body: JSON.stringify({
+				model: model.id,
+				prompt: spritePromptFor(options),
+				n: 1,
+				size: "1024x1024",
+				response_format: "b64_json",
+			}),
+		});
+		if (!response.ok) {
+			return { success: false, reason: `Local image server answered HTTP ${response.status}`, path: "local" };
+		}
+		let raw: Uint8Array;
+		try {
+			raw = await readCapped(response, MAX_LOCAL_IMAGE_BODY_BYTES);
+		} catch (err) {
+			if (err instanceof BodyTooLargeError) {
+				return { success: false, reason: "Local image server response is too large", path: "local" };
+			}
+			throw err;
+		}
+		const data = JSON.parse(new TextDecoder().decode(raw)) as { data?: { b64_json?: unknown }[] };
+		const b64 = data.data?.[0]?.b64_json;
+		if (typeof b64 !== "string" || b64.length === 0) {
+			return { success: false, reason: "Local image server returned no image", path: "local" };
+		}
+		const png = Buffer.from(b64, "base64");
+		if (!isPng(png)) {
+			return { success: false, reason: "Local image server returned something that is not a PNG", path: "local" };
+		}
+
+		const id = `local-${Date.now()}-${randomUUID().slice(0, 8)}`;
+		mkdirSync(join(ASSET_DIR, id), { recursive: true });
+		const sheetPath = join(ASSET_DIR, id, "sheet.png");
+		await Bun.write(sheetPath, png);
+
+		const manifest: MediaAssetManifest = {
+			frames: 1,
+			cols: 1,
+			rows: 1,
+			frameWidth: 1024,
+			frameHeight: 1024,
+			fps: 8,
+			loop: true,
+			direction: "forward",
+			animations: { idle: { start: 0, count: 1 } },
+		};
+		addAsset({
+			id,
+			name: options.prompt.slice(0, 60),
+			type: "sprite",
+			prompt: options.prompt,
+			sheetPath,
+			manifest,
+			createdAt: Date.now(),
+			path: "local",
+			tags: [`local-model:${model.id}`],
+		});
+		return { success: true, sheetPath, manifest, path: "local" };
+	} catch (err) {
+		return { success: false, reason: (err as Error).message, path: "local" };
+	}
+}
+
 // ── Cloud Fallback (DALL-E / GPT Image) ──────────────────────────
 
 async function generateCloud(options: GenerateOptions): Promise<GenerateResult> {
@@ -269,17 +383,7 @@ async function generateCloud(options: GenerateOptions): Promise<GenerateResult> 
 	mkdirSync(join(ASSET_DIR, id), { recursive: true });
 
 	// Build the sprite prompt for DALL-E
-	const cfg: SpritePromptConfig = {
-		subject: options.prompt,
-		style: options.style || "pixel-art",
-		cols: options.frameCount || 8,
-		rows: 1,
-		frameSize: 128,
-		background: "transparent",
-		animation: "idle",
-	};
-
-	const imagePrompt = buildSpritePrompt(cfg);
+	const imagePrompt = spritePromptFor(options);
 
 	try {
 		// Call DALL-E 3 or 2
@@ -373,8 +477,9 @@ async function generateCloud(options: GenerateOptions): Promise<GenerateResult> 
  *
  * Priority:
  * 1. Local sharp/canvas if available and no --force-cloud flag
- * 2. Cloud DALL-E fallback if OPENAI_API_KEY is set
- * 3. Honest degradation with a clear reason
+ * 2. With EIGHT_LOCAL_MEDIA=1 only: an image model on a loopback server (#3422)
+ * 3. Cloud DALL-E fallback if OPENAI_API_KEY is set
+ * 4. Honest degradation with a clear reason
  *
  * @example
  * const result = await generate({ prompt: "a walking robot", frameCount: 8, loop: true });
@@ -407,6 +512,29 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 		}
 	}
 
+	// Local model tier, flag-gated (#3422): ask loopback servers for an image
+	// model by capability. Off unless EIGHT_LOCAL_MEDIA is exactly "1"; when it
+	// finds nothing or fails, the cloud path below runs as before.
+	// localOutcome names what the local tier found, for the degraded reason.
+	let localOutcome: string | null = null;
+	if (!forceCloud && process.env.EIGHT_LOCAL_MEDIA === "1") {
+		const pick = pickLocalModel(await probeLocalMediaCapabilities(), "image");
+		if (pick.ok) {
+			const label = safeForLog(pick.model.id);
+			console.log(
+				`[media-harness] Using local image model ${label} at ${safeForLog(pick.model.baseUrl)}...`,
+			);
+			const local = await generateLocalModel(options, pick.model);
+			if (local.success) return local;
+			const why = safeForLog(local.reason ?? "unknown error");
+			console.log(`[media-harness] Local image model failed: ${why}`);
+			localOutcome = `Local image model ${label} failed (${why})`;
+		} else {
+			console.log(`[media-harness] ${pick.reason}.`);
+			localOutcome = `No local image model found (${pick.answered} of ${pick.asked} local model servers answered)`;
+		}
+	}
+
 	// Cloud path: DALL-E generates the sprite sheet from the prompt
 	if (tools.openai) {
 		console.log("[media-harness] Using cloud fallback (DALL-E)...");
@@ -415,6 +543,13 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
 	// Honest degradation
 	const id = `degraded-${Date.now()}`;
+	if (localOutcome !== null) {
+		return {
+			success: false,
+			reason: `${localOutcome} and no OPENAI_API_KEY. Start a local image server that lists an image model, or set OPENAI_API_KEY.`,
+			path: "degraded",
+		};
+	}
 	return {
 		success: false,
 		reason:
