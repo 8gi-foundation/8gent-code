@@ -22,6 +22,7 @@ import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { AuthRotator } from "./auth-rotation";
+import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import {
 	type ProviderCompat,
 	discoverModelsAt,
@@ -125,6 +126,12 @@ export interface ChatRequest {
 	 * exact level is unsupported. Pass `undefined` for non-thinking calls.
 	 */
 	thinking?: ThinkingLevel;
+	/**
+	 * Kind of task: a `TaskCategory` label from packages/ai/task-router, or `review`.
+	 * Only read by the effort policy (EIGHT_EFFORT_POLICY=1, #3461) to fill
+	 * `thinking` when the caller left it empty. Never sent to a provider.
+	 */
+	taskKind?: EffortTaskKind;
 }
 
 export interface ToolDefinition {
@@ -788,7 +795,11 @@ export class ProviderManager {
 	// Chat API
 	// ============================================
 
-	async chat(request: ChatRequest): Promise<ChatResponse> {
+	async chat(callerRequest: ChatRequest): Promise<ChatResponse> {
+		// Effort policy (#3461): fills `thinking` from `taskKind` only when the
+		// flag is exactly "1" and the caller left `thinking` empty. Otherwise
+		// returns the caller's object untouched.
+		const request = applyEffortPolicy(callerRequest);
 		const provider = this.getActiveProvider();
 		const model = request.model || this.settings.activeModel;
 
@@ -1135,6 +1146,11 @@ export class ProviderManager {
 		if (request.thinking) {
 			const budget = ANTHROPIC_THINKING_BUDGET[request.thinking];
 			body.thinking = { type: "enabled", budget_tokens: budget };
+			// The API rejects budget_tokens >= max_tokens (400). Keep a cap that is
+			// already above the budget; otherwise raise it to the budget plus 4096
+			// tokens for the answer. The no-thinking path above is unchanged.
+			const cap = request.maxTokens || 4096;
+			body.max_tokens = cap > budget ? cap : budget + 4096;
 		}
 
 		const response = await fetch(`${provider.baseUrl}/messages`, {
