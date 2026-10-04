@@ -132,7 +132,8 @@ export type CommunicationStyle =
 	| "concise" // Just the facts
 	| "detailed" // Teach me as we go
 	| "casual" // We're collaborators
-	| "formal"; // Professional tone
+	| "formal" // Professional tone
+	| "action-first"; // Next action first, numbered steps, one "Next:" line
 
 export interface OnboardingChoice {
 	/** Display label for the option (e.g. "Bruno (male, warm)") */
@@ -443,8 +444,26 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			{ label: "Detailed & explanatory", value: "3", description: "Teach me as we go" },
 			{ label: "Casual & friendly", value: "4", description: "We're collaborators" },
 			{ label: "Formal & precise", value: "5", description: "Professional tone" },
+			{
+				label: "Action first",
+				value: "6",
+				description: "Next step first, numbered steps, one clear next move",
+			},
 		],
-		options: ["1", "2", "3", "4", "5", "sarcastic", "concise", "detailed", "casual", "formal"],
+		options: [
+			"1",
+			"2",
+			"3",
+			"4",
+			"5",
+			"6",
+			"sarcastic",
+			"concise",
+			"detailed",
+			"casual",
+			"formal",
+			"action-first",
+		],
 		processor: (answer, user) => {
 			const styleMap: Record<string, CommunicationStyle> = {
 				"1": "sarcastic",
@@ -452,11 +471,13 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 				"3": "detailed",
 				"4": "casual",
 				"5": "formal",
+				"6": "action-first",
 				sarcastic: "sarcastic",
 				concise: "concise",
 				detailed: "detailed",
 				casual: "casual",
 				formal: "formal",
+				"action-first": "action-first",
 			};
 			const style = styleMap[answer.toLowerCase()] || "sarcastic";
 			return {
