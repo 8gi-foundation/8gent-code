@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluatePolicy, resolvePolicyPath } from "./policy-engine";
+import { ToolG8 } from "./toolg8";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "mcp-config-policy-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -56,6 +57,14 @@ describe("resolved_path rules for mcp.json and policies.yaml", () => {
 		expect(asks("write_file", "mcp.json", work)).toBe(false);
 		expect(asks("write_file", "notes.md", dot8)).toBe(false);
 		expect(asks("write_file", `${dot8}/settings.json`, work)).toBe(false);
+	});
+
+	test("a shell redirect is resolved against the executor's cwd, not the process's", () => {
+		const g = (cwd: string) =>
+			ToolG8.instance().gate("t", "run_command", { command: "echo {} > mcp.json", cwd });
+		expect(g(dot8).allowed).toBe(false);
+		expect(g(dot8).reason).toContain("mcp-config-and-policies");
+		expect(g(work).allowed).toBe(true);
 	});
 
 	test("resolvePolicyPath follows a symlinked dir and a dangling symlink to its target", () => {

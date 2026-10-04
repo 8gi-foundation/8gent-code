@@ -856,9 +856,14 @@ export interface BashCapabilityLike {
 	path?: string;
 }
 
-export function evaluateCapabilities(caps: BashCapabilityLike[], agentId?: string): PolicyDecision {
+export function evaluateCapabilities(
+	caps: BashCapabilityLike[],
+	agentId?: string,
+	cwd?: string,
+): PolicyDecision {
 	for (const cap of caps) {
-		const ctx: PolicyContext = { agentId };
+		// cwd: what a redirect's relative path resolves against (#3474).
+		const ctx: PolicyContext = cwd ? { agentId, cwd } : { agentId };
 		if (cap.command !== undefined) ctx.command = cap.command;
 		if (cap.path !== undefined) ctx.path = cap.path;
 		const decision = evaluatePolicy(cap.kind, ctx);
