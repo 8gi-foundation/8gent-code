@@ -58,6 +58,7 @@
     "smoke:bare-install": "sh scripts/bare-install-smoke.sh",
     "verify:presets": "bun scripts/verify-presets.ts",
     "verify:presets:strict": "bun scripts/verify-presets.ts --strict",
+    "arch:check": "bun packages/ast-index/arch-rules.ts",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",

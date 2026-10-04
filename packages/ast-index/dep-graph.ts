@@ -13,12 +13,16 @@ export interface DepNode {
 	exportedBy: string[]; // absolute paths that import this file (reverse map)
 }
 
+/** Map a bare-specifier prefix to a directory, e.g. { "@8gent/": "/repo/packages/" }. */
+export type ImportAliases = Record<string, string>;
+
 export interface DepGraph {
 	nodes: Map<string, DepNode>;
 	rootDir: string;
 }
 
-const IMPORT_RE = /(?:import\s+(?:[\w*{},\s]+\s+from\s+)?|require\s*\()\s*['"]([^'"]+)['"]/g;
+const IMPORT_RE =
+	/(?:import\s+(?:[\w*{},\s]+\s+from\s+)?|export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[\w,\s]*\})\s+from\s+|require\s*\()\s*['"]([^'"]+)['"]/g;
 const IGNORE_DIRS = new Set(["node_modules", "dist", ".git", ".next", "coverage", ".8gent"]);
 const SOURCE_EXTS = [".ts", ".tsx", ".js", ".jsx"];
 const RESOLVE_EXTS = [...SOURCE_EXTS, "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
@@ -39,13 +43,29 @@ function walkDir(dir: string): string[] {
 }
 
 /** Resolve a relative import specifier to an absolute file path */
-function resolveImport(specifier: string, fromFile: string, rootDir: string): string | null {
-	if (!specifier.startsWith(".") && !specifier.startsWith("/")) return null;
-	const base = path.resolve(path.dirname(fromFile), specifier);
+function resolveImport(
+	specifier: string,
+	fromFile: string,
+	aliases: ImportAliases = {},
+): string | null {
+	let base: string | null = null;
+	if (specifier.startsWith(".") || specifier.startsWith("/")) {
+		base = path.resolve(path.dirname(fromFile), specifier);
+	} else {
+		const prefix = Object.keys(aliases).find((p) => specifier.startsWith(p));
+		if (prefix) base = path.resolve(aliases[prefix], specifier.slice(prefix.length));
+	}
+	if (!base) return null;
 	if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;
 	for (const suffix of RESOLVE_EXTS) {
 		const candidate = base + suffix;
 		if (fs.existsSync(candidate)) return candidate;
+	}
+	// TS ESM style: "./foo.js" names the source file "./foo.ts"
+	const jsMatch = base.match(/\.jsx?$/);
+	if (jsMatch) {
+		const stem = base.slice(0, -jsMatch[0].length);
+		for (const ext of [".ts", ".tsx"]) if (fs.existsSync(stem + ext)) return stem + ext;
 	}
 	return null;
 }
@@ -65,7 +85,7 @@ function extractImports(content: string): string[] {
  * Build a dependency graph for all source files under rootDir.
  * Runs in O(files) with cheap regex parsing.
  */
-export function buildDepGraph(rootDir: string): DepGraph {
+export function buildDepGraph(rootDir: string, aliases?: ImportAliases): DepGraph {
 	const absRoot = path.resolve(rootDir);
 	const files = walkDir(absRoot);
 	const graph: DepGraph = { nodes: new Map(), rootDir: absRoot };
@@ -86,7 +106,7 @@ export function buildDepGraph(rootDir: string): DepGraph {
 		const node = graph.nodes.get(file)!;
 
 		for (const spec of specifiers) {
-			const resolved = resolveImport(spec, file, absRoot);
+			const resolved = resolveImport(spec, file, aliases);
 			if (!resolved || !graph.nodes.has(resolved)) continue;
 			if (!node.imports.includes(resolved)) node.imports.push(resolved);
 			const target = graph.nodes.get(resolved)!;
