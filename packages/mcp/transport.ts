@@ -34,6 +34,26 @@ interface JSONRPCResponse {
 
 // ── Stdio Transport ──────────────────────────────────────────────
 
+/**
+ * The parent environment a stdio server inherits: enough to find and run a
+ * program, nothing else. Every other variable (API keys, tokens) stays in
+ * this process; a server that needs one names it in its own config env.
+ */
+const SERVER_ENV_KEYS = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TMPDIR|LC_[A-Z_]+)$/;
+
+export function serverEnv(
+	own: Record<string, string> | undefined,
+	parent: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [k, v] of Object.entries(parent))
+		if (v !== undefined && SERVER_ENV_KEYS.test(k)) env[k] = v;
+	return { ...env, ...own };
+}
+
+/** Longest JSON-RPC line a server may send (UTF-16 units); over it the transport closes. */
+export const MAX_MESSAGE_CHARS = 16 * 1024 * 1024;
+
 export class StdioTransport implements Transport {
 	private proc: Subprocess | null = null;
 	private requestId = 0;
@@ -44,8 +64,11 @@ export class StdioTransport implements Transport {
 			reject: (e: Error) => void;
 		}
 	>();
-	private buffer = "";
+	// The unfinished line, kept as chunks so each byte is scanned once.
+	private partial: string[] = [];
+	private partialLength = 0;
 	private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	private closedReason: string | null = null;
 
 	constructor(
 		private command: string,
@@ -56,7 +79,7 @@ export class StdioTransport implements Transport {
 	async start(): Promise<void> {
 		this.proc = spawn({
 			cmd: [this.command, ...this.args],
-			env: { ...process.env, ...this.env },
+			env: serverEnv(this.env),
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
@@ -79,12 +102,14 @@ export class StdioTransport implements Transport {
 				if (!this.reader) return;
 				const { done, value } = await this.reader.read();
 				if (done) break;
-				this.buffer += decoder.decode(value, { stream: true });
-				this._processBuffer();
+				this._processChunk(decoder.decode(value, { stream: true }));
+				if (this.closedReason) return;
 			}
 		} catch {
 			// Process exited
 		}
+		// The server's output ended: nothing pending can be answered now.
+		this._shutdown("MCP server closed its output");
 	}
 
 	private async _readStderr(): Promise<void> {
@@ -102,33 +127,62 @@ export class StdioTransport implements Transport {
 		}
 	}
 
-	private _processBuffer(): void {
-		const lines = this.buffer.split("\n");
-		this.buffer = lines.pop() || "";
+	/** Split on newlines scanning only the new chunk; a line over the cap closes the transport. */
+	private _processChunk(text: string): void {
+		let start = 0;
+		let nl = text.indexOf("\n");
+		while (nl >= 0) {
+			if (this.partialLength + nl - start > MAX_MESSAGE_CHARS) {
+				this._overCap();
+				return;
+			}
+			const line = this.partial.length
+				? this.partial.join("") + text.slice(start, nl)
+				: text.slice(start, nl);
+			this.partial = [];
+			this.partialLength = 0;
+			this._handleLine(line);
+			start = nl + 1;
+			nl = text.indexOf("\n", start);
+		}
+		if (start < text.length) {
+			this.partial.push(text.slice(start));
+			this.partialLength += text.length - start;
+			if (this.partialLength > MAX_MESSAGE_CHARS) this._overCap();
+		}
+	}
 
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			try {
-				const msg = JSON.parse(trimmed) as JSONRPCResponse;
-				if (msg.id !== undefined) {
-					const p = this.pending.get(msg.id);
-					if (p) {
-						this.pending.delete(msg.id);
-						if (msg.error) {
-							p.reject(new Error(msg.error.message));
-						} else {
-							p.resolve(msg.result);
-						}
+	private _overCap(): void {
+		this.partial = [];
+		this.partialLength = 0;
+		this._shutdown(
+			`MCP server sent a message over ${MAX_MESSAGE_CHARS} characters; transport closed`,
+		);
+	}
+
+	private _handleLine(line: string): void {
+		const trimmed = line.trim();
+		if (!trimmed) return;
+		try {
+			const msg = JSON.parse(trimmed) as JSONRPCResponse;
+			if (msg.id !== undefined) {
+				const p = this.pending.get(msg.id);
+				if (p) {
+					this.pending.delete(msg.id);
+					if (msg.error) {
+						p.reject(new Error(msg.error.message));
+					} else {
+						p.resolve(msg.result);
 					}
 				}
-			} catch {
-				// Not valid JSON, skip
 			}
+		} catch {
+			// Not valid JSON, skip
 		}
 	}
 
 	async send(method: string, params?: unknown): Promise<unknown> {
+		if (this.closedReason) throw new Error(this.closedReason);
 		if (!this.proc?.stdin) throw new Error("Transport not started");
 
 		const id = ++this.requestId;
@@ -163,24 +217,42 @@ export class StdioTransport implements Transport {
 
 	notify(method: string, params?: unknown): void {
 		if (!this.proc?.stdin) return;
-		this._write({ jsonrpc: "2.0", method, params });
+		try {
+			this._write({ jsonrpc: "2.0", method, params });
+		} catch {
+			// A notification has no answer to fail; a dead server shows up on the next send.
+		}
 	}
 
 	// Bun's spawn({ stdin: "pipe" }) hands back a FileSink (write + flush), not
 	// a WritableStream: the old getWriter() call threw on every request, so no
 	// stdio server could ever connect (found under #3474).
 	private _write(msg: JSONRPCRequest): void {
-		const sink = this.proc?.stdin as unknown as { write(chunk: string): unknown; flush?(): unknown };
+		const sink = this.proc?.stdin as unknown as {
+			write(chunk: string): unknown;
+			flush?(): unknown;
+		};
 		sink.write(`${JSON.stringify(msg)}\n`);
-		sink.flush?.();
+		// flush() may return a promise that rejects once the server has gone.
+		const flushed = sink.flush?.() as Promise<unknown> | undefined;
+		if (flushed && typeof flushed.catch === "function") flushed.catch(() => {});
 	}
 
 	close(): void {
+		this._shutdown("Transport closed");
+	}
+
+	/** Kill the server and reject everything still waiting on it. Idempotent. */
+	private _shutdown(reason: string): void {
+		this.closedReason ??= reason;
 		this.reader?.cancel().catch(() => {});
-		this.proc?.kill();
+		this.reader = null;
+		try {
+			this.proc?.kill();
+		} catch {}
 		this.proc = null;
 		for (const [, p] of this.pending) {
-			p.reject(new Error("Transport closed"));
+			p.reject(new Error(reason));
 		}
 		this.pending.clear();
 	}
