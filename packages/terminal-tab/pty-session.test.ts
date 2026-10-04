@@ -7,21 +7,63 @@
  *
  * If the test runner has no Node binary available the tests skip
  * with a clear message rather than hanging.
+ *
+ * #3458: they also skip, with the reason printed, when the host cannot give
+ * the bridge a pty at all. Two such conditions, both outside this package:
+ *   - node-pty cannot be loaded. It is an optionalDependency with no Linux
+ *     prebuild, so on ubuntu CI it exists only if `node-gyp rebuild` succeeded
+ *     during `bun install`, and bun does not report when that build fails.
+ *     The bridge then exits 66 and every test here failed. The 66 path itself
+ *     is covered by pty-bridge-no-pty.test.ts.
+ *   - the host refuses openpty (a sandbox), so the bridge exits 65.
+ * The openpty check uses python3, independent of node-pty; if python3 is
+ * missing the check is inconclusive and the tests run.
  */
 
 import { describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { findNodeBinary } from "./find-node.js";
 import { PtySession } from "./pty-session.js";
 
-const nodeAvailable = (() => {
+function errorLine(s: string | undefined): string {
+	const lines = (s ?? "")
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean);
+	return lines.find((l) => /Error/.test(l)) ?? lines[0] ?? "";
+}
+
+function ptySkipReason(): string | null {
 	const bin = findNodeBinary();
-	return Boolean(bin);
-})();
+	if (!bin) return "no Node binary found";
+	// Same require the bridge makes, resolved from the bridge's own folder.
+	const load = spawnSync(bin, ["-e", "require('node-pty')"], {
+		cwd: import.meta.dir,
+		encoding: "utf-8",
+		timeout: 15_000,
+	});
+	if (load.status !== 0) {
+		return `node-pty cannot be loaded by ${bin}, so the bridge would exit 66: ${errorLine(load.stderr) || String(load.error ?? "")}`;
+	}
+	const open = spawnSync("python3", ["-c", "import os; os.openpty()"], {
+		encoding: "utf-8",
+		timeout: 15_000,
+	});
+	if (open.error) return null; // python3 unavailable: inconclusive, run the tests
+	if (open.status !== 0) {
+		return `this host refuses to open a pty, so the bridge would exit 65: ${errorLine(open.stderr)}`;
+	}
+	return null;
+}
+
+const skipReason = ptySkipReason();
+if (skipReason) console.warn(`[pty-session.test] SKIPPED: ${skipReason}`);
+const ptyAvailable = skipReason === null;
 
 const SHELL = process.env.SHELL || "/bin/bash";
 
 describe("PtySession — bridge spawn + capture output", () => {
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"spawns a one-shot command and emits its stdout via onData",
 		async () => {
 			const session = new PtySession({
@@ -45,7 +87,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 		8000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"forwards stdin writes back through onData (echo loop)",
 		async () => {
 			const session = new PtySession({
@@ -77,7 +119,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 });
 
 describe("PtySession — lifecycle", () => {
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"reports pid after ready and null after exit",
 		async () => {
 			const session = new PtySession({
@@ -99,7 +141,7 @@ describe("PtySession — lifecycle", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"invokes onExit callback with exit code",
 		async () => {
 			const session = new PtySession({
@@ -124,7 +166,7 @@ describe("PtySession — lifecycle", () => {
 });
 
 describe("PtySession — resize", () => {
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"resize() does not throw on a live session",
 		async () => {
 			const session = new PtySession({
@@ -140,7 +182,7 @@ describe("PtySession — resize", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(ptyAvailable)(
 		"resize() is a no-op on a dead session (does not throw)",
 		async () => {
 			const session = new PtySession({
