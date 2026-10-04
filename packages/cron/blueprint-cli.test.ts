@@ -56,6 +56,19 @@ describe("8gent blueprint", () => {
 		expect(fs.existsSync(store())).toBe(false);
 	});
 
+	test("flag on: parser refuses a repeated key, __proto__ and a bare word, escaped", () => {
+		const twice = cli(["add", "morning-brief", "time=07:00", "time=08:00"], "1");
+		expect(twice.code).not.toBe(0);
+		expect(twice.err).toContain('Slot given twice: "time"');
+		const proto = cli(["add", "morning-brief", "__proto__=x"], "1");
+		expect(proto.code).not.toBe(0);
+		expect(proto.err).toContain('Not a slot name: "__proto__"');
+		const bare = cli(["add", "morning-brief", "oops\u001b[2J"], "1");
+		expect(bare.code).not.toBe(0);
+		expect(bare.err).toContain('Expected key=value, got "oops\\u001b[2J"');
+		expect(fs.existsSync(store())).toBe(false);
+	});
+
 	test("flag on: there is no run subcommand", () => {
 		const r = cli(["run", "abcd1234"], "1");
 		expect(r.code).not.toBe(0);

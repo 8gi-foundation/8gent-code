@@ -1730,14 +1730,19 @@ async function blueprintCommand(args: string[]) {
 		return;
 	}
 	if (sub === "add" && target) {
-		const slots: Record<string, string> = {};
+		const slots: Record<string, string> = Object.create(null);
 		for (const p of pairs) {
 			const i = p.indexOf("=");
-			if (i < 1) {
-				console.error(`Expected key=value, got "${p}"`);
+			const key = p.slice(0, i);
+			let why = "";
+			if (i < 1) why = `Expected key=value, got ${JSON.stringify(p)}`;
+			else if (key === "__proto__") why = `Not a slot name: ${JSON.stringify(key)}`;
+			else if (key in slots) why = `Slot given twice: ${JSON.stringify(key)}`;
+			if (why) {
+				console.error(why);
 				process.exit(1);
 			}
-			slots[p.slice(0, i)] = p.slice(i + 1);
+			slots[key] = p.slice(i + 1);
 		}
 		try {
 			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
