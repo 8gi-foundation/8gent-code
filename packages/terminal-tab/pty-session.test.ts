@@ -50,14 +50,22 @@ function ptySkipReason(): string | null {
 		timeout: 15_000,
 	});
 	if (open.error) return null; // python3 unavailable: inconclusive, run the tests
-	if (open.status !== 0) {
+	// Only a refused openpty counts. Any other failure (a broken python3 shim,
+	// say) is inconclusive, and the tests run.
+	if (open.status !== 0 && /openpty|OSError|PermissionError/.test(open.stderr ?? "")) {
 		return `this host refuses to open a pty, so the bridge would exit 65: ${errorLine(open.stderr)}`;
 	}
 	return null;
 }
 
 const skipReason = ptySkipReason();
-if (skipReason) console.warn(`[pty-session.test] SKIPPED: ${skipReason}`);
+if (skipReason) {
+	console.warn(`[pty-session.test] SKIPPED: ${skipReason}`);
+	// Surface lost coverage on the GitHub Actions run summary.
+	if (process.env.GITHUB_ACTIONS) {
+		console.log(`::warning title=pty-session tests skipped::${skipReason.replace(/\r?\n/g, " ")}`);
+	}
+}
 const ptyAvailable = skipReason === null;
 
 const SHELL = process.env.SHELL || "/bin/bash";
