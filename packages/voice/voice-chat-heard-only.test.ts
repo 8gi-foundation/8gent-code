@@ -10,7 +10,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Agent } from "../eight/agent";
 import { TTSEngine, type TTSProcess, getTTSEngine, setTTSEngine } from "./tts-engine";
-import { HEARD_ONLY_MARK, VoiceChatLoop, heardOnlyText, isHeardOnlyEnabled } from "./voice-chat";
+import {
+	HEARD_ONLY_MARK,
+	VoiceChatLoop,
+	VoiceReplyTracker,
+	heardOnlyText,
+	isHeardOnlyEnabled,
+} from "./voice-chat";
 
 // Three sentences with unique tokens, each long enough (over 60 chars) to be its own TTS chunk, so "did unheard text leak" is a string check.
 const S1 = "Alpha one is here, the first of three points, and it runs long enough to fill a chunk.";
@@ -70,18 +76,24 @@ interface Run {
 }
 
 /** Drive one turn (listen stubbed) with the given script and flag. */
-async function runTurn(script: Step[], heardOnly: boolean, reply = REPLY): Promise<Run> {
+async function runTurn(
+	script: Step[],
+	heardOnly: boolean,
+	reply = REPLY,
+	opts: { onMessage?: (t: string) => Promise<string>; onHeard?: (h: string) => void } = {},
+): Promise<Run> {
 	const tts = new ScriptedTTS(script);
 	setTTSEngine(tts);
 	const loop = new VoiceChatLoop({
 		engine: {} as never,
-		onMessage: async () => reply,
+		onMessage: opts.onMessage ?? (async () => reply),
 		heardOnly,
 	});
 	tts.loop = loop;
 	const heard: string[] = [];
 	const said: string[] = [];
 	loop.on("agent-heard", (t) => heard.push(t));
+	if (opts.onHeard) loop.on("agent-heard", opts.onHeard);
 	loop.on("agent-said", (t) => said.push(t));
 	const internals = loop as unknown as {
 		running: boolean;
@@ -258,6 +270,145 @@ describe("flag off: unchanged", () => {
 	});
 });
 
+type Msg = { role: string; content: string };
+
+function makeAgent(history: Msg[]): Agent {
+	const agent = new Agent({ model: "eight-1.0-q3:14b", runtime: "ollama" });
+	agent.restoreFromCheckpoint(history);
+	return agent;
+}
+
+function contents(agent: Agent): string[] {
+	return agent
+		.getMessageHistory()
+		.filter((m) => m.role !== "system")
+		.map((m) => m.content);
+}
+
+/** chat() stand-in that pushes the user turn and the reply, as the real one does. */
+function pushTurn(agent: Agent, user: string, reply: string): void {
+	const h = (agent as unknown as { messageHistory: Msg[] }).messageHistory;
+	h.push({ role: "user", content: user });
+	h.push({ role: "assistant", content: reply });
+}
+
+/** The app.tsx voice turn shape: begin, chat, commit only on success, spoken error otherwise. */
+function voiceTurn(
+	agent: Agent | null,
+	tracker: VoiceReplyTracker,
+	chat: (t: string) => Promise<string>,
+) {
+	return async (t: string): Promise<string> => {
+		tracker.begin(agent);
+		if (!agent) return "Agent not ready.";
+		try {
+			const r = await chat(t);
+			tracker.commit(agent);
+			return r;
+		} catch (err) {
+			return `Error: ${(err as Error).message}`;
+		}
+	};
+}
+
+const PREVIOUS: Msg[] = [
+	{ role: "user", content: "earlier question" },
+	{ role: "assistant", content: "previous answer" },
+];
+
+describe("only amend the reply this voice turn produced", () => {
+	test("success: the cut-off reply is trimmed to what was heard", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		await runTurn(["finish", "interrupt"], true, REPLY, {
+			onMessage: voiceTurn(agent, tracker, async (t) => {
+				pushTurn(agent, t, REPLY);
+				return REPLY;
+			}),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(amended).toEqual([true]);
+		expect(contents(agent)).toEqual([
+			"earlier question",
+			"previous answer",
+			"tell me three things",
+			`${S1} ${HEARD_ONLY_MARK}`,
+		]);
+	});
+
+	test("chat() throws, the spoken error is interrupted: previous reply unchanged", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		const run = await runTurn(["interrupt"], true, REPLY, {
+			onMessage: voiceTurn(agent, tracker, async () => {
+				throw new Error("provider down");
+			}),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(run.said).toEqual(["Error: provider down"]);
+		expect(run.heard).toEqual([HEARD_ONLY_MARK]);
+		expect(amended).toEqual([false]);
+		expect(contents(agent)).toEqual(["earlier question", "previous answer"]);
+	});
+
+	test("agent not ready: nothing is amended", async () => {
+		const tracker = new VoiceReplyTracker();
+		const run = await runTurn(["interrupt"], true, REPLY, {
+			onMessage: voiceTurn(null, tracker, async () => REPLY),
+			onHeard: (h) => expect(tracker.amend(null, h)).toBe(false),
+		});
+		expect(run.said).toEqual(["Agent not ready."]);
+	});
+
+	test("a typed turn finishes while the voice reply is speaking: its reply is left alone", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		await runTurn(["finish", "interrupt"], true, REPLY, {
+			onMessage: voiceTurn(agent, tracker, async (t) => {
+				pushTurn(agent, t, REPLY);
+				return REPLY;
+			}),
+			onHeard: (h) => {
+				pushTurn(agent, "typed question", "typed answer");
+				amended.push(tracker.amend(agent, h));
+			},
+		});
+		expect(amended).toEqual([false]);
+		expect(contents(agent).slice(-2)).toEqual(["typed question", "typed answer"]);
+		expect(contents(agent)).toContain(REPLY);
+	});
+
+	test("chat() returns without adding a reply: the previous reply is not touched", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		await runTurn(["interrupt"], true, REPLY, {
+			onMessage: voiceTurn(agent, tracker, async () => REPLY),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(amended).toEqual([false]);
+		expect(contents(agent)).toEqual(["earlier question", "previous answer"]);
+	});
+
+	test("history shrank inside chat() (compaction): no amend", async () => {
+		const agent = makeAgent([...PREVIOUS, ...PREVIOUS, ...PREVIOUS]);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		await runTurn(["interrupt"], true, REPLY, {
+			onMessage: voiceTurn(agent, tracker, async () => {
+				agent.restoreFromCheckpoint([{ role: "assistant", content: "summary" }]);
+				return REPLY;
+			}),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(amended).toEqual([false]);
+		expect(contents(agent)).toEqual(["summary"]);
+	});
+});
+
 describe("Agent.amendLastAssistantMessage", () => {
 	test("replaces only the newest assistant message", () => {
 		const agent = new Agent({ model: "eight-1.0-q3:14b", runtime: "ollama" });
@@ -268,7 +419,7 @@ describe("Agent.amendLastAssistantMessage", () => {
 			{ role: "assistant", content: REPLY },
 		]);
 		const heard = heardOnlyText(CHUNKS, 1) as string;
-		expect(agent.amendLastAssistantMessage(heard)).toBe(true);
+		expect(agent.amendLastAssistantMessage(heard, REPLY)).toBe(true);
 		const history = agent.getMessageHistory().filter((m) => m.role !== "system");
 		expect(history.map((m) => m.content)).toEqual([
 			"first",
@@ -281,6 +432,17 @@ describe("Agent.amendLastAssistantMessage", () => {
 	test("returns false when there is no assistant message", () => {
 		const agent = new Agent({ model: "eight-1.0-q3:14b", runtime: "ollama" });
 		agent.restoreFromCheckpoint([{ role: "user", content: "hi" }]);
-		expect(agent.amendLastAssistantMessage("x")).toBe(false);
+		expect(agent.amendLastAssistantMessage("x", "y")).toBe(false);
+	});
+
+	test("newest assistant message does not match the spoken reply: no amend", () => {
+		const agent = makeAgent([
+			...PREVIOUS,
+			{ role: "user", content: "q" },
+			{ role: "assistant", content: "other" },
+		]);
+		const heard = heardOnlyText(CHUNKS, 1) as string;
+		expect(agent.amendLastAssistantMessage(heard, REPLY)).toBe(false);
+		expect(contents(agent)).toEqual(["earlier question", "previous answer", "q", "other"]);
 	});
 });
