@@ -296,6 +296,12 @@ describe("ProviderManager.chat with the effort policy, Anthropic shape", () => {
 		}
 	});
 
+	test("a caller cap already above the budget is kept, not raised", async () => {
+		await ask({ thinking: "minimal", maxTokens: 2000 });
+		expect((captured!.thinking as { budget_tokens: number }).budget_tokens).toBe(1024);
+		expect(captured!.max_tokens).toBe(2000);
+	});
+
 	test("flag off: max_tokens is unchanged (default 4096, caller value kept)", async () => {
 		for (const flag of [undefined, "0", "true"]) {
 			if (flag === undefined) delete process.env.EIGHT_EFFORT_POLICY;

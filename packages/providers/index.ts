@@ -1146,10 +1146,11 @@ export class ProviderManager {
 		if (request.thinking) {
 			const budget = ANTHROPIC_THINKING_BUDGET[request.thinking];
 			body.thinking = { type: "enabled", budget_tokens: budget };
-			// The API rejects budget_tokens >= max_tokens (400). Raise max_tokens
-			// to leave 4096 tokens for the answer on top of the budget. The
-			// no-thinking path above is unchanged.
-			body.max_tokens = Math.max(request.maxTokens || 4096, budget + 4096);
+			// The API rejects budget_tokens >= max_tokens (400). Keep a cap that is
+			// already above the budget; otherwise raise it to the budget plus 4096
+			// tokens for the answer. The no-thinking path above is unchanged.
+			const cap = request.maxTokens || 4096;
+			body.max_tokens = cap > budget ? cap : budget + 4096;
 		}
 
 		const response = await fetch(`${provider.baseUrl}/messages`, {
