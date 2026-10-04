@@ -105,27 +105,57 @@ export class ResidencyBroker {
 	}
 }
 
+/** True only for 127.0.0.0/8, ::1 and localhost. Anything unparsable is false. */
+export function isLoopbackUrl(url: string): boolean {
+	let host: string;
+	try {
+		host = new URL(url).hostname.toLowerCase();
+	} catch {
+		return false;
+	}
+	if (host === "localhost" || host === "[::1]" || host === "::1") return true;
+	return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
 /**
  * The Ollama language model as a resident, scoped to one voice turn.
  * `claim` (before think) snapshots GET /api/ps. `unload` (before speak)
  * unloads, through `unloadOllamaModel`, only the models whose entry changed
  * since that snapshot: newly loaded, or `expires_at` moved because a request
  * reached them. That is the agent model and anything the think step called,
- * such as a critic. Models nobody touched during think stay loaded. Without a
- * snapshot it unloads nothing. Known limit: a model another session used
- * during the same think step looks the same and is unloaded too.
+ * such as a critic. Models nobody touched during think stay loaded.
+ *
+ * Fails safe: a snapshot that errors, is not HTTP 2xx, or has no `models`
+ * array leaves no snapshot, and without a snapshot nothing is unloaded. A
+ * non-loopback Ollama (remote OLLAMA_HOST / OLLAMA_BASE_URL) is never
+ * contacted: unloading there frees no local memory and evicts other people's
+ * models. Known limit: a model another session used during the same think
+ * step looks the same and is unloaded too.
  */
-export function ollamaTurnResident(baseUrl?: string, timeoutMs = 2000): Resident {
+export function ollamaTurnResident(
+	baseUrl?: string,
+	timeoutMs = 2000,
+	warn: (message: string) => void = console.warn,
+): Resident {
 	const root = () => baseUrl ?? resolveOllamaBaseUrl();
 	let before: Map<string, string> | null = null;
+	let warned = false;
+	const local = (): boolean => {
+		if (isLoopbackUrl(root())) return true;
+		if (!warned) {
+			warned = true;
+			warn("[residency] Ollama is not on this machine, so voice turns will not unload its models.");
+		}
+		return false;
+	};
 	const ps = async (): Promise<Map<string, string>> => {
 		const res = await fetch(`${root()}/api/ps`, { signal: AbortSignal.timeout(timeoutMs) });
-		const body = (await res.json()) as {
-			models?: Array<{ name?: string; model?: string; expires_at?: string }>;
-		};
+		if (!res.ok) throw new Error(`ollama /api/ps returned ${res.status}`);
+		const body = (await res.json()) as { models?: unknown };
+		if (!Array.isArray(body?.models)) throw new Error("ollama /api/ps returned no models array");
 		const out = new Map<string, string>();
-		for (const m of body.models ?? []) {
-			const id = m.model ?? m.name;
+		for (const m of body.models as Array<{ name?: string; model?: string; expires_at?: string }>) {
+			const id = m?.model ?? m?.name;
 			if (id) out.set(id, m.expires_at ?? "");
 		}
 		return out;
@@ -134,12 +164,13 @@ export function ollamaTurnResident(baseUrl?: string, timeoutMs = 2000): Resident
 		kind: "llm",
 		claim: async () => {
 			before = null;
+			if (!local()) return;
 			before = await ps();
 		},
 		unload: async () => {
 			const snap = before;
 			before = null;
-			if (!snap) return;
+			if (!snap || !local()) return;
 			for (const [id, expires] of await ps()) {
 				if (snap.get(id) !== expires) await unloadOllamaModel(id, root());
 			}

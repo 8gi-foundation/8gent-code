@@ -258,7 +258,16 @@ export class VoiceChatLoop {
 
 		// 2. THINK — send to agent, wait for response
 		this.setState("thinking", transcript);
-		if (live) await Promise.race([this.enterPhase("think"), sleep(2500)]);
+		if (live) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			await Promise.race([
+				this.enterPhase("think"),
+				new Promise<void>((resolve) => {
+					timer = setTimeout(resolve, 2500);
+				}),
+			]);
+			clearTimeout(timer);
+		}
 		// A live voice turn hints thinking off (#3430); without the flag the call is unchanged.
 		const response = live
 			? await this.onMessage(transcript, { live: true, thinking: null })
