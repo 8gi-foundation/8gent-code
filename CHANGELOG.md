@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - redaction recognises more key and credential formats
+- `redact()` in `packages/memory/redact.ts` now also recognises OpenAI keys with a hyphenated prefix (`sk-proj-`, `sk-svcacct-`, `sk-admin-`), Stripe secret and restricted keys (`sk_`/`rk_`, live and test), `Bearer` tokens, and `user:pass` credentials inside a URL (the scheme and host are kept). It is on by default wherever `redact()` already runs: memory admission and the kernel's trace capture, lesson collection, judge and local scorer. An Anthropic key keeps its own label, and ordinary words, paths and URLs without credentials are left unchanged. `packages/memory/redact.test.ts` covers each format, text that must stay unchanged, and long inputs.
+
 ### Fixed - the launch splash marker and the voice cache follow the resolved home directory (refs #3394)
 - `apps/tui/src/lib/intro-gate.ts` (`readSeenVersion`, `markIntroSeen`) and `packages/voice/voice-resolver.ts` (`listInstalledSystemVoices`) now default to `resolveHome()` from `packages/core/home.ts` instead of calling `os.homedir()`, so `EIGHT_HOME` redirects `~/.8gent/intro-seen` and `~/.8gent/cache/system-voices.json` like the other migrated paths. The voice cache path is resolved on each call rather than once at module load, so a home set after import is honoured. Behaviour is unchanged when `EIGHT_HOME` is not set.
 - Both files drop out of the home-resolver ratchet's "outside the baseline" list in `tests/security`. No committed test drives the default-home path; it was checked by hand with `EIGHT_HOME` set after import. Coverage is indirect: `intro-gate.test.ts` and `voice-resolver.test.ts` exercise the same functions with an explicit home or cache path, `packages/core/home.test.ts` pins `resolveHome()` precedence, and the ratchet pins that neither file calls `homedir()`.
