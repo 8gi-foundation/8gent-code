@@ -1,16 +1,12 @@
 /**
  * 8gent Code - Revertible extension scope (#3431)
  *
- * Every registration an extension makes through its scope is recorded with
- * its undo. dispose() runs the undos newest first; one that throws is
+ * Every tool, listener or deferred undo an extension registers through its
+ * scope is recorded with its undo. Hooks are not part of the scope yet:
+ * HookManager persists them to disk, so they wait for in-memory registration.
+ * dispose() runs the undos newest first; one that throws is
  * reported and the rest still run. Behind EIGHT_EXT_SCOPE=1, default off.
  */
-
-/** Structural match for HookManager.registerHook / unregisterHook. */
-export interface HookRegistry {
-	registerHook(cfg: never): { id: string };
-	unregisterHook(id: string): boolean;
-}
 
 interface Emitter {
 	on(event: string, fn: (...args: unknown[]) => void): unknown;
@@ -23,8 +19,6 @@ export interface ExtensionScope {
 	readonly tools: Record<string, Function>;
 	/** Register a tool, exposed as `<extension>:<name>`. */
 	tool(name: string, fn: Function): void;
-	/** Register a hook config with the hook registry. */
-	hook(cfg: Record<string, unknown>): void;
 	/** Subscribe to an emitter; unsubscribed on dispose. */
 	listen(emitter: Emitter, event: string, fn: (...args: unknown[]) => void): void;
 	/** Record any other undo (timers, sockets). */
@@ -37,7 +31,7 @@ export function scopeEnabled(): boolean {
 	return process.env.EIGHT_EXT_SCOPE === "1";
 }
 
-export function createScope(name: string, hooks?: HookRegistry): ExtensionScope {
+export function createScope(name: string): ExtensionScope {
 	const undos: Array<() => unknown> = [];
 	const tools: Record<string, Function> = {};
 
@@ -47,11 +41,6 @@ export function createScope(name: string, hooks?: HookRegistry): ExtensionScope 
 		tool(toolName, fn) {
 			tools[toolName] = fn;
 			undos.push(() => delete tools[toolName]);
-		},
-		hook(cfg) {
-			if (!hooks) throw new Error(`[ext] ${name}: no hook registry`);
-			const { id } = hooks.registerHook(cfg as never);
-			undos.push(() => hooks.unregisterHook(id));
 		},
 		listen(emitter, event, fn) {
 			emitter.on(event, fn);
