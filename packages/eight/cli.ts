@@ -17,7 +17,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ChatRequest, type ProviderName, getProviderManager } from "../providers/index";
+import {
+	type ChatRequest,
+	type ChatResponse,
+	type ProviderName,
+	getProviderManager,
+} from "../providers/index";
 
 // ============================================
 // Types
@@ -56,6 +61,34 @@ export interface CLIResult {
 	model: string;
 	provider: string;
 	exitCode: number;
+	/** Token counts, present only when the provider reported them. */
+	usage?: ChatResponse["usage"];
+	/**
+	 * Thinking level requested and applied (after downgrade), present only
+	 * when the request carried a level. Lets an A/B of #3461 read both.
+	 */
+	thinking?: ChatResponse["thinking"];
+}
+
+/**
+ * The `--json` result for a completed call. `usage` and `thinking` are copied
+ * from the response only when present, so the default output keeps its keys.
+ */
+export function buildCLIResult(
+	result: ChatResponse,
+	created: string[],
+	modified: string[],
+): CLIResult {
+	return {
+		response: result.content,
+		files_created: created,
+		files_modified: modified,
+		model: result.model,
+		provider: result.provider,
+		exitCode: 0,
+		...(result.usage ? { usage: result.usage } : {}),
+		...(result.thinking ? { thinking: result.thinking } : {}),
+	};
 }
 
 // ============================================
@@ -228,14 +261,7 @@ export async function runCLI(args: string[]): Promise<void> {
 			writeOutput(opts.outputPath, code);
 		}
 
-		const cliResult: CLIResult = {
-			response: responseText,
-			files_created: filesCreated,
-			files_modified: filesModified,
-			model: result.model,
-			provider: result.provider,
-			exitCode: 0,
-		};
+		const cliResult = buildCLIResult(result, filesCreated, filesModified);
 
 		if (opts.jsonMode) {
 			console.log(JSON.stringify(cliResult, null, 2));
