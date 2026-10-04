@@ -481,6 +481,46 @@ export function heardOnlyText(chunks: string[], heardCount: number): string | nu
 	return said ? `${said} ${HEARD_ONLY_MARK}` : HEARD_ONLY_MARK;
 }
 
+/** The agent surface heard-only memory needs. `Agent` in packages/eight satisfies it. */
+export interface HeardOnlyHistory {
+	getHistoryLength(): number;
+	getMessageHistory(): Array<{ role: string; content: string }>;
+	amendLastAssistantMessage(content: string, expectedOriginal: string): boolean;
+}
+
+/**
+ * Remembers the reply a voice turn added to history, so a cut-off amends that
+ * reply and nothing else (#3428). begin() before the agent call, commit() only
+ * after it succeeds, amend() on agent-heard. A failed, skipped or reply-less
+ * turn leaves nothing to amend.
+ */
+export class VoiceReplyTracker {
+	private produced: string | null = null;
+	private before = Number.POSITIVE_INFINITY;
+
+	begin(agent: HeardOnlyHistory | null): void {
+		this.produced = null;
+		this.before = agent ? agent.getHistoryLength() : Number.POSITIVE_INFINITY;
+	}
+
+	commit(agent: HeardOnlyHistory): void {
+		const history = agent.getMessageHistory();
+		for (let i = history.length - 1; i >= this.before; i--) {
+			if (history[i]?.role === "assistant") {
+				this.produced = history[i]?.content ?? null;
+				return;
+			}
+		}
+	}
+
+	amend(agent: HeardOnlyHistory | null, heard: string): boolean {
+		const expected = this.produced;
+		this.produced = null;
+		if (!agent || expected === null) return false;
+		return agent.amendLastAssistantMessage(heard, expected);
+	}
+}
+
 /**
  * Split text into sentence-like chunks for chunked TTS delivery.
  */

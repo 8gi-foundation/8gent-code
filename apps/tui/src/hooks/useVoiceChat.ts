@@ -116,7 +116,13 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 
 		loop.on("user-said", (text) => setLastUserSaid(text));
 		loop.on("agent-said", (text) => setLastAgentSaid(text));
-		loop.on("agent-heard", (text) => options.onAgentHeard?.(text));
+		loop.on("agent-heard", (text) => {
+			try {
+				options.onAgentHeard?.(text);
+			} catch {
+				// A failed history trim must never break the voice loop.
+			}
+		});
 		loop.on("stopped", () => {
 			setIsActive(false);
 			options.onActiveChange?.(false);
