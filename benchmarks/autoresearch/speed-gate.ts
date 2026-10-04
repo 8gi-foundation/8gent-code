@@ -26,7 +26,8 @@
  * fragment or path. Only loopback hosts are allowed unless --allow-remote is
  * passed; link-local hosts (169.254.0.0/16, fe80::/10), the AWS IPv6
  * metadata range (fd00:ec2::/32) and any IPv6 form that embeds an IPv4 address
- * (mapped, compatible, translated, NAT64) other than 127/8 are always refused.
+ * (mapped, compatible, translated, NAT64 64:ff9b::/96 and 64:ff9b:1::/48)
+ * other than 127/8 are always refused. 6to4 (2002::/16) is not covered.
  * Hostnames are not resolved, so a name pointing at an internal address is not
  * blocked under --allow-remote.
  * Redirects are refused, and a reply body over 64 KiB is a failed call. An
@@ -419,10 +420,11 @@ export function loadTarget(path: string, label: string, allowRemote: boolean): M
 		throw new UsageError(`${path}: url must not have a query or fragment`);
 	if (u.pathname !== "/") throw new UsageError(`${path}: url must be an origin with no path`);
 	const host = u.hostname.toLowerCase();
-	// IPv6 that embeds an IPv4 address: ::a.b.c.d, ::ffff:a.b.c.d, ::ffff:0:a.b.c.d, 64:ff9b::a.b.c.d
-	const embedded = /^\[(?:::(?:ffff:(?:0:)?)?|64:ff9b::)([0-9a-f]{1,4}):[0-9a-f]{1,4}\]$/.exec(
-		host,
-	);
+	// IPv6 that embeds an IPv4 address: ::a.b.c.d, ::ffff:a.b.c.d, ::ffff:0:a.b.c.d, 64:ff9b::a.b.c.d, 64:ff9b:1::/48
+	const embedded =
+		/^\[(?:::(?:ffff:(?:0:)?)?|64:ff9b::|64:ff9b:1:(?:[0-9a-f]{0,4}:)+)([0-9a-f]{1,4}):[0-9a-f]{1,4}\]$/.exec(
+			host,
+		);
 	const embeddedLoopback =
 		embedded !== null && /^7f[0-9a-f]{2}$/.test(embedded[1].padStart(4, "0"));
 	if (
