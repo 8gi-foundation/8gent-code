@@ -22,7 +22,7 @@ import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { AuthRotator } from "./auth-rotation";
-import { applyEffortPolicy } from "./effort-policy";
+import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import {
 	type ProviderCompat,
 	discoverModelsAt,
@@ -131,7 +131,7 @@ export interface ChatRequest {
 	 * Only read by the effort policy (EIGHT_EFFORT_POLICY=1, #3461) to fill
 	 * `thinking` when the caller left it empty. Never sent to a provider.
 	 */
-	taskKind?: string;
+	taskKind?: EffortTaskKind;
 }
 
 export interface ToolDefinition {
@@ -1146,6 +1146,10 @@ export class ProviderManager {
 		if (request.thinking) {
 			const budget = ANTHROPIC_THINKING_BUDGET[request.thinking];
 			body.thinking = { type: "enabled", budget_tokens: budget };
+			// The API rejects budget_tokens >= max_tokens (400). Raise max_tokens
+			// to leave 4096 tokens for the answer on top of the budget. The
+			// no-thinking path above is unchanged.
+			body.max_tokens = Math.max(request.maxTokens || 4096, budget + 4096);
 		}
 
 		const response = await fetch(`${provider.baseUrl}/messages`, {

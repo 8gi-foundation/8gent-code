@@ -1,16 +1,46 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { applyEffortPolicy } from "../providers/effort-policy";
+import { EFFORT_BY_TASK_KIND, applyEffortPolicy } from "../providers/effort-policy";
 import { ProviderManager } from "../providers/index";
 import { CLI_TASK_KINDS, buildCLIChatRequest, buildCLIResult, parseCLIArgs } from "./cli";
 
 const ON = { EIGHT_EFFORT_POLICY: "1" };
 
+/** Runs bin/8gent.ts in a child with a temp HOME and data dir and no API keys. */
+function spawnCli(args: string[]): { exitCode: number; stdout: string; stderr: string } {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), "cli-task-kind-"));
+	try {
+		const bin = path.join(import.meta.dir, "..", "..", "bin", "8gent.ts");
+		const env: Record<string, string | undefined> = {
+			...process.env,
+			HOME: home,
+			TMPDIR: home,
+			EIGHT_HOME: path.join(home, ".8gent"),
+			EIGHT_DATA_DIR: path.join(home, ".8gent"),
+		};
+		delete env.OPENAI_API_KEY;
+		delete env.ANTHROPIC_API_KEY;
+		const proc = Bun.spawnSync([process.execPath, bin, ...args], { env });
+		return {
+			exitCode: proc.exitCode ?? -1,
+			stdout: proc.stdout.toString(),
+			stderr: proc.stderr.toString(),
+		};
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+}
+
 describe("--cli --task-kind", () => {
 	test("each accepted kind reaches applyEffortPolicy and sets thinking when the flag is on", () => {
-		const expected = { simple: "low", code: "medium", reasoning: "high", review: "high" };
+		const expected: Record<string, string> = {
+			simple: "low",
+			code: "medium",
+			reasoning: "high",
+			review: "high",
+		};
 		for (const kind of CLI_TASK_KINDS) {
 			const opts = parseCLIArgs(["--cli", "--task-kind", kind, "hello"]);
 			expect(opts?.taskKind).toBe(kind);
@@ -65,40 +95,80 @@ describe("--cli --task-kind", () => {
 	});
 
 	test("8gent --cli exits 1 on an invalid kind before calling any model", () => {
-		const home = fs.mkdtempSync(path.join(os.tmpdir(), "cli-task-kind-"));
-		try {
-			const bin = path.join(import.meta.dir, "..", "..", "bin", "8gent.ts");
-			const proc = Bun.spawnSync(
-				[process.execPath, bin, "--cli", "--json", "--task-kind", "bogus", "hello"],
-				{
-					env: { ...process.env, HOME: home, TMPDIR: home, EIGHT_HOME: path.join(home, ".8gent") },
-				},
-			);
-			expect(proc.exitCode).toBe(1);
-			const out = JSON.parse(proc.stdout.toString().trim().split("\n").pop()!);
-			expect(out.error).toContain("Invalid --task-kind");
-			expect(out.exitCode).toBe(1);
-		} finally {
-			fs.rmSync(home, { recursive: true, force: true });
-		}
+		const proc = spawnCli(["--cli", "--json", "--task-kind", "bogus", "hello"]);
+		expect(proc.exitCode).toBe(1);
+		const out = JSON.parse(proc.stdout.trim().split("\n").pop()!);
+		expect(out.error).toContain("Invalid --task-kind");
+		expect(out.exitCode).toBe(1);
+	});
+
+	test("repeated --task-kind: the last one wins", () => {
+		const both = parseCLIArgs(["--cli", "--task-kind", "simple", "--task-kind=review", "x"])!;
+		expect(both.taskKind).toBe("review");
+		expect(both.taskKindError).toBeUndefined();
+		const fixed = parseCLIArgs(["--cli", "--task-kind", "bogus", "--task-kind", "code", "x"])!;
+		expect(fixed.taskKind).toBe("code");
+		expect(fixed.taskKindError).toBeUndefined();
+		const broken = parseCLIArgs(["--cli", "--task-kind", "code", "--task-kind", "bogus", "x"])!;
+		expect(broken.taskKind).toBeUndefined();
+		expect(broken.taskKindError).toContain("Invalid --task-kind");
+	});
+
+	test("--task-kind --json takes --json as the value and is rejected", () => {
+		const opts = parseCLIArgs(["--cli", "--task-kind", "--json", "hello"])!;
+		expect(opts.taskKind).toBeUndefined();
+		expect(opts.taskKindError).toContain('"--json"');
+		expect(opts.jsonMode).toBe(true);
+	});
+
+	test("8gent --cli --task-kind --json prints the error as JSON and exits 1", () => {
+		const proc = spawnCli(["--cli", "--task-kind", "--json", "hello"]);
+		expect(proc.exitCode).toBe(1);
+		const out = JSON.parse(proc.stdout.trim().split("\n").pop()!);
+		expect(out).toEqual({ error: expect.stringContaining("Invalid --task-kind"), exitCode: 1 });
+	});
+
+	test("accepted kinds are exactly the policy table's kinds", () => {
+		expect([...CLI_TASK_KINDS].sort() as string[]).toEqual(Object.keys(EFFORT_BY_TASK_KIND).sort());
+		for (const k of CLI_TASK_KINDS) expect(EFFORT_BY_TASK_KIND[k]).toBeDefined();
 	});
 });
 
 describe("--cli --json usage and thinking", () => {
 	const realFetch = globalThis.fetch;
-	const realFlag = process.env.EIGHT_EFFORT_POLICY;
 	const OLD_KEYS = ["response", "files_created", "files_modified", "model", "provider", "exitCode"];
+	const ISOLATED_ENV = [
+		"HOME",
+		"EIGHT_DATA_DIR",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_API_KEY",
+		"EIGHT_EFFORT_POLICY",
+	] as const;
+	let saved: Array<readonly [string, string | undefined]>;
+	let dir: string;
+
+	beforeEach(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-json-"));
+		saved = ISOLATED_ENV.map((k) => [k, process.env[k]] as const);
+		process.env.HOME = dir;
+		process.env.EIGHT_DATA_DIR = path.join(dir, ".8gent");
+		delete process.env.OPENAI_API_KEY;
+		delete process.env.ANTHROPIC_API_KEY;
+		delete process.env.EIGHT_EFFORT_POLICY;
+	});
 
 	afterEach(() => {
 		globalThis.fetch = realFetch;
-		if (realFlag === undefined) delete process.env.EIGHT_EFFORT_POLICY;
-		else process.env.EIGHT_EFFORT_POLICY = realFlag;
+		for (const [k, v] of saved) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
 	/** Runs the --cli request path through a real ProviderManager with fetch stubbed. */
 	async function runJson(args: string[], body: object): Promise<Record<string, unknown>> {
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-json-"));
-		try {
+		{
 			const settings = path.join(dir, "providers.json");
 			fs.writeFileSync(
 				settings,
@@ -116,8 +186,6 @@ describe("--cli --json usage and thinking", () => {
 			const opts = parseCLIArgs(["--cli", "--json", ...args, "hello"])!;
 			const res = await new ProviderManager(settings).chat(buildCLIChatRequest(opts));
 			return JSON.parse(JSON.stringify(buildCLIResult(res, [], [])));
-		} finally {
-			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	}
 

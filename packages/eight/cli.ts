@@ -13,10 +13,15 @@
  * --task-kind <simple|code|reasoning|review> is passed to the provider router
  * as `taskKind`. It only changes anything when EIGHT_EFFORT_POLICY=1 (#3461).
  * Any other value is rejected with exit code 1 before a model is called.
+ * If --task-kind is repeated, the last one wins: a later valid value clears an
+ * earlier error, and a later invalid value replaces an earlier valid kind.
+ * A flag in the value slot (`--task-kind --json`) is taken as the value and
+ * rejected.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { EFFORT_BY_TASK_KIND, type EffortTaskKind } from "../providers/effort-policy";
 import {
 	type ChatRequest,
 	type ChatResponse,
@@ -40,9 +45,14 @@ export interface CLIOptions {
 	taskKindError?: string;
 }
 
-/** Values accepted by --task-kind. */
-export const CLI_TASK_KINDS = ["simple", "code", "reasoning", "review"] as const;
-export type CLITaskKind = (typeof CLI_TASK_KINDS)[number];
+/**
+ * Values accepted by --task-kind: exactly the kinds the effort policy has a
+ * level for, derived from its table so the two cannot drift.
+ */
+export type CLITaskKind = EffortTaskKind;
+export const CLI_TASK_KINDS: readonly CLITaskKind[] = Object.keys(
+	EFFORT_BY_TASK_KIND,
+) as CLITaskKind[];
 
 function setTaskKind(opts: CLIOptions, value: string | undefined): void {
 	if (value && (CLI_TASK_KINDS as readonly string[]).includes(value)) {
