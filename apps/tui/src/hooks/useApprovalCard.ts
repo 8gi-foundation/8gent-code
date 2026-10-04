@@ -48,18 +48,26 @@ interface Sized {
 }
 const sizeOf = (out: Sized) => `${out.columns}x${out.rows}`;
 
-/** A `full` card takes no key until it has been laid out whole this long, so it has been painted and seen. */
+/**
+ * A `full` card takes no key until it has been laid out whole, and no key has
+ * come, for this long: it has been painted and seen, and a key typed for the
+ * chat as it appeared does not answer it.
+ */
 export const CARD_MIN_SHOW_MS = 500;
 
 /** The box InlineApprovalPrompt draws a `full` card in. */
 export const fullCardBox = createRef<DOMElement>();
 
-/** True when the card's own box lies inside every ancestor's box and the screen (#3474). */
+/**
+ * True when the card's own box has a size and lies inside every ancestor's box
+ * and the screen (#3474). A 0-sized box (a `display: none` ancestor) is not shown.
+ */
 export function cardShowsAll(card: DOMElement | null | undefined, screen: Sized): boolean {
 	const node = card?.yogaNode;
 	if (!card || !node) return false;
 	const w = node.getComputedWidth();
 	const h = node.getComputedHeight();
+	if (!(w > 0 && h > 0)) return false;
 	let left = 0;
 	let top = 0;
 	let n: DOMElement = card;
@@ -104,23 +112,36 @@ export function isApprovalKeyClaimed(input: string, key: KeyLike): boolean {
 }
 
 /**
- * Settle the pending card with this keypress. Returns true when it settled
- * the card. A `full` card ignores its keys (still claimed, never passed on)
- * until it has been laid out whole at this screen size for CARD_MIN_SHOW_MS.
+ * Offer this keypress (any key) to the pending card. Returns true when a card
+ * key settled it. For a `full` card, once it has been laid out:
+ * - its fit is checked again, because a sibling can grow and push it out of
+ *   view without the card's own component re-rendering; if it no longer shows
+ *   whole it is answered "unfit" and taken down, so nobody is left facing a
+ *   card that takes no key;
+ * - a card key is taken only when the card has been whole at this screen size
+ *   and no key has come for CARD_MIN_SHOW_MS; any other keypress (still
+ *   claimed if it is a card key, never passed on) restarts that wait.
  */
 export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): boolean {
 	const card = active;
+	if (!card) return false;
 	const decision = approvalDecisionForKey(input, key);
-	if (!card || !decision) return false;
-	if (
-		card.full &&
-		!(
-			screen &&
+	if (card.full) {
+		if (card.shownWholeAt === undefined || !screen) return false;
+		if (!cardShowsAll(fullCardBox.current, screen)) {
+			card.resolve("unfit");
+			return false;
+		}
+		const now = Date.now();
+		const ready =
 			card.shownWholeAt === sizeOf(screen) &&
-			Date.now() - (card.shownSince ?? Number.POSITIVE_INFINITY) >= CARD_MIN_SHOW_MS
-		)
-	)
-		return false;
+			now - (card.shownSince ?? Number.POSITIVE_INFINITY) >= CARD_MIN_SHOW_MS;
+		if (!ready || !decision) {
+			card.shownSince = now;
+			return false;
+		}
+	}
+	if (!decision) return false;
 	card.resolve(decision);
 	return true;
 }
@@ -134,13 +155,22 @@ export function _resetApprovalCard(): void {
  * Registers the TUI approval handler, holds the pending card for rendering,
  * and routes Y/N/E/S to it. `onKey` runs after a card key settles the card.
  * A `full` card that is not laid out whole is answered "unfit" and taken
- * down, never left up clipped.
+ * down, never left up clipped. The hook re-renders on resize itself, so the
+ * check does not depend on the caller also using useViewport.
  */
 export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
+	const [, setSize] = useState("");
+	useEffect(() => {
+		const onResize = () => setSize(sizeOf(stdout));
+		stdout.on("resize", onResize);
+		return () => {
+			stdout.off("resize", onResize);
+		};
+	}, [stdout]);
 
-	// Every commit, after Ink has laid out (a resize re-renders too).
+	// Every commit, after Ink has laid out.
 	useLayoutEffect(() => {
 		const card = active;
 		if (!card?.full || card !== pending) return;
