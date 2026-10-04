@@ -31,6 +31,16 @@ describe("redact: key shapes", () => {
 		});
 	}
 
+	test("a key glued to the text before it is still redacted", () => {
+		expect(redact(`x${OPENAI_PROJ}`)).toBe("x[REDACTED_OPENAI_KEY]");
+		expect(redact(`yyy${OPENAI_CLASSIC}`)).toBe("yyy[REDACTED_OPENAI_KEY]");
+		expect(redact(`key:${OPENAI_SVC}`)).toBe("key:[REDACTED_OPENAI_KEY]");
+	});
+
+	test("a classic key with a hyphenated tail is redacted whole", () => {
+		expect(redact(`${OPENAI_CLASSIC}-Ab_9`)).toBe("[REDACTED_OPENAI_KEY]");
+	});
+
 	test("an Anthropic key keeps its own label", () => {
 		expect(redact(`k=${ANTHROPIC}`)).toBe("k=[REDACTED_ANTHROPIC_KEY]");
 	});
