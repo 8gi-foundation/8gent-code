@@ -151,19 +151,28 @@ export class StdioTransport implements Transport {
 				},
 			});
 
-			const writer = this.proc?.stdin as unknown as WritableStream;
-			const w = writer.getWriter();
-			w.write(new TextEncoder().encode(`${JSON.stringify(req)}\n`));
-			w.releaseLock();
+			try {
+				this._write(req);
+			} catch (err) {
+				this.pending.delete(id);
+				clearTimeout(timeout);
+				reject(err as Error);
+			}
 		});
 	}
 
 	notify(method: string, params?: unknown): void {
 		if (!this.proc?.stdin) return;
-		const req: JSONRPCRequest = { jsonrpc: "2.0", method, params };
-		const writer = (this.proc.stdin as unknown as WritableStream).getWriter();
-		writer.write(new TextEncoder().encode(`${JSON.stringify(req)}\n`));
-		writer.releaseLock();
+		this._write({ jsonrpc: "2.0", method, params });
+	}
+
+	// Bun's spawn({ stdin: "pipe" }) hands back a FileSink (write + flush), not
+	// a WritableStream: the old getWriter() call threw on every request, so no
+	// stdio server could ever connect (found under #3474).
+	private _write(msg: JSONRPCRequest): void {
+		const sink = this.proc?.stdin as unknown as { write(chunk: string): unknown; flush?(): unknown };
+		sink.write(`${JSON.stringify(msg)}\n`);
+		sink.flush?.();
 	}
 
 	close(): void {

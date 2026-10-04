@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - stdio MCP servers can connect again (#3479, found under #3474)
+- `packages/mcp/transport.ts` called `getWriter()` on Bun's spawn stdin, which is a FileSink, not a WritableStream, so every request threw and no stdio MCP server could ever connect. It now writes to the sink and flushes. Regression test: `packages/mcp/transport.test.ts` (fails on the old code, passes on the fix).
+
 ### Fixed - the launch splash marker and the voice cache follow the resolved home directory (refs #3394)
 - `apps/tui/src/lib/intro-gate.ts` (`readSeenVersion`, `markIntroSeen`) and `packages/voice/voice-resolver.ts` (`listInstalledSystemVoices`) now default to `resolveHome()` from `packages/core/home.ts` instead of calling `os.homedir()`, so `EIGHT_HOME` redirects `~/.8gent/intro-seen` and `~/.8gent/cache/system-voices.json` like the other migrated paths. The voice cache path is resolved on each call rather than once at module load, so a home set after import is honoured. Behaviour is unchanged when `EIGHT_HOME` is not set.
 - Both files drop out of the home-resolver ratchet's "outside the baseline" list in `tests/security`. No committed test drives the default-home path; it was checked by hand with `EIGHT_HOME` set after import. Coverage is indirect: `intro-gate.test.ts` and `voice-resolver.test.ts` exercise the same functions with an explicit home or cache path, `packages/core/home.test.ts` pins `resolveHome()` precedence, and the ratchet pins that neither file calls `homedir()`.
