@@ -60,6 +60,8 @@ export interface RunLogEntry {
 		promptTokens?: number[];
 		/** The flagged claims when the lane was rejected as unverified: at most 5, 120 chars each. */
 		claims?: string[];
+		/** True when the turn asked the one fixed question instead of answering (#3416). */
+		asked?: boolean;
 		/** True when the prompt went to the full loop because it needs the earlier conversation (#3416). */
 		context?: boolean;
 		/** Submit to the moment the quick answer was shown, in ms (#3416). */
@@ -86,15 +88,26 @@ function ensureDir() {
 export const CLAIMS_MAX = 5;
 export const CLAIM_MAX_CHARS = 120;
 
-/** Enforce the claims cap at the write, whatever the caller passed (#3411, 8SO L3). Pure. */
+/** The quick line's facts and answer text: at most FACTS_MAX facts of FACT_MAX_CHARS, and QUICK_TEXT_MAX_CHARS (#3416). */
+export const FACTS_MAX = 8;
+export const FACT_MAX_CHARS = 40;
+export const QUICK_TEXT_MAX_CHARS = 300;
+
+/** Enforce the claims, facts and text caps at the write, whatever the caller passed (#3411, #3416). Pure. */
 export function capRunEntry(entry: RunLogEntry): RunLogEntry {
-	const claims = entry.quick?.claims;
-	if (!claims || !entry.quick) return entry;
+	const q = entry.quick;
+	if (!q || (q.claims === undefined && q.facts === undefined && q.text === undefined)) return entry;
 	return {
 		...entry,
 		quick: {
-			...entry.quick,
-			claims: claims.slice(0, CLAIMS_MAX).map((c) => String(c).slice(0, CLAIM_MAX_CHARS)),
+			...q,
+			...(q.claims
+				? { claims: q.claims.slice(0, CLAIMS_MAX).map((c) => String(c).slice(0, CLAIM_MAX_CHARS)) }
+				: {}),
+			...(q.facts
+				? { facts: q.facts.slice(0, FACTS_MAX).map((f) => String(f).slice(0, FACT_MAX_CHARS)) }
+				: {}),
+			...(q.text !== undefined ? { text: String(q.text).slice(0, QUICK_TEXT_MAX_CHARS) } : {}),
 		},
 	};
 }

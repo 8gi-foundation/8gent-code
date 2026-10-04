@@ -11,6 +11,7 @@
 import { type TextTool, type TextToolAgentResult, type ToolSpec, runTextToolAgent } from "../ai";
 import type { TextToolCall, TextToolMessage } from "../ai/text-tool-client";
 import { cutOffToolCallMessage, isEmptyReplyStall } from "../ai/text-tool-loop";
+import { redact } from "../memory/redact";
 
 export type PromptClass = "quick" | "deep" | "unclear";
 
@@ -521,12 +522,10 @@ export type QuickVerdict = "confirmed" | "corrected" | "unknown" | "unchecked" |
 
 /** Each text is compared up to this many chars, so the scan stays bounded. */
 export const COMPARE_MAX_CHARS = 20_000;
-/** Facts named in a verdict line, and facts written to the run log (each FACT_LOG_CHARS at most). */
+/** Facts named in a verdict line. The run log's caps live in capRunEntry (packages/reporting/runlog.ts). */
 export const VERDICT_FACTS_SHOWN = 4;
-export const FACTS_LOGGED = 8;
-export const FACT_LOG_CHARS = 40;
 export const PROVISIONAL_LOG_CHARS = 300;
-/** A quick answer with more facts than this is never confirmed (bounds the comparison). */
+/** A quick answer with more facts than this is not compared: unknown (bounds the comparison). */
 export const COMPARE_MAX_FACTS = 32;
 
 const CUE_WORDS = new Set([
@@ -755,7 +754,7 @@ export type QuickComparison = {
 /**
  * Compare the quick answer with the full answer. Deterministic.
  * unchecked: the full answer is not clean (gated, unverified notes or failed).
- * unknown: the quick answer stated no comparable fact.
+ * unknown: the quick answer stated no comparable fact, or more than COMPARE_MAX_FACTS.
  * confirmed: every quick fact has a clean, correctly paired occurrence, in the same order.
  * corrected: anything else.
  */
@@ -768,7 +767,7 @@ export function compareQuick(
 	const values = facts.map((f) => f.value);
 	if (!deepClean) return { verdict: "unchecked", facts: values };
 	if (facts.length === 0) return { verdict: "unknown", facts: values };
-	if (facts.length > COMPARE_MAX_FACTS) return { verdict: "corrected", facts: values };
+	if (facts.length > COMPARE_MAX_FACTS) return { verdict: "unknown", facts: values };
 	const deep = deepText.slice(0, COMPARE_MAX_CHARS);
 	const toks = tokenize(deep);
 	const clause = clauseIds(toks);
@@ -786,6 +785,34 @@ export function compareQuick(
 		lastAt = hit[0];
 	}
 	return { verdict: "confirmed", facts: values };
+}
+
+/**
+ * Facts that may be logged or shown: the redactor leaves them unchanged, and they are still
+ * in the redacted answer (a fact inside a redacted span is part of a secret). Order kept.
+ */
+export function safeFacts(answer: string, facts: readonly string[]): string[] {
+	const cleaned = redact(answer);
+	return facts.filter((f) => redact(f) === f && cleaned.includes(f));
+}
+
+/** The quick answer as it may be logged: redacted first, then capped. */
+export function safeQuickText(answer: string): string {
+	return redact(answer).slice(0, PROVISIONAL_LOG_CHARS);
+}
+
+/**
+ * The facts a verdict line names: numbers and literals first, then ALL_CAPS words that do not
+ * just echo the prompt. If that leaves nothing, every fact.
+ */
+export function verdictFacts(facts: readonly string[], prompt: string): string[] {
+	const promptWords = new Set(tokenize(prompt).map((t) => t.text));
+	const caps = (f: string) =>
+		f.length >= 3 && CAPS_FACT.test(f) && /[A-Z]/.test(f) && !NUMBER_FACT.test(f);
+	const first = facts.filter((f) => !caps(f));
+	const rest = facts.filter((f) => caps(f) && !promptWords.has(f));
+	const shown = [...first, ...rest];
+	return shown.length > 0 ? shown : [...facts];
 }
 
 function factList(facts: readonly string[]): string {

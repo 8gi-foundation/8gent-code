@@ -91,9 +91,6 @@ import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
 import {
 	CLARIFY_QUESTION,
-	FACTS_LOGGED,
-	FACT_LOG_CHARS,
-	PROVISIONAL_LOG_CHARS,
 	classifyPrompt,
 	compareQuick,
 	installedModelsFor,
@@ -103,6 +100,9 @@ import {
 	quickLaneEnabled,
 	quickMessages,
 	runQuickAnswer,
+	safeFacts,
+	safeQuickText,
+	verdictFacts,
 	verdictLine,
 } from "./quick-answer";
 
@@ -965,7 +965,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// never sees the lane's messages, and its answer is labelled with how it
 		// compares. The lane runs only for a surface that can show the quick
 		// answer (events.onProvisional): every other surface gets the plain turn.
-		let provisional: { answer: string; facts: string[] } | null = null;
+		// facts: every quick fact, for the comparison. shown: the redacted, prompt-aware
+		// subset a verdict line names. Neither reaches the log unredacted.
+		let provisional: { answer: string; facts: string[]; shown: string[] } | null = null;
 		if (quickLaneEnabled() && !isTableSession) {
 			quickRecord = {
 				class: classifyPrompt(textForAgent),
@@ -1023,14 +1025,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			};
 			if (quick.ok) {
 				const facts = quickFacts(quick.answer).map((f) => f.value);
-				provisional = { answer: quick.answer, facts };
+				const safe = safeFacts(quick.answer, facts);
+				provisional = { answer: quick.answer, facts, shown: verdictFacts(safe, textForAgent) };
 				quickRecord = {
 					...quickRecord,
 					shownMs: Date.now() - chatStartTime,
-					facts: facts.slice(0, FACTS_LOGGED).map((f) => f.slice(0, FACT_LOG_CHARS)),
-					text: quick.answer.slice(0, PROVISIONAL_LOG_CHARS),
+					facts: safe,
+					text: safeQuickText(quick.answer),
 				};
-				showProvisional({ text: quick.result.content });
+				try {
+					showProvisional({ text: quick.result.content });
+				} catch (err) {
+					// A display error must never cost the user the checked answer.
+					console.log(
+						`[quick-answer] onProvisional threw: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
 			} else if (quick.reason === "aborted") {
 				// ESC during the lane ends the turn here: no second, unasked-for pass.
 				this.abortController = null;
@@ -1049,7 +1059,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// The final line names the quick facts; the failure detail goes to the run log only.
 		const quickNotChecked = (verdict: "unchecked" | "stopped", failed: boolean): string => {
 			if (quickRecord) quickRecord = { ...quickRecord, verdict };
-			return verdictLine(verdict, provisional?.facts ?? [], { failed });
+			return verdictLine(verdict, provisional?.shown ?? [], { failed });
 		};
 
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
@@ -1125,12 +1135,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		let content = gated.content;
 		if (provisional && quickRecord) {
 			// Only the checked answer goes to history: the next turn never sees a wrong quick one.
+			// The full loop returned, so its answer is compared even if ESC came after it:
+			// "stopped" is only for a full loop that did not return (the catch above).
 			const clean = !gated.violated && agentResult.unverified.length === 0;
-			const verdict = signal.aborted
-				? "stopped"
-				: compareQuick(provisional.answer, content, clean).verdict;
+			const verdict = compareQuick(provisional.answer, content, clean).verdict;
 			quickRecord = { ...quickRecord, verdict };
-			const line = verdictLine(verdict, provisional.facts);
+			const line = verdictLine(verdict, provisional.shown);
 			content = content.trim() ? `${line}\n\n${content}` : line;
 		}
 		const flavor = personalityVoice.getFlavor("complete");
@@ -1301,10 +1311,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// flags most short prompts (#3417). Instead one fixed question is asked,
 		// only for an unclear first message with nothing to resolve it against.
 		// A surface with no callback keeps the flag-off gate.
+		// Text-tool path only: the lane exists only there, so a native or cloud
+		// provider with the flag on gets exactly the flag-off turn.
 		const laneOn =
 			quickLaneEnabled() &&
 			this.events.onProvisional !== undefined &&
-			this.config.agentScope !== "__table__";
+			this.config.agentScope !== "__table__" &&
+			shouldUseTextTools(this.config.runtime, (this.config.allowedPaths?.length ?? 0) > 0);
 		const promptClass = laneOn ? classifyPrompt(textForAgent) : null;
 		const quickPrompt = promptClass === "quick";
 		if (laneOn) {
@@ -1320,6 +1333,35 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.messageHistory.push({ role: "assistant", content: CLARIFY_QUESTION });
 				this.sessionWriter.writeUserMessage(textForAgent);
 				this.sessionWriter.writeAssistantContent(0, [{ type: "text", text: CLARIFY_QUESTION }]);
+				if (this.enableReporting) {
+					try {
+						appendRun({
+							ts: new Date().toISOString(),
+							status: "ok",
+							model: this.config.model,
+							dur: 0,
+							tokens: 0,
+							cost: null,
+							tools: 0,
+							created: [],
+							modified: [],
+							session: this.sessionId,
+							cwd: this.config.workingDirectory || process.cwd(),
+							prompt: textForAgent.slice(0, 120),
+							quick: {
+								class: "unclear",
+								ran: false,
+								ok: false,
+								ms: 0,
+								tools: 0,
+								asked: true,
+								verdict: "none",
+							},
+						});
+					} catch {
+						// The run log is best-effort; it must never mask the reply.
+					}
+				}
 				return CLARIFY_QUESTION;
 			}
 		} else if (needsClarification(textForAgent) && !imageBase64) {

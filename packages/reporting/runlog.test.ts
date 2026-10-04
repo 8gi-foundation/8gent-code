@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLAIMS_MAX, CLAIM_MAX_CHARS, type RunLogEntry, capRunEntry } from "./runlog";
+import {
+	CLAIMS_MAX,
+	CLAIM_MAX_CHARS,
+	FACTS_MAX,
+	FACT_MAX_CHARS,
+	QUICK_TEXT_MAX_CHARS,
+	type RunLogEntry,
+	capRunEntry,
+} from "./runlog";
 
 const base: RunLogEntry = {
 	ts: "2026-10-03T00:00:00.000Z",
@@ -57,5 +65,31 @@ appendRun(${JSON.stringify({ ...base, quick: { class: "quick", ran: true, ok: fa
 		const line = JSON.parse(readFileSync(join(home, ".8gent", "runs.jsonl"), "utf8").trim());
 		expect(line.quick.claims).toHaveLength(CLAIMS_MAX);
 		for (const c of line.quick.claims) expect(c.length).toBeLessThanOrEqual(CLAIM_MAX_CHARS);
+	});
+});
+
+describe("run log quick facts and text caps (#3416)", () => {
+	test("capRunEntry keeps at most 8 facts of at most 40 chars, and 300 chars of text", () => {
+		const entry = {
+			...base,
+			quick: {
+				class: "quick",
+				ran: true,
+				ok: true,
+				ms: 1,
+				tools: 1,
+				facts: Array.from({ length: 12 }, (_, i) => `${i}${"f".repeat(100)}`),
+				text: "t".repeat(1000),
+			},
+		};
+		const out = capRunEntry(entry);
+		expect(FACTS_MAX).toBe(8);
+		expect(FACT_MAX_CHARS).toBe(40);
+		expect(QUICK_TEXT_MAX_CHARS).toBe(300);
+		expect(out.quick?.facts).toHaveLength(8);
+		for (const f of out.quick?.facts ?? []) expect(f.length).toBeLessThanOrEqual(40);
+		expect(out.quick?.facts?.[0].startsWith("0")).toBe(true);
+		expect(out.quick?.text).toHaveLength(300);
+		expect(entry.quick.facts).toHaveLength(12);
 	});
 });

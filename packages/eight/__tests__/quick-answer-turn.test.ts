@@ -16,6 +16,7 @@ type Probe = {
 	timeline: string[];
 	provisionals: string[];
 	history: string[];
+	abortControllerAfter: boolean;
 	seen: Array<{
 		quick: boolean;
 		proactive: boolean;
@@ -28,6 +29,7 @@ type Probe = {
 	}>;
 	runs: Array<{
 		status?: string;
+		tools?: number;
 		quick?: {
 			class: string;
 			ran: boolean;
@@ -38,6 +40,7 @@ type Probe = {
 			modelSource?: string;
 			promptTokens?: number[];
 			context?: boolean;
+			asked?: boolean;
 			shownMs?: number;
 			verdict?: string;
 			facts?: string[];
@@ -375,6 +378,78 @@ describe("quick then full in a real turn (#3416)", () => {
 		expect(off.seen.some((s) => s.proactive)).toBe(true);
 		expect(on.seen.some((s) => s.proactive)).toBe(true);
 		expect(on.reply).not.toBe(CLARIFY_QUESTION);
+	}, 60_000);
+
+	test("a secret in the quick answer leaves no trace in runs.jsonl or history", () => {
+		const key = `sk-${"Q7w8E9r0".repeat(4)}`;
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: `DONE: Staging listens on 5180 with the key \`${key}\`.`,
+			PROBE_DEEP_TEXT: DEEP,
+		});
+		expect(p.provisionals.length).toBe(1);
+		expect(JSON.stringify(p.runs)).not.toContain(key);
+		expect(JSON.stringify(p.runs)).not.toContain("Q7w8E9r0");
+		expect(JSON.stringify(p.history)).not.toContain("Q7w8E9r0");
+		expect(p.runs.at(-1)?.quick?.facts).toEqual(["5180"]);
+		expect(p.reply.split("\n")[0]).toBe(
+			"Correction: my quick answer (5180) did not match what I found when I checked. Use this instead:",
+		);
+	}, 60_000);
+
+	test("verdict line names numbers first and drops ALL_CAPS words echoed from the prompt", () => {
+		const p = probe("answer", PILOT_PROMPT, "1", {
+			PROBE_QUICK_TEXT:
+				"DONE: With APP_MODE=staging and no PORT it uses 3001.\nANSWER: staging=3001 unset=3000",
+			PROBE_DEEP_TEXT: "DONE: Staging uses 4180, unset uses 3000.\nANSWER: staging=4180 unset=3000",
+		});
+		expect(p.reply.split("\n")[0]).toBe(
+			"Correction: my quick answer (3001, 3000) did not match what I found when I checked. Use this instead:",
+		);
+	}, 60_000);
+
+	test("the one-question path writes a quick record to runs.jsonl", () => {
+		const p = probe("answer", "why?", "1");
+		expect(p.reply).toBe(CLARIFY_QUESTION);
+		expect(p.runs).toHaveLength(1);
+		expect(p.runs[0]).toMatchObject({ status: "ok", tools: 0 });
+		expect(p.runs[0].quick).toMatchObject({
+			class: "unclear",
+			ran: false,
+			asked: true,
+			verdict: "none",
+		});
+	}, 60_000);
+
+	test("a display error in onProvisional never breaks the turn", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: RIGHT_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+			PROBE_PROVISIONAL_THROW: "1",
+			PROBE_SECOND: "and on staging?",
+		});
+		expect(p.reply.startsWith("Checked: my quick answer (4180) was right.")).toBe(true);
+		expect(p.second).toContain("Staging listens on 4180");
+		expect(p.abortControllerAfter).toBe(false);
+	}, 60_000);
+
+	test("ESC after the full answer came back: compared, never 'Stopped before'", () => {
+		const p = probe("answer", CHECK_PROMPT, "1", {
+			PROBE_QUICK_TEXT: RIGHT_QUICK,
+			PROBE_DEEP_TEXT: DEEP,
+			PROBE_ESC: "after-deep",
+		});
+		expect(p.reply).not.toContain("Stopped before");
+		expect(p.reply.startsWith("Checked: my quick answer (4180) was right.")).toBe(true);
+		expect(p.runs.at(-1)?.quick?.verdict).toBe("confirmed");
+	}, 60_000);
+
+	test("native tool path (EIGHT_TEXT_TOOLS=0): flag on behaves as flag off, no question asked", () => {
+		const on = probe("answer", "why?", "1", { EIGHT_TEXT_TOOLS: "0" });
+		const off = probe("answer", "why?", undefined, { EIGHT_TEXT_TOOLS: "0" });
+		expect(on.reply).not.toBe(CLARIFY_QUESTION);
+		expect(on.provisionals).toEqual([]);
+		expect(on.seen.some((s) => s.quick)).toBe(false);
+		expect(on.seen.map((s) => s.proactive)).toEqual(off.seen.map((s) => s.proactive));
 	}, 60_000);
 
 	for (const prompt of [

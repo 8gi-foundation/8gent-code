@@ -2262,7 +2262,7 @@ export function App({
 			// bubble, uncapped: the final answer follows with a "Checked" line.
 			onProvisional: (event) => {
 				appendToTab(tabId, {
-					id: `provisional-${Date.now()}`,
+					id: `provisional-${crypto.randomUUID()}`,
 					role: "system" as const,
 					content: event.text,
 					timestamp: new Date(),

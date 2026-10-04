@@ -16,6 +16,8 @@
  *   PROBE_DEEP_TEXT         the full loop's answer (default "DONE: full loop answer.")
  *   PROBE_DEEP_FAIL=1       the full loop's requests fail with HTTP 400
  *   PROBE_ESC=lane|deep     press ESC (agent.abort()) on the first lane or full-loop request
+ *   PROBE_ESC=after-deep    press ESC as the full loop's answer comes back
+ *   PROBE_PROVISIONAL_THROW=1  the onProvisional callback throws (a broken display)
  *   PROBE_SECOND            a second prompt, sent after the first reply in the same session
  * `timeline` records lane requests, full-loop requests and provisional messages in order.
  */
@@ -97,6 +99,10 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string; signal?: Abor
 		if (!escPressed && process.env.PROBE_ESC === (quick ? "lane" : full ? "deep" : "")) {
 			return pressEsc(init?.signal);
 		}
+		if (full && !escPressed && process.env.PROBE_ESC === "after-deep") {
+			escPressed = true;
+			agentRef?.abort();
+		}
 		if (full && process.env.PROBE_DEEP_FAIL === "1") {
 			return new Response("upstream exploded", { status: 400 });
 		}
@@ -138,6 +144,7 @@ const agent = new Agent({
 					onProvisional: (event: { text: string }) => {
 						timeline.push("provisional");
 						provisionals.push(event.text);
+						if (process.env.PROBE_PROVISIONAL_THROW === "1") throw new Error("display broke");
 					},
 				},
 });
@@ -157,7 +164,18 @@ const runs = existsSync(runLog)
 			.map((l) => JSON.parse(l))
 	: [];
 process.stdout.write(
-	`\n@@PROBE@@${JSON.stringify({ reply, second, seen, runs, executed, timeline, provisionals, history })}\n`,
+	`\n@@PROBE@@${JSON.stringify({
+		reply,
+		second,
+		seen,
+		runs,
+		executed,
+		timeline,
+		provisionals,
+		history,
+		abortControllerAfter:
+			(agent as unknown as { abortController: unknown }).abortController != null,
+	})}\n`,
 );
 await agent.cleanup?.();
 process.exit(0);

@@ -17,6 +17,9 @@ import {
 	isContextDependent,
 	promptNeedsContext,
 	quickFacts,
+	safeFacts,
+	safeQuickText,
+	verdictFacts,
 	verdictLine,
 	compactSpec,
 	pickQuickModel,
@@ -337,11 +340,11 @@ describe("compareQuick (#3416)", () => {
 		]);
 	});
 
-	test("more facts than COMPARE_MAX_FACTS is never confirmed", () => {
+	test("more facts than COMPARE_MAX_FACTS is unknown, never confirmed (8PO round 2)", () => {
 		const many = Array.from({ length: COMPARE_MAX_FACTS + 1 }, (_, i) => String(1000 + i)).join(
 			" ",
 		);
-		expect(compareQuick(many, many).verdict).toBe("corrected");
+		expect(compareQuick(many, many).verdict).toBe("unknown");
 	});
 
 	test("the comparison stays linear on huge inputs", () => {
@@ -352,6 +355,46 @@ describe("compareQuick (#3416)", () => {
 		compareQuick(`staging 4180, unset 3000 ${'"a" '.repeat(5_000)}`, deep);
 		compareQuick("4180", "4180 ".repeat(100_000));
 		expect(performance.now() - t0).toBeLessThan(1_000);
+	});
+});
+
+describe("facts shown and logged (#3416 round 2)", () => {
+	const PROMPT =
+		"if I start this server with APP_MODE=staging and no PORT set, which port? ANSWER: staging=<port>";
+
+	test("numbers and literals first; ALL_CAPS words that only echo the prompt are dropped", () => {
+		expect(verdictFacts(["APP_MODE", "PORT", "3001", "3000", "ANSWER"], PROMPT)).toEqual([
+			"3001",
+			"3000",
+		]);
+		expect(verdictFacts(["LEGACY_PORTS", "apiKey", "5180"], PROMPT)).toEqual([
+			"apiKey",
+			"5180",
+			"LEGACY_PORTS",
+		]);
+	});
+
+	test("falls back to every fact when nothing else remains", () => {
+		expect(verdictFacts(["APP_MODE", "PORT"], PROMPT)).toEqual(["APP_MODE", "PORT"]);
+		expect(verdictFacts([], PROMPT)).toEqual([]);
+	});
+
+	test("a fact the redactor changes, or one that sits inside a redacted span, is dropped", () => {
+		const key = `sk-${"A1b2C3d4".repeat(4)}`;
+		const answer = `The key is \`${key}\` and the port is 4180.`;
+		const facts = quickFacts(answer).map((f) => f.value);
+		expect(facts).toContain(key);
+		expect(safeFacts(answer, facts)).toEqual(["4180"]);
+		const aws = "AKIAABCDEFGHIJKLMNOP";
+		expect(safeFacts(`uses ${aws} on 8080`, [aws, "8080"])).toEqual(["8080"]);
+	});
+
+	test("the logged quick text is redacted, then capped at 300 chars", () => {
+		const key = `sk-${"Z9".repeat(20)}`;
+		const out = safeQuickText(`port 4180, key ${key} ${"y".repeat(500)}`);
+		expect(out).not.toContain(key);
+		expect(out).not.toContain("Z9Z9");
+		expect(out.length).toBeLessThanOrEqual(300);
 	});
 });
 
