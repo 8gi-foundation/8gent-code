@@ -99,6 +99,21 @@ export const ACTION_FIRST_STYLE = [
 ].join("\n");
 
 /**
+ * The "Communication style" line of the user context. Also sent, unchanged, as
+ * the closing style reminder on the local text-tool path (#3487).
+ */
+export function communicationStyleLine(style: string): string {
+	const styleGuide: Record<string, string> = {
+		concise: "Be brief and direct. Skip explanations unless asked.",
+		detailed: "Explain your reasoning. Teach as you go.",
+		casual: "Keep it friendly and collaborative. We're partners.",
+		formal: "Maintain professional tone. Be precise.",
+		"action-first": ACTION_FIRST_STYLE,
+	};
+	return `Communication style: **${style}**. ${styleGuide[style] || ""}`;
+}
+
+/**
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
@@ -118,16 +133,7 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 		parts.push(`Their role: ${userData.role}.`);
 	}
 	if (userData.communicationStyle) {
-		const styleGuide: Record<string, string> = {
-			concise: "Be brief and direct. Skip explanations unless asked.",
-			detailed: "Explain your reasoning. Teach as you go.",
-			casual: "Keep it friendly and collaborative. We're partners.",
-			formal: "Maintain professional tone. Be precise.",
-			"action-first": ACTION_FIRST_STYLE,
-		};
-		parts.push(
-			`Communication style: **${userData.communicationStyle}**. ${styleGuide[userData.communicationStyle] || ""}`,
-		);
+		parts.push(communicationStyleLine(userData.communicationStyle));
 	}
 	if (userData.language && userData.language !== "en") {
 		parts.push(`Respond in: ${userData.language}`);
