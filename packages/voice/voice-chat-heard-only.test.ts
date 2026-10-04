@@ -297,13 +297,17 @@ function voiceTurn(
 	agent: Agent | null,
 	tracker: VoiceReplyTracker,
 	chat: (t: string) => Promise<string>,
+	opts: { approve?: (draft: string) => Promise<boolean>; beforeCommit?: () => void } = {},
 ) {
 	return async (t: string): Promise<string> => {
 		tracker.begin(agent);
 		if (!agent) return "Agent not ready.";
 		try {
-			const r = await chat(t);
-			tracker.commit(agent);
+			let r = await chat(t);
+			// The critic pass: a rejected draft triggers a second chat, as app.tsx does.
+			if (opts.approve && !(await opts.approve(r))) r = await chat(`${t}\n\n[critique]`);
+			opts.beforeCommit?.();
+			tracker.commit(agent, r);
 			return r;
 		} catch (err) {
 			return `Error: ${(err as Error).message}`;
@@ -391,6 +395,90 @@ describe("only amend the reply this voice turn produced", () => {
 		});
 		expect(amended).toEqual([false]);
 		expect(contents(agent)).toEqual(["earlier question", "previous answer"]);
+	});
+
+	test("a typed reply lands between chat returning and commit: the typed reply is intact", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		await runTurn(["finish", "interrupt"], true, REPLY, {
+			onMessage: voiceTurn(
+				agent,
+				tracker,
+				async (t) => {
+					pushTurn(agent, t, REPLY);
+					return REPLY;
+				},
+				{ beforeCommit: () => pushTurn(agent, "typed question", "typed answer") },
+			),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(amended).toEqual([false]);
+		expect(contents(agent).slice(-2)).toEqual(["typed question", "typed answer"]);
+		expect(contents(agent)).toContain(REPLY);
+	});
+
+	test("an empty reply is never recorded", () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		tracker.begin(agent);
+		pushTurn(agent, "q", "");
+		tracker.commit(agent, "");
+		expect(tracker.amend(agent, HEARD_ONLY_MARK)).toBe(false);
+		expect(contents(agent).at(-1)).toBe("");
+	});
+
+	test("the critic's second pass throws: no amend", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		let calls = 0;
+		const run = await runTurn(["interrupt"], true, REPLY, {
+			onMessage: voiceTurn(
+				agent,
+				tracker,
+				async (t) => {
+					calls++;
+					if (calls === 2) throw new Error("retry failed");
+					pushTurn(agent, t, REPLY);
+					return REPLY;
+				},
+				{ approve: async () => false },
+			),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(calls).toBe(2);
+		expect(run.said).toEqual(["Error: retry failed"]);
+		expect(amended).toEqual([false]);
+		expect(contents(agent)).toEqual([
+			"earlier question",
+			"previous answer",
+			"tell me three things",
+			REPLY,
+		]);
+	});
+
+	test("the critic rejects and the second pass succeeds: the second reply is trimmed", async () => {
+		const agent = makeAgent(PREVIOUS);
+		const tracker = new VoiceReplyTracker();
+		const amended: boolean[] = [];
+		let calls = 0;
+		await runTurn(["finish", "interrupt"], true, REPLY, {
+			onMessage: voiceTurn(
+				agent,
+				tracker,
+				async (t) => {
+					calls++;
+					const reply = calls === 1 ? "first draft" : REPLY;
+					pushTurn(agent, t, reply);
+					return reply;
+				},
+				{ approve: async () => false },
+			),
+			onHeard: (h) => amended.push(tracker.amend(agent, h)),
+		});
+		expect(amended).toEqual([true]);
+		expect(contents(agent).at(-1)).toBe(`${S1} ${HEARD_ONLY_MARK}`);
 	});
 
 	test("history shrank inside chat() (compaction): no amend", async () => {
