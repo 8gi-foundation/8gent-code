@@ -64,6 +64,7 @@ export {
 } from "./text-tools";
 export {
 	runTextToolAgent,
+	batchSkipToolEvents,
 	type TextTool,
 	type TextToolLogEntry,
 	type TextToolAgentResult,

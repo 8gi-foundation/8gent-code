@@ -13,6 +13,9 @@ import {
 	MAX_CALLS_PER_ROUND,
 	abortedCallResult,
 	batchSkippedCallResult,
+	batchSkipStatusLine,
+	batchSkipToolEvents,
+	type BatchSkipEvent,
 	isFailedChangeCall,
 	blockedCheckMessage,
 	blockedStopNote,
@@ -2268,10 +2271,202 @@ describe("isFailedChangeCall", () => {
 		expect(isFailedChangeCall("run_command", "grep found: Exit code 1: in a log")).toBe(false);
 		expect(isFailedChangeCall("write_file", "Wrote src/a.ts")).toBe(false);
 		expect(isFailedChangeCall("read_file", "Error: no such file")).toBe(false);
-		expect(isFailedChangeCall("git_commit", "Error: nothing to commit")).toBe(false);
+		expect(isFailedChangeCall("git_commit", "Error (exit 1): nothing to commit")).toBe(true);
+		expect(isFailedChangeCall("git_push", "Error (exit 1): rejected")).toBe(false);
 	});
 
 	test("the skipped-call result starts with Error so it never counts as done", () => {
 		expect(batchSkippedCallResult(1, "write_file")).toMatch(/^Error: not run: call 2 \(write_file\)/);
+	});
+});
+
+// ── 8SO findings 1 and 2 on 73bb1a4b: every refusal shape stops the reply ──
+
+describe("isFailedChangeCall - permission refusals, timeouts, git stage and commit", () => {
+	// The exact strings the executors return (packages/eight/tools.ts and
+	// packages/ai/tools.ts), so the prompt's "calls after it are not run" holds.
+	const DENIED = [
+		"[PERMISSION DENIED] Command blocked by security policy: rm -rf build",
+		"[PERMISSION DENIED] User declined to execute: git push --force",
+		"[PERMISSION DENIED] The person declined write_file. Nothing was done. Do not retry this call.",
+	];
+	const TIMEOUTS = [
+		"TIMEOUT after 2 min. Partial output:\nbuilding...\n\nTIP: Use background_start for long-running processes.",
+		"TIMEOUT after 30s: git commit",
+	];
+
+	test("a permission refusal stops write, edit, command and git calls", () => {
+		for (const r of DENIED) {
+			for (const name of ["write_file", "edit_file", "run_command", "git_add", "git_commit"]) {
+				expect(isFailedChangeCall(name, r)).toBe(true);
+			}
+			expect(isFailedChangeCall("read_file", r)).toBe(false);
+		}
+	});
+
+	test("a missing file or a guarded path stops the reply (no Error prefix on these)", () => {
+		expect(isFailedChangeCall("edit_file", "File not found: /repo/missing.ts")).toBe(true);
+		expect(isFailedChangeCall("write_file", 'Path traversal blocked: "../x" resolves outside working directory.')).toBe(true);
+		expect(isFailedChangeCall("edit_file", "Path blocked by path-guard: secret file")).toBe(true);
+		expect(isFailedChangeCall("read_file", "File not found: /repo/missing.ts")).toBe(false);
+	});
+
+	test("a timeout stops the reply", () => {
+		expect(isFailedChangeCall("run_command", TIMEOUTS[0])).toBe(true);
+		expect(isFailedChangeCall("git_commit", TIMEOUTS[1])).toBe(true);
+		expect(isFailedChangeCall("run_command", "build finished, no TIMEOUT after all")).toBe(false);
+	});
+
+	test("git_add and git_commit failures count, in both executors' shapes", () => {
+		expect(isFailedChangeCall("git_add", "Error (exit 128): fatal: pathspec 'x' did not match any files")).toBe(true);
+		expect(isFailedChangeCall("git_add", "Exit code 128:\n\nfatal: pathspec 'x' did not match any files")).toBe(true);
+		expect(isFailedChangeCall("git_commit", "Exit code 1:\nnothing to commit, working tree clean\n")).toBe(true);
+		expect(isFailedChangeCall("git_add", "")).toBe(false);
+		expect(isFailedChangeCall("git_commit", "[main 1a2b3c4] fix: x")).toBe(false);
+	});
+
+	for (const [label, result] of [
+		["user decline", DENIED[1]],
+		["policy block", DENIED[0]],
+		["write decline", DENIED[2]],
+		["command timeout", TIMEOUTS[0]],
+	] as const) {
+		test(`flag on: a ${label} on the first call skips the rest of the reply`, async () => {
+			await withRunBatch("1", async () => {
+				const ran: string[] = [];
+				const tools: TextTool[] = ["run_command", "write_file", "read_file"].map((name) => ({
+					spec: { name, description: name, parameters: {} },
+					run: async () => {
+						ran.push(name);
+						return name === "run_command" ? result : "ok";
+					},
+				}));
+				const model = scriptedModel([
+					[tc("run_command", { command: "make" }), tc("write_file", { path: "a", content: "a" }), tc("read_file", { path: "a" })].join("\n"),
+					"DONE: stopped.",
+				]);
+				const result2 = await runTextToolAgent({
+					messages: [{ role: "user", content: "build then write" }],
+					tools,
+					call: model.call,
+				});
+				expect(ran).toEqual(["run_command"]);
+				expect(result2.toolLog.slice(1).every((e) => e.result === batchSkippedCallResult(0, "run_command"))).toBe(true);
+				expect(lastUserMessage(model.seen[1])).toContain("Calls 2-3 (2) were not run");
+			});
+		});
+	}
+
+	test("flag on: a failed git_add skips the git_commit after it", async () => {
+		await withRunBatch("1", async () => {
+			const ran: string[] = [];
+			const tools: TextTool[] = [
+				{
+					spec: { name: "git_add", description: "Stage", parameters: {} },
+					run: async () => {
+						ran.push("git_add");
+						return "Error (exit 128): fatal: pathspec 'src/missing.ts' did not match any files";
+					},
+				},
+				{
+					spec: { name: "git_commit", description: "Commit", parameters: {} },
+					run: async () => {
+						ran.push("git_commit");
+						return "[main 1a2b3c4] feat: x";
+					},
+				},
+			];
+			const model = scriptedModel([
+				[tc("git_add", { files: "src/missing.ts" }), tc("git_commit", { message: "feat: x" })].join("\n"),
+				"DONE: stage failed.",
+			]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "stage and commit" }],
+				tools,
+				call: model.call,
+			});
+			expect(ran).toEqual(["git_add"]);
+			expect(result.toolLog[1]).toEqual({
+				name: "git_commit",
+				args: { message: "feat: x" },
+				result: batchSkippedCallResult(0, "git_add"),
+			});
+		});
+	});
+});
+
+// ── 8PO finding 3 on 73bb1a4b: the user sees that calls were skipped ──
+
+describe("runTextToolAgent - onCallsSkipped (batch trial only)", () => {
+	async function runFour(flag: string | undefined) {
+		return withRunBatch(flag, async () => {
+			const ws = batchWorkspace();
+			const events: BatchSkipEvent[] = [];
+			const model = scriptedModel([FOUR_CALLS_SECOND_WRITE_FAILS, "DONE: done."]);
+			await runTextToolAgent({
+				messages: [{ role: "user", content: "write both files and stage them" }],
+				tools: ws.tools,
+				call: model.call,
+				onCallsSkipped: (e) => events.push(e),
+			});
+			return events;
+		});
+	}
+
+	test("flag on: fires once per reply with the failed call and the skip count", async () => {
+		expect(await runFour("1")).toEqual([{ failedIndex: 1, failedName: "write_file", skipped: 2 }]);
+	});
+
+	test("flag off: never fires", async () => {
+		expect(await runFour(undefined)).toEqual([]);
+		expect(await runFour("0")).toEqual([]);
+	});
+
+	test("flag on: no event when the failed call was the last one (nothing skipped)", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const events: BatchSkipEvent[] = [];
+			const model = scriptedModel([
+				[tc("read_file", { path: "src/a.ts" }), tc("write_file", { path: "/locked/z.ts", content: "z" })].join("\n"),
+				"DONE: write failed.",
+			]);
+			await runTextToolAgent({
+				messages: [{ role: "user", content: "read then write" }],
+				tools: ws.tools,
+				call: model.call,
+				onCallsSkipped: (e) => events.push(e),
+			});
+			expect(events).toEqual([]);
+			expect(lastUserMessage(model.seen[1])).not.toContain("not run");
+		});
+	});
+
+	test("a throwing callback never breaks the turn", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([FOUR_CALLS_SECOND_WRITE_FAILS, "DONE: done."]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "write both files and stage them" }],
+				tools: ws.tools,
+				call: model.call,
+				onCallsSkipped: () => {
+					throw new Error("ui gone");
+				},
+			});
+			expect(result.toolLog).toHaveLength(4);
+			expect(result.content).toContain("done.");
+		});
+	});
+
+	test("the status line and the tool event pair the TUI renders", () => {
+		const e = { failedIndex: 1, failedName: "write_file", skipped: 2 };
+		expect(batchSkipStatusLine(e)).toBe("Skipped 2 calls after the failed write_file");
+		expect(batchSkipStatusLine({ ...e, skipped: 1 })).toBe("Skipped 1 call after the failed write_file");
+		const { start, end } = batchSkipToolEvents(e, "tt-skip-1", 4);
+		expect(start).toEqual({ toolName: "skipped_calls", toolCallId: "tt-skip-1", args: { skipped: 2, after: "write_file" }, stepNumber: 4 });
+		// success false is what makes app.tsx render "  ✗ <resultPreview>".
+		expect(end.success).toBe(false);
+		expect(end.toolCallId).toBe(start.toolCallId);
+		expect(end.resultPreview).toBe("Skipped 2 calls after the failed write_file");
 	});
 });

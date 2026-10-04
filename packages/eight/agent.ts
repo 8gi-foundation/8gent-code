@@ -137,6 +137,7 @@ import {
 } from "../ai";
 import {
 	type TextTool,
+	batchSkipToolEvents,
 	buildTextToolCall,
 	needsTextTools,
 	resolveTextToolEndpoint,
@@ -856,6 +857,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				call,
 				maxRounds: this.config.maxTurns ?? 6,
 				signal,
+				// Batch trial (EIGHT_RUN_BATCH=1, #3502): show skipped calls as one
+				// failed tool line through the existing events. Never fires flag off.
+				onCallsSkipped: (e) => {
+					const { start, end } = batchSkipToolEvents(e, `tt-skip-${Date.now()}-${stepNumber}`, stepNumber);
+					this.events.onToolStart?.(start);
+					this.events.onToolEnd?.(end);
+				},
 			});
 		};
 

@@ -102,6 +102,13 @@ export interface TextToolAgentOptions {
 	 * request is torn down) and into long-running tools.
 	 */
 	signal?: AbortSignal;
+	/**
+	 * Batch trial only (EIGHT_RUN_BATCH=1, #3502): called once for a reply in
+	 * which a failed write, edit, command or git call stopped the calls after
+	 * it, so the caller can show the user that they were skipped. Never called
+	 * with the flag off.
+	 */
+	onCallsSkipped?: (event: BatchSkipEvent) => void;
 }
 
 export interface TextToolAgentResult {
@@ -367,19 +374,72 @@ export function overCapCallResult(requested: number): string {
 /**
  * Tools whose failure stops the rest of a reply under the batch trial
  * (EIGHT_RUN_BATCH=1, #3502). A failed read changes nothing, so the calls after
- * it still run.
+ * it still run. git_add and git_commit are here because a commit planned on a
+ * failed stage (or a push planned on a failed commit) must not go ahead.
  */
-const BATCH_STOP_TOOLS: ReadonlySet<string> = new Set(["write_file", "edit_file", "run_command"]);
+const BATCH_STOP_TOOLS: ReadonlySet<string> = new Set([
+	"write_file",
+	"edit_file",
+	"run_command",
+	"git_add",
+	"git_commit",
+]);
 
 /**
- * True when a write, edit or command call failed: refused or errored (the same
- * test the claim check uses), or a command that ran and exited non-zero
- * ("Exit code 1:"), since later calls in the reply were planned on its success.
+ * True when a write, edit, command or git stage/commit call did not succeed:
+ *  - refused or errored ("Error...", "[... BLOCKED]"), the claim check's test;
+ *  - a permission refusal: a user decline, a policy block or a declined write
+ *    ("[PERMISSION DENIED] ...");
+ *  - a timeout ("TIMEOUT after 2 min...", "TIMEOUT after 30s: git ...");
+ *  - an edit of a missing file ("File not found: ...") or a path the guard
+ *    refused ("Path blocked by path-guard", "Path traversal blocked"), which
+ *    the executors return without an "Error" prefix;
+ *  - a command that ran and exited non-zero ("Exit code 1:").
+ * Later calls in the reply were planned on its success, so they do not run.
  */
 export function isFailedChangeCall(name: string, result: string): boolean {
 	if (!BATCH_STOP_TOOLS.has(name)) return false;
 	if (isRefusedToolResult(result)) return true;
-	return name === "run_command" && /^Exit code (?!0:)[^:\n]*:/.test(result);
+	if (/^\s*\[PERMISSION DENIED\]/i.test(result)) return true;
+	if (/^\s*TIMEOUT after\b/.test(result)) return true;
+	if (/^\s*(?:File not found:|Path blocked by path-guard|Path traversal blocked)/.test(result)) return true;
+	return /^Exit code (?!0:)[^:\n]*:/.test(result);
+}
+
+/** What the batch trial tells the caller when it skipped calls in one reply. */
+export type BatchSkipEvent = {
+	/** 0-based index, in the reply, of the call that failed. */
+	failedIndex: number;
+	failedName: string;
+	/** How many calls after it were not run. */
+	skipped: number;
+};
+
+/** One status line for the user, e.g. "Skipped 2 calls after the failed write_file". */
+export function batchSkipStatusLine(e: BatchSkipEvent): string {
+	return `Skipped ${e.skipped} call${e.skipped === 1 ? "" : "s"} after the failed ${e.failedName}`;
+}
+
+/**
+ * The existing tool start/end event pair that shows a batch skip to the user
+ * (the TUI renders the end event as one failed line carrying the status line).
+ * Plain objects shaped like AgentToolStartEvent / AgentToolEndEvent, so the
+ * caller passes them to its own onToolStart / onToolEnd and no UI changes.
+ */
+export function batchSkipToolEvents(e: BatchSkipEvent, toolCallId: string, stepNumber?: number) {
+	const args = { skipped: e.skipped, after: e.failedName };
+	return {
+		start: { toolName: "skipped_calls", toolCallId, args, stepNumber },
+		end: {
+			toolName: "skipped_calls",
+			toolCallId,
+			args,
+			success: false,
+			durationMs: 0,
+			stepNumber,
+			resultPreview: batchSkipStatusLine(e),
+		},
+	};
 }
 
 /**
@@ -823,6 +883,15 @@ export async function runTextToolAgent(
 					: "";
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 			if (batchTrial && isFailedChangeCall(tc.name, result)) failedChangeAt = k;
+		}
+
+		if (failedChangeAt >= 0 && failedChangeAt < calls.length - 1 && abortedAt < 0) {
+			const skipped = calls.length - failedChangeAt - 1;
+			try {
+				opts.onCallsSkipped?.({ failedIndex: failedChangeAt, failedName: calls[failedChangeAt].name, skipped });
+			} catch {
+				/* display only; never break the turn */
+			}
 		}
 
 		prevRoundAllRefused = ranAny && !prevRoundHadSuccess;
