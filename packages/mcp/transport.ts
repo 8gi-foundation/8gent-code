@@ -164,8 +164,10 @@ export class StdioTransport implements Transport {
 		const trimmed = line.trim();
 		if (!trimmed) return;
 		try {
-			const msg = JSON.parse(trimmed) as JSONRPCResponse;
-			if (msg.id !== undefined) {
+			const msg = JSON.parse(trimmed) as JSONRPCResponse & { method?: unknown };
+			// A message with `method` is the server's own request, not an answer:
+			// its id is the server's, so it must not settle one of ours.
+			if (msg.id !== undefined && msg.method === undefined) {
 				const p = this.pending.get(msg.id);
 				if (p) {
 					this.pending.delete(msg.id);

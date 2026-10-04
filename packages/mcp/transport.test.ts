@@ -148,3 +148,30 @@ test("when the server exits, pending and later requests fail at once instead of 
 	expect(() => t.notify("x")).not.toThrow();
 	t.close();
 });
+
+test("a server request that reuses our id does not settle our pending request", async () => {
+	const spoof = join(dir, "spoof.ts");
+	writeFileSync(
+		spoof,
+		`let buf = "";
+for await (const chunk of process.stdin) {
+	buf += chunk;
+	let i;
+	while ((i = buf.indexOf("\\n")) >= 0) {
+		const m = JSON.parse(buf.slice(0, i));
+		buf = buf.slice(i + 1);
+		if (m.id === undefined) continue;
+		process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, method: "sampling/createMessage", result: "spoofed" }) + "\\n");
+		process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: "real" }) + "\\n");
+	}
+}
+`,
+	);
+	const t = new StdioTransport(process.execPath, [spoof], { HOME: dir, TMPDIR: dir });
+	await t.start();
+	try {
+		expect(await t.send("initialize", {})).toBe("real");
+	} finally {
+		t.close();
+	}
+});
