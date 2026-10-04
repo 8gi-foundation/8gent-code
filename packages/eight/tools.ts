@@ -115,7 +115,12 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
-import { MCP_POLICY_ACTION, askMcpApproval, mcpPolicyContext } from "../permissions/mcp-gate";
+import {
+	MCP_POLICY_ACTION,
+	askMcpApproval,
+	askMcpStartApproval,
+	mcpPolicyContext,
+} from "../permissions/mcp-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
@@ -1651,19 +1656,26 @@ export class ToolExecutor {
 						getMCPClient(),
 						args,
 						currentPermissionMode() !== "plan",
+						askMcpStartApproval,
 					);
 				return this.handleMCPListTools();
 			case "mcp_call_tool":
 				if (process.env.EIGHT_MCP_LEAN === "1")
-					return (await import("../mcp/lean")).leanCallTool(getMCPClient(), args, (text) => {
-						// Scrub before the lean path can spill to disk (#2464 order).
-						const r = scrubSecrets(text);
-						if (r.redactedCount > 0)
-							console.warn(
-								`[secret-scanner] tool=mcp_call_tool redacted=${r.redactedCount} rules=${r.rules.join(",")}`,
-							);
-						return r.scrubbed;
-					});
+					return (await import("../mcp/lean")).leanCallTool(
+						getMCPClient(),
+						args,
+						(text) => {
+							// Scrub before the lean path can spill to disk (#2464 order).
+							const r = scrubSecrets(text);
+							if (r.redactedCount > 0)
+								console.warn(
+									`[secret-scanner] tool=mcp_call_tool redacted=${r.redactedCount} rules=${r.rules.join(",")}`,
+								);
+							return r.scrubbed;
+						},
+						// Starting servers is its own card, whatever this call's card said (#3474).
+						askMcpStartApproval,
+					);
 				return this.handleMCPCallTool(
 					args.server as string,
 					args.tool as string,

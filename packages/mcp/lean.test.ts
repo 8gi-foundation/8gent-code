@@ -21,6 +21,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { scrub } from "../eight/secret-scanner";
+import type { ServerConfig } from "./config";
 import {
 	PREVIEW,
 	RESULT_CAP,
@@ -32,10 +34,13 @@ import {
 	projectFields,
 	storeResult,
 } from "./lean";
+import { describeServer, ensureConnected } from "./lean";
 import { FAKE_TOOLS, REPORT_TOOL, SENTINEL, bigReport } from "./lean.fixture";
 
 /** A pass-through scrubber for tests that are not about secrets. */
 const id = (t: string) => t;
+/** The start card, answered yes, for tests that are not about consent. */
+const yes = async () => null;
 const root = mkdtempSync(join(tmpdir(), "mcp-lean-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
@@ -56,6 +61,8 @@ function fakeClient(
 		connects: 0,
 		listTools: () => tools,
 		isConnected: () => true,
+		loadServerConfigs: () => [{ type: "stdio" as const, name: "work", command: "work-server" }],
+		close() {},
 		async connect() {
 			this.connects++;
 		},
@@ -181,6 +188,11 @@ describe("spill to file", () => {
 		expect(existsSync(join(d, "tool-results"))).toBe(false);
 	});
 
+	test("under the cap, control and bidi characters are replaced; CRLF becomes LF", () => {
+		const d = freshDataDir();
+		expect(capResult("a\u001b[2Jb\u202ec\r\nd\te", d)).toBe("a?[2Jb?c\nd\te");
+	});
+
 	test("over the cap goes to a 0600 file in a per-session 0700 dir; the model gets path plus preview", () => {
 		const d = freshDataDir();
 		const big = bigReport("2026-Q3");
@@ -239,7 +251,13 @@ describe("spill to file", () => {
 	test("the server's names never pick the file path", async () => {
 		const d = freshDataDir();
 		const c = fakeClient();
-		const out = await leanCallTool(c, { server: "../../etc", tool: "../passwd", args: {} }, id, d);
+		const out = await leanCallTool(
+			c,
+			{ server: "../../etc", tool: "../passwd", args: {} },
+			id,
+			yes,
+			d,
+		);
 		const path = /saved to (\S+)\]/.exec(out)?.[1] ?? "";
 		expect(path.startsWith(join(d, "tool-results", "s-"))).toBe(true);
 		expect(path).not.toContain("passwd");
@@ -258,6 +276,7 @@ describe("leanCallTool", () => {
 				fields: ["totals.net"],
 			},
 			id,
+			yes,
 			d,
 		);
 		expect(JSON.parse(out)).toEqual({ "totals.net": 381300 });
@@ -276,6 +295,7 @@ describe("leanCallTool", () => {
 				fakeClient(ENTRIES, bad),
 				{ server: "work", tool: "t" },
 				id,
+				yes,
 				d,
 			);
 			expect(typeof out).toBe("string");
@@ -285,20 +305,20 @@ describe("leanCallTool", () => {
 	test("connects lazily; a failed connect is retried once, then left alone", async () => {
 		const c = { ...fakeClient(), isConnected: () => false };
 		for (let i = 0; i < 4; i++)
-			await leanCallTool(c, { server: "work", tool: "t" }, id, freshDataDir());
+			await leanCallTool(c, { server: "work", tool: "t" }, id, yes, freshDataDir());
 		expect(c.connects).toBe(2);
 		const ok = fakeClient();
-		await leanCallTool(ok, { server: "work", tool: "t" }, id, freshDataDir());
+		await leanCallTool(ok, { server: "work", tool: "t" }, id, yes, freshDataDir());
 		expect(ok.connects).toBe(0);
 	});
 
 	test("in Plan mode listing never starts a server", async () => {
 		const c = { ...fakeClient(), isConnected: () => false };
-		const out = await leanListToolsConnected(c, { query: "ledger" }, false);
+		const out = await leanListToolsConnected(c, { query: "ledger" }, false, yes);
 		expect(c.connects).toBe(0);
 		expect(out).toContain("not started in Plan mode");
 		const running = fakeClient();
-		expect(await leanListToolsConnected(running, { query: "ledger" }, false)).toContain(
+		expect(await leanListToolsConnected(running, { query: "ledger" }, false, yes)).toContain(
 			"ledger_quarter_report",
 		);
 	});
@@ -317,6 +337,7 @@ describe("leanCallTool", () => {
 				seen.push(t);
 				return t.replaceAll(secret, "[REDACTED:test]");
 			},
+			yes,
 			d,
 		);
 		const path = /saved to (\S+)\]/.exec(out)?.[1] ?? "";
@@ -328,5 +349,159 @@ describe("leanCallTool", () => {
 
 	test("clean caps before the regex runs", () => {
 		expect(clean("a".repeat(5_000_000), 10)).toBe("a".repeat(10));
+	});
+
+	test("a secret unescaped by projection is scrubbed before spill: \\u0041 and \\/ forms", async () => {
+		const key = "AKIAIOSFODNN7EXAMPLQ";
+		const pass = "token=aB3dE5gH7jK9mN1pQ4rS6tU8";
+		const escaped = `AKI\\u0041${key.slice(4)}`; // the raw JSON spells it with an escape
+		const slashed = pass.replace("aB3", "aB3\\/"); // and this one with an escaped slash
+		const pad = "x".repeat(RESULT_CAP * 2);
+		const body = `{"data":{"k":"${escaped}","p":"${slashed}","pad":"${pad}"}}`;
+		// The raw text does not show the AWS key to the scanner: only projection decodes it.
+		expect(body).not.toContain(key);
+		const d = freshDataDir();
+		const out = await leanCallTool(
+			fakeClient(ENTRIES, { content: [{ type: "text", text: body }] }),
+			{ server: "work", tool: "t", fields: ["data"] },
+			(t) => scrub(t).scrubbed,
+			yes,
+			d,
+		);
+		const path = /saved to (\S+)\]/.exec(out)?.[1] ?? "";
+		const file = readFileSync(path, "utf8");
+		expect(file.includes("[REDACTED:aws_access_key]")).toBe(true);
+		expect(file.includes(key)).toBe(false);
+		expect(file.includes("dE5gH7jK9mN1pQ4rS6tU8")).toBe(false);
+		expect(out.includes(key)).toBe(false);
+	});
+});
+
+describe("starting servers needs the person's yes (first-connect consent)", () => {
+	const CONFIGS: ServerConfig[] = [
+		{
+			type: "stdio",
+			name: "files",
+			command: "/usr/local/bin/files-mcp",
+			args: ["--root", "/srv"],
+			env: { FILES_TOKEN: "env-value-never-shown" },
+		},
+		{
+			type: "sse",
+			name: "remote",
+			url: "https://user:pw-never-shown@mcp.example.com/sse?key=q-never-shown",
+			headers: { Authorization: "Bearer header-never-shown" },
+		},
+	];
+	function startClient(configs = CONFIGS) {
+		const connected: unknown[] = [];
+		let up = false;
+		let reads = 0;
+		return {
+			connected,
+			get reads() {
+				return reads;
+			},
+			listTools: () => (up ? ENTRIES : []),
+			isConnected: () => up,
+			loadServerConfigs: () => {
+				reads++;
+				return configs;
+			},
+			close() {},
+			async connect(only?: ServerConfig[]) {
+				connected.push(only);
+				await Bun.sleep(20);
+				up = true;
+			},
+			async callTool() {
+				return { content: [{ type: "text", text: "ran" }] } as never;
+			},
+		};
+	}
+
+	test("the card names each server and its command plus args, or its URL; never env, headers or URL secrets", async () => {
+		const cards: string[][] = [];
+		const c = startClient();
+		await leanListToolsConnected(c, { query: "x" }, true, async (s) => {
+			cards.push(s);
+			return null;
+		});
+		expect(cards).toEqual([
+			["files: /usr/local/bin/files-mcp --root /srv", "remote: https://mcp.example.com/sse?..."],
+		]);
+		expect(JSON.stringify(cards)).not.toContain("never-shown");
+		expect(
+			describeServer({ type: "stdio", name: "s", command: "c", args: ["x".repeat(1200)] }),
+		).toEndWith("[+205 more chars]");
+		expect(describeServer({ type: "stdio", name: "a\u202eb", command: "x\u001b[2J" })).toBe(
+			"a?b: x?[2J",
+		);
+	});
+
+	test("a denied card means no server starts, from either tool, for the rest of the session", async () => {
+		const c = startClient();
+		let asked = 0;
+		const no = async () => {
+			asked++;
+			return "[PERMISSION DENIED] declined";
+		};
+		expect(await leanCallTool(c, { server: "files", tool: "t" }, id, no, freshDataDir())).toBe(
+			"[PERMISSION DENIED] declined",
+		);
+		expect(await leanListToolsConnected(c, { query: "x" }, true, no)).toBe(
+			"[PERMISSION DENIED] declined",
+		);
+		expect(c.connected).toEqual([]);
+		expect(asked).toBe(1);
+	});
+
+	test("no approval path at all means no start", async () => {
+		const c = startClient();
+		const out = await ensureConnected(c, true, undefined);
+		expect(out).toStartWith("[BLOCKED]");
+		expect(c.connected).toEqual([]);
+	});
+
+	test("exactly the approved list starts; the config is read once, also for the retry", async () => {
+		const c = { ...startClient(), isConnected: () => false };
+		let asked = 0;
+		const ok = async () => {
+			asked++;
+			return null;
+		};
+		for (let i = 0; i < 3; i++) await ensureConnected(c, true, ok);
+		expect(asked).toBe(1);
+		expect(c.connected.length).toBe(2); // one start, one retry, then left alone
+		for (const list of c.connected) expect(list).toBe(CONFIGS);
+	});
+
+	test("parallel first calls share one card and one start", async () => {
+		const c = startClient();
+		let asked = 0;
+		const ok = async () => {
+			asked++;
+			await Bun.sleep(10);
+			return null;
+		};
+		const outs = await Promise.all([
+			leanCallTool(c, { server: "files", tool: "t" }, id, ok, freshDataDir()),
+			leanCallTool(c, { server: "files", tool: "t" }, id, ok, freshDataDir()),
+			leanListToolsConnected(c, { query: "ledger" }, true, ok),
+		]);
+		expect(asked).toBe(1);
+		expect(c.connected.length).toBe(1);
+		expect(outs[0]).toBe("ran");
+	});
+
+	test("no configured servers: no card, today's message", async () => {
+		const c = startClient([]);
+		let asked = 0;
+		const out = await leanListToolsConnected(c, {}, true, async () => {
+			asked++;
+			return null;
+		});
+		expect(asked).toBe(0);
+		expect(out).toBe("No MCP tools available. Configure servers in ~/.8gent/mcp.json");
 	});
 });

@@ -69,7 +69,6 @@ export const HOMEDIR_BASELINE: Record<string, number> = {
 	"packages/kernel/local-trainer.ts": 1,
 	"packages/kernel/promotion-gate.ts": 2,
 	"packages/kernel/version-manager.ts": 3,
-	"packages/mcp/config.ts": 1,
 	"packages/memory/bus.ts": 1,
 	"packages/memory/computer-use-traces.ts": 2,
 	"packages/memory/index.ts": 2,

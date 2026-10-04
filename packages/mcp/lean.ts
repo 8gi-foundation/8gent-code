@@ -27,15 +27,25 @@
  * path's connect happens to make them see this process's servers afterwards,
  * in full and untrimmed.
  *
- * Starting servers: the first lean mcp_list_tools or mcp_call_tool starts
- * every server in ~/.8gent/mcp.json (their processes, as configured). Listing
- * is ungated and allowed in Plan mode, so in Plan mode the lean path does not
- * start servers; it lists only servers already running. A failed connect is
- * retried once, on the next call.
+ * Starting servers: the first lean mcp_list_tools or mcp_call_tool reads
+ * <home>/.8gent/mcp.json once and shows one approval card per session that
+ * names every server and its command plus args, or its URL (never env or
+ * headers). Only after an approve does it start exactly that list; nothing
+ * re-reads the file in between. Infinite mode skips the card; with no card
+ * and no terminal the answer is no, and a no stands for the session. The
+ * card is separate from the per-call card, so approving one call never
+ * starts the other servers. Parallel first calls share one start. Listing is
+ * ungated and allowed in Plan mode, so in Plan mode the lean path does not
+ * start servers; it lists only servers already running. A start that brings
+ * no server up is retried once, on the next call, with the approved list.
+ * Started servers are closed when the process exits.
  *
  * Secrets: callers pass the executor's secret scrubber; it runs on the answer
- * before projection, spill or preview, so nothing written to disk or shown
- * holds a secret the scanner knows (the #2464 "scrub before persist" order).
+ * before projection, and again on the projected text (projection re-encodes
+ * JSON, so a \u0041- or \/-escaped secret comes out in plain form), all
+ * before spill or preview (the #2464 "scrub before persist" order). Without
+ * fields the answer is scrubbed as written: an escaped secret the scanner
+ * cannot see stays escaped, in the file as in the answer.
  *
  * Spill files: a per-session 0700 dir under <data dir>/tool-results; dirs of
  * earlier sessions older than 7 days are removed when a new one is made.
@@ -44,7 +54,7 @@
  *
  * Server output is untrusted: it is capped before any regex, parsed inside
  * try, never chooses a file name, and control / bidi characters are replaced
- * before anything is echoed.
+ * before anything is echoed (answers under the cap included).
  */
 
 import { randomUUID } from "node:crypto";
@@ -62,7 +72,8 @@ import {
 import { join } from "node:path";
 import { resolveHome } from "../core/home";
 import type { MCPClient, MCPToolResult } from "./client";
-import { formatToolResult } from "./index";
+import type { ServerConfig } from "./config";
+import { clean, formatToolResult } from "./index";
 
 export const RESULT_CAP = 4000;
 export const PREVIEW = 400;
@@ -71,26 +82,86 @@ const PARSE_MAX = 2_000_000; // chars handed to JSON.parse for projection
 const TOP = 8;
 const BAD_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
-type Client = Pick<MCPClient, "listTools" | "callTool" | "isConnected" | "connect">;
+type Client = Pick<
+	MCPClient,
+	"listTools" | "callTool" | "isConnected" | "connect" | "loadServerConfigs" | "close"
+>;
 
-/** Replace control and bidi characters; keep newlines and tabs unless oneLine. */
-export function clean(value: unknown, max: number, oneLine = false): string {
-	const s = String(value ?? "").slice(0, max);
-	const out = s.replace(
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
-		/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g,
-		"?",
-	);
-	return oneLine ? out.replace(/[\n\t]+/g, " ") : out;
+/** Asks the person before servers start: null to go ahead, else the refusal. */
+export type StartApproval = (servers: string[]) => Promise<string | null>;
+
+export { clean };
+
+/** One card line per server: its name and what runs (command plus args) or is contacted (URL). */
+export function describeServer(cfg: ServerConfig): string {
+	if (cfg.type === "stdio") {
+		const line = `${cfg.name}: ${[cfg.command, ...(cfg.args ?? [])].join(" ")}`;
+		// Never cut silently: what is approved must be what runs.
+		const more = line.length > 1000 ? ` [+${line.length - 1000} more chars]` : "";
+		return clean(line, 1000, true) + more;
+	}
+	let where = String(cfg.url);
+	try {
+		const u = new URL(where);
+		// Credentials in a URL are config secrets, not what the person decides on.
+		where = `${u.protocol}//${u.host}${u.pathname}${u.search ? "?..." : ""}`;
+	} catch {}
+	return clean(`${cfg.name}: ${where}`, 1000, true);
 }
 
-const tries = new WeakMap<object, number>();
-/** Connect the configured servers on first lean use (never at startup); one retry if none came up. */
-export async function ensureConnected(client: Client, mayStart = true): Promise<void> {
-	const n = tries.get(client) ?? 0;
-	if (!mayStart || client.isConnected() || n >= 2) return;
-	tries.set(client, n + 1);
-	await client.connect();
+interface StartState {
+	tries: number;
+	approved?: ServerConfig[];
+	refused?: string;
+	inflight?: Promise<string | null>;
+	exitHook?: boolean;
+}
+const starts = new WeakMap<object, StartState>();
+
+/**
+ * Start the configured servers on first lean use (never at startup), after
+ * the person approved the exact list. Returns null when the caller may go on
+ * (servers up, none configured, or Plan mode), else the refusal for the model.
+ */
+export async function ensureConnected(
+	client: Client,
+	mayStart: boolean,
+	approve: StartApproval | undefined,
+): Promise<string | null> {
+	if (!mayStart || client.isConnected()) return null;
+	let st = starts.get(client);
+	if (!st) starts.set(client, (st = { tries: 0 }));
+	if (st.inflight) return st.inflight;
+	if (st.refused) return st.refused;
+	if (st.tries >= 2) return null;
+	const state = st;
+	state.inflight = (async () => {
+		try {
+			let configs = state.approved;
+			if (!configs) {
+				const read = client.loadServerConfigs();
+				if (read.length === 0) return null;
+				const refusal = approve
+					? await approve(read.map(describeServer))
+					: "[BLOCKED] MCP servers cannot start: no approval path. No server was started.";
+				if (refusal) {
+					state.refused = refusal;
+					return refusal;
+				}
+				configs = state.approved = read;
+			}
+			state.tries++;
+			if (!state.exitHook) {
+				state.exitHook = true;
+				process.once("exit", () => client.close());
+			}
+			await client.connect(configs);
+			return null;
+		} finally {
+			state.inflight = undefined;
+		}
+	})();
+	return state.inflight;
 }
 
 export function leanListTools(client: Client, args: Record<string, unknown>): string {
@@ -250,9 +321,9 @@ export function storeResult(text: string, dataDir: string): { handle: string; pa
 	return { handle, path };
 }
 
-/** Cap, then spill to a file when over RESULT_CAP. Under the cap the text is returned as is. */
+/** Cap, then spill to a file when over RESULT_CAP. Under the cap only control and bidi characters change. */
 export function capResult(text: string, dataDir: string): string {
-	if (text.length <= RESULT_CAP) return text;
+	if (text.length <= RESULT_CAP) return clean(text.replace(/\r\n/g, "\n"), RESULT_CAP);
 	let where: string;
 	try {
 		where = `saved to ${storeResult(text, dataDir).path}`;
@@ -266,10 +337,12 @@ export async function leanCallTool(
 	client: Client,
 	args: Record<string, unknown>,
 	scrub: (text: string) => string,
+	approveStart: StartApproval | undefined,
 	dataDir = join(resolveHome(), ".8gent"),
 ): Promise<string> {
 	try {
-		await ensureConnected(client);
+		const refused = await ensureConnected(client, true, approveStart);
+		if (refused) return refused;
 		const raw = (await client.callTool(
 			String(args.server),
 			String(args.tool),
@@ -279,7 +352,9 @@ export async function leanCallTool(
 			? raw.content.filter((p) => p && typeof p === "object")
 			: [];
 		const text = scrub(formatToolResult({ content: parts }).slice(0, HARD_MAX));
-		return capResult(raw?.isError ? text : projectFields(text, args.fields), dataDir);
+		const shaped = raw?.isError ? text : projectFields(text, args.fields);
+		// Projection re-encodes JSON, which can unescape a secret: scrub what will be kept.
+		return capResult(shaped === text ? text : scrub(shaped), dataDir);
 	} catch (err) {
 		return `MCP call tool failed: ${clean(err, 500)}`;
 	}
@@ -289,9 +364,11 @@ export async function leanListToolsConnected(
 	client: Client,
 	args: Record<string, unknown>,
 	mayStart: boolean,
+	approveStart: StartApproval | undefined,
 ): Promise<string> {
 	try {
-		await ensureConnected(client, mayStart);
+		const refused = await ensureConnected(client, mayStart, approveStart);
+		if (refused) return refused;
 		if (!mayStart && !client.isConnected())
 			return "MCP servers are not started in Plan mode. Leave Plan mode to list their tools.";
 		return leanListTools(client, args);

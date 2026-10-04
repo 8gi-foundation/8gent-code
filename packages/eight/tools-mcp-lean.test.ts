@@ -182,3 +182,127 @@ describe("flag on: real client, fake stdio server, lazy connect", () => {
 		expect(on.fields.length).toBeLessThan(100);
 	}, 120_000);
 });
+
+// Consent and Plan mode through the executor: a server that records its pid
+// on start, so "nothing started" is read off the disk, not inferred.
+const marked = join(root, "marked.ts");
+writeFileSync(
+	marked,
+	`require("node:fs").appendFileSync(process.argv[2], process.pid + "\\n");
+await import(${JSON.stringify(server)});
+`,
+);
+const consentDriver = join(root, "consent.ts");
+writeFileSync(
+	consentDriver,
+	`import { ToolExecutor } from ${JSON.stringify(join(pkg, "eight/tools.ts"))};
+import { registerTuiApprovalHandler } from ${JSON.stringify(join(pkg, "permissions/tui-approval-channel.ts"))};
+import { createPermissionHolder, runWithPermissionHolder } from ${JSON.stringify(join(pkg, "permissions/permission-mode.ts"))};
+const mode = process.env.DRIVE_MODE;
+const cards = [];
+if (mode !== "headless" && mode !== "infinite")
+	registerTuiApprovalHandler(async (req) => {
+		cards.push(req.command ?? req.action);
+		return mode === "deny" && req.action === "Start MCP servers" ? "deny" : "approve";
+	});
+const exec = new ToolExecutor(process.cwd(), "lean-consent");
+const holder = mode === "plan" ? createPermissionHolder("plan") : mode === "infinite" ? createPermissionHolder("infinite") : undefined;
+const run = (fn) => (holder ? runWithPermissionHolder(holder, fn) : fn());
+const out = await run(async () => ({
+	call: await exec.execute("mcp_call_tool", { server: "work", tool: "ledger_quarter_report", args: { quarter: "2026-Q3", rows: 2 } }),
+	list: await exec.execute("mcp_list_tools", { query: "ledger" }),
+	call2: await exec.execute("mcp_call_tool", { server: "work", tool: "ledger_quarter_report", args: { quarter: "2026-Q3", rows: 2 } }),
+}));
+console.log("RESULT" + JSON.stringify({ ...out, cards }));
+process.exit(0);
+`,
+);
+
+function consent(mode: "approve" | "deny" | "headless" | "plan" | "infinite") {
+	const dir = join(root, `consent-${mode}`);
+	const home = join(dir, "home");
+	mkdirSync(join(home, ".8gent"), { recursive: true });
+	mkdirSync(join(dir, "work"));
+	mkdirSync(join(dir, "tmp"));
+	const pids = join(dir, "pids");
+	writeFileSync(pids, "");
+	writeFileSync(
+		join(home, ".8gent", "mcp.json"),
+		JSON.stringify({
+			servers: {
+				work: {
+					command: process.execPath,
+					args: [marked, pids],
+					env: { WORK_TOKEN: "env-never-on-card" },
+				},
+			},
+		}),
+	);
+	const r = Bun.spawnSync([process.execPath, consentDriver], {
+		cwd: join(dir, "work"),
+		env: {
+			PATH: process.env.PATH ?? "/usr/bin:/bin",
+			HOME: home,
+			TMPDIR: join(dir, "tmp"),
+			EIGHT_MCP_LEAN: "1",
+			DRIVE_MODE: mode,
+			...(mode === "headless" || mode === "infinite" ? { EIGHT_HEADLESS: "1" } : {}),
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		timeout: 60_000,
+	});
+	const line = r.stdout
+		.toString()
+		.split("\n")
+		.find((l) => l.startsWith("RESULT"));
+	if (!line) throw new Error(`consent driver failed: ${r.stderr.toString().slice(0, 2000)}`);
+	const out = JSON.parse(line.slice(6)) as {
+		call: string;
+		list: string;
+		call2: string;
+		cards: string[];
+	};
+	return { ...out, started: readFileSync(pids, "utf8").split("\n").filter(Boolean).length };
+}
+
+describe("flag on: no server starts without the person's yes", () => {
+	test("approved: one start card naming the server and its command, never its env; one start", () => {
+		const r = consent("approve");
+		const start = r.cards.filter((c) => c.startsWith("start 1 MCP server:"));
+		expect(start.length).toBe(1);
+		expect(start[0]).toContain(`work: ${process.execPath} ${marked}`);
+		expect(JSON.stringify(r.cards)).not.toContain("env-never-on-card");
+		expect(r.started).toBe(1);
+		expect(r.call).toContain("2026-Q3");
+	}, 60_000);
+
+	test("denied card: zero spawns from either tool, and the card is not asked again", () => {
+		const r = consent("deny");
+		expect(r.started).toBe(0);
+		expect(r.call).toStartWith("[PERMISSION DENIED]");
+		expect(r.list).toStartWith("[PERMISSION DENIED]");
+		expect(r.call2).toStartWith("[PERMISSION DENIED]");
+		expect(r.cards.filter((c) => c.startsWith("start ")).length).toBe(1);
+	}, 60_000);
+
+	test("headless with no card: refused, zero spawns", () => {
+		const r = consent("headless");
+		expect(r.started).toBe(0);
+		expect(r.list).toStartWith("[BLOCKED]");
+	}, 60_000);
+
+	test("Plan mode: mcp_call_tool and mcp_list_tools spawn nothing", () => {
+		const r = consent("plan");
+		expect(r.started).toBe(0);
+		expect(r.call).toStartWith("[PLAN MODE]");
+		expect(r.list).toContain("not started in Plan mode");
+		expect(r.cards).toEqual([]);
+	}, 60_000);
+
+	test("Infinite: starts without a card", () => {
+		const r = consent("infinite");
+		expect(r.cards).toEqual([]);
+		expect(r.started).toBe(1);
+	}, 60_000);
+});

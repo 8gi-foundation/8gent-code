@@ -46,25 +46,55 @@ export async function askMcpApproval(
 	args: Record<string, unknown> | undefined,
 	reason: string | undefined,
 ): Promise<string | null> {
+	const label = `mcp_call_tool ${server}/${tool}`;
+	return askPerson(
+		{
+			action: MCP_APPROVAL_ACTION,
+			details: `${reason ?? "This MCP tool call needs your approval."} Server: ${server}. Tool: ${tool}. Args: ${JSON.stringify(args ?? {})}`,
+		},
+		`[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`,
+		`[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`,
+	);
+}
+
+/** The approval card's title before the lean path starts MCP servers (#3474). */
+export const MCP_START_APPROVAL_ACTION = "Start MCP servers";
+
+/**
+ * Ask once before MCP servers are started: each line names one server and
+ * what will run (command and args) or be contacted (URL). Never env values.
+ * Same rules as a call: Infinite starts without a card; no card, no start.
+ * Returns null when the servers may start, or the refusal for the model.
+ */
+export async function askMcpStartApproval(servers: string[]): Promise<string | null> {
+	return askPerson(
+		{
+			action: MCP_START_APPROVAL_ACTION,
+			// The TUI card shows `command` on one row, so it leads with the count.
+			command: `start ${servers.length} MCP server${servers.length === 1 ? "" : "s"}: ${servers.join(" | ")}`,
+			details: `Using MCP starts these servers from your MCP config, as configured:\n${servers.map((l) => `- ${l}`).join("\n")}`,
+		},
+		"[BLOCKED] Starting MCP servers needs the person's approval and there is no one to ask in this session. No server was started. Do not retry.",
+		"[PERMISSION DENIED] The person declined to start the MCP servers. No server was started. Do not retry.",
+	);
+}
+
+async function askPerson(
+	request: { action: string; details: string; command?: string },
+	noOne: string,
+	declined: string,
+): Promise<string | null> {
 	const manager = getPermissionManager();
 	if (manager.isInfiniteMode()) return null;
-	const label = `mcp_call_tool ${server}/${tool}`;
-	const request = {
-		action: MCP_APPROVAL_ACTION,
-		details: `${reason ?? "This MCP tool call needs your approval."} Server: ${server}. Tool: ${tool}. Args: ${JSON.stringify(args ?? {})}`,
-	};
 	let approved: boolean;
 	if (hasTuiApprovalHandler()) {
 		approved = (await requestTuiApproval(request)) === true;
 	} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
 		approved = await manager.requestPermission(request.action, request.details);
 	} else {
-		return `[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`;
+		return noOne;
 	}
-	if (!approved) {
-		return `[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`;
-	}
-	return null;
+	return approved ? null : declined;
 }
 
 /**
