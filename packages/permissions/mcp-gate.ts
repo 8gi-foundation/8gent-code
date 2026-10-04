@@ -23,7 +23,7 @@
 
 import { getPermissionManager } from "./index";
 import { ToolG8 } from "./toolg8";
-import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
+import { hasTuiApprovalHandler, requestTuiDecision } from "./tui-approval-channel";
 import type { PolicyContext } from "./types";
 
 export const MCP_POLICY_ACTION = "mcp_call" as const;
@@ -33,6 +33,13 @@ export const MCP_APPROVAL_ACTION = "MCP tool call";
 
 export function mcpPolicyContext(server: string, tool: string): PolicyContext {
 	return { server, tool, action: `${server}/${tool}` };
+}
+
+/** Untrusted text on one line, as clean() in packages/mcp/index.ts (not imported: a cycle). */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g;
+function oneLine(value: string): string {
+	return value.replace(UNSAFE, "?").replace(/[\n\t]+/g, " ");
 }
 
 /**
@@ -46,25 +53,68 @@ export async function askMcpApproval(
 	args: Record<string, unknown> | undefined,
 	reason: string | undefined,
 ): Promise<string | null> {
+	const label = `mcp_call_tool ${server}/${tool}`;
+	let json: string;
+	try {
+		json = JSON.stringify(args ?? {}) ?? "{}";
+	} catch {
+		json = "[arguments that cannot be shown as JSON]";
+	}
+	const command = oneLine(`${label} ${json}`);
+	return askPerson(
+		{
+			action: MCP_APPROVAL_ACTION,
+			command,
+			full: true,
+			details: oneLine(`${reason ?? "This MCP tool call needs your approval."} ${label} ${json}`),
+		},
+		`[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`,
+		`[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`,
+		`[BLOCKED] ${label} was not shown for approval: the approval card must show the whole call and it does not fit on this screen. Nothing was sent to the MCP server. Send smaller arguments, or ask the person to make the window larger.`,
+	);
+}
+
+/** The approval card's title before the lean path starts MCP servers (#3474). */
+export const MCP_START_APPROVAL_ACTION = "Start MCP servers";
+
+/** Ask once before MCP servers start, one line per server; null to start, else the refusal. */
+export async function askMcpStartApproval(servers: string[]): Promise<string | null> {
+	const n = `${servers.length} MCP server${servers.length === 1 ? "" : "s"}`;
+	const cwd = oneLine(process.cwd());
+	return askPerson(
+		{
+			action: MCP_START_APPROVAL_ACTION,
+			command: `start ${n} from your MCP config (working directory ${cwd}):\n${servers.map((l) => `- ${l}`).join("\n")}`,
+			full: true,
+			details: `Using MCP starts these servers from your MCP config, as configured, in ${cwd}:\n${servers.map((l) => `- ${l}`).join("\n")}`,
+		},
+		"[BLOCKED] Starting MCP servers needs the person's approval and there is no one to ask in this session. No server was started. Do not retry; restart the session with a person present to be asked again.",
+		"[PERMISSION DENIED] The person declined to start the MCP servers. No server was started. Do not retry; the answer stands for this session, and the person can restart the session to be asked again.",
+		"[BLOCKED] The MCP servers were not offered for approval: the approval card must show every server in full and it does not fit on this screen. No server was started. Do not retry; the person can list fewer servers in ~/.8gent/mcp.json or make the window larger, then restart the session to be asked again.",
+	);
+}
+
+async function askPerson(
+	request: { action: string; details: string; command?: string; full?: boolean },
+	noOne: string,
+	declined: string,
+	doesNotFit: string,
+): Promise<string | null> {
 	const manager = getPermissionManager();
 	if (manager.isInfiniteMode()) return null;
-	const label = `mcp_call_tool ${server}/${tool}`;
-	const request = {
-		action: MCP_APPROVAL_ACTION,
-		details: `${reason ?? "This MCP tool call needs your approval."} Server: ${server}. Tool: ${tool}. Args: ${JSON.stringify(args ?? {})}`,
-	};
 	let approved: boolean;
 	if (hasTuiApprovalHandler()) {
-		approved = (await requestTuiApproval(request)) === true;
+		const decision = await requestTuiDecision(request);
+		if (decision === "unfit") return doesNotFit;
+		approved = decision === "approve";
 	} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
-		approved = await manager.requestPermission(request.action, request.details);
+		approved = await manager.requestPermission(request.action, request.details, undefined, {
+			defaultNo: true,
+		});
 	} else {
-		return `[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`;
+		return noOne;
 	}
-	if (!approved) {
-		return `[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`;
-	}
-	return null;
+	return approved ? null : declined;
 }
 
 /**

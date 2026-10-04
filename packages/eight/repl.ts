@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { getHookManager } from "../hooks";
-import { getMCPClient } from "../mcp";
+import { clean, getMCPClient } from "../mcp";
 import { formatAgentStatus, getAgentPool, parseSpawnCommand } from "../orchestration";
 import { getPermissionManager } from "../permissions";
 import { type RunLogEntry, readRuns } from "../reporting/runlog";
@@ -762,7 +762,7 @@ function handleMCPCommands(trimmed: string): boolean {
 			console.log("\x1b[36mMCP Tools:\x1b[0m");
 			for (const { server, tool } of tools) {
 				console.log(
-					`  [\x1b[33m${server}\x1b[0m] ${tool.name}: ${tool.description || "No description"}`,
+					`  [\x1b[33m${clean(server, 80, true)}\x1b[0m] ${clean(tool.name, 120, true)}: ${clean(tool.description || "No description", 2000, true)}`,
 				);
 			}
 		}

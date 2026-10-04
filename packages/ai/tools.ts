@@ -1080,7 +1080,7 @@ const mcpListTools = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		try {
-			const { getMCPClient } = await import("../mcp");
+			const { clean, getMCPClient } = await import("../mcp");
 			const mcpClient = getMCPClient();
 			const tools = mcpClient.listTools();
 
@@ -1090,8 +1090,12 @@ const mcpListTools = tool({
 
 			const grouped: Record<string, string[]> = {};
 			for (const { server, tool } of tools) {
-				if (!grouped[server]) grouped[server] = [];
-				grouped[server].push(`  - ${tool.name}: ${tool.description || "No description"}`);
+				// Server-supplied text: control and bidi characters never reach the model.
+				const key = clean(server, 80, true);
+				if (!grouped[key]) grouped[key] = [];
+				grouped[key].push(
+					`  - ${clean(tool.name, 120, true)}: ${clean(tool.description || "No description", 2000, true)}`,
+				);
 			}
 
 			let output = "Available MCP Tools:\n\n";

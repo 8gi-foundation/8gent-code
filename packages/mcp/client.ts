@@ -43,12 +43,18 @@ export class MCPClient {
 		this.configPath = configPath;
 	}
 
+	/** The servers this client's config file names, read now. */
+	loadServerConfigs(): ServerConfig[] {
+		return loadConfig(this.configPath);
+	}
+
 	/**
-	 * Connect to all configured MCP servers.
+	 * Connect to all configured MCP servers, or exactly the given ones (the
+	 * approved list, so nothing re-reads the config after the card).
 	 * Performs handshake + tool discovery on each.
 	 */
-	async connect(): Promise<void> {
-		const configs = loadConfig(this.configPath);
+	async connect(only?: ServerConfig[]): Promise<void> {
+		const configs = only ?? loadConfig(this.configPath);
 		if (configs.length === 0) return;
 
 		const results = await Promise.allSettled(configs.map((cfg) => this._connectServer(cfg)));
@@ -72,20 +78,27 @@ export class MCPClient {
 			transport = new SSETransport(config.url, config.headers);
 		}
 
-		// MCP handshake
-		await transport.send("initialize", {
-			protocolVersion: "2024-11-05",
-			capabilities: { roots: { listChanged: true } },
-			clientInfo: { name: "8gent-code", version: "1.0.0" },
-		});
+		let tools: MCPToolSchema[];
+		try {
+			// MCP handshake
+			await transport.send("initialize", {
+				protocolVersion: "2024-11-05",
+				capabilities: { roots: { listChanged: true } },
+				clientInfo: { name: "8gent-code", version: "1.0.0" },
+			});
 
-		transport.notify("notifications/initialized");
+			transport.notify("notifications/initialized");
 
-		// Discover tools
-		const result = (await transport.send("tools/list")) as {
-			tools: MCPToolSchema[];
-		};
-		const tools = result?.tools || [];
+			// Discover tools
+			const result = (await transport.send("tools/list")) as {
+				tools: MCPToolSchema[];
+			};
+			tools = result?.tools || [];
+		} catch (err) {
+			// A server that fails the handshake is not kept, so it must not keep running.
+			transport.close();
+			throw err;
+		}
 
 		this.servers.set(config.name, { config, transport, tools });
 

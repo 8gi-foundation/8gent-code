@@ -54,6 +54,20 @@ export function resetMCPClient(): void {
 // ── Legacy helpers ───────────────────────────────────────────────
 
 /**
+ * Server text is untrusted: cap it, then replace control and bidi characters
+ * (keeping newlines and tabs unless oneLine) before it is printed or shown.
+ */
+export function clean(value: unknown, max: number, oneLine = false): string {
+	const s = String(value ?? "").slice(0, max);
+	const out = s.replace(
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+		/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g,
+		"?",
+	);
+	return oneLine ? out.replace(/[\n\t]+/g, " ") : out;
+}
+
+/**
  * Format MCP tool result as string for agent consumption.
  */
 export function formatToolResult(result: {

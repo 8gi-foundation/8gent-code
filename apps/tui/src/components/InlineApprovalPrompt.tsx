@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
+import { fullCardBox } from "../hooks/useApprovalCard.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
 
@@ -16,6 +17,8 @@ interface InlineApprovalPromptProps {
 	target: string;
 	/** Why this card came up, e.g. "risky step" in Guarded (#3174). */
 	reason?: string;
+	/** Whole target, wrapped, keys below; never cut (MCP cards, #3474). */
+	full?: boolean;
 }
 
 /**
@@ -27,7 +30,41 @@ interface InlineApprovalPromptProps {
  *
  * Keys offered: [Y] approve  [N] deny  [E] edit  [S] skip.
  */
-export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptProps) {
+export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPromptProps) {
+	if (full) {
+		return (
+			<Box
+				ref={fullCardBox}
+				borderStyle="round"
+				borderColor={t.orange}
+				paddingX={1}
+				marginTop={1}
+				flexShrink={0}
+				flexDirection="column"
+			>
+				<Box>
+					<Text color={t.orange} bold>
+						ASK
+					</Text>
+					{reason ? (
+						<Box marginLeft={1}>
+							<Text color={t.muted}>{reason}</Text>
+						</Box>
+					) : null}
+				</Box>
+				<Text color={t.textSecondary} wrap="wrap">
+					{target}
+				</Text>
+				<Box justifyContent="flex-end">
+					<KeyCapRow
+						caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
+						idPrefix="card"
+						z={10}
+					/>
+				</Box>
+			</Box>
+		);
+	}
 	return (
 		<Box
 			borderStyle="round"

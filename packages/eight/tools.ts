@@ -115,7 +115,12 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
-import { MCP_POLICY_ACTION, askMcpApproval, mcpPolicyContext } from "../permissions/mcp-gate";
+import {
+	MCP_POLICY_ACTION,
+	askMcpApproval,
+	askMcpStartApproval,
+	mcpPolicyContext,
+} from "../permissions/mcp-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
@@ -268,6 +273,44 @@ function positiveInt(value: unknown): number | undefined {
 	const n = Math.floor(Number(value));
 	return Number.isFinite(n) && n >= 1 ? n : undefined;
 }
+
+/** Text-tool definitions for lean MCP access (#3474); only sent with EIGHT_MCP_LEAN=1. */
+const MCP_LEAN_TOOL_DEFS = [
+	{
+		type: "function",
+		function: {
+			name: "mcp_list_tools",
+			description:
+				"[MCP] Find tools on the connected MCP servers. Pass query (a few words) to get the best matching tools, one line each. Pass tool (and server) to get that one tool's full input schema before calling it. With no arguments it lists the servers and their tool counts.",
+			parameters: {
+				type: "object",
+				properties: {
+					query: { type: "string", description: "Words describing the job, e.g. 'weather forecast'" },
+					tool: { type: "string", description: "Exact tool name whose input schema you need" },
+					server: { type: "string", description: "Limit to this MCP server" },
+				},
+			},
+		},
+	},
+	{
+		type: "function",
+		function: {
+			name: "mcp_call_tool",
+			description:
+				"[MCP] Call one MCP tool. Pass fields (dotted paths such as 'data.total') to keep only those parts of a JSON answer. Answers over 4000 characters are saved to a file and you get its path plus a short preview.",
+			parameters: {
+				type: "object",
+				properties: {
+					server: { type: "string", description: "MCP server name" },
+					tool: { type: "string", description: "Tool name" },
+					args: { type: "object", description: "Tool arguments, per its input schema" },
+					fields: { type: "array", items: { type: "string" }, description: "Dotted paths to keep" },
+				},
+				required: ["server", "tool"],
+			},
+		},
+	},
+];
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1208,6 +1251,8 @@ export class ToolExecutor {
 			},
 			// Windowed-session orchestration (term_*) — see packages/eight/term-tools.ts
 			...getTermToolDefs(),
+			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
+			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 		];
 	}
 
@@ -1348,6 +1393,8 @@ export class ToolExecutor {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
 				path: args.path as string,
+				// What a relative path resolves against, for `resolved_path` rules (#3474).
+				cwd: this.workingDirectory,
 				// Every write tool is checked on what it actually writes, not
 				// only write_file's `content` (#3011: edit_file's newText was
 				// never seen by no-secrets-in-files).
@@ -1606,8 +1653,31 @@ export class ToolExecutor {
 
 			// MCP tools
 			case "mcp_list_tools":
+				if (process.env.EIGHT_MCP_LEAN === "1")
+					return (await import("../mcp/lean")).leanListToolsConnected(
+						getMCPClient(),
+						args,
+						currentPermissionMode() !== "plan",
+						askMcpStartApproval,
+					);
 				return this.handleMCPListTools();
 			case "mcp_call_tool":
+				if (process.env.EIGHT_MCP_LEAN === "1")
+					return (await import("../mcp/lean")).leanCallTool(
+						getMCPClient(),
+						args,
+						(text) => {
+							// Scrub before the lean path can spill to disk (#2464 order).
+							const r = scrubSecrets(text);
+							if (r.redactedCount > 0)
+								console.warn(
+									`[secret-scanner] tool=mcp_call_tool redacted=${r.redactedCount} rules=${r.rules.join(",")}`,
+								);
+							return r.scrubbed;
+						},
+						// Starting servers is its own card, whatever this call's card said (#3474).
+						askMcpStartApproval,
+					);
 				return this.handleMCPCallTool(
 					args.server as string,
 					args.tool as string,

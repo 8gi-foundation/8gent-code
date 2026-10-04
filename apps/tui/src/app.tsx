@@ -6337,6 +6337,7 @@ export function App({
 							<InlineApprovalPrompt
 								target={approvalPending.target}
 								reason={approvalPending.reason}
+								full={approvalPending.full}
 							/>
 						)}
 
