@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - pty-session tests skip with a reason instead of failing when node-pty or a pty is unavailable (refs #3458)
+
+On ubuntu CI, node-pty has no prebuild and is compiled during `bun install`; when that build fails, bun stays silent and the pty bridge exits 66, failing every pty-session test on unrelated PRs. The tests now check first that node-pty loads and that the host can open a pty, and skip with a stated reason (also shown as a GitHub Actions warning) when either is missing. Follow-up #3459 makes CI fail loudly when node-pty does not build, so coverage is not silently lost.
+
 ### Fixed - the launch splash marker and the voice cache follow the resolved home directory (refs #3394)
 - `apps/tui/src/lib/intro-gate.ts` (`readSeenVersion`, `markIntroSeen`) and `packages/voice/voice-resolver.ts` (`listInstalledSystemVoices`) now default to `resolveHome()` from `packages/core/home.ts` instead of calling `os.homedir()`, so `EIGHT_HOME` redirects `~/.8gent/intro-seen` and `~/.8gent/cache/system-voices.json` like the other migrated paths. The voice cache path is resolved on each call rather than once at module load, so a home set after import is honoured. Behaviour is unchanged when `EIGHT_HOME` is not set.
 - Both files drop out of the home-resolver ratchet's "outside the baseline" list in `tests/security`. No committed test drives the default-home path; it was checked by hand with `EIGHT_HOME` set after import. Coverage is indirect: `intro-gate.test.ts` and `voice-resolver.test.ts` exercise the same functions with an explicit home or cache path, `packages/core/home.test.ts` pins `resolveHome()` precedence, and the ratchet pins that neither file calls `homedir()`.
