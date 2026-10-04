@@ -447,7 +447,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			{
 				label: "Action first",
 				value: "6",
-				description: "Next step first, numbered steps, one clear next move",
+				description: "Answer first, short numbered steps, one next step at the end",
 			},
 		],
 		options: [
