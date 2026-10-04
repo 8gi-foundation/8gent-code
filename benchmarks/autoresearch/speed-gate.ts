@@ -15,12 +15,19 @@
  * Model output is only parsed and compared; nothing in it is executed or read
  * as an instruction, so it cannot change the verdict logic.
  *
- * Determinism: the gate's own caller posts to {url}/api/chat (Ollama and the
+ * Determinism: the gate's own caller posts to {origin}/api/chat (Ollama and the
  * 8gent provider only) with format "json", temperature 0 and a fixed seed
  * (recorded in the report), under a fixed system prompt asking for
  * {"decision": <one short label>, "probability": <0..1>}. Suite prompts must
  * name a fixed label set (e.g. "Answer yes or no."), or free-text decisions
  * will differ and REJECT. One untimed warm-up call per side runs before timing.
+ *
+ * Safety: a target must be an http(s) origin with no credentials, query,
+ * fragment or path. Only loopback hosts are allowed unless --allow-remote is
+ * passed; link-local hosts (169.254.0.0/16, fe80::/10) are always refused.
+ * Redirects are refused, and a reply body over 64 KiB is a failed call. An
+ * empty, non-string or over-64-char decision is a failed call. Exit 5 means a
+ * crash or I/O error, never a verdict.
  *
  * Off unless EIGHT_SPEED_GATE=1. Does NOT: serve Marlin (JSON-RPC over stdio)
  * or moshi-mlx (websocket), which need their own callers; repeat runs to
@@ -30,7 +37,8 @@
  * logits. Its numbers are for this machine and this suite only.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { loadRecentTraffic } from "./canary-measure";
 import type { ModelTarget } from "./validate-holdout";
@@ -66,6 +74,8 @@ export interface GateReport {
 	maxDrift: number | null;
 	/** True when a probability was present on only one side of some input. */
 	maxDriftUnmeasurable: boolean;
+	/** False when no input carried a probability on either side, so drift was never checked. */
+	driftChecked: boolean;
 	sampling: {
 		samplesPerInput: 1;
 		baselineTimedSamples: number;
@@ -84,7 +94,11 @@ export interface GateReport {
 	}[];
 }
 
-const MAX_DECISION_CHARS = 2000;
+export const MAX_DECISION_CHARS = 64;
+export const MAX_REPLY_BYTES = 64 * 1024;
+export const MAX_SUITE_BYTES = 1024 * 1024;
+export const MAX_SUITE_PROMPTS = 1000;
+export const MAX_TIMEOUT_MS = 2147483647;
 export const MIN_SUITE_FOR_CONFIDENCE = 20;
 export const DEFAULT_SEED = 8;
 export const GATE_SYSTEM_PROMPT =
@@ -100,6 +114,7 @@ export function gateCaller(
 		try {
 			const res = await fetchImpl(`${target.url}/api/chat`, {
 				method: "POST",
+				redirect: "error",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					model: target.model,
@@ -113,41 +128,66 @@ export function gateCaller(
 				}),
 				signal: AbortSignal.timeout(timeoutMs),
 			});
-			if (!res.ok) return null;
-			const data = (await res.json()) as { message?: { content?: unknown } };
-			return typeof data.message?.content === "string" ? data.message.content : null;
+			if (!res.ok || !res.body) return null;
+			const reader = res.body.getReader();
+			const chunks: Uint8Array[] = [];
+			let size = 0;
+			for (let r = await reader.read(); !r.done; r = await reader.read()) {
+				size += r.value.byteLength;
+				if (size > MAX_REPLY_BYTES) {
+					await reader.cancel();
+					return null; // over the cap: a failed call, never a truncated answer
+				}
+				chunks.push(r.value);
+			}
+			const data = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as {
+				message?: { content?: unknown };
+			} | null;
+			return typeof data?.message?.content === "string" ? data.message.content : null;
 		} catch {
 			return null;
 		}
 	};
 }
 
-/** Defensive parse of untrusted model output. JSON {decision, probability} or plain text. */
-export function parseOutput(raw: string): { decision: string; probability?: number } {
-	const body = raw.trim().replace(/^```[a-z]*\s*([\s\S]*?)\s*```$/i, "$1");
+/**
+ * Defensive parse of untrusted model output: JSON {decision, probability} or
+ * plain text. Cut to the byte cap first, then only linear scans. An empty,
+ * missing, non-string or over-long decision is an error, never a decision.
+ */
+export function parseOutput(raw: string): {
+	decision?: string;
+	probability?: number;
+	error?: string;
+} {
+	let body = raw.slice(0, MAX_REPLY_BYTES).trim();
+	if (body.startsWith("```")) {
+		const nl = body.indexOf("\n");
+		body = nl === -1 ? body.slice(3) : body.slice(nl + 1);
+		if (body.endsWith("```")) body = body.slice(0, -3);
+		body = body.trim();
+	}
 	let decision: unknown = body;
 	let probability: number | undefined;
 	try {
 		const obj: unknown = JSON.parse(body);
 		if (obj !== null && typeof obj === "object" && !Array.isArray(obj)) {
 			const rec = obj as Record<string, unknown>;
-			if (Object.hasOwn(rec, "decision")) decision = rec.decision;
+			decision = Object.hasOwn(rec, "decision") ? rec.decision : undefined;
 			const p = Object.hasOwn(rec, "probability") ? rec.probability : undefined;
 			if (typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1) probability = p;
 		}
 	} catch {
 		// plain text output: the whole string is the decision
 	}
-	const text = typeof decision === "string" ? decision : (JSON.stringify(decision) ?? "");
-	return {
-		decision: text
-			.trim()
-			.toLowerCase()
-			.replace(/\s+/g, " ")
-			.replace(/[.!?,;:]+$/, "")
-			.slice(0, MAX_DECISION_CHARS),
-		probability,
-	};
+	if (typeof decision !== "string") return { error: "reply has no string decision" };
+	const text = decision.trim().toLowerCase().replace(/\s+/g, " ");
+	let end = text.length;
+	while (end > 0 && ".!?,;: ".includes(text[end - 1])) end--;
+	if (end === 0) return { error: "reply has an empty decision" };
+	if (end > MAX_DECISION_CHARS)
+		return { error: `decision longer than ${MAX_DECISION_CHARS} chars` };
+	return { decision: text.slice(0, end), probability };
 }
 
 export function p50(values: number[]): number | null {
@@ -175,7 +215,9 @@ async function timed(
 		if (typeof out !== "string") return { ok: false, error: "caller returned no output" };
 		if (!Number.isFinite(latencyMs) || latencyMs < 0)
 			return { ok: false, error: `invalid timing ${latencyMs}` };
-		return { ok: true, latencyMs, ...parseOutput(out) };
+		const parsed = parseOutput(out);
+		if (parsed.error !== undefined) return { ok: false, error: parsed.error };
+		return { ok: true, latencyMs, decision: parsed.decision, probability: parsed.probability };
 	} catch (err) {
 		return { ok: false, error: String(err instanceof Error ? err.message : err).slice(0, 300) };
 	} finally {
@@ -248,6 +290,7 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 	let mismatches = 0;
 	let maxDrift: number | null = null;
 	let unmeasurable = false;
+	let driftChecked = false;
 	const perInput: GateReport["perInput"] = [];
 	for (let i = 0; i < n; i++) {
 		const b = baseline[i];
@@ -261,6 +304,7 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 			} else if (b.probability !== undefined && c.probability !== undefined) {
 				drift = Math.abs(b.probability - c.probability);
 			}
+			if (drift !== null) driftChecked = true;
 			if (drift === Number.POSITIVE_INFINITY) unmeasurable = true;
 			else if (drift !== null) maxDrift = Math.max(maxDrift ?? 0, drift);
 		}
@@ -288,6 +332,8 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 					`suite has ${n} inputs, fewer than ${MIN_SUITE_FOR_CONFIDENCE}: p50 from one sample per input is noisy`,
 				]
 			: [];
+	if (n > failures && !driftChecked)
+		warnings.push("no input carried a probability on either side: drift was not checked");
 	const improvementPct =
 		bP50 !== null && cP50 !== null && bP50 > 0 ? ((bP50 - cP50) / bP50) * 100 : null;
 	if (reasons.length === 0 && improvementPct === null)
@@ -320,6 +366,7 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 		decisionMismatches: mismatches,
 		maxDrift,
 		maxDriftUnmeasurable: unmeasurable,
+		driftChecked,
 		sampling: {
 			samplesPerInput: 1,
 			baselineTimedSamples: bLat.length,
@@ -333,17 +380,164 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 	};
 }
 
-export const EXIT = { ACCEPT: 0, REJECT: 1, "NO WIN": 2, OFF: 3, USAGE: 4 } as const;
+export const EXIT = { ACCEPT: 0, REJECT: 1, "NO WIN": 2, OFF: 3, USAGE: 4, ERROR: 5 } as const;
 
-function loadTarget(path: string, label: string): ModelTarget {
-	const obj = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-	if (typeof obj.url !== "string" || typeof obj.model !== "string")
-		throw new Error(`${path}: needs string "url" and "model"`);
-	return {
-		url: obj.url,
-		model: obj.model,
-		label: typeof obj.label === "string" ? obj.label : label,
+export class UsageError extends Error {}
+
+/** Load and validate a target config. Throws UsageError on anything unsafe. */
+export function loadTarget(path: string, label: string, allowRemote: boolean): ModelTarget {
+	let obj: Record<string, unknown> | null;
+	try {
+		obj = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown> | null;
+	} catch {
+		throw new UsageError(`${path}: cannot read config JSON`);
+	}
+	if (typeof obj?.url !== "string" || typeof obj.model !== "string")
+		throw new UsageError(`${path}: needs string "url" and "model"`);
+	let u: URL;
+	try {
+		u = new URL(obj.url);
+	} catch {
+		throw new UsageError(`${path}: url is not a valid URL`);
+	}
+	if (u.protocol !== "http:" && u.protocol !== "https:")
+		throw new UsageError(`${path}: url must be http or https`);
+	if (u.username || u.password) throw new UsageError(`${path}: url must not carry credentials`);
+	if (obj.url.includes("?") || obj.url.includes("#"))
+		throw new UsageError(`${path}: url must not have a query or fragment`);
+	if (u.pathname !== "/") throw new UsageError(`${path}: url must be an origin with no path`);
+	const host = u.hostname.toLowerCase();
+	if (/^169\.254\./.test(host) || /^\[fe[89ab]/.test(host))
+		throw new UsageError(`${path}: link-local host ${host} is refused`);
+	const loopback = host === "localhost" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
+	if (!loopback) {
+		if (!allowRemote)
+			throw new UsageError(`${path}: ${host} is not loopback; pass --allow-remote to use it`);
+		console.error(`remote host allowed for ${label}: ${host}`);
+	}
+	const name = typeof obj.label === "string" ? obj.label.slice(0, 64) : label;
+	return { url: u.origin, model: obj.model, label: name };
+}
+
+/** Validate the suite file strictly, then load it with the canary traffic loader. */
+export function loadSuite(path: string): string[] {
+	let size: number;
+	try {
+		const st = statSync(path);
+		if (!st.isFile()) throw new UsageError(`suite ${path} is not a regular file`);
+		size = st.size;
+	} catch (err) {
+		throw err instanceof UsageError ? err : new UsageError(`suite ${path} cannot be read`);
+	}
+	if (size > MAX_SUITE_BYTES) throw new UsageError(`suite is over ${MAX_SUITE_BYTES} bytes`);
+	let count = 0;
+	for (const [i, line] of readFileSync(path, "utf-8").split("\n").entries()) {
+		if (!line.trim()) continue;
+		let prompt: unknown;
+		try {
+			prompt = (JSON.parse(line) as Record<string, unknown> | null)?.prompt;
+		} catch {
+			throw new UsageError(`suite line ${i + 1} is not valid JSON`);
+		}
+		if (typeof prompt !== "string" || prompt.length === 0)
+			throw new UsageError(`suite line ${i + 1} has no string "prompt"`);
+		count++;
+	}
+	if (count === 0) throw new UsageError(`suite ${path} has no prompts`);
+	if (count > MAX_SUITE_PROMPTS)
+		throw new UsageError(`suite has over ${MAX_SUITE_PROMPTS} prompts`);
+	const prompts = loadRecentTraffic(path, 0).map((t) => t.prompt);
+	if (prompts.length !== count) throw new UsageError("suite changed while it was being read");
+	return prompts;
+}
+
+/** Refuse an --out that is an input, a symlink, or not a regular file. */
+function checkOut(out: string, inputs: string[]): void {
+	if (inputs.some((p) => resolve(p) === resolve(out)))
+		throw new UsageError("--out must not be an input file");
+	let st: ReturnType<typeof lstatSync>;
+	try {
+		st = lstatSync(out);
+	} catch {
+		return; // absent is fine
+	}
+	if (st.isSymbolicLink() || !st.isFile())
+		throw new UsageError("--out must not be a symlink, directory or special file");
+}
+
+/** Write a 0600 temp file in the same directory, then rename it over the target. */
+function writeReport(out: string, text: string): void {
+	const tmp = join(dirname(out), `.${basename(out)}.${process.pid}.${Date.now()}.tmp`);
+	try {
+		writeFileSync(tmp, text, { mode: 0o600, flag: "wx" });
+		renameSync(tmp, out);
+	} catch (err) {
+		rmSync(tmp, { force: true });
+		throw err;
+	}
+}
+
+const USAGE =
+	"usage: EIGHT_SPEED_GATE=1 bun benchmarks/autoresearch/speed-gate.ts --baseline <cfg.json> --candidate <cfg.json> --suite <suite.jsonl> --min-improvement <pct> --materiality <pct> --max-drift <abs> --timeout-ms <ms> [--seed <int>] [--out <report.json>] [--allow-remote]";
+
+async function run(argv: string[], caller?: Caller, now?: () => number): Promise<number> {
+	const args: Record<string, string> = {};
+	let allowRemote = false;
+	for (let i = 0; i < argv.length; i++) {
+		if (argv[i] === "--allow-remote") {
+			allowRemote = true;
+			continue;
+		}
+		if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined)
+			throw new UsageError(`bad argument near "${argv[i]}"`);
+		args[argv[i].slice(2)] = argv[i + 1];
+		i++;
+	}
+	const num = (k: string) =>
+		args[k] === undefined || args[k].trim() === "" ? Number.NaN : Number(args[k]);
+	const thresholds = {
+		minImprovementPct: num("min-improvement"),
+		materialityPct: num("materiality"),
+		maxDrift: num("max-drift"),
 	};
+	const timeoutMs = num("timeout-ms");
+	const seed = args.seed === undefined ? DEFAULT_SEED : num("seed");
+	const bad =
+		validateThresholds(thresholds) ??
+		(!(timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)
+			? `timeout-ms must be declared, > 0 and <= ${MAX_TIMEOUT_MS}`
+			: null) ??
+		(!Number.isSafeInteger(seed) ? "seed must be an integer" : null) ??
+		(!args.baseline || !args.candidate || !args.suite
+			? "--baseline, --candidate and --suite are required"
+			: null);
+	if (bad) throw new UsageError(bad);
+	const out = args.out ?? "speed-gate-report.json";
+	checkOut(out, [args.baseline, args.candidate, args.suite]);
+	const prompts = loadSuite(args.suite);
+	const baseline = loadTarget(args.baseline, "baseline", allowRemote);
+	const candidate = loadTarget(args.candidate, "candidate", allowRemote);
+	const samples = await runPaired({ baseline, candidate, prompts, caller, timeoutMs, seed, now });
+	const report = judge(samples.baseline, samples.candidate, thresholds);
+	for (const side of ["baseline", "candidate"] as const) {
+		if (!samples.warmUp[side])
+			report.sampling.warnings.push(
+				`${side} warm-up failed: its first timed call likely includes model load`,
+			);
+	}
+	console.log(`${report.verdict}: ${report.reasons.join("; ")}`);
+	for (const w of report.sampling.warnings) console.log(`warning: ${w}`);
+	const decoding = { endpoint: "/api/chat", format: "json", temperature: 0, seed };
+	const warmUp = { untimedCallsPerSide: 1, ok: samples.warmUp };
+	const full = { baseline, candidate, suite: args.suite, decoding, warmUp, ...report };
+	try {
+		writeReport(out, `${JSON.stringify(full, null, 2)}\n`);
+	} catch (err) {
+		console.error(`report write failed: ${err instanceof Error ? err.message : err}`);
+		return EXIT.ERROR;
+	}
+	console.log(`report: ${out}`);
+	return EXIT[report.verdict];
 }
 
 /** CLI entry. Returns the exit code; the caller and clock are injectable for tests. */
@@ -357,68 +551,21 @@ export async function main(
 		console.error("speed-gate is off. Set EIGHT_SPEED_GATE=1 to run it. Nothing was run.");
 		return EXIT.OFF;
 	}
-	const args: Record<string, string> = {};
-	for (let i = 0; i < argv.length; i += 2) {
-		if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined) {
-			console.error(`bad argument near "${argv[i]}"`);
+	try {
+		return await run(argv, caller, now);
+	} catch (err) {
+		if (err instanceof UsageError) {
+			console.error(`${USAGE}\n${err.message}`);
 			return EXIT.USAGE;
 		}
-		args[argv[i].slice(2)] = argv[i + 1];
+		console.error(`speed-gate error: ${err instanceof Error ? err.message : err}`);
+		return EXIT.ERROR;
 	}
-	const num = (k: string) =>
-		args[k] === undefined || args[k].trim() === "" ? Number.NaN : Number(args[k]);
-	const thresholds = {
-		minImprovementPct: num("min-improvement"),
-		materialityPct: num("materiality"),
-		maxDrift: num("max-drift"),
-	};
-	const timeoutMs = num("timeout-ms");
-	const seed = args.seed === undefined ? DEFAULT_SEED : num("seed");
-	const prompts =
-		args.suite && existsSync(args.suite)
-			? loadRecentTraffic(args.suite, 0).map((t) => t.prompt)
-			: [];
-	const bad =
-		validateThresholds(thresholds) ??
-		(!(timeoutMs > 0) ? "timeout-ms must be declared as a number > 0" : null) ??
-		(!Number.isSafeInteger(seed) ? "seed must be an integer" : null) ??
-		(args.suite && prompts.length === 0
-			? `suite ${args.suite} is missing or has no prompts`
-			: null);
-	if (!args.baseline || !args.candidate || !args.suite || bad) {
-		console.error(
-			`usage: EIGHT_SPEED_GATE=1 bun benchmarks/autoresearch/speed-gate.ts --baseline <cfg.json> --candidate <cfg.json> --suite <suite.jsonl> --min-improvement <pct> --materiality <pct> --max-drift <abs> --timeout-ms <ms> [--seed <int>] [--out <report.json>]${bad ? `\n${bad}` : ""}`,
-		);
-		return EXIT.USAGE;
-	}
-	let baseline: ModelTarget;
-	let candidate: ModelTarget;
-	try {
-		baseline = loadTarget(args.baseline, "baseline");
-		candidate = loadTarget(args.candidate, "candidate");
-	} catch (err) {
-		console.error(`config error: ${err instanceof Error ? err.message : err}`);
-		return EXIT.USAGE;
-	}
-	const samples = await runPaired({ baseline, candidate, prompts, caller, timeoutMs, seed, now });
-	const report = judge(samples.baseline, samples.candidate, thresholds);
-	for (const side of ["baseline", "candidate"] as const) {
-		if (!samples.warmUp[side])
-			report.sampling.warnings.push(
-				`${side} warm-up failed: its first timed call likely includes model load`,
-			);
-	}
-	const out = args.out ?? "speed-gate-report.json";
-	const decoding = { endpoint: "/api/chat", format: "json", temperature: 0, seed };
-	const warmUp = { untimedCallsPerSide: 1, ok: samples.warmUp };
-	const full = { baseline, candidate, suite: args.suite, decoding, warmUp, ...report };
-	writeFileSync(out, `${JSON.stringify(full, null, 2)}\n`);
-	console.log(`${report.verdict}: ${report.reasons.join("; ")}`);
-	for (const w of report.sampling.warnings) console.log(`warning: ${w}`);
-	console.log(`report: ${out}`);
-	return EXIT[report.verdict];
 }
 
 if (import.meta.main) {
-	main(process.argv.slice(2), process.env).then((code) => process.exit(code));
+	main(process.argv.slice(2), process.env).then(
+		(code) => process.exit(code),
+		() => process.exit(EXIT.ERROR),
+	);
 }

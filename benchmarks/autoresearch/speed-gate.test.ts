@@ -3,8 +3,17 @@
  * no model is called, nothing is downloaded, files go to a temp dir.
  */
 
-import { afterAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +25,7 @@ import {
 	type Thresholds,
 	gateCaller,
 	judge,
+	loadTarget,
 	main,
 	parseOutput,
 	runPaired,
@@ -138,7 +148,7 @@ describe("speed-gate verdicts", () => {
 		expect(r.sampling.baselineTimedSamples).toBe(PROMPTS.length);
 		expect(r.sampling.candidateTimedSamples).toBe(PROMPTS.length);
 		expect(r.sampling.warnings[0]).toContain("fewer than 20");
-		const ok: Sample = { ok: true, decision: "yes", latencyMs: 10 };
+		const ok: Sample = { ok: true, decision: "yes", latencyMs: 10, probability: 0.9 };
 		expect(judge(Array(20).fill(ok), Array(20).fill(ok), T).sampling.warnings).toEqual([]);
 	});
 
@@ -166,19 +176,63 @@ describe("speed-gate verdicts", () => {
 	test("the gate caller asks for deterministic JSON decoding", async () => {
 		let body: Record<string, unknown> = {};
 		let url = "";
+		let redirect: string | undefined;
 		const fakeFetch = (async (u: string, init: RequestInit) => {
 			url = u;
+			redirect = init.redirect;
 			body = JSON.parse(String(init.body));
 			return new Response(JSON.stringify({ message: { content: '{"decision":"yes"}' } }));
 		}) as unknown as typeof fetch;
 		const out = await gateCaller(42, 1000, fakeFetch)(BASE, "Answer yes or no. Is it on?");
 		expect(out).toBe('{"decision":"yes"}');
 		expect(url).toBe("http://baseline/api/chat");
+		expect(redirect).toBe("error");
 		expect(body.format).toBe("json");
 		expect(body.options).toEqual({ temperature: 0, seed: 42 });
 		expect((body.messages as { content: string }[])[0].content).toBe(GATE_SYSTEM_PROMPT);
 		const failing = (async () => new Response("no", { status: 500 })) as unknown as typeof fetch;
 		expect(await gateCaller(42, 1000, failing)(BASE, "x")).toBeNull();
+		const huge = JSON.stringify({ message: { content: "x".repeat(70 * 1024) } });
+		const big = (async () => new Response(huge)) as unknown as typeof fetch;
+		expect(await gateCaller(42, 1000, big)(BASE, "x")).toBeNull();
+	});
+
+	test("empty, missing, non-string or over-long decisions are failures, not decisions", async () => {
+		for (const reply of [
+			"",
+			"  ",
+			"...",
+			'{"probability":0.9}',
+			'{"decision":42}',
+			'{"decision":""}',
+		]) {
+			expect(parseOutput(reply).error).toBeDefined();
+		}
+		expect(parseOutput("a".repeat(65)).error).toContain("longer than 64");
+		expect(parseOutput("a".repeat(64)).decision).toBe("a".repeat(64));
+		const r = await gate({
+			baseline: { ms: 100, out: () => "" },
+			candidate: { ms: 50, out: () => "" },
+		});
+		expect(r.verdict).toBe("REJECT");
+		expect(r.failures).toBe(PROMPTS.length);
+	});
+
+	test("a 1 MB punctuation reply parses in a few ms", () => {
+		const start = performance.now();
+		expect(parseOutput("```".concat(".".repeat(1024 * 1024))).error).toBeDefined();
+		expect(parseOutput(`yes${" .".repeat(512 * 1024)}`).decision).toBe("yes");
+		expect(performance.now() - start).toBeLessThan(200);
+	});
+
+	test("no probability on either side: drift is not checked and says so", async () => {
+		const r = await gate({
+			baseline: { ms: 100, out: () => "yes" },
+			candidate: { ms: 50, out: () => "Yes." },
+		});
+		expect(r.verdict).toBe("ACCEPT");
+		expect(r.driftChecked).toBe(false);
+		expect(r.sampling.warnings.join()).toContain("drift was not checked");
 	});
 
 	test("a throwing caller is not ACCEPT", async () => {
@@ -288,11 +342,11 @@ describe("speed-gate CLI", () => {
 		dirs.push(dir);
 		writeFileSync(
 			join(dir, "base.json"),
-			JSON.stringify({ url: "http://baseline", model: "base", label: "baseline" }),
+			JSON.stringify({ url: "http://127.0.0.1:11434", model: "base", label: "baseline" }),
 		);
 		writeFileSync(
 			join(dir, "cand.json"),
-			JSON.stringify({ url: "http://candidate", model: "cand", label: "candidate" }),
+			JSON.stringify({ url: "http://localhost:11435/", model: "cand", label: "candidate" }),
 		);
 		writeFileSync(
 			join(dir, "suite.jsonl"),
@@ -317,8 +371,25 @@ describe("speed-gate CLI", () => {
 			"--out",
 			out,
 		];
-		return { argv, out };
+		return { argv, out, dir };
 	}
+	let log: ReturnType<typeof spyOn>;
+	let err: ReturnType<typeof spyOn>;
+	beforeEach(() => {
+		log = spyOn(console, "log").mockImplementation(() => {});
+		err = spyOn(console, "error").mockImplementation(() => {});
+	});
+	afterEach(() => {
+		log.mockRestore();
+		err.mockRestore();
+	});
+	const ON = { EIGHT_SPEED_GATE: "1" };
+	const swap = (argv: string[], flag: string, value: string) => {
+		const a = [...argv];
+		a[a.indexOf(flag) + 1] = value;
+		return a;
+	};
+	const ok = () => fake({ baseline: { ms: 100, out: yes() }, candidate: { ms: 60, out: yes() } });
 
 	test("flag off runs nothing", async () => {
 		const { argv, out } = setup();
@@ -342,10 +413,8 @@ describe("speed-gate CLI", () => {
 		});
 		let n = 0;
 		const coldBaseline: Caller = (t, p) => (++n === 1 ? Promise.resolve(null) : caller(t, p));
-		const log = spyOn(console, "log").mockImplementation(() => {});
 		const code = await main(argv, { EIGHT_SPEED_GATE: "1" }, coldBaseline, now);
 		const printed = log.mock.calls.map((c) => String(c[0])).join("\n");
-		log.mockRestore();
 		expect(code).toBe(EXIT.ACCEPT);
 		expect(printed).toContain("warning: suite has 4 inputs, fewer than 20");
 		expect(printed).toContain(
@@ -408,5 +477,101 @@ describe("speed-gate CLI", () => {
 		expect(code).toBe(EXIT.USAGE);
 		expect(calls).toBe(0);
 		expect(existsSync(out)).toBe(false);
+	});
+
+	test("target URLs: http(s) loopback origins only, unless --allow-remote", () => {
+		const { dir } = setup();
+		const cfg = (url: string) => {
+			const p = join(dir, `t-${Math.random()}.json`);
+			writeFileSync(p, JSON.stringify({ url, model: "m" }));
+			return p;
+		};
+		for (const url of [
+			"file:///etc/passwd",
+			"http://127.0.0.1:11434/#",
+			"http://127.0.0.1:11434/?",
+			"http://user:pw@127.0.0.1:11434",
+			"http://127.0.0.1:11434/v1",
+			"http://169.254.169.254",
+			"http://[fe80::1]",
+			"http://example.com",
+		]) {
+			expect(() => loadTarget(cfg(url), "x", false)).toThrow();
+		}
+		expect(() => loadTarget(cfg("http://169.254.169.254"), "x", true)).toThrow("link-local");
+		expect(loadTarget(cfg("http://example.com"), "x", true).url).toBe("http://example.com");
+		expect(err.mock.calls.map((c) => String(c[0])).join()).toContain(
+			"remote host allowed for x: example.com",
+		);
+		expect(loadTarget(cfg("http://[::1]:11434"), "x", false).url).toBe("http://[::1]:11434");
+		expect(loadTarget(cfg("HTTP://LOCALHOST:11434/"), "x", false).url).toBe(
+			"http://localhost:11434",
+		);
+	});
+
+	test("an unsafe URL is refused before any request, with no injected caller", async () => {
+		const { argv, dir } = setup();
+		writeFileSync(
+			join(dir, "cand.json"),
+			JSON.stringify({ url: "http://169.254.169.254", model: "m" }),
+		);
+		const f = spyOn(globalThis, "fetch");
+		const code = await main(argv, ON);
+		const calls = f.mock.calls.length;
+		f.mockRestore();
+		expect(code).toBe(EXIT.USAGE);
+		expect(calls).toBe(0);
+	});
+
+	test("--suite that is a directory, malformed or too long is a usage error", async () => {
+		const { argv, dir, out } = setup();
+		const { caller } = ok();
+		expect(await main(swap(argv, "--suite", dir), ON, caller)).toBe(EXIT.USAGE);
+		const bad = join(dir, "bad.jsonl");
+		writeFileSync(bad, '{"prompt":"a"}\nnot json\n');
+		expect(await main(swap(argv, "--suite", bad), ON, caller)).toBe(EXIT.USAGE);
+		writeFileSync(bad, '{"prompt":"a"}\n{"text":"b"}\n');
+		expect(await main(swap(argv, "--suite", bad), ON, caller)).toBe(EXIT.USAGE);
+		writeFileSync(bad, Array(1001).fill('{"prompt":"a"}').join("\n"));
+		expect(await main(swap(argv, "--suite", bad), ON, caller)).toBe(EXIT.USAGE);
+		expect(existsSync(out)).toBe(false);
+	});
+
+	test("--out that is a directory, a symlink or an input is refused", async () => {
+		const { argv, dir } = setup();
+		const { caller } = ok();
+		expect(await main(swap(argv, "--out", dir), ON, caller)).toBe(EXIT.USAGE);
+		const link = join(dir, "link.json");
+		symlinkSync(join(dir, "victim.json"), link);
+		expect(await main(swap(argv, "--out", link), ON, caller)).toBe(EXIT.USAGE);
+		expect(existsSync(join(dir, "victim.json"))).toBe(false);
+		expect(await main(swap(argv, "--out", join(dir, "suite.jsonl")), ON, caller)).toBe(EXIT.USAGE);
+	});
+
+	test("the report is written 0600; a failed write exits 5 after printing the verdict", async () => {
+		const { argv, out, dir } = setup();
+		const a = ok();
+		expect(await main(argv, ON, a.caller, a.now)).toBe(EXIT.ACCEPT);
+		expect(statSync(out).mode & 0o777).toBe(0o600);
+		mkdirSync(join(dir, "ro"), { mode: 0o500 });
+		const b = ok();
+		const code = await main(swap(argv, "--out", join(dir, "ro", "r.json")), ON, b.caller, b.now);
+		expect(code).toBe(EXIT.ERROR);
+		const lines = log.mock.calls.map((c) => String(c[0]));
+		expect(lines.filter((l) => l.startsWith("ACCEPT:"))).toHaveLength(2);
+		expect(lines.filter((l) => l.startsWith("report:"))).toHaveLength(1);
+	});
+
+	test("a crash exits 5, never a verdict code", async () => {
+		const { argv } = setup();
+		const boom = () => {
+			throw new Error("clock broke");
+		};
+		expect(await main(argv, ON, ok().caller, boom)).toBe(EXIT.ERROR);
+	});
+
+	test("--timeout-ms above the timer limit is a usage error", async () => {
+		const { argv } = setup();
+		expect(await main(swap(argv, "--timeout-ms", "2147483648"), ON, ok().caller)).toBe(EXIT.USAGE);
 	});
 });
