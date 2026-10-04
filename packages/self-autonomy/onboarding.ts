@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
+import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import { getVault } from "../secrets";
 import {
@@ -127,13 +128,8 @@ export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
 		"Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11500`.",
 };
 
-export type CommunicationStyle =
-	| "sarcastic" // Dry-witted, seriously motivational, roasts you into greatness
-	| "concise" // Just the facts
-	| "detailed" // Teach me as we go
-	| "casual" // We're collaborators
-	| "formal" // Professional tone
-	| "action-first"; // Next action first, numbered steps, one "Next:" line
+// The fixed style set lives in a leaf module so the prompt builder can check it (#3487).
+export type { CommunicationStyle } from "./communication-style";
 
 export interface OnboardingChoice {
 	/** Display label for the option (e.g. "Bruno (male, warm)") */
@@ -921,7 +917,12 @@ export class OnboardingManager {
 		try {
 			if (fs.existsSync(this.userConfigPath)) {
 				const content = fs.readFileSync(this.userConfigPath, "utf-8");
-				return JSON.parse(content) as UserConfig;
+				const loaded = JSON.parse(content) as UserConfig;
+				// #3487: a style outside the fixed set (hand-edited file, old sync)
+				// is dropped, never carried into the prompt.
+				const style = loaded?.identity?.communicationStyle;
+				if (style != null && !isCommunicationStyle(style)) loaded.identity.communicationStyle = null;
+				return loaded;
 			}
 		} catch {
 			// Fall through to default

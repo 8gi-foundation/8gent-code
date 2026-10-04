@@ -371,16 +371,24 @@ export class Agent {
 		// Inject user context from onboarding data
 		const userData = this.onboarding.getUser();
 		let userContextBlock = "";
+		// #3487: the same block without the board briefing, for a local-protocol
+		// runtime that is not on this machine (set below, once the runtime is known).
+		let userContextNoBoard = "";
 		if (userData.onboardingComplete || userData.identity.name) {
 			const { USER_CONTEXT_SEGMENT } = require("./prompts/system-prompt");
-			userContextBlock = USER_CONTEXT_SEGMENT({
+			const userArgs = {
 				name: userData.identity.name,
 				role: userData.identity.role,
 				communicationStyle: userData.identity.communicationStyle,
 				language: userData.identity.language,
-			});
+			};
+			userContextBlock = USER_CONTEXT_SEGMENT(userArgs);
 			if (userContextBlock) {
 				userContextBlock = `\n\n${userContextBlock}`;
+			}
+			userContextNoBoard = USER_CONTEXT_SEGMENT(userArgs, { includeBoard: false });
+			if (userContextNoBoard) {
+				userContextNoBoard = `\n\n${userContextNoBoard}`;
 			}
 		}
 		// #3487: the same style line, restated after the conversation on the local
@@ -389,9 +397,16 @@ export class Agent {
 		// and the raw path folds every system message into it, which would move the
 		// cached prefix (#3222). Never stored in the history. Table officers keep
 		// their supplied prompt verbatim, so they get none.
+		// Only a known style with a guide line gets one: "sarcastic" (the default)
+		// has no guide, and any value outside the fixed set gets nothing.
 		const style = userData.identity.communicationStyle;
-		if ((userData.onboardingComplete || userData.identity.name) && style && config.agentScope !== "__table__") {
-			const { communicationStyleLine } = require("./prompts/system-prompt");
+		const { communicationStyleLine, styleHasGuide } = require("./prompts/system-prompt");
+		if (
+			(userData.onboardingComplete || userData.identity.name) &&
+			style &&
+			styleHasGuide(style) &&
+			config.agentScope !== "__table__"
+		) {
 			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
 
@@ -471,7 +486,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				: isLocalRuntime
 				? // #3487: the user context (style, name, role, language, board briefing)
 					// trails the project instructions so the cached prefix stays stable (#3222).
-					compactLocalPrompt + projectInstructionsBlock + userContextBlock
+					// The board briefing goes only to a model on this machine (#3236 rule).
+					compactLocalPrompt +
+						projectInstructionsBlock +
+						(runsOnBox(runtimeName, config.baseUrl) ? userContextBlock : userContextNoBoard)
 				: basePrompt +
 					vesselContext +
 					userContextBlock +
