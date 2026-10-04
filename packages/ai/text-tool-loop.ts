@@ -385,12 +385,18 @@ const BATCH_STOP_TOOLS: ReadonlySet<string> = new Set([
 	"git_commit",
 ]);
 
+/** The head of an ArtifactStore chip (packages/eight/artifact-store.ts renderChip). */
+const ARTIFACT_CHIP_HEAD = /^\[ARTIFACT [0-9a-f]+ [^\]\n]+\]\n\n/;
+
 /**
  * True when a write, edit, command or git stage/commit call did not succeed:
  *  - refused or errored ("Error...", "[... BLOCKED]"), the claim check's test;
  *  - a permission refusal: a user decline, a policy block or a declined write
  *    ("[PERMISSION DENIED] ...");
  *  - a timeout ("TIMEOUT after 2 min...", "TIMEOUT after 30s: git ...");
+ *  - a rate-limit refusal ("Rate limit exceeded for write_file ...") or a
+ *    Plan mode refusal ("[PLAN MODE] write_file was not run ...");
+ *  - any of these inside an ArtifactStore chip (a result over 50 KB);
  *  - an edit of a missing file ("File not found: ...") or a path the guard
  *    refused ("Path blocked by path-guard", "Path traversal blocked"), which
  *    the executors return without an "Error" prefix;
@@ -399,7 +405,14 @@ const BATCH_STOP_TOOLS: ReadonlySet<string> = new Set([
  */
 export function isFailedChangeCall(name: string, result: string): boolean {
 	if (!BATCH_STOP_TOOLS.has(name)) return false;
+	// A result over 50 KB reaches the loop as an ArtifactStore chip
+	// ("[ARTIFACT <hash> <size>]", a blank line, then the preview), which would
+	// hide the failure prefix: check the preview instead.
+	result = result.replace(ARTIFACT_CHIP_HEAD, "");
 	if (isRefusedToolResult(result)) return true;
+	// Refusals that carry no Error prefix: the per-tool rate limiter and Plan mode.
+	if (/^\s*Rate limit exceeded for\b/.test(result)) return true;
+	if (/^\s*\[PLAN MODE\]/.test(result)) return true;
 	if (/^\s*\[PERMISSION DENIED\]/i.test(result)) return true;
 	if (/^\s*TIMEOUT after\b/.test(result)) return true;
 	if (/^\s*(?:File not found:|Path blocked by path-guard|Path traversal blocked)/.test(result)) return true;

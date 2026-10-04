@@ -2311,6 +2311,64 @@ describe("isFailedChangeCall - permission refusals, timeouts, git stage and comm
 		expect(isFailedChangeCall("read_file", "File not found: /repo/missing.ts")).toBe(false);
 	});
 
+	// 8SO re-review of a868407f, findings F1-F3.
+	/** What ArtifactStore.renderChip makes of a result over 50 KB. */
+	const chip = (full: string) =>
+		[
+			"[ARTIFACT 3f9a1c2b7d4e5f60 61.2KB]",
+			"",
+			full.slice(0, 1024),
+			"",
+			"[truncated; full at /home/x/.8gent/artifacts/3f9a1c2b7d4e5f60]",
+			"(run `8gent artifact <hash>` to expand)",
+		].join("\n");
+
+	test("F1: a failing run_command result over 50 KB, behind an artifact chip, still stops the reply", () => {
+		const full = `Exit code 1:\n${"x".repeat(60_000)}\n`;
+		expect(full.length).toBeGreaterThan(50_000);
+		expect(isFailedChangeCall("run_command", chip(full))).toBe(true);
+		expect(isFailedChangeCall("run_command", chip(`ok\n${"x".repeat(60_000)}`))).toBe(false);
+	});
+
+	test("F1: a failing git_commit result over 50 KB, behind an artifact chip, still stops the reply", () => {
+		const full = `Error (exit 1): ${"hook output ".repeat(5_000)}`;
+		expect(full.length).toBeGreaterThan(50_000);
+		expect(isFailedChangeCall("git_commit", chip(full))).toBe(true);
+	});
+
+	test("F1: the chip the real ArtifactStore renders is unwrapped", async () => {
+		const { ArtifactStore } = await import("../eight/artifact-store");
+		const { mkdtempSync, rmSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		const { tmpdir } = await import("node:os");
+		const dir = mkdtempSync(join(tmpdir(), "batch3502-artifacts-"));
+		try {
+			const store = new ArtifactStore("session_test", dir);
+			const failed = store.persistAndReplace(`Exit code 2:\n${"y".repeat(60_000)}`, "run_command");
+			expect(failed.startsWith("[ARTIFACT ")).toBe(true);
+			expect(isFailedChangeCall("run_command", failed)).toBe(true);
+			const ok = store.persistAndReplace(`passed\n${"y".repeat(60_000)}`, "run_command");
+			expect(ok.startsWith("[ARTIFACT ")).toBe(true);
+			expect(isFailedChangeCall("run_command", ok)).toBe(false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("F2: a rate-limit refusal stops the reply", () => {
+		expect(isFailedChangeCall("write_file", "Rate limit exceeded for write_file (50/min). Wait 12 seconds.")).toBe(true);
+		expect(isFailedChangeCall("read_file", "Rate limit exceeded for read_file (50/min). Wait 12 seconds.")).toBe(false);
+	});
+
+	test("F3: a Plan mode refusal stops the reply", () => {
+		expect(
+			isFailedChangeCall(
+				"write_file",
+				"[PLAN MODE] write_file was not run: this agent is in Plan mode, which only reads (writes a file). Nothing changed. Propose the change instead; the user can press Shift+Tab to leave Plan.",
+			),
+		).toBe(true);
+	});
+
 	test("a timeout stops the reply", () => {
 		expect(isFailedChangeCall("run_command", TIMEOUTS[0])).toBe(true);
 		expect(isFailedChangeCall("git_commit", TIMEOUTS[1])).toBe(true);
