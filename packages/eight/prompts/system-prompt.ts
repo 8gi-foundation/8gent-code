@@ -81,6 +81,21 @@ export function buildBoardContextSegment(path: string = BOARD_CONTEXT_PATH): str
 }
 
 /**
+ * Opt-in reply shape for people who lose the thread in long answers (#3487).
+ * Only reaches the prompt when the user picked communicationStyle "action-first".
+ */
+export const ACTION_FIRST_STYLE = [
+	"Shape every reply so the reader can act without rereading:",
+	"1. Open with the action or the answer itself. No greeting, no restating the question, no warm-up.",
+	"2. Give steps as a numbered list, one action per step. Never more than five items in any list; if there are more, do the first five and say what comes after.",
+	"3. Put commands and paths in code blocks so they can be copied.",
+	"4. When something failed, say what failed and the fix, in plain words, with no apology.",
+	"5. If you give a time estimate, give a number of minutes.",
+	"6. No summary of what you just said and no sign-off line.",
+	'7. End with exactly one line that starts with "Next:" and names one concrete thing to do.',
+].join("\n");
+
+/**
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
@@ -105,6 +120,7 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 			detailed: "Explain your reasoning. Teach as you go.",
 			casual: "Keep it friendly and collaborative. We're partners.",
 			formal: "Maintain professional tone. Be precise.",
+			"action-first": ACTION_FIRST_STYLE,
 		};
 		parts.push(
 			`Communication style: **${userData.communicationStyle}**. ${styleGuide[userData.communicationStyle] || ""}`,
