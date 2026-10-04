@@ -512,6 +512,53 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 // Workspace boundary hard-deny (issue #2083)
 // ============================================
 
+/** Actions whose rules may match `resolved_path` (#3474). */
+const RESOLVED_PATH_ACTIONS = new Set<string>(["write_file", "delete_file"]);
+
+/**
+ * Where a write to `p` lands, for rules that match `resolved_path` (#3474,
+ * 8SO round 2): `~/` expanded from HOME (as the executor's safePath does),
+ * resolved against `cwd`, then symlinks followed: the whole path when it
+ * exists, else the parent's real path plus the name, following a dangling
+ * symlink to its target. So "./", "//", "a/../" and a relative path from
+ * inside ~/.8gent all match "resolved_path ends_with /.8gent/mcp.json".
+ */
+export function resolvePolicyPath(p: string, cwd: string): string {
+	const home = process.env.HOME;
+	const expanded = home && (p === "~" || p.startsWith("~/")) ? path.join(home, p.slice(1)) : p;
+	let cur = path.resolve(cwd, expanded);
+	for (let hop = 0; hop < 8; hop++) {
+		try {
+			return fs.realpathSync(cur);
+		} catch {}
+		let full: string;
+		try {
+			full = path.join(fs.realpathSync(path.dirname(cur)), path.basename(cur));
+		} catch {
+			return cur;
+		}
+		let link: string;
+		try {
+			link = fs.readlinkSync(full);
+		} catch {
+			return full;
+		}
+		cur = path.resolve(path.dirname(full), link);
+	}
+	return cur;
+}
+
+/** Rules match where a write really lands too, not only the path as typed. */
+function withResolvedPath(action: string, context: PolicyContext): PolicyContext {
+	if (!RESOLVED_PATH_ACTIONS.has(action) || typeof context.path !== "string" || !context.path)
+		return context;
+	const cwd =
+		(typeof context.cwd === "string" && context.cwd) ||
+		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
+		process.cwd();
+	return { ...context, resolved_path: resolvePolicyPath(context.path, cwd) };
+}
+
 /**
  * File-system actions whose `path` field must stay inside the workspace root.
  */
@@ -688,8 +735,9 @@ function shadowGate(action: string, context: PolicyContext): PolicyDecision | nu
  */
 export function evaluatePolicy(
 	action: PolicyActionType | string,
-	context: PolicyContext,
+	given: PolicyContext,
 ): PolicyDecision {
+	const context = withResolvedPath(action, given);
 	const guard = pathGuardGate(action, context);
 	if (guard) return guard;
 

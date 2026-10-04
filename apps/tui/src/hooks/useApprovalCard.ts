@@ -34,6 +34,8 @@ export interface PendingApproval {
 	target: string;
 	/** Why the card came up, from the asking call's own permission mode (#3174). */
 	reason?: string;
+	/** Show the target in full, wrapped, never cut (the request's `full`). */
+	full?: boolean;
 	resolve: (decision: TuiApprovalDecision) => void;
 }
 
@@ -99,6 +101,7 @@ export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 				const card: PendingApproval = {
 					target,
 					...(reason ? { reason } : {}),
+					...(request.full ? { full: true } : {}),
 					resolve: (decision) => {
 						if (settled) return;
 						settled = true;

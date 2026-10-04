@@ -1393,6 +1393,8 @@ export class ToolExecutor {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
 				path: args.path as string,
+				// What a relative path resolves against, for `resolved_path` rules (#3474).
+				cwd: this.workingDirectory,
 				// Every write tool is checked on what it actually writes, not
 				// only write_file's `content` (#3011: edit_file's newText was
 				// never seen by no-secrets-in-files).

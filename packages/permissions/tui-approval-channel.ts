@@ -25,6 +25,11 @@ export interface TuiApprovalRequest {
 	action: string;
 	details: string;
 	command?: string;
+	/**
+	 * Show `command` in full, wrapped (the card's own lines kept), never cut.
+	 * The asker checks it fits the terminal first (MCP, #3474).
+	 */
+	full?: boolean;
 }
 
 export type TuiApprovalHandler = (

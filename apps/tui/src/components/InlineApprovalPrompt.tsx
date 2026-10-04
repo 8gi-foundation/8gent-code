@@ -16,6 +16,12 @@ interface InlineApprovalPromptProps {
 	target: string;
 	/** Why this card came up, e.g. "risky step" in Guarded (#3174). */
 	reason?: string;
+	/**
+	 * Show the whole target, wrapped over as many rows as it needs, with the
+	 * keys on their own row below it. Never truncated: the asker refuses a
+	 * request that would not fit the terminal (MCP start and call cards, #3474).
+	 */
+	full?: boolean;
 }
 
 /**
@@ -27,7 +33,40 @@ interface InlineApprovalPromptProps {
  *
  * Keys offered: [Y] approve  [N] deny  [E] edit  [S] skip.
  */
-export function InlineApprovalPrompt({ target, reason }: InlineApprovalPromptProps) {
+export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPromptProps) {
+	if (full) {
+		return (
+			<Box
+				borderStyle="round"
+				borderColor={t.orange}
+				paddingX={1}
+				marginTop={1}
+				flexShrink={0}
+				flexDirection="column"
+			>
+				<Box>
+					<Text color={t.orange} bold>
+						ASK
+					</Text>
+					{reason ? (
+						<Box marginLeft={1}>
+							<Text color={t.muted}>{reason}</Text>
+						</Box>
+					) : null}
+				</Box>
+				<Text color={t.textSecondary} wrap="wrap">
+					{target}
+				</Text>
+				<Box justifyContent="flex-end">
+					<KeyCapRow
+						caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
+						idPrefix="card"
+						z={10}
+					/>
+				</Box>
+			</Box>
+		);
+	}
 	return (
 		<Box
 			borderStyle="round"

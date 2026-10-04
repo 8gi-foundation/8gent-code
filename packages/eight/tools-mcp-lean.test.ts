@@ -267,11 +267,16 @@ function consent(mode: "approve" | "deny" | "headless" | "plan" | "infinite") {
 }
 
 describe("flag on: no server starts without the person's yes", () => {
-	test("approved: one start card naming the server and its command, never its env; one start", () => {
+	test("approved: one start card naming the server, its command and its env names, never env values; one start", () => {
 		const r = consent("approve");
-		const start = r.cards.filter((c) => c.startsWith("start 1 MCP server:"));
+		const start = r.cards.filter((c) => c.startsWith("start 1 MCP server from your MCP config"));
 		expect(start.length).toBe(1);
-		expect(start[0]).toContain(`work: ${process.execPath} ${marked}`);
+		expect(start[0]).toContain(`\n- work: ${process.execPath} ${marked} `);
+		expect(start[0]).toContain("(env: WORK_TOKEN)");
+		// The per-call card is not blind: it names the call and its arguments.
+		expect(r.cards).toContain(
+			'mcp_call_tool work/ledger_quarter_report {"quarter":"2026-Q3","rows":2}',
+		);
 		expect(JSON.stringify(r.cards)).not.toContain("env-never-on-card");
 		expect(r.started).toBe(1);
 		expect(r.call).toContain("2026-Q3");

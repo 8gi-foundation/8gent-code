@@ -420,7 +420,7 @@ describe("starting servers needs the person's yes (first-connect consent)", () =
 		};
 	}
 
-	test("the card names each server and its command plus args, or its URL; never env, headers or URL secrets", async () => {
+	test("the card names each server, its command plus args and its env NAMES, or its URL; never env values, headers or URL secrets", async () => {
 		const cards: string[][] = [];
 		const c = startClient();
 		await leanListToolsConnected(c, { query: "x" }, true, async (s) => {
@@ -428,15 +428,52 @@ describe("starting servers needs the person's yes (first-connect consent)", () =
 			return null;
 		});
 		expect(cards).toEqual([
-			["files: /usr/local/bin/files-mcp --root /srv", "remote: https://mcp.example.com/sse?..."],
+			[
+				"files: /usr/local/bin/files-mcp --root /srv (env: FILES_TOKEN)",
+				"remote: https://mcp.example.com/sse?...",
+			],
 		]);
 		expect(JSON.stringify(cards)).not.toContain("never-shown");
+		// Never cut: the whole line comes back, and the start refuses it (next test).
 		expect(
 			describeServer({ type: "stdio", name: "s", command: "c", args: ["x".repeat(1200)] }),
-		).toEndWith("[+205 more chars]");
+		).toBe(`s: c ${"x".repeat(1200)}`);
+		// An arg with a space or a quote is quoted, so the card shows where args split.
+		expect(
+			describeServer({
+				type: "stdio",
+				name: "s",
+				command: "/bin/sh",
+				args: ["-c", "echo hi; rm x", ""],
+			}),
+		).toBe('s: /bin/sh -c "echo hi; rm x" ""');
 		expect(describeServer({ type: "stdio", name: "a\u202eb", command: "x\u001b[2J" })).toBe(
 			"a?b: x?[2J",
 		);
+	});
+
+	test("a server line over the 1000-char cap is refused before the card; nothing starts", async () => {
+		const c = startClient([
+			...CONFIGS,
+			{ type: "stdio", name: "long", command: "/bin/x", args: ["y".repeat(1200)] },
+		]);
+		let asked = 0;
+		const r = await leanCallTool(
+			c,
+			{ server: "files", tool: "t" },
+			id,
+			async () => {
+				asked++;
+				return null;
+			},
+			freshDataDir(),
+		);
+		expect(r).toStartWith(
+			"[BLOCKED] MCP servers were not started: 1 server line is over 1000 characters",
+		);
+		expect(r).toContain("restart the session");
+		expect(asked).toBe(0);
+		expect(c.connected).toEqual([]);
 	});
 
 	test("a denied card means no server starts, from either tool, for the rest of the session", async () => {

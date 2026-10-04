@@ -1,6 +1,7 @@
 /**
  * Lean MCP tool access (#3474), behind EIGHT_MCP_LEAN=1 (exactly "1"; any
- * other value, unset included, leaves the old behaviour byte for byte).
+ * other value, unset included, leaves the MCP tools as they were; the policy
+ * rules, the EIGHT_HOME mcp.json path and the cards are not behind the flag).
  *
  * Concept from Uber's "Designing MCP Gateway" (search, schema on demand,
  * response projection, spill to file); no code taken from it.
@@ -29,9 +30,11 @@
  *
  * Starting servers: the first lean mcp_list_tools or mcp_call_tool reads
  * <home>/.8gent/mcp.json once and shows one approval card per session that
- * names every server and its command plus args, or its URL (never env or
- * headers). Only after an approve does it start exactly that list; nothing
- * re-reads the file in between. Infinite mode skips the card; with no card
+ * names every server, its command plus args and its env variable NAMES, or
+ * its URL (never env values or headers), each line in full or not at all;
+ * a config env that changes what runs (PATH, NODE_OPTIONS, ...) refuses.
+ * Only after an approve does it start exactly that list; nothing re-reads
+ * the file in between. Infinite mode skips the card; with no card
  * and no terminal the answer is no, and a no stands for the session. The
  * card is separate from the per-call card, so approving one call never
  * starts the other servers. Parallel first calls share one start. Listing is
@@ -92,13 +95,32 @@ export type StartApproval = (servers: string[]) => Promise<string | null>;
 
 export { clean };
 
-/** One card line per server: its name and what runs (command plus args) or is contacted (URL). */
+/** Longest card line one server may have; a longer one refuses the start (never a cut line on the card). */
+export const SERVER_LINE_MAX = 1000;
+
+/**
+ * Config env names that change which program runs or what code it loads
+ * (#3474, 8SO round 2). A server whose config sets one is refused: the card
+ * shows command and args, and these would make that not what runs.
+ */
+const LOADER_ENV =
+	/^(path|node_options|node_path|ld_.*|dyld_.*|pythonpath|pythonstartup|pythonhome|bash_env|env|perl5opt|perl5lib|rubyopt|rubylib|npm_config_.*)$/i;
+export function isLoaderEnv(name: string): boolean {
+	return LOADER_ENV.test(name);
+}
+
+const quote = (a: string) => (a === "" || /[\s"'\\]/.test(a) ? JSON.stringify(a) : a);
+
+/**
+ * One card line per server: its name and what runs (command plus args, an
+ * arg with a space or quote quoted) or is contacted (URL), then the NAMES of
+ * the env variables its config sets, never their values. Never cut.
+ */
 export function describeServer(cfg: ServerConfig): string {
 	if (cfg.type === "stdio") {
-		const line = `${cfg.name}: ${[cfg.command, ...(cfg.args ?? [])].join(" ")}`;
-		// Never cut silently: what is approved must be what runs.
-		const more = line.length > 1000 ? ` [+${line.length - 1000} more chars]` : "";
-		return clean(line, 1000, true) + more;
+		const env = Object.keys(cfg.env ?? {});
+		const line = `${cfg.name}: ${[cfg.command, ...(cfg.args ?? [])].map((a) => quote(String(a))).join(" ")}${env.length ? ` (env: ${env.join(", ")})` : ""}`;
+		return clean(line, line.length, true);
 	}
 	let where = String(cfg.url);
 	try {
@@ -106,7 +128,25 @@ export function describeServer(cfg: ServerConfig): string {
 		// Credentials in a URL are config secrets, not what the person decides on.
 		where = `${u.protocol}//${u.host}${u.pathname}${u.search ? "?..." : ""}`;
 	} catch {}
-	return clean(`${cfg.name}: ${where}`, 1000, true);
+	const line = `${cfg.name}: ${where}`;
+	return clean(line, line.length, true);
+}
+
+/** Why these servers may not be offered for approval at all, or null. */
+function startRefusal(read: ServerConfig[], lines: string[]): string | null {
+	const loader = read.flatMap((c) =>
+		c.type === "stdio"
+			? Object.keys(c.env ?? {})
+					.filter(isLoaderEnv)
+					.map((k) => `${clean(c.name, 80, true)} sets ${clean(k, 80, true)}`)
+			: [],
+	);
+	if (loader.length)
+		return `[BLOCKED] MCP servers were not started: ${loader.join("; ")} in its config env, which changes what program runs or what code it loads, so the approval card could not show what would really run. No server was started. Remove that variable from ~/.8gent/mcp.json, then restart the session to be asked again.`;
+	const long = lines.filter((l) => l.length > SERVER_LINE_MAX);
+	if (long.length)
+		return `[BLOCKED] MCP servers were not started: ${long.length} server line${long.length === 1 ? " is" : "s are"} over ${SERVER_LINE_MAX} characters, too long to show in full on the approval card. No server was started. Shorten the entry in ~/.8gent/mcp.json, then restart the session to be asked again.`;
+	return null;
 }
 
 interface StartState {
@@ -141,9 +181,12 @@ export async function ensureConnected(
 			if (!configs) {
 				const read = client.loadServerConfigs();
 				if (read.length === 0) return null;
-				const refusal = approve
-					? await approve(read.map(describeServer))
-					: "[BLOCKED] MCP servers cannot start: no approval path. No server was started.";
+				const lines = read.map(describeServer);
+				const refusal =
+					startRefusal(read, lines) ??
+					(approve
+						? await approve(lines)
+						: "[BLOCKED] MCP servers cannot start: no approval path. No server was started. Restart the session to be asked again.");
 				if (refusal) {
 					state.refused = refusal;
 					return refusal;
