@@ -11,7 +11,7 @@ import {
 	ResidencyBroker,
 	type Resident,
 	type ResidentKind,
-	ollamaResident,
+	ollamaTurnResident,
 	residencyEnabled,
 } from "./model-residency";
 
@@ -80,16 +80,22 @@ describe("ResidencyBroker", () => {
 		expect(log).toEqual(["call-unload:llm"]);
 	});
 
-	test("a busy model is never evicted", async () => {
-		const log: string[] = [];
-		const broker = new ResidencyBroker([fake("llm", log)]);
-		broker.setBusy("llm", true);
-		await broker.enter("speak");
-		expect(log).toEqual([]);
-		expect(broker.isResident("llm")).toBe(true);
-		broker.setBusy("llm", false);
-		await broker.enter("speak");
-		expect(log).toEqual(["call-unload:llm"]);
+	test("a claim that throws never blocks the turn", async () => {
+		const events: string[] = [];
+		const broker = new ResidencyBroker(
+			[
+				{
+					kind: "llm",
+					unload: async () => {},
+					claim: async () => {
+						throw new Error("ps down");
+					},
+				},
+			],
+			{ onEvent: (e) => events.push(e) },
+		);
+		await broker.enter("think");
+		expect(events).toEqual(["claim-failed:llm", "load:llm"]);
 	});
 
 	test("an unload that throws never blocks the turn", async () => {
@@ -120,45 +126,77 @@ describe("ResidencyBroker", () => {
 	});
 });
 
-describe("ollamaResident against a fake Ollama", () => {
-	test("unloads every model Ollama reports as loaded, with keep_alive 0", async () => {
-		const calls: Array<{ path: string; body?: unknown }> = [];
-		const server = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			async fetch(req) {
-				const path = new URL(req.url).pathname;
-				if (path === "/api/ps") {
-					calls.push({ path });
-					return Response.json({
-						models: [{ name: "qwen3:14b", model: "qwen3:14b" }, { name: "gemma:2b" }],
-					});
-				}
-				calls.push({ path, body: await req.json() });
-				return Response.json({ done: true });
-			},
-		});
+/** Fake Ollama whose /api/ps answers come from a queue; records unloads. */
+function fakeOllama(psQueue: Array<Array<{ model: string; expires_at: string }>>) {
+	const unloads: Array<{ model: string; keep_alive: number }> = [];
+	let psCalls = 0;
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(req) {
+			const path = new URL(req.url).pathname;
+			if (path === "/api/ps") {
+				const models = psQueue[Math.min(psCalls, psQueue.length - 1)];
+				psCalls++;
+				return Response.json({ models });
+			}
+			unloads.push((await req.json()) as { model: string; keep_alive: number });
+			return Response.json({ done: true });
+		},
+	});
+	return { server, unloads, url: `http://127.0.0.1:${server.port}`, psCalls: () => psCalls };
+}
+
+describe("ollamaTurnResident against a fake Ollama", () => {
+	test("unloads only the models this turn's think step used; an unrelated loaded model stays", async () => {
+		const o = fakeOllama([
+			// snapshot before think: the agent model and another session's model are loaded
+			[
+				{ model: "agent:14b", expires_at: "t1" },
+				{ model: "other-session:7b", expires_at: "t0" },
+			],
+			// after think: the agent model was used (expiry moved), a critic was loaded
+			[
+				{ model: "agent:14b", expires_at: "t2" },
+				{ model: "other-session:7b", expires_at: "t0" },
+				{ model: "qwen3:32b", expires_at: "t2" },
+			],
+		]);
 		try {
-			await ollamaResident(`http://127.0.0.1:${server.port}`).unload();
-			expect(calls).toEqual([
-				{ path: "/api/ps" },
-				{ path: "/api/generate", body: { model: "qwen3:14b", keep_alive: 0 } },
-				{ path: "/api/generate", body: { model: "gemma:2b", keep_alive: 0 } },
+			const broker = new ResidencyBroker([ollamaTurnResident(o.url)]);
+			await broker.enter("think");
+			await broker.enter("speak");
+			expect(o.unloads).toEqual([
+				{ model: "agent:14b", keep_alive: 0 },
+				{ model: "qwen3:32b", keep_alive: 0 },
 			]);
 		} finally {
-			server.stop(true);
+			o.server.stop(true);
 		}
 	});
 
-	test("an unreachable Ollama fails the unload without blocking the broker", async () => {
+	test("with no snapshot (first listen of a session) nothing is unloaded", async () => {
+		const o = fakeOllama([[{ model: "agent:14b", expires_at: "t1" }]]);
+		try {
+			const broker = new ResidencyBroker([ollamaTurnResident(o.url)]);
+			await broker.enter("listen");
+			expect(o.unloads).toEqual([]);
+			expect(o.psCalls()).toBe(0);
+		} finally {
+			o.server.stop(true);
+		}
+	});
+
+	test("an unreachable Ollama fails the claim and unload without blocking the broker", async () => {
 		const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("x") });
 		const url = `http://127.0.0.1:${server.port}`;
 		server.stop(true);
 		const events: string[] = [];
-		const broker = new ResidencyBroker([ollamaResident(url, 200)], {
+		const broker = new ResidencyBroker([ollamaTurnResident(url, 200)], {
 			onEvent: (e) => events.push(e),
 		});
-		await broker.enter("listen");
-		expect(events).toEqual(["unload:llm", "unload-failed:llm", "load:stt"]);
+		await broker.enter("think");
+		await broker.enter("speak");
+		expect(events).toEqual(["claim-failed:llm", "load:llm", "unload:llm", "load:tts"]);
 	});
 });

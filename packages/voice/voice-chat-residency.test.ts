@@ -31,11 +31,10 @@ afterEach(() => {
 	}
 });
 
-/** Build a loop whose listen and speak steps only log, then run one turn. */
-async function runTurn(
-	log: string[],
-	extra: { residency?: { enter: (p: "listen" | "think" | "speak") => Promise<void> } },
-) {
+type Hook = { enter: (p: "listen" | "think" | "speak") => Promise<void> };
+
+/** Build a loop whose mic, whisper and TTS steps only log, run one turn, then let queued residency steps finish. */
+async function runTurn(log: string[], extra: { residency?: Hook } = {}) {
 	const messageArgs: unknown[][] = [];
 	const loop = new VoiceChatLoop({
 		engine: {} as VoiceEngine,
@@ -44,11 +43,12 @@ async function runTurn(
 			log.push("agent");
 			return "hello back";
 		},
+		onStateChange: (state) => log.push(`state:${state}`),
 		...extra,
 	});
 	const internals = loop as unknown as Record<string, unknown>;
 	internals.listenForSpeech = async () => {
-		log.push("record+transcribe");
+		log.push("record");
 		return "hello";
 	};
 	internals.speakText = async () => {
@@ -56,33 +56,47 @@ async function runTurn(
 	};
 	internals.running = true;
 	await (internals.runOneTurn as () => Promise<void>).call(loop);
+	await internals.residencyChain;
 	return messageArgs;
 }
+
+const slow =
+	(log: string[], ms: number): Hook["enter"] =>
+	async (p) => {
+		await Bun.sleep(ms);
+		log.push(`enter:${p} done`);
+	};
 
 describe("VoiceChatLoop residency", () => {
 	test("flag off: the turn is unchanged and the residency hook is never called", async () => {
 		delete process.env.EIGHT_RESIDENCY;
 		const log: string[] = [];
-		const args = await runTurn(log, {
-			residency: { enter: async (p) => void log.push(`enter:${p}`) },
-		});
-		expect(log).toEqual(["record+transcribe", "agent", "tts"]);
+		const args = await runTurn(log, { residency: { enter: slow(log, 0) } });
+		expect(log).toEqual([
+			"state:listening",
+			"record",
+			"state:thinking",
+			"agent",
+			"state:speaking",
+			"tts",
+		]);
 		expect(args).toEqual([["hello"]]);
 	});
 
-	test("flag on: each phase is entered before it runs, and the agent gets thinking off", async () => {
+	test("flag on: recording and TTS start with their state change, not after the unload", async () => {
 		process.env.EIGHT_RESIDENCY = "1";
 		const log: string[] = [];
-		const args = await runTurn(log, {
-			residency: { enter: async (p) => void log.push(`enter:${p}`) },
-		});
+		const args = await runTurn(log, { residency: { enter: slow(log, 50) } });
 		expect(log).toEqual([
-			"enter:listen",
-			"record+transcribe",
-			"enter:think",
+			"state:listening",
+			"record", // the mic opens at once; the listen step runs behind it
+			"state:thinking",
+			"enter:listen done",
+			"enter:think done", // the agent waits for think (bounded)
 			"agent",
-			"enter:speak",
-			"tts",
+			"state:speaking",
+			"tts", // TTS starts at once; the speak step runs behind it
+			"enter:speak done",
 		]);
 		expect(args).toEqual([["hello", { live: true, thinking: null }]]);
 	});
@@ -97,22 +111,56 @@ describe("VoiceChatLoop residency", () => {
 				},
 			},
 		});
-		expect(log).toEqual(["record+transcribe", "agent", "tts"]);
+		expect(log).toEqual([
+			"state:listening",
+			"record",
+			"state:thinking",
+			"agent",
+			"state:speaking",
+			"tts",
+		]);
 	});
 
-	test("flag on, default broker: unloads the fake Ollama model before listen and before speak", async () => {
-		const hits: string[] = [];
+	test("flag on: a hook that hangs delays the agent by at most 2.5 s", async () => {
+		process.env.EIGHT_RESIDENCY = "1";
+		const log: string[] = [];
+		const loop = new VoiceChatLoop({
+			engine: {} as VoiceEngine,
+			onMessage: async () => {
+				log.push("agent");
+				return "ok";
+			},
+			residency: { enter: () => new Promise<void>(() => {}) },
+		});
+		const internals = loop as unknown as Record<string, unknown>;
+		internals.listenForSpeech = async () => "hi";
+		internals.speakText = async () => void log.push("tts");
+		internals.running = true;
+		const t0 = Date.now();
+		await (internals.runOneTurn as () => Promise<void>).call(loop);
+		expect(Date.now() - t0).toBeLessThan(3500);
+		expect(log).toEqual(["agent", "tts"]);
+	});
+
+	test("flag on, default broker: unloads only the models the think step used", async () => {
+		let psCalls = 0;
+		const unloads: string[] = [];
 		const server = Bun.serve({
 			hostname: "127.0.0.1",
 			port: 0,
 			async fetch(req) {
-				const path = new URL(req.url).pathname;
-				if (path === "/api/ps") {
-					hits.push("ps");
-					return Response.json({ models: [{ model: "fake:1b" }] });
+				if (new URL(req.url).pathname === "/api/ps") {
+					psCalls++;
+					// call 1 = snapshot before think; call 2 = before speak, after the agent used its model
+					return Response.json({
+						models: [
+							{ model: "agent:14b", expires_at: psCalls === 1 ? "t1" : "t2" },
+							{ model: "other-session:7b", expires_at: "t0" },
+						],
+					});
 				}
 				const body = (await req.json()) as { model: string; keep_alive: number };
-				hits.push(`unload ${body.model} keep_alive=${body.keep_alive}`);
+				unloads.push(`${body.model} keep_alive=${body.keep_alive}`);
 				return Response.json({ done: true });
 			},
 		});
@@ -120,33 +168,16 @@ describe("VoiceChatLoop residency", () => {
 			process.env.EIGHT_RESIDENCY = "1";
 			process.env.OLLAMA_BASE_URL = `http://127.0.0.1:${server.port}`;
 			const log: string[] = [];
-			const loop = new VoiceChatLoop({
-				engine: {} as VoiceEngine,
-				onMessage: async () => {
-					log.push(`agent (unloads so far: ${hits.length})`);
-					return "ok";
-				},
-			});
-			const internals = loop as unknown as Record<string, unknown>;
-			internals.listenForSpeech = async () => {
-				log.push(`listen (unloads so far: ${hits.length})`);
-				return "hi";
-			};
-			internals.speakText = async () => {
-				log.push(`speak (unloads so far: ${hits.length})`);
-			};
-			internals.running = true;
-			await (internals.runOneTurn as () => Promise<void>).call(loop);
-			expect(hits).toEqual([
-				"ps",
-				"unload fake:1b keep_alive=0",
-				"ps",
-				"unload fake:1b keep_alive=0",
-			]);
+			await runTurn(log);
+			expect(psCalls).toBe(2);
+			expect(unloads).toEqual(["agent:14b keep_alive=0"]);
 			expect(log).toEqual([
-				"listen (unloads so far: 2)",
-				"agent (unloads so far: 2)",
-				"speak (unloads so far: 4)",
+				"state:listening",
+				"record",
+				"state:thinking",
+				"agent",
+				"state:speaking",
+				"tts",
 			]);
 		} finally {
 			server.stop(true);
