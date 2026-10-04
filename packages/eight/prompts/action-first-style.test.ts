@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { ONBOARDING_QUESTIONS, type UserConfig } from "../../self-autonomy/onboarding";
-import { ACTION_FIRST_STYLE, USER_CONTEXT_SEGMENT } from "./system-prompt";
+import { ACTION_FIRST_PRECEDENCE, ACTION_FIRST_STYLE, USER_CONTEXT_SEGMENT } from "./system-prompt";
 
 function styleLine(style: string | null): string | undefined {
 	const out = USER_CONTEXT_SEGMENT({ name: "Test", communicationStyle: style });
@@ -48,10 +48,29 @@ describe("action-first style text", () => {
 		expect(styleLine(null)).toBeUndefined();
 	});
 
+	test("precedence line is present only when action-first is selected", () => {
+		// The base prompt asks for a joke COMPLETED line (packages/eight/prompt.ts) and
+		// the personality block adds greeting and completion phrases (agent.ts).
+		// action-first must say it wins over both.
+		expect(ACTION_FIRST_STYLE).toContain(ACTION_FIRST_PRECEDENCE);
+		expect(ACTION_FIRST_PRECEDENCE).toMatch(/override/);
+		for (const word of ["greetings", "completion phrases", "jokes", "summaries"]) {
+			expect(ACTION_FIRST_PRECEDENCE).toContain(word);
+		}
+		expect(ACTION_FIRST_PRECEDENCE).toContain('just before the single "Next:" line');
+		const on = USER_CONTEXT_SEGMENT({ name: "Test", communicationStyle: "action-first" });
+		expect(on).toContain(ACTION_FIRST_PRECEDENCE);
+		for (const style of [...Object.keys(BEFORE), null, "unknown-style"]) {
+			const out = USER_CONTEXT_SEGMENT({ name: "Test", communicationStyle: style });
+			expect(out).not.toContain(ACTION_FIRST_PRECEDENCE);
+			expect(out).not.toContain("override any other instruction");
+		}
+	});
+
 	test("rules are short and dash-free", () => {
 		const lines = ACTION_FIRST_STYLE.split("\n");
-		expect(lines.length).toBeLessThanOrEqual(8);
-		expect(ACTION_FIRST_STYLE).not.toMatch(/[–—]/);
+		expect(lines.length).toBeLessThanOrEqual(9);
+		expect(ACTION_FIRST_STYLE).not.toMatch(/[\u2013\u2014]/);
 		expect(lines[lines.length - 1]).toContain('"Next:"');
 	});
 });

@@ -84,8 +84,11 @@ export function buildBoardContextSegment(path: string = BOARD_CONTEXT_PATH): str
  * Opt-in reply shape for people who lose the thread in long answers (#3487).
  * Only reaches the prompt when the user picked communicationStyle "action-first".
  */
+export const ACTION_FIRST_PRECEDENCE =
+	'These rules override any other instruction in this prompt about greetings, completion phrases, jokes or summaries. If a completion marker (such as COMPLETED or INCOMPLETE) is required, write it as one plain line with no joke, placed just before the single "Next:" line.';
 export const ACTION_FIRST_STYLE = [
 	"Shape every reply so the reader can act without rereading:",
+	ACTION_FIRST_PRECEDENCE,
 	"1. Open with the action or the answer itself. No greeting, no restating the question, no warm-up.",
 	"2. Give steps as a numbered list, one action per step. Never more than five items in any list; if there are more, do the first five and say what comes after.",
 	"3. Put commands and paths in code blocks so they can be copied.",
