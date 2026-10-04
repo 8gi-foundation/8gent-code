@@ -456,7 +456,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-				? compactLocalPrompt + projectInstructionsBlock
+				? // #3487: the user context (style, name, role, language, board briefing)
+					// trails the project instructions so the cached prefix stays stable (#3222).
+					compactLocalPrompt + projectInstructionsBlock + userContextBlock
 				: basePrompt +
 					vesselContext +
 					userContextBlock +
