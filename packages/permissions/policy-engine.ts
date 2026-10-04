@@ -515,14 +515,7 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 /** Actions whose rules may match `resolved_path` (#3474). */
 const RESOLVED_PATH_ACTIONS = new Set<string>(["write_file", "delete_file"]);
 
-/**
- * Where a write to `p` lands, for rules that match `resolved_path` (#3474,
- * 8SO round 2): `~/` expanded from HOME (as the executor's safePath does),
- * resolved against `cwd`, then symlinks followed: the whole path when it
- * exists, else the parent's real path plus the name, following a dangling
- * symlink to its target. So "./", "//", "a/../" and a relative path from
- * inside ~/.8gent all match "resolved_path ends_with /.8gent/mcp.json".
- */
+/** Where a write to `p` lands: `~/` expanded, resolved against `cwd`, symlinks followed (#3474). */
 export function resolvePolicyPath(p: string, cwd: string): string {
 	const home = process.env.HOME;
 	const expanded = home && (p === "~" || p.startsWith("~/")) ? path.join(home, p.slice(1)) : p;

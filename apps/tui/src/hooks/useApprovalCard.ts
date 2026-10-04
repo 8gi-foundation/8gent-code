@@ -54,10 +54,7 @@ export const CARD_MIN_SHOW_MS = 500;
 /** The box InlineApprovalPrompt draws a `full` card in. */
 export const fullCardBox = createRef<DOMElement>();
 
-/**
- * True when the card's own box lies inside every ancestor's box and the
- * screen, so no row of it is clipped (#3474).
- */
+/** True when the card's own box lies inside every ancestor's box and the screen (#3474). */
 export function cardShowsAll(card: DOMElement | null | undefined, screen: Sized): boolean {
 	const node = card?.yogaNode;
 	if (!card || !node) return false;

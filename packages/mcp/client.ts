@@ -50,8 +50,7 @@ export class MCPClient {
 
 	/**
 	 * Connect to all configured MCP servers, or exactly the given ones (the
-	 * lean path passes the list the person approved, so nothing re-reads the
-	 * config between the card and the spawn).
+	 * approved list, so nothing re-reads the config after the card).
 	 * Performs handshake + tool discovery on each.
 	 */
 	async connect(only?: ServerConfig[]): Promise<void> {

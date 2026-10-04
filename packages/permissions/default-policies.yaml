@@ -117,11 +117,8 @@ policies:
     decision: require_approval
     message: "Deleting project config files requires confirmation."
 
-  # Which programs MCP may start, and the rules themselves (#3474). An agent
+  # Which programs MCP may start, and the rules themselves (#3474): an agent
   # that could rewrite either could approve itself past every other gate.
-  # The file rules also match resolved_path: where the write really lands
-  # (resolved against the working directory, "./" and "//" collapsed,
-  # symlinks followed; see resolvePolicyPath in policy-engine.ts).
   - name: "mcp-config-and-policies-write-approval"
     action: write_file
     condition: "path contains .8gent/mcp.json or path contains .8gent/policies.yaml or resolved_path ends_with /.8gent/mcp.json or resolved_path ends_with /.8gent/policies.yaml"
@@ -134,9 +131,7 @@ policies:
     decision: require_approval
     message: "Deleting ~/.8gent/mcp.json or ~/.8gent/policies.yaml requires confirmation."
 
-  # Literal-string match only: it catches a command that spells either path
-  # out, not one that builds it (cd ~/.8gent && ... mcp.json, "$HOME/.8gent/"mcp.json,
-  # globs). It is a speed bump for the obvious case, not a boundary.
+  # Literal-string match only: a speed bump, not a boundary.
   - name: "mcp-config-and-policies-shell-approval"
     action: run_command
     condition: "command contains .8gent/mcp.json or command contains .8gent/policies.yaml"

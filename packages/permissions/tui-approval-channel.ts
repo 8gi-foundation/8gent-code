@@ -19,20 +19,14 @@
  * just register their handler at boot.
  */
 
-/**
- * "unfit": the frontend did not show a `full` request because the whole of
- * it does not fit on screen. Any caller that only asks yes/no reads it as no.
- */
+/** "unfit": a `full` request did not fit on screen and was not shown; yes/no callers read it as no. */
 export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip" | "unfit";
 
 export interface TuiApprovalRequest {
 	action: string;
 	details: string;
 	command?: string;
-	/**
-	 * Show `command` in full, wrapped (the card's own lines kept), never cut.
-	 * The frontend answers "unfit" when it cannot show all of it (MCP, #3474).
-	 */
+	/** Show `command` in full, never cut; else the frontend answers "unfit" (#3474). */
 	full?: boolean;
 }
 

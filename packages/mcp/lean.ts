@@ -1,63 +1,16 @@
 /**
- * Lean MCP tool access (#3474), behind EIGHT_MCP_LEAN=1 (exactly "1"; any
- * other value, unset included, leaves the MCP tools as they were; the policy
- * rules, the EIGHT_HOME mcp.json path and the cards are not behind the flag).
- *
- * Concept from Uber's "Designing MCP Gateway" (search, schema on demand,
- * response projection, spill to file); no code taken from it.
+ * Lean MCP tool access (#3474), behind EIGHT_MCP_LEAN=1 (exactly "1"), on the
+ * text-tool path (ToolExecutor). Concept from Uber's "Designing MCP Gateway";
+ * no code taken. Full behaviour and what is not covered: CHANGELOG #3474.
  *
  *   mcp_list_tools {query?, server?}  -> top 8 matching tools, one line each
  *   mcp_list_tools {tool, server?}    -> that one tool's full input schema
  *   mcp_call_tool {..., fields?}      -> keep only those dotted paths
- *   any result over RESULT_CAP chars  -> written to a harness-named 0600 file
- *                                        (O_EXCL, O_NOFOLLOW) in a per-session
- *                                        0700 dir under <data dir>/tool-results;
- *                                        the model gets the path and a preview
+ *   any result over RESULT_CAP chars  -> spilled to a harness-named 0600 file
  *
- * Before this, MCP was unreachable from a local model's turn: nothing in the
- * runtime called MCPClient.connect(), the stdio transport could not write
- * (fixed in packages/mcp/transport.ts), and the text-tool path never offered
- * the MCP tools. With the flag on, this path connects the configured servers
- * lazily on first use and serves them lean.
- *
- * Covered: the text-tool path (ToolExecutor in packages/eight/tools.ts, the
- * local-provider path the TUI uses with ollama / lmstudio / llama-server).
- * NOT covered: the native AI SDK tools (packages/ai/tools.ts), the bridged
- * per-tool ToolSet (client.getTools), the REPL /mcp-tools command. None of
- * them connects a server, so they still reach no MCP tool at all; the lean
- * path's connect happens to make them see this process's servers afterwards,
- * in full and untrimmed.
- *
- * Starting servers: the first lean mcp_list_tools or mcp_call_tool reads
- * <home>/.8gent/mcp.json once and shows one approval card per session that
- * names every server, its command plus args and its env variable NAMES, or
- * its URL (never env values or headers), each line in full or not at all;
- * a config env name that is not credential-shaped (_TOKEN, _KEY, ...) refuses.
- * Only after an approve does it start exactly that list; nothing re-reads
- * the file in between. Infinite mode skips the card; with no card
- * and no terminal the answer is no, and a no stands for the session. The
- * card is separate from the per-call card, so approving one call never
- * starts the other servers. Parallel first calls share one start. Listing is
- * ungated and allowed in Plan mode, so in Plan mode the lean path does not
- * start servers; it lists only servers already running. A start that brings
- * no server up is retried once, on the next call, with the approved list.
- * Started servers are closed when the process exits.
- *
- * Secrets: callers pass the executor's secret scrubber; it runs on the answer
- * before projection, and again on the projected text (projection re-encodes
- * JSON, so a \u0041- or \/-escaped secret comes out in plain form), all
- * before spill or preview (the #2464 "scrub before persist" order). Without
- * fields the answer is scrubbed as written: an escaped secret the scanner
- * cannot see stays escaped, in the file as in the answer.
- *
- * Spill files: a per-session 0700 dir under <data dir>/tool-results; dirs of
- * earlier sessions older than 7 days are removed when a new one is made.
- * ArtifactStore (packages/eight/artifact-store.ts, #2463) still chips every
- * executor result over 50,000 bytes; #3477 should keep one of the two stores.
- *
- * Server output is untrusted: it is capped before any regex, parsed inside
- * try, never chooses a file name, and control / bidi characters are replaced
- * before anything is echoed (answers under the cap included).
+ * Servers start on first lean use, only after one approval card per session
+ * that names every server in full. Server output is untrusted: capped before
+ * any regex, scrubbed before projection and again after, never names a file.
  */
 
 import { randomUUID } from "node:crypto";
@@ -68,8 +21,6 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	openSync,
-	readdirSync,
-	rmSync,
 	writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -95,18 +46,10 @@ export type StartApproval = (servers: string[]) => Promise<string | null>;
 
 export { clean };
 
-/** Longest card line one server may have; a longer one refuses the start (never a cut line on the card). */
-export const SERVER_LINE_MAX = 1000;
-
 /**
- * Config env names a server may set while the flag is on (#3474, 8SO round
- * 3): upper-case names ending _TOKEN, _KEY, _SECRET, _PASSWORD or _ID, the
- * shapes that carry a credential or an account id and that no loader, shell,
- * package manager or runtime reads to decide what runs. Every other name is
- * refused before the card: the card shows command and args, and a name like
- * PATH, NODE_OPTIONS, JAVA_TOOL_OPTIONS, HOME, PIP_INDEX_URL or SHELLOPTS
- * would make that not what runs. An allowlist, because the denylist of
- * rounds 1 and 2 kept missing such names.
+ * Config env names a server may set while the flag is a trial: credential
+ * shapes only. Any other name (PATH, NODE_OPTIONS, HOME ...) can change what
+ * runs, so the card would not show what really runs.
  */
 const CREDENTIAL_ENV = /^[A-Z][A-Z0-9_]*_(TOKEN|KEY|SECRET|PASSWORD|ID)$/;
 export function isCredentialEnv(name: string): boolean {
@@ -115,11 +58,7 @@ export function isCredentialEnv(name: string): boolean {
 
 const quote = (a: string) => (a === "" || /[\s"'\\]/.test(a) ? JSON.stringify(a) : a);
 
-/**
- * One card line per server: its name and what runs (command plus args, an
- * arg with a space or quote quoted) or is contacted (URL), then the NAMES of
- * the env variables its config sets, never their values. Never cut.
- */
+/** One card line per server: what runs or is contacted, and env NAMES, never values. */
 export function describeServer(cfg: ServerConfig): string {
 	if (cfg.type === "stdio") {
 		const env = Object.keys(cfg.env ?? {});
@@ -137,7 +76,7 @@ export function describeServer(cfg: ServerConfig): string {
 }
 
 /** Why these servers may not be offered for approval at all, or null. */
-function startRefusal(read: ServerConfig[], lines: string[]): string | null {
+function startRefusal(read: ServerConfig[]): string | null {
 	const other = read.flatMap((c) =>
 		c.type === "stdio"
 			? Object.keys(c.env ?? {})
@@ -147,9 +86,6 @@ function startRefusal(read: ServerConfig[], lines: string[]): string | null {
 	);
 	if (other.length)
 		return `[BLOCKED] MCP servers were not started: ${other.join("; ")} in its config env. While EIGHT_MCP_LEAN is a trial, a server's config env may only set credential names (upper case, ending _TOKEN, _KEY, _SECRET, _PASSWORD or _ID): any other variable can change what program runs or what code it loads, so the approval card could not show what would really run. No server was started. Remove that variable from ~/.8gent/mcp.json, then restart the session to be asked again.`;
-	const long = lines.filter((l) => l.length > SERVER_LINE_MAX);
-	if (long.length)
-		return `[BLOCKED] MCP servers were not started: ${long.length} server line${long.length === 1 ? " is" : "s are"} over ${SERVER_LINE_MAX} characters, too long to show in full on the approval card. No server was started. Shorten the entry in ~/.8gent/mcp.json, then restart the session to be asked again.`;
 	return null;
 }
 
@@ -162,11 +98,7 @@ interface StartState {
 }
 const starts = new WeakMap<object, StartState>();
 
-/**
- * Start the configured servers on first lean use (never at startup), after
- * the person approved the exact list. Returns null when the caller may go on
- * (servers up, none configured, or Plan mode), else the refusal for the model.
- */
+/** Start the configured servers once the person approved the exact list; null to go on, else the refusal. */
 export async function ensureConnected(
 	client: Client,
 	mayStart: boolean,
@@ -187,7 +119,7 @@ export async function ensureConnected(
 				if (read.length === 0) return null;
 				const lines = read.map(describeServer);
 				const refusal =
-					startRefusal(read, lines) ??
+					startRefusal(read) ??
 					(approve
 						? await approve(lines)
 						: "[BLOCKED] MCP servers cannot start: no approval path. No server was started. Restart the session to be asked again.");
@@ -320,9 +252,7 @@ export function projectFields(text: string, fields: unknown): string {
 }
 
 // Result store: a per-session 0700 dir under <dataDir>/tool-results, one 0600
-// file per result, named by a harness-made handle. Kept tool-agnostic so the
-// stale-output handles of #3477 can reuse it instead of building a second one.
-const KEEP_MS = 7 * 24 * 3600_000;
+// file per result, named by a harness-made handle (tool-agnostic, for #3477).
 const sessionDirs = new Map<string, string>();
 function sessionDir(dataDir: string): string {
 	let dir = sessionDirs.get(dataDir);
@@ -334,19 +264,6 @@ function sessionDir(dataDir: string): string {
 			throw new Error(`${base} is not a plain directory`);
 		dir = mkdtempSync(join(base, "s-")); // 0700, unique per session
 		sessionDirs.set(dataDir, dir);
-		for (const name of readdirSync(base)) {
-			const old = join(base, name);
-			try {
-				const o = lstatSync(old);
-				if (
-					name.startsWith("s-") &&
-					old !== dir &&
-					o.isDirectory() &&
-					Date.now() - o.mtimeMs > KEEP_MS
-				)
-					rmSync(old, { recursive: true, force: true });
-			} catch {}
-		}
 	}
 	return dir;
 }

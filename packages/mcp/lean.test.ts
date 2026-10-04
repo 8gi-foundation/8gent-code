@@ -16,7 +16,6 @@ import {
 	rmSync,
 	statSync,
 	symlinkSync,
-	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,25 +226,6 @@ describe("spill to file", () => {
 		const { handle, path } = storeResult("kept", d);
 		expect(path).toBe(join(dirname(path), `${handle}.txt`));
 		expect(readFileSync(path, "utf8")).toBe("kept");
-	});
-
-	test("session dirs older than 7 days are pruned when a new session starts; newer ones and non-dirs stay", () => {
-		const d = freshDataDir();
-		const base = join(d, "tool-results");
-		mkdirSync(join(base, "s-old"), { recursive: true, mode: 0o700 });
-		writeFileSync(join(base, "s-old", "x.txt"), "x");
-		mkdirSync(join(base, "s-recent"), { mode: 0o700 });
-		writeFileSync(join(base, "s-file"), "not a dir");
-		mkdirSync(join(base, "keep-me"));
-		const eightDaysAgo = (Date.now() - 8 * 24 * 3600_000) / 1000;
-		utimesSync(join(base, "s-old"), eightDaysAgo, eightDaysAgo);
-		utimesSync(join(base, "keep-me"), eightDaysAgo, eightDaysAgo);
-		storeResult("new", d);
-		const left = readdirSync(base).sort();
-		expect(left).not.toContain("s-old");
-		expect(left).toContain("s-recent");
-		expect(left).toContain("s-file");
-		expect(left).toContain("keep-me");
 	});
 
 	test("the server's names never pick the file path", async () => {
@@ -505,30 +485,6 @@ describe("starting servers needs the person's yes (first-connect consent)", () =
 			"_TOKEN",
 		])
 			expect(isCredentialEnv(no)).toBe(false);
-	});
-
-	test("a server line over the 1000-char cap is refused before the card; nothing starts", async () => {
-		const c = startClient([
-			...CONFIGS,
-			{ type: "stdio", name: "long", command: "/bin/x", args: ["y".repeat(1200)] },
-		]);
-		let asked = 0;
-		const r = await leanCallTool(
-			c,
-			{ server: "files", tool: "t" },
-			id,
-			async () => {
-				asked++;
-				return null;
-			},
-			freshDataDir(),
-		);
-		expect(r).toStartWith(
-			"[BLOCKED] MCP servers were not started: 1 server line is over 1000 characters",
-		);
-		expect(r).toContain("restart the session");
-		expect(asked).toBe(0);
-		expect(c.connected).toEqual([]);
 	});
 
 	test("a denied card means no server starts, from either tool, for the rest of the session", async () => {

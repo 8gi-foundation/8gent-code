@@ -35,12 +35,7 @@ export function mcpPolicyContext(server: string, tool: string): PolicyContext {
 	return { server, tool, action: `${server}/${tool}` };
 }
 
-/**
- * One line of untrusted text for a card: control, zero-width and bidi
- * characters become "?", newlines and tabs a space, as clean() in
- * packages/mcp/index.ts (not imported: packages/mcp/tool-bridge.ts imports
- * this file, so importing back would make a cycle).
- */
+/** Untrusted text on one line, as clean() in packages/mcp/index.ts (not imported: a cycle). */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
 const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g;
 function oneLine(value: string): string {
@@ -50,8 +45,7 @@ function oneLine(value: string): string {
 /**
  * Ask the person before an MCP call the policy did not allow outright.
  * Returns null when the call may run, or the refusal to hand to the model.
- * `reason` is the policy's reason, shown on the card. The TUI card shows
- * `mcp_call_tool server/tool {args}` in full, or the TUI refuses the call.
+ * `reason` is the policy's reason, shown on the card.
  */
 export async function askMcpApproval(
 	server: string,
@@ -83,15 +77,7 @@ export async function askMcpApproval(
 /** The approval card's title before the lean path starts MCP servers (#3474). */
 export const MCP_START_APPROVAL_ACTION = "Start MCP servers";
 
-/**
- * Ask once before MCP servers are started: each line names one server, what
- * will run (command and args) or be contacted (URL), and the names of the env
- * variables its config sets. Never env values. The TUI card shows every line
- * in full or the TUI refuses the start. Same rules as a call: Infinite starts
- * without a card; no card, no start. A refusal stands for the session, so
- * each one says to restart the session to be asked again.
- * Returns null when the servers may start, or the refusal for the model.
- */
+/** Ask once before MCP servers start, one line per server; null to start, else the refusal. */
 export async function askMcpStartApproval(servers: string[]): Promise<string | null> {
 	const n = `${servers.length} MCP server${servers.length === 1 ? "" : "s"}`;
 	const cwd = oneLine(process.cwd());
@@ -118,8 +104,6 @@ async function askPerson(
 	if (manager.isInfiniteMode()) return null;
 	let approved: boolean;
 	if (hasTuiApprovalHandler()) {
-		// The TUI knows its real geometry; it answers "unfit" rather than
-		// draw a `full` card it cannot show whole.
 		const decision = await requestTuiDecision(request);
 		if (decision === "unfit") return doesNotFit;
 		approved = decision === "approve";
