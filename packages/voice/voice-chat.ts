@@ -503,11 +503,17 @@ export class VoiceReplyTracker {
 		this.before = agent ? agent.getHistoryLength() : Number.POSITIVE_INFINITY;
 	}
 
-	commit(agent: HeardOnlyHistory): void {
+	/**
+	 * `response` is what the final agent.chat() returned, byte-identical to the
+	 * reply it pushed. Record it only if it is still the newest assistant message
+	 * added since begin(), so a typed reply that landed meanwhile is never taken.
+	 */
+	commit(agent: HeardOnlyHistory, response: string): void {
+		if (!response) return;
 		const history = agent.getMessageHistory();
 		for (let i = history.length - 1; i >= this.before; i--) {
 			if (history[i]?.role === "assistant") {
-				this.produced = history[i]?.content ?? null;
+				if (history[i]?.content === response) this.produced = response;
 				return;
 			}
 		}

@@ -970,7 +970,7 @@ export function App({
 						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`,
 					);
 				}
-				voiceReplyRef.current.commit(agent);
+				voiceReplyRef.current.commit(agent, response || "");
 				const cleanResponse = (response || "")
 					.replace(/\[_EOT_\]/g, "")
 					.replace(/<\|.*?\|>/g, "")
