@@ -1,0 +1,48 @@
+{
+  "_note": "Captured from doctor.ts at 7a3ff6b2 (before #3451) with fetch stubbed and the agent/tools imports mocked. Each entry is one console.log call; the temp home is replaced by <HOME>. Do not edit by hand.",
+  "down": [
+    "\n  8gent Harness — Health Check\n",
+    "  \u001b[31m✗\u001b[0m Sessions directory     <HOME>/.8gent/sessions does not exist",
+    "  \u001b[31m✗\u001b[0m Ollama                 Not running (localhost:11434)",
+    "  \u001b[31m✗\u001b[0m LM Studio              Not running (localhost:1234)",
+    "  \u001b[31m✗\u001b[0m OpenRouter API key     Not set (OPENROUTER_API_KEY)",
+    "  \u001b[32m✓\u001b[0m Agent module           packages/eight/agent.ts loaded",
+    "  \u001b[32m✓\u001b[0m AI SDK tools           3 tools registered",
+    "",
+    "  \u001b[33mSome checks failed — 8gent may not work fully.\u001b[0m\n"
+  ],
+  "up": [
+    "\n  8gent Harness — Health Check\n",
+    "  \u001b[32m✓\u001b[0m Sessions directory     <HOME>/.8gent/sessions",
+    "  \u001b[32m✓\u001b[0m Existing sessions      2 session file(s)",
+    "  \u001b[32m✓\u001b[0m Ollama                 Running, models: qwen3:8b, llama3:8b",
+    "  \u001b[32m✓\u001b[0m LM Studio              Running on :1234",
+    "  \u001b[32m✓\u001b[0m OpenRouter API key     Set (sk-or-v1...)",
+    "  \u001b[32m✓\u001b[0m Agent module           packages/eight/agent.ts loaded",
+    "  \u001b[32m✓\u001b[0m AI SDK tools           3 tools registered",
+    "",
+    "  \u001b[32mAll checks passed.\u001b[0m\n"
+  ],
+  "http": [
+    "\n  8gent Harness — Health Check\n",
+    "  \u001b[31m✗\u001b[0m Sessions directory     <HOME>/.8gent/sessions does not exist",
+    "  \u001b[31m✗\u001b[0m Ollama                 HTTP 503",
+    "  \u001b[31m✗\u001b[0m LM Studio              HTTP 503",
+    "  \u001b[31m✗\u001b[0m OpenRouter API key     Not set (OPENROUTER_API_KEY)",
+    "  \u001b[32m✓\u001b[0m Agent module           packages/eight/agent.ts loaded",
+    "  \u001b[32m✓\u001b[0m AI SDK tools           3 tools registered",
+    "",
+    "  \u001b[33mSome checks failed — 8gent may not work fully.\u001b[0m\n"
+  ],
+  "importfail": [
+    "\n  8gent Harness — Health Check\n",
+    "  \u001b[31m✗\u001b[0m Sessions directory     <HOME>/.8gent/sessions does not exist",
+    "  \u001b[31m✗\u001b[0m Ollama                 HTTP 503",
+    "  \u001b[31m✗\u001b[0m LM Studio              HTTP 503",
+    "  \u001b[31m✗\u001b[0m OpenRouter API key     Not set (OPENROUTER_API_KEY)",
+    "  \u001b[31m✗\u001b[0m Agent module           Failed to import: agent boom",
+    "  \u001b[31m✗\u001b[0m AI SDK tools           Failed to import: tools boom",
+    "",
+    "  \u001b[33mSome checks failed — 8gent may not work fully.\u001b[0m\n"
+  ]
+}
