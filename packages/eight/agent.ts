@@ -2770,6 +2770,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Replace the newest assistant message's text, only when it is still
+	 * `expectedOriginal`, the reply the caller's turn produced. Heard-only voice
+	 * memory (#3428) uses it so a cut-off spoken reply keeps only what was
+	 * played. Returns false, changing nothing, on no match or no assistant message.
+	 */
+	amendLastAssistantMessage(content: string, expectedOriginal: string): boolean {
+		for (let i = this.messageHistory.length - 1; i >= 0; i--) {
+			const msg = this.messageHistory[i];
+			if (msg?.role === "assistant") {
+				if (msg.content !== expectedOriginal) return false;
+				this.messageHistory[i] = { ...msg, content };
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Get the orchestrator bus for multi-agent coordination.
 	 */
 	getOrchestratorBus(): OrchestratorBus {
