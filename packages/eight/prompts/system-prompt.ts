@@ -8,12 +8,17 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveHome } from "../../core/home";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
 import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
+import {
+	type CommunicationStyle,
+	isCommunicationStyle,
+	isLanguageCode,
+} from "../../self-autonomy/communication-style";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -38,7 +43,9 @@ export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
  * by the relay (mac/relay/board_context.py on the heartbeat cadence) so this
  * read is pure and never needs the network.
  */
-export const BOARD_CONTEXT_PATH = join(homedir(), ".8gent", "board-context.md");
+// resolveHome (EIGHT_HOME > HOME > os.homedir) so a sandboxed run, the test
+// preload included, reads its own home; os.homedir() is frozen at process start (#3240).
+export const BOARD_CONTEXT_PATH = join(resolveHome(), ".8gent", "board-context.md");
 
 /**
  * Cap the injected briefing so a long file never bloats every agent's prompt.
@@ -98,19 +105,29 @@ export const ACTION_FIRST_STYLE = [
 	'7. End with exactly one line that starts with "Next:" and names one concrete thing to do.',
 ].join("\n");
 
+/** The guide line per style. "sarcastic" (the default) has none. */
+const STYLE_GUIDE: Record<CommunicationStyle, string> = {
+	sarcastic: "",
+	concise: "Be brief and direct. Skip explanations unless asked.",
+	detailed: "Explain your reasoning. Teach as you go.",
+	casual: "Keep it friendly and collaborative. We're partners.",
+	formal: "Maintain professional tone. Be precise.",
+	"action-first": ACTION_FIRST_STYLE,
+};
+
 /**
  * The "Communication style" line of the user context. Also sent, unchanged, as
- * the closing style reminder on the local text-tool path (#3487).
+ * the closing style reminder on the local text-tool path (#3487). Only a key
+ * from the fixed style set produces a line; any other value yields "".
  */
 export function communicationStyleLine(style: string): string {
-	const styleGuide: Record<string, string> = {
-		concise: "Be brief and direct. Skip explanations unless asked.",
-		detailed: "Explain your reasoning. Teach as you go.",
-		casual: "Keep it friendly and collaborative. We're partners.",
-		formal: "Maintain professional tone. Be precise.",
-		"action-first": ACTION_FIRST_STYLE,
-	};
-	return `Communication style: **${style}**. ${styleGuide[style] || ""}`;
+	if (!isCommunicationStyle(style)) return "";
+	return `Communication style: **${style}**. ${STYLE_GUIDE[style]}`;
+}
+
+/** True when the style is a known key with a guide line (so not "sarcastic"). */
+export function styleHasGuide(style: string): boolean {
+	return isCommunicationStyle(style) && STYLE_GUIDE[style] !== "";
 }
 
 /**
@@ -123,7 +140,7 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	communicationStyle?: string | null;
 	language?: string;
 	preferences?: Record<string, unknown>;
-}) => {
+}, opts: { includeBoard?: boolean } = {}) => {
 	const parts: string[] = ["## USER CONTEXT"];
 
 	if (userData.name) {
@@ -132,16 +149,19 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	if (userData.role) {
 		parts.push(`Their role: ${userData.role}.`);
 	}
-	if (userData.communicationStyle) {
-		parts.push(communicationStyleLine(userData.communicationStyle));
+	const styleLine = userData.communicationStyle ? communicationStyleLine(userData.communicationStyle) : "";
+	if (styleLine) {
+		parts.push(styleLine);
 	}
-	if (userData.language && userData.language !== "en") {
+	// #3487: only a language code reaches the prompt ("pt-BR", not free text).
+	if (userData.language && userData.language !== "en" && isLanguageCode(userData.language)) {
 		parts.push(`Respond in: ${userData.language}`);
 	}
 
 	// Append the universal board briefing so every agent that gets a user-context
 	// block also gets the shared roadmap + "query the live sources" instruction.
-	const board = buildBoardContextSegment();
+	// #3487: callers leave it out for a model that is not on this machine.
+	const board = opts.includeBoard === false ? "" : buildBoardContextSegment();
 	const userPart = parts.length > 1 ? parts.join("\n") : "";
 	return [userPart, board].filter(Boolean).join("\n\n");
 };

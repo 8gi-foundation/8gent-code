@@ -2278,9 +2278,18 @@ async function preferencesCommand(args: string[]) {
 				case "role":
 					user.identity.role = value;
 					break;
-				case "style":
-					user.identity.communicationStyle = value as any;
+				case "style": {
+					// #3487: only a style from the fixed set is stored.
+					const { COMMUNICATION_STYLES, isCommunicationStyle } = await import(
+						"../packages/self-autonomy/communication-style"
+					);
+					if (!isCommunicationStyle(value)) {
+						console.error(`Unknown style. Use one of: ${COMMUNICATION_STYLES.join(", ")}`);
+						process.exit(1);
+					}
+					user.identity.communicationStyle = value;
 					break;
+				}
 				case "language":
 					user.identity.language = value;
 					break;
