@@ -1,6 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -115,5 +123,147 @@ describe.skipIf(!ffmpeg || !ffprobe)("breakdown on a synthetic 3-shot clip", () 
 		const lines = readFileSync(out.table, "utf-8").trim().split("\n");
 		expect(lines.length).toBe(4);
 		expect(shotTable(b)).toContain("shots 3");
+	}, 60_000);
+});
+
+describe("tool lookup", () => {
+	test("a missing EIGHT_FFMPEG_PATH returns null instead of falling back", () => {
+		expect(
+			findMediaTool("ffmpeg", {
+				EIGHT_FFMPEG_PATH: join(dir, "no-such-ffmpeg"),
+				PATH: "/opt/homebrew/bin:/usr/bin",
+			}),
+		).toBeNull();
+	});
+});
+
+describe.skipIf(!ffmpeg || !ffprobe)("bounds and local-file handling", () => {
+	const strobe = join(dir, "strobe.mp4");
+	const one = join(dir, "one.mp4");
+	const make = () => {
+		if (existsSync(strobe)) return;
+		// Black and white swap every 0.2 s for 2 s: 9 cuts, 10 shots.
+		execFileSync(ffmpeg as string, [
+			"-v",
+			"error",
+			"-y",
+			"-f",
+			"lavfi",
+			"-i",
+			"color=c=black:s=64x36:d=2:r=10",
+			"-vf",
+			"geq=lum='if(mod(floor(T*5),2),235,16)':cb=128:cr=128",
+			"-c:v",
+			"mpeg4",
+			"-q:v",
+			"2",
+			"-pix_fmt",
+			"yuv420p",
+			strobe,
+		]);
+		execFileSync(ffmpeg as string, [
+			"-v",
+			"error",
+			"-y",
+			"-f",
+			"lavfi",
+			"-i",
+			"color=c=0x00ff00:s=64x36:d=1:r=10",
+			"-c:v",
+			"mpeg4",
+			"-pix_fmt",
+			"yuv420p",
+			one,
+		]);
+	};
+
+	test("the shot cap holds, the tail merges into the last shot, and the report says truncated", async () => {
+		make();
+		const b = await breakdown(strobe, ON, { maxShots: 3 });
+		expect(b.detectedShots).toBeGreaterThan(3);
+		expect(b.shots.length).toBe(3);
+		expect(b.truncated).toBe(true);
+		expect(b.shots[2].end).toBe(b.duration);
+		const out = writeBreakdown(b, join(dir, "strobe-out"));
+		expect(JSON.parse(readFileSync(out.report, "utf-8")).truncated).toBe(true);
+		expect(readFileSync(out.table, "utf-8")).toContain("truncated");
+	}, 60_000);
+
+	test("the spawn budget stops sampling and marks the rest unsampled", async () => {
+		make();
+		// probe + scene pass + 3 frames for one shot = 5 spawns.
+		const b = await breakdown(strobe, ON, { maxSpawns: 5 });
+		expect(b.truncated).toBe(true);
+		expect(b.shots[0].brightness).not.toBeNull();
+		expect(b.shots[1].brightness).toBeNull();
+		expect(b.shots[1].colours).toEqual([]);
+		expect(shotTable(b)).toContain("not sampled");
+	}, 60_000);
+
+	test("a run past its time budget fails clearly", async () => {
+		make();
+		await expect(breakdown(strobe, ON, { budgetMs: 1 })).rejects.toThrow("time budget");
+	});
+
+	test("an untruncated run says truncated: false", async () => {
+		make();
+		const b = await breakdown(one, ON);
+		expect(b.truncated).toBe(false);
+		expect(b.shots.length).toBe(1);
+	}, 60_000);
+
+	test("a local playlist pointing at http is refused without network", async () => {
+		const m3u8 = join(dir, "remote.m3u8");
+		writeFileSync(
+			m3u8,
+			"#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nhttp://127.0.0.1:9/seg.ts\n#EXT-X-ENDLIST\n",
+		);
+		await expect(breakdown(m3u8, ON)).rejects.toThrow(/Not a (readable )?video file/);
+	}, 30_000);
+
+	test("dash-prefixed and subfile-style names are read as plain local files", async () => {
+		make();
+		const cwd = process.cwd();
+		for (const n of ["-dash.mp4", "subfile,,start,0,end,0,,.mp4"]) {
+			copyFileSync(one, join(dir, n));
+			process.chdir(dir);
+			try {
+				const b = await breakdown(n, ON);
+				expect(b.file).toBe(join(realpathSync(dir), n));
+				expect(b.shots.length).toBe(1);
+			} finally {
+				process.chdir(cwd);
+			}
+		}
+	}, 60_000);
+});
+
+describe.skipIf(!ffmpeg || !ffprobe)("argv", () => {
+	test("every ffmpeg and ffprobe call pins the file protocol before its input", async () => {
+		const clip = join(dir, "argv.mp4");
+		execFileSync(ffmpeg as string, [
+			"-v",
+			"error",
+			"-y",
+			"-f",
+			"lavfi",
+			"-i",
+			"color=c=red:s=64x36:d=1:r=10",
+			"-c:v",
+			"mpeg4",
+			"-pix_fmt",
+			"yuv420p",
+			clip,
+		]);
+		const calls: string[][] = [];
+		await breakdown(clip, ON, { onSpawn: (_c, a) => calls.push(a) });
+		expect(calls.length).toBe(5);
+		for (const a of calls) {
+			const at = a.indexOf("-protocol_whitelist");
+			expect(at).toBeGreaterThan(-1);
+			expect(a[at + 1]).toBe("file");
+			expect(at).toBeLessThan(a.indexOf(clip));
+			expect(a.filter((x) => x === clip).length).toBe(1);
+		}
 	}, 60_000);
 });
