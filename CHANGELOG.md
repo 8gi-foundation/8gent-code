@@ -11,6 +11,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added (flag off) - revertible extension scope: unload and reload extensions (#3431)
 - `packages/extensions/scope.ts` records every tool, listener and deferred undo an extension registers through `activate(scope)` (`scope.tool`, `scope.listen`, `scope.defer`) together with its undo. `manager.unload(name)` runs the undos newest first. An undo that throws is reported and the remaining undos still run. `manager.reload(name)` unloads the extension and then loads a fresh import of the same directory. This is behind `EIGHT_EXT_SCOPE=1` and off by default. With the flag off, `activate` is never called and `unload`/`reload` return an error without changing anything. Tests: `packages/extensions/scope.test.ts`.
+- Hardening: once `dispose()` starts, the scope refuses any further `tool`/`listen`/`defer`, so a timer that fires after unload or after a failed activate cannot register anything. `activate()` has a 5 s limit; an activate that hangs past it is rolled back and marked as an error, and the other extensions still load. `listen()` refuses an emitter that has neither `off` nor `removeListener`. Tool names must match `/^[\w-]+$/` and `__proto__` is refused.
 - Hooks are not part of the scope yet. `HookManager` saves every registered hook to `~/.8gent/hooks.json`, so hooks will join the scope once hook registration can be kept in memory.
 
 ### Fixed - the launch splash marker and the voice cache follow the resolved home directory (refs #3394)
