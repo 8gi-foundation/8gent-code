@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - redaction recognises more key and credential formats
+- `redact()` in `packages/memory/redact.ts` now also recognises OpenAI keys with a hyphenated prefix (`sk-proj-`, `sk-svcacct-`, `sk-admin-`), Stripe secret and restricted keys (`sk_`/`rk_`, live and test), `Bearer` tokens, and `user:pass` credentials inside a URL (the scheme and host are kept). It is on by default wherever `redact()` already runs: memory admission and the kernel's trace capture, lesson collection, judge and local scorer. An Anthropic key keeps its own label, and ordinary words, paths and URLs without credentials are left unchanged. `packages/memory/redact.test.ts` covers each format, text that must stay unchanged, and long inputs.
+
 ### Changed (off by default) - the quick answer is provisional and the full answer always follows it, behind `EIGHT_QUICK_ANSWER=1` (#3416)
 - In the TUI, a quick answer is shown at once as its own grey message, "Quick answer (still checking): ...", and the full loop always runs afterwards without seeing it. The final answer opens with one line from a deterministic fact comparison: "Checked: ...", "Correction: ...", "Full answer (...)", "I could not check ..." or "Stopped before ...". Only the final answer goes to history.
 - The lane runs only on a surface that registers the new `onProvisional` callback (the TUI). Telegram, the daemon and Table get exactly the flag-off turn. Pressing ESC during the quick answer now ends the turn instead of starting a second, empty pass.
