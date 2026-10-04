@@ -9,6 +9,7 @@
  *
  * Usage: bun packages/ast-index/arch-rules.ts [--rules file] [--root dir] [--print-cycles]
  * Exit 0 = rules hold, 1 = violation, 2 = usage or read error.
+ * Forbidden rules ban direct imports only; a path through a cycle group is not checked.
  */
 
 import * as fs from "node:fs";
@@ -29,7 +30,9 @@ const isTest = (f: string) => /\.(test|spec)\.[jt]sx?$|[\\/]__tests__[\\/]/.test
 export function packageEdges(packagesDir: string): PackageEdges {
 	const dir = path.resolve(packagesDir);
 	const graph = buildDepGraph(dir, { "@8gent/": dir });
-	const pkgOf = (f: string) => path.relative(dir, f).split(path.sep)[0];
+	// "/" on every OS, so reports and tests read the same on Windows
+	const rel = (f: string) => path.relative(dir, f).split(path.sep).join("/");
+	const pkgOf = (f: string) => rel(f).split("/")[0];
 	const edges: PackageEdges = new Map();
 	for (const [file, node] of graph.nodes) {
 		if (isTest(file)) continue;
@@ -38,7 +41,7 @@ export function packageEdges(packagesDir: string): PackageEdges {
 		for (const target of node.imports) {
 			const to = pkgOf(target);
 			if (to === from || isTest(target) || edges.get(from)!.has(to)) continue;
-			edges.get(from)!.set(to, `${path.relative(dir, file)} -> ${path.relative(dir, target)}`);
+			edges.get(from)!.set(to, `${rel(file)} -> ${rel(target)}`);
 		}
 	}
 	return edges;
@@ -88,6 +91,9 @@ export function mutualPairs(edges: PackageEdges): string[][] {
 export function checkRules(edges: PackageEdges, rules: ArchRules): string[] {
 	const out: string[] = [];
 	for (const r of rules.forbidden) {
+		for (const name of [r.from, r.to])
+			if (!edges.has(name))
+				out.push(`unknown package in forbidden rule: ${name} (typo, or the package was removed)`);
 		const via = edges.get(r.from)?.get(r.to);
 		if (via)
 			out.push(
@@ -130,6 +136,10 @@ if (import.meta.main) {
 	if (process.argv.includes("--print-cycles")) console.log(JSON.stringify(groups));
 	const violations = checkRules(edges, rules);
 	for (const v of violations) console.error(`  FAIL ${v}`);
+	if (violations.length)
+		console.error(
+			"  To fix: remove the import, or if the coupling is intended, edit architecture.rules.json in this PR and say why.",
+		);
 	console.log(
 		violations.length ? `arch-rules: ${violations.length} violation(s)` : "arch-rules: OK",
 	);

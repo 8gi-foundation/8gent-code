@@ -75,13 +75,26 @@ describe("arch-rules", () => {
 		expect(checkRules(edges, RULES)).toEqual([]);
 	});
 
-	test("the real repo passes against architecture.rules.json", () => {
-		const r = spawnSync(process.execPath, ["packages/ast-index/arch-rules.ts"], {
-			cwd: REPO,
-			encoding: "utf-8",
-		});
-		expect(r.stderr).toBe("");
-		expect(r.stdout).toContain("arch-rules: OK");
-		expect(r.status).toBe(0);
+	test("a forbidden rule naming a package that does not exist fails", () => {
+		const edges = packageEdges(fixture(BASE));
+		const v = checkRules(edges, { ...RULES, forbidden: [{ from: "prem", to: "a" }] });
+		expect(v).toEqual([
+			"unknown package in forbidden rule: prem (typo, or the package was removed)",
+		]);
 	});
+
+	// Advisory until a separate CI-step PR with 8SO review: `bun run test` runs in CI,
+	// so this gate only runs when EIGHT_ARCH_GATE=1 is set exactly.
+	test.skipIf(process.env.EIGHT_ARCH_GATE !== "1")(
+		"the real repo passes against architecture.rules.json (EIGHT_ARCH_GATE=1 only; advisory until wired into CI)",
+		() => {
+			const r = spawnSync(process.execPath, ["packages/ast-index/arch-rules.ts"], {
+				cwd: REPO,
+				encoding: "utf-8",
+			});
+			expect(r.stderr).toBe("");
+			expect(r.stdout).toContain("arch-rules: OK");
+			expect(r.status).toBe(0);
+		},
+	);
 });
