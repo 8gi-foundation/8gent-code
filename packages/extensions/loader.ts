@@ -13,6 +13,8 @@ import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./typ
 export interface LoadOptions {
 	/** Bypass the module cache so a reload picks up edits. */
 	fresh?: boolean;
+	/** Max time activate() may take before it is rolled back. Default 5000 ms. */
+	activateTimeoutMs?: number;
 }
 
 const EXTENSIONS_DIR = path.join(
@@ -91,8 +93,15 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 			return { manifest, dir, module: mod, status: "loaded" };
 		}
 		const scope = createScope(manifest.name);
+		const ms = opts.activateTimeoutMs ?? 5000;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			await mod.activate(scope);
+			await Promise.race([
+				Promise.resolve().then(() => mod.activate(scope)),
+				new Promise((_, reject) => {
+					timer = setTimeout(() => reject(new Error(`activate timed out after ${ms} ms`)), ms);
+				}),
+			]);
 		} catch (err) {
 			// Undo whatever activate managed to register before it threw.
 			const { errors } = await scope.dispose();
@@ -103,6 +112,8 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 				status: "error",
 				error: [`Activate failed: ${err}`, ...errors].join("; "),
 			};
+		} finally {
+			clearTimeout(timer);
 		}
 		return { manifest, dir, module: mod, status: "loaded", scope };
 	} catch (err) {
@@ -117,7 +128,10 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 }
 
 /** Scan extensions directory and load all valid extensions */
-export async function loadAllExtensions(root: string = EXTENSIONS_DIR): Promise<LoadedExtension[]> {
+export async function loadAllExtensions(
+	root: string = EXTENSIONS_DIR,
+	opts: LoadOptions = {},
+): Promise<LoadedExtension[]> {
 	if (!fs.existsSync(root)) return [];
 
 	const entries = fs.readdirSync(root, { withFileTypes: true });
@@ -126,7 +140,7 @@ export async function loadAllExtensions(root: string = EXTENSIONS_DIR): Promise<
 		.map((e) => path.join(root, e.name))
 		.filter((d) => fs.existsSync(path.join(d, MANIFEST_FILE)));
 
-	const results = await Promise.allSettled(dirs.map((d) => loadExtension(d)));
+	const results = await Promise.allSettled(dirs.map((d) => loadExtension(d, opts)));
 
 	const loaded: LoadedExtension[] = [];
 	for (const result of results) {

@@ -34,7 +34,7 @@ export async function activate(scope) {
 let root: string;
 let prevFlag: string | undefined;
 
-function writeExt(name: string, version: number): string {
+function writeExt(name: string, version: number, entry = ENTRY(version)): string {
 	const dir = path.join(root, name);
 	fs.mkdirSync(dir, { recursive: true });
 	fs.writeFileSync(
@@ -47,7 +47,7 @@ function writeExt(name: string, version: number): string {
 			tools: [{ name: "ping", description: "ping", parameters: {} }],
 		}),
 	);
-	fs.writeFileSync(path.join(dir, "index.js"), ENTRY(version));
+	fs.writeFileSync(path.join(dir, "index.js"), entry);
 	return dir;
 }
 
@@ -126,6 +126,83 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 
 		// Disposing twice is a no-op.
 		expect((await scope.dispose()).errors).toEqual([]);
+	});
+
+	test("registrations after unload are refused (timer fires late)", async () => {
+		const mgr = createExtensionManager({ dir: root });
+		writeExt(
+			"late",
+			1,
+			`export function activate(scope) {
+				setTimeout(() => {
+					try { scope.listen(globalThis.__extScopeTestBus, "msg", () => {}); }
+					catch (e) { globalThis.__extScopeLate = String(e.message); }
+				}, 20);
+			}`,
+		);
+		await mgr.loadAll();
+		expect((await mgr.unload("late")).errors).toEqual([]);
+		await Bun.sleep(60);
+		expect(bus.listenerCount("msg")).toBe(0);
+		expect(String(g.__extScopeLate)).toContain("disposed");
+	});
+
+	test("a hanging activate times out, is rolled back, and does not block the rest", async () => {
+		const mgr = createExtensionManager({ dir: root, activateTimeoutMs: 50 });
+		writeExt("alpha", 1);
+		writeExt(
+			"hang",
+			1,
+			`export function activate(scope) {
+				scope.listen(globalThis.__extScopeTestBus, "msg", () => {});
+				return new Promise(() => {});
+			}`,
+		);
+		const loaded = await mgr.loadAll();
+		const hang = loaded.find((e) => e.manifest.name === "hang");
+		expect(hang?.status).toBe("error");
+		expect(hang?.error).toContain("timed out");
+		expect(loaded.find((e) => e.manifest.name === "alpha")?.status).toBe("loaded");
+		// Only alpha's listener is left; hang's was undone on timeout.
+		expect(bus.listenerCount("msg")).toBe(1);
+		expect(mgr.getTools()["alpha:echo"]?.()).toBe("v1");
+	});
+
+	test("activate that throws rolls back what it registered", async () => {
+		writeExt(
+			"broken",
+			1,
+			`export function activate(scope) {
+				scope.tool("t", () => 1);
+				globalThis.__extScopeTestLive.count++;
+				scope.defer(() => { globalThis.__extScopeTestLive.count--; });
+				scope.listen(globalThis.__extScopeTestBus, "msg", () => {});
+				throw new Error("kaboom");
+			}`,
+		);
+		const ext = await loadExtension(path.join(root, "broken"));
+		expect(ext.status).toBe("error");
+		expect(ext.error).toContain("kaboom");
+		expect(ext.scope).toBeUndefined();
+		expect(bus.listenerCount("msg")).toBe(0);
+		expect(live.count).toBe(0);
+		expect(collectExtensionTools([ext])).toEqual({});
+	});
+
+	test("listen refuses an emitter it could not unsubscribe from", () => {
+		const scope = createScope("noff");
+		let subscribed = 0;
+		const emitter = { on: () => subscribed++ };
+		expect(() => scope.listen(emitter, "msg", () => {})).toThrow(/off/);
+		expect(subscribed).toBe(0);
+	});
+
+	test("tool names are validated, so __proto__ cannot be registered", () => {
+		const scope = createScope("names");
+		expect(() => scope.tool("__proto__", () => 1)).toThrow(/tool name/);
+		expect(() => scope.tool("a b", () => 1)).toThrow(/tool name/);
+		scope.tool("ok-name_1", () => 1);
+		expect(Object.keys(scope.tools)).toEqual(["ok-name_1"]);
 	});
 
 	test("unload of an unknown extension reports, does not throw", async () => {

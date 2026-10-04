@@ -22,12 +22,15 @@ let _manager: ExtensionManager | null = null;
 
 const OFF = { errors: ["[ext] unload/reload need EIGHT_EXT_SCOPE=1"] };
 
-/** Build a manager. `dir` is overridable for tests. */
-export function createExtensionManager(opts: { dir?: string } = {}): ExtensionManager {
+/** Build a manager. `dir` and `activateTimeoutMs` are overridable for tests. */
+export function createExtensionManager(
+	opts: { dir?: string; activateTimeoutMs?: number } = {},
+): ExtensionManager {
+	const timeout = { activateTimeoutMs: opts.activateTimeoutMs };
 	const manager: ExtensionManager = {
 		extensions: [],
 		async loadAll() {
-			manager.extensions = await loadAllExtensions(opts.dir);
+			manager.extensions = await loadAllExtensions(opts.dir, timeout);
 			return manager.extensions;
 		},
 		getTools() {
@@ -47,7 +50,7 @@ export function createExtensionManager(opts: { dir?: string } = {}): ExtensionMa
 			const dir = manager.extensions.find((e) => e.manifest.name === name)?.dir;
 			if (!dir) return { errors: [`[ext] ${name}: not loaded`] };
 			const { errors } = await manager.unload(name);
-			const ext = await loadExtension(dir, { fresh: true });
+			const ext = await loadExtension(dir, { ...timeout, fresh: true });
 			manager.extensions.push(ext);
 			return { errors: ext.error ? [...errors, ext.error] : errors };
 		},
