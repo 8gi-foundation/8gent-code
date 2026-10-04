@@ -1,0 +1,46 @@
+{
+	"$comment": "Checked by `bun run arch:check` (packages/ast-index/arch-rules.ts). forbidden: package `from` must not import package `to`. baselineCycleGroups: the package import cycles that existed on 2026-10-04 (issue #3488); a cycle outside these groups fails. Shrink a group when a cycle is broken; never grow one to make a check pass.",
+	"forbidden": [
+		{
+			"from": "permissions",
+			"to": "eight",
+			"reason": "the policy engine must not depend on the agent it polices"
+		},
+		{ "from": "secrets", "to": "eight", "reason": "secret storage must not depend on the agent" },
+		{
+			"from": "quarantine",
+			"to": "eight",
+			"reason": "untrusted-skill quarantine must not depend on the agent"
+		}
+	],
+	"baselineCycleGroups": [
+		[
+			"ai",
+			"ast-index",
+			"daemon",
+			"decide",
+			"eight",
+			"extensions",
+			"eyes",
+			"goal",
+			"harness",
+			"infinite",
+			"kernel",
+			"mcp",
+			"memory",
+			"orchestration",
+			"permissions",
+			"proactive",
+			"providers",
+			"self-autonomy",
+			"skills",
+			"table",
+			"telegram-bot",
+			"tools",
+			"validation",
+			"verify",
+			"workflow"
+		],
+		["quarantine", "toolshed"]
+	]
+}

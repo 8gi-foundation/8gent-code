@@ -59,6 +59,7 @@
     "smoke:strict": "bun --config=bin/bunfig.empty.toml scripts/smoke.ts --strict",
     "smoke:pack": "bun --config=bin/bunfig.empty.toml scripts/pack-smoke.ts",
     "smoke:bare-install": "sh scripts/bare-install-smoke.sh",
+    "arch:check": "bun --config=bin/bunfig.empty.toml packages/ast-index/arch-rules.ts",
     "verify:presets": "bun --config=bin/bunfig.empty.toml scripts/verify-presets.ts",
     "verify:presets:strict": "bun --config=bin/bunfig.empty.toml scripts/verify-presets.ts --strict",
     "lint": "biome lint .",
