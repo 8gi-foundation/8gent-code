@@ -89,6 +89,22 @@ import {
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
+import {
+	CLARIFY_QUESTION,
+	classifyPrompt,
+	compareQuick,
+	installedModelsFor,
+	pickQuickModel,
+	promptNeedsContext,
+	quickFacts,
+	quickLaneEnabled,
+	quickMessages,
+	runQuickAnswer,
+	safeFacts,
+	safeQuickText,
+	verdictFacts,
+	verdictLine,
+} from "./quick-answer";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -137,6 +153,7 @@ import {
 } from "../ai";
 import {
 	type TextTool,
+	type TextToolUsage,
 	buildTextToolCall,
 	needsTextTools,
 	resolveTextToolEndpoint,
@@ -814,6 +831,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// no fabricated numbers, ever.
 		let usageStepNumber = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+		const onUsage = (usage: TextToolUsage) => {
+			usageTotals.promptTokens += usage.promptTokens;
+			usageTotals.completionTokens += usage.completionTokens;
+			usageTotals.totalTokens += usage.totalTokens;
+			this.events.onStepFinish?.({
+				stepNumber: usageStepNumber++,
+				finishReason: "stop",
+				text: "",
+				toolCalls: [],
+				usage,
+			});
+		};
 		const runTurn = (provider: string, model: string) => {
 			const rawCall = buildTextToolCall({
 				provider,
@@ -830,18 +859,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
 				tools: tools.map((t) => t.spec),
-				onUsage: (usage) => {
-					usageTotals.promptTokens += usage.promptTokens;
-					usageTotals.completionTokens += usage.completionTokens;
-					usageTotals.totalTokens += usage.totalTokens;
-					this.events.onStepFinish?.({
-						stepNumber: usageStepNumber++,
-						finishReason: "stop",
-						text: "",
-						toolCalls: [],
-						usage,
-					});
-				},
+				onUsage,
 			});
 			const call = (msgs: Parameters<typeof rawCall>[0]) =>
 				withTurnTimeout(
@@ -910,13 +928,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// The quick-answer lane's outcome (#3411), written to the run log so the
+		// A/B can report the fall-through rate. Set below when the flag is on.
+		let quickRecord: RunLogEntry["quick"];
+
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
 		const recordFailedRun = (reason: string) => {
 			if (!this.enableReporting) return;
 			try {
-				appendRun(
-					failedTurnRunEntry({
+				appendRun({
+					...failedTurnRunEntry({
 						model: this.config.model,
 						startedAt: chatStartTime,
 						tokens: usageTotals.totalTokens,
@@ -929,10 +951,115 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						prompt: textForAgent,
 						reason,
 					}),
-				);
+					...(quickRecord ? { quick: quickRecord } : {}),
+				});
 			} catch {
 				// The run log is best-effort; it must never mask the turn's reply.
 			}
+		};
+
+		// ── Quick-answer fast lane (#3411, #3416, EIGHT_QUICK_ANSWER=1) ──────
+		// A short question with no instruction in it is first answered by a
+		// bounded read-only run (3 tool calls, 15 s). A complete answer is shown
+		// at once as a provisional message; the normal loop then ALWAYS runs,
+		// never sees the lane's messages, and its answer is labelled with how it
+		// compares. The lane runs only for a surface that can show the quick
+		// answer (events.onProvisional): every other surface gets the plain turn.
+		// facts: every quick fact, for the comparison. shown: the redacted, prompt-aware
+		// subset a verdict line names. Neither reaches the log unredacted.
+		let provisional: { answer: string; facts: string[]; shown: string[] } | null = null;
+		if (quickLaneEnabled() && !isTableSession) {
+			quickRecord = {
+				class: classifyPrompt(textForAgent),
+				...(promptNeedsContext(textForAgent) ? { context: true } : {}),
+				ran: false,
+				ok: false,
+				ms: 0,
+				tools: 0,
+				verdict: "none",
+			};
+		}
+		const showProvisional = this.events.onProvisional;
+		if (quickRecord?.class === "quick" && !this.proactiveGatherer && showProvisional) {
+			const pick = pickQuickModel({
+				envModel: process.env.EIGHT_QUICK_MODEL,
+				sessionModel: effectiveModel,
+				installed: process.env.EIGHT_QUICK_MODEL ? [] : await installedModelsFor(effectiveProvider),
+			});
+			const quickModel = pick.model;
+			const laneTokens: number[] = [];
+			const quick = await runQuickAnswer({
+				// Its own small prompt and the user's message only (round 4): no agent
+				// system prompt, no history.
+				messages: quickMessages(this.config.workingDirectory || process.cwd(), textForAgent),
+				tools,
+				signal,
+				makeCall: (laneSignal, timeoutMs, laneSpecs) =>
+					buildTextToolCall({
+						provider: effectiveProvider,
+						model: quickModel,
+						baseUrl: this.config.baseUrl,
+						temperature: this.runtimeParams.temperature ?? 0.2,
+						signal: laneSignal,
+						timeoutMs,
+						tools: laneSpecs,
+						onUsage: (usage) => {
+							laneTokens.push(usage.promptTokens);
+							onUsage(usage);
+						},
+						// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
+						noThink: true,
+					}),
+			});
+			quickRecord = {
+				...quickRecord,
+				ran: true,
+				ok: quick.ok,
+				model: quickModel,
+				modelSource: pick.source,
+				...(laneTokens.length > 0 ? { promptTokens: laneTokens } : {}),
+				ms: quick.ms,
+				tools: quick.tools,
+				...(quick.ok ? {} : { reason: quick.reason.slice(0, 200) }),
+				...(!quick.ok && quick.claims ? { claims: quick.claims } : {}),
+			};
+			if (quick.ok) {
+				const facts = quickFacts(quick.answer).map((f) => f.value);
+				const safe = safeFacts(quick.answer, facts);
+				provisional = { answer: quick.answer, facts, shown: verdictFacts(safe, textForAgent) };
+				quickRecord = {
+					...quickRecord,
+					shownMs: Date.now() - chatStartTime,
+					facts: safe,
+					text: safeQuickText(quick.answer),
+				};
+				try {
+					showProvisional({ text: quick.result.content });
+				} catch (err) {
+					// A display error must never cost the user the checked answer.
+					console.log(
+						`[quick-answer] onProvisional threw: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+			} else if (quick.reason === "aborted") {
+				// ESC during the lane ends the turn here: no second, unasked-for pass.
+				this.abortController = null;
+				const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
+				const failure = describeLocalTurnFailure(signal.reason ?? new Error("aborted"), {
+					endpoint,
+					timeoutMs: attemptTimeoutMs,
+				});
+				this.messageHistory.push({ role: "assistant", content: failure.message });
+				recordFailedRun(`quick lane aborted: ${failure.reason}`);
+				return failure.message;
+			} else {
+				console.log(`[quick-answer] full loop after ${quick.ms} ms: ${quick.reason}`);
+			}
+		}
+		// The final line names the quick facts; the failure detail goes to the run log only.
+		const quickNotChecked = (verdict: "unchecked" | "stopped", failed: boolean): string => {
+			if (quickRecord) quickRecord = { ...quickRecord, verdict };
+			return verdictLine(verdict, provisional?.shown ?? [], { failed });
 		};
 
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
@@ -955,9 +1082,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			});
 			if (!outcome.ok) {
 				this.abortController = null;
-				this.messageHistory.push({ role: "assistant", content: outcome.message });
+				const reply = provisional ? quickNotChecked("unchecked", true) : outcome.message;
+				this.messageHistory.push({ role: "assistant", content: reply });
 				recordFailedRun(`no local model: ${outcome.message}`);
-				return outcome.message;
+				return reply;
 			}
 			if (outcome.rerouted) {
 				// Self-correct the session so subsequent turns skip the dead model
@@ -974,9 +1102,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.abortController = null;
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
-			this.messageHistory.push({ role: "assistant", content: failure.message });
+			// ESC, the watchdog or the circuit breaker stopped it; a timeout is a failure.
+			const reply = provisional
+				? signal.aborted && failure.kind !== "timeout"
+					? quickNotChecked("stopped", false)
+					: quickNotChecked("unchecked", true)
+				: failure.message;
+			this.messageHistory.push({ role: "assistant", content: reply });
 			recordFailedRun(failure.reason);
-			return failure.message;
+			return reply;
 		}
 		this.abortController = null;
 
@@ -998,7 +1132,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// onto the assistant history, with the post-turn bookkeeping the native
 		// path performs (session evidence summary, run log, journal). A reply the
 		// honesty gate rewrote is NOT flavored - no celebration on a failure.
-		const content = gated.content;
+		let content = gated.content;
+		if (provisional && quickRecord) {
+			// Only the checked answer goes to history: the next turn never sees a wrong quick one.
+			// The full loop returned, so its answer is compared even if ESC came after it:
+			// "stopped" is only for a full loop that did not return (the catch above).
+			const clean = !gated.violated && agentResult.unverified.length === 0;
+			const verdict = compareQuick(provisional.answer, content, clean).verdict;
+			quickRecord = { ...quickRecord, verdict };
+			const line = verdictLine(verdict, provisional.shown);
+			content = content.trim() ? `${line}\n\n${content}` : line;
+		}
 		const flavor = personalityVoice.getFlavor("complete");
 		// Never flavor a Table reply. The officer speaking is Karen or Rishi, not
 		// 8gent, and flavorResponse staples a random COMPLETION_PHRASE ("Consider
@@ -1011,7 +1155,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Same for a reply carrying "[harness] Not verified" lines: the tool log
 		// contradicts part of it, so no completion tagline goes on the end.
 		const flavoredContent =
-			gated.violated || agentResult.unverified.length > 0 || this.config.agentScope === "__table__"
+			gated.violated ||
+			agentResult.unverified.length > 0 ||
+			this.config.agentScope === "__table__" ||
+			provisional !== null
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1033,8 +1180,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				modified: Array.from(this.sessionWriter.getFilesModified()),
 				session: this.sessionId,
 				cwd: this.config.workingDirectory || process.cwd(),
-				prompt: textForAgent.slice(0, 120),
+				prompt: textForAgent,
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
+				...(quickRecord ? { quick: quickRecord } : {}),
 			});
 		}
 
@@ -1158,7 +1306,65 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		if (needsClarification(textForAgent) && !imageBase64) {
+		// With the quick-answer lane on for this surface (#3411, #3416: the flag
+		// AND an onProvisional callback), the gate's heuristic is not used: it
+		// flags most short prompts (#3417). Instead one fixed question is asked,
+		// only for an unclear first message with nothing to resolve it against.
+		// A surface with no callback keeps the flag-off gate.
+		// Text-tool path only: the lane exists only there, so a native or cloud
+		// provider with the flag on gets exactly the flag-off turn.
+		const laneOn =
+			quickLaneEnabled() &&
+			this.events.onProvisional !== undefined &&
+			this.config.agentScope !== "__table__" &&
+			shouldUseTextTools(this.config.runtime, (this.config.allowedPaths?.length ?? 0) > 0);
+		const promptClass = laneOn ? classifyPrompt(textForAgent) : null;
+		const quickPrompt = promptClass === "quick";
+		if (laneOn) {
+			this.proactiveGatherer = null;
+			if (
+				promptClass === "unclear" &&
+				!imageBase64 &&
+				!this.messageHistory.some((m) => m.role === "assistant")
+			) {
+				// Asked instead of answered: no model call. The reply to it is a turn in a
+				// session that now has an assistant message, so it is never asked twice.
+				this.messageHistory.push({ role: "user", content: textForAgent });
+				this.messageHistory.push({ role: "assistant", content: CLARIFY_QUESTION });
+				this.sessionWriter.writeUserMessage(textForAgent);
+				this.sessionWriter.writeAssistantContent(0, [{ type: "text", text: CLARIFY_QUESTION }]);
+				if (this.enableReporting) {
+					try {
+						appendRun({
+							ts: new Date().toISOString(),
+							status: "ok",
+							model: this.config.model,
+							dur: 0,
+							tokens: 0,
+							cost: null,
+							tools: 0,
+							created: [],
+							modified: [],
+							session: this.sessionId,
+							cwd: this.config.workingDirectory || process.cwd(),
+							prompt: textForAgent,
+							quick: {
+								class: "unclear",
+								ran: false,
+								ok: false,
+								ms: 0,
+								tools: 0,
+								asked: true,
+								verdict: "none",
+							},
+						});
+					} catch {
+						// The run log is best-effort; it must never mask the reply.
+					}
+				}
+				return CLARIFY_QUESTION;
+			}
+		} else if (needsClarification(textForAgent) && !imageBase64) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {
@@ -1190,8 +1396,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// pre-fetch the obvious retrieval (ast/grep/glob/vector/fileread)
 		// BEFORE the LLM turn. Model-agnostic — small local models get the
 		// same correct routing as frontier models. Skipped if the proactive
-		// gatherer already injected a clarifying question.
-		if (!this.proactiveGatherer) {
+		// gatherer already injected a clarifying question. Also skipped for a
+		// prompt the quick-answer lane takes (#3411, 8SO F1): its grep strategy
+		// runs run_command, outside the lane's read-only tools and budget.
+		if (!this.proactiveGatherer && !quickPrompt) {
 			await this.tryRunPreToolRouter(textForAgent);
 		}
 
@@ -2279,7 +2487,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					modified: Array.from(this.sessionWriter.getFilesModified()),
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
-					prompt: textForAgent.slice(0, 120),
+					prompt: textForAgent,
 				});
 			}
 			const finalContent = flavoredContent;
@@ -2399,7 +2607,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					modified: Array.from(this.sessionWriter.getFilesModified()),
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
-					prompt: textForAgent.slice(0, 120),
+					prompt: textForAgent,
 					error: errMsg.slice(0, 200),
 				});
 			}

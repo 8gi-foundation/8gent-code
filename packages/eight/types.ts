@@ -94,6 +94,12 @@ export interface AgentEventCallbacks {
 	 * that runs the turn while it runs. Display only (#3102).
 	 */
 	onModelRouted?: (event: { requested: string; used: string; provider: string }) => void;
+	/**
+	 * A quick answer shown while the full answer is still running (#3416). Registering
+	 * this is what turns the quick-answer lane on for a surface (with EIGHT_QUICK_ANSWER=1):
+	 * a surface that cannot show it gets the plain turn. `text` is the whole labelled message.
+	 */
+	onProvisional?: (event: { text: string }) => void;
 	onCompaction?: (event: {
 		summary: string;
 		tokensBefore: number;
