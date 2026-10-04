@@ -27,9 +27,14 @@
  */
 
 import { createOllamaServer } from "../local-model-server";
+import {
+	DecisionReadoutJudge,
+	decisionConfigFromEnv,
+	decisionJudgeEnabled,
+} from "./decision-readout";
 
 /** Where a verdict came from, so callers can tell a real judgment from a fail-closed default. */
-export type VerdictSource = "selene" | "fail-closed";
+export type VerdictSource = "selene" | "decision-readout" | "fail-closed";
 
 /** The result of judging one output against a rubric. */
 export interface JudgeVerdict {
@@ -223,6 +228,11 @@ export class SeleneJudge {
 
 	/** Judge one output against a rubric. Never throws; fails closed to FAIL. */
 	async judge(output: string, rubric: string): Promise<JudgeVerdict> {
+		// Flag-off trial (#3455): EIGHT_DECISION_JUDGE=1 routes to the llama.cpp
+		// /v1/systemone probability reader. Read per call; off means unchanged.
+		if (decisionJudgeEnabled()) {
+			return new DecisionReadoutJudge(decisionConfigFromEnv()).judge(output, rubric);
+		}
 		const prompt = buildJudgePrompt(output, rubric);
 		let raw: string;
 		try {
