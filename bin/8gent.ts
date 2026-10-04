@@ -1742,26 +1742,14 @@ async function blueprintCommand(args: string[]) {
 		try {
 			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
 			console.log(`Saved routine ${r.id} (${r.name}), cron pattern "${r.schedule}".`);
-			console.log("Nothing runs routines automatically yet.");
-			console.log(`Run it once now with: 8gent blueprint run ${r.id}`);
+			console.log("Nothing runs routines yet; this trial only saves them.");
 		} catch (e) {
 			console.error(e instanceof Error ? e.message : String(e));
 			process.exit(1);
 		}
 		return;
 	}
-	if (sub === "run" && target) {
-		const run = await getRoutineManager().trigger(target);
-		if (!run) {
-			console.error(`No saved routine with id ${target}`);
-			process.exit(1);
-		}
-		console.log(`Run ${run.id}: ${run.status}`);
-		if (run.error) console.error(run.error);
-		if (run.status !== "completed") process.exit(1);
-		return;
-	}
-	console.error("Usage: 8gent blueprint list | add <name> key=value... | run <id>");
+	console.error("Usage: 8gent blueprint list | add <name> key=value...");
 	process.exit(1);
 }
 

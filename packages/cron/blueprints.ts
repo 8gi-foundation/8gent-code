@@ -12,8 +12,7 @@
  *
  * Trial behind EIGHT_BLUEPRINTS=1. With any other value createFromBlueprint
  * refuses and the one surface, `8gent blueprint` in bin/8gent.ts, writes
- * nothing. Nothing runs routines automatically yet; `8gent blueprint run <id>`
- * runs a saved one once through RoutineManager.trigger().
+ * nothing. Nothing runs routines yet; this trial only saves them.
  */
 
 import type { RoutineManager } from "./routines";

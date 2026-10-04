@@ -3,8 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// Drives `8gent blueprint` as a real process with a temp HOME. Never calls
-// `run` on a saved routine, so no agent or model is started.
+// Drives `8gent blueprint` as a real process with a temp HOME. The command
+// only lists and saves, so no agent or model is started.
 const BIN = path.join(import.meta.dir, "..", "..", "bin", "8gent.ts");
 let home: string;
 
@@ -33,16 +33,16 @@ describe("8gent blueprint", () => {
 			expect(r.code).not.toBe(0);
 			expect(r.err).toContain("Blueprints are off");
 		}
-		expect(cli(["run", "abcd1234"]).err).toContain("Blueprints are off");
+		expect(cli(["list"]).err).toContain("Blueprints are off");
 		expect(fs.existsSync(store())).toBe(false);
 	});
 
-	test("flag on: add saves exactly one routine and says nothing runs it yet", () => {
+	test("flag on: add saves exactly one routine and says nothing runs it", () => {
 		const r = cli(["add", "pr-watch", "repo=owner/repo", "every=6h"], "1");
 		expect(r.code).toBe(0);
 		expect(r.out).toContain("Saved routine");
-		expect(r.out).toContain("Nothing runs routines automatically yet.");
-		expect(r.out).toContain("8gent blueprint run ");
+		expect(r.out).toContain("Nothing runs routines yet; this trial only saves them.");
+		expect(r.out).not.toContain("blueprint run");
 		expect(r.out.toLowerCase()).not.toContain("scheduled");
 		const saved = JSON.parse(fs.readFileSync(store(), "utf-8"));
 		expect(saved).toHaveLength(1);
@@ -56,10 +56,10 @@ describe("8gent blueprint", () => {
 		expect(fs.existsSync(store())).toBe(false);
 	});
 
-	test("flag on: run with an unknown id refuses", () => {
-		const r = cli(["run", "nope0000"], "1");
+	test("flag on: there is no run subcommand", () => {
+		const r = cli(["run", "abcd1234"], "1");
 		expect(r.code).not.toBe(0);
-		expect(r.err).toContain("No saved routine with id nope0000");
+		expect(r.err).toContain("Usage: 8gent blueprint list | add <name> key=value...");
 	});
 
 	test("flag on: list shows the three blueprints", () => {
