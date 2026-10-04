@@ -1649,10 +1649,7 @@ export function App({
 	// and lights the ASK chip in HeaderBar. The hook registers the approval
 	// handler and routes Y/N/E/S to the card, never to the chat input (#3055).
 	// Headless callers see no handler and PermissionManager falls back to stdin.
-	// The chat column the card is drawn in: a `full` card is refused unless
-	// it fits there whole (#3474).
-	const chatColumnRef = useRef<DOMElement>(null);
-	const approvalPending = useApprovalCard(undefined, chatColumnRef);
+	const approvalPending = useApprovalCard();
 
 	// A mouse selection copied text (#3239): the footer says so for 2 s.
 	const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -6267,7 +6264,7 @@ export function App({
 								<PlanEmpty width={PLAN_COLUMN_WIDTH} />
 							))}
 
-					<Box ref={chatColumnRef} flexGrow={1} flexDirection="column" minWidth={0}>
+					<Box flexGrow={1} flexDirection="column" minWidth={0}>
 						<LiveFocalStripWithGoal
 							goalClient={goalClient}
 							adhdMode={adhdMode}

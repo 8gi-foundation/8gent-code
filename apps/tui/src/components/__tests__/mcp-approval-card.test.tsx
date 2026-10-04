@@ -1,18 +1,9 @@
 /**
  * MCP cards (`full`) are shown whole or refused by the TUI, from its real
- * geometry (#3474, 8SO round 3). Round 2 guessed in packages/permissions
- * (stdout.columns - 4, 12 reserved rows, .length as width); the card really
- * sits in the chat column, 81 wide at 120 columns with the activity rail, 56
- * with the PLAN column open, under more chrome than guessed.
- *
- * The shell below is app.tsx's column structure (FixedFrame, header, tabs,
- * bordered shell, PLAN column, chat column with the focal strip, chat box,
- * card and input, activity rail, bottom bar), with stand-ins for the
- * components' contents. Every case drives the real path: describeServer ->
- * askMcpStartApproval / askMcpApproval -> the approval channel ->
- * useApprovalCard -> InlineApprovalPrompt, rendered by Ink. The rule checked:
- * every line of the card and its key row are on screen, or no card is on
- * screen and the request was refused.
+ * geometry, and take no key before they have been on screen (#3474). The
+ * shell is app.tsx's column structure with stand-in contents; every case
+ * drives describeServer -> askMcp*Approval -> the approval channel ->
+ * useApprovalCard -> InlineApprovalPrompt, rendered by Ink.
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -27,6 +18,7 @@ import {
 } from "../../../../../packages/permissions/mcp-gate.js";
 import { _resetTuiApprovalChannel } from "../../../../../packages/permissions/tui-approval-channel.js";
 import {
+	CARD_MIN_SHOW_MS,
 	_resetApprovalCard,
 	settleApprovalKey,
 	useApprovalCard,
@@ -76,7 +68,7 @@ afterEach(() => {
 
 function Shell({ plan }: { plan: boolean }) {
 	const column = useRef<DOMElement>(null);
-	const card = useApprovalCard(undefined, column);
+	const card = useApprovalCard();
 	const viewport = useViewport();
 	columnWidth = column.current?.yogaNode?.getComputedWidth() ?? 0;
 	return (
@@ -157,7 +149,8 @@ async function wholeOrRefused(
 		if (count) expect(screen.split(count[0]).length - 1).toBe(count[1]);
 		expect(screen).toContain("[Y] approve");
 		expect(screen).toContain("INPUT");
-		settleApprovalKey("n", {});
+		await tick(CARD_MIN_SHOW_MS);
+		settleApprovalKey("n", {}, stdout);
 		expect(await answer).toStartWith("[PERMISSION DENIED]");
 		return "shown";
 	}
@@ -228,7 +221,7 @@ test("a card that fits is shown whole and Y approves it", async () => {
 		"shown",
 	);
 	const again = askMcpStartApproval(servers(3, (i) => `@scope/pkg-${i}`));
-	await tick(120);
+	await tick(CARD_MIN_SHOW_MS + 20);
 	settleApprovalKey("y", {}, stdout);
 	expect(await again).toBeNull();
 });
@@ -242,23 +235,35 @@ test("the pilot's single-server card at 160x48 is shown, and Y starts it", async
 		args: ["/private/var/folders/xy/run-1790898045/mcp-fake/server.ts"],
 	});
 	const answer = askMcpStartApproval([line]);
-	await tick(120);
+	await tick(CARD_MIN_SHOW_MS + 20);
 	expect(strip(stdout.last)).toContain("mcp-fake/server.ts");
 	settleApprovalKey("y", {}, stdout);
 	expect(await answer).toBeNull();
 });
 
-test("resized after the card was drawn: Y is a no; a shrink that clips it refuses it", async () => {
+test("a key before the card has been on screen CARD_MIN_SHOW_MS is claimed and ignored", async () => {
+	const stdout = await mount(120, 40, false);
+	const answer = askMcpStartApproval(servers(3, (i) => `@scope/pkg-${i}`));
+	await new Promise((r) => setImmediate(r)); // laid out, not yet painted
+	expect(settleApprovalKey("y", {}, stdout)).toBe(false);
+	await tick(CARD_MIN_SHOW_MS - 150);
+	expect(settleApprovalKey("y", {}, stdout)).toBe(false);
+	expect(await Promise.race([answer, tick(5).then(() => "pending")])).toBe("pending");
+	await tick(200);
+	expect(settleApprovalKey("y", {}, stdout)).toBe(true);
+	expect(await answer).toBeNull();
+});
+
+test("resized after the card was drawn: keys wait again; a shrink that clips it refuses it", async () => {
 	const stdout = await mount(120, 40, false);
 	const lines = servers(3, (i) => `@scope/pkg-${i}`);
-	// Size changed and no layout has run since: the card was not seen at this size.
 	let answer = askMcpStartApproval(lines);
-	await tick(120);
-	stdout.rows = 41;
-	settleApprovalKey("y", {}, stdout);
-	expect(await answer).toStartWith("[PERMISSION DENIED]");
+	await tick(CARD_MIN_SHOW_MS + 20);
+	stdout.rows = 41; // no layout at this size yet
+	expect(settleApprovalKey("y", {}, stdout)).toBe(false);
 	stdout.rows = 40;
-	// The terminal shrinks under a card: the re-render finds it clipped.
+	settleApprovalKey("n", {}, stdout);
+	expect(await answer).toStartWith("[PERMISSION DENIED]");
 	answer = askMcpStartApproval(lines);
 	await tick(120);
 	expect(strip(stdout.last)).toContain("HIDDEN_LAST_SERVER_PAYLOAD");
@@ -269,20 +274,53 @@ test("resized after the card was drawn: Y is a no; a shrink that clips it refuse
 	expect(strip(stdout.last)).not.toContain("approve");
 });
 
-test("a full card with no column to measure is refused, never drawn unchecked", async () => {
+test("the card's own box is measured: clipped inside a shrunk wrapper, it is refused", async () => {
+	const stdout = makeStdout(80, 14);
+	function Wrapped() {
+		const p = useApprovalCard();
+		return (
+			<FixedFrame>
+				<Box flexGrow={1} flexDirection="column" minHeight={0}>
+					<Box flexDirection="column">
+						{p && <InlineApprovalPrompt target={p.target} full={p.full} />}
+					</Box>
+					<Box height={3} flexShrink={0} borderStyle="round">
+						<Text>INPUT</Text>
+					</Box>
+				</Box>
+			</FixedFrame>
+		);
+	}
+	instance = render(<Wrapped />, {
+		stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
+		stdout: stdout as unknown as NodeJS.WriteStream,
+		debug: false,
+		exitOnCtrlC: false,
+		patchConsole: false,
+	});
+	await tick();
+	const answer = askMcpStartApproval(servers(13, (i) => `pkg-${i}`));
+	expect(await answer).toContain("does not fit on this screen");
+	await tick(120);
+	expect(strip(stdout.last)).not.toContain("approve");
+});
+
+test("a full card taller than the screen is refused even with no frame around it", async () => {
 	function Bare() {
 		const p = useApprovalCard();
 		return p ? <InlineApprovalPrompt target={p.target} full={p.full} /> : null;
 	}
 	instance = render(<Bare />, {
 		stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
-		stdout: makeStdout(120, 40) as unknown as NodeJS.WriteStream,
+		stdout: makeStdout(120, 6) as unknown as NodeJS.WriteStream,
 		debug: false,
 		exitOnCtrlC: false,
 		patchConsole: false,
 	});
 	await tick();
-	expect(await askMcpStartApproval(["a: npx a"])).toContain("does not fit on this screen");
+	expect(await askMcpStartApproval(servers(6, (i) => `pkg-${i}`))).toContain(
+		"does not fit on this screen",
+	);
 });
 
 test("a card without `full` still renders on one truncated row (other tools unchanged)", async () => {

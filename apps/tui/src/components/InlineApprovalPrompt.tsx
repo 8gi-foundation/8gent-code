@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
+import { fullCardBox } from "../hooks/useApprovalCard.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
 
@@ -16,11 +17,7 @@ interface InlineApprovalPromptProps {
 	target: string;
 	/** Why this card came up, e.g. "risky step" in Guarded (#3174). */
 	reason?: string;
-	/**
-	 * Show the whole target, wrapped over as many rows as it needs, with the
-	 * keys on their own row below it. Never truncated: the asker refuses a
-	 * request that would not fit the terminal (MCP start and call cards, #3474).
-	 */
+	/** Whole target, wrapped, keys below; never cut (MCP cards, #3474). */
 	full?: boolean;
 }
 
@@ -37,6 +34,7 @@ export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPro
 	if (full) {
 		return (
 			<Box
+				ref={fullCardBox}
 				borderStyle="round"
 				borderColor={t.orange}
 				paddingX={1}

@@ -21,7 +21,7 @@
  */
 
 import { type DOMElement, useInput, useStdout } from "ink";
-import { type RefObject, useEffect, useLayoutEffect, useState } from "react";
+import { createRef, useEffect, useLayoutEffect, useState } from "react";
 import {
 	registerTuiApprovalHandler,
 	type TuiApprovalDecision,
@@ -34,10 +34,11 @@ export interface PendingApproval {
 	target: string;
 	/** Why the card came up, from the asking call's own permission mode (#3174). */
 	reason?: string;
-	/** Show the target in full, wrapped, never cut (the request's `full`). */
+	/** Show the target in full, never cut (the request's `full`). */
 	full?: boolean;
-	/** For a `full` card: the screen size it was last laid out whole at, if it was. */
+	/** For a `full` card: the screen size it was last laid out whole at, and since when. */
 	shownWholeAt?: string;
+	shownSince?: number;
 	resolve: (decision: TuiApprovalDecision) => void;
 }
 
@@ -47,21 +48,37 @@ interface Sized {
 }
 const sizeOf = (out: Sized) => `${out.columns}x${out.rows}`;
 
+/** A `full` card takes no key until it has been laid out whole this long, so it has been painted and seen. */
+export const CARD_MIN_SHOW_MS = 500;
+
+/** The box InlineApprovalPrompt draws a `full` card in. */
+export const fullCardBox = createRef<DOMElement>();
+
 /**
- * True when nothing in `column` (the chat column holding the card) is laid
- * out past its bottom edge, so the card and everything under it are on
- * screen. Ink wraps the card's text at the column's real width with real
- * display widths, so the heights read here are what is drawn (#3474).
+ * True when the card's own box lies inside every ancestor's box and the
+ * screen, so no row of it is clipped (#3474).
  */
-export function columnShowsAll(column: DOMElement | null | undefined): boolean {
-	const node = column?.yogaNode;
-	if (!node) return false;
-	let bottom = 0;
-	for (const child of column.childNodes) {
-		const y = (child as DOMElement).yogaNode;
-		if (y) bottom = Math.max(bottom, y.getComputedTop() + y.getComputedHeight());
+export function cardShowsAll(card: DOMElement | null | undefined, screen: Sized): boolean {
+	const node = card?.yogaNode;
+	if (!card || !node) return false;
+	const w = node.getComputedWidth();
+	const h = node.getComputedHeight();
+	let left = 0;
+	let top = 0;
+	let n: DOMElement = card;
+	for (;;) {
+		const y = n.yogaNode;
+		if (!y) return false;
+		left += y.getComputedLeft();
+		top += y.getComputedTop();
+		const parent = n.parentNode;
+		const box = parent?.yogaNode
+			? { w: parent.yogaNode.getComputedWidth(), h: parent.yogaNode.getComputedHeight() }
+			: { w: screen.columns ?? 0, h: screen.rows ?? 0 };
+		if (left < 0 || top < 0 || left + w > box.w || top + h > box.h) return false;
+		if (!parent?.yogaNode) return true;
+		n = parent;
 	}
-	return bottom <= node.getComputedHeight();
 }
 
 interface KeyLike {
@@ -90,19 +107,24 @@ export function isApprovalKeyClaimed(input: string, key: KeyLike): boolean {
 }
 
 /**
- * Settle the pending card with this keypress. Returns true when the key was
- * a card key (the caller must not act on it further). Idempotent within one
- * keypress dispatch: the card resolves once.
+ * Settle the pending card with this keypress. Returns true when it settled
+ * the card. A `full` card ignores its keys (still claimed, never passed on)
+ * until it has been laid out whole at this screen size for CARD_MIN_SHOW_MS.
  */
 export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): boolean {
 	const card = active;
-	if (!card) return false;
 	const decision = approvalDecisionForKey(input, key);
-	if (!decision) return false;
-	// A `full` card is approved only as last seen whole, at this screen size.
-	// Not laid out yet, clipped, or resized since: Y is a no.
-	const seenWhole = !card.full || (screen && card.shownWholeAt === sizeOf(screen));
-	card.resolve(decision === "approve" && !seenWhole ? "deny" : decision);
+	if (!card || !decision) return false;
+	if (
+		card.full &&
+		!(
+			screen &&
+			card.shownWholeAt === sizeOf(screen) &&
+			Date.now() - (card.shownSince ?? Number.POSITIVE_INFINITY) >= CARD_MIN_SHOW_MS
+		)
+	)
+		return false;
+	card.resolve(decision);
 	return true;
 }
 
@@ -114,14 +136,10 @@ export function _resetApprovalCard(): void {
 /**
  * Registers the TUI approval handler, holds the pending card for rendering,
  * and routes Y/N/E/S to it. `onKey` runs after a card key settles the card.
- * `column` is the box the card is drawn in: a `full` card that does not fit
- * it whole after layout is answered "unfit" and taken down, never left up
- * clipped (no column, no fit).
+ * A `full` card that is not laid out whole is answered "unfit" and taken
+ * down, never left up clipped.
  */
-export function useApprovalCard(
-	onKey?: () => void,
-	column?: RefObject<DOMElement | null>,
-): PendingApproval | null {
+export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
 
@@ -129,8 +147,12 @@ export function useApprovalCard(
 	useLayoutEffect(() => {
 		const card = active;
 		if (!card?.full || card !== pending) return;
-		if (columnShowsAll(column?.current)) card.shownWholeAt = sizeOf(stdout);
-		else card.resolve("unfit");
+		if (!cardShowsAll(fullCardBox.current, stdout)) return card.resolve("unfit");
+		const size = sizeOf(stdout);
+		if (card.shownWholeAt !== size) {
+			card.shownWholeAt = size;
+			card.shownSince = Date.now();
+		}
 	});
 
 	useEffect(() => {
