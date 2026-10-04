@@ -72,11 +72,11 @@ export async function askMcpApproval(
 			action: MCP_APPROVAL_ACTION,
 			command,
 			full: true,
-			details: `${reason ?? "This MCP tool call needs your approval."} Server: ${server}. Tool: ${tool}. Args: ${json}`,
+			details: oneLine(`${reason ?? "This MCP tool call needs your approval."} ${label} ${json}`),
 		},
 		`[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`,
 		`[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`,
-		`[BLOCKED] ${label} was not shown for approval: the approval card must show the whole call and it does not fit on this screen. Nothing was sent to the MCP server. Send smaller arguments, or ask the person to make the window larger or restart without the full-screen TUI, where the terminal prompt shows the whole call.`,
+		`[BLOCKED] ${label} was not shown for approval: the approval card must show the whole call and it does not fit on this screen. Nothing was sent to the MCP server. Send smaller arguments, or ask the person to make the window larger.`,
 	);
 }
 
@@ -104,7 +104,7 @@ export async function askMcpStartApproval(servers: string[]): Promise<string | n
 		},
 		"[BLOCKED] Starting MCP servers needs the person's approval and there is no one to ask in this session. No server was started. Do not retry; restart the session with a person present to be asked again.",
 		"[PERMISSION DENIED] The person declined to start the MCP servers. No server was started. Do not retry; the answer stands for this session, and the person can restart the session to be asked again.",
-		"[BLOCKED] The MCP servers were not offered for approval: the approval card must show every server in full and it does not fit on this screen. No server was started. Do not retry; the person can list fewer servers in ~/.8gent/mcp.json, make the window larger, or restart without the full-screen TUI, where the terminal prompt shows every server, then restart the session to be asked again.",
+		"[BLOCKED] The MCP servers were not offered for approval: the approval card must show every server in full and it does not fit on this screen. No server was started. Do not retry; the person can list fewer servers in ~/.8gent/mcp.json or make the window larger, then restart the session to be asked again.",
 	);
 }
 
@@ -124,7 +124,9 @@ async function askPerson(
 		if (decision === "unfit") return doesNotFit;
 		approved = decision === "approve";
 	} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
-		approved = await manager.requestPermission(request.action, request.details);
+		approved = await manager.requestPermission(request.action, request.details, undefined, {
+			defaultNo: true,
+		});
 	} else {
 		return noOne;
 	}

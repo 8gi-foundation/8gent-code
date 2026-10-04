@@ -833,7 +833,12 @@ export class PermissionManager {
 	/**
 	 * Request permission from the user for a command/action
 	 */
-	async requestPermission(action: string, details: string, command?: string): Promise<boolean> {
+	async requestPermission(
+		action: string,
+		details: string,
+		command?: string,
+		opts: { defaultNo?: boolean } = {},
+	): Promise<boolean> {
 		const request: PermissionRequest = {
 			id: `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
 			action,
@@ -890,7 +895,7 @@ export class PermissionManager {
 		}
 
 		// Interactive prompt
-		const approved = await this.promptUser(action, details, command);
+		const approved = await this.promptUser(action, details, command, opts.defaultNo);
 		request.approved = approved;
 		this.log.requests.push(request);
 
@@ -933,9 +938,15 @@ export class PermissionManager {
 	 * Prompt user for permission (Y/n)
 	 * In headless mode: auto-approve safe commands, deny dangerous ones
 	 */
-	private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
+	private async promptUser(
+		action: string,
+		details: string,
+		command?: string,
+		defaultNo = false,
+	): Promise<boolean> {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
+			if (defaultNo) return false;
 			if (command && this.isDangerous(command)) {
 				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
 				return false;
@@ -975,13 +986,14 @@ export class PermissionManager {
 						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
 				}
 			}
-			prompt += "\nAllow? [Y/n]: ";
+			prompt += defaultNo ? "\nAllow? [y/N]: " : "\nAllow? [Y/n]: ";
 
 			rl.question(prompt, (answer) => {
 				rl.close();
 				const normalized = answer.trim().toLowerCase();
-				// Default to Yes if empty, explicit no required
-				resolve(normalized !== "n" && normalized !== "no");
+				// Empty is Yes unless the caller asked for default No (MCP).
+				if (defaultNo) resolve(normalized === "y" || normalized === "yes");
+				else resolve(normalized !== "n" && normalized !== "no");
 			});
 		});
 	}
