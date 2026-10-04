@@ -11,8 +11,10 @@ import { join } from "node:path";
 import {
 	type Caller,
 	EXIT,
+	GATE_SYSTEM_PROMPT,
 	type Sample,
 	type Thresholds,
+	gateCaller,
 	judge,
 	main,
 	parseOutput,
@@ -111,6 +113,72 @@ describe("speed-gate verdicts", () => {
 			},
 		});
 		expect(r.verdict).toBe("REJECT");
+		expect(r.maxDriftUnmeasurable).toBe(true);
+		expect(r.maxDrift).toBeNull();
+		const json = JSON.parse(JSON.stringify(r));
+		expect(json.perInput[0].driftUnmeasurable).toBe(true);
+	});
+
+	test("the same deterministic model on both sides, through the real parse path, is NO WIN", async () => {
+		// Real-looking replies: fenced JSON, stray whitespace, a plain "Yes." on one prompt.
+		const model = (p: string) =>
+			p.includes("light")
+				? "Yes.\n"
+				: `\`\`\`json\n{"decision": "${p.includes("rain") ? "No" : "Yes"}", "probability": 0.81}\n\`\`\`  `;
+		const r = await gate({ baseline: { ms: 100, out: model }, candidate: { ms: 100, out: model } });
+		expect(r.verdict).toBe("NO WIN");
+		expect(r.decisionMismatches).toBe(0);
+		expect(r.perInput[0].baseline.decision).toBe("yes");
+		expect(r.perInput[0].baseline.probability).toBe(0.81);
+	});
+
+	test("sampling is reported honestly, with a warning under 20 inputs", async () => {
+		const r = await gate({ baseline: { ms: 100, out: yes() }, candidate: { ms: 60, out: yes() } });
+		expect(r.sampling.samplesPerInput).toBe(1);
+		expect(r.sampling.baselineTimedSamples).toBe(PROMPTS.length);
+		expect(r.sampling.candidateTimedSamples).toBe(PROMPTS.length);
+		expect(r.sampling.warnings[0]).toContain("fewer than 20");
+		const ok: Sample = { ok: true, decision: "yes", latencyMs: 10 };
+		expect(judge(Array(20).fill(ok), Array(20).fill(ok), T).sampling.warnings).toEqual([]);
+	});
+
+	test("one untimed warm-up call per side runs before timing", async () => {
+		let t = 0;
+		const calls: string[] = [];
+		const caller: Caller = async (target) => {
+			calls.push(target.label);
+			t += calls.length <= 2 ? 5000 : 100; // a slow cold load must not reach p50
+			return '{"decision":"yes","probability":0.9}';
+		};
+		const s = await runPaired({
+			baseline: BASE,
+			candidate: CAND,
+			prompts: PROMPTS,
+			caller,
+			now: () => t,
+			timeoutMs: 1000,
+		});
+		expect(calls.length).toBe(2 * PROMPTS.length + 2);
+		expect(s.warmUp).toEqual({ baseline: true, candidate: true });
+		expect(judge(s.baseline, s.candidate, T).baselineP50Ms).toBe(100);
+	});
+
+	test("the gate caller asks for deterministic JSON decoding", async () => {
+		let body: Record<string, unknown> = {};
+		let url = "";
+		const fakeFetch = (async (u: string, init: RequestInit) => {
+			url = u;
+			body = JSON.parse(String(init.body));
+			return new Response(JSON.stringify({ message: { content: '{"decision":"yes"}' } }));
+		}) as unknown as typeof fetch;
+		const out = await gateCaller(42, 1000, fakeFetch)(BASE, "Answer yes or no. Is it on?");
+		expect(out).toBe('{"decision":"yes"}');
+		expect(url).toBe("http://baseline/api/chat");
+		expect(body.format).toBe("json");
+		expect(body.options).toEqual({ temperature: 0, seed: 42 });
+		expect((body.messages as { content: string }[])[0].content).toBe(GATE_SYSTEM_PROMPT);
+		const failing = (async () => new Response("no", { status: 500 })) as unknown as typeof fetch;
+		expect(await gateCaller(42, 1000, failing)(BASE, "x")).toBeNull();
 	});
 
 	test("a throwing caller is not ACCEPT", async () => {
@@ -195,6 +263,19 @@ describe("speed-gate verdicts", () => {
 		});
 		expect(parseOutput("[1,2]").decision).toBe("[1,2]");
 	});
+
+	test("real replies parse: code fences, whitespace, trailing punctuation", () => {
+		expect(parseOutput('```json\n{"decision": "Yes", "probability": 0.7}\n```\n')).toEqual({
+			decision: "yes",
+			probability: 0.7,
+		});
+		expect(parseOutput('```\n{"decision":"no"}\n```')).toEqual({
+			decision: "no",
+			probability: undefined,
+		});
+		expect(parseOutput("Yes.").decision).toBe(parseOutput("yes").decision);
+		expect(parseOutput(" No!\n").decision).toBe("no");
+	});
 });
 
 describe("speed-gate CLI", () => {
@@ -264,6 +345,31 @@ describe("speed-gate CLI", () => {
 		expect(report.verdict).toBe("ACCEPT");
 		expect(report.inputs).toBe(PROMPTS.length);
 		expect(report.perInput).toHaveLength(PROMPTS.length);
+		expect(report.decoding).toEqual({
+			endpoint: "/api/chat",
+			format: "json",
+			temperature: 0,
+			seed: 8,
+		});
+		expect(report.warmUp.untimedCallsPerSide).toBe(1);
+		expect(report.maxDriftUnmeasurable).toBe(false);
+	});
+
+	test("missing or empty suite file is a usage error and runs nothing", async () => {
+		const { argv, out } = setup();
+		let calls = 0;
+		const counting: Caller = async () => {
+			calls++;
+			return "yes";
+		};
+		const i = argv.indexOf("--suite");
+		const missing = [...argv];
+		missing[i + 1] = join(tmpdir(), "no-such-suite.jsonl");
+		expect(await main(missing, { EIGHT_SPEED_GATE: "1" }, counting)).toBe(EXIT.USAGE);
+		writeFileSync(argv[i + 1], "\n\n");
+		expect(await main(argv, { EIGHT_SPEED_GATE: "1" }, counting)).toBe(EXIT.USAGE);
+		expect(calls).toBe(0);
+		expect(existsSync(out)).toBe(false);
 	});
 
 	test("missing threshold is a usage error and runs nothing", async () => {

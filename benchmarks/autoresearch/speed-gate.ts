@@ -15,15 +15,25 @@
  * Model output is only parsed and compared; nothing in it is executed or read
  * as an instruction, so it cannot change the verdict logic.
  *
- * Off unless EIGHT_SPEED_GATE=1. Does NOT: repeat runs to estimate noise,
- * measure capability beyond decision agreement on this suite, or change any
- * model setting. Its numbers are for this machine and this suite only.
+ * Determinism: the gate's own caller posts to {url}/api/chat (Ollama and the
+ * 8gent provider only) with format "json", temperature 0 and a fixed seed
+ * (recorded in the report), under a fixed system prompt asking for
+ * {"decision": <one short label>, "probability": <0..1>}. Suite prompts must
+ * name a fixed label set (e.g. "Answer yes or no."), or free-text decisions
+ * will differ and REJECT. One untimed warm-up call per side runs before timing.
+ *
+ * Off unless EIGHT_SPEED_GATE=1. Does NOT: serve Marlin (JSON-RPC over stdio)
+ * or moshi-mlx (websocket), which need their own callers; repeat runs to
+ * estimate noise (one timed sample per input); measure capability beyond
+ * decision agreement on this suite; or change any model setting. The
+ * probability is the model's self-report, not a scorer probability read from
+ * logits. Its numbers are for this machine and this suite only.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 import { loadRecentTraffic } from "./canary-measure";
-import { type ModelTarget, callModel } from "./validate-holdout";
+import type { ModelTarget } from "./validate-holdout";
 
 export type Caller = (target: ModelTarget, prompt: string) => Promise<string | null>;
 export type Verdict = "ACCEPT" | "REJECT" | "NO WIN";
@@ -52,21 +62,73 @@ export interface GateReport {
 	inputs: number;
 	failures: number;
 	decisionMismatches: number;
+	/** Largest finite drift; null when none was measured or it is unmeasurable. */
 	maxDrift: number | null;
+	/** True when a probability was present on only one side of some input. */
+	maxDriftUnmeasurable: boolean;
+	sampling: {
+		samplesPerInput: 1;
+		baselineTimedSamples: number;
+		candidateTimedSamples: number;
+		warnings: string[];
+	};
 	baselineP50Ms: number | null;
 	candidateP50Ms: number | null;
 	improvementPct: number | null;
-	perInput: { index: number; baseline: Sample; candidate: Sample; drift: number | null }[];
+	perInput: {
+		index: number;
+		baseline: Sample;
+		candidate: Sample;
+		drift: number | null;
+		driftUnmeasurable?: true;
+	}[];
 }
 
 const MAX_DECISION_CHARS = 2000;
+export const MIN_SUITE_FOR_CONFIDENCE = 20;
+export const DEFAULT_SEED = 8;
+export const GATE_SYSTEM_PROMPT =
+	'Answer with JSON only: {"decision": "<one short label from the labels the question allows>", "probability": <your confidence in that label, a number from 0 to 1>}. No other text.';
+
+/** The gate's own /api/chat caller: deterministic decoding, JSON output. Shared callModel is untouched. */
+export function gateCaller(
+	seed: number,
+	timeoutMs: number,
+	fetchImpl: typeof fetch = fetch,
+): Caller {
+	return async (target, prompt) => {
+		try {
+			const res = await fetchImpl(`${target.url}/api/chat`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					model: target.model,
+					messages: [
+						{ role: "system", content: GATE_SYSTEM_PROMPT },
+						{ role: "user", content: prompt },
+					],
+					stream: false,
+					format: "json",
+					options: { temperature: 0, seed },
+				}),
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			if (!res.ok) return null;
+			const data = (await res.json()) as { message?: { content?: unknown } };
+			return typeof data.message?.content === "string" ? data.message.content : null;
+		} catch {
+			return null;
+		}
+	};
+}
 
 /** Defensive parse of untrusted model output. JSON {decision, probability} or plain text. */
 export function parseOutput(raw: string): { decision: string; probability?: number } {
-	let decision: unknown = raw;
+	const body = raw.trim().replace(/^```[a-z]*\s*([\s\S]*?)\s*```$/i, "$1");
+	let decision: unknown = body;
 	let probability: number | undefined;
 	try {
-		const obj: unknown = JSON.parse(raw);
+		const obj: unknown = JSON.parse(body);
 		if (obj !== null && typeof obj === "object" && !Array.isArray(obj)) {
 			const rec = obj as Record<string, unknown>;
 			if (Object.hasOwn(rec, "decision")) decision = rec.decision;
@@ -78,7 +140,12 @@ export function parseOutput(raw: string): { decision: string; probability?: numb
 	}
 	const text = typeof decision === "string" ? decision : (JSON.stringify(decision) ?? "");
 	return {
-		decision: text.trim().toLowerCase().replace(/\s+/g, " ").slice(0, MAX_DECISION_CHARS),
+		decision: text
+			.trim()
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.replace(/[.!?,;:]+$/, "")
+			.slice(0, MAX_DECISION_CHARS),
 		probability,
 	};
 }
@@ -116,19 +183,35 @@ async function timed(
 	}
 }
 
-/** Paired run: the same inputs, sides called one at a time, order alternated per input. */
+/**
+ * Paired run: one untimed warm-up call per side, then the same inputs, sides
+ * called one at a time, order alternated per input.
+ */
 export async function runPaired(opts: {
 	baseline: ModelTarget;
 	candidate: ModelTarget;
 	prompts: string[];
 	caller?: Caller;
 	timeoutMs: number;
+	seed?: number;
 	now?: () => number;
-}): Promise<{ baseline: Sample[]; candidate: Sample[] }> {
-	const call = opts.caller ?? ((t, p) => callModel(t, p, opts.timeoutMs));
+}): Promise<{
+	baseline: Sample[];
+	candidate: Sample[];
+	warmUp: { baseline: boolean; candidate: boolean };
+}> {
+	const call = opts.caller ?? gateCaller(opts.seed ?? DEFAULT_SEED, opts.timeoutMs);
 	const now = opts.now ?? (() => performance.now());
 	const baseline: Sample[] = [];
 	const candidate: Sample[] = [];
+	const warmUp = { baseline: false, candidate: false };
+	if (opts.prompts.length > 0) {
+		const free = () => 0; // warm-up is never timed
+		warmUp.baseline = (await timed(call, opts.baseline, opts.prompts[0], opts.timeoutMs, free)).ok;
+		warmUp.candidate = (
+			await timed(call, opts.candidate, opts.prompts[0], opts.timeoutMs, free)
+		).ok;
+	}
 	for (const [i, prompt] of opts.prompts.entries()) {
 		if (i % 2 === 0) {
 			baseline.push(await timed(call, opts.baseline, prompt, opts.timeoutMs, now));
@@ -138,7 +221,7 @@ export async function runPaired(opts: {
 			baseline.push(await timed(call, opts.baseline, prompt, opts.timeoutMs, now));
 		}
 	}
-	return { baseline, candidate };
+	return { baseline, candidate, warmUp };
 }
 
 export function validateThresholds(t: Partial<Thresholds>): string | null {
@@ -164,6 +247,7 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 	let failures = 0;
 	let mismatches = 0;
 	let maxDrift: number | null = null;
+	let unmeasurable = false;
 	const perInput: GateReport["perInput"] = [];
 	for (let i = 0; i < n; i++) {
 		const b = baseline[i];
@@ -177,19 +261,33 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 			} else if (b.probability !== undefined && c.probability !== undefined) {
 				drift = Math.abs(b.probability - c.probability);
 			}
-			if (drift !== null) maxDrift = Math.max(maxDrift ?? 0, drift);
+			if (drift === Number.POSITIVE_INFINITY) unmeasurable = true;
+			else if (drift !== null) maxDrift = Math.max(maxDrift ?? 0, drift);
 		}
-		perInput.push({ index: i, baseline: b, candidate: c, drift });
+		perInput.push(
+			drift === Number.POSITIVE_INFINITY
+				? { index: i, baseline: b, candidate: c, drift: null, driftUnmeasurable: true }
+				: { index: i, baseline: b, candidate: c, drift },
+		);
 	}
 	if (failures > 0)
 		reasons.push(`${failures} paired input(s) had a failed, timed-out or invalid call`);
 	if (mismatches > 0) reasons.push(`${mismatches} decision(s) changed`);
+	if (unmeasurable) reasons.push("drift unmeasurable: a probability was present on only one side");
 	if (maxDrift !== null && maxDrift > t.maxDrift)
 		reasons.push(`max drift ${maxDrift} exceeds tolerance ${t.maxDrift}`);
 	const lat = (s: Sample[]) =>
 		s.filter((x) => x.ok && typeof x.latencyMs === "number").map((x) => x.latencyMs as number);
-	const bP50 = p50(lat(baseline));
-	const cP50 = p50(lat(candidate));
+	const bLat = lat(baseline);
+	const cLat = lat(candidate);
+	const bP50 = p50(bLat);
+	const cP50 = p50(cLat);
+	const warnings =
+		n < MIN_SUITE_FOR_CONFIDENCE
+			? [
+					`suite has ${n} inputs, fewer than ${MIN_SUITE_FOR_CONFIDENCE}: p50 from one sample per input is noisy`,
+				]
+			: [];
 	const improvementPct =
 		bP50 !== null && cP50 !== null && bP50 > 0 ? ((bP50 - cP50) / bP50) * 100 : null;
 	if (reasons.length === 0 && improvementPct === null)
@@ -221,6 +319,13 @@ export function judge(baseline: Sample[], candidate: Sample[], t: Thresholds): G
 		failures,
 		decisionMismatches: mismatches,
 		maxDrift,
+		maxDriftUnmeasurable: unmeasurable,
+		sampling: {
+			samplesPerInput: 1,
+			baselineTimedSamples: bLat.length,
+			candidateTimedSamples: cLat.length,
+			warnings,
+		},
 		baselineP50Ms: bP50,
 		candidateP50Ms: cP50,
 		improvementPct,
@@ -268,12 +373,21 @@ export async function main(
 		maxDrift: num("max-drift"),
 	};
 	const timeoutMs = num("timeout-ms");
+	const seed = args.seed === undefined ? DEFAULT_SEED : num("seed");
+	const prompts =
+		args.suite && existsSync(args.suite)
+			? loadRecentTraffic(args.suite, 0).map((t) => t.prompt)
+			: [];
 	const bad =
 		validateThresholds(thresholds) ??
-		(!(timeoutMs > 0) ? "timeout-ms must be declared as a number > 0" : null);
+		(!(timeoutMs > 0) ? "timeout-ms must be declared as a number > 0" : null) ??
+		(!Number.isSafeInteger(seed) ? "seed must be an integer" : null) ??
+		(args.suite && prompts.length === 0
+			? `suite ${args.suite} is missing or has no prompts`
+			: null);
 	if (!args.baseline || !args.candidate || !args.suite || bad) {
 		console.error(
-			`usage: EIGHT_SPEED_GATE=1 bun benchmarks/autoresearch/speed-gate.ts --baseline <cfg.json> --candidate <cfg.json> --suite <suite.jsonl> --min-improvement <pct> --materiality <pct> --max-drift <abs> --timeout-ms <ms> [--out <report.json>]${bad ? `\n${bad}` : ""}`,
+			`usage: EIGHT_SPEED_GATE=1 bun benchmarks/autoresearch/speed-gate.ts --baseline <cfg.json> --candidate <cfg.json> --suite <suite.jsonl> --min-improvement <pct> --materiality <pct> --max-drift <abs> --timeout-ms <ms> [--seed <int>] [--out <report.json>]${bad ? `\n${bad}` : ""}`,
 		);
 		return EXIT.USAGE;
 	}
@@ -286,14 +400,13 @@ export async function main(
 		console.error(`config error: ${err instanceof Error ? err.message : err}`);
 		return EXIT.USAGE;
 	}
-	const prompts = loadRecentTraffic(args.suite, 0).map((t) => t.prompt);
-	const samples = await runPaired({ baseline, candidate, prompts, caller, timeoutMs, now });
+	const samples = await runPaired({ baseline, candidate, prompts, caller, timeoutMs, seed, now });
 	const report = judge(samples.baseline, samples.candidate, thresholds);
 	const out = args.out ?? "speed-gate-report.json";
-	writeFileSync(
-		out,
-		`${JSON.stringify({ baseline, candidate, suite: args.suite, ...report }, null, 2)}\n`,
-	);
+	const decoding = { endpoint: "/api/chat", format: "json", temperature: 0, seed };
+	const warmUp = { untimedCallsPerSide: 1, ok: samples.warmUp };
+	const full = { baseline, candidate, suite: args.suite, decoding, warmUp, ...report };
+	writeFileSync(out, `${JSON.stringify(full, null, 2)}\n`);
 	console.log(`${report.verdict}: ${report.reasons.join("; ")}\nreport: ${out}`);
 	return EXIT[report.verdict];
 }
