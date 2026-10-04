@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -45,12 +45,19 @@ describe("catalog renders exact schedules", () => {
 		const o = fillBlueprint("pr-watch", { repo: "8gi-foundation/8gent-code", every: "6h" });
 		expect(o.schedule).toBe("0 */6 * * 1,2,3,4,5");
 		expect(o.prompt).toContain("8gi-foundation/8gent-code");
+		expect(o.prompt).toContain("in the last 6 hours");
+		expect(fillBlueprint("pr-watch", { repo: "a/b", every: "1h" }).prompt).toContain("in the last hour");
 	});
 
 	test("weekly-review", () => {
 		const o = fillBlueprint("weekly-review", { time: "17:30", notes: "the release plan" });
 		expect(o.schedule).toBe("30 17 * * 5");
 		expect(o.prompt).toContain("the release plan");
+	});
+
+	test("text slots accept Unicode letters and marks", () => {
+		const o = fillBlueprint("weekly-review", { notes: "Seán's café" });
+		expect(o.prompt).toContain("Seán's café");
 	});
 
 	test("rendered schedule fires when the existing matcher says so", () => {
@@ -71,6 +78,11 @@ describe("validator refuses bad slots", () => {
 		["morning-brief", { days: "1-5" }, /"days" days must be from/],
 		["morning-brief", { focus: "news" }, /"focus" must be one of repos, issues, everything/],
 		["morning-brief", { extra: "x" }, /unknown slot "extra"/],
+		["weekly-review", { day: ["mon", "fri"] }, /"day" takes at most 1 day/],
+		["pr-watch", { repo: "not a repo" }, /"repo" must look like owner\/name/],
+		["pr-watch", { repo: "owner/name/extra" }, /"repo" must look like owner\/name/],
+		["weekly-review", { notes: "costs $5" }, /basic punctuation/],
+		["weekly-review", { notes: "a\u0007b" }, /basic punctuation/],
 		["pr-watch", {}, /"repo" is required/],
 		["pr-watch", { repo: "   " }, /"repo" must not be empty/],
 		["pr-watch", { repo: "a".repeat(101) }, /at most 100 characters/],
@@ -118,5 +130,32 @@ describe("createFromBlueprint uses RoutineManager.create", () => {
 		const saved = JSON.parse(fs.readFileSync(file, "utf-8"));
 		expect(saved).toHaveLength(1);
 		expect(saved[0].prompt).toContain("owner/repo");
+	});
+});
+
+describe("a text slot stays inside the single prompt argument", () => {
+	test("--flag inside notes is one argv element, after chat", async () => {
+		process.env.EIGHT_BLUEPRINTS = "1";
+		const mgr = new RoutineManager(path.join(dir, "routines.json"));
+		const r = createFromBlueprint(mgr, "weekly-review", { notes: "check the --flag handling" });
+		const empty = () => new ReadableStream({ start: (c) => c.close() });
+		// Replace the spawn so no agent or model ever runs.
+		const spawn = spyOn(Bun, "spawn").mockImplementation((() => ({
+			stdout: empty(),
+			stderr: empty(),
+			exited: Promise.resolve(0),
+			kill() {},
+		})) as unknown as typeof Bun.spawn);
+		try {
+			const run = await mgr.trigger(r.id);
+			expect(run?.status).toBe("completed");
+			const argv = spawn.mock.calls[0][0] as unknown as string[];
+			expect(argv.slice(0, 4)).toEqual(["bun", "run", "bin/8gent.ts", "chat"]);
+			expect(argv[4]).toBe(r.prompt);
+			expect(argv[4]).toContain("--flag");
+			expect(argv.slice(5)).toEqual(["--yes", "--json"]);
+		} finally {
+			spawn.mockRestore();
+		}
 	});
 });

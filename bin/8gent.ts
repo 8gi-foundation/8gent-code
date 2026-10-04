@@ -503,6 +503,10 @@ async function main() {
 			await cronCommand(restArgs);
 			break;
 
+		case "blueprint":
+			await blueprintCommand(restArgs);
+			break;
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
@@ -1706,6 +1710,59 @@ async function cronCommand(args: string[]) {
 		console.log("Available: list, add, remove, enable, disable");
 		process.exit(1);
 	}
+}
+
+// ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────
+
+async function blueprintCommand(args: string[]) {
+	const bp = await import("../packages/cron/blueprints.ts");
+	if (!bp.blueprintsEnabled()) {
+		console.error("Blueprints are off. Set EIGHT_BLUEPRINTS=1 to try them.");
+		process.exit(1);
+	}
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const [sub, target, ...pairs] = args;
+	if (!sub || sub === "list") {
+		for (const b of bp.BLUEPRINTS) {
+			console.log(`${b.name}  ${b.description}`);
+			for (const s of b.slots) console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
+		}
+		return;
+	}
+	if (sub === "add" && target) {
+		const slots: Record<string, string> = {};
+		for (const p of pairs) {
+			const i = p.indexOf("=");
+			if (i < 1) {
+				console.error(`Expected key=value, got "${p}"`);
+				process.exit(1);
+			}
+			slots[p.slice(0, i)] = p.slice(i + 1);
+		}
+		try {
+			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
+			console.log(`Saved routine ${r.id} (${r.name}), cron pattern "${r.schedule}".`);
+			console.log("Nothing runs routines automatically yet.");
+			console.log(`Run it once now with: 8gent blueprint run ${r.id}`);
+		} catch (e) {
+			console.error(e instanceof Error ? e.message : String(e));
+			process.exit(1);
+		}
+		return;
+	}
+	if (sub === "run" && target) {
+		const run = await getRoutineManager().trigger(target);
+		if (!run) {
+			console.error(`No saved routine with id ${target}`);
+			process.exit(1);
+		}
+		console.log(`Run ${run.id}: ${run.status}`);
+		if (run.error) console.error(run.error);
+		if (run.status !== "completed") process.exit(1);
+		return;
+	}
+	console.error("Usage: 8gent blueprint list | add <name> key=value... | run <id>");
+	process.exit(1);
 }
 
 // ── Chat Command (non-interactive, pipe-friendly) ─────────────────
