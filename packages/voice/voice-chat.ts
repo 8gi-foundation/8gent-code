@@ -94,6 +94,7 @@ export class VoiceChatLoop {
 	private ttsEngine: TTSEngine;
 	private residency: VoiceChatConfig["residency"] | null = null;
 	private residencyOn: boolean;
+	private residencyChain: Promise<void> = Promise.resolve();
 
 	constructor(config: VoiceChatConfig) {
 		this.engine = config.engine;
@@ -109,19 +110,22 @@ export class VoiceChatLoop {
 		if (this.residencyOn) this.residency = config.residency ?? null;
 	}
 
-	/** Best-effort residency step: a failure here never blocks the turn. */
-	private async enterPhase(phase: "listen" | "think" | "speak"): Promise<void> {
-		try {
+	/**
+	 * Queue a best-effort residency step (#3430). Steps run in order, but only
+	 * think waits for them (bounded), so the mic and TTS are never held back.
+	 */
+	private enterPhase(phase: "listen" | "think" | "speak"): Promise<void> {
+		const step = this.residencyChain.then(async () => {
 			if (!this.residency) {
-				const { ResidencyBroker, ollamaResident } = await import(
+				const { ResidencyBroker, ollamaTurnResident } = await import(
 					"../orchestration/model-residency"
 				);
-				this.residency = new ResidencyBroker([ollamaResident()]);
+				this.residency = new ResidencyBroker([ollamaTurnResident()]);
 			}
 			await this.residency.enter(phase);
-		} catch {
-			// best effort
-		}
+		});
+		this.residencyChain = step.catch(() => {});
+		return this.residencyChain;
 	}
 
 	// ---- Public API ----
@@ -246,7 +250,7 @@ export class VoiceChatLoop {
 		// 1. LISTEN — start recording, wait for VAD to auto-stop
 		this.setState("listening");
 		const live = this.residencyOn;
-		if (live) await this.enterPhase("listen");
+		if (live) void this.enterPhase("listen");
 		const transcript = await this.listenForSpeech();
 		if (!transcript || !this.running) return;
 
@@ -254,7 +258,7 @@ export class VoiceChatLoop {
 
 		// 2. THINK — send to agent, wait for response
 		this.setState("thinking", transcript);
-		if (live) await this.enterPhase("think");
+		if (live) await Promise.race([this.enterPhase("think"), sleep(2500)]);
 		// A live voice turn hints thinking off (#3430); without the flag the call is unchanged.
 		const response = live
 			? await this.onMessage(transcript, { live: true, thinking: null })
@@ -265,7 +269,7 @@ export class VoiceChatLoop {
 
 		// 3. SPEAK — play TTS, can be interrupted
 		this.setState("speaking");
-		if (live) await this.enterPhase("speak");
+		if (live) void this.enterPhase("speak");
 		await this.speakText(response);
 	}
 
