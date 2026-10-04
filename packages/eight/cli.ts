@@ -8,11 +8,16 @@
  *   8gent --cli --output /tmp/result.ts "write a debounce utility"
  *   8gent --cli --json "explain this codebase"
  *   echo "Summarize this" | 8gent --cli
+ *   8gent --cli --task-kind review "find what is wrong in this diff"
+ *
+ * --task-kind <simple|code|reasoning|review> is passed to the provider router
+ * as `taskKind`. It only changes anything when EIGHT_EFFORT_POLICY=1 (#3461).
+ * Any other value is rejected with exit code 1 before a model is called.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ProviderName, getProviderManager } from "../providers/index";
+import { type ChatRequest, type ProviderName, getProviderManager } from "../providers/index";
 
 // ============================================
 // Types
@@ -24,6 +29,24 @@ export interface CLIOptions {
 	jsonMode: boolean;
 	model?: string;
 	provider?: ProviderName;
+	/** Task kind for the effort policy (#3461). Only set when valid. */
+	taskKind?: CLITaskKind;
+	/** Set when --task-kind was given a missing or unknown value. */
+	taskKindError?: string;
+}
+
+/** Values accepted by --task-kind. */
+export const CLI_TASK_KINDS = ["simple", "code", "reasoning", "review"] as const;
+export type CLITaskKind = (typeof CLI_TASK_KINDS)[number];
+
+function setTaskKind(opts: CLIOptions, value: string | undefined): void {
+	if (value && (CLI_TASK_KINDS as readonly string[]).includes(value)) {
+		opts.taskKind = value as CLITaskKind;
+		opts.taskKindError = undefined;
+		return;
+	}
+	opts.taskKind = undefined;
+	opts.taskKindError = `Invalid --task-kind ${JSON.stringify(value ?? "")}. Use one of: ${CLI_TASK_KINDS.join(", ")}.`;
 }
 
 export interface CLIResult {
@@ -64,6 +87,10 @@ export function parseCLIArgs(args: string[]): CLIOptions | null {
 			opts.provider = filtered[++i] as ProviderName;
 		} else if (arg.startsWith("--provider=")) {
 			opts.provider = arg.slice("--provider=".length) as ProviderName;
+		} else if (arg === "--task-kind") {
+			setTaskKind(opts, filtered[++i]);
+		} else if (arg.startsWith("--task-kind=")) {
+			setTaskKind(opts, arg.slice("--task-kind=".length));
 		} else if (!arg.startsWith("--")) {
 			withoutFlags.push(arg);
 		}
@@ -71,6 +98,25 @@ export function parseCLIArgs(args: string[]): CLIOptions | null {
 
 	opts.prompt = withoutFlags.join(" ").trim();
 	return opts;
+}
+
+/**
+ * The request `--cli` sends to the router. `taskKind` is added only when the
+ * option was given, so without it the request is the same as before #3461.
+ */
+export function buildCLIChatRequest(opts: CLIOptions): ChatRequest {
+	return {
+		messages: [
+			{
+				role: "system",
+				content:
+					"You are 8gent Code, an autonomous coding agent. When asked to write code, output clean TypeScript inside a fenced code block. Be concise and practical.",
+			},
+			{ role: "user", content: opts.prompt },
+		],
+		model: opts.model,
+		...(opts.taskKind ? { taskKind: opts.taskKind } : {}),
+	};
 }
 
 // ============================================
@@ -138,6 +184,15 @@ export async function runCLI(args: string[]): Promise<void> {
 		process.exit(1);
 	}
 
+	if (opts.taskKindError) {
+		if (opts.jsonMode) {
+			console.log(JSON.stringify({ error: opts.taskKindError, exitCode: 1 }));
+		} else {
+			console.error(`Error: ${opts.taskKindError}`);
+		}
+		process.exit(1);
+	}
+
 	// Read from stdin if no inline prompt
 	if (!opts.prompt) {
 		opts.prompt = await readStdin();
@@ -164,17 +219,7 @@ export async function runCLI(args: string[]): Promise<void> {
 	}
 
 	try {
-		const result = await manager.chat({
-			messages: [
-				{
-					role: "system",
-					content:
-						"You are 8gent Code, an autonomous coding agent. When asked to write code, output clean TypeScript inside a fenced code block. Be concise and practical.",
-				},
-				{ role: "user", content: opts.prompt },
-			],
-			model: opts.model,
-		});
+		const result = await manager.chat(buildCLIChatRequest(opts));
 
 		const responseText = result.content;
 

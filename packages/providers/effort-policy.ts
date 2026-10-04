@@ -5,8 +5,9 @@
  * Any other value (unset, "", "0", "true", " 1") leaves every request exactly
  * as the caller built it.
  *
- * The task kind is the existing `TaskCategory` from packages/ai/task-router.ts.
- * No new classifier: if the caller does not pass a kind, nothing changes.
+ * The task kind is the existing `TaskCategory` from packages/ai/task-router.ts,
+ * plus `review` (see EffortTaskKind). No new classifier: if the caller does not
+ * pass a kind, nothing changes. First caller: `8gent --cli --task-kind <kind>`.
  *
  * Rules, in order:
  *   1. Flag not exactly "1"           -> request returned unchanged (same object).
@@ -25,11 +26,21 @@ import type { ThinkingLevel } from "../types/index.js";
 
 export const EFFORT_POLICY_FLAG = "EIGHT_EFFORT_POLICY";
 
+/**
+ * Kinds the policy understands: the existing `TaskCategory` labels plus
+ * `review`. `review` is not a TaskCategory (the task router has no review or
+ * security label); it exists so a caller that knows it is asking for a review
+ * ("find what is wrong", security, audit) can request deep checking. That is
+ * the pitch's main claim, and this keeps it testable without a classifier.
+ */
+export type EffortTaskKind = TaskCategory | "review";
+
 /** Task kind -> requested thinking level. Absent kind = provider default. */
-export const EFFORT_BY_TASK_KIND: Readonly<Partial<Record<TaskCategory, ThinkingLevel>>> = {
+export const EFFORT_BY_TASK_KIND: Readonly<Partial<Record<EffortTaskKind, ThinkingLevel>>> = {
 	simple: "low",
 	code: "medium",
 	reasoning: "high",
+	review: "high",
 };
 
 /** True only when the flag is exactly "1". */
@@ -42,7 +53,7 @@ export function isEffortPolicyEnabled(
 /** Requested level for a task kind, or undefined to leave the provider default. */
 export function effortForTaskKind(kind: string | undefined): ThinkingLevel | undefined {
 	if (!kind || !Object.prototype.hasOwnProperty.call(EFFORT_BY_TASK_KIND, kind)) return undefined;
-	return EFFORT_BY_TASK_KIND[kind as TaskCategory];
+	return EFFORT_BY_TASK_KIND[kind as EffortTaskKind];
 }
 
 /**

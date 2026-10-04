@@ -46,10 +46,13 @@ describe("effortForTaskKind table", () => {
 			expect(effortForTaskKind(k)).toBeUndefined();
 		}
 	});
-	test("table only names existing TaskCategory values", () => {
-		const known: TaskCategory[] = ["code", "reasoning", "simple", "creative"];
+	test("review (outside TaskCategory) -> high", () => {
+		expect(effortForTaskKind("review")).toBe("high");
+	});
+	test("table names only TaskCategory values plus review", () => {
+		const known: string[] = ["code", "reasoning", "simple", "creative", "review"];
 		for (const k of Object.keys(EFFORT_BY_TASK_KIND)) {
-			expect(known).toContain(k as TaskCategory);
+			expect(known).toContain(k);
 		}
 	});
 });
@@ -72,6 +75,7 @@ describe("applyEffortPolicy", () => {
 		expect(applyEffortPolicy({ ...base, taskKind: "simple" }, ON).thinking).toBe("low");
 		expect(applyEffortPolicy({ ...base, taskKind: "code" }, ON).thinking).toBe("medium");
 		expect(applyEffortPolicy({ ...base, taskKind: "reasoning" }, ON).thinking).toBe("high");
+		expect(applyEffortPolicy({ ...base, taskKind: "review" }, ON).thinking).toBe("high");
 	});
 
 	test("flag on: does not mutate the caller's object", () => {
@@ -178,6 +182,66 @@ describe("ProviderManager.chat with the effort policy", () => {
 		process.env.EIGHT_EFFORT_POLICY = "1";
 		const res = await ask({ taskKind: "security" });
 		expect(captured!.reasoning_effort).toBeUndefined();
+		expect(res.thinking).toBeUndefined();
+	});
+});
+
+describe("ProviderManager.chat with the effort policy, Anthropic shape", () => {
+	let tmpDir: string;
+	let settingsPath: string;
+	const realFetch = globalThis.fetch;
+	const realFlag = process.env.EIGHT_EFFORT_POLICY;
+	let captured: Record<string, unknown> | null;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "effort-policy-anthropic-"));
+		settingsPath = path.join(tmpDir, "providers.json");
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({
+				activeProvider: "anthropic",
+				activeModel: "claude-test",
+				providers: { anthropic: { enabled: true, apiKey: "test-key" } },
+			}),
+		);
+		captured = null;
+		globalThis.fetch = (async (_url: string, init: { body: string }) => {
+			captured = JSON.parse(init.body);
+			return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+		if (realFlag === undefined) delete process.env.EIGHT_EFFORT_POLICY;
+		else process.env.EIGHT_EFFORT_POLICY = realFlag;
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	const ask = (extra: Record<string, unknown>) =>
+		new ProviderManager(settingsPath).chat({
+			messages: [{ role: "user", content: "review this diff" }],
+			...extra,
+		});
+
+	test("flag on: review becomes an extended-thinking budget, taskKind stays off the wire", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const res = await ask({ taskKind: "review" });
+		expect(captured).not.toBeNull();
+		expect(captured!.thinking).toEqual({ type: "enabled", budget_tokens: expect.any(Number) });
+		expect("taskKind" in captured!).toBe(false);
+		expect(JSON.stringify(captured)).not.toContain("taskKind");
+		expect(res.thinking?.level).toBe("high");
+	});
+
+	test("flag unset: no thinking block and no taskKind on the wire", async () => {
+		delete process.env.EIGHT_EFFORT_POLICY;
+		const res = await ask({ taskKind: "review" });
+		expect(captured!.thinking).toBeUndefined();
+		expect(JSON.stringify(captured)).not.toContain("taskKind");
 		expect(res.thinking).toBeUndefined();
 	});
 });

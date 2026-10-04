@@ -127,7 +127,7 @@ export interface ChatRequest {
 	 */
 	thinking?: ThinkingLevel;
 	/**
-	 * Kind of task, using the `TaskCategory` labels from packages/ai/task-router.
+	 * Kind of task: a `TaskCategory` label from packages/ai/task-router, or `review`.
 	 * Only read by the effort policy (EIGHT_EFFORT_POLICY=1, #3461) to fill
 	 * `thinking` when the caller left it empty. Never sent to a provider.
 	 */
