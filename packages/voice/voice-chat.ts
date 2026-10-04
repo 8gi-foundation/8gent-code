@@ -37,7 +37,7 @@ export interface VoiceChatConfig {
 	/** VoiceEngine instance (STT) */
 	engine: VoiceEngine;
 	/** Callback when user transcript is ready — return agent response text */
-	onMessage: (transcript: string) => Promise<string>;
+	onMessage: (transcript: string, hint?: VoiceTurnHint) => Promise<string>;
 	/** macOS voice name for TTS (default: Daniel) */
 	voice?: string;
 	/** Speech rate in words per minute (default: 200) */
@@ -50,6 +50,18 @@ export interface VoiceChatConfig {
 	onError?: (error: string) => void;
 	/** Max TTS text length (default: 500 chars) */
 	maxSpeakLength?: number;
+	/**
+	 * Model residency hook (#3430). Called before each phase so models take
+	 * turns in memory. Only used when EIGHT_RESIDENCY=1; when the flag is set
+	 * and this is omitted, the Ollama broker from packages/orchestration is used.
+	 */
+	residency?: { enter: (phase: "listen" | "think" | "speak") => Promise<void> };
+}
+
+/** Hint for a live voice turn (#3430): thinking off for a fast first word. */
+export interface VoiceTurnHint {
+	live: true;
+	thinking: null;
 }
 
 export interface VoiceChatEvents {
@@ -66,7 +78,7 @@ export interface VoiceChatEvents {
 
 export class VoiceChatLoop {
 	private engine: VoiceEngine;
-	private onMessage: (transcript: string) => Promise<string>;
+	private onMessage: (transcript: string, hint?: VoiceTurnHint) => Promise<string>;
 	private voice: string;
 	private rate: number;
 	private silenceMs: number;
@@ -80,6 +92,8 @@ export class VoiceChatLoop {
 	private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
 	private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
 	private ttsEngine: TTSEngine;
+	private residency: VoiceChatConfig["residency"] | null = null;
+	private residencyOn: boolean;
 
 	constructor(config: VoiceChatConfig) {
 		this.engine = config.engine;
@@ -91,6 +105,23 @@ export class VoiceChatLoop {
 		this.onStateChange = config.onStateChange;
 		this.onError = config.onError;
 		this.ttsEngine = getTTSEngine();
+		this.residencyOn = process.env.EIGHT_RESIDENCY === "1";
+		if (this.residencyOn) this.residency = config.residency ?? null;
+	}
+
+	/** Best-effort residency step: a failure here never blocks the turn. */
+	private async enterPhase(phase: "listen" | "think" | "speak"): Promise<void> {
+		try {
+			if (!this.residency) {
+				const { ResidencyBroker, ollamaResident } = await import(
+					"../orchestration/model-residency"
+				);
+				this.residency = new ResidencyBroker([ollamaResident()]);
+			}
+			await this.residency.enter(phase);
+		} catch {
+			// best effort
+		}
 	}
 
 	// ---- Public API ----
@@ -214,6 +245,8 @@ export class VoiceChatLoop {
 
 		// 1. LISTEN — start recording, wait for VAD to auto-stop
 		this.setState("listening");
+		const live = this.residencyOn;
+		if (live) await this.enterPhase("listen");
 		const transcript = await this.listenForSpeech();
 		if (!transcript || !this.running) return;
 
@@ -221,13 +254,18 @@ export class VoiceChatLoop {
 
 		// 2. THINK — send to agent, wait for response
 		this.setState("thinking", transcript);
-		const response = await this.onMessage(transcript);
+		if (live) await this.enterPhase("think");
+		// A live voice turn hints thinking off (#3430); without the flag the call is unchanged.
+		const response = live
+			? await this.onMessage(transcript, { live: true, thinking: null })
+			: await this.onMessage(transcript);
 		if (!response || !this.running) return;
 
 		this.emit("agent-said", response);
 
 		// 3. SPEAK — play TTS, can be interrupted
 		this.setState("speaking");
+		if (live) await this.enterPhase("speak");
 		await this.speakText(response);
 	}
 
