@@ -20,8 +20,8 @@
  * in the same keypress dispatch still sees the key as claimed and ignores it.
  */
 
-import { useInput } from "ink";
-import { useEffect, useState } from "react";
+import { type DOMElement, useInput, useStdout } from "ink";
+import { type RefObject, useEffect, useLayoutEffect, useState } from "react";
 import {
 	registerTuiApprovalHandler,
 	type TuiApprovalDecision,
@@ -36,7 +36,32 @@ export interface PendingApproval {
 	reason?: string;
 	/** Show the target in full, wrapped, never cut (the request's `full`). */
 	full?: boolean;
+	/** For a `full` card: the screen size it was last laid out whole at, if it was. */
+	shownWholeAt?: string;
 	resolve: (decision: TuiApprovalDecision) => void;
+}
+
+interface Sized {
+	columns?: number;
+	rows?: number;
+}
+const sizeOf = (out: Sized) => `${out.columns}x${out.rows}`;
+
+/**
+ * True when nothing in `column` (the chat column holding the card) is laid
+ * out past its bottom edge, so the card and everything under it are on
+ * screen. Ink wraps the card's text at the column's real width with real
+ * display widths, so the heights read here are what is drawn (#3474).
+ */
+export function columnShowsAll(column: DOMElement | null | undefined): boolean {
+	const node = column?.yogaNode;
+	if (!node) return false;
+	let bottom = 0;
+	for (const child of column.childNodes) {
+		const y = (child as DOMElement).yogaNode;
+		if (y) bottom = Math.max(bottom, y.getComputedTop() + y.getComputedHeight());
+	}
+	return bottom <= node.getComputedHeight();
 }
 
 interface KeyLike {
@@ -69,12 +94,15 @@ export function isApprovalKeyClaimed(input: string, key: KeyLike): boolean {
  * a card key (the caller must not act on it further). Idempotent within one
  * keypress dispatch: the card resolves once.
  */
-export function settleApprovalKey(input: string, key: KeyLike): boolean {
+export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): boolean {
 	const card = active;
 	if (!card) return false;
 	const decision = approvalDecisionForKey(input, key);
 	if (!decision) return false;
-	card.resolve(decision);
+	// A `full` card is approved only as last seen whole, at this screen size.
+	// Not laid out yet, clipped, or resized since: Y is a no.
+	const seenWhole = !card.full || (screen && card.shownWholeAt === sizeOf(screen));
+	card.resolve(decision === "approve" && !seenWhole ? "deny" : decision);
 	return true;
 }
 
@@ -86,9 +114,24 @@ export function _resetApprovalCard(): void {
 /**
  * Registers the TUI approval handler, holds the pending card for rendering,
  * and routes Y/N/E/S to it. `onKey` runs after a card key settles the card.
+ * `column` is the box the card is drawn in: a `full` card that does not fit
+ * it whole after layout is answered "unfit" and taken down, never left up
+ * clipped (no column, no fit).
  */
-export function useApprovalCard(onKey?: () => void): PendingApproval | null {
+export function useApprovalCard(
+	onKey?: () => void,
+	column?: RefObject<DOMElement | null>,
+): PendingApproval | null {
 	const [pending, setPending] = useState<PendingApproval | null>(null);
+	const { stdout } = useStdout();
+
+	// Every commit, after Ink has laid out (a resize re-renders too).
+	useLayoutEffect(() => {
+		const card = active;
+		if (!card?.full || card !== pending) return;
+		if (columnShowsAll(column?.current)) card.shownWholeAt = sizeOf(stdout);
+		else card.resolve("unfit");
+	});
 
 	useEffect(() => {
 		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> =>
@@ -125,7 +168,7 @@ export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 	}, []);
 
 	useInput((input, key) => {
-		if (settleApprovalKey(input, key)) onKey?.();
+		if (settleApprovalKey(input, key, stdout)) onKey?.();
 	});
 
 	return pending;

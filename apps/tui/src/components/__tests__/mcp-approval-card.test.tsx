@@ -1,25 +1,29 @@
 /**
- * The MCP start card shows every server in full, or is never raised (#3474,
- * 8SO round 2). Before, the card rendered `start 3 MCP servers: a | b | c`
- * on one truncated row, so at 120 columns the third server (whatever it ran)
- * was past the edge when the person pressed Y.
+ * MCP cards (`full`) are shown whole or refused by the TUI, from its real
+ * geometry (#3474, 8SO round 3). Round 2 guessed in packages/permissions
+ * (stdout.columns - 4, 12 reserved rows, .length as width); the card really
+ * sits in the chat column, 81 wide at 120 columns with the activity rail, 56
+ * with the PLAN column open, under more chrome than guessed.
  *
- * This drives the real path: describeServer -> askMcpStartApproval -> the
- * TUI approval channel -> useApprovalCard -> InlineApprovalPrompt, rendered
- * through Ink at 120 columns, and checks each server's whole line is on
- * screen. The gate's own fit rule is pinned in packages/permissions/mcp-gate.test.ts.
+ * The shell below is app.tsx's column structure (FixedFrame, header, tabs,
+ * bordered shell, PLAN column, chat column with the focal strip, chat box,
+ * card and input, activity rail, bottom bar), with stand-ins for the
+ * components' contents. Every case drives the real path: describeServer ->
+ * askMcpStartApproval / askMcpApproval -> the approval channel ->
+ * useApprovalCard -> InlineApprovalPrompt, rendered by Ink. The rule checked:
+ * every line of the card and its key row are on screen, or no card is on
+ * screen and the request was refused.
  */
 
 import { afterEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
-import { type Instance, render } from "ink";
-import React from "react";
+import { Box, type DOMElement, type Instance, Text, render } from "ink";
+import React, { useRef } from "react";
 import { describeServer } from "../../../../../packages/mcp/lean.js";
 import {
-	TUI_CARD_CHROME_COLS,
+	askMcpApproval,
 	askMcpStartApproval,
-	wrappedRows,
 } from "../../../../../packages/permissions/mcp-gate.js";
 import { _resetTuiApprovalChannel } from "../../../../../packages/permissions/tui-approval-channel.js";
 import {
@@ -27,7 +31,10 @@ import {
 	settleApprovalKey,
 	useApprovalCard,
 } from "../../hooks/useApprovalCard.js";
+import { useViewport } from "../../hooks/useViewport.js";
+import { ACTIVITY_RAIL_WIDTH, chatColumnWidth } from "../../lib/chat-layout.js";
 import { InlineApprovalPrompt } from "../InlineApprovalPrompt.js";
+import { FixedFrame } from "../fixed-frame/FixedFrame.js";
 
 class FakeStdin extends EventEmitter {
 	isTTY = true;
@@ -57,7 +64,9 @@ function makeStdout(columns: number, rows: number): FakeStdout {
 const strip = (s: string) => s.replace(/\u001B\[[0-9;?]*[A-Za-z]/g, "");
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
+const PLAN_COLUMN_WIDTH = 24; // app.tsx
 let instance: Instance | null = null;
+let columnWidth = 0;
 afterEach(() => {
 	instance?.unmount();
 	instance = null;
@@ -65,93 +74,215 @@ afterEach(() => {
 	_resetApprovalCard();
 });
 
-function Harness() {
-	const p = useApprovalCard();
-	return p ? <InlineApprovalPrompt target={p.target} reason={p.reason} full={p.full} /> : null;
+function Shell({ plan }: { plan: boolean }) {
+	const column = useRef<DOMElement>(null);
+	const card = useApprovalCard(undefined, column);
+	const viewport = useViewport();
+	columnWidth = column.current?.yogaNode?.getComputedWidth() ?? 0;
+	return (
+		<FixedFrame>
+			<Box flexShrink={0}>
+				<Text>HEADER</Text>
+			</Box>
+			<Box flexShrink={0}>
+				<Text>TABS</Text>
+			</Box>
+			<Box borderStyle="single" paddingX={1} flexGrow={1} minHeight={0}>
+				<Box flexGrow={1} minHeight={0} gap={1}>
+					{plan && (
+						<Box width={PLAN_COLUMN_WIDTH} flexShrink={0}>
+							<Text>PLAN</Text>
+						</Box>
+					)}
+					<Box ref={column} flexGrow={1} flexDirection="column" minWidth={0}>
+						<Box height={3} flexShrink={0} borderStyle="round">
+							<Text>NOW</Text>
+						</Box>
+						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+							<Text>chat</Text>
+						</Box>
+						{card && (
+							<InlineApprovalPrompt target={card.target} reason={card.reason} full={card.full} />
+						)}
+						<Box height={3} flexShrink={0} borderStyle="round">
+							<Text>INPUT</Text>
+						</Box>
+					</Box>
+					{viewport.width >= 90 && (
+						<Box width={ACTIVITY_RAIL_WIDTH} flexShrink={0}>
+							<Text>RAIL</Text>
+						</Box>
+					)}
+				</Box>
+			</Box>
+			<Box flexShrink={0}>
+				<Text>BOTTOMBAR</Text>
+			</Box>
+		</FixedFrame>
+	);
 }
 
-/** The card's text rows, border and padding removed, each trimmed. */
-function cardRows(frame: string): string[] {
-	return strip(frame)
-		.split("\n")
-		.filter((l) => l.includes("│"))
-		.map((l) =>
-			l
-				.replace(/^\s*│\s?/, "")
-				.replace(/\s?│\s*$/, "")
-				.trimEnd(),
-		);
-}
-
-test("three servers at 120 columns: every server line is on the card in full", async () => {
-	const lines = [
-		{
-			type: "stdio" as const,
-			name: "github",
-			command: "npx",
-			args: ["-y", "@modelcontextprotocol/server-github"],
-		},
-		{
-			type: "stdio" as const,
-			name: "filesystem",
-			command: "npx",
-			args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/projects"],
-			env: { FS_TOKEN: "value-never-on-card" },
-		},
-		{
-			type: "stdio" as const,
-			name: "notes",
-			command: "/bin/sh",
-			args: ["-c", "HIDDEN_THIRD_SERVER_PAYLOAD"],
-		},
-	].map(describeServer);
-	const stdout = makeStdout(120, 30);
-	const cols = process.stdout as unknown as { columns?: number; rows?: number };
-	const saved = { c: cols.columns, r: cols.rows };
-	Object.defineProperty(process.stdout, "columns", {
-		value: 120,
-		configurable: true,
-		writable: true,
+async function mount(cols: number, rows: number, plan: boolean): Promise<FakeStdout> {
+	const stdout = makeStdout(cols, rows);
+	instance = render(<Shell plan={plan} />, {
+		stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
+		stdout: stdout as unknown as NodeJS.WriteStream,
+		stderr: makeStdout(cols, rows) as unknown as NodeJS.WriteStream,
+		debug: false,
+		exitOnCtrlC: false,
+		patchConsole: false,
 	});
-	Object.defineProperty(process.stdout, "rows", { value: 30, configurable: true, writable: true });
-	try {
-		instance = render(<Harness />, {
-			stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
-			stdout: stdout as unknown as NodeJS.WriteStream,
-			stderr: makeStdout(120, 30) as unknown as NodeJS.WriteStream,
-			debug: false,
-			exitOnCtrlC: false,
-			patchConsole: false,
-		});
-		await tick();
-		const answer = askMcpStartApproval(lines);
-		await tick(100);
-		const rows = cardRows(stdout.last);
-		const text = rows.join("\n");
-		// Each server's line is on screen whole, on its own row.
-		for (const l of lines) expect(rows).toContain(`- ${l}`);
-		expect(text).toContain("HIDDEN_THIRD_SERVER_PAYLOAD");
-		expect(text).toContain("(env: FS_TOKEN)");
-		expect(text).not.toContain("value-never-on-card");
-		expect(text).toContain("[Y] approve");
-		// The gate's row estimate is never below what Ink drew for the target.
-		const targetRows = rows.length - 2; // ASK row and key row
-		const target = `start 3 MCP servers from your MCP config (working directory ${process.cwd()}):\n${lines.map((l) => `- ${l}`).join("\n")}`;
-		expect(wrappedRows(target, 120 - TUI_CARD_CHROME_COLS)).toBeGreaterThanOrEqual(targetRows);
+	await tick();
+	// The stand-in shell gives the chat column the width app.tsx sizes from.
+	instance.rerender(<Shell plan={plan} />);
+	await tick();
+	expect(columnWidth).toBe(
+		chatColumnWidth(cols, { planWidth: plan ? PLAN_COLUMN_WIDTH : 0, activity: cols >= 90 }),
+	);
+	return stdout;
+}
+
+/** Each of `musts` and the key row on screen, or no card and a refusal. */
+async function wholeOrRefused(
+	stdout: FakeStdout,
+	answer: Promise<string | null>,
+	musts: string[],
+	count?: [string, number],
+): Promise<"shown" | "refused"> {
+	await tick(120);
+	const screen = strip(stdout.last);
+	const settled = await Promise.race([answer, tick(5).then(() => "pending" as const)]);
+	if (settled === "pending") {
+		for (const m of musts) expect(screen).toContain(m);
+		if (count) expect(screen.split(count[0]).length - 1).toBe(count[1]);
+		expect(screen).toContain("[Y] approve");
+		expect(screen).toContain("INPUT");
 		settleApprovalKey("n", {});
 		expect(await answer).toStartWith("[PERMISSION DENIED]");
-	} finally {
-		Object.defineProperty(process.stdout, "columns", {
-			value: saved.c,
-			configurable: true,
-			writable: true,
-		});
-		Object.defineProperty(process.stdout, "rows", {
-			value: saved.r,
-			configurable: true,
-			writable: true,
-		});
+		return "shown";
 	}
+	expect(settled).toStartWith("[BLOCKED]");
+	expect(settled).toContain("does not fit on this screen");
+	expect(screen).not.toContain("approve");
+	expect(screen).not.toContain("ASK");
+	return "refused";
+}
+
+const servers = (n: number, arg: (i: number) => string) =>
+	Array.from({ length: n }, (_, i) =>
+		describeServer(
+			i === n - 1
+				? {
+						type: "stdio",
+						name: "evil",
+						command: "/bin/sh",
+						args: ["-c", "HIDDEN_LAST_SERVER_PAYLOAD"],
+					}
+				: { type: "stdio", name: `s${i}`, command: "npx", args: ["-y", arg(i)] },
+		),
+	);
+const twelve = servers(12, (i) => `@scope/pkg-${i}-${"a".repeat(80)}`);
+const lastServerMusts = ["HIDDEN_LAST_SERVER_PAYLOAD", "s0:", "s10:"];
+
+for (const plan of [false, true]) {
+	const layout = plan ? "PLAN column open" : "activity rail on";
+	test(`120x30, ${layout}: the 12-server start card is whole on screen or refused`, async () => {
+		const stdout = await mount(120, 30, plan);
+		// 24+ rows of servers under this chrome in 29 rows: it cannot be whole.
+		expect(await wholeOrRefused(stdout, askMcpStartApproval(twelve), lastServerMusts)).toBe(
+			"refused",
+		);
+	});
+
+	test(`120x30, ${layout}: a per-call card with an argument after 1.6 KB is whole or refused`, async () => {
+		const stdout = await mount(120, 30, plan);
+		const answer = askMcpApproval(
+			"fs",
+			"write_file",
+			{
+				path: "/tmp/notes.txt",
+				content: "x ".repeat(800),
+				then_also: "HIDDEN_LAST_SERVER_PAYLOAD",
+			},
+			undefined,
+		);
+		expect(
+			await wholeOrRefused(stdout, answer, ["HIDDEN_LAST_SERVER_PAYLOAD", "fs/write_file"]),
+		).toBe("refused");
+	});
+
+	test(`120x30, ${layout}: double-width arguments are measured as drawn`, async () => {
+		const stdout = await mount(120, 30, plan);
+		// 100 double-width characters are 200 columns: Ink wraps them as drawn.
+		const answer = askMcpStartApproval(servers(3, () => "中".repeat(100)));
+		expect(await wholeOrRefused(stdout, answer, ["HIDDEN_LAST_SERVER_PAYLOAD"], ["中", 200])).toBe(
+			"shown",
+		);
+	});
+}
+
+test("a card that fits is shown whole and Y approves it", async () => {
+	const stdout = await mount(120, 40, false);
+	const answer = askMcpStartApproval(servers(3, (i) => `@scope/pkg-${i}`));
+	expect(await wholeOrRefused(stdout, answer, ["HIDDEN_LAST_SERVER_PAYLOAD", "s0:", "s1:"])).toBe(
+		"shown",
+	);
+	const again = askMcpStartApproval(servers(3, (i) => `@scope/pkg-${i}`));
+	await tick(120);
+	settleApprovalKey("y", {}, stdout);
+	expect(await again).toBeNull();
+});
+
+test("the pilot's single-server card at 160x48 is shown, and Y starts it", async () => {
+	const stdout = await mount(160, 48, true);
+	const line = describeServer({
+		type: "stdio",
+		name: "ledger",
+		command: "/Users/runner/.bun/bin/bun",
+		args: ["/private/var/folders/xy/run-1790898045/mcp-fake/server.ts"],
+	});
+	const answer = askMcpStartApproval([line]);
+	await tick(120);
+	expect(strip(stdout.last)).toContain("mcp-fake/server.ts");
+	settleApprovalKey("y", {}, stdout);
+	expect(await answer).toBeNull();
+});
+
+test("resized after the card was drawn: Y is a no; a shrink that clips it refuses it", async () => {
+	const stdout = await mount(120, 40, false);
+	const lines = servers(3, (i) => `@scope/pkg-${i}`);
+	// Size changed and no layout has run since: the card was not seen at this size.
+	let answer = askMcpStartApproval(lines);
+	await tick(120);
+	stdout.rows = 41;
+	settleApprovalKey("y", {}, stdout);
+	expect(await answer).toStartWith("[PERMISSION DENIED]");
+	stdout.rows = 40;
+	// The terminal shrinks under a card: the re-render finds it clipped.
+	answer = askMcpStartApproval(lines);
+	await tick(120);
+	expect(strip(stdout.last)).toContain("HIDDEN_LAST_SERVER_PAYLOAD");
+	stdout.rows = 14;
+	stdout.emit("resize");
+	expect(await answer).toContain("does not fit on this screen");
+	await tick(120);
+	expect(strip(stdout.last)).not.toContain("approve");
+});
+
+test("a full card with no column to measure is refused, never drawn unchecked", async () => {
+	function Bare() {
+		const p = useApprovalCard();
+		return p ? <InlineApprovalPrompt target={p.target} full={p.full} /> : null;
+	}
+	instance = render(<Bare />, {
+		stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
+		stdout: makeStdout(120, 40) as unknown as NodeJS.WriteStream,
+		debug: false,
+		exitOnCtrlC: false,
+		patchConsole: false,
+	});
+	await tick();
+	expect(await askMcpStartApproval(["a: npx a"])).toContain("does not fit on this screen");
 });
 
 test("a card without `full` still renders on one truncated row (other tools unchanged)", async () => {
@@ -165,5 +296,9 @@ test("a card without `full` still renders on one truncated row (other tools unch
 		patchConsole: false,
 	});
 	await tick();
-	expect(cardRows(stdout.last).length).toBe(1);
+	expect(
+		strip(stdout.last)
+			.split("\n")
+			.filter((l) => l.includes("│")).length,
+	).toBe(1);
 });

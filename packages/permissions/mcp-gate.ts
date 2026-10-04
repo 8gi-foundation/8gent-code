@@ -23,7 +23,7 @@
 
 import { getPermissionManager } from "./index";
 import { ToolG8 } from "./toolg8";
-import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
+import { hasTuiApprovalHandler, requestTuiDecision } from "./tui-approval-channel";
 import type { PolicyContext } from "./types";
 
 export const MCP_POLICY_ACTION = "mcp_call" as const;
@@ -34,16 +34,6 @@ export const MCP_APPROVAL_ACTION = "MCP tool call";
 export function mcpPolicyContext(server: string, tool: string): PolicyContext {
 	return { server, tool, action: `${server}/${tool}` };
 }
-
-/**
- * The TUI card (InlineApprovalPrompt with `full`) shows the command wrapped
- * across the card's width: the round border and padding take 4 columns. Lines
- * beyond what the terminal can show are never cut; the request is refused
- * instead (#3474, 8SO round 2). TUI_CARD_RESERVED_ROWS is the card's own
- * frame (border, ASK row, key row, margin) plus the input box and HUD below it.
- */
-export const TUI_CARD_CHROME_COLS = 4;
-export const TUI_CARD_RESERVED_ROWS = 12;
 
 /**
  * One line of untrusted text for a card: control, zero-width and bidi
@@ -58,53 +48,10 @@ function oneLine(value: string): string {
 }
 
 /**
- * Rows `text` takes when wrapped greedily at `width` on spaces, words longer
- * than a row broken hard (Ink's wrap). Never fewer than Ink renders.
- */
-export function wrappedRows(text: string, width: number): number {
-	const w = Math.max(1, width);
-	let rows = 0;
-	for (const line of text.split("\n")) {
-		rows++;
-		let col = 0;
-		for (const [i, word] of line.split(" ").entries()) {
-			if (i > 0) {
-				if (col + 1 > w) {
-					rows++;
-					col = 0;
-				} else col++;
-			}
-			let len = word.length;
-			if (col > 0 && col + len > w && len <= w) {
-				rows++;
-				col = 0;
-			}
-			while (col + len > w) {
-				len -= w - col;
-				rows++;
-				col = 0;
-			}
-			col += len;
-		}
-	}
-	return rows;
-}
-
-/** Null when the TUI card can show `text` in full in this terminal, else why not. */
-export function cardFitRefusal(text: string): string | null {
-	const cols = process.stdout.columns || 80;
-	const room = (process.stdout.rows || 24) - TUI_CARD_RESERVED_ROWS;
-	const need = wrappedRows(text, cols - TUI_CARD_CHROME_COLS);
-	return need <= room
-		? null
-		: `it needs ${need} rows on the approval card and this terminal has room for ${Math.max(0, room)}`;
-}
-
-/**
  * Ask the person before an MCP call the policy did not allow outright.
  * Returns null when the call may run, or the refusal to hand to the model.
  * `reason` is the policy's reason, shown on the card. The TUI card shows
- * `mcp_call_tool server/tool {args}` in full, or the call is refused.
+ * `mcp_call_tool server/tool {args}` in full, or the TUI refuses the call.
  */
 export async function askMcpApproval(
 	server: string,
@@ -129,8 +76,7 @@ export async function askMcpApproval(
 		},
 		`[BLOCKED] ${label} needs the person's approval and there is no one to ask in this session. Nothing was sent to the MCP server. Do not retry this call.`,
 		`[PERMISSION DENIED] The person declined ${label}. Nothing was sent to the MCP server. Do not retry this call.`,
-		(why) =>
-			`[BLOCKED] ${label} was not shown for approval: the card must show the whole call and ${why}. Nothing was sent to the MCP server. Send smaller arguments, or ask the person to run it from a session with a larger terminal.`,
+		`[BLOCKED] ${label} was not shown for approval: the approval card must show the whole call and it does not fit on this screen. Nothing was sent to the MCP server. Send smaller arguments, or ask the person to make the window larger or restart without the full-screen TUI, where the terminal prompt shows the whole call.`,
 	);
 }
 
@@ -141,7 +87,7 @@ export const MCP_START_APPROVAL_ACTION = "Start MCP servers";
  * Ask once before MCP servers are started: each line names one server, what
  * will run (command and args) or be contacted (URL), and the names of the env
  * variables its config sets. Never env values. The TUI card shows every line
- * in full or the start is refused. Same rules as a call: Infinite starts
+ * in full or the TUI refuses the start. Same rules as a call: Infinite starts
  * without a card; no card, no start. A refusal stands for the session, so
  * each one says to restart the session to be asked again.
  * Returns null when the servers may start, or the refusal for the model.
@@ -158,8 +104,7 @@ export async function askMcpStartApproval(servers: string[]): Promise<string | n
 		},
 		"[BLOCKED] Starting MCP servers needs the person's approval and there is no one to ask in this session. No server was started. Do not retry; restart the session with a person present to be asked again.",
 		"[PERMISSION DENIED] The person declined to start the MCP servers. No server was started. Do not retry; the answer stands for this session, and the person can restart the session to be asked again.",
-		(why) =>
-			`[BLOCKED] The MCP servers were not offered for approval: the card must show every server in full and ${why}. No server was started. Do not retry; the person can list fewer servers in ~/.8gent/mcp.json or use a larger terminal, then restart the session to be asked again.`,
+		"[BLOCKED] The MCP servers were not offered for approval: the approval card must show every server in full and it does not fit on this screen. No server was started. Do not retry; the person can list fewer servers in ~/.8gent/mcp.json, make the window larger, or restart without the full-screen TUI, where the terminal prompt shows every server, then restart the session to be asked again.",
 	);
 }
 
@@ -167,15 +112,17 @@ async function askPerson(
 	request: { action: string; details: string; command?: string; full?: boolean },
 	noOne: string,
 	declined: string,
-	doesNotFit: (why: string) => string,
+	doesNotFit: string,
 ): Promise<string | null> {
 	const manager = getPermissionManager();
 	if (manager.isInfiniteMode()) return null;
 	let approved: boolean;
 	if (hasTuiApprovalHandler()) {
-		const why = request.full && request.command ? cardFitRefusal(request.command) : null;
-		if (why) return doesNotFit(why);
-		approved = (await requestTuiApproval(request)) === true;
+		// The TUI knows its real geometry; it answers "unfit" rather than
+		// draw a `full` card it cannot show whole.
+		const decision = await requestTuiDecision(request);
+		if (decision === "unfit") return doesNotFit;
+		approved = decision === "approve";
 	} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
 		approved = await manager.requestPermission(request.action, request.details);
 	} else {

@@ -19,7 +19,11 @@
  * just register their handler at boot.
  */
 
-export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip";
+/**
+ * "unfit": the frontend did not show a `full` request because the whole of
+ * it does not fit on screen. Any caller that only asks yes/no reads it as no.
+ */
+export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip" | "unfit";
 
 export interface TuiApprovalRequest {
 	action: string;
@@ -27,7 +31,7 @@ export interface TuiApprovalRequest {
 	command?: string;
 	/**
 	 * Show `command` in full, wrapped (the card's own lines kept), never cut.
-	 * The asker checks it fits the terminal first (MCP, #3474).
+	 * The frontend answers "unfit" when it cannot show all of it (MCP, #3474).
 	 */
 	full?: boolean;
 }
@@ -46,16 +50,23 @@ export function hasTuiApprovalHandler(): boolean {
 	return handler != null;
 }
 
-export async function requestTuiApproval(
+/** The frontend's decision, or null when there is no handler or it failed. */
+export async function requestTuiDecision(
 	request: TuiApprovalRequest,
-): Promise<boolean | null> {
+): Promise<TuiApprovalDecision | null> {
 	if (!handler) return null;
 	try {
-		const decision = await handler(request);
-		return decision === "approve";
+		return await handler(request);
 	} catch {
 		return null;
 	}
+}
+
+export async function requestTuiApproval(
+	request: TuiApprovalRequest,
+): Promise<boolean | null> {
+	const decision = await requestTuiDecision(request);
+	return decision === null ? null : decision === "approve";
 }
 
 /** Test-only: clear the registered handler. */
