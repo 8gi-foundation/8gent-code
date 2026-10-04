@@ -26,7 +26,8 @@ type Step =
 	| "stop"
 	| "throw"
 	| "finish-then-interrupt"
-	| "interrupt-before-start";
+	| "interrupt-before-start"
+	| "stop-before-start";
 
 /** A TTS engine whose chunks finish or get cut off on a script, no audio involved. */
 class ScriptedTTS extends TTSEngine {
@@ -42,12 +43,14 @@ class ScriptedTTS extends TTSEngine {
 		if (step === "throw") throw new Error("tts failed");
 		// Interrupt lands after the previous chunk ended and before this one plays.
 		if (step === "interrupt-before-start") await loop.interrupt();
+		if (step === "stop-before-start") await loop.stop();
 		let done: (code: number) => void = () => {};
 		const exited = new Promise<number>((r) => {
 			done = r;
 		});
 		const proc: TTSProcess = { kill: () => done(143), exited };
-		if (step === "finish" || step === "interrupt-before-start") queueMicrotask(() => done(0));
+		if (step === "finish" || step === "interrupt-before-start" || step === "stop-before-start")
+			queueMicrotask(() => done(0));
 		if (step === "finish-then-interrupt") {
 			// Chunk ends and the interrupt arrives in the same tick.
 			exited.then(() => loop.interrupt());
@@ -143,7 +146,11 @@ const SCENARIOS: Array<{ name: string; script: Step[]; heardCount: number; reply
 		heardCount: 2,
 	},
 	{ name: "6. stop() during chunk 2", script: ["finish", "stop"], heardCount: 1 },
-	{ name: "7. TTS fails on chunk 2", script: ["finish", "throw"], heardCount: 1 },
+	{
+		name: "7. stop() between chunks 2 and 3",
+		script: ["finish", "finish", "stop-before-start"],
+		heardCount: 2,
+	},
 	{
 		name: "8. chunk 1 ends in the same tick as the interrupt (counted unheard)",
 		script: ["finish-then-interrupt"],
@@ -190,6 +197,14 @@ describe("10 scripted interruptions, flag on", () => {
 		expect(run.spoken).toEqual(CHUNKS.slice(0, 2));
 		const mid = await runTurn(["finish", "interrupt"], true);
 		expect(mid.spoken).toEqual(CHUNKS.slice(0, 2));
+	});
+
+	test("a TTS failure is not a cut-off: no change to history", async () => {
+		const run = await runTurn(["finish", "throw"], true);
+		expect(run.heard).toEqual([]);
+		expect(run.said).toEqual([REPLY]);
+		const first = await runTurn(["throw"], true);
+		expect(first.heard).toEqual([]);
 	});
 
 	test("metric: 0 of 10 interruptions keep text the user did not hear", async () => {
