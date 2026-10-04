@@ -93,3 +93,36 @@ describe("run log quick facts and text caps (#3416)", () => {
 		expect(entry.quick.facts).toHaveLength(12);
 	});
 });
+
+describe("run log redaction at the write (#3416)", () => {
+	const key = `sk-proj-${"Hq3_Lm7-Vt9".repeat(3)}`;
+
+	test("prompt, claims and text are redacted; a fact the redactor changes is dropped", () => {
+		const out = capRunEntry({
+			...base,
+			prompt: `use ${key} please`,
+			quick: {
+				class: "quick",
+				ran: true,
+				ok: false,
+				ms: 1,
+				tools: 1,
+				claims: [`ran with ${key}`],
+				facts: ["5180", key, "Bearer abcdefghijklmnop1234"],
+				text: `port 5180, key ${key}`,
+			},
+		});
+		const all = JSON.stringify(out);
+		expect(all).not.toContain("Hq3_Lm7");
+		expect(all).not.toContain("abcdefghijklmnop1234");
+		expect(out.prompt).toBe("use [REDACTED_OPENAI_KEY] please");
+		expect(out.quick?.facts).toEqual(["5180"]);
+		expect(out.quick?.text).toBe("port 5180, key [REDACTED_OPENAI_KEY]");
+		expect(out.quick?.claims).toEqual(["ran with [REDACTED_OPENAI_KEY]"]);
+	});
+
+	test("an entry with nothing to redact or cap is returned as is", () => {
+		const entry = { ...base, prompt: "which port does staging use?" };
+		expect(capRunEntry(entry)).toBe(entry);
+	});
+});

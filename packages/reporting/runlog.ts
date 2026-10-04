@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { redact } from "../memory/redact";
 
 export interface RunLogEntry {
 	/** ISO timestamp */
@@ -93,22 +94,47 @@ export const FACTS_MAX = 8;
 export const FACT_MAX_CHARS = 40;
 export const QUICK_TEXT_MAX_CHARS = 300;
 
-/** Enforce the claims, facts and text caps at the write, whatever the caller passed (#3411, #3416). Pure. */
+/**
+ * Enforce the redaction and the caps at the write, whatever the caller passed (#3411, #3416):
+ * the prompt, the quick claims and text are redacted; a fact the redactor would change is
+ * dropped; then claims, facts and text are capped. Pure; returns the entry itself when
+ * nothing changes.
+ */
 export function capRunEntry(entry: RunLogEntry): RunLogEntry {
+	const prompt = redact(entry.prompt);
 	const q = entry.quick;
-	if (!q || (q.claims === undefined && q.facts === undefined && q.text === undefined)) return entry;
+	const quickTouched =
+		q !== undefined && (q.claims !== undefined || q.facts !== undefined || q.text !== undefined);
+	if (prompt === entry.prompt && !quickTouched) return entry;
 	return {
 		...entry,
-		quick: {
-			...q,
-			...(q.claims
-				? { claims: q.claims.slice(0, CLAIMS_MAX).map((c) => String(c).slice(0, CLAIM_MAX_CHARS)) }
-				: {}),
-			...(q.facts
-				? { facts: q.facts.slice(0, FACTS_MAX).map((f) => String(f).slice(0, FACT_MAX_CHARS)) }
-				: {}),
-			...(q.text !== undefined ? { text: String(q.text).slice(0, QUICK_TEXT_MAX_CHARS) } : {}),
-		},
+		prompt,
+		...(q && quickTouched
+			? {
+					quick: {
+						...q,
+						...(q.claims
+							? {
+									claims: q.claims
+										.slice(0, CLAIMS_MAX)
+										.map((c) => redact(String(c)).slice(0, CLAIM_MAX_CHARS)),
+								}
+							: {}),
+						...(q.facts
+							? {
+									facts: q.facts
+										.map(String)
+										.filter((f) => redact(f) === f)
+										.slice(0, FACTS_MAX)
+										.map((f) => f.slice(0, FACT_MAX_CHARS)),
+								}
+							: {}),
+						...(q.text !== undefined
+							? { text: redact(String(q.text)).slice(0, QUICK_TEXT_MAX_CHARS) }
+							: {}),
+					},
+				}
+			: {}),
 	};
 }
 

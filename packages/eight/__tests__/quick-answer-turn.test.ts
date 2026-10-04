@@ -396,6 +396,32 @@ describe("quick then full in a real turn (#3416)", () => {
 		);
 	}, 60_000);
 
+	// Each shape the redactor learned in fix/redact-key-shapes, end to end: nothing of the
+	// secret may reach runs.jsonl (facts, text), the verdict line, or history.
+	for (const [shape, secret, fragment] of [
+		["OpenAI sk-proj-", `sk-proj-${"Hq3_Lm7-Vt9".repeat(3)}`, "Hq3_Lm7"],
+		["Bearer token", `Bearer ${"dG9rZW4tVk".repeat(3)}x.y~z`, "dG9rZW4tVk"],
+		["Stripe live key", `sk_live_${"Pq81Rs27Tu".repeat(2)}`, "Pq81Rs27Tu"],
+		["URL credentials", "postgres://ops:Wy5hunter7pass@db.internal:5432/app", "Wy5hunter7pass"],
+	] as const) {
+		test(`a ${shape} in the quick answer leaves no trace in the log, the verdict line or history`, () => {
+			const p = probe("answer", CHECK_PROMPT, "1", {
+				PROBE_QUICK_TEXT: `DONE: Staging listens on 5180, connect with \`${secret}\`.`,
+				PROBE_DEEP_TEXT: DEEP,
+			});
+			expect(p.provisionals.length).toBe(1);
+			const quick = p.runs.at(-1)?.quick;
+			expect(quick?.facts).toEqual(["5180"]);
+			expect(quick?.text ?? "").not.toContain(fragment);
+			expect(JSON.stringify(p.runs)).not.toContain(fragment);
+			expect(p.reply.split("\n")[0]).toBe(
+				"Correction: my quick answer (5180) did not match what I found when I checked. Use this instead:",
+			);
+			expect(p.reply).not.toContain(fragment);
+			expect(JSON.stringify(p.history)).not.toContain(fragment);
+		}, 60_000);
+	}
+
 	test("verdict line names numbers first and drops ALL_CAPS words echoed from the prompt", () => {
 		const p = probe("answer", PILOT_PROMPT, "1", {
 			PROBE_QUICK_TEXT:
