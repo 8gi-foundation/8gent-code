@@ -22,6 +22,7 @@ import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { AuthRotator } from "./auth-rotation";
+import { applyEffortPolicy } from "./effort-policy";
 import {
 	type ProviderCompat,
 	discoverModelsAt,
@@ -125,6 +126,12 @@ export interface ChatRequest {
 	 * exact level is unsupported. Pass `undefined` for non-thinking calls.
 	 */
 	thinking?: ThinkingLevel;
+	/**
+	 * Kind of task, using the `TaskCategory` labels from packages/ai/task-router.
+	 * Only read by the effort policy (EIGHT_EFFORT_POLICY=1, #3461) to fill
+	 * `thinking` when the caller left it empty. Never sent to a provider.
+	 */
+	taskKind?: string;
 }
 
 export interface ToolDefinition {
@@ -788,7 +795,11 @@ export class ProviderManager {
 	// Chat API
 	// ============================================
 
-	async chat(request: ChatRequest): Promise<ChatResponse> {
+	async chat(callerRequest: ChatRequest): Promise<ChatResponse> {
+		// Effort policy (#3461): fills `thinking` from `taskKind` only when the
+		// flag is exactly "1" and the caller left `thinking` empty. Otherwise
+		// returns the caller's object untouched.
+		const request = applyEffortPolicy(callerRequest);
 		const provider = this.getActiveProvider();
 		const model = request.model || this.settings.activeModel;
 
