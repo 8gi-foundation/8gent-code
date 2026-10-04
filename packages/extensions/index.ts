@@ -11,30 +11,60 @@ export type {
 	ExtensionToolDef,
 	ExtensionManager,
 } from "./types";
-export { loadAllExtensions, collectExtensionTools } from "./loader";
+export { loadAllExtensions, loadExtension, collectExtensionTools } from "./loader";
+export { createScope, scopeEnabled, type ExtensionScope, type HookRegistry } from "./scope";
 
-import { collectExtensionTools, loadAllExtensions } from "./loader";
-import type { ExtensionManager, LoadedExtension } from "./types";
+import { collectExtensionTools, loadAllExtensions, loadExtension } from "./loader";
+import { type HookRegistry, scopeEnabled } from "./scope";
+import type { ExtensionManager } from "./types";
 
 let _manager: ExtensionManager | null = null;
 
-/** Get or create the singleton extension manager */
-export function getExtensionManager(): ExtensionManager {
-	if (_manager) return _manager;
+const OFF = { errors: ["[ext] unload/reload need EIGHT_EXT_SCOPE=1"] };
+
+/** Build a manager. `dir` and `hooks` are overridable for tests. */
+export function createExtensionManager(
+	opts: { dir?: string; hooks?: HookRegistry } = {},
+): ExtensionManager {
+	// The real hook registry is pulled in only when the scope flag is on.
+	const hooks = async () => opts.hooks ?? (await import("../hooks")).getHookManager();
 
 	const manager: ExtensionManager = {
 		extensions: [],
 		async loadAll() {
-			manager.extensions = await loadAllExtensions();
+			const lo = scopeEnabled() ? { hooks: await hooks() } : {};
+			manager.extensions = await loadAllExtensions(opts.dir, lo);
 			return manager.extensions;
 		},
 		getTools() {
 			return collectExtensionTools(manager.extensions);
 		},
+		async unload(name) {
+			if (!scopeEnabled()) return OFF;
+			const ext = manager.extensions.find((e) => e.manifest.name === name);
+			if (!ext) return { errors: [`[ext] ${name}: not loaded`] };
+			manager.extensions = manager.extensions.filter((e) => e !== ext);
+			const res = (await ext.scope?.dispose()) ?? { errors: [] };
+			for (const e of res.errors) console.warn(e);
+			return res;
+		},
+		async reload(name) {
+			if (!scopeEnabled()) return OFF;
+			const dir = manager.extensions.find((e) => e.manifest.name === name)?.dir;
+			if (!dir) return { errors: [`[ext] ${name}: not loaded`] };
+			const { errors } = await manager.unload(name);
+			const ext = await loadExtension(dir, { hooks: await hooks(), fresh: true });
+			manager.extensions.push(ext);
+			return { errors: ext.error ? [...errors, ext.error] : errors };
+		},
 	};
-
-	_manager = manager;
 	return manager;
+}
+
+/** Get or create the singleton extension manager */
+export function getExtensionManager(): ExtensionManager {
+	_manager ??= createExtensionManager();
+	return _manager;
 }
 
 export { craftExtension, type CraftOptions, type CraftResult } from "./crafter";
