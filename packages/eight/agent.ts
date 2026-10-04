@@ -474,10 +474,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// The operator's user-global files (~/.claude/CLAUDE.md, ~/.8gent, a
 		// ~/AGENTS.md) go only to an on-box model; a cloud provider gets the
 		// project's files alone (8SO, #3236).
+		// #3487: judge the endpoint the request will actually use. With no baseUrl
+		// a local provider follows OLLAMA_BASE_URL / OLLAMA_HOST / LLAMA_SERVER_URL
+		// (resolveTextToolEndpoint), which can name another host.
+		const onBox = runsOnBox(runtimeName, config.baseUrl || resolveTextToolEndpoint(runtimeName));
 		const projectInstructionsBlock = isTableScope
 			? ""
 			: projectInstructionsSection(config.workingDirectory || process.cwd(), {
-					includeUserGlobal: runsOnBox(runtimeName, config.baseUrl),
+					includeUserGlobal: onBox,
 				});
 		this.messageHistory.push({
 			role: "system",
@@ -489,7 +493,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					// The board briefing goes only to a model on this machine (#3236 rule).
 					compactLocalPrompt +
 						projectInstructionsBlock +
-						(runsOnBox(runtimeName, config.baseUrl) ? userContextBlock : userContextNoBoard)
+						(onBox ? userContextBlock : userContextNoBoard)
 				: basePrompt +
 					vesselContext +
 					userContextBlock +
