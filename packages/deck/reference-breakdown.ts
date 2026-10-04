@@ -22,9 +22,10 @@ export interface Shot {
 	start: number;
 	end: number;
 	len: number;
-	brightness: number;
-	contrast: number;
-	darkRatio: number;
+	/** null when the shot was not sampled (spawn budget reached). */
+	brightness: number | null;
+	contrast: number | null;
+	darkRatio: number | null;
 	colours: Colour[];
 }
 export interface Breakdown {
@@ -32,8 +33,27 @@ export interface Breakdown {
 	duration: number;
 	avgShotLen: number;
 	cutsPerMinute: number;
+	/** Shots the scene pass found, before any cap. */
+	detectedShots: number;
+	/** True when shots were merged past the cap or left unsampled. */
+	truncated: boolean;
 	shots: Shot[];
 }
+export interface BreakdownOptions {
+	/** Most shots reported; later cuts merge into the last shot. Default 500. */
+	maxShots?: number;
+	/** Most ffmpeg/ffprobe spawns for the whole run. Default 2 + 3 per shot at the cap. */
+	maxSpawns?: number;
+	/** Wall-clock budget for the whole run, ms. Default 15 minutes. */
+	budgetMs?: number;
+	/** Observer for each spawn (tests). */
+	onSpawn?: (cmd: string, args: string[]) => void;
+}
+
+export const MAX_SHOTS = 500;
+export const BUDGET_MS = 15 * 60_000;
+/** Input options that keep every read on the local file protocol. */
+const LOCAL_ONLY = ["-protocol_whitelist", "file"];
 
 export const SCENE_THRESHOLD = 0.3;
 const W = 48;
@@ -58,15 +78,28 @@ export function findMediaTool(name: "ffmpeg" | "ffprobe", env: Env = process.env
 	return dirs.map((d) => join(d, name)).find((p) => existsSync(p)) ?? null;
 }
 
-function run(cmd: string, args: string[]): Promise<{ out: Buffer; err: string }> {
+const BUDGET_ERROR = "Reference breakdown ran past its time budget.";
+
+function run(
+	cmd: string,
+	args: string[],
+	timeoutMs: number,
+): Promise<{ out: Buffer; err: string }> {
+	if (timeoutMs <= 0) return Promise.reject(new Error(BUDGET_ERROR));
 	return new Promise((ok, fail) => {
 		execFile(
 			cmd,
 			args,
-			{ encoding: "buffer", timeout: 300_000, maxBuffer: 64 * 1024 * 1024 },
+			{
+				encoding: "buffer",
+				timeout: timeoutMs,
+				killSignal: "SIGKILL",
+				maxBuffer: 64 * 1024 * 1024,
+			},
 			(e, out, err) => {
 				const tail = String(err).trim().split("\n").slice(-2).join(" ");
-				if (e) fail(new Error(`${name(cmd)} failed: ${tail || e.message}`));
+				if (e && (e as { killed?: boolean }).killed) fail(new Error(BUDGET_ERROR));
+				else if (e) fail(new Error(`${name(cmd)} failed: ${tail || e.message}`));
 				else ok({ out, err: String(err) });
 			},
 		);
@@ -114,7 +147,11 @@ export function lookOf(
 	};
 }
 
-export async function breakdown(videoPath: string, env: Env = process.env): Promise<Breakdown> {
+export async function breakdown(
+	videoPath: string,
+	env: Env = process.env,
+	opts: BreakdownOptions = {},
+): Promise<Breakdown> {
 	if (!refBreakdownEnabled(env))
 		throw new Error("Reference breakdown is off. Set EIGHT_REF_BREAKDOWN=1 to use it.");
 	if (/^[a-z][a-z0-9+.-]*:/i.test(videoPath))
@@ -125,12 +162,22 @@ export async function breakdown(videoPath: string, env: Env = process.env): Prom
 	const ffprobe = findMediaTool("ffprobe", env);
 	if (!ffmpeg || !ffprobe)
 		throw new Error("ffmpeg and ffprobe are required (brew install ffmpeg).");
+	const maxShots = Math.max(1, opts.maxShots ?? MAX_SHOTS);
+	const maxSpawns = opts.maxSpawns ?? 2 + 3 * maxShots;
+	const deadline = Date.now() + (opts.budgetMs ?? BUDGET_MS);
+	let spawns = 0;
+	const spawn = (cmd: string, args: string[]) => {
+		spawns++;
+		opts.onSpawn?.(cmd, args);
+		return run(cmd, args, deadline - Date.now());
+	};
 
 	let probe: { streams?: unknown[]; format?: { duration?: string } };
 	try {
-		const { out } = await run(ffprobe, [
+		const { out } = await spawn(ffprobe, [
 			"-v",
 			"error",
+			...LOCAL_ONLY,
 			"-select_streams",
 			"v:0",
 			"-show_entries",
@@ -140,16 +187,18 @@ export async function breakdown(videoPath: string, env: Env = process.env): Prom
 			file,
 		]);
 		probe = JSON.parse(String(out));
-	} catch {
+	} catch (e) {
+		if (e instanceof Error && e.message === BUDGET_ERROR) throw e;
 		throw new Error(`Not a readable video file: ${file}`);
 	}
 	const duration = Number(probe.format?.duration);
 	if (!probe.streams?.length || !Number.isFinite(duration) || duration <= 0)
 		throw new Error(`Not a video file (no video stream): ${file}`);
 
-	const { err } = await run(ffmpeg, [
+	const { err } = await spawn(ffmpeg, [
 		"-hide_banner",
 		"-nostats",
+		...LOCAL_ONLY,
 		"-i",
 		file,
 		"-an",
@@ -162,20 +211,36 @@ export async function breakdown(videoPath: string, env: Env = process.env): Prom
 	const cuts = [...err.matchAll(/Parsed_showinfo.*?pts_time:\s*([0-9.]+)/g)]
 		.map((m) => Number(m[1]))
 		.filter((t) => t > 0.05 && t < duration - 0.05);
-	const edges = [0, ...cuts, duration];
+	const kept = cuts.slice(0, maxShots - 1);
+	const edges = [0, ...kept, duration];
+	let truncated = kept.length < cuts.length;
 
 	const shots: Shot[] = [];
 	for (let i = 0; i < edges.length - 1; i++) {
 		const start = edges[i];
 		const end = edges[i + 1];
 		const len = end - start;
+		if (spawns + 3 > maxSpawns) {
+			truncated = true;
+			shots.push({
+				start: r3(start),
+				end: r3(end),
+				len: r3(len),
+				brightness: null,
+				contrast: null,
+				darkRatio: null,
+				colours: [],
+			});
+			continue;
+		}
 		const frames: Buffer[] = [];
 		for (const f of [0.25, 0.5, 0.75]) {
-			const { out } = await run(ffmpeg, [
+			const { out } = await spawn(ffmpeg, [
 				"-v",
 				"error",
 				"-ss",
 				(start + len * f).toFixed(3),
+				...LOCAL_ONLY,
 				"-i",
 				file,
 				"-frames:v",
@@ -200,19 +265,23 @@ export async function breakdown(videoPath: string, env: Env = process.env): Prom
 	return {
 		file,
 		duration: r3(duration),
-		avgShotLen: r3(duration / shots.length),
+		avgShotLen: r3(duration / (cuts.length + 1)),
 		cutsPerMinute: r3((cuts.length / duration) * 60),
+		detectedShots: cuts.length + 1,
+		truncated,
 		shots,
 	};
 }
 
 /** One line per shot: index, span, length, look numbers, colours. */
 export function shotTable(b: Breakdown): string {
-	const head = `shots ${b.shots.length}  avg ${b.avgShotLen.toFixed(2)}s  cuts/min ${b.cutsPerMinute.toFixed(1)}  ${b.file}`;
-	const rows = b.shots.map(
-		(s, i) =>
-			`${String(i + 1).padStart(3)}  ${s.start.toFixed(2)}-${s.end.toFixed(2)}  ${s.len.toFixed(2)}s  bright ${s.brightness.toFixed(2)}  contrast ${s.contrast.toFixed(2)}  dark ${s.darkRatio.toFixed(2)}  ${s.colours.map((c) => `${c.hex} ${Math.round(c.share * 100)}%`).join(" ")}`,
-	);
+	const cap = b.truncated ? `  truncated (${b.detectedShots} detected)` : "";
+	const head = `shots ${b.shots.length}${cap}  avg ${b.avgShotLen.toFixed(2)}s  cuts/min ${b.cutsPerMinute.toFixed(1)}  ${b.file}`;
+	const rows = b.shots.map((s, i) => {
+		const span = `${String(i + 1).padStart(3)}  ${s.start.toFixed(2)}-${s.end.toFixed(2)}  ${s.len.toFixed(2)}s`;
+		if (s.brightness === null) return `${span}  not sampled`;
+		return `${span}  bright ${s.brightness.toFixed(2)}  contrast ${(s.contrast ?? 0).toFixed(2)}  dark ${(s.darkRatio ?? 0).toFixed(2)}  ${s.colours.map((c) => `${c.hex} ${Math.round(c.share * 100)}%`).join(" ")}`;
+	});
 	return `${[head, ...rows].join("\n")}\n`;
 }
 
