@@ -424,7 +424,9 @@ export class VoiceChatLoop {
 			if (this.interruptSeq === seq && this.running) heard++;
 		}
 
-		if (this.heardOnly) {
+		// Trim only when the user cut playback off (interrupt or stop), never on a TTS failure.
+		const cutOff = this.interruptSeq !== startSeq || !this.running;
+		if (this.heardOnly && cutOff) {
 			const kept = heardOnlyText(chunks, heard);
 			if (kept !== null) this.emit("agent-heard", kept);
 		}
