@@ -217,11 +217,13 @@ async function timed(
 	timeoutMs: number,
 	now: () => number,
 ): Promise<Sample> {
+	// Read the clock before arming the timer: a clock that throws must not leave
+	// a live timer whose rejection nobody handles.
+	const start = now();
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<never>((_, rej) => {
 		timer = setTimeout(() => rej(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
 	});
-	const start = now();
 	try {
 		const out = await Promise.race([call(target, prompt), timeout]);
 		const latencyMs = now() - start;

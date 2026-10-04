@@ -285,6 +285,29 @@ describe("speed-gate verdicts", () => {
 		expect(judge([ok], [neg], T).verdict).toBe("REJECT");
 	});
 
+	test("a clock that throws leaves no timer behind", async () => {
+		const stray: unknown[] = [];
+		const onStray = (e: unknown) => stray.push(e);
+		process.on("unhandledRejection", onStray);
+		try {
+			const run = runPaired({
+				baseline: BASE,
+				candidate: CAND,
+				prompts: PROMPTS.slice(0, 1),
+				caller: async (_t, p) => yes()(p),
+				now: () => {
+					throw new Error("clock broke");
+				},
+				timeoutMs: 20,
+			});
+			await expect(run).rejects.toThrow("clock broke");
+			await new Promise((r) => setTimeout(r, 80));
+			expect(stray).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onStray);
+		}
+	});
+
 	test("empty suite and mismatched lengths are REJECT", () => {
 		expect(judge([], [], T).verdict).toBe("REJECT");
 		const ok: Sample = { ok: true, decision: "yes", latencyMs: 10 };
