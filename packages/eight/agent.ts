@@ -221,6 +221,8 @@ export class Agent {
 	private messageHistory: Array<{ role: string; content: string }> = [];
 	/** #3487: the user's communication style, restated as the last message of every local text-tool request; null when no style is set. */
 	private styleReminder: string | null = null;
+	/** #3487: the system prompt for a request rerouted to an off-box endpoint; null when the built prompt is already off-box safe. */
+	private offBoxSystemPrompt: (() => string) | null = null;
 	private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
 	private loopWarningInjected = false;
 	private loopDetector = new ToolLoopDetector();
@@ -520,6 +522,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					languageInstruction +
 					projectInstructionsBlock,
 		});
+		// #3487: a turn can be rerouted to another local provider after this
+		// prompt is built (resolveToolCapableModel, callLocalModelWithReroute), and
+		// that provider's endpoint can be off this machine. Keep the variant without
+		// the board briefing and the user-global files for such a request; built on
+		// first use. Only needed when the built prompt carries them.
+		if (!isTableScope && isLocalRuntime && onBox) {
+			const workingDirectory = config.workingDirectory || process.cwd();
+			let offBox: string | null = null;
+			this.offBoxSystemPrompt = () => {
+				offBox ??=
+					compactLocalPrompt +
+					projectInstructionsSection(workingDirectory, { includeUserGlobal: false }) +
+					userContextNoBoard;
+				return offBox;
+			};
+		}
 
 		// Initialize session persistence (v2)
 		this.sessionWriter = new SessionWriter(this.sessionId);
@@ -875,6 +893,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		let usageStepNumber = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
+			// #3487: the built prompt was judged on-box for the session's runtime. If
+			// this turn goes to a provider whose endpoint is off this machine (a
+			// reroute), send the variant without the board briefing and the
+			// user-global files instead.
+			const offBox =
+				this.offBoxSystemPrompt &&
+				!runsOnBox(provider, this.config.baseUrl || resolveTextToolEndpoint(provider));
+			const turnMessages =
+				offBox && this.offBoxSystemPrompt && messages[0]?.role === "system"
+					? [{ role: "system" as const, content: this.offBoxSystemPrompt() }, ...messages.slice(1)]
+					: messages;
 			const rawCall = buildTextToolCall({
 				provider,
 				model,
@@ -911,7 +940,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					`${provider}/${model} (text-tools)`,
 				);
 			return runTextToolAgent({
-				messages,
+				messages: turnMessages,
 				tools,
 				call,
 				maxRounds: this.config.maxTurns ?? 6,
