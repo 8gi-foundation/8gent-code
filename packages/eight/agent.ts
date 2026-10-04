@@ -108,7 +108,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
-import { type SentSections, contextNote, harnessNote } from "./context-note";
+import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -219,6 +219,8 @@ export class Agent {
 	private totalCost: number | null = null;
 	private sessionWriter: SessionWriter;
 	private messageHistory: Array<{ role: string; content: string }> = [];
+	/** #3487: the user's communication style, restated as the last message of every local text-tool request; null when no style is set. */
+	private styleReminder: string | null = null;
 	private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
 	private loopWarningInjected = false;
 	private loopDetector = new ToolLoopDetector();
@@ -397,6 +399,17 @@ export class Agent {
 			if (userContextBlock) {
 				userContextBlock = `\n\n${userContextBlock}`;
 			}
+		}
+		// #3487: the same style line, restated after the conversation on the local
+		// text-tool path, where a long tool loop buries the system prompt. A harness
+		// note, not a system message: Ollama's qwen3.8 renderer takes one system turn
+		// and the raw path folds every system message into it, which would move the
+		// cached prefix (#3222). Never stored in the history. Table officers keep
+		// their supplied prompt verbatim, so they get none.
+		const style = userData.identity.communicationStyle;
+		if ((userData.onboardingComplete || userData.identity.name) && style && config.agentScope !== "__table__") {
+			const { communicationStyleLine } = require("./prompts/system-prompt");
+			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
 
 		// Inject the 8gent personality voice into the system prompt. Fixed phrases,
@@ -870,7 +883,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			});
 			const call = (msgs: Parameters<typeof rawCall>[0]) =>
 				withTurnTimeout(
-					() => rawCall(msgs),
+					() => rawCall(withStyleReminder(msgs, this.styleReminder)),
 					attemptTimeoutMs,
 					() => this.abortController?.abort(),
 					`${provider}/${model} (text-tools)`,
