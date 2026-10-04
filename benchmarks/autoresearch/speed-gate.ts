@@ -402,12 +402,20 @@ export async function main(
 	}
 	const samples = await runPaired({ baseline, candidate, prompts, caller, timeoutMs, seed, now });
 	const report = judge(samples.baseline, samples.candidate, thresholds);
+	for (const side of ["baseline", "candidate"] as const) {
+		if (!samples.warmUp[side])
+			report.sampling.warnings.push(
+				`${side} warm-up failed: its first timed call likely includes model load`,
+			);
+	}
 	const out = args.out ?? "speed-gate-report.json";
 	const decoding = { endpoint: "/api/chat", format: "json", temperature: 0, seed };
 	const warmUp = { untimedCallsPerSide: 1, ok: samples.warmUp };
 	const full = { baseline, candidate, suite: args.suite, decoding, warmUp, ...report };
 	writeFileSync(out, `${JSON.stringify(full, null, 2)}\n`);
-	console.log(`${report.verdict}: ${report.reasons.join("; ")}\nreport: ${out}`);
+	console.log(`${report.verdict}: ${report.reasons.join("; ")}`);
+	for (const w of report.sampling.warnings) console.log(`warning: ${w}`);
+	console.log(`report: ${out}`);
 	return EXIT[report.verdict];
 }
 

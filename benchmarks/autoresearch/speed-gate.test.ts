@@ -3,7 +3,7 @@
  * no model is called, nothing is downloaded, files go to a temp dir.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -332,6 +332,27 @@ describe("speed-gate CLI", () => {
 		}
 		expect(calls).toBe(0);
 		expect(existsSync(out)).toBe(false);
+	});
+
+	test("sampling and warm-up warnings print next to the verdict", async () => {
+		const { argv, out } = setup();
+		const { now, caller } = fake({
+			baseline: { ms: 100, out: yes() },
+			candidate: { ms: 60, out: yes() },
+		});
+		let n = 0;
+		const coldBaseline: Caller = (t, p) => (++n === 1 ? Promise.resolve(null) : caller(t, p));
+		const log = spyOn(console, "log").mockImplementation(() => {});
+		const code = await main(argv, { EIGHT_SPEED_GATE: "1" }, coldBaseline, now);
+		const printed = log.mock.calls.map((c) => String(c[0])).join("\n");
+		log.mockRestore();
+		expect(code).toBe(EXIT.ACCEPT);
+		expect(printed).toContain("warning: suite has 4 inputs, fewer than 20");
+		expect(printed).toContain(
+			"warning: baseline warm-up failed: its first timed call likely includes model load",
+		);
+		expect(printed).not.toContain("candidate warm-up failed");
+		expect(JSON.parse(readFileSync(out, "utf-8")).sampling.warnings).toHaveLength(2);
 	});
 
 	test("flag on writes a JSON report and exits with the verdict code", async () => {
