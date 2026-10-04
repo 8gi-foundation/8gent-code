@@ -121,6 +121,7 @@ export function decideVerdict(p: number | null, threshold: number, raw: string):
 		rationale: `P(pass)=${p.toFixed(4)} ${pass ? ">=" : "<"} threshold ${threshold}.`,
 		raw,
 		source: "decision-readout",
+		probability: p,
 	};
 }
 
@@ -171,6 +172,24 @@ export class DecisionReadoutJudge {
 			);
 		}
 		return decideVerdict(parseDecisionProbability(raw), this.threshold, raw.slice(0, 2000));
+	}
+
+	/**
+	 * True when the loopback llama-server answers GET /health with 2xx.
+	 * 503 (model loading), a non-loopback URL, or any error is unavailable.
+	 */
+	async isAvailable(): Promise<boolean> {
+		if (!isLoopbackUrl(this.baseUrl)) return false;
+		try {
+			const res = await fetch(`${this.baseUrl}/health`, {
+				signal: AbortSignal.timeout(Math.min(this.timeoutMs, 5000)),
+				redirect: "error",
+			});
+			await res.body?.cancel();
+			return res.ok;
+		} catch {
+			return false;
+		}
 	}
 }
 

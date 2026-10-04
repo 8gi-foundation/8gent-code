@@ -46,6 +46,8 @@ export interface JudgeVerdict {
 	raw: string;
 	/** How this verdict was produced. "fail-closed" means no real judgment happened. */
 	source: VerdictSource;
+	/** P(pass) from the decision reader (#3455). Absent on Selene and fail-closed verdicts. */
+	probability?: number;
 }
 
 /** A single candidate to be scored by the scalar reward model. */
@@ -258,8 +260,13 @@ export class SeleneJudge {
 		return parseVerdict(raw);
 	}
 
-	/** True when the local Ollama server is reachable. */
+	/** True when the judge in use is reachable: Ollama, or the decision server when flagged on. */
 	async isAvailable(): Promise<boolean> {
+		// With the flag on, availability follows the judge actually in use, so a
+		// kernel gate on this probe does not route around the trial (#3455).
+		if (decisionJudgeEnabled()) {
+			return new DecisionReadoutJudge(decisionConfigFromEnv()).isAvailable();
+		}
 		return createOllamaServer({ baseUrl: this.baseUrl }).isHealthy({ signal: AbortSignal.timeout(5000) });
 	}
 }

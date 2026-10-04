@@ -135,6 +135,7 @@ describe("DecisionReadoutJudge against a fake 127.0.0.1 server", () => {
 		);
 		expect(v.pass).toBe(true);
 		expect(v.source).toBe("decision-readout");
+		expect(v.probability).toBe(0.95);
 		expect(hits).toHaveLength(1);
 		expect(hits[0].path).toBe("/v1/systemone");
 		expect((hits[0].body as { questions: Record<string, unknown> }).questions).toHaveProperty(
@@ -279,5 +280,54 @@ describe("EIGHT_DECISION_JUDGE flag in SeleneJudge", () => {
 		expect(v.pass).toBe(false);
 		expect(v.source).toBe("fail-closed");
 		expect(hits).toHaveLength(0);
+	});
+});
+
+describe("availability follows the judge in use (8PO must-fix 1)", () => {
+	it("DecisionReadoutJudge probes GET /health on the llama-server base URL", async () => {
+		reply = { body: '{"status":"ok"}' };
+		expect(await new DecisionReadoutJudge({ baseUrl: base }).isAvailable()).toBe(true);
+		expect(hits.map((h) => h.path)).toEqual(["/health"]);
+	});
+
+	it("reports unavailable on a 503 from /health (model still loading)", async () => {
+		reply = { status: 503, body: '{"error":"loading"}' };
+		expect(await new DecisionReadoutJudge({ baseUrl: base }).isAvailable()).toBe(false);
+	});
+
+	it("reports unavailable for a non-loopback URL without a request", async () => {
+		expect(await new DecisionReadoutJudge({ baseUrl: "https://example.com" }).isAvailable()).toBe(
+			false,
+		);
+		expect(hits).toHaveLength(0);
+	});
+
+	it("flag on: SeleneJudge.isAvailable follows the decision server, not Ollama", async () => {
+		process.env.EIGHT_DECISION_JUDGE = "1";
+		process.env.EIGHT_DECISION_JUDGE_URL = base;
+		reply = { body: '{"status":"ok"}' };
+		// Ollama base points at a dead port; availability must still be true.
+		expect(await new SeleneJudge({ baseUrl: "http://127.0.0.1:1" }).isAvailable()).toBe(true);
+		expect(hits.map((h) => h.path)).toEqual(["/health"]);
+	});
+
+	it("flag on: decision server down means unavailable even when Ollama is up", async () => {
+		const dead = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
+		const port = dead.port;
+		dead.stop(true);
+		process.env.EIGHT_DECISION_JUDGE = "1";
+		process.env.EIGHT_DECISION_JUDGE_URL = `http://127.0.0.1:${port}`;
+		reply = { body: "{}" };
+		// `base` answers 200 on every path, so an Ollama probe would say true.
+		expect(await new SeleneJudge({ baseUrl: base }).isAvailable()).toBe(false);
+		expect(hits).toHaveLength(0);
+	});
+
+	it("flag off: SeleneJudge.isAvailable still probes Ollama", async () => {
+		delete process.env.EIGHT_DECISION_JUDGE;
+		reply = { body: '{"version":"0.0.0"}' };
+		await new SeleneJudge({ baseUrl: base }).isAvailable();
+		expect(hits.length).toBeGreaterThan(0);
+		expect(hits.every((h) => h.path.startsWith("/api/"))).toBe(true);
 	});
 });
