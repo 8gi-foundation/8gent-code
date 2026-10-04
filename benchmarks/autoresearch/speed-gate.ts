@@ -24,7 +24,11 @@
  *
  * Safety: a target must be an http(s) origin with no credentials, query,
  * fragment or path. Only loopback hosts are allowed unless --allow-remote is
- * passed; link-local hosts (169.254.0.0/16, fe80::/10) are always refused.
+ * passed; link-local hosts (169.254.0.0/16, fe80::/10), the AWS IPv6
+ * metadata range (fd00:ec2::/32) and any IPv6 form that embeds an IPv4 address
+ * (mapped, compatible, translated, NAT64) other than 127/8 are always refused.
+ * Hostnames are not resolved, so a name pointing at an internal address is not
+ * blocked under --allow-remote.
  * Redirects are refused, and a reply body over 64 KiB is a failed call. An
  * empty, non-string or over-64-char decision is a failed call. Exit 5 means a
  * crash or I/O error, never a verdict.
@@ -37,7 +41,15 @@
  * logits. Its numbers are for this machine and this suite only.
  */
 
-import { lstatSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	lstatSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { loadRecentTraffic } from "./canary-measure";
@@ -407,13 +419,30 @@ export function loadTarget(path: string, label: string, allowRemote: boolean): M
 		throw new UsageError(`${path}: url must not have a query or fragment`);
 	if (u.pathname !== "/") throw new UsageError(`${path}: url must be an origin with no path`);
 	const host = u.hostname.toLowerCase();
-	if (/^169\.254\./.test(host) || /^\[fe[89ab]/.test(host))
-		throw new UsageError(`${path}: link-local host ${host} is refused`);
-	const loopback = host === "localhost" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
+	// IPv6 that embeds an IPv4 address: ::a.b.c.d, ::ffff:a.b.c.d, ::ffff:0:a.b.c.d, 64:ff9b::a.b.c.d
+	const embedded = /^\[(?:::(?:ffff:(?:0:)?)?|64:ff9b::)([0-9a-f]{1,4}):[0-9a-f]{1,4}\]$/.exec(
+		host,
+	);
+	const embeddedLoopback =
+		embedded !== null && /^7f[0-9a-f]{2}$/.test(embedded[1].padStart(4, "0"));
+	if (
+		/^169\.254\./.test(host) ||
+		/^\[fe[89ab]/.test(host) ||
+		host.startsWith("[fd00:ec2:") ||
+		(embedded !== null && !embeddedLoopback)
+	)
+		throw new UsageError(`${path}: link-local, metadata or IPv4-embedded host ${host} is refused`);
+	const loopback =
+		host === "localhost" ||
+		host === "[::1]" ||
+		embeddedLoopback ||
+		/^127\.\d+\.\d+\.\d+$/.test(host);
 	if (!loopback) {
 		if (!allowRemote)
 			throw new UsageError(`${path}: ${host} is not loopback; pass --allow-remote to use it`);
-		console.error(`remote host allowed for ${label}: ${host}`);
+		console.error(
+			`remote host allowed for ${label}: ${host} (hostnames are not resolved; a name pointing at an internal address is not blocked)`,
+		);
 	}
 	const name = typeof obj.label === "string" ? obj.label.slice(0, 64) : label;
 	return { url: u.origin, model: obj.model, label: name };
@@ -453,7 +482,18 @@ export function loadSuite(path: string): string[] {
 
 /** Refuse an --out that is an input, a symlink, or not a regular file. */
 function checkOut(out: string, inputs: string[]): void {
-	if (inputs.some((p) => resolve(p) === resolve(out)))
+	const real = (p: string) => {
+		try {
+			return realpathSync(p);
+		} catch {
+			try {
+				return join(realpathSync(dirname(p)), basename(p));
+			} catch {
+				return resolve(p);
+			}
+		}
+	};
+	if (inputs.some((p) => real(p) === real(out)))
 		throw new UsageError("--out must not be an input file");
 	let st: ReturnType<typeof lstatSync>;
 	try {

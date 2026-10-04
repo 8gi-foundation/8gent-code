@@ -498,11 +498,26 @@ describe("speed-gate CLI", () => {
 		]) {
 			expect(() => loadTarget(cfg(url), "x", false)).toThrow();
 		}
-		expect(() => loadTarget(cfg("http://169.254.169.254"), "x", true)).toThrow("link-local");
+		for (const url of [
+			"http://169.254.169.254",
+			"http://[::ffff:169.254.169.254]",
+			"http://[::169.254.169.254]",
+			"http://[::ffff:0:169.254.169.254]",
+			"http://[64:ff9b::169.254.169.254]",
+			"http://[::ffff:10.0.0.1]",
+			"http://[fd00:ec2::254]",
+			"http://[fe80::1]",
+		]) {
+			expect(() => loadTarget(cfg(url), "x", true)).toThrow("is refused");
+		}
+		expect(loadTarget(cfg("http://[::ffff:127.0.0.1]:11434"), "x", false).url).toBe(
+			"http://[::ffff:7f00:1]:11434",
+		);
 		expect(loadTarget(cfg("http://example.com"), "x", true).url).toBe("http://example.com");
 		expect(err.mock.calls.map((c) => String(c[0])).join()).toContain(
 			"remote host allowed for x: example.com",
 		);
+		expect(err.mock.calls.map((c) => String(c[0])).join()).toContain("hostnames are not resolved");
 		expect(loadTarget(cfg("http://[::1]:11434"), "x", false).url).toBe("http://[::1]:11434");
 		expect(loadTarget(cfg("HTTP://LOCALHOST:11434/"), "x", false).url).toBe(
 			"http://localhost:11434",
@@ -515,7 +530,9 @@ describe("speed-gate CLI", () => {
 			join(dir, "cand.json"),
 			JSON.stringify({ url: "http://169.254.169.254", model: "m" }),
 		);
-		const f = spyOn(globalThis, "fetch");
+		const f = spyOn(globalThis, "fetch").mockImplementation((() => {
+			throw new Error("network must not be reached");
+		}) as unknown as typeof fetch);
 		const code = await main(argv, ON);
 		const calls = f.mock.calls.length;
 		f.mockRestore();
@@ -546,6 +563,10 @@ describe("speed-gate CLI", () => {
 		expect(await main(swap(argv, "--out", link), ON, caller)).toBe(EXIT.USAGE);
 		expect(existsSync(join(dir, "victim.json"))).toBe(false);
 		expect(await main(swap(argv, "--out", join(dir, "suite.jsonl")), ON, caller)).toBe(EXIT.USAGE);
+		symlinkSync(dir, join(dir, "alias"));
+		const viaAlias = join(dir, "alias", "suite.jsonl");
+		expect(await main(swap(argv, "--out", viaAlias), ON, caller)).toBe(EXIT.USAGE);
+		expect(readFileSync(join(dir, "suite.jsonl"), "utf-8")).toContain("prompt");
 	});
 
 	test("the report is written 0600; a failed write exits 5 after printing the verdict", async () => {
