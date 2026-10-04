@@ -5,12 +5,15 @@ import {
 	DEGENERATE_REPEAT_MIN,
 	DEGENERATE_REPLY_MESSAGE,
 	DONE_MARKER,
+	FOLLOW_UP_INSTRUCTION,
 	hasDoneMarker,
 	isQuestionToUser,
 	MAX_COMPLETION_CHECKS,
 	MAX_CONSECUTIVE_CHECKS,
 	MAX_CALLS_PER_ROUND,
 	abortedCallResult,
+	batchSkippedCallResult,
+	isFailedChangeCall,
 	blockedCheckMessage,
 	blockedStopNote,
 	blockReason,
@@ -2027,3 +2030,248 @@ describe("runTextToolAgent - plan check at turn end (#3098)", () => {
 	});
 });
 
+
+// ── Ordered command batch trial (#3502), EIGHT_RUN_BATCH=1, off by default ──
+//
+// Under the flag, once a write, edit or command in a multi-call reply fails,
+// the rest of that reply is not run and the model is told which calls were
+// skipped. With the flag unset (or any value but "1") nothing changes.
+
+async function withRunBatch<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+	const prev = process.env.EIGHT_RUN_BATCH;
+	if (value === undefined) delete process.env.EIGHT_RUN_BATCH;
+	else process.env.EIGHT_RUN_BATCH = value;
+	try {
+		return await fn();
+	} finally {
+		if (prev === undefined) delete process.env.EIGHT_RUN_BATCH;
+		else process.env.EIGHT_RUN_BATCH = prev;
+	}
+}
+
+/** write_file, read_file, run_command; records every call that really ran. */
+function batchWorkspace() {
+	const ran: string[] = [];
+	const tools: TextTool[] = [
+		{
+			spec: { name: "write_file", description: "Write a file", parameters: {} },
+			run: async (a) => {
+				ran.push(`write_file ${a.path}`);
+				if (String(a.path).startsWith("/locked/")) return `Error: EACCES: permission denied, open '${a.path}'`;
+				return `Wrote ${a.path}`;
+			},
+		},
+		{
+			spec: { name: "read_file", description: "Read a file", parameters: {} },
+			run: async (a) => {
+				ran.push(`read_file ${a.path}`);
+				if (String(a.path).startsWith("missing")) throw new Error(`no such file ${a.path}`);
+				return "contents";
+			},
+		},
+		{
+			spec: { name: "run_command", description: "Run a command", parameters: {} },
+			run: async (a) => {
+				const cmd = String(a.command);
+				ran.push(`run_command ${cmd}`);
+				if (cmd === "bun test") return "Exit code 1:\n3 pass\n1 fail\n";
+				if (cmd.includes(";")) return `[BLOCKED] Semicolon command chaining is not allowed. Use separate run_command calls instead. Command: ${cmd}`;
+				return "ok";
+			},
+		},
+	];
+	return { tools, ran };
+}
+
+/** Four calls; the second (a write) fails. */
+const FOUR_CALLS_SECOND_WRITE_FAILS = [
+	tc("write_file", { path: "src/a.ts", content: "a" }),
+	tc("write_file", { path: "/locked/b.ts", content: "b" }),
+	tc("run_command", { command: "git add -A" }),
+	tc("read_file", { path: "src/a.ts" }),
+].join("\n");
+
+describe("runTextToolAgent - ordered batch trial (#3502)", () => {
+	test("flag on: a 4-call reply whose second write fails runs exactly 2 calls and reports 2 as not run", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([FOUR_CALLS_SECOND_WRITE_FAILS, "DONE: stopped at the failed write."]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "write both files and stage them" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toEqual(["write_file src/a.ts", "write_file /locked/b.ts"]);
+			expect(result.toolLog).toHaveLength(4);
+			const skipped = result.toolLog.slice(2);
+			expect(skipped.map((e) => e.name)).toEqual(["run_command", "read_file"]);
+			expect(skipped.every((e) => e.result === batchSkippedCallResult(1, "write_file"))).toBe(true);
+			const fed = lastUserMessage(model.seen[1]);
+			expect(fed.split("Tool write_file returned:").length - 1).toBe(2);
+			expect(fed).toContain("Calls 3-4 (2) were not run");
+			expect(fed.split("in this reply failed").length - 1).toBe(1);
+			expect(fed).not.toContain("Tool run_command returned:");
+		});
+	});
+
+	test("flag off: the same reply runs all 4 calls and says nothing about skips", async () => {
+		for (const value of [undefined, "0", "true", " 1", ""]) {
+			await withRunBatch(value, async () => {
+				const ws = batchWorkspace();
+				const model = scriptedModel([FOUR_CALLS_SECOND_WRITE_FAILS, "DONE: done."]);
+				const result = await runTextToolAgent({
+					messages: [{ role: "user", content: "write both files and stage them" }],
+					tools: ws.tools,
+					call: model.call,
+				});
+				expect(ws.ran).toEqual([
+					"write_file src/a.ts",
+					"write_file /locked/b.ts",
+					"run_command git add -A",
+					"read_file src/a.ts",
+				]);
+				expect(result.toolLog.map((e) => e.result)).toEqual([
+					"Wrote src/a.ts",
+					"Error: EACCES: permission denied, open '/locked/b.ts'",
+					"ok",
+					"contents",
+				]);
+				expect(lastUserMessage(model.seen[1])).not.toContain("not run");
+			});
+		}
+	});
+
+	test("flag off: the follow-up sent to the model is byte-identical to a run without the trial code", async () => {
+		// The fed-back message is the only model-visible output of a tool round.
+		await withRunBatch(undefined, async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([FOUR_CALLS_SECOND_WRITE_FAILS, "DONE: done."]);
+			await runTextToolAgent({
+				messages: [{ role: "user", content: "write both files and stage them" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(lastUserMessage(model.seen[1])).toBe(
+				[
+					"Tool write_file returned:\nWrote src/a.ts",
+					"Tool write_file returned:\nError: EACCES: permission denied, open '/locked/b.ts'",
+					"Tool run_command returned:\nok",
+					"Tool read_file returned:\ncontents",
+					"",
+					FOLLOW_UP_INSTRUCTION,
+				].join("\n"),
+			);
+		});
+	});
+
+	test("flag on: a command that exits non-zero stops the calls after it", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([
+				[tc("run_command", { command: "bun test" }), tc("run_command", { command: "git commit -m x" })].join("\n"),
+				"DONE: tests fail.",
+			]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "test then commit" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toEqual(["run_command bun test"]);
+			expect(result.toolLog[1].result).toBe(batchSkippedCallResult(0, "run_command"));
+			expect(lastUserMessage(model.seen[1])).toContain("Calls 2-2 (1) were not run");
+		});
+	});
+
+	test("flag on: a gate-blocked command stops the calls after it", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([
+				[tc("run_command", { command: "ls; pwd" }), tc("write_file", { path: "src/c.ts", content: "c" })].join("\n"),
+				"DONE: blocked.",
+			]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "look then write" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toEqual(["run_command ls; pwd"]);
+			expect(result.toolLog[1].result).toBe(batchSkippedCallResult(0, "run_command"));
+		});
+	});
+
+	test("flag on: a failed read does not stop the reply", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([
+				[tc("read_file", { path: "missing.ts" }), tc("read_file", { path: "src/a.ts" }), tc("run_command", { command: "ls" })].join(
+					"\n",
+				),
+				"DONE: read.",
+			]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "read and list" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toEqual(["read_file missing.ts", "read_file src/a.ts", "run_command ls"]);
+			expect(lastUserMessage(model.seen[1])).not.toContain("not run");
+			expect(result.toolLog[2].result).toBe("ok");
+		});
+	});
+
+	test("flag on: a reply where every call succeeds runs all of them, no extra text", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([
+				[tc("read_file", { path: "src/a.ts" }), tc("write_file", { path: "src/b.ts", content: "b" }), tc("run_command", { command: "ls" })].join(
+					"\n",
+				),
+				"DONE: all done.",
+			]);
+			await runTextToolAgent({
+				messages: [{ role: "user", content: "read, write, list" }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toHaveLength(3);
+			expect(lastUserMessage(model.seen[1])).not.toContain("not run");
+		});
+	});
+
+	test("flag on: a skipped command the user asked for is reported as not verified", async () => {
+		await withRunBatch("1", async () => {
+			const ws = batchWorkspace();
+			const model = scriptedModel([
+				[tc("write_file", { path: "/locked/x.ts", content: "x" }), tc("run_command", { command: "bun run build" })].join("\n"),
+				"DONE: wrote it and built.",
+			]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "Write the file, then run `bun run build`." }],
+				tools: ws.tools,
+				call: model.call,
+			});
+			expect(ws.ran).toEqual(["write_file /locked/x.ts"]);
+			expect(result.unverified.some((u) => u.includes("bun run build"))).toBe(true);
+		});
+	});
+});
+
+describe("isFailedChangeCall", () => {
+	test("write, edit and command failures count; reads and successes do not", () => {
+		expect(isFailedChangeCall("write_file", "Error: EACCES")).toBe(true);
+		expect(isFailedChangeCall("edit_file", "Error: old_string not found")).toBe(true);
+		expect(isFailedChangeCall("run_command", "[TOOLG8 BLOCKED] run_command did NOT run.")).toBe(true);
+		expect(isFailedChangeCall("run_command", "Exit code 1:\nboom\n")).toBe(true);
+		expect(isFailedChangeCall("run_command", "Exit code null:\n\n")).toBe(true);
+		expect(isFailedChangeCall("run_command", "Exit code 0:\n")).toBe(false);
+		expect(isFailedChangeCall("run_command", "Command completed successfully.")).toBe(false);
+		expect(isFailedChangeCall("run_command", "grep found: Exit code 1: in a log")).toBe(false);
+		expect(isFailedChangeCall("write_file", "Wrote src/a.ts")).toBe(false);
+		expect(isFailedChangeCall("read_file", "Error: no such file")).toBe(false);
+		expect(isFailedChangeCall("git_commit", "Error: nothing to commit")).toBe(false);
+	});
+
+	test("the skipped-call result starts with Error so it never counts as done", () => {
+		expect(batchSkippedCallResult(1, "write_file")).toMatch(/^Error: not run: call 2 \(write_file\)/);
+	});
+});

@@ -7,7 +7,10 @@
 
 import { test, expect, describe } from "bun:test";
 import {
+	BATCH_PARTS_RULE,
+	BATCH_RULE,
 	buildToolSystemPrompt,
+	runBatchEnabled,
 	escapeInvalidBackslashesInStrings,
 	findUnterminatedToolCall,
 	needsTextTools,
@@ -672,5 +675,69 @@ describe("parseToolCalls - invalid JSON escapes from small local models", () => 
 
 	test("escapeInvalidBackslashesInStrings touches only string contents", () => {
 		expect(escapeInvalidBackslashesInStrings('{"a": "\\s\\n\\"", "b": 1}')).toBe('{"a": "\\\\s\\n\\"", "b": 1}');
+	});
+});
+
+// ── Ordered command batch trial (#3502), EIGHT_RUN_BATCH=1, off by default ──
+
+function withRunBatchSync<T>(value: string | undefined, fn: () => T): T {
+	const prev = process.env.EIGHT_RUN_BATCH;
+	if (value === undefined) delete process.env.EIGHT_RUN_BATCH;
+	else process.env.EIGHT_RUN_BATCH = value;
+	try {
+		return fn();
+	} finally {
+		if (prev === undefined) delete process.env.EIGHT_RUN_BATCH;
+		else process.env.EIGHT_RUN_BATCH = prev;
+	}
+}
+
+const ORIGINAL_SEVERAL_RULE = [
+	"- You may emit several `tool_call` blocks in a single reply to call",
+	"  several tools at once.",
+].join("\n");
+const ORIGINAL_PARTS_RULE = [
+	"- If a request has multiple parts (for example: read a file AND list a",
+	"  directory), handle them one at a time: call the tool for the first part,",
+	"  wait for its result, then call the tool for the next part. Only give your",
+	"  final prose answer once every part is backed by a real tool result.",
+].join("\n");
+
+describe("buildToolSystemPrompt - ordered batch trial (#3502)", () => {
+	test("only the exact value 1 turns the trial on", () => {
+		for (const v of [undefined, "", "0", "true", " 1", "1 ", "yes"]) {
+			expect(withRunBatchSync(v, runBatchEnabled)).toBe(false);
+		}
+		expect(withRunBatchSync("1", runBatchEnabled)).toBe(true);
+	});
+
+	test("flag off: the prompt is the same bytes as with the trial forced off, and keeps the original rules", () => {
+		for (const v of [undefined, "0", "true"]) {
+			const prompt = withRunBatchSync(v, () => buildToolSystemPrompt(TOOLS));
+			expect(prompt).toBe(buildToolSystemPrompt(TOOLS, false));
+			expect(prompt).toContain(ORIGINAL_SEVERAL_RULE);
+			expect(prompt).toContain(ORIGINAL_PARTS_RULE);
+			expect(prompt).not.toContain("Batch independent steps");
+			expect(prompt).not.toContain('"command": "bun test"');
+		}
+	});
+
+	test("flag on: the batching rule and its worked example replace the two original rules", () => {
+		const prompt = withRunBatchSync("1", () => buildToolSystemPrompt(TOOLS));
+		expect(prompt).toBe(buildToolSystemPrompt(TOOLS, true));
+		expect(prompt).toContain(BATCH_RULE.join("\n"));
+		expect(prompt).toContain(BATCH_PARTS_RULE.join("\n"));
+		expect(prompt).not.toContain(ORIGINAL_SEVERAL_RULE);
+		expect(prompt).not.toContain(ORIGINAL_PARTS_RULE);
+		// The worked example is three valid tool_call blocks that the parser reads
+		// back in order: two reads, then the test command.
+		const example = BATCH_RULE.filter((l) => !l.startsWith("-") && !l.startsWith("  ")).join("\n");
+		expect(parseToolCalls(example).map((c) => c.name)).toEqual(["read_file", "read_file", "run_command"]);
+		// The rest of the protocol is unchanged.
+		const off = buildToolSystemPrompt(TOOLS, false);
+		const strip = (p: string) =>
+			p.replace(BATCH_RULE.join("\n"), "").replace(BATCH_PARTS_RULE.join("\n"), "")
+				.replace(ORIGINAL_SEVERAL_RULE, "").replace(ORIGINAL_PARTS_RULE, "");
+		expect(strip(prompt)).toBe(strip(off));
 	});
 });

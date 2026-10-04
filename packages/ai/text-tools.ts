@@ -152,13 +152,53 @@ function renderToolLine(t: ToolSpec): string {
 }
 
 /**
+ * Ordered command batch trial (#3502), off by default. Only the exact value
+ * "1" turns it on. Read on every call so a test or a run can toggle it.
+ * With it on, the protocol prompt asks the model to put independent calls in
+ * one reply, and the loop (text-tool-loop.ts) stops running a reply's calls
+ * after a failed write, edit or command.
+ */
+export function runBatchEnabled(): boolean {
+	return process.env.EIGHT_RUN_BATCH === "1";
+}
+
+/** Replaces the "several tool_call blocks" rule when the batch trial is on. */
+export const BATCH_RULE: readonly string[] = [
+	"- Batch independent steps: when no call needs an earlier call's output, put",
+	"  them all in ONE reply. They run in order. If a write, edit or command fails,",
+	"  the calls after it are not run and you are told which. Example: to read two",
+	"  files and then run the tests, your ENTIRE reply is:",
+	"",
+	"```tool_call",
+	'{"name": "read_file", "arguments": {"path": "src/a.ts"}}',
+	"```",
+	"```tool_call",
+	'{"name": "read_file", "arguments": {"path": "src/b.ts"}}',
+	"```",
+	"```tool_call",
+	'{"name": "run_command", "arguments": {"command": "bun test"}}',
+	"```",
+	"",
+];
+
+/** Replaces the "one at a time" multi-part rule when the batch trial is on. */
+export const BATCH_PARTS_RULE: readonly string[] = [
+	"- If a request has multiple parts, batch the parts that do not depend on each",
+	"  other; wait for a result only when the next call needs it. Only give your",
+	"  final prose answer once every part is backed by a real tool result.",
+];
+
+/**
  * Render the instruction block that teaches a model the text tool-call
  * protocol. Each tool is rendered as ONE lean signature line (name, typed
  * params, one-line description) rather than a pretty-printed full JSON schema,
  * so the whole block stays small enough to fit an 8k local context window. It
  * always contains the literal token `tool_call` and each tool name verbatim.
  */
-export function buildToolSystemPrompt(tools: ToolSpec[]): string {
+export function buildToolSystemPrompt(
+	tools: ToolSpec[],
+	batch: boolean = runBatchEnabled(),
+): string {
 	const toolBlocks = tools.map(renderToolLine).join("\n");
 
 	const toolsSection =
@@ -199,8 +239,12 @@ export function buildToolSystemPrompt(tools: ToolSpec[]): string {
 		'  "name" and an "arguments" object (use {} when the tool takes no args).',
 		"- When you need a tool, reply with ONLY the tool_call block(s) and no other",
 		"  prose. Do not explain that you are about to call a tool; just call it.",
-		"- You may emit several `tool_call` blocks in a single reply to call",
-		"  several tools at once.",
+		...(batch
+			? BATCH_RULE
+			: [
+					"- You may emit several `tool_call` blocks in a single reply to call",
+					"  several tools at once.",
+				]),
 		"- Any normal prose you write OUTSIDE `tool_call` blocks is treated as your",
 		"  final answer to the user. Do not wrap your final answer in a block.",
 		"- After a tool runs, its result is sent back to you. Keep calling tools until",
@@ -212,10 +256,14 @@ export function buildToolSystemPrompt(tools: ToolSpec[]): string {
 		"  do not already have from a prior tool result in THIS conversation, you MUST",
 		"  call the matching tool to get it. Do not fabricate file names, paths, or",
 		"  results.",
-		"- If a request has multiple parts (for example: read a file AND list a",
-		"  directory), handle them one at a time: call the tool for the first part,",
-		"  wait for its result, then call the tool for the next part. Only give your",
-		"  final prose answer once every part is backed by a real tool result.",
+		...(batch
+			? BATCH_PARTS_RULE
+			: [
+					"- If a request has multiple parts (for example: read a file AND list a",
+					"  directory), handle them one at a time: call the tool for the first part,",
+					"  wait for its result, then call the tool for the next part. Only give your",
+					"  final prose answer once every part is backed by a real tool result.",
+				]),
 		"- To create or write a file, you MUST use the write_file tool. Do NOT use",
 		"  run_command (echo, cat, printf, mkdir, tee) to write file contents.",
 		"  write_file is the only correct way to put content on disk.",

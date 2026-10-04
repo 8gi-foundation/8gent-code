@@ -76,7 +76,7 @@ import {
 } from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import { type PlanItem, parsePlan } from "./update-plan";
-import type { ToolSpec } from "./text-tools";
+import { runBatchEnabled, type ToolSpec } from "./text-tools";
 
 export type TextTool = {
 	spec: ToolSpec;
@@ -365,6 +365,36 @@ export function overCapCallResult(requested: number): string {
 }
 
 /**
+ * Tools whose failure stops the rest of a reply under the batch trial
+ * (EIGHT_RUN_BATCH=1, #3502). A failed read changes nothing, so the calls after
+ * it still run.
+ */
+const BATCH_STOP_TOOLS: ReadonlySet<string> = new Set(["write_file", "edit_file", "run_command"]);
+
+/**
+ * True when a write, edit or command call failed: refused or errored (the same
+ * test the claim check uses), or a command that ran and exited non-zero
+ * ("Exit code 1:"), since later calls in the reply were planned on its success.
+ */
+export function isFailedChangeCall(name: string, result: string): boolean {
+	if (!BATCH_STOP_TOOLS.has(name)) return false;
+	if (isRefusedToolResult(result)) return true;
+	return name === "run_command" && /^Exit code (?!0:)[^:\n]*:/.test(result);
+}
+
+/**
+ * The result logged for a call skipped because an earlier write, edit or
+ * command in the same reply failed (batch trial only). Starts with "Error" so
+ * the claim check and the success bookkeeping never count it as done.
+ */
+export function batchSkippedCallResult(failedIndex: number, failedName: string): string {
+	return (
+		`Error: not run: call ${failedIndex + 1} (${failedName}) in this reply failed, ` +
+		"so the calls after it were skipped. Read its result, then re-issue the calls you still need."
+	);
+}
+
+/**
  * The short reason a gate gave for blocking a call, or null when the result is
  * not a gate block ("[TOOLG8 BLOCKED] ... Reason: X Alternative: ...",
  * "[BLOCKED] X. Use ... Command: ..."). Structural: reads the gate's own
@@ -497,6 +527,8 @@ export async function runTextToolAgent(
 	opts: TextToolAgentOptions,
 ): Promise<TextToolAgentResult> {
 	const maxRounds = opts.maxRounds ?? 6;
+	// Off-by-default trial (#3502), read once per turn.
+	const batchTrial = runBatchEnabled();
 	const specs = opts.tools.map((t) => t.spec);
 	const toolLog: TextToolLogEntry[] = [];
 
@@ -730,6 +762,9 @@ export async function runTextToolAgent(
 		awaitingCheckAnswer = false;
 		const calls = turn.toolCalls;
 		let abortedAt = -1;
+		// Batch trial (#3502): index of the first failed write, edit or command
+		// in this reply; the calls after it are logged as not run.
+		let failedChangeAt = -1;
 		for (let k = 0; k < calls.length; k++) {
 			const tc = calls[k];
 			// The caller can abort mid-round (circuit breaker, turn timeout, ESC):
@@ -737,6 +772,17 @@ export async function runTextToolAgent(
 			if (opts.signal?.aborted) {
 				abortedAt = k;
 				break;
+			}
+			if (failedChangeAt >= 0) {
+				// Log each skipped call, and tell the model once in the result block.
+				const result = batchSkippedCallResult(failedChangeAt, calls[failedChangeAt].name);
+				toolLog.push({ name: tc.name, args: tc.arguments, result });
+				if (k === failedChangeAt + 1) {
+					resultParts.push(
+						`Calls ${k + 1}-${calls.length} (${calls.length - k}) were not run:\n${result}`,
+					);
+				}
+				continue;
 			}
 			if (k >= MAX_CALLS_PER_ROUND) {
 				// Over the per-reply cap: log each skipped call, and tell the model
@@ -776,6 +822,7 @@ export async function runTextToolAgent(
 					? SHELL_WRITE_NOTE
 					: "";
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
+			if (batchTrial && isFailedChangeCall(tc.name, result)) failedChangeAt = k;
 		}
 
 		prevRoundAllRefused = ranAny && !prevRoundHadSuccess;
