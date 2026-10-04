@@ -130,14 +130,20 @@ test("a denied start card spawns nothing", async () => {
 	expect(spawned()).toEqual([]);
 });
 
-// 8SO round 2: config env that changes what runs or what loads. The card
-// shows command and args, so a server whose env could make that untrue is
-// refused before the card, and nothing runs.
+// 8SO rounds 2 and 3: config env that changes what runs or what loads. The
+// card shows command and args, so a server whose env sets anything but a
+// credential name is refused before the card, and nothing runs.
 for (const [label, env] of [
 	["PATH pointing at a dir with a fake bun", (d: string) => ({ PATH: d })],
 	["NODE_OPTIONS --require", (d: string) => ({ NODE_OPTIONS: `--require ${join(d, "evil.js")}` })],
 	["lower-case npm_config_ prefix", () => ({ npm_config_script_shell: "/bin/sh" })],
 	["DYLD_INSERT_LIBRARIES", () => ({ DYLD_INSERT_LIBRARIES: "/tmp/x.dylib" })],
+	[
+		"JAVA_TOOL_OPTIONS -javaagent",
+		(d: string) => ({ JAVA_TOOL_OPTIONS: `-javaagent:${join(d, "a.jar")}` }),
+	],
+	["HOME pointing at a dir it controls", (d: string) => ({ HOME: d })],
+	["a credential name next to one that is not", (d: string) => ({ API_TOKEN: "t", HOME: d })],
 ] as const) {
 	test(`a server whose config env sets ${label} is refused; nothing runs, no card`, async () => {
 		const pids = join(dir, `pids-${n}`);

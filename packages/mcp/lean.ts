@@ -32,7 +32,7 @@
  * <home>/.8gent/mcp.json once and shows one approval card per session that
  * names every server, its command plus args and its env variable NAMES, or
  * its URL (never env values or headers), each line in full or not at all;
- * a config env that changes what runs (PATH, NODE_OPTIONS, ...) refuses.
+ * a config env name that is not credential-shaped (_TOKEN, _KEY, ...) refuses.
  * Only after an approve does it start exactly that list; nothing re-reads
  * the file in between. Infinite mode skips the card; with no card
  * and no terminal the answer is no, and a no stands for the session. The
@@ -99,14 +99,18 @@ export { clean };
 export const SERVER_LINE_MAX = 1000;
 
 /**
- * Config env names that change which program runs or what code it loads
- * (#3474, 8SO round 2). A server whose config sets one is refused: the card
- * shows command and args, and these would make that not what runs.
+ * Config env names a server may set while the flag is on (#3474, 8SO round
+ * 3): upper-case names ending _TOKEN, _KEY, _SECRET, _PASSWORD or _ID, the
+ * shapes that carry a credential or an account id and that no loader, shell,
+ * package manager or runtime reads to decide what runs. Every other name is
+ * refused before the card: the card shows command and args, and a name like
+ * PATH, NODE_OPTIONS, JAVA_TOOL_OPTIONS, HOME, PIP_INDEX_URL or SHELLOPTS
+ * would make that not what runs. An allowlist, because the denylist of
+ * rounds 1 and 2 kept missing such names.
  */
-const LOADER_ENV =
-	/^(path|node_options|node_path|ld_.*|dyld_.*|pythonpath|pythonstartup|pythonhome|bash_env|env|perl5opt|perl5lib|rubyopt|rubylib|npm_config_.*)$/i;
-export function isLoaderEnv(name: string): boolean {
-	return LOADER_ENV.test(name);
+const CREDENTIAL_ENV = /^[A-Z][A-Z0-9_]*_(TOKEN|KEY|SECRET|PASSWORD|ID)$/;
+export function isCredentialEnv(name: string): boolean {
+	return CREDENTIAL_ENV.test(name);
 }
 
 const quote = (a: string) => (a === "" || /[\s"'\\]/.test(a) ? JSON.stringify(a) : a);
@@ -134,15 +138,15 @@ export function describeServer(cfg: ServerConfig): string {
 
 /** Why these servers may not be offered for approval at all, or null. */
 function startRefusal(read: ServerConfig[], lines: string[]): string | null {
-	const loader = read.flatMap((c) =>
+	const other = read.flatMap((c) =>
 		c.type === "stdio"
 			? Object.keys(c.env ?? {})
-					.filter(isLoaderEnv)
+					.filter((k) => !isCredentialEnv(k))
 					.map((k) => `${clean(c.name, 80, true)} sets ${clean(k, 80, true)}`)
 			: [],
 	);
-	if (loader.length)
-		return `[BLOCKED] MCP servers were not started: ${loader.join("; ")} in its config env, which changes what program runs or what code it loads, so the approval card could not show what would really run. No server was started. Remove that variable from ~/.8gent/mcp.json, then restart the session to be asked again.`;
+	if (other.length)
+		return `[BLOCKED] MCP servers were not started: ${other.join("; ")} in its config env. While EIGHT_MCP_LEAN is a trial, a server's config env may only set credential names (upper case, ending _TOKEN, _KEY, _SECRET, _PASSWORD or _ID): any other variable can change what program runs or what code it loads, so the approval card could not show what would really run. No server was started. Remove that variable from ~/.8gent/mcp.json, then restart the session to be asked again.`;
 	const long = lines.filter((l) => l.length > SERVER_LINE_MAX);
 	if (long.length)
 		return `[BLOCKED] MCP servers were not started: ${long.length} server line${long.length === 1 ? " is" : "s are"} over ${SERVER_LINE_MAX} characters, too long to show in full on the approval card. No server was started. Shorten the entry in ~/.8gent/mcp.json, then restart the session to be asked again.`;

@@ -34,7 +34,7 @@ import {
 	projectFields,
 	storeResult,
 } from "./lean";
-import { describeServer, ensureConnected } from "./lean";
+import { describeServer, ensureConnected, isCredentialEnv } from "./lean";
 import { FAKE_TOOLS, REPORT_TOOL, SENTINEL, bigReport } from "./lean.fixture";
 
 /** A pass-through scrubber for tests that are not about secrets. */
@@ -450,6 +450,61 @@ describe("starting servers needs the person's yes (first-connect consent)", () =
 		expect(describeServer({ type: "stdio", name: "a\u202eb", command: "x\u001b[2J" })).toBe(
 			"a?b: x?[2J",
 		);
+	});
+
+	test("config env: only credential names pass; every name 8SO probed in rounds 2 and 3 is refused", () => {
+		for (const ok of [
+			"GITHUB_PERSONAL_ACCESS_TOKEN",
+			"BRAVE_API_KEY",
+			"AWS_SECRET_ACCESS_KEY",
+			"AWS_ACCESS_KEY_ID",
+			"SLACK_TEAM_ID",
+			"DB_PASSWORD",
+			"CLIENT_SECRET",
+		])
+			expect(isCredentialEnv(ok)).toBe(true);
+		for (const no of [
+			"PATH",
+			"NODE_OPTIONS",
+			"NODE_PATH",
+			"LD_PRELOAD",
+			"DYLD_INSERT_LIBRARIES",
+			"PYTHONPATH",
+			"PYTHONSTARTUP",
+			"PYTHONHOME",
+			"BASH_ENV",
+			"ENV",
+			"PERL5OPT",
+			"PERL5LIB",
+			"PERL5DB",
+			"RUBYOPT",
+			"RUBYLIB",
+			"npm_config_script_shell",
+			"npm_config_key",
+			"JAVA_TOOL_OPTIONS",
+			"_JAVA_OPTIONS",
+			"JDK_JAVA_OPTIONS",
+			"HOME",
+			"XDG_CONFIG_HOME",
+			"PIP_INDEX_URL",
+			"PIP_EXTRA_INDEX_URL",
+			"UV_INDEX_URL",
+			"UV_DEFAULT_INDEX",
+			"PIPX_HOME",
+			"SHELLOPTS",
+			"BASHOPTS",
+			"PS4",
+			"ZDOTDIR",
+			"GEM_HOME",
+			"GEM_PATH",
+			"BUNDLE_GEMFILE",
+			"NODE_TLS_REJECT_UNAUTHORIZED",
+			"NODE_EXTRA_CA_CERTS",
+			"GOOGLE_APPLICATION_CREDENTIALS",
+			"api_token",
+			"_TOKEN",
+		])
+			expect(isCredentialEnv(no)).toBe(false);
 	});
 
 	test("a server line over the 1000-char cap is refused before the card; nothing starts", async () => {
