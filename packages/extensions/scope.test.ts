@@ -1,7 +1,8 @@
 /**
- * Revertible extension scope (#3431). Every tool, hook and listener an
- * extension registers through its scope is recorded with its undo, so
- * unload leaves nothing behind and reload is unload plus load.
+ * Revertible extension scope (#3431). Every tool, listener and deferred undo
+ * an extension registers through its scope is recorded with its undo, so
+ * unload leaves nothing behind and reload is unload plus load. Hooks are not
+ * part of the scope yet (HookManager persists them to disk).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -13,31 +14,19 @@ import { createExtensionManager } from "./index";
 import { collectExtensionTools, loadExtension } from "./loader";
 import { createScope } from "./scope";
 
-/** A stand-in for HookManager: same registerHook/unregisterHook shape. */
-function fakeHooks() {
-	const hooks = new Map<string, Record<string, unknown>>();
-	let n = 0;
-	return {
-		hooks,
-		registerHook(cfg: Record<string, unknown>) {
-			const id = `h${++n}`;
-			hooks.set(id, cfg);
-			return { id };
-		},
-		unregisterHook(id: string) {
-			return hooks.delete(id);
-		},
-	};
-}
-
 const bus = new EventEmitter();
-(globalThis as Record<string, unknown>).__extScopeTestBus = bus;
+const g = globalThis as Record<string, unknown>;
+g.__extScopeTestBus = bus;
+/** Live resources the fixture opens with scope.defer; must return to 0. */
+const live = { count: 0 };
+g.__extScopeTestLive = live;
 
 const ENTRY = (version: number) => `
 export function ping() { return "manifest-tool"; }
 export async function activate(scope) {
 	scope.tool("echo", () => "v${version}");
-	scope.hook({ type: "onSessionStart", name: "fake-hook", mode: "function", enabled: true });
+	globalThis.__extScopeTestLive.count++;
+	scope.defer(() => { globalThis.__extScopeTestLive.count--; });
 	scope.listen(globalThis.__extScopeTestBus, "msg", () => {});
 }
 `;
@@ -66,6 +55,7 @@ beforeEach(() => {
 	root = fs.mkdtempSync(path.join(os.tmpdir(), "ext-scope-"));
 	prevFlag = process.env.EIGHT_EXT_SCOPE;
 	bus.removeAllListeners();
+	live.count = 0;
 });
 
 afterEach(() => {
@@ -79,15 +69,14 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 		process.env.EIGHT_EXT_SCOPE = "1";
 	});
 
-	test("unload removes the tool, the hook and the listener", async () => {
-		const hooks = fakeHooks();
-		const mgr = createExtensionManager({ dir: root, hooks });
+	test("unload removes the tool, the listener and the deferred resource", async () => {
+		const mgr = createExtensionManager({ dir: root });
 		writeExt("alpha", 1);
 		writeExt("beta", 1);
 		await mgr.loadAll();
 
 		expect(mgr.getTools()["alpha:echo"]?.()).toBe("v1");
-		expect(hooks.hooks.size).toBe(2);
+		expect(live.count).toBe(2);
 		expect(bus.listenerCount("msg")).toBe(2);
 
 		const res = await mgr.unload("alpha");
@@ -97,14 +86,13 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 		expect(Object.keys(tools).filter((k) => k.startsWith("alpha:"))).toEqual([]);
 		expect(mgr.extensions.map((e) => e.manifest.name)).toEqual(["beta"]);
 		// Only beta's registrations remain.
-		expect(hooks.hooks.size).toBe(1);
+		expect(live.count).toBe(1);
 		expect(bus.listenerCount("msg")).toBe(1);
 		expect(tools["beta:echo"]?.()).toBe("v1");
 	});
 
 	test("reload gives exactly one of each and picks up edits", async () => {
-		const hooks = fakeHooks();
-		const mgr = createExtensionManager({ dir: root, hooks });
+		const mgr = createExtensionManager({ dir: root });
 		const dir = writeExt("alpha", 1);
 		await mgr.loadAll();
 
@@ -115,7 +103,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 		const tools = mgr.getTools();
 		expect(Object.keys(tools).filter((k) => k === "alpha:echo")).toHaveLength(1);
 		expect(tools["alpha:echo"]?.()).toBe("v2");
-		expect(hooks.hooks.size).toBe(1);
+		expect(live.count).toBe(1);
 		expect(bus.listenerCount("msg")).toBe(1);
 		expect(mgr.extensions.filter((e) => e.manifest.name === "alpha")).toHaveLength(1);
 	});
@@ -141,7 +129,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 	});
 
 	test("unload of an unknown extension reports, does not throw", async () => {
-		const mgr = createExtensionManager({ dir: root, hooks: fakeHooks() });
+		const mgr = createExtensionManager({ dir: root });
 		const res = await mgr.unload("nope");
 		expect(res.errors[0]).toContain("not loaded");
 	});
@@ -165,12 +153,11 @@ describe("flag off (default)", () => {
 	});
 
 	test("manager unload and reload refuse without touching anything", async () => {
-		const hooks = fakeHooks();
-		const mgr = createExtensionManager({ dir: root, hooks });
+		const mgr = createExtensionManager({ dir: root });
 		writeExt("alpha", 1);
 		await mgr.loadAll();
 		expect(Object.keys(mgr.getTools())).toEqual(["alpha:ping"]);
-		expect(hooks.hooks.size).toBe(0);
+		expect(live.count).toBe(0);
 
 		const res = await mgr.unload("alpha");
 		expect(res.errors[0]).toContain("EIGHT_EXT_SCOPE");

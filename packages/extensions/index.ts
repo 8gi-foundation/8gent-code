@@ -12,28 +12,22 @@ export type {
 	ExtensionManager,
 } from "./types";
 export { loadAllExtensions, loadExtension, collectExtensionTools } from "./loader";
-export { createScope, scopeEnabled, type ExtensionScope, type HookRegistry } from "./scope";
+export { createScope, scopeEnabled, type ExtensionScope } from "./scope";
 
 import { collectExtensionTools, loadAllExtensions, loadExtension } from "./loader";
-import { type HookRegistry, scopeEnabled } from "./scope";
+import { scopeEnabled } from "./scope";
 import type { ExtensionManager } from "./types";
 
 let _manager: ExtensionManager | null = null;
 
 const OFF = { errors: ["[ext] unload/reload need EIGHT_EXT_SCOPE=1"] };
 
-/** Build a manager. `dir` and `hooks` are overridable for tests. */
-export function createExtensionManager(
-	opts: { dir?: string; hooks?: HookRegistry } = {},
-): ExtensionManager {
-	// The real hook registry is pulled in only when the scope flag is on.
-	const hooks = async () => opts.hooks ?? (await import("../hooks")).getHookManager();
-
+/** Build a manager. `dir` is overridable for tests. */
+export function createExtensionManager(opts: { dir?: string } = {}): ExtensionManager {
 	const manager: ExtensionManager = {
 		extensions: [],
 		async loadAll() {
-			const lo = scopeEnabled() ? { hooks: await hooks() } : {};
-			manager.extensions = await loadAllExtensions(opts.dir, lo);
+			manager.extensions = await loadAllExtensions(opts.dir);
 			return manager.extensions;
 		},
 		getTools() {
@@ -53,7 +47,7 @@ export function createExtensionManager(
 			const dir = manager.extensions.find((e) => e.manifest.name === name)?.dir;
 			if (!dir) return { errors: [`[ext] ${name}: not loaded`] };
 			const { errors } = await manager.unload(name);
-			const ext = await loadExtension(dir, { hooks: await hooks(), fresh: true });
+			const ext = await loadExtension(dir, { fresh: true });
 			manager.extensions.push(ext);
 			return { errors: ext.error ? [...errors, ext.error] : errors };
 		},

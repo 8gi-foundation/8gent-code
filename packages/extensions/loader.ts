@@ -7,12 +7,10 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type HookRegistry, createScope, scopeEnabled } from "./scope";
+import { createScope, scopeEnabled } from "./scope";
 import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./types";
 
 export interface LoadOptions {
-	/** Hook registry for scope.hook(); HookManager fits this shape. */
-	hooks?: HookRegistry;
 	/** Bypass the module cache so a reload picks up edits. */
 	fresh?: boolean;
 }
@@ -92,7 +90,7 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 		if (!scopeEnabled() || typeof mod.activate !== "function") {
 			return { manifest, dir, module: mod, status: "loaded" };
 		}
-		const scope = createScope(manifest.name, opts.hooks);
+		const scope = createScope(manifest.name);
 		try {
 			await mod.activate(scope);
 		} catch (err) {
@@ -119,10 +117,7 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 }
 
 /** Scan extensions directory and load all valid extensions */
-export async function loadAllExtensions(
-	root: string = EXTENSIONS_DIR,
-	opts: LoadOptions = {},
-): Promise<LoadedExtension[]> {
+export async function loadAllExtensions(root: string = EXTENSIONS_DIR): Promise<LoadedExtension[]> {
 	if (!fs.existsSync(root)) return [];
 
 	const entries = fs.readdirSync(root, { withFileTypes: true });
@@ -131,7 +126,7 @@ export async function loadAllExtensions(
 		.map((e) => path.join(root, e.name))
 		.filter((d) => fs.existsSync(path.join(d, MANIFEST_FILE)));
 
-	const results = await Promise.allSettled(dirs.map((d) => loadExtension(d, opts)));
+	const results = await Promise.allSettled(dirs.map((d) => loadExtension(d)));
 
 	const loaded: LoadedExtension[] = [];
 	for (const result of results) {
