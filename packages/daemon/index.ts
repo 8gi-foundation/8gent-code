@@ -15,6 +15,10 @@
  *                                     Only James's chat_id should appear here.
  *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
  *
+ * EIGHT_RESUME_ON_BOOT=1 journals open sessions to sessions-journal.json in
+ * the data dir and restores them from their newest time-travel checkpoint on
+ * the next start, so a crash or power cut does not lose the conversation.
+ *
  * Secrets are read from process.env or any pre-loaded env file. The daemon
  * never prints token contents. See `packages/daemon/scripts/start-local.ts`
  * for the canonical launcher.
@@ -41,7 +45,9 @@ import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
+import { SessionJournal, resumeJournaledSessions, resumeOnBootEnabled } from "./session-journal";
 import type { DaemonChannel } from "./types";
+import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { installFlowTap } from "../telemetry/flow-stream";
 
 // EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
@@ -239,8 +245,16 @@ export async function main(): Promise<void> {
 		}
 	}
 
-	// Create the agent pool - manages Agent instances per session
-	pool = new AgentPool(poolConfig);
+	// Create the agent pool - manages Agent instances per session.
+	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
+	// them back from their newest checkpoint after a crash or power cut. Only
+	// history is restored; no tool call is run again.
+	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
+	pool = new AgentPool(poolConfig, journal ? { journal } : {});
+	if (journal) {
+		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
+		console.log(`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal`);
+	}
 
 	// Wire the dispatch protocol (issue #1896). Surfaces register and
 	// fan results across each other; the daemon is the trusted executor.
