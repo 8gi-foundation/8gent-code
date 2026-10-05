@@ -153,6 +153,61 @@ describe("OpenAI-compatible shape", () => {
 		expect(args.to).not.toContain("@example.com");
 	});
 
+	/**
+	 * Run a loop that must not reach the cloud: rerouted to a local provider or
+	 * refused. Any request that does go out must not be to the cloud, and no
+	 * cloud-bound body may carry the email.
+	 */
+	const expectFailClosed = async (messages: ChatMessage[]) => {
+		const sent: Array<{ url: string; body: string }> = [];
+		const inner = globalThis.fetch;
+		globalThis.fetch = (async (url: string, init: { body: string }) => {
+			sent.push({ url: String(url), body: init.body });
+			return inner(url as never, init as never);
+		}) as unknown as typeof fetch;
+		try {
+			await chat(messages);
+		} catch {
+			// Refusing (no local provider) is an acceptable fail-closed outcome.
+		}
+		for (const s of sent) {
+			expect(s.url).not.toContain("api.openai.com");
+			if (!/localhost|127\.0\.0\.1/.test(s.url)) expect(s.body).not.toContain("sarah.connor@example.com");
+		}
+	};
+
+	test("PII in a tool-call id and its reply toolCallId fails closed, never reaches the cloud", async () => {
+		useOpenAI();
+		const id = "sarah.connor@example.com";
+		await expectFailClosed([
+			{ role: "user", content: "check the weather" },
+			{ role: "assistant", content: "", toolCalls: [{ id, name: "get_weather", arguments: { city: "Dublin" } }] },
+			{ role: "tool", content: "12C", toolCallId: id },
+		]);
+	});
+
+	test("PII in a tool-call name fails closed, never reaches the cloud", async () => {
+		useOpenAI();
+		await expectFailClosed([
+			{ role: "user", content: "check the weather" },
+			{
+				role: "assistant",
+				content: "",
+				toolCalls: [{ id: "c1", name: "sarah.connor@example.com", arguments: { city: "Dublin" } }],
+			},
+			{ role: "tool", content: "12C", toolCallId: "c1" },
+		]);
+	});
+
+	test("PII only in a tool reply toolCallId fails closed, never reaches the cloud", async () => {
+		useOpenAI();
+		await expectFailClosed([
+			{ role: "user", content: "check the weather" },
+			{ role: "assistant", content: "", toolCalls: [{ id: "c1", name: "get_weather", arguments: { city: "Dublin" } }] },
+			{ role: "tool", content: "12C", toolCallId: "sarah.connor@example.com" },
+		]);
+	});
+
 	test("long numeric arguments keep valid JSON and still reach the cloud provider", async () => {
 		useOpenAI();
 		const numeric: ChatMessage[] = [

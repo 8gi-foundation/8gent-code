@@ -885,10 +885,15 @@ export class ProviderManager {
 							}
 						: m,
 				);
-				// Verify the exact outbound text, including argument keys.
+				// Verify every outbound field: message text, tool-call arguments
+				// (keys and values), tool-call ids and names, and tool reply ids.
+				// Ids and names are not anonymized, so PII there fails closed.
 				const outbound = [
 					...cleanMsgs.map((m) => m.content),
-					...cleanMsgs.flatMap((m) => (m.toolCalls ?? []).map((tc) => JSON.stringify(tc.arguments))),
+					...cleanMsgs.flatMap((m) =>
+						(m.toolCalls ?? []).flatMap((tc) => [JSON.stringify(tc.arguments), tc.id ?? "", tc.name ?? ""]),
+					),
+					...cleanMsgs.map((m) => m.toolCallId ?? ""),
 				].join("\n");
 				if (verifyClean(outbound)) {
 					piiMap = gated.map;
