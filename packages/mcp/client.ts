@@ -13,7 +13,7 @@ import {
 	loadConfig,
 } from "./config";
 import { type MCPToolSchema, bridgeTools } from "./tool-bridge";
-import { SSETransport, StdioTransport, type Transport } from "./transport";
+import { MCPRPCError, SSETransport, StdioTransport, type Transport } from "./transport";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -25,6 +25,48 @@ interface ServerConnection {
 	restarted?: boolean;
 	/** Answered a tools/call since it started. */
 	answered?: boolean;
+	era: Era;
+	protocolVersion: string;
+}
+
+/**
+ * Protocol eras (#3549). Legacy: the 2024-11-05 `initialize` handshake.
+ * Modern: 2026-07-28, no handshake, version and capabilities in every
+ * request's `_meta`. EIGHT_MCP_MODERN=1 probes modern first and falls back.
+ */
+type Era = "modern" | "legacy";
+const LEGACY_VERSION = "2024-11-05";
+const MODERN_VERSION = "2026-07-28";
+const CLIENT_INFO = { name: "8gent-code", version: "1.0.0" };
+/** Spec-defined modern error codes: HeaderMismatch, MissingRequiredClientCapability, UnsupportedProtocolVersion. */
+const MODERN_ERRORS = new Set([-32020, -32021, -32022]);
+
+function modernMeta(): Record<string, unknown> {
+	return {
+		"io.modelcontextprotocol/protocolVersion": MODERN_VERSION,
+		"io.modelcontextprotocol/clientInfo": CLIENT_INFO,
+		"io.modelcontextprotocol/clientCapabilities": {},
+	};
+}
+
+/** Add modern `_meta` to request params; legacy params are untouched. */
+function withMeta(
+	era: Era,
+	params: Record<string, unknown> = {},
+): Record<string, unknown> | undefined {
+	if (era === "legacy") return Object.keys(params).length ? params : undefined;
+	return { ...params, _meta: { ...modernMeta(), ...(params._meta as object) } };
+}
+
+/** A modern result with a resultType other than "complete" is one we cannot act on. */
+function complete<T>(era: Era, result: T): T {
+	if (era === "legacy") return result;
+	const type = (result as { resultType?: unknown } | null)?.resultType;
+	if (type !== undefined && type !== "complete")
+		throw new Error(
+			`MCP server returned resultType "${String(type)}", which 8gent does not support`,
+		);
+	return result;
 }
 
 /** The server behind this connection has exited; its tools cannot run. */
@@ -62,9 +104,11 @@ export class MCPClient {
 	/** Bumped by close(), so a connect still in its handshake knows to discard itself. */
 	private generation = 0;
 	private configPath?: string;
+	private probeTimeoutMs: number;
 
-	constructor(configPath?: string) {
+	constructor(configPath?: string, opts: { probeTimeoutMs?: number } = {}) {
 		this.configPath = configPath;
+		this.probeTimeoutMs = opts.probeTimeoutMs ?? 5_000;
 	}
 
 	/** The servers this client's config file names, read now. */
@@ -104,20 +148,28 @@ export class MCPClient {
 		}
 
 		let tools: MCPToolSchema[];
+		let era: Era = "legacy";
 		try {
-			// MCP handshake
-			await transport.send("initialize", {
-				protocolVersion: "2024-11-05",
-				capabilities: { roots: { listChanged: true } },
-				clientInfo: { name: "8gent-code", version: "1.0.0" },
-			});
+			if (process.env.EIGHT_MCP_MODERN === "1") era = await this._probe(transport);
 
-			transport.notify("notifications/initialized");
+			if (era === "legacy") {
+				// MCP handshake
+				await transport.send("initialize", {
+					protocolVersion: LEGACY_VERSION,
+					capabilities: { roots: { listChanged: true } },
+					clientInfo: CLIENT_INFO,
+				});
+
+				transport.notify("notifications/initialized");
+			}
 
 			// Discover tools
-			const result = (await transport.send("tools/list")) as {
-				tools: MCPToolSchema[];
-			};
+			const result = complete(
+				era,
+				(await transport.send("tools/list", withMeta(era))) as {
+					tools: MCPToolSchema[];
+				},
+			);
 			tools = result?.tools || [];
 		} catch (err) {
 			// A server that fails the handshake is not kept, so it must not keep running.
@@ -131,7 +183,8 @@ export class MCPClient {
 			throw new Error("client closed while connecting");
 		}
 
-		const conn: ServerConnection = { config, transport, tools };
+		const protocolVersion = era === "modern" ? MODERN_VERSION : LEGACY_VERSION;
+		const conn: ServerConnection = { config, transport, tools, era, protocolVersion };
 		const prev = this.servers.get(config.name);
 		this.servers.set(config.name, conn);
 		// A replaced connection must not keep its server running.
@@ -183,6 +236,40 @@ export class MCPClient {
 	}
 
 	/**
+	 * Detect the server's era, per the 2026-07-28 lifecycle page: send
+	 * `server/discover` with our modern version. A DiscoverResult or a
+	 * recognised modern error means modern (never fall back then); any other
+	 * error, a non-discover result, or no answer in time means legacy.
+	 * Decided once per connection, which is the server process on stdio.
+	 */
+	private async _probe(transport: Transport): Promise<Era> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<"timeout">((resolve) => {
+			timer = setTimeout(() => resolve("timeout"), this.probeTimeoutMs);
+		});
+		let answer: unknown;
+		try {
+			answer = await Promise.race([transport.send("server/discover", withMeta("modern")), timeout]);
+		} catch (err) {
+			if (!(err instanceof MCPRPCError) || !MODERN_ERRORS.has(err.code)) return "legacy";
+			const supported = (err.data as { supported?: unknown } | undefined)?.supported;
+			throw new Error(
+				`MCP server speaks the ${MODERN_VERSION}+ protocol but refused our request (${err.message}${
+					Array.isArray(supported) ? `; it supports ${supported.join(", ")}` : ""
+				}); 8gent speaks ${MODERN_VERSION} and ${LEGACY_VERSION}`,
+			);
+		} finally {
+			clearTimeout(timer);
+		}
+		const versions = (answer as { supportedVersions?: unknown } | null)?.supportedVersions;
+		if (!Array.isArray(versions)) return "legacy";
+		if (versions.includes(MODERN_VERSION)) return "modern";
+		throw new Error(
+			`MCP server supports ${versions.join(", ")}; 8gent speaks ${MODERN_VERSION} and ${LEGACY_VERSION}`,
+		);
+	}
+
+	/**
 	 * Get all MCP tools as AI SDK ToolSet entries.
 	 * Merges tools from all connected servers.
 	 */
@@ -220,13 +307,13 @@ export class MCPClient {
 		}
 
 		try {
-			const result = (await conn.transport.send("tools/call", {
-				name: toolName,
-				arguments: args || {},
-			})) as MCPToolResult;
+			const result = (await conn.transport.send(
+				"tools/call",
+				withMeta(conn.era, { name: toolName, arguments: args || {} }),
+			)) as MCPToolResult;
 			conn.answered = true;
 
-			return result;
+			return complete(conn.era, result);
 		} catch (err) {
 			// Exited during the call: it may have acted, so the call is not sent
 			// again, but the server is started for the next one (or removed).
@@ -243,11 +330,19 @@ export class MCPClient {
 	/**
 	 * List all connected servers and their tool counts.
 	 */
-	listServers(): Array<{ name: string; toolCount: number; type: string }> {
+	listServers(): Array<{
+		name: string;
+		toolCount: number;
+		type: string;
+		era: Era;
+		protocolVersion: string;
+	}> {
 		return this._live().map(([name, conn]) => ({
 			name,
 			toolCount: conn.tools.length,
 			type: conn.config.type,
+			era: conn.era,
+			protocolVersion: conn.protocolVersion,
 		}));
 	}
 

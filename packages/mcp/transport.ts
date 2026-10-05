@@ -34,6 +34,21 @@ interface JSONRPCResponse {
 	error?: { code: number; message: string; data?: unknown };
 }
 
+/**
+ * A JSON-RPC error answer, keeping the code and data the peer sent so the
+ * client can tell a modern MCP error (-32020..-32022) from anything else.
+ * The message is the peer's, unchanged.
+ */
+export class MCPRPCError extends Error {
+	constructor(
+		message: string,
+		readonly code: number,
+		readonly data?: unknown,
+	) {
+		super(message);
+	}
+}
+
 // ── Stdio Transport ──────────────────────────────────────────────
 
 /**
@@ -174,7 +189,7 @@ export class StdioTransport implements Transport {
 				if (p) {
 					this.pending.delete(msg.id);
 					if (msg.error) {
-						p.reject(new Error(msg.error.message));
+						p.reject(new MCPRPCError(msg.error.message, msg.error.code, msg.error.data));
 					} else {
 						p.resolve(msg.result);
 					}
@@ -284,22 +299,31 @@ export class SSETransport implements Transport {
 		const id = ++this.requestId;
 		const req: JSONRPCRequest = { jsonrpc: "2.0", id, method, params };
 
+		const modern = modernHeaders(method, params);
+
 		const res = await fetch(this.endpoint, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				...this.headers,
+				...modern,
 			},
 			body: JSON.stringify(req),
 		});
 
 		if (!res.ok) {
+			// A modern server explains a 4xx in a JSON-RPC error body (#3549).
+			const err = modern ? await errorBody(res) : null;
+			if (err) throw new MCPRPCError(err.message, err.code, err.data);
 			throw new Error(`MCP SSE request failed: ${res.status} ${res.statusText}`);
 		}
 
-		const body = (await res.json()) as JSONRPCResponse;
+		const body =
+			modern && res.headers.get("content-type")?.includes("text/event-stream")
+				? sseResponse(await res.text(), id)
+				: ((await res.json()) as JSONRPCResponse);
 		if (body.error) {
-			throw new Error(body.error.message);
+			throw new MCPRPCError(body.error.message, body.error.code, body.error.data);
 		}
 		return body.result;
 	}
@@ -316,4 +340,64 @@ export class SSETransport implements Transport {
 	close(): void {
 		this.abortController?.abort();
 	}
+}
+
+// ── Modern (2026-07-28) HTTP request metadata, #3549 ─────────────
+
+const VERSION_KEY = "io.modelcontextprotocol/protocolVersion";
+
+/** RFC 9110 visible ASCII plus inner spaces, and not the Base64 sentinel itself. */
+function headerValue(v: string): string {
+	const plain = /^[\x21-\x7E]([\x20-\x7E]*[\x21-\x7E])?$/.test(v);
+	const sentinel = v.startsWith("=?base64?") && v.endsWith("?=");
+	return plain && !sentinel ? v : `=?base64?${Buffer.from(v, "utf8").toString("base64")}?=`;
+}
+
+/**
+ * The headers a modern request mirrors from its body, or null for a request
+ * that carries no modern `_meta` (legacy requests are sent exactly as before).
+ */
+function modernHeaders(method: string, params: unknown): Record<string, string> | null {
+	const p = params as
+		| { name?: unknown; uri?: unknown; _meta?: Record<string, unknown> }
+		| undefined;
+	const version = p?._meta?.[VERSION_KEY];
+	if (typeof version !== "string") return null;
+	const h: Record<string, string> = {
+		Accept: "application/json, text/event-stream",
+		"MCP-Protocol-Version": version,
+		"Mcp-Method": method,
+	};
+	const name = typeof p?.name === "string" ? p.name : typeof p?.uri === "string" ? p.uri : null;
+	if (name !== null) h["Mcp-Name"] = headerValue(name);
+	return h;
+}
+
+/** The JSON-RPC error in a failed response's body, if it has one. */
+async function errorBody(res: Response): Promise<JSONRPCResponse["error"] | null> {
+	try {
+		const body = (await res.json()) as JSONRPCResponse;
+		return typeof body?.error?.code === "number" ? body.error : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The response to request `id` in an SSE reply; notifications before it are skipped. */
+function sseResponse(text: string, id: number): JSONRPCResponse {
+	for (const event of text.split(/\r?\n\r?\n/)) {
+		const data = event
+			.split(/\r?\n/)
+			.filter((l) => l.startsWith("data:"))
+			.map((l) => l.slice(5).replace(/^ /, ""))
+			.join("\n");
+		if (!data) continue;
+		try {
+			const msg = JSON.parse(data) as JSONRPCResponse & { method?: unknown };
+			if (msg.id === id && msg.method === undefined) return msg;
+		} catch {
+			// Not JSON: not ours.
+		}
+	}
+	throw new Error("MCP SSE stream ended without a response");
 }
