@@ -88,7 +88,7 @@ interface ClientState {
 type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
 	| { type: "session:create"; channel: string }
-	| { type: "session:resume"; sessionId: string }
+	| { type: "session:resume"; sessionId: string; channel?: string }
 	| { type: "session:compact"; sessionId: string }
 	| { type: "session:destroy"; sessionId: string }
 	| { type: "prompt"; text: string }
@@ -288,6 +288,9 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 		case "session:resume": {
 			state.sessionId = msg.sessionId;
+			// A resume on a fresh socket would otherwise default to "api" (#3538).
+			// session:create already takes the channel from the client.
+			state.channel = msg.channel || state.channel;
 
 			// If pool doesn't have this session, create a new agent for it
 			if (!pool.hasSession(msg.sessionId)) {

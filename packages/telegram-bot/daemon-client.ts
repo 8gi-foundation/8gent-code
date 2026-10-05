@@ -86,7 +86,7 @@ export class DaemonClient {
 		};
 	}
 
-	/** Open the WebSocket and create a session. Resolves once session:created arrives. */
+	/** Open the WebSocket and create (or resume) a session. Resolves once session:created or session:resumed arrives. */
 	connect(): Promise<void> {
 		if (this.ws && this.ws.readyState === OPEN && this.sessionId) {
 			return Promise.resolve();
@@ -108,7 +108,17 @@ export class DaemonClient {
 			if (this.config.authToken) {
 				this.send({ type: "auth", token: this.config.authToken });
 			}
-			this.send({ type: "session:create", channel: this.config.channel });
+			// Reconnect: resume the session we already own rather than leaking a
+			// new never-evicted agent and dropping the conversation (#3538).
+			if (this.sessionId) {
+				this.send({
+					type: "session:resume",
+					sessionId: this.sessionId,
+					channel: this.config.channel,
+				});
+			} else {
+				this.send({ type: "session:create", channel: this.config.channel });
+			}
 		};
 
 		ws.onmessage = (ev) => {
@@ -129,10 +139,13 @@ export class DaemonClient {
 		ws.onclose = () => {
 			this.stopPing();
 			this.ws = null;
-			this.sessionId = null;
+			// Keep sessionId so the next open resumes it.
 			this.connecting = false;
 			if (!this.closed) {
-				setTimeout(() => this.openSocket(), this.config.reconnectDelayMs);
+				setTimeout(() => {
+					// connect() may already have redialled; never open two sockets.
+					if (!this.closed && !this.ws) this.openSocket();
+				}, this.config.reconnectDelayMs);
 			}
 		};
 	}
@@ -140,13 +153,11 @@ export class DaemonClient {
 	private handleMessage(msg: { type: string; [k: string]: unknown }): void {
 		switch (msg.type) {
 			case "session:created":
+			case "session:resumed":
 				this.sessionId = String(msg.sessionId);
 				this.connecting = false;
 				this.startPing();
 				this.resolveConnect();
-				break;
-			case "session:resumed":
-				this.sessionId = String(msg.sessionId);
 				break;
 			case "auth:ok":
 				break;
@@ -171,6 +182,9 @@ export class DaemonClient {
 
 	/** Force a fresh session (e.g. on cancel / new task). */
 	resetSession(): void {
+		// Destroy the old agent first: telegram sessions are never evicted, so
+		// an abandoned one would live until the daemon restarts (#3538).
+		if (this.sessionId) this.send({ type: "session:destroy", sessionId: this.sessionId });
 		this.sessionId = null;
 		this.send({ type: "session:create", channel: this.config.channel });
 	}
