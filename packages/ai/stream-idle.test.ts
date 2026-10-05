@@ -13,6 +13,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	DEFAULT_STREAM_CEILING_MS,
 	DEFAULT_TURN_TIMEOUT_MS,
@@ -170,6 +172,39 @@ describe("resolveStreamIdleMs / resolveStepCeilingMs (EIGHT_STREAM_IDLE_MS)", ()
 		expect(
 			resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "60000", EIGHT_TURN_TIMEOUT_MS: "900000" }),
 		).toBe(900_000);
+	});
+});
+
+describe("EIGHT_STREAM_IDLE_MS is documented with the values the code uses", () => {
+	const root = join(import.meta.dir, "..", "..");
+	const docs = readFileSync(join(root, "docs", "VESSEL-ABILITIES.md"), "utf8");
+	const para = docs.split("\n").find((l) => l.startsWith("`EIGHT_STREAM_IDLE_MS`")) ?? "";
+
+	it("has its own paragraph right after the EIGHT_TURN_TIMEOUT_MS one", () => {
+		expect(para).not.toBe("");
+		const turnIdx = docs.indexOf("`EIGHT_TURN_TIMEOUT_MS` bounds");
+		const idleIdx = docs.indexOf(para);
+		expect(turnIdx).toBeGreaterThan(-1);
+		expect(idleIdx).toBeGreaterThan(turnIdx);
+		expect(docs.slice(turnIdx, idleIdx).split("\n").filter((l) => l.trim()).length).toBe(1);
+	});
+
+	it("states off by default, the floor, the ceiling, the caps and the prefill warning", () => {
+		expect(para).toContain("off by default");
+		expect(para).toContain(`${resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "1" })} ms floor`);
+		expect(para).toContain(`\`${DEFAULT_STREAM_CEILING_MS}\``);
+		expect(para).toContain(`${DEFAULT_STREAM_CEILING_MS / 60_000} minutes`);
+		expect(para).toContain("unless `EIGHT_TURN_TIMEOUT_MS` is set");
+		expect(para).toContain("`max_tokens`");
+		expect(para).toContain("30-minute session watchdog");
+		expect(para).toContain("prefill");
+	});
+
+	it("has a CHANGELOG entry under Unreleased", () => {
+		const log = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+		const unreleased = log.slice(log.indexOf("## [Unreleased]"), log.indexOf("\n## [", log.indexOf("## [Unreleased]") + 1));
+		expect(unreleased).toMatch(/^### .*\(#3553\)$/m);
+		expect(unreleased).toContain("`EIGHT_STREAM_IDLE_MS`");
 	});
 });
 
