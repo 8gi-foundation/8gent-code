@@ -59,6 +59,8 @@ export class MCPClient {
 	private servers = new Map<string, ServerConnection>();
 	/** One restart in flight per server, shared by every caller that found it dead. */
 	private reviving = new Map<string, Promise<ServerConnection | undefined>>();
+	/** Bumped by close(), so a connect still in its handshake knows to discard itself. */
+	private generation = 0;
 	private configPath?: string;
 
 	constructor(configPath?: string) {
@@ -90,6 +92,7 @@ export class MCPClient {
 	}
 
 	private async _connectServer(config: ServerConfig): Promise<ServerConnection> {
+		const gen = this.generation;
 		let transport: Transport;
 
 		if (config.type === "stdio") {
@@ -122,6 +125,12 @@ export class MCPClient {
 			throw err;
 		}
 
+		// close() ran while this server was starting: it must not outlive the client.
+		if (gen !== this.generation) {
+			transport.close();
+			throw new Error("client closed while connecting");
+		}
+
 		const conn: ServerConnection = { config, transport, tools };
 		const prev = this.servers.get(config.name);
 		this.servers.set(config.name, conn);
@@ -145,6 +154,7 @@ export class MCPClient {
 	private _revive(name: string, conn: ServerConnection): Promise<ServerConnection | undefined> {
 		const inflight = this.reviving.get(name);
 		if (inflight) return inflight;
+		const gen = this.generation;
 		const p = (async () => {
 			const current = this.servers.get(name);
 			if (current !== conn) return current; // already restarted or removed
@@ -155,6 +165,7 @@ export class MCPClient {
 					fresh.restarted = true;
 					return fresh;
 				} catch (err) {
+					if (gen !== this.generation) return undefined; // client closed meanwhile
 					why = `restart failed: ${err}`;
 				}
 			}
@@ -280,5 +291,6 @@ export class MCPClient {
 			}
 		}
 		this.servers.clear();
+		this.generation++;
 	}
 }
