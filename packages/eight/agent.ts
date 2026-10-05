@@ -81,7 +81,7 @@ import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
 import { providerConfigForStep } from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
-import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
+import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
 	type CheckpointEntry,
 	type Summarizer,
@@ -884,8 +884,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// round is wrapped in withTurnTimeout: a single stalled round (socket
 		// accepted, no body - maxRounds bounds round COUNT, not a stuck round)
 		// aborts the shared signal and rejects, ending the turn in bounded time
-		// instead of hanging for the full session watchdog.
-		const attemptTimeoutMs = resolveTurnTimeoutMs();
+		// instead of hanging for the full session watchdog. With
+		// EIGHT_STREAM_IDLE_MS set the reply streams and a silent gap is what
+		// fails the step, so this becomes a higher ceiling (#3553); unset, it is
+		// exactly resolveTurnTimeoutMs().
+		const attemptTimeoutMs = resolveStepCeilingMs();
 		// #2805: the OpenAI-compatible local endpoints (ollama, LM Studio) report
 		// REAL usage on each completion. Forward it through onStepFinish so
 		// consumers (harness StatusEvent.tokens, TUI totals) see real token

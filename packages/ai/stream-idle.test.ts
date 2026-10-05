@@ -1,0 +1,379 @@
+/**
+ * #3553: judge a model step by silence, not total time.
+ *
+ * With EIGHT_STREAM_IDLE_MS set, the text-tool path streams its reply and the
+ * step limit is a quiet-gap timer re-armed on every chunk, so a slow model that
+ * keeps writing is never cut off, and a connection that goes silent is caught
+ * after one quiet gap. The per-step wall clock stays as a higher ceiling, and
+ * the output-token cap (#3074) still applies.
+ *
+ * The peers' numbers (a chunk every 20 s for 6 min at idle = 60 s) are scaled
+ * down to milliseconds against a real local Bun server, so the suite runs in
+ * seconds without models or network.
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import {
+	DEFAULT_STREAM_CEILING_MS,
+	DEFAULT_TURN_TIMEOUT_MS,
+	resolveStepCeilingMs,
+	resolveStreamIdleMs,
+	TurnTimeoutError,
+} from "../eight/turn-timeout";
+import { modelFetch } from "./model-fetch";
+import { buildTextToolCall, type TextToolUsage } from "./text-tool-endpoint";
+
+const enc = new TextEncoder();
+
+// Requests the fake endpoint saw, keyed by path.
+const bodies: Array<{ path: string; body: Record<string, unknown> }> = [];
+
+// A ReadableStream that writes each chunk after `gapMs`, then ends - or, with
+// `hang`, never ends after the chunks.
+function drip(chunks: string[], gapMs: number, hang = false): ReadableStream<Uint8Array> {
+	let i = 0;
+	return new ReadableStream({
+		async pull(controller) {
+			if (i < chunks.length) {
+				if (i > 0) await Bun.sleep(gapMs);
+				controller.enqueue(enc.encode(chunks[i++]));
+				return;
+			}
+			if (hang) {
+				await new Promise(() => {});
+				return;
+			}
+			controller.close();
+		},
+	});
+}
+
+const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+
+// An OpenAI-compatible streamed reply: content split across deltas, one tool
+// call whose arguments arrive in pieces, then usage, then [DONE].
+const STREAMED_CHAT = [
+	sse({ choices: [{ index: 0, delta: { role: "assistant", content: "Read" } }] }),
+	sse({ choices: [{ index: 0, delta: { content: "ing the " } }] }),
+	sse({ choices: [{ index: 0, delta: { content: "README." } }] }),
+	sse({
+		choices: [
+			{
+				index: 0,
+				delta: {
+					tool_calls: [
+						{
+							index: 0,
+							id: "c1",
+							type: "function",
+							function: { name: "read_file", arguments: '{"pa' },
+						},
+					],
+				},
+			},
+		],
+	}),
+	sse({
+		choices: [
+			{
+				index: 0,
+				delta: { tool_calls: [{ index: 0, function: { arguments: 'th":"README.md"}' } }] },
+			},
+		],
+	}),
+	sse({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }),
+	sse({ choices: [], usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 } }),
+	"data: [DONE]\n\n",
+];
+
+let server: ReturnType<typeof Bun.serve> | null = null;
+let base = "";
+
+beforeAll(() => {
+	server = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		idleTimeout: 0,
+		async fetch(req) {
+			const url = new URL(req.url);
+			const gap = Number(url.searchParams.get("gap") ?? "0");
+			const mode = url.searchParams.get("mode") ?? "";
+			if (req.method === "POST") {
+				const text = await req.text();
+				try {
+					bodies.push({ path: url.pathname, body: JSON.parse(text) });
+				} catch {
+					// not JSON; ignore
+				}
+			}
+			if (mode === "plain") {
+				// Ten small chunks, `gap` ms apart.
+				const parts = Array.from({ length: 10 }, (_, n) => `chunk${n};`);
+				return new Response(drip(parts, gap));
+			}
+			if (mode === "silent") {
+				return new Response(drip(["first;"], 0, true));
+			}
+			if (mode === "chat") {
+				return new Response(drip(STREAMED_CHAT, gap), {
+					headers: { "Content-Type": "text/event-stream" },
+				});
+			}
+			if (mode === "chat-silent") {
+				return new Response(drip(STREAMED_CHAT.slice(0, 1), 0, true), {
+					headers: { "Content-Type": "text/event-stream" },
+				});
+			}
+			if (mode === "chat-length") {
+				return new Response(
+					drip(
+						[
+							sse({ choices: [{ index: 0, delta: { content: "again again " } }] }),
+							sse({ choices: [{ index: 0, delta: {}, finish_reason: "length" }] }),
+							"data: [DONE]\n\n",
+						],
+						gap,
+					),
+					{ headers: { "Content-Type": "text/event-stream" } },
+				);
+			}
+			return new Response("unknown mode", { status: 400 });
+		},
+	});
+	base = `http://127.0.0.1:${server.port}`;
+});
+
+afterAll(() => {
+	server?.stop(true);
+});
+
+describe("resolveStreamIdleMs / resolveStepCeilingMs (EIGHT_STREAM_IDLE_MS)", () => {
+	it("is off by default and the step limit stays the 300 s wall clock", () => {
+		expect(resolveStreamIdleMs({})).toBeNull();
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "" })).toBeNull();
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "0" })).toBeNull();
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "abc" })).toBeNull();
+		expect(resolveStepCeilingMs({})).toBe(DEFAULT_TURN_TIMEOUT_MS);
+		expect(resolveStepCeilingMs({ EIGHT_TURN_TIMEOUT_MS: "5000" })).toBe(5000);
+	});
+
+	it("reads a positive idle gap with a 1 s floor", () => {
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "60000" })).toBe(60_000);
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "10" })).toBe(1000);
+	});
+
+	it("with the flag on, raises the default ceiling but never above an explicit EIGHT_TURN_TIMEOUT_MS", () => {
+		expect(resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "60000" })).toBe(DEFAULT_STREAM_CEILING_MS);
+		expect(DEFAULT_STREAM_CEILING_MS).toBeGreaterThan(DEFAULT_TURN_TIMEOUT_MS);
+		// Below the 30 min session watchdog, so the session cap stays the outer bound.
+		expect(DEFAULT_STREAM_CEILING_MS).toBeLessThan(30 * 60 * 1000);
+		expect(
+			resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "60000", EIGHT_TURN_TIMEOUT_MS: "900000" }),
+		).toBe(900_000);
+	});
+});
+
+describe("modelFetch idleMs", () => {
+	it("a body that keeps dripping finishes even when it outlasts several idle gaps", async () => {
+		// 10 chunks, 120 ms apart (~1.1 s total) against a 400 ms idle gap.
+		const started = Date.now();
+		const res = await modelFetch(
+			`${base}/x?mode=plain&gap=120`,
+			{ method: "POST" },
+			{
+				timeoutMs: 10_000,
+				idleMs: 400,
+			},
+		);
+		const text = await res.text();
+		expect(text).toBe(Array.from({ length: 10 }, (_, n) => `chunk${n};`).join(""));
+		expect(Date.now() - started).toBeGreaterThan(400 * 2);
+	});
+
+	it("a body that goes silent after one chunk fails after one idle gap, not the ceiling", async () => {
+		const started = Date.now();
+		const res = await modelFetch(
+			`${base}/x?mode=silent`,
+			{ method: "POST" },
+			{
+				timeoutMs: 10_000,
+				idleMs: 300,
+				label: "fake/silent",
+			},
+		);
+		const err = await res.text().catch((e: unknown) => e);
+		const elapsed = Date.now() - started;
+		expect(err).toBeInstanceOf(TurnTimeoutError);
+		expect((err as TurnTimeoutError).timeoutMs).toBe(300);
+		expect((err as Error).message).toContain("no output");
+		expect(elapsed).toBeLessThan(3_000);
+	});
+
+	it("the wall-clock ceiling still bounds a body that never stops dripping", async () => {
+		const res = await modelFetch(
+			`${base}/x?mode=plain&gap=200`,
+			{ method: "POST" },
+			{
+				timeoutMs: 700,
+				idleMs: 1_000,
+			},
+		);
+		const err = await res.text().catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(TurnTimeoutError);
+		expect((err as TurnTimeoutError).timeoutMs).toBe(700);
+	});
+
+	it("a caller abort mid-body stays an abort, not a timeout", async () => {
+		const ac = new AbortController();
+		const res = await modelFetch(
+			`${base}/x?mode=silent`,
+			{ method: "POST", signal: ac.signal },
+			{
+				timeoutMs: 10_000,
+				idleMs: 5_000,
+			},
+		);
+		setTimeout(() => ac.abort(), 100);
+		const err = await res.text().catch((e: unknown) => e);
+		expect(err).not.toBeInstanceOf(TurnTimeoutError);
+		expect((err as Error).name).toBe("AbortError");
+	});
+});
+
+describe("buildTextToolCall with a stream idle gap (#3553)", () => {
+	it("default (flag off) still sends stream: false", async () => {
+		const prev = process.env.EIGHT_STREAM_IDLE_MS;
+		delete process.env.EIGHT_STREAM_IDLE_MS;
+		const realFetch = globalThis.fetch;
+		let sent: Record<string, unknown> | undefined;
+		globalThis.fetch = (async (_i: unknown, init?: { body?: string }) => {
+			sent = JSON.parse(init?.body ?? "{}");
+			return Response.json({ choices: [{ message: { content: "ok" } }] });
+		}) as unknown as typeof fetch;
+		try {
+			const call = buildTextToolCall({ provider: "ollama", model: "m", timeoutMs: 5_000 });
+			expect(await call([{ role: "user", content: "hi" }])).toBe("ok");
+			expect(sent?.stream).toBe(false);
+		} finally {
+			globalThis.fetch = realFetch;
+			if (prev !== undefined) process.env.EIGHT_STREAM_IDLE_MS = prev;
+		}
+	});
+
+	it("streams, reassembles content and split tool-call deltas, and reports real usage", async () => {
+		bodies.length = 0;
+		const seen: TextToolUsage[] = [];
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			// Each chunk 150 ms apart (~1 s total) against a 400 ms idle gap and a
+			// 10 s ceiling: the step outlasts two idle gaps and still finishes.
+			endpoint: `${base}/v1/chat/completions?mode=chat&gap=150`,
+			timeoutMs: 10_000,
+			idleMs: 400,
+			onUsage: (u) => seen.push(u),
+		});
+		const out = await call([{ role: "user", content: "read the readme" }]);
+		expect(out).toEqual({
+			content: "Reading the README.",
+			toolCalls: [{ name: "read_file", arguments: { path: "README.md" } }],
+		});
+		expect(seen).toEqual([{ promptTokens: 30, completionTokens: 12, totalTokens: 42 }]);
+		const sent = bodies.find((b) => b.path === "/v1/chat/completions")?.body;
+		expect(sent?.stream).toBe(true);
+		expect(sent?.stream_options).toEqual({ include_usage: true });
+		// The output cap is still sent (#3074).
+		expect(typeof sent?.max_tokens).toBe("number");
+	});
+
+	it("a stream that goes silent fails the step with TurnTimeoutError after the idle gap", async () => {
+		const started = Date.now();
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			endpoint: `${base}/v1/chat/completions?mode=chat-silent`,
+			timeoutMs: 10_000,
+			idleMs: 300,
+		});
+		const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(TurnTimeoutError);
+		expect(Date.now() - started).toBeLessThan(3_000);
+	});
+
+	it("a streamed reply cut off by the output cap still fails loudly (#3074)", async () => {
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			endpoint: `${base}/v1/chat/completions?mode=chat-length&gap=10`,
+			timeoutMs: 10_000,
+			idleMs: 400,
+			maxTokens: 64,
+		});
+		const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain("64-token output cap");
+	});
+});
+
+describe("buildTextToolCall raw recovery path streams too (#3553)", () => {
+	it("reassembles Ollama's streamed /api/generate reply after a swallowed streamed reply", async () => {
+		const seenPaths: Array<{ path: string; stream: unknown }> = [];
+		const raw = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			idleTimeout: 0,
+			async fetch(req) {
+				const path = new URL(req.url).pathname;
+				const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+				seenPaths.push({ path, stream: body.stream });
+				if (path === "/api/show") return Response.json({ modelfile: "FROM x\nRENDERER qwen3.5\n" });
+				if (path === "/v1/chat/completions") {
+					// Ollama's parser ate the reply: no content, but real generated tokens.
+					return new Response(
+						drip(
+							[
+								sse({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+								sse({
+									choices: [],
+									usage: { prompt_tokens: 9, completion_tokens: 5, total_tokens: 14 },
+								}),
+								"data: [DONE]\n\n",
+							],
+							10,
+						),
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				}
+				if (path === "/api/generate") {
+					const lines = [
+						{ response: "<think>hm</think>", done: false },
+						{ response: "The answer", done: false },
+						{ response: " is 4.", done: false },
+						{ response: "", done: true, done_reason: "stop", prompt_eval_count: 9, eval_count: 6 },
+					].map((o) => `${JSON.stringify(o)}\n`);
+					return new Response(drip(lines, 120));
+				}
+				return new Response("nope", { status: 404 });
+			},
+		});
+		try {
+			const seen: TextToolUsage[] = [];
+			const call = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: `http://127.0.0.1:${raw.port}/v1/chat/completions`,
+				timeoutMs: 10_000,
+				idleMs: 300,
+				onUsage: (u) => seen.push(u),
+			});
+			expect(await call([{ role: "user", content: "2+2?" }])).toBe("The answer is 4.");
+			expect(seen).toEqual([
+				{ promptTokens: 9, completionTokens: 5, totalTokens: 14 },
+				{ promptTokens: 9, completionTokens: 6, totalTokens: 15 },
+			]);
+			expect(seenPaths.find((p) => p.path === "/api/generate")?.stream).toBe(true);
+		} finally {
+			raw.stop(true);
+		}
+	});
+});
