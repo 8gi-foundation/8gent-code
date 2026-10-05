@@ -23,9 +23,9 @@ class RecordingPool {
 		this.created.push({ id, channel });
 		this.live.set(id, channel);
 	}
-	resumes = 0;
+	hasSessionCalls = 0;
 	hasSession(id: string) {
-		this.resumes++;
+		this.hasSessionCalls++;
 		return this.live.has(id);
 	}
 	destroySession(id: string) {
@@ -72,7 +72,7 @@ function reset() {
 	pool.live.clear();
 	pool.created.length = 0;
 	pool.destroyed.length = 0;
-	pool.resumes = 0;
+	pool.hasSessionCalls = 0;
 }
 
 describe("DaemonClient against the real gateway", () => {
@@ -149,7 +149,7 @@ describe("TelegramDaemonBridge daemon socket against the real gateway", () => {
 		b.ws?.close();
 		// The bridge redials after its fixed 5 s delay. Wait for whichever frame
 		// it sends on the new socket: a resume (fixed) or a second create (leak).
-		await until(() => pool.resumes + pool.created.length >= 2, 8000);
+		await until(() => pool.hasSessionCalls + pool.created.length >= 2, 8000);
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(b.sessionId).toBe(id);
@@ -167,4 +167,49 @@ describe("TelegramDaemonBridge daemon socket against the real gateway", () => {
 		if (b.ws) b.ws.onclose = null;
 		b.ws?.close();
 	}, 10000);
+
+	it("ignores the old session's end event when replacing a busy session", async () => {
+		reset();
+		const bridge = new TelegramDaemonBridge({
+			telegramToken: "test-token",
+			chatId: "1",
+			daemonUrl: url,
+			authorizedChatIds: ["1"],
+		});
+		const b = bridge as unknown as {
+			connectDaemon(): Promise<void>;
+			freshSession(): void;
+			ws: WebSocket | null;
+			sessionId: string | null;
+			agentBusy: boolean;
+			_retryTimer: ReturnType<typeof setTimeout> | null;
+		};
+		await b.connectDaemon();
+		await until(() => pool.created.length === 1);
+		const old = b.sessionId as string;
+
+		// The legacy retry timer path: the turn is still running, the session is
+		// replaced, and the next attempt arms its own timer straight away.
+		b.agentBusy = true;
+		b.freshSession();
+		let fired = false;
+		b._retryTimer = setTimeout(() => {
+			fired = true;
+		}, 60000);
+		const armed = b._retryTimer;
+
+		await until(() => pool.created.length === 2);
+		await until(() => b.sessionId !== null && b.sessionId !== old);
+		await new Promise((r) => setTimeout(r, 150));
+
+		expect(pool.destroyed).toEqual([old]);
+		expect(b.agentBusy).toBe(true);
+		expect(b._retryTimer).toBe(armed);
+		expect(fired).toBe(false);
+
+		clearTimeout(armed);
+		b._retryTimer = null;
+		if (b.ws) b.ws.onclose = null;
+		b.ws?.close();
+	});
 });

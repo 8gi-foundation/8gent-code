@@ -548,6 +548,12 @@ class TelegramDaemonBridge {
 
 		const { event, payload } = msg;
 
+		// Drop events addressed to a session this bridge no longer owns. Destroying
+		// the old session in freshSession() echoes its session:end back on this
+		// socket after sessionId was cleared; acting on it would mark the bridge
+		// idle and cancel the retry timer armed for the replacement session.
+		if (payload?.sessionId && payload.sessionId !== this.sessionId) return;
+
 		switch (event) {
 			case "agent:stream":
 				if (payload.final && payload.chunk) {
