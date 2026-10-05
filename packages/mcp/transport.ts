@@ -14,6 +14,8 @@ export interface Transport {
 	send(method: string, params?: unknown): Promise<unknown>;
 	notify(method: string, params?: unknown): void;
 	close(): void;
+	/** True once the transport can no longer carry a request (the server exited). */
+	readonly closed?: boolean;
 }
 
 // ── JSON-RPC helpers ─────────────────────────────────────────────
@@ -242,6 +244,10 @@ export class StdioTransport implements Transport {
 
 	close(): void {
 		this._shutdown("Transport closed");
+	}
+
+	get closed(): boolean {
+		return this.closedReason !== null;
 	}
 
 	/** Kill the server and reject everything still waiting on it. Idempotent. */

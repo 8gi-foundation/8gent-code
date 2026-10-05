@@ -21,7 +21,14 @@ interface ServerConnection {
 	config: ServerConfig;
 	transport: Transport;
 	tools: MCPToolSchema[];
+	/** Started again after its server exited (#3542). */
+	restarted?: boolean;
+	/** Answered a tools/call since it started. */
+	answered?: boolean;
 }
+
+/** The server behind this connection has exited; its tools cannot run. */
+const dead = (conn: ServerConnection) => conn.transport.closed === true;
 
 export interface MCPToolResult {
 	content: Array<{
@@ -33,10 +40,25 @@ export interface MCPToolResult {
 	isError?: boolean;
 }
 
+function stopped(name: string, err?: unknown): MCPToolResult {
+	const detail = err ? ` (${err})` : "";
+	return {
+		content: [
+			{
+				type: "text",
+				text: `MCP server "${name}" stopped and could not be restarted; its tools are no longer available${detail}`,
+			},
+		],
+		isError: true,
+	};
+}
+
 // ── Client ───────────────────────────────────────────────────────
 
 export class MCPClient {
 	private servers = new Map<string, ServerConnection>();
+	/** One restart in flight per server, shared by every caller that found it dead. */
+	private reviving = new Map<string, Promise<ServerConnection | undefined>>();
 	private configPath?: string;
 
 	constructor(configPath?: string) {
@@ -67,7 +89,7 @@ export class MCPClient {
 		}
 	}
 
-	private async _connectServer(config: ServerConfig): Promise<void> {
+	private async _connectServer(config: ServerConfig): Promise<ServerConnection> {
 		let transport: Transport;
 
 		if (config.type === "stdio") {
@@ -100,9 +122,53 @@ export class MCPClient {
 			throw err;
 		}
 
-		this.servers.set(config.name, { config, transport, tools });
+		const conn: ServerConnection = { config, transport, tools };
+		const prev = this.servers.get(config.name);
+		this.servers.set(config.name, conn);
+		// A replaced connection must not keep its server running.
+		if (prev) {
+			try {
+				prev.transport.close();
+			} catch {}
+		}
 
 		console.log(`[mcp] Connected to "${config.name}" - ${tools.length} tools`);
+		return conn;
+	}
+
+	/**
+	 * Start a server whose process exited, once, from the config it was approved
+	 * with (no re-read of the file), refreshing its tools. A server that cannot
+	 * start, or was already restarted and died again before answering a call,
+	 * is removed so its tools stop being offered.
+	 */
+	private _revive(name: string, conn: ServerConnection): Promise<ServerConnection | undefined> {
+		const inflight = this.reviving.get(name);
+		if (inflight) return inflight;
+		const p = (async () => {
+			const current = this.servers.get(name);
+			if (current !== conn) return current; // already restarted or removed
+			let why = "it exited again before answering a call";
+			if (!conn.restarted || conn.answered) {
+				try {
+					const fresh = await this._connectServer(conn.config);
+					fresh.restarted = true;
+					return fresh;
+				} catch (err) {
+					why = `restart failed: ${err}`;
+				}
+			}
+			if (this.servers.get(name) === conn) this.servers.delete(name);
+			console.error(`[mcp] Server "${name}" stopped and was removed (${why})`);
+			return undefined;
+		})().finally(() => this.reviving.delete(name));
+		this.reviving.set(name, p);
+		return p;
+	}
+
+	/** Connections whose server is still running. */
+	private _live(): Array<[string, ServerConnection]> {
+		return [...this.servers.entries()].filter(([, conn]) => !dead(conn));
 	}
 
 	/**
@@ -112,7 +178,7 @@ export class MCPClient {
 	getTools(): ToolSet {
 		const merged: ToolSet = {};
 
-		for (const [name, conn] of this.servers) {
+		for (const [name, conn] of this._live()) {
 			const bridged = bridgeTools(name, conn.tools, this);
 			Object.assign(merged, bridged);
 		}
@@ -129,12 +195,17 @@ export class MCPClient {
 		toolName: string,
 		args?: Record<string, unknown>,
 	): Promise<MCPToolResult> {
-		const conn = this.servers.get(serverName);
+		let conn = this.servers.get(serverName);
 		if (!conn) {
 			return {
 				content: [{ type: "text", text: `Server "${serverName}" not connected` }],
 				isError: true,
 			};
+		}
+		// Exited before this call was sent: start it again, then send.
+		if (dead(conn)) {
+			conn = await this._revive(serverName, conn);
+			if (!conn) return stopped(serverName);
 		}
 
 		try {
@@ -142,9 +213,15 @@ export class MCPClient {
 				name: toolName,
 				arguments: args || {},
 			})) as MCPToolResult;
+			conn.answered = true;
 
 			return result;
 		} catch (err) {
+			// Exited during the call: it may have acted, so the call is not sent
+			// again, but the server is started for the next one (or removed).
+			if (dead(conn) && !(await this._revive(serverName, conn))) {
+				return stopped(serverName, err);
+			}
 			return {
 				content: [{ type: "text", text: `MCP tool error: ${err}` }],
 				isError: true,
@@ -156,7 +233,7 @@ export class MCPClient {
 	 * List all connected servers and their tool counts.
 	 */
 	listServers(): Array<{ name: string; toolCount: number; type: string }> {
-		return [...this.servers.entries()].map(([name, conn]) => ({
+		return this._live().map(([name, conn]) => ({
 			name,
 			toolCount: conn.tools.length,
 			type: conn.config.type,
@@ -183,7 +260,7 @@ export class MCPClient {
 	/** @deprecated Use getTools() which returns a ToolSet */
 	listTools(): Array<{ server: string; tool: MCPToolSchema }> {
 		const result: Array<{ server: string; tool: MCPToolSchema }> = [];
-		for (const [name, conn] of this.servers) {
+		for (const [name, conn] of this._live()) {
 			for (const tool of conn.tools) {
 				result.push({ server: name, tool });
 			}
