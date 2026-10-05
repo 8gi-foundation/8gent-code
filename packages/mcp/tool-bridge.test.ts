@@ -9,7 +9,7 @@
  * EIGHT_MCP_LEGACY_SCHEMA=1 restores the old converter.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { asSchema } from "ai";
 import { createPermissionHolder, runWithPermissionHolder } from "../permissions/permission-mode";
 import {
@@ -21,6 +21,10 @@ import { type MCPToolSchema, bridgeTools } from "./tool-bridge";
 
 const prevLegacy = process.env.EIGHT_MCP_LEGACY_SCHEMA;
 const prevHeadless = process.env.EIGHT_HEADLESS;
+// The default-path tests must not depend on the caller's shell.
+beforeEach(() => {
+	Reflect.deleteProperty(process.env, "EIGHT_MCP_LEGACY_SCHEMA");
+});
 afterEach(() => {
 	_resetTuiApprovalChannel();
 	if (prevLegacy === undefined) Reflect.deleteProperty(process.env, "EIGHT_MCP_LEGACY_SCHEMA");
@@ -125,6 +129,24 @@ describe("MCP schema passthrough", () => {
 		expect(js.allOf).toBeUndefined();
 		expect(Object.keys(js.properties).sort()).toEqual(["a", "b"]);
 		expect([...js.required].sort()).toEqual(["a", "b"]);
+	});
+
+	test("branch properties named like Object.prototype members are kept", async () => {
+		const branchProps = JSON.parse(
+			'{"constructor":{"type":"string"},"toString":{"type":"string"},"__proto__":{"type":"integer"}}',
+		);
+		const t = bridgeOne({
+			type: "object",
+			oneOf: [{ properties: branchProps, required: ["constructor"] }],
+		} as MCPToolSchema["inputSchema"]);
+		const js = await shown(t);
+		expect(Object.keys(js.properties).sort()).toEqual(["__proto__", "constructor", "toString"]);
+		expect(Object.hasOwn(js.properties, "__proto__")).toBe(true);
+		expect(js.properties.constructor).toEqual({ type: "string" });
+		expect(js.properties.toString).toEqual({ type: "string" });
+		expect(js.required).toEqual(["constructor"]);
+		// The global prototype is untouched.
+		expect(({} as Record<string, unknown>).type).toBeUndefined();
 	});
 
 	test("a tool with no schema is an empty object", async () => {

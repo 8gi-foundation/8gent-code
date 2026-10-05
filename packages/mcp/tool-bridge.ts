@@ -63,7 +63,16 @@ export function normalizeMcpInputSchema(schema: MCPToolSchema["inputSchema"]): J
 		for (const raw of branches) {
 			const branch = asObject(raw);
 			for (const [name, prop] of Object.entries(asObject(branch.properties))) {
-				if (!(name in properties)) properties[name] = prop;
+				// Own-key check and data-property write, so names such as
+				// "constructor" or "__proto__" are kept rather than dropped.
+				if (!Object.hasOwn(properties, name)) {
+					Object.defineProperty(properties, name, {
+						value: prop,
+						enumerable: true,
+						writable: true,
+						configurable: true,
+					});
+				}
 			}
 			const req = new Set(asStrings(branch.required));
 			if (key === "allOf") {
