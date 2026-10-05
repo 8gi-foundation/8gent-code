@@ -22,6 +22,65 @@ export function isLikelyEmbeddingModelId(id: string): boolean {
 	return false;
 }
 
+/**
+ * What an Ollama model says it can do, from `/api/show` `capabilities`
+ * (#3548), or null when it does not say (older Ollama, an error, a timeout).
+ * Known answers are cached per host and model; a null answer is not, so a
+ * host that was down is asked again next time.
+ */
+const capabilityCache = new Map<string, string[]>();
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+async function ollamaCapabilities(
+	root: string,
+	model: string,
+	fetchImpl: FetchLike,
+	timeoutMs: number,
+): Promise<string[] | null> {
+	const key = `${root}\n${model}`;
+	const hit = capabilityCache.get(key);
+	if (hit) return hit;
+	try {
+		const res = await fetchImpl(`${root}/api/show`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model }),
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		if (!res.ok) return null;
+		const caps = ((await res.json()) as { capabilities?: unknown })?.capabilities;
+		if (!Array.isArray(caps) || caps.length === 0) return null;
+		const list = caps.map((c) => String(c));
+		capabilityCache.set(key, list);
+		return list;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Ollama models that can chat (#3548). A model whose reported capabilities
+ * lack "completion" (Ollama's decision models report only "decision"; embedding
+ * models report "embedding") is dropped. A model that reports nothing falls
+ * back to the name heuristic, which, as before, gives way when it would leave
+ * no model at all.
+ */
+export async function filterChatCapable(
+	root: string,
+	ids: string[],
+	opts?: { fetch?: FetchLike; timeoutMs?: number },
+): Promise<string[]> {
+	const fetchImpl = opts?.fetch ?? ((url, init) => fetch(url, init));
+	const timeoutMs = opts?.timeoutMs ?? 2000;
+	const caps = await Promise.all(ids.map((id) => ollamaCapabilities(root, id, fetchImpl, timeoutMs)));
+	const capable = ids
+		.map((id, i) => ({ id, caps: caps[i] }))
+		.filter((m) => m.caps === null || m.caps.includes("completion"));
+	const named = capable.filter((m) => m.caps !== null || !isLikelyEmbeddingModelId(m.id));
+	return (named.length > 0 ? named : capable).map((m) => m.id);
+}
+
 function scoreChatModelCandidate(id: string): number {
 	if (isLikelyEmbeddingModelId(id)) return -1e9;
 	const s = id.toLowerCase();

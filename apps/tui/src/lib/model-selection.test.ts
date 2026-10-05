@@ -19,9 +19,11 @@ import {
 	autoSelectModel,
 	canReuseTabAgent,
 	declaredModels,
+	filterChatCapable,
 	listsInstalledOllamaModels,
 	missingModelNotice,
 	normalizeProviderId,
+	pickBestChatModel,
 	providerToRuntime,
 	specForActivatedTab,
 	tabAgentRole,
@@ -313,5 +315,68 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 		expect(missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed })).toBeNull();
 		expect(missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] })).toBeNull();
 		expect(missingModelNotice({ provider: "ollama", from: "qwen3.5:9b", to: "qwen3.8:27b-mlx", available: installed })).toBeNull();
+	});
+});
+
+describe("filterChatCapable (#3548)", () => {
+	const ROOT = "http://ollama.test:11434";
+	/** A stub /api/show: capabilities per model, or a status / throw. */
+	function stubShow(table: Record<string, string[] | number | "throw" | "none">) {
+		const calls: string[] = [];
+		const fetchImpl = async (url: string, init?: RequestInit) => {
+			const model = JSON.parse(String(init?.body ?? "{}")).model as string;
+			calls.push(`${url} ${model}`);
+			const entry = table[model];
+			if (entry === "throw") throw new Error("connection refused");
+			if (typeof entry === "number") return new Response("", { status: entry });
+			if (entry === "none" || entry === undefined) return Response.json({ modelfile: "FROM x" });
+			return Response.json({ capabilities: entry });
+		};
+		return { calls, fetchImpl };
+	}
+
+	test("drops decision-only models that report no completion capability", async () => {
+		const { fetchImpl } = stubShow({
+			"clef:27b": ["decision"],
+			"nimble:latest": ["decision"],
+			"qwen3.5:14b": ["completion", "tools"],
+		});
+		const ids = ["clef:27b", "nimble:latest", "qwen3.5:14b"];
+		const kept = await filterChatCapable(`${ROOT}/a`, ids, { fetch: fetchImpl });
+		expect(kept).toEqual(["qwen3.5:14b"]);
+		// The decision model no longer outranks the chat model in the picker.
+		expect(pickBestChatModel(kept)).toBe("qwen3.5:14b");
+	});
+
+	test("keeps a model when capabilities are absent or the lookup fails, and name-filters it", async () => {
+		const { fetchImpl } = stubShow({
+			"old-chat:7b": "none",
+			"broken:8b": 500,
+			"down:3b": "throw",
+			"nomic-embed-text:latest": "none",
+		});
+		const ids = ["old-chat:7b", "broken:8b", "down:3b", "nomic-embed-text:latest"];
+		const kept = await filterChatCapable(`${ROOT}/b`, ids, { fetch: fetchImpl });
+		expect(kept).toEqual(["old-chat:7b", "broken:8b", "down:3b"]);
+	});
+
+	test("reported capabilities win over the name heuristic", async () => {
+		const { fetchImpl } = stubShow({
+			"embed-chat-tuned:8b": ["completion"],
+			"mxbai-embed-large:latest": ["embedding"],
+		});
+		const kept = await filterChatCapable(`${ROOT}/c`, ["embed-chat-tuned:8b", "mxbai-embed-large:latest"], {
+			fetch: fetchImpl,
+		});
+		expect(kept).toEqual(["embed-chat-tuned:8b"]);
+	});
+
+	test("caches a known answer per host and model, but retries a failed lookup", async () => {
+		const { calls, fetchImpl } = stubShow({ "qwen3.5:14b": ["completion"], "down:3b": "throw" });
+		const root = `${ROOT}/d`;
+		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
+		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
+		expect(calls.filter((c) => c.endsWith(" qwen3.5:14b"))).toEqual([`${root}/api/show qwen3.5:14b`]);
+		expect(calls.filter((c) => c.endsWith(" down:3b")).length).toBe(2);
 	});
 });
