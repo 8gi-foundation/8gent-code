@@ -107,9 +107,10 @@ export class SessionManager {
 		meta?: Partial<Pick<SessionInfo, "model" | "provider" | "branch">>,
 	): void {
 		const { file: existing, corrupt } = this.load(id);
-		if (!existing && !corrupt) return;
-		// A quarantined file is rebuilt from the caller's full message list so
-		// saves resume; name and createdAt from the torn file are lost.
+		// A file quarantined now, or earlier by list()/resume()/rename(), is
+		// rebuilt from the caller's full message list so saves resume; name and
+		// createdAt from the torn file are lost.
+		if (!existing && !corrupt && !fs.existsSync(`${this.filePath(id)}.corrupt`)) return;
 		const now = new Date().toISOString();
 		const file: SessionFile = existing ?? {
 			id,
@@ -181,7 +182,9 @@ export class SessionManager {
 	private quarantine(p: string): void {
 		try {
 			fs.renameSync(p, `${p}.corrupt`);
-			console.warn(`[sessions] unreadable session file moved to ${p}.corrupt`);
+			console.warn(
+				`[sessions] unreadable session file moved to ${p}.corrupt; saving continues, but the session name was reset`,
+			);
 		} catch {
 			// Already moved by another reader; nothing to report twice.
 		}

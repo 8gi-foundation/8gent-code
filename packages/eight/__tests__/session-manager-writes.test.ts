@@ -57,6 +57,32 @@ describe("SessionManager write safety (#3522)", () => {
 		}
 	});
 
+	it("resumes saving when list() quarantined the torn file before update()", () => {
+		const sm = new SessionManager(dir);
+		const info = sm.create({ model: "m", provider: "p" });
+		const file = path.join(dir, `${info.id}.json`);
+		const good = fs.readFileSync(file, "utf-8");
+		fs.writeFileSync(file, good.slice(0, Math.floor(good.length / 2)));
+
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(sm.list().map((s) => s.id)).not.toContain(info.id);
+			expect(fs.existsSync(`${file}.corrupt`)).toBe(true);
+			expect(fs.existsSync(file)).toBe(false);
+
+			const messages = [{ role: "user", content: "after list" }];
+			sm.update(info.id, messages);
+
+			const saved = JSON.parse(fs.readFileSync(file, "utf-8"));
+			expect(saved.id).toBe(info.id);
+			expect(saved.messages).toEqual(messages);
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(String(warn.mock.calls[0][0])).toContain("session name was reset");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("leaves the previous file intact when a write fails midway", () => {
 		const sm = new SessionManager(dir);
 		const info = sm.create({ model: "m", provider: "p" });
