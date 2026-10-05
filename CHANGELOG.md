@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - Telegram resumes its daemon session on reconnect (#3538)
+- When the Telegram link to the daemon drops and returns, `packages/telegram-bot/daemon-client.ts` and `packages/daemon/telegram-bridge.ts` resume the same session on both sockets instead of creating a new one (`packages/daemon/gateway.ts`).
+- Cancel, Retry and New task destroy the old session first, so abandoned agents no longer pile up in the daemon. Context still does not survive a daemon restart.
+- Tests in `packages/daemon/telegram-reconnect.test.ts` (against the real gateway) and `packages/telegram-bot/daemon-client.test.ts`.
+
 ### Added (opt-in) - action-first communication style (#3487)
 - New `communicationStyle` value `action-first`, choice 6 in the onboarding communication step (`packages/self-autonomy/onboarding.ts`), also accepted by name. When picked, `USER_CONTEXT_SEGMENT` in `packages/eight/prompts/system-prompt.ts` adds `ACTION_FIRST_STYLE`: open with the action or answer, numbered steps, lists capped at five, commands in code blocks, plain failure statements, minutes for estimates, no recap or sign-off, and one closing "Next:" line. It opens with a precedence line saying these rules win over the base prompt's joke `COMPLETED` summary (`packages/eight/prompt.ts`) and the greeting and completion phrases in the personality block (`packages/eight/agent.ts`); a required completion marker becomes one plain line just before "Next:". Written in our own words; nothing on screen names a condition.
 - Nothing changes unless a user picks it. The other five styles and the no-style prompt are byte-identical to before, and an unknown answer still falls back to `sarcastic`. Tests in `packages/eight/prompts/action-first-style.test.ts`, with the before lines checked against the previous `system-prompt.ts`. Whether replies actually follow the shape (checker pass rate on replayed cases, style on versus off) is not measured yet.
