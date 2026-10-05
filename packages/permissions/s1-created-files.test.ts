@@ -304,14 +304,11 @@ describe("everything else still goes to the judge", () => {
 });
 
 /**
- * 8SO (2026-10-05): a redirect target is recorded only when it is still the
- * inode the shell opened. `mv user-file target > target` creates the target,
- * then renames the user's file over it; `zip -qm - user-file > out.zip` fills
- * the target with the user's file and deletes the original. Either way a
- * later `rm -f target` would have removed the user's only copy without the
- * judge. All files here are scratch, in this test's own workspace.
+ * A redirect target is recorded only when, at the end of the command, its
+ * path still names the inode created for it before the command ran. All files
+ * here are scratch, in this test's own workspace.
  */
-describe("laundering a user's file through a redirect target is judged", () => {
+describe("a redirect target that no longer holds the created file is not recorded", () => {
 	/** Run `rm` and require: the judge was asked, it blocked, the file survives. */
 	async function judged(rmRun: (c: string) => Promise<string>, command: string, survivor: string) {
 		const before = judge.rmAsks;
@@ -322,7 +319,7 @@ describe("laundering a user's file through a redirect target is judged", () => {
 	}
 	const userFile = () => writeFileSync(join(ws, "user.txt"), "the user's only copy");
 
-	test("PoC: mv user.txt out.txt > out.txt, then rm -f out.txt (ToolExecutor)", async () => {
+	test("a target replaced by a rename during the command is not recorded (ToolExecutor)", async () => {
 		userFile();
 		const ex = new ToolExecutor(ws, "own-a");
 		await run(ex, "mv user.txt out.txt > out.txt");
@@ -332,7 +329,7 @@ describe("laundering a user's file through a redirect target is judged", () => {
 		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
 	});
 
-	test("PoC: the same through the native run_command", async () => {
+	test("a target replaced by a rename is not recorded (native run_command)", async () => {
 		userFile();
 		const agent = nativeAgent(new CreatedFiles());
 		await agent.run("mv user.txt out.txt > out.txt");
@@ -351,7 +348,7 @@ describe("laundering a user's file through a redirect target is judged", () => {
 		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
 	});
 
-	test("PoC: zip -qm - user.txt > out.zip escalates; even approved, rm -f out.zip is judged", async () => {
+	test("an archive command that removes its source escalates, and rm of its output is judged", async () => {
 		userFile();
 		const ex = new ToolExecutor(ws, "own-a");
 		// Unapproved, archive_removes_source escalates and the zip never runs.

@@ -614,22 +614,14 @@ describe("#3381: absent absolute paths under a temp root", () => {
 });
 
 /**
- * The #3395 own-temp-file allowance is withdrawn. It passed an EXISTING temp
- * file born after the session's record opened, owned by this uid, with one
- * link. Anything the session could move into temp met that bar, so a user
- * file could be laundered into a fresh temp path and then removed without the
- * judge:
- *   zip -qm <temp>/n.zip <user file>         (zip moves the file into a new archive)
- *   rsync --remove-source-files <user file> <temp>/n.txt
- * then `rm -f <temp path>`. An existing temp path is now always judged; only
- * an ABSENT one passes (#3381).
- *
- * Every file here is scratch, under this test's own temp directories.
+ * An existing temp file is judged even when it was born after the session's
+ * record opened and is owned by this uid with one link: content can be moved
+ * into a fresh temp path, so birth time alone does not prove the session made it.
  */
 describe("existing temp files are judged, whoever made them", () => {
 	let tmp: string;
 	beforeEach(() => {
-		tmp = tempDir("s1-launder-tmp-");
+		tmp = tempDir("s1-archive-tmp-");
 	});
 
 	/** A user's file in the workspace, there before the session. */
@@ -649,7 +641,7 @@ describe("existing temp files are judged, whoever made them", () => {
 		expect(rmOfNothingOrOwn(`rm -f ${tmp}/absent.json`, ws, rec)).toBe("nothing-temp");
 	});
 
-	test("PoC: zip -qm moves a user file into a new temp archive; rm -f of it is judged", async () => {
+	test("an archive that removed its source into temp: rm -f of it is judged", async () => {
 		const rec = new CreatedFiles();
 		await Bun.sleep(5);
 		const src = userFile();
@@ -664,7 +656,7 @@ describe("existing temp files are judged, whoever made them", () => {
 		expect(existsSync(zip)).toBe(true);
 	});
 
-	test("PoC: rsync --remove-source-files moves a user file into temp; rm -f of it is judged", async () => {
+	test("a sync that removed its source into temp: rm -f of it is judged", async () => {
 		const rec = new CreatedFiles();
 		await Bun.sleep(5);
 		const src = userFile();
@@ -680,7 +672,7 @@ describe("existing temp files are judged, whoever made them", () => {
 	});
 
 	test("ToolExecutor run_command: rm -f of a temp file made after the agent started is blocked", async () => {
-		const ex = new ToolExecutor(ws, "s1-launder");
+		const ex = new ToolExecutor(ws, "s1-archive");
 		await Bun.sleep(5);
 		const p = join(tmp, "tt.json");
 		execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
