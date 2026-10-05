@@ -132,6 +132,12 @@ export interface ChatRequest {
 	 * `thinking` when the caller left it empty. Never sent to a provider.
 	 */
 	taskKind?: EffortTaskKind;
+	/**
+	 * Cancels the model call when it fires (the proxy passes the client's
+	 * request signal, #3541). Forwarded to the HTTP fetch for the Ollama and
+	 * OpenAI-compatible paths. Never sent to a provider as a field.
+	 */
+	signal?: AbortSignal;
 }
 
 export interface ToolDefinition {
@@ -957,6 +963,7 @@ export class ProviderManager {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
+			signal: request.signal,
 		});
 
 		if (!response.ok) {
@@ -1053,6 +1060,7 @@ export class ProviderManager {
 			method: "POST",
 			headers,
 			body: JSON.stringify(body),
+			signal: request.signal,
 		});
 
 		if (response.status === 429) {

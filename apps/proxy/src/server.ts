@@ -15,6 +15,7 @@ import {
 	callLocalModelWithReroute,
 	getProviderManager,
 } from "../../../packages/providers";
+import type { Server } from "bun";
 import {
 	type OpenAIChatRequest,
 	toChatRequest,
@@ -25,10 +26,13 @@ import {
 export interface ProxyOptions {
 	port: number;
 	host: string;
+	/** Server idle timeout in seconds. Default: Bun's own default, 10. */
+	idleTimeout: number;
 }
 
 export const DEFAULT_PORT = 8787;
 export const DEFAULT_HOST = "127.0.0.1";
+export const DEFAULT_IDLE_TIMEOUT_S = 10;
 
 function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
 	return new Response(JSON.stringify(body), {
@@ -71,7 +75,11 @@ function handleHealth(): Response {
 }
 
 /** `POST /v1/chat/completions` - the one route that matters. */
-async function handleChatCompletions(req: Request): Promise<Response> {
+async function handleChatCompletions(
+	req: Request,
+	server: Server<unknown> | undefined,
+	idleTimeoutS: number,
+): Promise<Response> {
 	let body: OpenAIChatRequest;
 	try {
 		body = (await req.json()) as OpenAIChatRequest;
@@ -79,6 +87,22 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 		return errorBody("Request body must be valid JSON.", "invalid_request_error", 400);
 	}
 
+	// The body is in. Lift the idle timeout for this request only, so a slow
+	// model is not cut off while the socket sits silent (#3541). Header and body
+	// reads, and every other route, keep the server's idle bound. The model
+	// step itself is bounded by EIGHT_TURN_TIMEOUT_MS (modelFetch) on the Ollama
+	// and OpenAI-compatible paths; the Anthropic path uses plain fetch.
+	server?.timeout(req, 0);
+	try {
+		return await completeChat(req, body);
+	} finally {
+		// Restore before the response goes out. Without this the keep-alive
+		// socket would have no idle bound for the rest of its life.
+		server?.timeout(req, idleTimeoutS);
+	}
+}
+
+async function completeChat(req: Request, body: OpenAIChatRequest): Promise<Response> {
 	if (!Array.isArray(body.messages) || body.messages.length === 0) {
 		return errorBody("`messages` must be a non-empty array.", "invalid_request_error", 400);
 	}
@@ -92,7 +116,9 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 	const outcome = await callLocalModelWithReroute({
 		provider: active.name,
 		model: chatRequest.model ?? pm.getActiveModel(),
-		run: (_provider, model) => pm.chat({ ...chatRequest, model }),
+		// req.signal fires when the client disconnects; it cancels the model
+		// call so the GPU is not left generating for nobody (#3541).
+		run: (_provider, model) => pm.chat({ ...chatRequest, model, signal: req.signal }),
 	});
 
 	if (!outcome.ok) {
@@ -116,7 +142,11 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 }
 
 /** Build the request router. Exported so tests can drive it without a socket. */
-export async function handle(req: Request): Promise<Response> {
+export async function handle(
+	req: Request,
+	server?: Server<unknown>,
+	idleTimeoutS: number = DEFAULT_IDLE_TIMEOUT_S,
+): Promise<Response> {
 	const url = new URL(req.url);
 	const { pathname } = url;
 
@@ -131,7 +161,7 @@ export async function handle(req: Request): Promise<Response> {
 		(pathname === "/v1/chat/completions" || pathname === "/chat/completions")
 	) {
 		try {
-			return await handleChatCompletions(req);
+			return await handleChatCompletions(req, server, idleTimeoutS);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return errorBody(message, "api_error", 502);
@@ -145,6 +175,12 @@ export async function handle(req: Request): Promise<Response> {
 export function startServer(opts: Partial<ProxyOptions> = {}) {
 	const port = opts.port ?? DEFAULT_PORT;
 	const host = opts.host ?? DEFAULT_HOST;
-	const server = Bun.serve({ port, hostname: host, fetch: handle });
+	const idleTimeout = opts.idleTimeout ?? DEFAULT_IDLE_TIMEOUT_S;
+	const server = Bun.serve({
+		port,
+		hostname: host,
+		idleTimeout,
+		fetch: (req, srv) => handle(req, srv, idleTimeout),
+	});
 	return server;
 }
