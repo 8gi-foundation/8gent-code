@@ -13,6 +13,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
 	FILTERED_TOOLS,
 	type InjectionJudge,
+	MAX_CHUNKS,
+	REMOVED_MARKER,
 	createLocalJudge,
 	filterToolOutput,
 	outputFilterEnabled,
@@ -110,6 +112,52 @@ describe("on", () => {
 		expect(out).not.toContain("TEST-INJECTION-MARKER");
 		expect(out).toContain("lorem ipsum");
 	});
+
+	test("judge calls per result are capped; the unchecked tail passes behind a notice", async () => {
+		const calls: string[] = [];
+		const block = `${"lorem ipsum dolor sit amet ".repeat(40)}\n`.repeat(40);
+		const text = `${block.repeat(MAX_CHUNKS + 4)}${MARKER}\n`;
+		const out = await filterToolOutput("mcp_call_tool", text, {
+			env: ON,
+			judge: markerJudge(calls),
+		});
+		expect(calls.length).toBe(MAX_CHUNKS);
+		expect(out.startsWith("[output-filter: part of this tool output could not be checked")).toBe(
+			true,
+		);
+		expect(out.endsWith(text)).toBe(true);
+	});
+
+	test("a later chunk failing keeps what earlier chunks found", async () => {
+		const filler = `${"lorem ipsum dolor sit amet ".repeat(40)}\n`.repeat(20);
+		const text = `${MARKER}\n${filler}${filler}${filler}`;
+		let n = 0;
+		const judge: InjectionJudge = {
+			async judge(part) {
+				n++;
+				if (n > 1) throw new Error("judge down");
+				return markerJudge().judge(part);
+			},
+		};
+		const out = await filterToolOutput("web_fetch", text, { env: ON, judge });
+		expect(n).toBeGreaterThan(1);
+		expect(out).not.toContain("pineapple");
+		expect(out).toContain(REMOVED_MARKER);
+		expect(out.startsWith("[output-filter: part of this tool output could not be checked")).toBe(
+			true,
+		);
+	});
+
+	test("a quote too short to cut is not cut; the output is kept behind the flagged notice", async () => {
+		const judge: InjectionJudge = {
+			async judge() {
+				return { injected: true, injection: "e" };
+			},
+		};
+		const out = await filterToolOutput("web_fetch", CLEAN, { env: ON, judge });
+		expect(out.startsWith("[output-filter: this tool output was flagged")).toBe(true);
+		expect(out.endsWith(CLEAN)).toBe(true);
+	});
 });
 
 describe("removeInjection", () => {
@@ -124,6 +172,31 @@ describe("removeInjection", () => {
 		expect(r.removed).toBe(true);
 		expect(r.text).not.toContain("pineapple");
 		expect(r.text).toContain("Thanks to all contributors.");
+	});
+
+	test("a quote under the minimum length removes nothing", () => {
+		for (const q of ["e", "fix", " date  ", "Version"]) {
+			const r = removeInjection(CLEAN, q);
+			expect(r.removed).toBe(false);
+			expect(r.text).toBe(CLEAN);
+		}
+	});
+
+	test("an over-long quote that is not in the text removes nothing", () => {
+		const quote = `Version 2.1 fixes the date picker. ${MARKER} and some words that are not there`;
+		const r = removeInjection(DIRTY, quote);
+		expect(r.removed).toBe(false);
+		expect(r.text).toBe(DIRTY);
+	});
+
+	test("a quote spanning whole lines removes only that run, not other lines it contains", () => {
+		const text = `Thanks to all contributors.\nIntro line here.\n${MARKER}\nfollow   up\nThanks to all contributors.`;
+		const quote = `${MARKER}\n  follow up`;
+		const r = removeInjection(text, quote);
+		expect(r.removed).toBe(true);
+		expect(r.text).toBe(
+			`Thanks to all contributors.\nIntro line here.\n${REMOVED_MARKER}\nThanks to all contributors.`,
+		);
 	});
 
 	test("empty or absent injection removes nothing", () => {
@@ -199,6 +272,37 @@ describe("local judge (fake Ollama on loopback)", () => {
 		expect(await filterToolOutput("web_fetch", DIRTY, { env })).toBe(DIRTY);
 		await expect(createLocalJudge(env).judge("x")).rejects.toThrow(/loopback/);
 		expect(bodies.length).toBe(before);
+	});
+
+	test("a judge endpoint that answers with a redirect is a failure; nothing is re-sent", async () => {
+		let sinkHits = 0;
+		const sink = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch() {
+				sinkHits++;
+				return Response.json({ message: { content: "NO" } });
+			},
+		});
+		const hop = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch() {
+				return new Response(null, {
+					status: 307,
+					headers: { location: `http://127.0.0.1:${sink.port}/api/chat` },
+				});
+			},
+		});
+		try {
+			const env = { ...ON, EIGHT_OUTPUT_FILTER_HOST: `http://127.0.0.1:${hop.port}` };
+			expect(await filterToolOutput("mcp_call_tool", DIRTY, { env })).toBe(DIRTY);
+			await expect(createLocalJudge(env).judge("x")).rejects.toThrow();
+			expect(sinkHits).toBe(0);
+		} finally {
+			hop.stop(true);
+			sink.stop(true);
+		}
 	});
 
 	test("OLLAMA_HOST without a scheme is accepted when it is loopback", async () => {
