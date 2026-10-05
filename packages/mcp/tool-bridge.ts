@@ -3,10 +3,16 @@
  *
  * Converts MCP tool schemas into Vercel AI SDK tool() objects.
  * Namespaces tools as mcp__{server}__{tool} to avoid collisions.
+ *
+ * The server's JSON Schema is passed through as declared (#3546), so enums,
+ * array item types, type lists and nested combinators reach the model. A
+ * top-level anyOf/oneOf/allOf is flattened into one object because some
+ * providers reject the combinator there. EIGHT_MCP_LEGACY_SCHEMA=1 restores
+ * the old hand-written zod converter.
  */
 
-import { tool } from "ai";
-import type { ToolSet } from "ai";
+import { jsonSchema, tool } from "ai";
+import type { FlexibleSchema, JSONSchema7, ToolSet } from "ai";
 import { z } from "zod";
 import { gateMcpCall } from "../permissions/mcp-gate";
 import type { MCPClient } from "./client";
@@ -20,10 +26,66 @@ export interface MCPToolSchema {
 		type: string;
 		properties?: Record<string, any>;
 		required?: string[];
+		[key: string]: unknown;
 	};
 }
 
-// ── Schema Converter ─────────────────────────────────────────────
+// ── Schema Passthrough ───────────────────────────────────────────
+
+const COMBINATORS = ["anyOf", "oneOf", "allOf"] as const;
+
+type JsonObject = Record<string, unknown>;
+
+function asObject(value: unknown): JsonObject {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function asStrings(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Return the server's input schema as a top-level object schema, without
+ * mutating it. A top-level anyOf/oneOf/allOf has its branch properties merged
+ * into one flat object: for allOf every branch's required fields stay
+ * required, for anyOf/oneOf only fields required in every branch do.
+ */
+export function normalizeMcpInputSchema(schema: MCPToolSchema["inputSchema"]): JsonObject {
+	const out: JsonObject = { ...asObject(schema) };
+	const properties: JsonObject = { ...asObject(out.properties) };
+	const required = new Set(asStrings(out.required));
+
+	for (const key of COMBINATORS) {
+		const branches = out[key];
+		if (!Array.isArray(branches)) continue;
+		Reflect.deleteProperty(out, key);
+		const branchRequired: Set<string>[] = [];
+		for (const raw of branches) {
+			const branch = asObject(raw);
+			for (const [name, prop] of Object.entries(asObject(branch.properties))) {
+				if (!(name in properties)) properties[name] = prop;
+			}
+			const req = new Set(asStrings(branch.required));
+			if (key === "allOf") {
+				for (const r of req) required.add(r);
+			} else {
+				branchRequired.push(req);
+			}
+		}
+		const [first, ...rest] = branchRequired;
+		for (const r of first ?? []) {
+			if (rest.every((req) => req.has(r))) required.add(r);
+		}
+	}
+
+	out.type = "object";
+	out.properties = properties;
+	if (required.size > 0) out.required = [...required];
+	else Reflect.deleteProperty(out, "required");
+	return out;
+}
+
+// ── Legacy Schema Converter (EIGHT_MCP_LEGACY_SCHEMA=1) ──────────
 
 /**
  * Convert a JSON Schema properties object to a Zod schema.
@@ -112,15 +174,16 @@ export function bridgeTools(
 	for (const mcpTool of tools) {
 		const key = mcpToolKey(serverName, mcpTool.name);
 
-		// Build Zod input schema from MCP JSON Schema
-		let inputSchema: z.ZodTypeAny;
-		if (mcpTool.inputSchema?.properties) {
-			inputSchema = jsonSchemaToZod(
-				mcpTool.inputSchema.properties,
-				mcpTool.inputSchema.required || [],
-			);
+		// Pass the server's schema through; the legacy switch rebuilds it in zod
+		let inputSchema: FlexibleSchema<Record<string, unknown>>;
+		if (process.env.EIGHT_MCP_LEGACY_SCHEMA === "1") {
+			inputSchema = mcpTool.inputSchema?.properties
+				? jsonSchemaToZod(mcpTool.inputSchema.properties, mcpTool.inputSchema.required || [])
+				: z.object({});
 		} else {
-			inputSchema = z.object({});
+			inputSchema = jsonSchema<Record<string, unknown>>(
+				normalizeMcpInputSchema(mcpTool.inputSchema) as JSONSchema7,
+			);
 		}
 
 		const description = mcpTool.description
@@ -129,7 +192,7 @@ export function bridgeTools(
 
 		result[key] = tool({
 			description,
-			inputSchema: inputSchema as z.ZodObject<any>,
+			inputSchema,
 			execute: async (args: Record<string, unknown>) => {
 				// Policy, then the person, before anything reaches the server
 				// (#3230). The agent scope is not known here; "primary" gets the
