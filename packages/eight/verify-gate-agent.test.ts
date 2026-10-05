@@ -14,7 +14,7 @@ import type { Agent as AgentT } from "./agent";
 let Agent: typeof import("./agent").Agent;
 const NUDGE_NEEDLE = "have not checked the result since the last change";
 
-type Body = { messages: Array<{ role: string; content: unknown }> };
+type Body = { model?: string; messages: Array<{ role: string; content: unknown }> };
 
 const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
@@ -156,3 +156,63 @@ for (const [label, textTools, m] of [
 		}, 60_000);
 	});
 }
+
+describe("verify gate, native-tool follow-up", () => {
+	beforeAll(() => {
+		process.env.EIGHT_TEXT_TOOLS = "0";
+		process.env.OLLAMA_HOST = `http://127.0.0.1:${server.port}`;
+		process.env.EIGHT_VERIFY_GATE = "1";
+		mode = "native";
+	});
+	afterEach(() => {
+		bodies = [];
+		rmSync(join(repo, "out.txt"), { force: true });
+	});
+	afterAll(() => {
+		Reflect.deleteProperty(process.env, "EIGHT_TEXT_TOOLS");
+		Reflect.deleteProperty(process.env, "OLLAMA_HOST");
+		Reflect.deleteProperty(process.env, "EIGHT_VERIFY_GATE");
+	});
+
+	const followUp = () =>
+		bodies.find((b) =>
+			b.messages.some((x) => x.role === "user" && JSON.stringify(x.content).includes(NUDGE_NEEDLE)),
+		);
+
+	test("the follow-up request carries the turn's write_file call and its result", async () => {
+		await build().chat(PROMPT);
+		const body = followUp();
+		expect(body).toBeDefined();
+		const raw = (body as Body).messages.map((x) => JSON.stringify(x));
+		const nudgeAt = raw.findIndex((r) => r.includes(NUDGE_NEEDLE));
+		const callAt = raw.findIndex((r) => r.includes('"tool_calls"') && r.includes("write_file"));
+		const resultAt = raw.findIndex((r) => r.includes('"role":"tool"'));
+		expect(callAt).toBeGreaterThanOrEqual(0);
+		expect(resultAt).toBeGreaterThan(callAt);
+		expect(nudgeAt).toBeGreaterThan(resultAt);
+	}, 60_000);
+
+	test("the follow-up goes to the provider entry that answered the turn", async () => {
+		const agent = build();
+		// Stand in for a hedge whose winner is not the chain's current entry.
+		const winner = { provider: "ollama", model: "m-winner", local: true };
+		(agent as any).kernel.hedgeExecutor = {
+			enabled: false,
+			run: async (
+				_c: unknown,
+				gen: (c: typeof winner, s?: AbortSignal) => Promise<unknown>,
+				ctx: any,
+			) => ({
+				result: await gen(winner, ctx?.abortSignal),
+				winner,
+				candidatesFired: 1,
+				signalWritten: false,
+			}),
+		};
+		await agent.chat(PROMPT);
+		const body = followUp();
+		expect(body).toBeDefined();
+		expect(bodies[0].model).toBe("m-winner");
+		expect((body as Body).model).toBe("m-winner");
+	}, 60_000);
+});

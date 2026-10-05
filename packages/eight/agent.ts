@@ -2262,17 +2262,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const verifyNudge = result?.text ? verifyNudgeFor(this.turnToolLedger) : null;
 			if (verifyNudge) {
 				console.log("[verify-gate] change not checked yet - asking for one targeted check");
-				// Same provider the turn resolved on, not the head of the chain.
-				const verifyAgent = createEightAgent({
-					...agentConfig,
-					provider: providerConfigForStep(providerConfig, currentEntry),
-				});
+				// agentConfig already holds the provider that answered (chain step
+				// or hedge winner), so the follow-up goes to the same one.
+				const verifyAgent = createEightAgent(agentConfig);
 				this.abortController = new AbortController();
-				const verifyMessages = [
-					...this.messageHistory
-						.filter((m) => m.role !== "system")
-						.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-					{ role: "assistant" as const, content: result.text as string },
+				// Carry the turn's own transcript (tool calls and results) so the
+				// model can see what it changed instead of guessing from its prose.
+				const turnMessages: any[] = Array.isArray(result.response?.messages)
+					? result.response.messages
+					: [{ role: "assistant" as const, content: result.text as string }];
+				const verifyMessages: any[] = [
+					...messages,
+					...turnMessages,
 					{ role: "user" as const, content: verifyNudge },
 				];
 				let verifyTimedOut = false;
