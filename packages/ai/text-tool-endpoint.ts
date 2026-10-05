@@ -493,11 +493,41 @@ async function* bodyLines(res: Response): AsyncGenerator<string> {
 }
 
 /**
+ * A streamed reply that failed after the 200 status was sent: an in-band
+ * `{"error": ...}` frame, or a stream that closed without its terminator.
+ * `body` is a JSON error body in the shape a non-streamed failure would have,
+ * so the caller can judge it exactly like an HTTP 500 (#3553).
+ */
+export class StreamedReplyError extends Error {
+	readonly body: string;
+	constructor(error: unknown) {
+		const message =
+			typeof error === "string"
+				? error
+				: typeof (error as { message?: unknown } | null)?.message === "string"
+					? (error as { message: string }).message
+					: JSON.stringify(error);
+		super(message);
+		this.name = "StreamedReplyError";
+		this.body = JSON.stringify({ error });
+	}
+}
+
+/** Streamed tool calls are merged by `index`; anything outside 0..cap-1 is not trusted. */
+const MAX_STREAMED_TOOL_CALLS = 128;
+
+/**
  * Reassemble an OpenAI-compatible streamed chat completion (SSE `data:` lines)
  * into the non-streamed shape: content deltas joined, tool-call deltas merged
  * by index (name and argument pieces concatenated), the last finish_reason,
  * and usage from the final chunk (sent when stream_options.include_usage is
  * set). Lines that are not JSON are skipped (#3553).
+ *
+ * Throws StreamedReplyError when a frame carries an `error` (Ollama reports a
+ * failure after the first bytes that way), or when the stream closes with
+ * neither `[DONE]` nor a finish_reason: a truncated body is a failure, never
+ * a complete reply. A tool-call `index` that is not a small non-negative
+ * integer falls back to the call's position in its delta.
  */
 export async function readStreamedChatCompletion(res: Response): Promise<{
 	choices: Array<{ message: { content: string; tool_calls?: unknown[] }; finish_reason?: unknown }>;
@@ -507,20 +537,26 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 	let finishReason: unknown;
 	let usage: unknown;
 	type StreamedCall = { id?: string; type: string; function: { name: string; arguments: string } };
-	const calls: StreamedCall[] = [];
+	const calls = new Map<number, StreamedCall>();
+	let done = false;
 	for await (const line of bodyLines(res)) {
 		if (!line.startsWith("data:")) continue;
 		const payload = line.slice(5).trim();
-		if (payload === "[DONE]") break;
+		if (payload === "[DONE]") {
+			done = true;
+			break;
+		}
 		let chunk: {
 			choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: unknown }>;
 			usage?: unknown;
+			error?: unknown;
 		};
 		try {
 			chunk = JSON.parse(payload);
 		} catch {
 			continue;
 		}
+		if (chunk?.error != null) throw new StreamedReplyError(chunk.error);
 		if (chunk?.usage) usage = chunk.usage;
 		const choice = chunk?.choices?.[0];
 		if (!choice) continue;
@@ -529,9 +565,17 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 		if (typeof delta.content === "string") content += delta.content;
 		if (!Array.isArray(delta.tool_calls)) continue;
 		for (const [n, raw] of (delta.tool_calls as Array<Record<string, unknown>>).entries()) {
-			const i = typeof raw?.index === "number" ? raw.index : n;
+			const idx = raw?.index;
+			const i =
+				Number.isInteger(idx) && (idx as number) >= 0 && (idx as number) < MAX_STREAMED_TOOL_CALLS
+					? (idx as number)
+					: n;
 			const fn = (raw?.function ?? {}) as { name?: unknown; arguments?: unknown };
-			const slot = (calls[i] ??= { type: "function", function: { name: "", arguments: "" } });
+			let slot = calls.get(i);
+			if (!slot) {
+				slot = { type: "function", function: { name: "", arguments: "" } };
+				calls.set(i, slot);
+			}
 			if (typeof raw?.id === "string") slot.id = raw.id;
 			if (typeof fn.name === "string") slot.function.name += fn.name;
 			if (typeof fn.arguments === "string") slot.function.arguments += fn.arguments;
@@ -540,7 +584,10 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 			}
 		}
 	}
-	const toolCalls = calls.filter(Boolean);
+	if (!done && finishReason == null) {
+		throw new StreamedReplyError("stream ended before [DONE] or a finish_reason");
+	}
+	const toolCalls = [...calls.keys()].sort((a, b) => a - b).map((k) => calls.get(k) as StreamedCall);
 	return {
 		choices: [
 			{
@@ -555,7 +602,8 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 /**
  * Reassemble Ollama's streamed /api/generate reply (one JSON object per line)
  * into the non-streamed shape: `response` pieces joined, the counts and
- * done_reason taken from the final line (#3553).
+ * done_reason taken from the final line (#3553). Throws StreamedReplyError on
+ * an in-band `error` line, or when no line carried `done: true`.
  */
 async function readStreamedGenerate(res: Response): Promise<Record<string, unknown>> {
 	let response = "";
@@ -567,9 +615,11 @@ async function readStreamedGenerate(res: Response): Promise<Record<string, unkno
 		} catch {
 			continue;
 		}
+		if (obj?.error != null) throw new StreamedReplyError(obj.error);
 		if (typeof obj?.response === "string") response += obj.response;
 		last = obj;
 	}
+	if (last.done !== true) throw new StreamedReplyError("stream ended before a done: true line");
 	return { ...last, response };
 }
 
@@ -711,7 +761,18 @@ export function buildTextToolCall(opts: {
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
-		const data = (streamed ? await readStreamedChatCompletion(res) : await res.json()) as {
+		let streamedData: Awaited<ReturnType<typeof readStreamedChatCompletion>> | undefined;
+		if (streamed) {
+			try {
+				streamedData = await readStreamedChatCompletion(res);
+			} catch (e) {
+				// A failure after the 200 is judged like the HTTP 500 it would have
+				// been non-streamed, so parser-failure recovery still runs.
+				if (e instanceof StreamedReplyError) return { ok: false, status: 500, body: e.body };
+				throw e;
+			}
+		}
+		const data = (streamed ? streamedData : await res.json()) as {
 			choices?: Array<{
 				message?: { content?: unknown; tool_calls?: unknown };
 				finish_reason?: unknown;
@@ -772,7 +833,18 @@ export function buildTextToolCall(opts: {
 			const body = await res.text().catch(() => "");
 			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
 		}
-		const data = (streamed ? await readStreamedGenerate(res) : await res.json()) as {
+		let streamedRaw: Record<string, unknown> | undefined;
+		if (streamed) {
+			try {
+				streamedRaw = await readStreamedGenerate(res);
+			} catch (e) {
+				if (e instanceof StreamedReplyError) {
+					return { ok: false, why: `raw generate stream failed: ${e.message.slice(0, 200)}` };
+				}
+				throw e;
+			}
+		}
+		const data = (streamed ? streamedRaw : await res.json()) as {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;

@@ -23,7 +23,11 @@ import {
 	TurnTimeoutError,
 } from "../eight/turn-timeout";
 import { modelFetch } from "./model-fetch";
-import { buildTextToolCall, type TextToolUsage } from "./text-tool-endpoint";
+import {
+	buildTextToolCall,
+	readStreamedChatCompletion,
+	type TextToolUsage,
+} from "./text-tool-endpoint";
 
 const enc = new TextEncoder();
 
@@ -410,5 +414,246 @@ describe("buildTextToolCall raw recovery path streams too (#3553)", () => {
 		} finally {
 			raw.stop(true);
 		}
+	});
+});
+
+// A fake Ollama for the recovery tests: the chat stream and the raw generate
+// stream are whatever the test hands in, /api/show reports a Qwen renderer so
+// the raw path is available.
+function fakeOllama(chat: () => string[], generate: () => string[]) {
+	const seen: string[] = [];
+	const srv = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		idleTimeout: 0,
+		async fetch(req) {
+			const path = new URL(req.url).pathname;
+			await req.text().catch(() => "");
+			seen.push(path);
+			if (path === "/api/show") return Response.json({ modelfile: "FROM x\nRENDERER qwen3.5\n" });
+			if (path === "/v1/chat/completions") {
+				return new Response(drip(chat(), 5), { headers: { "Content-Type": "text/event-stream" } });
+			}
+			if (path === "/api/generate") return new Response(drip(generate(), 5));
+			return new Response("nope", { status: 404 });
+		},
+	});
+	return { srv, seen, endpoint: `http://127.0.0.1:${srv.port}/v1/chat/completions` };
+}
+
+const ndjson = (objs: unknown[]) => objs.map((o) => `${JSON.stringify(o)}\n`);
+const SWALLOWED_CHAT = () => [
+	sse({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+	sse({ choices: [], usage: { prompt_tokens: 9, completion_tokens: 5, total_tokens: 14 } }),
+	"data: [DONE]\n\n",
+];
+const GOOD_GENERATE = () =>
+	ndjson([
+		{ response: "<think>hm</think>", done: false },
+		{ response: "The answer is 4.", done: false },
+		{ response: "", done: true, done_reason: "stop", prompt_eval_count: 9, eval_count: 6 },
+	]);
+
+describe("streamed failures are failures, not empty successes (#3553 review F1)", () => {
+	it("an in-band error frame on Ollama's chat stream still reaches the raw parser-failure recovery", async () => {
+		// Ollama writes an error that happens after the first bytes as a frame on
+		// a 200 stream. Non-streamed, the same failure is a parser 500.
+		const f = fakeOllama(
+			() => [
+				sse({ choices: [{ index: 0, delta: { content: "" } }] }),
+				sse({ error: { message: "XML syntax error on line 1", type: "api_error" } }),
+				"data: [DONE]\n\n",
+			],
+			GOOD_GENERATE,
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			expect(await call([{ role: "user", content: "2+2?" }])).toBe("The answer is 4.");
+			expect(f.seen).toContain("/api/generate");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+
+	it("an in-band error frame that is not a parser failure fails the step loudly with its message", async () => {
+		const f = fakeOllama(
+			() => [
+				sse({ choices: [{ index: 0, delta: { content: "half an ans" } }] }),
+				sse({ error: { message: "model runner has unexpectedly stopped" } }),
+			],
+			GOOD_GENERATE,
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "lmstudio",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).toContain("model runner has unexpectedly stopped");
+			expect(f.seen).not.toContain("/api/generate");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+
+	it("a chat stream that closes with neither [DONE] nor a finish_reason fails instead of returning the fragment", async () => {
+		const f = fakeOllama(
+			() => [
+				sse({ choices: [{ index: 0, delta: { content: "Partial ans" } }] }),
+				sse({ choices: [{ index: 0, delta: { content: "wer" } }] }),
+			],
+			GOOD_GENERATE,
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "lmstudio",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).toContain("stream ended before");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+
+	it("a chat stream that ends after a finish_reason but before [DONE] is still complete", async () => {
+		const f = fakeOllama(
+			() => [
+				sse({ choices: [{ index: 0, delta: { content: "Done." } }] }),
+				sse({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+			],
+			GOOD_GENERATE,
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "lmstudio",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			expect(await call([{ role: "user", content: "hi" }])).toBe("Done.");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+
+	it("an error frame on the raw generate stream is reported with its message, not as 'no answer'", async () => {
+		const f = fakeOllama(SWALLOWED_CHAT, () =>
+			ndjson([{ response: "<think>", done: false }, { error: "llama runner process has terminated" }]),
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).toContain("llama runner process has terminated");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+
+	it("a raw generate stream with no final done:true line fails instead of returning the fragment", async () => {
+		const f = fakeOllama(SWALLOWED_CHAT, () =>
+			ndjson([
+				{ response: "<think>hm</think>", done: false },
+				{ response: "The answ", done: false },
+			]),
+		);
+		try {
+			const call = buildTextToolCall({
+				provider: "ollama",
+				model: "m",
+				endpoint: f.endpoint,
+				timeoutMs: 10_000,
+				idleMs: 400,
+			});
+			const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).toContain("stream ended before");
+		} finally {
+			f.srv.stop(true);
+		}
+	});
+});
+
+describe("streamed tool-call index is bounded (#3553 review F2)", () => {
+	const streamOf = (index: unknown) =>
+		new Response(
+			[
+				sse({
+					choices: [
+						{
+							index: 0,
+							delta: {
+								tool_calls: [
+									{ index, id: "c1", function: { name: "read_file", arguments: '{"path":"a"}' } },
+								],
+							},
+						},
+					],
+				}),
+				sse({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }),
+				"data: [DONE]\n\n",
+			].join(""),
+		);
+
+	it("a huge index neither blocks the event loop nor drops the call", async () => {
+		const started = Date.now();
+		const out = await readStreamedChatCompletion(streamOf(1e9));
+		expect(Date.now() - started).toBeLessThan(500);
+		expect(out.choices[0].message.tool_calls).toHaveLength(1);
+		expect((out.choices[0].message.tool_calls?.[0] as { function: { name: string } }).function.name).toBe(
+			"read_file",
+		);
+	});
+
+	it("a negative or fractional index does not silently drop the call", async () => {
+		for (const bad of [-1, 0.5]) {
+			const out = await readStreamedChatCompletion(streamOf(bad));
+			expect(out.choices[0].message.tool_calls).toHaveLength(1);
+		}
+	});
+
+	it("calls are emitted in index order whatever order their deltas arrive in", async () => {
+		const res = new Response(
+			[
+				sse({
+					choices: [
+						{ index: 0, delta: { tool_calls: [{ index: 1, function: { name: "b", arguments: "{}" } }] } },
+					],
+				}),
+				sse({
+					choices: [
+						{ index: 0, delta: { tool_calls: [{ index: 0, function: { name: "a", arguments: "{}" } }] } },
+					],
+				}),
+				"data: [DONE]\n\n",
+			].join(""),
+		);
+		const out = await readStreamedChatCompletion(res);
+		const names = (out.choices[0].message.tool_calls as Array<{ function: { name: string } }>).map(
+			(c) => c.function.name,
+		);
+		expect(names).toEqual(["a", "b"]);
 	});
 });
