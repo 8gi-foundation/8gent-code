@@ -20,6 +20,8 @@
  * Anything this does not recognise stays as the literal text.
  */
 
+import stringWidth from "string-width";
+
 export interface Span {
 	text: string;
 	bold?: boolean;
@@ -231,29 +233,40 @@ export function hasMarkdown(content: string): boolean {
 
 /** Marker column width for a list item: the marker plus one space. */
 export function markerWidth(marker: string): number {
-	return [...marker].length + 1;
+	return stringWidth(marker) + 1;
 }
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /**
  * Cut a word too long for a row, preferring the seams a path or a compound
- * has (-, /, _, .), and only then the row edge.
+ * has (-, /, _, .), and only then the row edge. Widths are terminal cells
+ * (a CJK ideograph or an emoji is two), and a cut never splits a grapheme,
+ * so a ZWJ emoji or a flag stays whole (#3536).
  */
 export function chunkWord(word: string, width: number): string[] {
 	const w = Math.max(1, width);
 	const out: string[] = [];
 	let buf = "";
 	for (let part of word.split(/(?<=[-/_.])/)) {
-		if ([...buf].length + [...part].length <= w) {
+		if (stringWidth(buf) + stringWidth(part) <= w) {
 			buf += part;
 			continue;
 		}
 		if (buf) out.push(buf);
 		buf = "";
-		while ([...part].length > w) {
-			out.push([...part].slice(0, w).join(""));
-			part = [...part].slice(w).join("");
+		let cells = 0;
+		for (const { segment } of graphemes.segment(part)) {
+			const sw = stringWidth(segment);
+			// A grapheme wider than the whole row still gets a row of its own.
+			if (buf && cells + sw > w) {
+				out.push(buf);
+				buf = "";
+				cells = 0;
+			}
+			buf += segment;
+			cells += sw;
 		}
-		buf = part;
 	}
 	if (buf) out.push(buf);
 	return out.length ? out : [""];
@@ -297,7 +310,7 @@ export function layoutLines(spans: Span[], width: number, keepSpaces = false): S
 	let col = 0;
 	const put = (span: Span) => {
 		push(lines[lines.length - 1], span);
-		col += [...span.text].length;
+		col += stringWidth(span.text);
 	};
 	const newline = () => {
 		lines.push([]);
@@ -311,10 +324,10 @@ export function layoutLines(spans: Span[], width: number, keepSpaces = false): S
 		if (!tok.sp && groups.length) groups[groups.length - 1].push(tok);
 		else groups.push([tok]);
 	}
-	const groupWidth = (g: Tok[]) => g.reduce((n, t) => n + [...t.text].length, 0);
+	const groupWidth = (g: Tok[]) => g.reduce((n, t) => n + stringWidth(t.text), 0);
 	const place = (tok: Tok, first: boolean) => {
 		const piece: Span = { text: tok.text, bold: tok.bold, italic: tok.italic, code: tok.code };
-		const len = [...tok.text].length;
+		const len = stringWidth(tok.text);
 		const gap = first && col > 0 && tok.sp ? 1 : 0;
 		if (col + gap + len <= w) {
 			if (gap) put({ text: " ", bold: tok.bold, italic: tok.italic });
@@ -349,7 +362,7 @@ function layoutKeepingSpaces(spans: Span[], w: number): Span[][] {
 		const parts = span.code ? [span.text] : span.text.split(/( +)/).filter(Boolean);
 		for (const part of parts) {
 			const space = !span.code && part.startsWith(" ");
-			let len = [...part].length;
+			let len = stringWidth(part);
 			if (col + len > w && col > 0) {
 				lines.push([]);
 				col = 0;
@@ -363,7 +376,7 @@ function layoutKeepingSpaces(spans: Span[], w: number): Span[][] {
 				}
 				const piece: Span = { ...span, text };
 				push(lines[lines.length - 1], piece);
-				len = [...text].length;
+				len = stringWidth(text);
 				col += len;
 			});
 		}
@@ -391,7 +404,7 @@ export function blockRows(block: Block, width: number): number {
 			return 1;
 		case "code": {
 			const w = blockWrapWidth(block, width);
-			const body = block.lines.reduce((n, l) => n + Math.max(1, Math.ceil([...l].length / w)), 0);
+			const body = block.lines.reduce((n, l) => n + Math.max(1, Math.ceil(stringWidth(l) / w)), 0);
 			return body + (block.lang ? 1 : 0);
 		}
 		default:
