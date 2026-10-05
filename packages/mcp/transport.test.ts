@@ -9,7 +9,13 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_MESSAGE_CHARS, StdioTransport, serverEnv } from "./transport";
+import {
+	MAX_MESSAGE_CHARS,
+	MCP_REQUEST_TIMEOUT_MS,
+	SSETransport,
+	StdioTransport,
+	serverEnv,
+} from "./transport";
 
 const dir = mkdtempSync(join(tmpdir(), "mcp-transport-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -173,5 +179,91 @@ for await (const chunk of process.stdin) {
 		expect(await t.send("initialize", {})).toBe("real");
 	} finally {
 		t.close();
+	}
+});
+
+// ── SSETransport (#3533) ─────────────────────────────────────────
+// A fetch stub stands in for the server: no port, no network. "hang" never
+// answers and settles only when its signal aborts, as a real fetch does.
+
+type Call = { url: string; init: RequestInit };
+function stubFetch(mode: "hang" | "ok") {
+	const calls: Call[] = [];
+	const prev = globalThis.fetch;
+	globalThis.fetch = ((url: string, init: RequestInit) => {
+		calls.push({ url, init });
+		if (mode === "ok") {
+			const id = JSON.parse(String(init.body)).id;
+			return Promise.resolve(Response.json({ jsonrpc: "2.0", id, result: "pong" }));
+		}
+		return new Promise((_, reject) => {
+			const signal = init.signal;
+			if (!signal) return; // no signal: hangs forever, the bug
+			if (signal.aborted) return reject(signal.reason);
+			signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+		});
+	}) as typeof fetch;
+	return { calls, restore: () => (globalThis.fetch = prev) };
+}
+
+const settle = (p: Promise<unknown>, ms: number) =>
+	Promise.race([
+		p.then(
+			() => "resolved",
+			(e: Error) => e.message,
+		),
+		Bun.sleep(ms).then(() => "still pending"),
+	]);
+
+test("both transports share one 30 s request timeout", () => {
+	expect(MCP_REQUEST_TIMEOUT_MS).toBe(30_000);
+});
+
+test("SSE send answers through fetch with the request body", async () => {
+	const f = stubFetch("ok");
+	try {
+		const t = new SSETransport("http://mcp.invalid/rpc", { "X-K": "v" }, 1_000);
+		expect(await t.send("tools/list")).toBe("pong");
+		expect(JSON.parse(String(f.calls[0].init.body)).method).toBe("tools/list");
+		t.close();
+	} finally {
+		f.restore();
+	}
+});
+
+test("SSE send to a stalled server rejects at the timeout with the stdio message", async () => {
+	const f = stubFetch("hang");
+	try {
+		const t = new SSETransport("http://mcp.invalid/rpc", {}, 50);
+		expect(await settle(t.send("tools/list"), 1_000)).toBe("MCP request timeout: tools/list");
+		t.close();
+	} finally {
+		f.restore();
+	}
+});
+
+test("SSE close() rejects an in-flight send at once", async () => {
+	const f = stubFetch("hang");
+	try {
+		const t = new SSETransport("http://mcp.invalid/rpc", {}, 10_000);
+		const p = t.send("initialize", {});
+		await Bun.sleep(5);
+		t.close();
+		expect(await settle(p, 500)).toBe("Transport closed");
+	} finally {
+		f.restore();
+	}
+});
+
+test("SSE send after close() rejects without a request; notify after close() sends nothing", async () => {
+	const f = stubFetch("ok");
+	try {
+		const t = new SSETransport("http://mcp.invalid/rpc", {}, 1_000);
+		t.close();
+		expect(await settle(t.send("tools/list"), 500)).toBe("Transport closed");
+		t.notify("notifications/initialized");
+		expect(f.calls.length).toBe(0);
+	} finally {
+		f.restore();
 	}
 });
