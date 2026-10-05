@@ -3,9 +3,17 @@
  * derived from (#3556).
  *
  * Without this, autoresearch-loop.ts adds every rule analyzeAndMutate() emits
- * straight into the system prompt and never removes one. Some of those rules
- * spell out a benchmark's own answer (SD001, MR001), so the score can rise by
- * leakage while the prompt only grows.
+ * straight into the system prompt and never removes one, so the prompt only
+ * grows and nothing checks that a rule helps beyond the task it came from.
+ *
+ * What the gate guarantees: a kept batch does not lower the held-out mean, and
+ * the held-out mean is a clean signal (no rule derived from a held-out task is
+ * ever in the prompt, including rules restored from loop-state.json).
+ *
+ * What it does NOT guarantee: that answer-key rules are rejected. A rule that
+ * spells out the answer for a TUNING id (e.g. SD001, or MR001 in an agentic
+ * run) lifts the tuning mean and leaves held-out unchanged, so it is kept.
+ * Requiring held-out to rise is a separate design change.
  *
  * With AUTORESEARCH_GATE=1 the loop:
  *   1. splits benchmark ids into tuning and held-out by a stable hash,
@@ -16,6 +24,8 @@
  *   5. appends kept batches to a proposal file for human review.
  *
  * Fails closed: an empty held-out set, or a rerun that throws, keeps nothing.
+ * A single benchmark that fails inside the rerun scores 0 (scoreAll), the same
+ * as in the first sweep, rather than aborting the whole rerun.
  * Off by default; with the flag unset the loop behaves exactly as before.
  *
  * Does NOT: judge rules one at a time (one rerun per batch), repeat runs to
@@ -111,6 +121,51 @@ export function decide(before: Scores, after: Scores, split: Split, minGain = 1)
 		keep: true,
 		reason: `tuning ${d.tuningBefore.toFixed(1)} -> ${d.tuningAfter.toFixed(1)}, held-out ${d.heldOutBefore.toFixed(1)} -> ${d.heldOutAfter.toFixed(1)}`,
 	};
+}
+
+/** The benchmark id a rule was derived from: "[LH001] ..." -> "LH001". */
+export function mutationSourceId(mutation: string): string | null {
+	const m = /^\[([^\]]+)\]/.exec(mutation);
+	return m ? m[1] : null;
+}
+
+/**
+ * Drop restored rules whose source id is held out, so a state file written by
+ * an earlier (ungated) run cannot contaminate the held-out mean.
+ */
+export function dropHeldOutMutations(
+	mutations: string[],
+	split: Split,
+): { kept: string[]; dropped: string[] } {
+	const held = new Set(split.heldOut);
+	const kept: string[] = [];
+	const dropped: string[] = [];
+	for (const m of mutations) {
+		const id = mutationSourceId(m);
+		(id !== null && held.has(id) ? dropped : kept).push(m);
+	}
+	return { kept, dropped };
+}
+
+/**
+ * Score every item; one that throws scores 0 instead of aborting the batch.
+ * Matches the first sweep in autoresearch-loop.ts so before/after are symmetric.
+ */
+export async function scoreAll<T extends { id: string }>(
+	items: T[],
+	score: (item: T) => Promise<number>,
+	onError?: (item: T, err: unknown) => void,
+): Promise<Scores> {
+	const out: Scores = {};
+	for (const item of items) {
+		try {
+			out[item.id] = await score(item);
+		} catch (err) {
+			onError?.(item, err);
+			out[item.id] = 0;
+		}
+	}
+	return out;
 }
 
 export async function gateCandidates(opts: {

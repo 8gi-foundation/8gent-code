@@ -24,7 +24,14 @@ import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
-import { appendProposal, gateCandidates, isGateEnabled, splitIds } from "./mutation-gate";
+import {
+	appendProposal,
+	dropHeldOutMutations,
+	gateCandidates,
+	isGateEnabled,
+	scoreAll,
+	splitIds,
+} from "./mutation-gate";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
 import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
@@ -646,6 +653,17 @@ async function main(): Promise<void> {
 		log(
 			`🚧 Mutation gate ON: tuning=${split.tuning.join(",")} held-out=${split.heldOut.join(",")}`,
 		);
+	if (split) {
+		// Rules restored from loop-state.json may come from held-out tasks; they
+		// would leak into the held-out mean the gate trusts. Drop them first.
+		const { kept, dropped } = dropHeldOutMutations(getMutations(), split);
+		if (dropped.length > 0) {
+			log(`🚧 Dropped ${dropped.length} restored rule(s) derived from held-out tasks:`);
+			for (const m of dropped) log(`     - ${m.slice(0, 100)}`);
+			clearMutations();
+			for (const m of kept) addMutation(m);
+		}
+	}
 
 	for (let iter = state.iteration; iter < MAX_ITERATIONS; iter++) {
 		log(`\n${"═".repeat(60)}`);
@@ -710,11 +728,15 @@ async function main(): Promise<void> {
 					clearMutations();
 					for (const m of ms) addMutation(m);
 				},
-				rerun: async () => {
-					const after: Record<string, number> = {};
-					for (const b of benchmarks) after[b.id] = (await runBenchmarkSweep(b)).grade.score;
-					return after;
-				},
+				rerun: () =>
+					scoreAll(
+						benchmarks,
+						async (b) => (await runBenchmarkSweep(b)).grade.score,
+						(b, err) =>
+							log(
+								`  ✗ rerun ${b.id} FAILED (scored 0): ${err instanceof Error ? err.message : String(err)}`,
+							),
+					),
 			});
 			log(
 				`  🚧 Gate ${gate.keep ? "KEPT" : "DISCARDED"} ${candidates.length} rule(s): ${gate.reason}`,

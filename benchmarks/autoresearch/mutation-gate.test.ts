@@ -8,7 +8,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { appendProposal, decide, gateCandidates, isGateEnabled, splitIds } from "./mutation-gate";
+import {
+	appendProposal,
+	decide,
+	dropHeldOutMutations,
+	gateCandidates,
+	isGateEnabled,
+	mutationSourceId,
+	scoreAll,
+	splitIds,
+} from "./mutation-gate";
 
 const IDS = [
 	"BF001",
@@ -180,5 +189,61 @@ describe("appendProposal", () => {
 			.split("\n")
 			.map((l) => JSON.parse(l));
 		expect(lines.map((l) => l.iteration)).toEqual([1, 2]);
+	});
+});
+
+describe("dropHeldOutMutations (restored state cannot contaminate held-out)", () => {
+	test("reads the source id from the rule prefix", () => {
+		expect(mutationSourceId("[LH001] do x")).toBe("LH001");
+		expect(mutationSourceId("no prefix")).toBeNull();
+	});
+
+	test("drops rules whose source id is held out, keeps the rest in order", () => {
+		const split = { tuning: ["SD001", "BF004"], heldOut: ["LH001", "MR001"] };
+		const r = dropHeldOutMutations(
+			["[SD001] a", "[LH001] b", "general rule", "[MR001] c", "[BF004] d"],
+			split,
+		);
+		expect(r.kept).toEqual(["[SD001] a", "general rule", "[BF004] d"]);
+		expect(r.dropped).toEqual(["[LH001] b", "[MR001] c"]);
+	});
+
+	test("the tracked loop-state.json LH rules are all dropped when LH ids are held out", () => {
+		const state = JSON.parse(readFileSync(join(import.meta.dir, "loop-state.json"), "utf-8"));
+		const lh = (state.mutations as string[]).filter((m) => /^\[LH00[1-5]\]/.test(m));
+		expect(lh.length).toBeGreaterThan(0);
+		const split = { tuning: ["SD001"], heldOut: ["LH001", "LH002", "LH003", "LH004", "LH005"] };
+		const r = dropHeldOutMutations(state.mutations, split);
+		expect(r.kept.filter((m) => /^\[LH00[1-5]\]/.test(m))).toEqual([]);
+		expect(r.dropped.length).toBe(lh.length);
+	});
+});
+
+describe("scoreAll (rerun matches the sweep: a failing benchmark scores 0)", () => {
+	const items = [{ id: "T1" }, { id: "BOOM" }, { id: "H1" }];
+	const score = async (b: { id: string }) => {
+		if (b.id === "BOOM") throw new Error("All temps failed for BOOM");
+		return b.id === "T1" ? 70 : 60;
+	};
+
+	test("one throwing benchmark scores 0 and does not abort the rest", async () => {
+		const errors: string[] = [];
+		const s = await scoreAll(items, score, (b) => errors.push(b.id));
+		expect(s).toEqual({ T1: 70, BOOM: 0, H1: 60 });
+		expect(errors).toEqual(["BOOM"]);
+	});
+
+	test("the gate still decides on the merits when one benchmark always fails", async () => {
+		const r = await gateCandidates({
+			candidates: ["[T1] new"],
+			accepted: [],
+			before: { T1: 40, BOOM: 0, H1: 50 },
+			split: { tuning: ["T1", "BOOM"], heldOut: ["H1"] },
+			apply: () => {},
+			rerun: () => scoreAll(items, score),
+		});
+		expect(r.reason).not.toContain("rerun failed");
+		expect(r.keep).toBe(true);
+		expect(r.after.BOOM).toBe(0);
 	});
 });
