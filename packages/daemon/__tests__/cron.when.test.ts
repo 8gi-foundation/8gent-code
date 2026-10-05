@@ -61,11 +61,16 @@ async function run(jobs: Record<string, unknown>[]) {
 	writeFileSync(cronPath, JSON.stringify(jobs, null, 2));
 	const results: unknown[] = [];
 	const starts: string[] = [];
+	const checks: { input?: unknown; output?: unknown }[] = [];
 	const a = bus.on("tool:result", (p) => {
-		if (p.sessionId === "cron") results.push(p.output);
+		if (p.sessionId !== "cron") return;
+		if (p.tool === "cron:when") checks.push({ output: p.output });
+		else results.push(p.output);
 	});
 	const b = bus.on("tool:start", (p) => {
-		if (p.sessionId === "cron") starts.push(p.tool);
+		if (p.sessionId !== "cron") return;
+		if (p.tool === "cron:when") checks.push({ input: p.input });
+		else starts.push(p.tool);
 	});
 	try {
 		await cron.startCron();
@@ -74,7 +79,40 @@ async function run(jobs: Record<string, unknown>[]) {
 		bus.off(b);
 	}
 	const saved = JSON.parse(readFileSync(cronPath, "utf8")) as Record<string, unknown>[];
-	return { results, starts, saved };
+	return { results, starts, checks, saved };
+}
+
+/** True once `pid` no longer exists (polls up to 1 s for the kernel to finish). */
+async function gone(pid: number): Promise<boolean> {
+	for (let i = 0; i < 20; i++) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return true;
+		}
+		await Bun.sleep(50);
+	}
+	return false;
+}
+
+/** Run a check that records its background child's pid; assert that child is dead afterwards. */
+async function expectNoSurvivor(check: (pidFile: string) => string, wantQueued: boolean) {
+	process.env.EIGHT_CRON_WHEN = "1";
+	const pidFile = join(home, `child-${Math.random().toString(36).slice(2)}.pid`);
+	let pid = 0;
+	try {
+		const { results } = await run([job({ when: check(pidFile) })]);
+		pid = Number(readFileSync(pidFile, "utf8").trim());
+		expect(pid).toBeGreaterThan(0);
+		expect(results).toEqual(wantQueued ? [queued] : []);
+		expect(await gone(pid)).toBe(true);
+	} finally {
+		if (pid > 0) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {}
+		}
+	}
 }
 
 const queued = { prompt: "review the open issues", queued: true };
@@ -134,6 +172,43 @@ describe("cron when gate", () => {
 		expect(results).toEqual([]);
 		expect(saved[0].skips).toBe(2);
 	});
+
+	it("flag on, one-shot job skipped: consumed, not left pending", async () => {
+		process.env.EIGHT_CRON_WHEN = "1";
+		const { results, saved } = await run([job({ when: "exit 1", recurring: false })]);
+		expect(results).toEqual([]);
+		expect(saved[0].enabled).toBe(false);
+		expect(saved[0].skips).toBe(1);
+	});
+
+	it("flag on: the check itself is reported on the bus as cron:when", async () => {
+		process.env.EIGHT_CRON_WHEN = "1";
+		const { checks } = await run([job({ when: "exit 3" })]);
+		expect(checks).toEqual([
+			{ input: "exit 3" },
+			{ output: { command: "exit 3", exitCode: 3, outcome: "skip" } },
+		]);
+	});
+
+	it("flag on: a background child of a check that exits is killed", async () => {
+		await expectNoSurvivor((f) => `sleep 47 & echo $! > ${f}; exit 1`, false);
+	});
+
+	it(
+		"flag on: a compound check that times out leaves no live child",
+		async () => {
+			await expectNoSurvivor((f) => `sleep 47 & echo $! > ${f}; wait`, true);
+		},
+		15_000,
+	);
+
+	it(
+		"flag on: a TERM-trapping check that times out leaves no live child",
+		async () => {
+			await expectNoSurvivor((f) => `trap '' TERM; sleep 47 & echo $! > ${f}; wait`, true);
+		},
+		15_000,
+	);
 
 	it("flag on: shell jobs ignore `when` and run as today", async () => {
 		process.env.EIGHT_CRON_WHEN = "1";
