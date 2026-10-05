@@ -102,6 +102,13 @@ export interface TextToolAgentOptions {
 	 * request is torn down) and into long-running tools.
 	 */
 	signal?: AbortSignal;
+	/**
+	 * Optional final check (#3550). Asked once per turn when the model gives
+	 * its final answer; a non-null return is sent to the model as one more
+	 * user message (like the plan check) while a round remains. Null lets the
+	 * answer through. The caller owns what it checks.
+	 */
+	finalCheck?: () => string | null;
 }
 
 export interface TextToolAgentResult {
@@ -536,6 +543,8 @@ export async function runTextToolAgent(
 	let claimFollowUpSent = false;
 	// The plan check (#3098) fires at most once per turn.
 	let planCheckSent = false;
+	// The caller's final check (#3550) fires at most once per turn.
+	let finalCheckSent = false;
 	// The user's request this turn: the last user message the caller sent.
 	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
 	const claimsAgainstLog = (answer: string) =>
@@ -648,7 +657,7 @@ export async function runTextToolAgent(
 			const emptyAfterWork = replyText.trim() === "" && toolLog.length > 0;
 			const freshStall =
 				(prevRoundHadSuccess || prevRoundAllRefused || emptyAfterWork) &&
-				!((checksSent > 0 || planCheckSent) && hasDoneMarker(replyText));
+				!((checksSent > 0 || planCheckSent || finalCheckSent) && hasDoneMarker(replyText));
 			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
 			const stalled = (freshStall || unansweredCheck) && !isQuestionToUser(replyText);
 			if (
@@ -696,6 +705,30 @@ export async function runTextToolAgent(
 						...messages,
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: planCheckMessage(open) },
+					];
+					continue;
+				}
+			}
+			// The caller's final check (#3550, e.g. verify-before-done): one
+			// message, once per turn, sent like the plan check.
+			if (
+				opts.finalCheck &&
+				!finalCheckSent &&
+				!stalled &&
+				round < maxRounds &&
+				!isQuestionToUser(replyText)
+			) {
+				const check = opts.finalCheck();
+				if (check) {
+					finalCheckSent = true;
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: check },
 					];
 					continue;
 				}

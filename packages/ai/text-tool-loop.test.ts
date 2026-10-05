@@ -2027,3 +2027,77 @@ describe("runTextToolAgent - plan check at turn end (#3098)", () => {
 	});
 });
 
+
+describe("runTextToolAgent - caller final check (#3550)", () => {
+	const WRITE_TOOL: TextTool = {
+		spec: {
+			name: "write_file",
+			description: "Write a file",
+			parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+		},
+		run: async () => "wrote /tmp/x.txt",
+	};
+	const writeCall = [
+		"```tool_call",
+		'{"name": "write_file", "arguments": {"path": "/tmp/x.txt"}}',
+		"```",
+	].join("\n");
+	const CHECK = "SENTINEL_3550_final_check";
+	const scripted = (replies: string[]) => {
+		const seen: TextToolMessage[][] = [];
+		let i = 0;
+		const call = async (msgs: TextToolMessage[]): Promise<string> => {
+			seen.push(msgs);
+			return replies[Math.min(i++, replies.length - 1)];
+		};
+		return { seen, call };
+	};
+	const sentChecks = (seen: TextToolMessage[][]) =>
+		(seen[seen.length - 1] ?? []).filter((m) => m.role === "user" && m.content === CHECK);
+
+	test("a non-null final check is sent once, then the turn ends", async () => {
+		const model = scripted([writeCall, "DONE: wrote it."]);
+		let asked = 0;
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write x" }],
+			tools: [WRITE_TOOL],
+			call: model.call,
+			finalCheck: () => {
+				asked++;
+				return CHECK;
+			},
+		});
+		expect(asked).toBe(1);
+		expect(sentChecks(model.seen)).toHaveLength(1);
+		expect(result.content).toBe("wrote it.");
+	});
+
+	test("a null final check lets the answer through", async () => {
+		const model = scripted([writeCall, "DONE: wrote it."]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "write x" }],
+			tools: [WRITE_TOOL],
+			call: model.call,
+			finalCheck: () => null,
+		});
+		expect(sentChecks(model.seen)).toHaveLength(0);
+		expect(result.content).toBe("wrote it.");
+	});
+
+	test("no final check option keeps the old round count", async () => {
+		const withOut = scripted([writeCall, "DONE: wrote it."]);
+		const a = await runTextToolAgent({
+			messages: [{ role: "user", content: "write x" }],
+			tools: [WRITE_TOOL],
+			call: withOut.call,
+		});
+		const withNull = scripted([writeCall, "DONE: wrote it."]);
+		const b = await runTextToolAgent({
+			messages: [{ role: "user", content: "write x" }],
+			tools: [WRITE_TOOL],
+			call: withNull.call,
+			finalCheck: () => null,
+		});
+		expect(b.rounds).toBe(a.rounds);
+	});
+});
