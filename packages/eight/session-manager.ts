@@ -106,8 +106,21 @@ export class SessionManager {
 		messages: Array<{ role: string; content: string }>,
 		meta?: Partial<Pick<SessionInfo, "model" | "provider" | "branch">>,
 	): void {
-		const file = this.readFile(id);
-		if (!file) return;
+		const { file: existing, corrupt } = this.load(id);
+		if (!existing && !corrupt) return;
+		// A quarantined file is rebuilt from the caller's full message list so
+		// saves resume; name and createdAt from the torn file are lost.
+		const now = new Date().toISOString();
+		const file: SessionFile = existing ?? {
+			id,
+			model: "unknown",
+			provider: "ollama",
+			cwd: process.cwd(),
+			messageCount: 0,
+			createdAt: now,
+			lastActiveAt: now,
+			messages: [],
+		};
 		file.messages = messages;
 		file.messageCount = messages.length;
 		file.lastActiveAt = new Date().toISOString();
@@ -123,16 +136,54 @@ export class SessionManager {
 		return path.join(this.dir, `${id}.json`);
 	}
 
+	/**
+	 * Atomic save: write a temp file in the same directory, fsync it, then
+	 * rename over the target. A crash or failed write leaves the previous
+	 * file intact (same shape as turn-journal.ts write()).
+	 */
 	private write(id: string, data: SessionFile): void {
-		fs.writeFileSync(this.filePath(id), JSON.stringify(data, null, 2));
+		const finalPath = this.filePath(id);
+		const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+		const fd = fs.openSync(tmpPath, "w");
+		try {
+			fs.writeFileSync(fd, JSON.stringify(data, null, 2));
+			fs.fsyncSync(fd);
+		} catch (err) {
+			fs.closeSync(fd);
+			fs.rmSync(tmpPath, { force: true });
+			throw err;
+		}
+		fs.closeSync(fd);
+		fs.renameSync(tmpPath, finalPath);
 	}
 
 	private readFile(id: string): SessionFile | null {
+		return this.load(id).file;
+	}
+
+	/** Read a session file; one that fails to parse is moved aside, not skipped. */
+	private load(id: string): { file: SessionFile | null; corrupt: boolean } {
+		const p = this.filePath(id);
+		let raw: string;
 		try {
-			const raw = fs.readFileSync(this.filePath(id), "utf-8");
-			return JSON.parse(raw) as SessionFile;
+			raw = fs.readFileSync(p, "utf-8");
 		} catch {
-			return null;
+			return { file: null, corrupt: false };
+		}
+		try {
+			return { file: JSON.parse(raw) as SessionFile, corrupt: false };
+		} catch {
+			this.quarantine(p);
+			return { file: null, corrupt: true };
+		}
+	}
+
+	private quarantine(p: string): void {
+		try {
+			fs.renameSync(p, `${p}.corrupt`);
+			console.warn(`[sessions] unreadable session file moved to ${p}.corrupt`);
+		} catch {
+			// Already moved by another reader; nothing to report twice.
 		}
 	}
 
@@ -141,15 +192,11 @@ export class SessionManager {
 			const files = fs.readdirSync(this.dir).filter((f) => f.endsWith(".json"));
 			const sessions: SessionInfo[] = [];
 			for (const f of files) {
-				try {
-					const raw = fs.readFileSync(path.join(this.dir, f), "utf-8");
-					const parsed = JSON.parse(raw) as SessionFile;
-					// Return info without messages (lightweight)
-					const { messages: _, ...info } = parsed;
-					sessions.push(info);
-				} catch {
-					// Skip corrupt files
-				}
+				const parsed = this.load(f.slice(0, -".json".length)).file;
+				if (!parsed) continue;
+				// Return info without messages (lightweight)
+				const { messages: _, ...info } = parsed;
+				sessions.push(info);
 			}
 			return sessions;
 		} catch {
