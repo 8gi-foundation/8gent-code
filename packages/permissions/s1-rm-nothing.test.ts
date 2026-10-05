@@ -32,12 +32,7 @@ import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
 import { CreatedFiles } from "./s1-created-files";
-import {
-	_setPlatformForTests,
-	_setTempRootsForTests,
-	rmOfNothing,
-	rmOfNothingOrOwn,
-} from "./s1-rm-nothing";
+import { _setTempRootsForTests, rmOfNothing, rmOfNothingOrOwn } from "./s1-rm-nothing";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -257,8 +252,7 @@ describe("integration: the real run_command paths", () => {
  * path whose nearest existing ancestor's realpath is inside a real temp root
  * deletes nothing, so the judge is not asked. Pilot run 2026-10-03_081746 ran
  * `rm -f /tmp/todos.json`; no rule fired and the judge blocked it.
- * Not covered on purpose: globs. An existing temp file the session made is
- * #3395, below.
+ * Not covered on purpose: globs, and any existing temp file (see below).
  */
 describe("#3381: absent absolute paths under a temp root", () => {
 	const uniq = () => `s1-3381-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -620,224 +614,77 @@ describe("#3381: absent absolute paths under a temp root", () => {
 });
 
 /**
- * #3395: pilot l5-feature-e2e (main 2b1afc07, run 2026-10-03_164600, tool call
- * tt-40). The agent ran `TODO_FILE=/tmp/tt.json bun src/cli.ts add ...`, so a
- * child process created /tmp/tt.json, then `rm -f /tmp/tt.json` to reset its
- * test state. The judge blocked it: #3381 only passed an ABSENT temp path.
+ * The #3395 own-temp-file allowance is withdrawn. It passed an EXISTING temp
+ * file born after the session's record opened, owned by this uid, with one
+ * link. Anything the session could move into temp met that bar, so a user
+ * file could be laundered into a fresh temp path and then removed without the
+ * judge:
+ *   zip -qm <temp>/n.zip <user file>         (zip moves the file into a new archive)
+ *   rsync --remove-source-files <user file> <temp>/n.txt
+ * then `rm -f <temp path>`. An existing temp path is now always judged; only
+ * an ABSENT one passes (#3381).
  *
- * An existing temp path now passes only when it is a regular file (lstat), owned
- * by this uid, with one link, born after this session's record opened
- * (CreatedFiles.startedNs), and its parent passes the same walk as #3381.
+ * Every file here is scratch, under this test's own temp directories.
  */
-describe("#3395: a temp file this session created", () => {
-	// Bun on this host reports a birth time; where it reports none, the rule fails closed.
-	const born = (p: string) => lstatSync(p, { bigint: true }).birthtimeNs > 0n;
-	const openRecord = async () => {
-		const rec = new CreatedFiles();
-		await Bun.sleep(5);
-		return rec;
-	};
+describe("existing temp files are judged, whoever made them", () => {
 	let tmp: string;
 	beforeEach(() => {
-		tmp = tempDir("s1-3395-tmp-");
-		// The rule runs on darwin only; these tests exercise that branch on any host.
-		_setPlatformForTests("darwin");
-	});
-	afterEach(() => {
-		_setPlatformForTests(null);
+		tmp = tempDir("s1-launder-tmp-");
 	});
 
-	for (const platform of ["linux", "win32"]) {
-		test(`${platform}: an own temp file still goes to the judge; absent temp paths still pass`, async () => {
-			_setPlatformForTests(platform);
-			const rec = await openRecord();
-			const p = join(tmp, "tt.json");
-			execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
-			expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
-			expect(rmOfNothingOrOwn(`rm -f ${tmp}/absent.json`, ws, rec)).toBe("nothing-temp");
-			const g = await systemOneGate(`rm -f ${p}`, process.env, ws, rec);
-			expect(g.run).toBe(false);
-			expect(judge.asks).toBe(1);
-			expect(existsSync(p)).toBe(true);
-		});
-	}
+	/** A user's file in the workspace, there before the session. */
+	const userFile = () => {
+		const p = join(ws, "user-notes.txt");
+		writeFileSync(p, "the user's only copy");
+		return p;
+	};
 
-	test("the pilot case: rm -f of a temp file a child process made this session", async () => {
-		const rec = await openRecord();
-		const p = join(tmp, "tt.json");
-		execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
-		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBe(born(p) ? "own-scratch" : null);
-	});
-
-	test("the exact pilot command, /tmp/tt.json, when this session made it", async () => {
-		const p = `/tmp/s1-3395-${process.pid}-${Math.random().toString(36).slice(2)}.json`;
-		const rec = await openRecord();
-		writeFileSync(p, "[]");
-		try {
-			expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBe(born(p) ? "own-scratch" : null);
-		} finally {
-			rmSync(p, { force: true });
-		}
-	});
-
-	test("a file in a uid-owned 0700 subdirectory of temp passes", async () => {
-		mkdirSync(join(tmp, "sub"), { mode: 0o700 });
-		const rec = await openRecord();
-		const p = join(tmp, "sub", "tt.json");
-		writeFileSync(p, "[]");
-		expect(rmOfNothingOrOwn(`rm -fv ${p}`, ws, rec)).toBe(born(p) ? "own-scratch" : null);
-	});
-
-	test("refuses a file older than the session", async () => {
-		const p = join(tmp, "tt.json");
-		writeFileSync(p, "[]");
-		const rec = await openRecord();
-		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
-		// Modifying it this session does not make it the session's.
-		writeFileSync(p, "[1]");
-		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
-	});
-
-	test("refuses without a session record, or with one that has no start time", async () => {
-		const p = join(tmp, "tt.json");
-		await Bun.sleep(5);
-		writeFileSync(p, "[]");
-		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws)).toBeNull();
-		const stub = { createdBySession: () => true } as unknown as CreatedFiles;
-		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, stub)).toBeNull();
-	});
-
-	test("refuses a symlink made this session, to a file or a directory", async () => {
-		const rec = await openRecord();
-		writeFileSync(join(outside, "keep.txt"), "x");
-		symlinkSync(join(outside, "keep.txt"), join(tmp, "ln"));
-		symlinkSync(outside, join(tmp, "dirln"));
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/ln`, ws, rec)).toBeNull();
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/dirln`, ws, rec)).toBeNull();
-	});
-
-	test("refuses a directory made this session", async () => {
-		const rec = await openRecord();
-		mkdirSync(join(tmp, "d"));
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/d`, ws, rec)).toBeNull();
-	});
-
-	test("refuses a hard link to a file made this session", async () => {
-		const rec = await openRecord();
-		writeFileSync(join(tmp, "a.json"), "[]");
-		linkSync(join(tmp, "a.json"), join(tmp, "b.json"));
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/b.json`, ws, rec)).toBeNull();
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/a.json`, ws, rec)).toBeNull();
-	});
-
-	test("refuses a file under a symlinked or group-writable directory", async () => {
-		mkdirSync(join(tmp, "real"));
-		symlinkSync(join(tmp, "real"), join(tmp, "inlink"));
-		mkdirSync(join(tmp, "ww"));
-		chmodSync(join(tmp, "ww"), 0o777);
-		const rec = await openRecord();
-		writeFileSync(join(tmp, "real", "tt.json"), "[]");
-		writeFileSync(join(tmp, "ww", "tt.json"), "[]");
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/inlink/tt.json`, ws, rec)).toBeNull();
-		expect(rmOfNothingOrOwn(`rm -f ${tmp}/ww/tt.json`, ws, rec)).toBeNull();
-	});
-
-	test("refuses a file made this session outside every temp root", async () => {
-		const rec = await openRecord();
-		const p = join(realpathSync(import.meta.dir), `.s1-3395-${process.pid}.json`);
-		writeFileSync(p, "[]");
-		try {
-			expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
-		} finally {
-			rmSync(p, { force: true });
-		}
-	});
-
-	const flags: Array<[string, (p: string) => string]> = [
-		["recursive force", (p) => `rm -${"r"}f ${p}`],
-		["recursive", (p) => `rm -${"r"} ${p}`],
-		["rm -d", (p) => `rm -d ${p}`],
-		["the end-of-options marker", (p) => `rm -f -- ${p}`],
-		["a glob", () => `rm -f ${tmp}/t*.json`],
-		["a wrapper", (p) => `sudo rm -f ${p}`],
-		["mixed with an existing file outside temp", (p) => `rm -f ${p} /etc/hosts`],
-	];
-	for (const [why, cmd] of flags) {
-		test(`refuses ${why}`, async () => {
-			const rec = await openRecord();
-			const p = join(tmp, "tt.json");
-			writeFileSync(p, "[]");
-			expect(rmOfNothingOrOwn(cmd(p), ws, rec)).toBeNull();
-		});
-	}
-
-	describe("a file owned by another uid (process.getuid stubbed)", () => {
-		const realGetuid = process.getuid;
-		afterEach(() => {
-			process.getuid = realGetuid;
-		});
-		test("refuses it, even directly in /tmp", async () => {
-			const p = `/tmp/s1-3395-${process.pid}-other.json`;
-			const rec = await openRecord();
-			writeFileSync(p, "[]");
-			try {
-				const uid = lstatSync(p).uid;
-				process.getuid = () => uid + 1;
-				expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
-			} finally {
-				process.getuid = realGetuid;
-				rmSync(p, { force: true });
-			}
-		});
-	});
-
-	test("gate: the pilot case runs without asking the judge; an older file is judged", async () => {
-		const old = join(tmp, "old.json");
-		writeFileSync(old, "[]");
-		const rec = await openRecord();
-		const p = join(tmp, "tt.json");
-		writeFileSync(p, "[]");
-		const g = await systemOneGate(`rm -f ${p}`, process.env, ws, rec);
-		if (born(p)) {
-			expect(g.run).toBe(true);
-			expect(g.guard?.backend).toBe("allowlist");
-			expect(judge.asks).toBe(0);
-		}
-		const h = await systemOneGate(`rm -f ${old}`, process.env, ws, rec);
-		expect(h.run).toBe(false);
-		expect(existsSync(old)).toBe(true);
-	});
-
-	// The headless permission prompt in this harness declines an rm of an
-	// existing path before System One runs; the pilot passed that layer and was
-	// stopped by System One. So this asserts what #3381's test does: no System
-	// One block and no judge call.
-	test("ToolExecutor run_command: the pilot sequence is not System One blocked", async () => {
-		const ex = new ToolExecutor(ws, "s1-rm-3395");
+	test("the former #3395 pilot shape: a temp file a child process made this session", async () => {
+		const rec = new CreatedFiles();
 		await Bun.sleep(5);
 		const p = join(tmp, "tt.json");
-		// The pilot's child process (`TODO_FILE=/tmp/tt.json bun src/cli.ts add`):
-		// the stub judge here blocks every judged command, so a child process
-		// of this test makes the file instead.
 		execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
-		expect(existsSync(p)).toBe(true);
-		const b = born(p);
+		expect(rmOfNothingOrOwn(`rm -f ${p}`, ws, rec)).toBeNull();
+		// An absent temp path still passes (#3381).
+		expect(rmOfNothingOrOwn(`rm -f ${tmp}/absent.json`, ws, rec)).toBe("nothing-temp");
+	});
+
+	test("PoC: zip -qm moves a user file into a new temp archive; rm -f of it is judged", async () => {
+		const rec = new CreatedFiles();
+		await Bun.sleep(5);
+		const src = userFile();
+		const zip = join(tmp, "n.zip");
+		execFileSync("zip", ["-qm", zip, "user-notes.txt"], { cwd: ws });
+		expect(existsSync(src)).toBe(false);
+		expect(existsSync(zip)).toBe(true);
+		expect(rmOfNothingOrOwn(`rm -f ${zip}`, ws, rec)).toBeNull();
+		const g = await systemOneGate(`rm -f ${zip}`, process.env, ws, rec);
+		expect(g.run).toBe(false);
+		expect(judge.asks).toBe(1);
+		expect(existsSync(zip)).toBe(true);
+	});
+
+	test("PoC: rsync --remove-source-files moves a user file into temp; rm -f of it is judged", async () => {
+		const rec = new CreatedFiles();
+		await Bun.sleep(5);
+		const src = userFile();
+		const dest = join(tmp, "n.txt");
+		execFileSync("rsync", ["--remove-source-files", src, dest]);
+		expect(existsSync(src)).toBe(false);
+		expect(existsSync(dest)).toBe(true);
+		expect(rmOfNothingOrOwn(`rm -f ${dest}`, ws, rec)).toBeNull();
+		const g = await systemOneGate(`rm -f ${dest}`, process.env, ws, rec);
+		expect(g.run).toBe(false);
+		expect(judge.asks).toBe(1);
+		expect(existsSync(dest)).toBe(true);
+	});
+
+	test("ToolExecutor run_command: rm -f of a temp file made after the agent started is blocked", async () => {
+		const ex = new ToolExecutor(ws, "s1-launder");
+		await Bun.sleep(5);
+		const p = join(tmp, "tt.json");
+		execFileSync("sh", ["-c", `echo '[]' > ${p}`]);
 		const out = await ex.execute("run_command", { command: `rm -f ${p}` });
-		if (b) {
-			expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
-			expect(judge.asks).toBe(0);
-		} else {
-			expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
-		}
-	});
-
-	test("ToolExecutor run_command: a temp file older than the agent is still blocked", async () => {
-		const p = join(tmp, "tt.json");
-		writeFileSync(p, "[]");
-		await Bun.sleep(5);
-		const out = await new ToolExecutor(ws, "s1-rm-3395").execute("run_command", {
-			command: `rm -f ${p}`,
-		});
 		expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
 		expect(existsSync(p)).toBe(true);
 	});

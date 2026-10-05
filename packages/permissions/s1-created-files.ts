@@ -11,7 +11,8 @@
  * What counts as "created by this session":
  *   - write_file writing a path that did not exist just before the write;
  *   - a run_command whose `>` / `>>` redirect names a plain relative path that
- *     did not exist just before the command and is a regular file after it.
+ *     did not exist just before the command and is, after it, still the file
+ *     created for it then (see "pinned" below).
  * Both tool paths (packages/eight/tools.ts, packages/ai/tools.ts) record into
  * the same object: one per ToolExecutor, which the Agent also hands to its
  * native tool context. A different agent, tab or child has its own record.
@@ -26,14 +27,25 @@
  * overwrite or a `>` truncation of a pre-existing file is a modification, not
  * a creation.
  *
- * Known window: a process other than the command could create a redirect
- * target while the command runs; it would then be recorded. The agent's own
- * tool calls are serial, so only its background tasks could do that.
+ * Redirect targets are pinned (8SO, 2026-10-05). Before the command runs,
+ * an absent target is created empty with O_EXCL, and its device and inode
+ * are kept (with the descriptor held open, so the inode cannot be reused).
+ * After it exits, the target is recorded only if it is still that inode. A
+ * shell `>` or `>>` reuses it; `mv user-file target > target`, or any other
+ * rename onto the target, replaces it, and then nothing is recorded. A
+ * recorded target the command replaces is forgotten. A command that any rule
+ * escalates or blocks (zip -qm - user-file > out.zip fills the target's own
+ * inode with a file it deletes), or that changes directory, records nothing.
+ *
+ * Known effects of the pinning: the target exists, empty, from just before
+ * the command starts, so a test such as `[ -e target ]` inside the command
+ * sees it; and a redirect the shell never opens (a branch not taken, or a
+ * command that fails before it) leaves that empty file behind.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
 import * as path from "node:path";
-import { maskQuotes } from "../decide/rules";
+import { decideRules, maskQuotes } from "../decide/rules";
 
 /** The words a recorded path may contain: no quotes, glob, `$`, `~`, spaces. */
 const PLAIN_PATH = /^[A-Za-z0-9._/+,=@:-]+$/;
@@ -77,21 +89,8 @@ export function pathAbsent(abs: string): boolean {
 	}
 }
 
-/** Wall-clock now in nanoseconds, rounded UP to the next millisecond (fails closed). */
-function nowCeilNs(): bigint {
-	return (BigInt(Date.now()) + 1n) * 1_000_000n;
-}
-
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
-
-	/**
-	 * When this record opened (one per ToolExecutor, so the agent session's
-	 * start), in nanoseconds, rounded up to the next millisecond. A temp file
-	 * born after it, owned by this uid, counts as this session's for `rm -f`
-	 * (#3395; see s1-rm-nothing.ts for every condition).
-	 */
-	readonly startedNs: bigint = nowCeilNs();
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {
@@ -107,6 +106,12 @@ export class CreatedFiles {
 		const id = regularFile(abs);
 		if (id) this.files.set(key, id);
 		else this.files.delete(key);
+	}
+
+	/** Drop `abs` from the record. */
+	forget(abs: string): void {
+		const key = keyOf(abs);
+		if (key) this.files.delete(key);
 	}
 
 	/** True when `abs` is a regular file this session created, and still that same file. */
@@ -160,10 +165,68 @@ export function redirectTargets(command: string): string[] {
 	return out;
 }
 
+/** Device and inode of `abs` when it is a regular file (lstat), else null. */
+function inodeOf(abs: string): string | null {
+	try {
+		const st = lstatSync(abs, { bigint: true });
+		return st.isFile() ? `${st.dev}:${st.ino}` : null;
+	} catch {
+		return null;
+	}
+}
+
+const CHANGES_DIR = /(^|[\s;&|(])(cd|pushd|popd)(?=[\s;&|)]|$)/;
+
+/**
+ * Pin one redirect target (8SO, 2026-10-05). Absent: create it empty with
+ * O_EXCL, hold the descriptor, and record it after only if it is still that
+ * inode. Already recorded: refresh it after if it is still the same inode,
+ * else forget it. Anything else (it existed and is not this session's, or it
+ * cannot be created): nothing.
+ */
+function pinTarget(abs: string, record: CreatedFiles): () => void {
+	if (pathAbsent(abs)) {
+		let fd: number;
+		try {
+			fd = openSync(abs, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o666);
+		} catch {
+			return () => {};
+		}
+		let pin: string | null = null;
+		try {
+			const st = fstatSync(fd, { bigint: true });
+			pin = `${st.dev}:${st.ino}`;
+		} catch {
+			// No pin: never recorded.
+		}
+		return () => {
+			try {
+				if (pin !== null && inodeOf(abs) === pin) record.record(abs);
+			} catch {
+				// Recording is best effort; it never affects the command.
+			} finally {
+				closeSync(fd);
+			}
+		};
+	}
+	if (!record.createdBySession(abs)) return () => {};
+	const pin = inodeOf(abs);
+	return () => {
+		try {
+			if (pin !== null && inodeOf(abs) === pin) record.refresh(abs);
+			else record.forget(abs);
+		} catch {
+			// Best effort.
+		}
+	};
+}
+
 /**
  * Bracket one shell command: call before it runs, and call the result after
- * it exits. Its plain redirect targets that did not exist before are recorded
- * if they are regular files after; ones already recorded are refreshed.
+ * it exits. Each plain redirect target is pinned (`pinTarget`): an absent
+ * one is created empty now and recorded after if the shell kept its inode; a
+ * recorded one is refreshed, or forgotten if it was replaced. A command any
+ * rule escalates or blocks, or that changes directory, records nothing.
  */
 export function watchRedirects(
 	command: string,
@@ -173,10 +236,17 @@ export function watchRedirects(
 	if (!record) return () => {};
 	const watches: Array<() => void> = [];
 	try {
-		for (const t of redirectTargets(command))
-			watches.push(watchWrite(path.resolve(cwd, t), record));
+		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
+		if (decideRules(command).rules.length > 0) return () => {};
+		const seen = new Set<string>();
+		for (const t of redirectTargets(command)) {
+			const abs = path.resolve(cwd, t);
+			if (seen.has(abs)) continue;
+			seen.add(abs);
+			watches.push(pinTarget(abs, record));
+		}
 	} catch {
-		return () => {};
+		// Fall through with what was pinned, so every descriptor is closed.
 	}
 	return () => {
 		for (const w of watches) w();
