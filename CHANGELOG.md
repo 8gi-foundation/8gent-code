@@ -20,6 +20,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed - a crashed MCP stdio server is restarted once, or dropped (#3542)
 - When an MCP stdio server dies, the next call restarts it once (`packages/mcp/client.ts`, `packages/mcp/transport.ts`). If that fails, the server is removed from the tool list and status with one plain error, instead of showing as connected while the model calls a dead tool.
 - Tests in `packages/mcp/dead-server.test.ts`, which also check that no spawned server process outlives close or drop.
+### Fixed - PII placeholders split across stream chunks are restored (#3545)
+- `createStreamDeanonymizer` in `packages/permissions/pii-anonymizer.ts` buffers a partial placeholder such as `[EMAIL_1]` across streamed chunks and restores the real value; `packages/eight/clients/deepseek.ts` uses it. Latent today (no streaming caller yet, provider off by default); the first streaming caller is safe by default.
+- Tests in `packages/eight/clients/deepseek-stream.test.ts` (every two-way split, no network).
 
 ### Added (opt-in) - action-first communication style (#3487)
 - New `communicationStyle` value `action-first`, choice 6 in the onboarding communication step (`packages/self-autonomy/onboarding.ts`), also accepted by name. When picked, `USER_CONTEXT_SEGMENT` in `packages/eight/prompts/system-prompt.ts` adds `ACTION_FIRST_STYLE`: open with the action or answer, numbered steps, lists capped at five, commands in code blocks, plain failure statements, minutes for estimates, no recap or sign-off, and one closing "Next:" line. It opens with a precedence line saying these rules win over the base prompt's joke `COMPLETED` summary (`packages/eight/prompt.ts`) and the greeting and completion phrases in the personality block (`packages/eight/agent.ts`); a required completion marker becomes one plain line just before "Next:". Written in our own words; nothing on screen names a condition.
