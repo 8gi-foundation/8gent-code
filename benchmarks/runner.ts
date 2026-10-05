@@ -549,6 +549,13 @@ function outputResults(suiteResult: BenchmarkSuiteResult, options: RunnerOptions
 	}
 }
 
+/** "N of M items loaded from <dir>", or null when the run was not resumed. */
+function resumedLabel(suiteResult: BenchmarkSuiteResult): string | null {
+	if (!suiteResult.resumed) return null;
+	const { dir, skipped } = suiteResult.resumed;
+	return `${skipped.length} of ${suiteResult.results.length} items loaded from ${dir}`;
+}
+
 function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 	log(
 		"\n╔══════════════════════════════════════════════════════════════════════════╗",
@@ -574,6 +581,9 @@ function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 		`║  Total Tokens Used:    ${suiteResult.totalTokensUsed}${" ".repeat(50)}║`,
 		colors.cyan,
 	);
+	log(`║  Seed:                 ${suiteResult.seed ?? "unset"}`, colors.cyan);
+	const resumed = resumedLabel(suiteResult);
+	if (resumed) log(`║  Resumed:              ${resumed}`, colors.cyan);
 
 	log("╠══════════════════════════════════════════════════════════════════════════╣", colors.cyan);
 	log("║  Scores by Category:                                                      ║", colors.cyan);
@@ -620,7 +630,8 @@ function outputMarkdown(suiteResult: BenchmarkSuiteResult): void {
 **Timestamp:** ${suiteResult.timestamp}
 **Model:** ${suiteResult.model}
 **Provider:** ${suiteResult.provider}
-
+**Seed:** ${suiteResult.seed ?? "unset"}
+${resumedLabel(suiteResult) ? `**Resumed:** ${resumedLabel(suiteResult)}\n` : ""}
 ## Summary
 
 | Metric | Value |
