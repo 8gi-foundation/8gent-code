@@ -26,12 +26,15 @@ interface SessionFile extends SessionInfo {
 	messages: Array<{ role: string; content: string }>;
 }
 
+/** Session ids are file names inside the sessions directory, never paths. */
+const SESSION_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
 export class SessionManager {
 	private dir: string;
 
 	constructor(dataDir?: string) {
 		this.dir = dataDir || path.join(process.env.HOME || "~", ".8gent", "sessions");
-		fs.mkdirSync(this.dir, { recursive: true });
+		fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
 	}
 
 	/** Create a new session and persist it. */
@@ -106,6 +109,7 @@ export class SessionManager {
 		messages: Array<{ role: string; content: string }>,
 		meta?: Partial<Pick<SessionInfo, "model" | "provider" | "branch">>,
 	): void {
+		if (!SESSION_ID.test(id)) return;
 		const { file: existing, corrupt } = this.load(id);
 		// A file quarantined now, or earlier by list()/resume()/rename(), is
 		// rebuilt from the caller's full message list so saves resume; name and
@@ -143,19 +147,28 @@ export class SessionManager {
 	 * file intact (same shape as turn-journal.ts write()).
 	 */
 	private write(id: string, data: SessionFile): void {
+		if (!SESSION_ID.test(id)) throw new Error(`invalid session id: ${JSON.stringify(id)}`);
 		const finalPath = this.filePath(id);
 		const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
-		const fd = fs.openSync(tmpPath, "w");
+		const fd = fs.openSync(tmpPath, "wx", 0o600);
+		let closed = false;
 		try {
 			fs.writeFileSync(fd, JSON.stringify(data, null, 2));
 			fs.fsyncSync(fd);
-		} catch (err) {
+			closed = true;
 			fs.closeSync(fd);
+			fs.renameSync(tmpPath, finalPath);
+		} catch (err) {
+			if (!closed) {
+				try {
+					fs.closeSync(fd);
+				} catch {
+					// Already failing; the original error is the one to report.
+				}
+			}
 			fs.rmSync(tmpPath, { force: true });
 			throw err;
 		}
-		fs.closeSync(fd);
-		fs.renameSync(tmpPath, finalPath);
 	}
 
 	private readFile(id: string): SessionFile | null {
@@ -164,6 +177,7 @@ export class SessionManager {
 
 	/** Read a session file; one that fails to parse is moved aside, not skipped. */
 	private load(id: string): { file: SessionFile | null; corrupt: boolean } {
+		if (!SESSION_ID.test(id)) return { file: null, corrupt: false };
 		const p = this.filePath(id);
 		let raw: string;
 		try {

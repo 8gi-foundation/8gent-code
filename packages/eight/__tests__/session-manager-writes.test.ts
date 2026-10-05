@@ -115,4 +115,58 @@ describe("SessionManager write safety (#3522)", () => {
 		expect(JSON.parse(before).messageCount).toBe(1);
 		expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 	});
+
+	it("keeps resume(), update() and rename() inside the sessions directory", () => {
+		const sessions = path.join(dir, "sessions");
+		const outside = path.join(dir, "outside");
+		fs.mkdirSync(outside);
+		const target = path.join(outside, "x.json");
+		const sibling = `${target}.corrupt`;
+		const targetBody = "{ // not strict JSON\n}\n";
+		const siblingBody = '{"keep": true}\n';
+		fs.writeFileSync(target, targetBody);
+		fs.writeFileSync(sibling, siblingBody);
+
+		const sm = new SessionManager(sessions);
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			for (const id of ["../outside/x", "../OUTSIDE/X", `${outside}/x`]) {
+				expect(sm.resume(id)).toBeNull();
+				sm.update(id, [{ role: "user", content: "nope" }]);
+				sm.rename(id, "nope");
+			}
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+
+		expect(fs.readdirSync(outside).sort()).toEqual(["x.json", "x.json.corrupt"]);
+		expect(fs.readFileSync(target, "utf-8")).toBe(targetBody);
+		expect(fs.readFileSync(sibling, "utf-8")).toBe(siblingBody);
+		expect(fs.readdirSync(sessions)).toEqual([]);
+	});
+
+	it("writes session files owner-only and creates the directory owner-only", () => {
+		const sessions = path.join(dir, "fresh", "sessions");
+		const sm = new SessionManager(sessions);
+		const info = sm.create();
+		expect(fs.statSync(sessions).mode & 0o777).toBe(0o700);
+		expect(fs.statSync(path.join(sessions, `${info.id}.json`)).mode & 0o777).toBe(0o600);
+	});
+
+	it("removes the temp file when the final rename fails", () => {
+		const sm = new SessionManager(dir);
+		const info = sm.create();
+		const before = fs.readFileSync(path.join(dir, `${info.id}.json`), "utf-8");
+		const stub = spyOn(fs, "renameSync").mockImplementation(() => {
+			throw new Error("EXDEV: simulated rename failure");
+		});
+		try {
+			expect(() => sm.update(info.id, [{ role: "user", content: "x" }])).toThrow("EXDEV");
+		} finally {
+			stub.mockRestore();
+		}
+		expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+		expect(fs.readFileSync(path.join(dir, `${info.id}.json`), "utf-8")).toBe(before);
+	});
 });
