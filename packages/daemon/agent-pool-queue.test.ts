@@ -131,6 +131,30 @@ describe("per-session queue (#3554)", () => {
 		pool.destroySession("full-1");
 	});
 
+	test("flag on: an invalid max falls back to 32 waiting, and 0 means no waiting line", async () => {
+		process.env.EIGHT_SESSION_QUEUE = "1";
+		for (const bad of ["abc", "-1", "2.5"]) {
+			process.env.EIGHT_SESSION_QUEUE_MAX = bad;
+			const id = `max-${bad}`;
+			const { pool, fake } = poolWithFake(id);
+			// 1 running + 32 waiting; the 34th is refused.
+			const many = Array.from({ length: 34 }, (_, i) => `x${i}`);
+			const replies = many.map((m) => pool.chat(id, m));
+			await fake.drain();
+			const out = await Promise.all(replies);
+			expect(out.slice(0, 33)).toEqual(many.slice(0, 33).map((m) => `done:${m}`));
+			expect(out[33]).toBe("[error] session queue full");
+			pool.destroySession(id);
+		}
+		process.env.EIGHT_SESSION_QUEUE_MAX = "0";
+		const { pool, fake } = poolWithFake("max-0");
+		const replies = msgs.slice(0, 3).map((m) => pool.chat("max-0", m));
+		await fake.drain();
+		const out = await Promise.all(replies);
+		expect(out).toEqual(["done:m0", "[error] session queue full", "[error] session queue full"]);
+		pool.destroySession("max-0");
+	});
+
 	test("flag on: destroying the session drops queued messages", async () => {
 		process.env.EIGHT_SESSION_QUEUE = "1";
 		const { pool, fake } = poolWithFake("end-1");
