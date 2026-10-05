@@ -382,6 +382,11 @@ export class Agent {
 	/** Id of the turn running now, or null between turns. */
 	private activeTurn: number | null = null;
 	private turnCounter = 0;
+	// A stop that arrived while no live controller existed (#3521). chat()
+	// awaits several pre-turn steps before a controller is armed; without this
+	// latch an ESC in that window was dropped and the model call went ahead.
+	// Set by abort(), honoured by armController(), cleared at chat() entry.
+	private stopRequested = false;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -1069,8 +1074,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// `this.abortController` is null and this.abort() - fired by the circuit
 		// breaker below, the session watchdog, and user ESC - would be a no-op.
 		// Assigning it here makes all three actually stop the turn.
-		this.abortController = new AbortController();
-		const signal = this.abortController.signal;
+		const signal = this.armController().signal;
 
 		// Build the real tool set: intersect the executor's own tool definitions
 		// (everything it can actually run) with the local CORE_TOOLS subset via a
@@ -1699,6 +1703,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		await this.extensionsReady;
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
+		// A stop latched while idle belongs to no turn; it must not cancel this
+		// one (#3521). Known gap, not fixed here: an ESC between the TUI's submit
+		// and this line is also cleared, because nothing marks a turn as pending
+		// before chat() is entered.
+		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.turnTask = userMessage;
@@ -2660,7 +2669,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}));
 
 			// Create abort controller for ESC interruption (shared across attempts)
-			this.abortController = new AbortController();
+			this.armController();
 
 			// Deterministic self-healing: walk the failover chain on ANY error
 			// (Bad Request, 5xx, network, schema, timeout). Within the same
@@ -2806,8 +2815,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						// The shared controller is now aborted (timeout tore it down).
 						// Refresh it so the next chain attempt gets a live signal instead
 						// of an already-aborted one that would fail instantly.
+						// Our own timeout aborts the controller directly, never through
+						// abort(), so it does not latch a stop; a user stop that landed
+						// in this window did, and armController() honours it.
 						if (attemptTimedOut) {
-							this.abortController = new AbortController();
+							this.armController();
 						}
 
 						const msg = String(err?.message ?? err);
@@ -2882,7 +2894,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					);
 					agentConfig.maxOutputTokens = 8192;
 					const retryAgent = createEightAgent(agentConfig);
-					this.abortController = new AbortController();
+					this.armController();
 					const messages2 = this.messageHistory
 						.filter((m) => m.role !== "system")
 						.map((m) => ({
@@ -3310,6 +3322,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (!this.abortController) {
 			if (stop?.kind === "watchdog")
 				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
+			// The person's ESC between steps (pre-turn awaits, a timeout refresh, a retry):
+			// latch it so the next armController() in this turn aborts at once instead of
+			// the stop being lost (#3521). A harness stop with no call in flight stays unkept.
+			if (stop === undefined) {
+				this.stopRequested = true;
+				console.log("[8gent] Stop requested; the turn will stop before its next model call");
+			}
 			return;
 		}
 		if (stop && this.turnStop === null) this.turnStop = stop;
@@ -3329,6 +3348,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
 	getTurnStop(): TurnStop | null {
 		return this.turnStop;
+	}
+
+	/**
+	 * The one place a turn's abort controller is created (#3521). If a stop was
+	 * latched while no controller existed, the new controller is aborted before
+	 * it is returned, so the model call it guards never starts. The latch holds
+	 * until the next chat() entry, so every later arm in the same turn stops too.
+	 */
+	private armController(): AbortController {
+		const controller = new AbortController();
+		this.abortController = controller;
+		if (this.stopRequested) controller.abort();
+		return controller;
 	}
 
 	private async collectToolEvidence(event: {
