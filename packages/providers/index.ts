@@ -839,10 +839,35 @@ export class ProviderManager {
 			// routing to a local provider, or refuse if none exists.
 			let failClosed = false;
 			try {
-				const gated = anonymizeMessages(resolvedRequest.messages);
+				// Tool-call arguments ride along as extra entries so they share the
+				// same pseudonym map as message text, then are put back (#3547).
+				const msgs = resolvedRequest.messages;
+				const argEntries = msgs.flatMap((m) =>
+					(m.toolCalls ?? []).map((tc) => ({
+						role: "tool-args",
+						content: JSON.stringify(tc.arguments ?? {}),
+					})),
+				);
+				const gated = anonymizeMessages<{ role: string; content: string }>([
+					...msgs,
+					...argEntries,
+				]);
 				if (verifyClean(gated.messages.map((m) => m.content).join("\n"))) {
 					piiMap = gated.map;
-					resolvedRequest = { ...resolvedRequest, messages: gated.messages };
+					const cleanArgs = gated.messages.slice(msgs.length);
+					let next = 0;
+					const cleanMsgs = (gated.messages.slice(0, msgs.length) as ChatMessage[]).map((m) =>
+						m.toolCalls
+							? {
+									...m,
+									toolCalls: m.toolCalls.map((tc) => ({
+										...tc,
+										arguments: JSON.parse(cleanArgs[next++].content),
+									})),
+								}
+							: m,
+					);
+					resolvedRequest = { ...resolvedRequest, messages: cleanMsgs };
 				} else {
 					failClosed = true;
 				}
@@ -947,10 +972,7 @@ export class ProviderManager {
 	): Promise<ChatResponse> {
 		const body: Record<string, unknown> = {
 			model,
-			messages: request.messages.map((m) => ({
-				role: m.role,
-				content: m.content,
-			})),
+			messages: toOllamaMessages(request.messages),
 			stream: false,
 		};
 
@@ -1033,10 +1055,7 @@ export class ProviderManager {
 
 		const body: Record<string, unknown> = {
 			model,
-			messages: request.messages.map((m) => ({
-				role: m.role,
-				content: m.content,
-			})),
+			messages: toOpenAIMessages(request.messages),
 			stream: false,
 		};
 
@@ -1132,10 +1151,7 @@ export class ProviderManager {
 		const body: Record<string, unknown> = {
 			model,
 			max_tokens: request.maxTokens || 4096,
-			messages: otherMessages.map((m) => ({
-				role: m.role === "assistant" ? "assistant" : "user",
-				content: m.content,
-			})),
+			messages: toAnthropicMessages(otherMessages),
 		};
 
 		if (systemMessage) {
@@ -1253,6 +1269,95 @@ export function isCloudProvider(provider: Pick<ProviderConfig, "baseUrl">): bool
 	// *.internal (Fly private network) is NOT proven local - the proxy behind it
 	// may forward to a public cloud provider. Treat as cloud (fail-safe).
 	return true;
+}
+
+// ============================================
+// Wire message shapes (#3547)
+// ============================================
+//
+// Each serialiser keeps the earlier tool calls and the reply ids, so step two
+// of a tool loop is accepted. A message with no tool fields serialises exactly
+// as { role, content }, as it always did.
+
+/** OpenAI-compatible: tool_calls on assistant turns, tool_call_id on replies. */
+export function toOpenAIMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	return messages.map((m) => {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			return {
+				role: m.role,
+				// Strict endpoints reject "" on a tool-only turn; null is the spec.
+				content: m.content || null,
+				tool_calls: m.toolCalls.map((tc) => ({
+					id: tc.id,
+					type: "function",
+					function: { name: tc.name, arguments: JSON.stringify(tc.arguments ?? {}) },
+				})),
+			};
+		}
+		if (m.role === "tool" && m.toolCallId) {
+			return { role: m.role, content: m.content, tool_call_id: m.toolCallId };
+		}
+		return { role: m.role, content: m.content };
+	});
+}
+
+/** Ollama /api/chat: object arguments, and a tool reply names its tool. */
+export function toOllamaMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	const nameById = new Map<string, string>();
+	return messages.map((m) => {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			for (const tc of m.toolCalls) nameById.set(tc.id, tc.name);
+			return {
+				role: m.role,
+				content: m.content,
+				tool_calls: m.toolCalls.map((tc) => ({
+					function: { name: tc.name, arguments: tc.arguments ?? {} },
+				})),
+			};
+		}
+		const toolName = m.role === "tool" && m.toolCallId ? nameById.get(m.toolCallId) : undefined;
+		if (toolName) return { role: m.role, content: m.content, tool_name: toolName };
+		return { role: m.role, content: m.content };
+	});
+}
+
+/**
+ * Anthropic Messages: tool_use blocks on assistant turns, tool_result blocks in
+ * a user turn. Consecutive tool replies share one user turn, as the API expects
+ * for parallel calls. System messages are handled by the caller.
+ */
+export function toAnthropicMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	const out: Array<{ role: string; content: unknown }> = [];
+	for (const m of messages) {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			out.push({
+				role: "assistant",
+				content: [
+					...(m.content ? [{ type: "text", text: m.content }] : []),
+					...m.toolCalls.map((tc) => ({
+						type: "tool_use",
+						id: tc.id,
+						name: tc.name,
+						input: tc.arguments ?? {},
+					})),
+				],
+			});
+			continue;
+		}
+		if (m.role === "tool" && m.toolCallId) {
+			const block = { type: "tool_result", tool_use_id: m.toolCallId, content: m.content };
+			const prev = out[out.length - 1];
+			const prevBlocks = prev?.role === "user" && Array.isArray(prev.content) ? prev.content : null;
+			if (prevBlocks?.every((b: { type?: string }) => b.type === "tool_result")) {
+				prevBlocks.push(block);
+			} else {
+				out.push({ role: "user", content: [block] });
+			}
+			continue;
+		}
+		out.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
+	}
+	return out;
 }
 
 /**
