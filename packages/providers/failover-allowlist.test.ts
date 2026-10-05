@@ -22,6 +22,12 @@ const DEFAULT_KEYS: Record<FailoverChannel, string[]> = {
 	computer: ["qwen3.6:27b", "apple-foundationmodel", "deepseek-flash"],
 };
 
+/**
+ * The built-in chains, injected so the developer's own ~/.8gent/failover.json
+ * can never change these results. A fresh copy per call: chains are not shared.
+ */
+const defaults = () => ModelFailover.defaultChains();
+
 /** Every entry resolve() can ever hand back for a model, walking the chain to exhaustion. */
 function walk(fo: ModelFailover, model: string, channel: FailoverChannel): FailoverEntry[] {
 	const seen: FailoverEntry[] = [];
@@ -43,17 +49,19 @@ afterEach(() => {
 describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 	test("default is unchanged: no allowlist still falls back to openrouter", () => {
 		delete process.env.EIGHT_PROVIDERS_ALLOW;
-		const fo = new ModelFailover();
+		const fo = new ModelFailover(defaults());
 		expect(fo.resolve("no-such-model")).toEqual({ model: "no-such-model", provider: "openrouter" });
 		expect(
-			walk(new ModelFailover(), "eight:latest", "text").some((e) => e.provider === "openrouter"),
+			walk(new ModelFailover(defaults()), "eight:latest", "text").some(
+				(e) => e.provider === "openrouter",
+			),
 		).toBe(true);
 	});
 
 	for (const channel of ["text", "computer"] as const) {
 		for (const model of DEFAULT_KEYS[channel]) {
 			test(`${channel} chain ${model} never yields a cloud entry under a local allowlist`, () => {
-				const fo = new ModelFailover(undefined, { allow: LOCAL });
+				const fo = new ModelFailover(defaults(), { allow: LOCAL });
 				let entries: FailoverEntry[] = [];
 				try {
 					entries = walk(fo, model, channel);
@@ -69,7 +77,7 @@ describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 	}
 
 	test("a chain filtered to nothing throws a typed error instead of returning openrouter", () => {
-		const fo = new ModelFailover(undefined, { allow: LOCAL });
+		const fo = new ModelFailover(defaults(), { allow: LOCAL });
 		expect(() => fo.resolve("openrouter/auto")).toThrow(NoAllowedProviderError);
 		try {
 			fo.resolve("openrouter/auto");
@@ -82,12 +90,12 @@ describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 	});
 
 	test("an unknown model throws when openrouter is not allowed", () => {
-		const fo = new ModelFailover(undefined, { allow: ["ollama"] });
+		const fo = new ModelFailover(defaults(), { allow: ["ollama"] });
 		expect(() => fo.resolve("no-such-model")).toThrow(NoAllowedProviderError);
 	});
 
 	test("an unknown model still goes to openrouter when openrouter is allowed", () => {
-		const fo = new ModelFailover(undefined, { allow: ["ollama", "openrouter"] });
+		const fo = new ModelFailover(defaults(), { allow: ["ollama", "openrouter"] });
 		expect(fo.resolve("no-such-model")).toEqual({ model: "no-such-model", provider: "openrouter" });
 	});
 
@@ -114,15 +122,52 @@ describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 
 	test("reads EIGHT_PROVIDERS_ALLOW from the environment, trimmed and case-insensitive", () => {
 		process.env.EIGHT_PROVIDERS_ALLOW = " Ollama , 8gent ,";
-		const fo = new ModelFailover();
+		const fo = new ModelFailover(defaults());
 		expect(() => fo.resolve("openrouter/auto")).toThrow(NoAllowedProviderError);
 		for (const e of walk(fo, "qwen3.5:latest", "text")) {
 			expect(["ollama", "8gent"]).toContain(e.provider);
 		}
 	});
 
+	test("malformed chains and entries are dropped, failing closed instead of crashing", () => {
+		const chains = {
+			text: {
+				noModels: {},
+				nullChain: null,
+				badEntries: { models: [{ model: "x" }, null, { model: "y", provider: 7 }] },
+				mixed: {
+					models: [
+						{ model: "z" },
+						{ model: "mixed", provider: "ollama" },
+						{ model: "c:free", provider: "openrouter" },
+					],
+				},
+			},
+			computer: null,
+		} as unknown as Record<FailoverChannel, Record<string, FailoverChain>>;
+		const fo = new ModelFailover(chains, { allow: ["ollama"] });
+		for (const model of ["noModels", "nullChain", "badEntries"]) {
+			expect(() => fo.resolve(model)).toThrow(NoAllowedProviderError);
+		}
+		expect(fo.resolve("mixed")).toEqual({ model: "mixed", provider: "ollama" });
+		expect(() => fo.resolve("anything", "computer")).toThrow(NoAllowedProviderError);
+	});
+
+	test("an injected allow list is trimmed and lowercased like the env value", () => {
+		const fo = new ModelFailover(defaults(), { allow: [" Ollama ", "8GENT"] });
+		for (const e of walk(fo, "qwen3.5:latest", "text")) {
+			expect(["ollama", "8gent"]).toContain(e.provider);
+		}
+		expect(() => fo.resolve("openrouter/auto")).toThrow(NoAllowedProviderError);
+	});
+
+	test("an empty injected allow list allows nothing", () => {
+		const fo = new ModelFailover(defaults(), { allow: [] });
+		expect(() => fo.resolve("qwen3.5:latest")).toThrow(NoAllowedProviderError);
+	});
+
 	test("an empty or whitespace-only value means no allowlist", () => {
 		process.env.EIGHT_PROVIDERS_ALLOW = " , ";
-		expect(new ModelFailover().resolve("no-such-model").provider).toBe("openrouter");
+		expect(new ModelFailover(defaults()).resolve("no-such-model").provider).toBe("openrouter");
 	});
 });

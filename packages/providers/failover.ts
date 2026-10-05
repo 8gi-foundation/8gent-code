@@ -85,7 +85,10 @@ function allowFromEnv(): string[] | null {
 }
 
 export interface ModelFailoverOptions {
-	/** Providers chains may use. Defaults to EIGHT_PROVIDERS_ALLOW; null or absent means all. */
+	/**
+	 * Providers chains may use. Defaults to EIGHT_PROVIDERS_ALLOW; null or absent
+	 * means all. An empty array allows nothing, so every resolve() throws.
+	 */
 	allow?: readonly string[] | null;
 }
 
@@ -100,12 +103,19 @@ export class ModelFailover {
 		opts: ModelFailoverOptions = {},
 	) {
 		this.allow =
-			opts.allow === undefined ? allowFromEnv() : (opts.allow?.map((p) => p.toLowerCase()) ?? null);
+			opts.allow === undefined
+				? allowFromEnv()
+				: (opts.allow?.map((p) => p.trim().toLowerCase()) ?? null);
 		const loaded = chains || this.loadChains();
 		this.chainsByChannel = this.allow ? this.filterChains(loaded, this.allow) : loaded;
 	}
 
-	/** Copy of `chains` keeping only entries whose provider is allowed. */
+	/**
+	 * Copy of `chains` keeping only entries whose provider is allowed. Malformed
+	 * chains (non-array `models`) and entries (non-string `provider`) from a
+	 * hand-edited failover.json are dropped, never thrown on: the chain empties
+	 * and resolve() fails closed with NoAllowedProviderError.
+	 */
 	private filterChains(
 		chains: Record<FailoverChannel, Record<string, FailoverChain>>,
 		allow: string[],
@@ -116,13 +126,26 @@ export class ModelFailover {
 		>;
 		for (const channel of Object.keys(chains) as FailoverChannel[]) {
 			out[channel] = {};
-			for (const [model, chain] of Object.entries(chains[channel] ?? {})) {
+			const byModel = chains[channel];
+			if (!byModel || typeof byModel !== "object") continue;
+			for (const [model, chain] of Object.entries(byModel)) {
+				const models = Array.isArray(chain?.models) ? chain.models : [];
 				out[channel][model] = {
-					models: chain.models.filter((e) => allow.includes(e.provider.toLowerCase())),
+					models: models.filter(
+						(e) => typeof e?.provider === "string" && allow.includes(e.provider.toLowerCase()),
+					),
 				};
 			}
 		}
 		return out;
+	}
+
+	/** The built-in chains, ignoring ~/.8gent/failover.json. */
+	static defaultChains(): Record<FailoverChannel, Record<string, FailoverChain>> {
+		return {
+			text: ModelFailover.defaultTextChains(),
+			computer: ModelFailover.defaultComputerChains(),
+		};
 	}
 
 	private loadChains(): Record<FailoverChannel, Record<string, FailoverChain>> {
@@ -133,24 +156,21 @@ export class ModelFailover {
 				// Back-compat: if the file is the old flat shape (no `text`/`computer`
 				// top-level keys), treat the whole thing as the text channel.
 				if (raw && typeof raw === "object" && !raw.text && !raw.computer) {
-					return { text: raw, computer: this.defaultComputerChains() };
+					return { text: raw, computer: ModelFailover.defaultComputerChains() };
 				}
 				return {
-					text: raw.text || this.defaultTextChains(),
-					computer: raw.computer || this.defaultComputerChains(),
+					text: raw.text || ModelFailover.defaultTextChains(),
+					computer: raw.computer || ModelFailover.defaultComputerChains(),
 				};
 			}
 		} catch {
 			// Fall through to defaults.
 		}
 
-		return {
-			text: this.defaultTextChains(),
-			computer: this.defaultComputerChains(),
-		};
+		return ModelFailover.defaultChains();
 	}
 
-	private defaultTextChains(): Record<string, FailoverChain> {
+	private static defaultTextChains(): Record<string, FailoverChain> {
 		const preferAppleFoundation = appleFoundationAvailable();
 		const prefix: FailoverEntry[] = preferAppleFoundation ? [APPLE_FOUNDATION_ENTRY] : [];
 
@@ -230,7 +250,7 @@ export class ModelFailover {
 	 * `vision-router.ts`. If apfel is asked for a vision prompt, it will throw
 	 * and the chain falls through to Qwen.
 	 */
-	private defaultComputerChains(): Record<string, FailoverChain> {
+	private static defaultComputerChains(): Record<string, FailoverChain> {
 		const computerChain: FailoverEntry[] = [
 			APFEL_ENTRY,
 			{ model: "qwen3.6:27b", provider: "ollama" },
