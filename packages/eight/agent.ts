@@ -243,10 +243,11 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
-	// A stop that arrived while no live controller existed (#3521). chat()
-	// awaits several pre-turn steps before a controller is armed; without this
-	// latch an ESC in that window was dropped and the model call went ahead.
-	// Set by abort(), honoured by armController(), cleared at chat() entry.
+	// A stop pressed in this turn (#3521). chat() awaits several pre-turn steps
+	// before a controller is armed, and the native loop re-arms after a 429
+	// backoff; without this latch an ESC in either window was dropped and the
+	// model call went ahead. Set by abort(), honoured by armController(),
+	// cleared at chat() entry.
 	private stopRequested = false;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
@@ -1065,6 +1066,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// instead of throwing a raw fetch error up through the surface. A slow
 			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
+			// A user stop (not the circuit breaker, which reports its own reason)
+			// reads as what it is, not as a model failure.
+			if (this.stopRequested && breakerStop === null) {
+				this.messageHistory.push({ role: "assistant", content: "Stopped." });
+				recordFailedRun("stopped by user");
+				return "Stopped.";
+			}
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
@@ -1072,6 +1080,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			return failure.message;
 		}
 		this.abortController = null;
+		if (this.stopRequested && breakerStop === null && agentResult.content.trim() === "") {
+			this.messageHistory.push({ role: "assistant", content: "Stopped." });
+			recordFailedRun("stopped by user");
+			return "Stopped.";
+		}
 
 		// ── Law 1 (issue #2747): no fabricated completion ────────────────────
 		// The final reply is gated on the turn's tool ledger. A completion claim
@@ -2073,6 +2086,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					// TurnTimeoutError. Without this flag the catch below would treat
 					// that AbortError as a user ESC and kill the whole turn.
 					let attemptTimedOut = false;
+					// A stop during the previous attempt or its 429 backoff nulled the
+					// controller. Re-arm (honouring the latch) so this attempt is never
+					// sent with no signal, and stop before the call if it was pressed.
+					if (!this.abortController) this.armController();
+					if (this.abortController?.signal.aborted) {
+						throw Object.assign(new Error("Stopped by user"), { name: "AbortError" });
+					}
 					try {
 						// ── Hedge wrap (ISI keystone). When the hedge flag is OFF (default),
 						// this fires exactly ONE candidate (the current chain entry) and is
@@ -2563,23 +2583,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * Abort the current generation. Called when user presses ESC during processing.
 	 */
 	abort(): void {
+		// Latch every stop, live controller or not (#3521). A live controller is
+		// aborted and nulled below; a later step in the same turn (a 429 backoff
+		// retry, a failover attempt) arms a fresh one through armController(),
+		// which must see the stop too or the retry runs unstoppable. The latch
+		// holds until the next chat() entry.
+		this.stopRequested = true;
 		if (this.abortController && !this.abortController.signal.aborted) {
 			this.abortController.abort();
-			this.abortController = null;
 			console.log("[8gent] Generation aborted by user");
-			return;
+		} else {
+			// Between steps (pre-turn awaits, a backoff, a retry) or idle.
+			console.log("[8gent] Stop latched; no model call was in flight");
 		}
-		// No live controller: the turn is between steps (pre-turn awaits, a
-		// timeout refresh, a retry). Latch the stop so the next armController()
-		// in this turn aborts at once instead of the stop being lost (#3521).
 		this.abortController = null;
-		this.stopRequested = true;
-		console.log("[8gent] Stop requested; the turn will stop before its next model call");
 	}
 
 	/**
 	 * The one place a turn's abort controller is created (#3521). If a stop was
-	 * latched while no controller existed, the new controller is aborted before
+	 * latched earlier in this turn, the new controller is aborted before
 	 * it is returned, so the model call it guards never starts. The latch holds
 	 * until the next chat() entry, so every later arm in the same turn stops too.
 	 */

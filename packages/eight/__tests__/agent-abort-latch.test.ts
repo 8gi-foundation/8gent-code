@@ -31,14 +31,40 @@ const PROMPT = `${MARKER} add a function named sum to src/math.ts that returns a
 const CHILD = `
 const MARKER = ${JSON.stringify(MARKER)};
 const PROMPT = ${JSON.stringify(PROMPT)};
+const mode = process.env.LATCH_MODE;
 let modelCalls = 0;
+let agent;
+// native429: calls counted when the stop was pressed, -1 until then.
+let callsAtStop = -1;
+if (mode === "native429") {
+	// Press stop 300 ms into the agent's own 429 backoff (its first wait is
+	// 2 s). The AI SDK's internal 429 retries honour the signal already; this
+	// targets the harness loop's wait, where the signal used to be lost.
+	const log = console.log;
+	console.log = (...args) => {
+		log(...args);
+		if (callsAtStop < 0 && String(args[0]).includes("rate limited, retry in")) {
+			setTimeout(() => { callsAtStop = modelCalls; agent.abort(); }, 300);
+		}
+	};
+}
 globalThis.fetch = (async (input, init) => {
 	const url = String(typeof input === "string" ? input : input?.url ?? input);
 	if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "probe:1b", model: "probe:1b" }] });
+	const body = String(init?.body ?? "");
+	// Count only the real turn: requests that carry the user's message (a
+	// capability probe sends its own fixed prompt). Any chat endpoint counts.
+	if (body.includes(MARKER)) {
+		modelCalls++;
+		if (mode === "native429" && callsAtStop < 0) {
+			// Rate limited until the stop; a call after it would succeed.
+			return new Response(JSON.stringify({ error: { message: "429 rate limit exceeded" } }), {
+				status: 429,
+				headers: { "content-type": "application/json" },
+			});
+		}
+	}
 	if (url.includes("/chat/completions")) {
-		// Count only the real turn: requests that carry the user's message
-		// (a capability probe sends its own fixed prompt).
-		if (String(init?.body ?? "").includes(MARKER)) modelCalls++;
 		return Response.json({
 			choices: [{ message: { role: "assistant", content: "DONE: nothing to do." }, finish_reason: "stop" }],
 		});
@@ -46,8 +72,7 @@ globalThis.fetch = (async (input, init) => {
 	return new Response("not found", { status: 404 });
 });
 const { Agent } = await import(${JSON.stringify(AGENT)});
-const agent = new Agent({ model: "probe:1b", runtime: "ollama", workingDirectory: process.env.LATCH_WORK, maxTurns: 2 });
-const mode = process.env.LATCH_MODE;
+agent = new Agent({ model: "probe:1b", runtime: "ollama", workingDirectory: process.env.LATCH_WORK, maxTurns: 2 });
 let result = {};
 if (mode === "arm") {
 	// No stop pressed: a freshly armed controller is live.
@@ -62,19 +87,28 @@ if (mode === "arm") {
 	// A stop that lands while chat() is awaiting a pre-turn step.
 	let stubbed = false;
 	agent.tryRunPreToolRouter = async () => { stubbed = true; agent.abort(); };
-	await agent.chat(PROMPT);
-	result = { stubbed, modelCalls };
+	const reply = await agent.chat(PROMPT);
+	result = { stubbed, modelCalls, reply };
 } else if (mode === "idle") {
 	agent.abort();
 	await agent.chat(PROMPT);
 	result = { modelCalls };
+} else if (mode === "native429") {
+	// Native AI SDK path (EIGHT_TEXT_TOOLS=0). A stopped turn may end by
+	// throwing the abort; either way no second model call may start.
+	let reply = "";
+	let threw = "";
+	try { reply = await agent.chat(PROMPT); } catch (err) { threw = String(err?.name ?? err); }
+	// Give a wrongly scheduled retry time to fire before counting.
+	await new Promise((r) => setTimeout(r, 2500));
+	result = { callsAtStop, modelCalls, threw };
 }
 process.stdout.write("\\n@@LATCH@@" + JSON.stringify(result) + "\\n");
 await agent.cleanup?.();
 process.exit(0);
 `;
 
-function runChild(mode: "arm" | "mid" | "idle"): Record<string, unknown> {
+function runChild(mode: "arm" | "mid" | "idle" | "native429"): Record<string, unknown> {
 	const root = tempDir("abort-latch-");
 	mkdirSync(join(root, "home"));
 	mkdirSync(join(root, "work"));
@@ -86,6 +120,8 @@ function runChild(mode: "arm" | "mid" | "idle"): Record<string, unknown> {
 			OLLAMA_HOST: "http://127.0.0.1:9",
 			EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9",
 			LATCH_MODE: mode,
+			// The native case forces the AI SDK path; the others stay on text tools.
+			EIGHT_TEXT_TOOLS: mode === "native429" ? "0" : "1",
 			LATCH_WORK: join(root, "work"),
 		},
 		stdout: "pipe",
@@ -106,7 +142,16 @@ describe("stop-signal latch (#3521)", () => {
 
 	test("a stop during a pre-turn await cancels the turn before any model call", () => {
 		// stubbed: the stop really landed inside chat(), not before it.
-		expect(runChild("mid")).toEqual({ stubbed: true, modelCalls: 0 });
+		// The reply names the stop instead of a generic model failure.
+		expect(runChild("mid")).toEqual({ stubbed: true, modelCalls: 0, reply: "Stopped." });
+	}, 60_000);
+
+	test("a stop during the native-path 429 backoff stops the retry", () => {
+		const r = runChild("native429") as { callsAtStop: number; modelCalls: number; threw: string };
+		// The stop really landed in the backoff, after at least one rate-limited call...
+		expect(r.callsAtStop).toBeGreaterThan(0);
+		// ...and no model call started after it.
+		expect(r.modelCalls).toBe(r.callsAtStop);
 	}, 60_000);
 
 	test("an idle stop does not cancel the next turn", () => {
