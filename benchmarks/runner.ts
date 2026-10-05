@@ -14,12 +14,14 @@
  *   bun run benchmarks/runner.ts --output json
  *   bun run benchmarks/runner.ts --dry-run
  *   bun run benchmarks/runner.ts --model qwen3:8b
+ *   bun run benchmarks/runner.ts --resume benchmarks/results/run1 --seed 300
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { grade } from "./autoresearch/execution-grader";
 import { getSystemPrompt } from "./autoresearch/system-prompt";
+import { loadDone, openRun, saveResult } from "./run-store";
 import type { BenchmarkCategory, BenchmarkDefinition, CombinedGradeResult } from "./types";
 
 // Benchmark categories whose fixtures match the current execution-graded
@@ -65,6 +67,9 @@ interface BenchmarkSuiteResult {
 	difficultyScores: Record<string, number>;
 	totalTokensUsed: number;
 	results: BenchmarkResult[];
+	seed?: number;
+	/** Set when --resume was used: items loaded from disk instead of run now. */
+	resumed?: { dir: string; skipped: string[] };
 	stats: {
 		total: number;
 		passed: number;
@@ -115,6 +120,8 @@ interface RunnerOptions {
 	verbose: boolean;
 	model?: string;
 	provider?: string;
+	resumeDir?: string;
+	seed?: number;
 }
 
 /**
@@ -163,6 +170,18 @@ function parseArgs(): RunnerOptions {
 				options.provider = next;
 				i++;
 				break;
+			case "--resume":
+				options.resumeDir = next;
+				i++;
+				break;
+			case "--seed":
+				options.seed = Number(next);
+				if (!Number.isInteger(options.seed)) {
+					console.error(`--seed must be an integer, got "${next}"`);
+					process.exit(1);
+				}
+				i++;
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -191,6 +210,9 @@ Options:
   --verbose, -v           Show detailed output
   --model <name>          Ollama model to use (default: llama3.2:3b, or $OLLAMA_MODEL)
   --provider <name>       Model provider (only "ollama" is wired up)
+  --resume <dir>          Save each finished item to <dir>/<id>.json and skip
+                          items already saved there (refuses a model/seed change)
+  --seed <n>              Pass a sampling seed to the model and record it
   --help, -h              Show this help message
 
 Categories:
@@ -290,6 +312,7 @@ async function probeOllama(model: string): Promise<void> {
 async function callOllama(
 	model: string,
 	messages: ChatMessage[],
+	seed?: number,
 ): Promise<{ content: string; tokensUsed: number }> {
 	const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
 		method: "POST",
@@ -299,7 +322,7 @@ async function callOllama(
 			model,
 			messages,
 			stream: false,
-			options: { temperature: 0.2 },
+			options: seed === undefined ? { temperature: 0.2 } : { temperature: 0.2, seed },
 		}),
 	});
 	if (!res.ok) {
@@ -341,10 +364,14 @@ async function executeBenchmark(
 		? `${benchmark.prompt}\n\nContext:\n${fixtureContent}`
 		: benchmark.prompt;
 
-	const { content, tokensUsed } = await callOllama(model, [
-		{ role: "system", content: getSystemPrompt() },
-		{ role: "user", content: userPrompt },
-	]);
+	const { content, tokensUsed } = await callOllama(
+		model,
+		[
+			{ role: "system", content: getSystemPrompt() },
+			{ role: "user", content: userPrompt },
+		],
+		options.seed,
+	);
 
 	const duration = Date.now() - startTime;
 
@@ -359,6 +386,17 @@ async function runBenchmarks(
 	options: RunnerOptions,
 ): Promise<BenchmarkSuiteResult> {
 	const results: BenchmarkResult[] = [];
+	const resumeDir = options.resumeDir;
+	const done = new Map<string, BenchmarkResult>();
+	const skipped: string[] = [];
+	if (resumeDir) {
+		openRun(resumeDir, {
+			model: options.model ?? DEFAULT_MODEL,
+			provider: options.provider ?? DEFAULT_PROVIDER,
+			seed: options.seed,
+		});
+		for (const [id, r] of loadDone<BenchmarkResult>(resumeDir)) done.set(id, r);
+	}
 
 	log(
 		"\n╔══════════════════════════════════════════════════════════════════════════╗",
@@ -386,6 +424,16 @@ async function runBenchmarks(
 			process.stdout.write(`  ${benchmark.id.padEnd(8)} ${benchmark.title.padEnd(35)} `);
 		}
 
+		const previous = done.get(benchmark.id);
+		if (previous) {
+			results.push(previous);
+			skipped.push(benchmark.id);
+			log(
+				`${getScoreColor(previous.grade.score)}${previous.grade.score.toString().padStart(3)}%${colors.reset} (resumed)`,
+			);
+			continue;
+		}
+
 		// Execute benchmark against a real model (throws + exits non-zero on failure)
 		const { output, tokensUsed, duration } = await executeBenchmark(benchmark, options);
 
@@ -399,6 +447,7 @@ async function runBenchmarks(
 			duration,
 		};
 		results.push(result);
+		if (resumeDir) saveResult(resumeDir, result);
 
 		// Display result
 		const scoreColor = getScoreColor(combined.score);
@@ -469,6 +518,8 @@ async function runBenchmarks(
 		difficultyScores,
 		totalTokensUsed,
 		results,
+		...(options.seed === undefined ? {} : { seed: options.seed }),
+		...(resumeDir ? { resumed: { dir: resumeDir, skipped } } : {}),
 		stats: {
 			total: results.length,
 			passed: passedCount,
