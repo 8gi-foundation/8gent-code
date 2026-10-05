@@ -25,6 +25,8 @@ const dir = mkdtempSync(join(tmpdir(), "mcp-era-"));
 // legacy:    answers initialize; unknown methods get -32601.
 // silent:    legacy, but never answers an unknown method (some legacy servers do this).
 // otherver:  modern, but only speaks a version we do not.
+// oldonly:   refuses our modern version with -32022 listing 2024-11-05, then speaks legacy.
+// discold:   answers server/discover listing only 2024-11-05, then speaks legacy.
 const stdioServer = join(dir, "server.ts");
 writeFileSync(
 	stdioServer,
@@ -42,6 +44,14 @@ for await (const chunk of process.stdin) {
 		fs.appendFileSync(log, m.method + "\\n");
 		if (m.id === undefined) continue;
 		const v = m.params?._meta?.["${V}"];
+		if (m.method === "server/discover" && mode === "oldonly") {
+			out({ id: m.id, error: { code: -32022, message: "Unsupported protocol version", data: { supported: ["2024-11-05"], requested: v } } });
+			continue;
+		}
+		if (m.method === "server/discover" && mode === "discold") {
+			out({ id: m.id, result: { resultType: "complete", supportedVersions: ["2024-11-05"], capabilities: { tools: {} } } });
+			continue;
+		}
 		if (mode === "modern" || mode === "otherver") {
 			const speaks = mode === "modern" ? ["${MODERN}"] : ["2099-01-01"];
 			if (!speaks.includes(v)) {
@@ -338,4 +348,30 @@ test("a modern server that speaks no version we do is not sent initialize; the e
 	expect(c.isConnected()).toBe(false);
 	expect(s.methods()).toEqual(["server/discover"]);
 	expect(errors.join("\n")).toContain("2099-01-01");
+});
+
+test("a server that refuses our modern version but lists 2024-11-05 gets the handshake", async () => {
+	const s = stdio("oldonly");
+	const { c, errors } = await connect([s.cfg], true);
+	expect(errors).toEqual([]);
+	expect(s.methods()).toEqual([
+		"server/discover",
+		"initialize",
+		"notifications/initialized",
+		"tools/list",
+	]);
+	expect(c.listServers()[0]).toMatchObject({ era: "legacy", toolCount: 1 });
+});
+
+test("a discover result that lists only 2024-11-05 gets the handshake", async () => {
+	const s = stdio("discold");
+	const { c, errors } = await connect([s.cfg], true);
+	expect(errors).toEqual([]);
+	expect(s.methods()).toEqual([
+		"server/discover",
+		"initialize",
+		"notifications/initialized",
+		"tools/list",
+	]);
+	expect(c.listServers()[0]).toMatchObject({ era: "legacy", toolCount: 1 });
 });

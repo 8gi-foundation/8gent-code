@@ -238,8 +238,10 @@ export class MCPClient {
 	/**
 	 * Detect the server's era, per the 2026-07-28 lifecycle page: send
 	 * `server/discover` with our modern version. A DiscoverResult or a
-	 * recognised modern error means modern (never fall back then); any other
-	 * error, a non-discover result, or no answer in time means legacy.
+	 * recognised modern error means modern (never fall back then), except an
+	 * UnsupportedProtocolVersion error or DiscoverResult that lists 2024-11-05,
+	 * which means the handshake. Any other error, a non-discover result, or no
+	 * answer in time means legacy.
 	 * Decided once per connection, which is the server process on stdio.
 	 */
 	private async _probe(transport: Transport): Promise<Era> {
@@ -253,6 +255,9 @@ export class MCPClient {
 		} catch (err) {
 			if (!(err instanceof MCPRPCError) || !MODERN_ERRORS.has(err.code)) return "legacy";
 			const supported = (err.data as { supported?: unknown } | undefined)?.supported;
+			// UnsupportedProtocolVersion that lists the version we also speak: use it.
+			if (err.code === -32022 && Array.isArray(supported) && supported.includes(LEGACY_VERSION))
+				return "legacy";
 			throw new Error(
 				`MCP server speaks the ${MODERN_VERSION}+ protocol but refused our request (${err.message}${
 					Array.isArray(supported) ? `; it supports ${supported.join(", ")}` : ""
@@ -264,6 +269,7 @@ export class MCPClient {
 		const versions = (answer as { supportedVersions?: unknown } | null)?.supportedVersions;
 		if (!Array.isArray(versions)) return "legacy";
 		if (versions.includes(MODERN_VERSION)) return "modern";
+		if (versions.includes(LEGACY_VERSION)) return "legacy";
 		throw new Error(
 			`MCP server supports ${versions.join(", ")}; 8gent speaks ${MODERN_VERSION} and ${LEGACY_VERSION}`,
 		);
