@@ -841,32 +841,57 @@ export class ProviderManager {
 			try {
 				// Tool-call arguments ride along as extra entries so they share the
 				// same pseudonym map as message text, then are put back (#3547).
+				// Each string or number LEAF is its own entry: anonymizing the
+				// stringified JSON would turn a bare number into an unquoted token
+				// and break JSON.parse, which tripped fail-closed on clean requests.
 				const msgs = resolvedRequest.messages;
-				const argEntries = msgs.flatMap((m) =>
-					(m.toolCalls ?? []).map((tc) => ({
-						role: "tool-args",
-						content: JSON.stringify(tc.arguments ?? {}),
-					})),
-				);
+				const leaves: { role: string; content: string }[] = [];
+				const collect = (v: unknown): void => {
+					if (typeof v === "string" || typeof v === "number") {
+						leaves.push({ role: "tool-arg", content: String(v) });
+					} else if (Array.isArray(v)) {
+						for (const x of v) collect(x);
+					} else if (v && typeof v === "object") {
+						for (const x of Object.values(v)) collect(x);
+					}
+				};
+				for (const m of msgs) for (const tc of m.toolCalls ?? []) collect(tc.arguments ?? {});
 				const gated = anonymizeMessages<{ role: string; content: string }>([
 					...msgs,
-					...argEntries,
+					...leaves,
 				]);
-				if (verifyClean(gated.messages.map((m) => m.content).join("\n"))) {
+				const cleanLeaves = gated.messages.slice(msgs.length);
+				let next = 0;
+				const rebuild = (v: unknown): unknown => {
+					if (typeof v === "string") return cleanLeaves[next++].content;
+					if (typeof v === "number") {
+						const out = cleanLeaves[next++].content;
+						return out === String(v) ? v : out;
+					}
+					if (Array.isArray(v)) return v.map(rebuild);
+					if (v && typeof v === "object") {
+						return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebuild(x)]));
+					}
+					return v;
+				};
+				const cleanMsgs = (gated.messages.slice(0, msgs.length) as ChatMessage[]).map((m) =>
+					m.toolCalls
+						? {
+								...m,
+								toolCalls: m.toolCalls.map((tc) => ({
+									...tc,
+									arguments: rebuild(tc.arguments ?? {}) as Record<string, unknown>,
+								})),
+							}
+						: m,
+				);
+				// Verify the exact outbound text, including argument keys.
+				const outbound = [
+					...cleanMsgs.map((m) => m.content),
+					...cleanMsgs.flatMap((m) => (m.toolCalls ?? []).map((tc) => JSON.stringify(tc.arguments))),
+				].join("\n");
+				if (verifyClean(outbound)) {
 					piiMap = gated.map;
-					const cleanArgs = gated.messages.slice(msgs.length);
-					let next = 0;
-					const cleanMsgs = (gated.messages.slice(0, msgs.length) as ChatMessage[]).map((m) =>
-						m.toolCalls
-							? {
-									...m,
-									toolCalls: m.toolCalls.map((tc) => ({
-										...tc,
-										arguments: JSON.parse(cleanArgs[next++].content),
-									})),
-								}
-							: m,
-					);
 					resolvedRequest = { ...resolvedRequest, messages: cleanMsgs };
 				} else {
 					failClosed = true;

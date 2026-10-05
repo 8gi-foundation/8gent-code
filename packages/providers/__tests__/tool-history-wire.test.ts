@@ -30,10 +30,12 @@ let settingsPath: string;
 let saved: Array<readonly [string, string | undefined]>;
 const realFetch = globalThis.fetch;
 let captured: Record<string, any> | null;
+let capturedUrl: string | null;
 
 function useProvider(activeProvider: string, activeModel: string, providers: object, reply: object) {
 	fs.writeFileSync(settingsPath, JSON.stringify({ activeProvider, activeModel, providers }));
-	globalThis.fetch = (async (_url: string, init: { body: string }) => {
+	globalThis.fetch = (async (url: string, init: { body: string }) => {
+		capturedUrl = String(url);
 		captured = JSON.parse(init.body);
 		return new Response(JSON.stringify(reply), {
 			status: 200,
@@ -65,6 +67,7 @@ beforeEach(() => {
 	delete process.env.ANTHROPIC_API_KEY;
 	delete process.env.EIGHT_EFFORT_POLICY;
 	captured = null;
+	capturedUrl = null;
 });
 
 afterEach(() => {
@@ -148,6 +151,35 @@ describe("OpenAI-compatible shape", () => {
 		const args = JSON.parse(captured!.messages[1].tool_calls[0].function.arguments);
 		expect(typeof args.to).toBe("string");
 		expect(args.to).not.toContain("@example.com");
+	});
+
+	test("long numeric arguments keep valid JSON and still reach the cloud provider", async () => {
+		useOpenAI();
+		const numeric: ChatMessage[] = [
+			{ role: "user", content: "log the event" },
+			{
+				role: "assistant",
+				content: "",
+				toolCalls: [
+					{
+						id: "c1",
+						name: "log_event",
+						arguments: { ts: 1728123456789, count: 3, ok: true, tags: ["a", 42], meta: { n: null } },
+					},
+				],
+			},
+			{ role: "tool", content: "logged", toolCallId: "c1" },
+		];
+		await chat(numeric);
+		expect(capturedUrl).toContain("api.openai.com");
+		const raw = captured!.messages[1].tool_calls[0].function.arguments;
+		const args = JSON.parse(raw);
+		expect(raw).not.toContain("1728123456789");
+		expect(args.ts).not.toBe(1728123456789);
+		expect(args.count).toBe(3);
+		expect(args.ok).toBe(true);
+		expect(args.tags).toEqual(["a", 42]);
+		expect(args.meta).toEqual({ n: null });
 	});
 });
 
