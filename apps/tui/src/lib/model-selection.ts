@@ -363,16 +363,24 @@ export function listsInstalledOllamaModels(provider: string): boolean {
  * not have (#3332), or null when there is nothing to tell: a first pick (no
  * previous model), a provider not backed by Ollama, or a model that is
  * installed (an embedding-model swap is not a missing model).
+ *
+ * `installed` is Ollama's raw /api/tags list, before chat filtering. A model
+ * in it but not in `available` is installed and cannot chat (#3548), so the
+ * notice says that rather than claiming it is not installed.
  */
 export function missingModelNotice(opts: {
 	provider: string;
 	from: string;
 	to: string;
 	available: string[];
+	installed?: string[];
 }): string | null {
-	const { provider, from, to, available } = opts;
+	const { provider, from, to, available, installed } = opts;
 	if (!from || !to || from === to) return null;
 	if (!listsInstalledOllamaModels(provider)) return null;
 	if (available.includes(from)) return null;
+	if (installed?.includes(from)) {
+		return `${from} cannot be used for chat, so this session uses ${to}. Pick another with /model.`;
+	}
 	return `${from} is not installed in Ollama, so this session uses ${to}. Pick another with /model.`;
 }

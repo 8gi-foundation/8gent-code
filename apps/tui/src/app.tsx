@@ -1368,6 +1368,9 @@ export function App({
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	// Ollama's full /api/tags list before chat filtering, so a model that is
+	// installed but cannot chat is not reported as missing (#3548).
+	const installedOllamaModelsRef = useRef<string[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [modelsLoading, setModelsLoading] = useState(false);
@@ -1419,7 +1422,10 @@ export function App({
 						// What each model reports it can do decides first, so decision-only
 						// models are never offered for chat; the name filter is the fallback (#3548).
 						const chatModels = await filterChatCapable(ollamaRoot, allModels);
-						if (!cancelled) setAvailableModels(chatModels);
+						if (!cancelled) {
+							installedOllamaModelsRef.current = allModels;
+							setAvailableModels(chatModels);
+						}
 					}
 				} else if (currentProvider === "llama-server") {
 					// llama-server lists the model(s) it serves (#3149).
@@ -1531,6 +1537,7 @@ export function App({
 			from: currentModel,
 			to: next,
 			available: availableModels,
+			installed: installedOllamaModelsRef.current,
 		});
 		if (notice) addSystemMessage(notice);
 		setCurrentModel(next);

@@ -311,6 +311,30 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 		expect(notice).not.toContain("\n");
 	});
 
+	test("a model that is installed but cannot chat is not called missing (#3548)", () => {
+		const notice = missingModelNotice({
+			provider: "ollama",
+			from: "clef:27b",
+			to: "qwen3.5:14b",
+			available: ["qwen3.5:14b"],
+			installed: ["clef:27b", "qwen3.5:14b"],
+		});
+		expect(notice).toBe("clef:27b cannot be used for chat, so this session uses qwen3.5:14b. Pick another with /model.");
+		expect(notice).not.toContain("not installed");
+	});
+
+	test("a model absent from the installed list is still called missing", () => {
+		expect(
+			missingModelNotice({
+				provider: "8gent",
+				from: "eight-1.0-q3:14b",
+				to: "qwen3.5:14b",
+				available: ["qwen3.5:14b"],
+				installed: ["clef:27b", "qwen3.5:14b"],
+			}),
+		).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.5:14b. Pick another with /model.");
+	});
+
 	test("no notice for a first pick, a non-Ollama provider, or a model that is installed", () => {
 		expect(missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed })).toBeNull();
 		expect(missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] })).toBeNull();
