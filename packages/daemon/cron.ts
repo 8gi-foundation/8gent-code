@@ -5,7 +5,7 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
-import { shellInvocation } from "../core/shell";
+import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { bus } from "./events";
 
 export type JobType = "shell" | "agent-prompt" | "webhook";
@@ -20,6 +20,12 @@ export interface CronJob {
 	lastRun: string | null;
 	nextRun: string | null;
 	recurring: boolean;
+	/** agent-prompt only, EIGHT_CRON_WHEN=1: shell check run before queuing; exit 0 queues, other exits skip. */
+	when?: string;
+	/** After this many consecutive skips the job runs without checking. */
+	maxSkips?: number;
+	/** Consecutive skips so far (written by the gate). */
+	skips?: number;
 }
 
 const CRON_PATH = `${process.env.HOME}/.8gent/cron.json`;
@@ -71,7 +77,81 @@ function matchesCron(expr: string, now: Date): boolean {
 	});
 }
 
+const WHEN_TIMEOUT_MS = 5_000;
+const WHEN_KILL_GRACE_MS = 500;
+
+type WhenExit = { code: number | null; signal: string | null } | "timeout" | "error";
+
+/**
+ * Run a job's `when` check. Returns "run" or "skip". Anything that stops the
+ * check from giving a real answer (spawn failure, exit 126/127, signal,
+ * timeout) fails open: the job runs as it would without a check. The check
+ * runs in its own process group, which is always killed before returning, so
+ * background or TERM-trapping children cannot outlive it.
+ */
+async function whenGate(job: CronJob): Promise<"run" | "skip"> {
+	const skips = job.skips ?? 0;
+	if (job.maxSkips && job.maxSkips > 0 && skips >= job.maxSkips) {
+		console.log(`[cron] when: ${job.name} skipped ${skips} times, running anyway`);
+		return "run";
+	}
+	const command = job.when as string;
+	bus.emit("tool:start", { sessionId: "cron", tool: "cron:when", input: command });
+	const startMs = Date.now();
+	let result: WhenExit = "error";
+	let pid: number | undefined;
+	try {
+		const child = spawnShell(command, { stdio: "ignore", processGroup: true });
+		pid = child.pid;
+		const exited = new Promise<WhenExit>((resolve) => {
+			child.once("exit", (code, signal) => resolve({ code, signal }));
+			child.once("error", () => resolve("error"));
+		});
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timedOut = new Promise<"timeout">((r) => {
+			timer = setTimeout(() => r("timeout"), WHEN_TIMEOUT_MS);
+		});
+		result = await Promise.race([exited, timedOut]);
+		clearTimeout(timer);
+		if (result === "timeout") {
+			killProcessTree(pid, "SIGTERM");
+			await Promise.race([exited, Bun.sleep(WHEN_KILL_GRACE_MS)]);
+		}
+	} catch {
+		result = "error";
+	} finally {
+		killProcessTree(pid, "SIGKILL");
+	}
+	const exitCode = typeof result === "object" ? result.code : null;
+	const failed = typeof result !== "object" || result.signal !== null || exitCode === 126 || exitCode === 127;
+	const outcome = exitCode === 0 ? "run" : failed ? "failed-open" : "skip";
+	bus.emit("tool:result", {
+		sessionId: "cron",
+		tool: "cron:when",
+		output: { command, exitCode, outcome },
+		durationMs: Date.now() - startMs,
+	});
+	if (outcome === "failed-open") {
+		const why = typeof result === "string" ? result : result.signal ? `signal ${result.signal}` : `exit ${exitCode}`;
+		console.log(`[cron] when: ${job.name} check failed (${why}), running anyway`);
+	}
+	return outcome === "skip" ? "skip" : "run";
+}
+
 async function executeJob(job: CronJob): Promise<void> {
+	if (process.env.EIGHT_CRON_WHEN === "1" && job.type === "agent-prompt" && job.when) {
+		if ((await whenGate(job)) === "skip") {
+			job.skips = (job.skips ?? 0) + 1;
+			console.log(`[cron] when: ${job.name} skipped (${job.skips} in a row)`);
+			if (!job.recurring) {
+				job.enabled = false;
+				console.log(`[cron] when: ${job.name} is a one-shot, skip consumed it, will not run`);
+			}
+			await saveJobs();
+			return;
+		}
+		job.skips = 0;
+	}
 	console.log(`[cron] executing job: ${job.name} (${job.type})`);
 	bus.emit("tool:start", {
 		sessionId: "cron",
