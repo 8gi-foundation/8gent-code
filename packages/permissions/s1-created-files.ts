@@ -27,25 +27,29 @@
  * overwrite or a `>` truncation of a pre-existing file is a modification, not
  * a creation.
  *
- * Redirect targets are pinned (8SO, 2026-10-05). Before the command runs,
- * an absent target is created empty with O_EXCL, and its device and inode
- * are kept (with the descriptor held open, so the inode cannot be reused).
- * After it exits, the target is recorded only if it is still that inode. A
- * shell `>` or `>>` reuses it; `mv user-file target > target`, or any other
- * rename onto the target, replaces it, and then nothing is recorded. A
- * recorded target the command replaces is forgotten. A command that any rule
- * escalates or blocks (zip -qm - user-file > out.zip fills the target's own
- * inode with a file it deletes), or that changes directory, records nothing.
+ * Redirect targets are pinned. Invariant: a redirect target is recorded only
+ * if, when the command ends, the path names the very inode this module
+ * created for it before the command started. Before the command runs, each
+ * absent target whose parent directory resolves inside the working directory
+ * is created empty with O_EXCL, and its device and inode are kept while the
+ * descriptor stays open (so the inode cannot be reused). The shell's `>` and
+ * `>>` open that inode; anything that puts a different inode at the path
+ * leaves it unrecorded. A recorded target is refreshed only if it is still
+ * the same inode, and forgotten otherwise. Commands whose effect on the
+ * target's contents cannot be attributed to the redirect alone record
+ * nothing: any command a rule escalates or blocks, and any command that
+ * changes directory (its relative targets would resolve elsewhere).
  *
- * Known effects of the pinning: the target exists, empty, from just before
- * the command starts, so a test such as `[ -e target ]` inside the command
- * sees it; and a redirect the shell never opens (a branch not taken, or a
- * command that fails before it) leaves that empty file behind.
+ * Effects of pre-creating: the target exists, empty, from just before the
+ * command starts, so a test such as `[ -e target ]` inside the command sees
+ * it; and a redirect the shell never opens (a branch not taken, or a command
+ * that fails before it) leaves that empty file behind.
  */
 
 import { constants, closeSync, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { decideRules, maskQuotes } from "../decide/rules";
+import { inside } from "./s1-rm-nothing";
 
 /** The words a recorded path may contain: no quotes, glob, `$`, `~`, spaces. */
 const PLAIN_PATH = /^[A-Za-z0-9._/+,=@:-]+$/;
@@ -177,15 +181,29 @@ function inodeOf(abs: string): string | null {
 
 const CHANGES_DIR = /(^|[\s;&|(])(cd|pushd|popd)(?=[\s;&|)]|$)/;
 
+/** At most this many redirect targets are pinned per command; the rest are not. */
+const MAX_PINNED = 64;
+
 /**
- * Pin one redirect target (8SO, 2026-10-05). Absent: create it empty with
- * O_EXCL, hold the descriptor, and record it after only if it is still that
- * inode. Already recorded: refresh it after if it is still the same inode,
- * else forget it. Anything else (it existed and is not this session's, or it
- * cannot be created): nothing.
+ * Pin one redirect target. Invariant: the returned finisher records `abs`
+ * only when it still names the inode created here, and refreshes a recorded
+ * `abs` only when it still names the inode it had before the command.
+ *   - Absent, with a parent whose realpath is inside `root`: created empty
+ *     with O_EXCL; the descriptor is held until the finisher runs.
+ *   - Absent with a parent that does not resolve, or resolves outside
+ *     `root`: nothing is created or recorded.
+ *   - Already recorded by this session: its inode is kept for comparison.
+ *   - Anything else (it existed and is not this session's): nothing.
  */
-function pinTarget(abs: string, record: CreatedFiles): () => void {
+function pinTarget(abs: string, root: string, record: CreatedFiles): () => void {
 	if (pathAbsent(abs)) {
+		let parent: string;
+		try {
+			parent = realpathSync(path.dirname(abs));
+		} catch {
+			return () => {};
+		}
+		if (!inside(parent, root)) return () => {};
 		let fd: number;
 		try {
 			fd = openSync(abs, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o666);
@@ -223,10 +241,11 @@ function pinTarget(abs: string, record: CreatedFiles): () => void {
 
 /**
  * Bracket one shell command: call before it runs, and call the result after
- * it exits. Each plain redirect target is pinned (`pinTarget`): an absent
- * one is created empty now and recorded after if the shell kept its inode; a
- * recorded one is refreshed, or forgotten if it was replaced. A command any
- * rule escalates or blocks, or that changes directory, records nothing.
+ * it exits. Invariant: a target ends up recorded only if it is still the
+ * inode `pinTarget` created for it (see `pinTarget` for each case). The
+ * first MAX_PINNED distinct plain targets are pinned. A command any rule
+ * escalates or blocks, a command that changes directory, or a working
+ * directory that does not resolve pins nothing.
  */
 export function watchRedirects(
 	command: string,
@@ -238,12 +257,14 @@ export function watchRedirects(
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
 		if (decideRules(command).rules.length > 0) return () => {};
+		const root = realpathSync(cwd);
 		const seen = new Set<string>();
 		for (const t of redirectTargets(command)) {
 			const abs = path.resolve(cwd, t);
 			if (seen.has(abs)) continue;
+			if (seen.size >= MAX_PINNED) break;
 			seen.add(abs);
-			watches.push(pinTarget(abs, record));
+			watches.push(pinTarget(abs, root, record));
 		}
 	} catch {
 		// Fall through with what was pinned, so every descriptor is closed.

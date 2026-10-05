@@ -62,11 +62,9 @@
  * must be absolute and pass the realpath test above; a relative path there
  * returns null.
  *
- * Existing temp files are never passed (8SO, 2026-10-05). #3395 passed an
- * existing temp file born this session; the session can move any readable
- * file into a fresh temp path (zip -m, rsync --remove-source-files), so that
- * allowance let a user's file be removed without the judge. It is withdrawn:
- * an existing absolute path always goes to the judge.
+ * Invariant for absolute paths: only an ABSENT path passes. An absolute path
+ * that exists always goes to the judge, whoever created it and whenever:
+ * neither birth time nor ownership shows where a file's contents came from.
  *
  * Known window: another process (the agent's background tasks, any other
  * process of this uid, or, in a shared temp root, another user) could create
@@ -105,7 +103,8 @@ function absent(p: string): boolean {
 	}
 }
 
-function inside(child: string, root: string): boolean {
+/** True when `child` is `root` or below it (both already resolved). */
+export function inside(child: string, root: string): boolean {
 	const rel = path.relative(root, child);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
@@ -299,7 +298,7 @@ export function rmOfNothingOrOwn(
 		for (const p of paths) {
 			if (p.startsWith("/")) {
 				// Absolute: only an absent path under a real temp root (#3381).
-				// An existing one is judged, whoever made it (8SO, 2026-10-05).
+				// An existing one is always judged.
 				if (!absentInTemp(p)) return null;
 				temp = true;
 				continue;

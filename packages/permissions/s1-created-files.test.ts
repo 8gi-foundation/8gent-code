@@ -418,6 +418,25 @@ describe("watchRedirects: pinning", () => {
 		expect(rec.size).toBe(0);
 	});
 
+	test("a target whose parent resolves outside the working directory is never created", () => {
+		const rec = new CreatedFiles();
+		for (const c of ["echo x > escape/pinned.txt", "false && echo x > escape/pinned.txt"]) {
+			const done = watchRedirects(c, ws, rec);
+			expect(existsSync(join(outside, "pinned.txt"))).toBe(false);
+			done();
+		}
+		expect(rec.size).toBe(0);
+	});
+
+	test("at most 64 targets are pinned per command", () => {
+		const rec = new CreatedFiles();
+		const names = Array.from({ length: 70 }, (_, i) => `t${i}.txt`);
+		const done = watchRedirects(`echo x ${names.map((n) => `> ${n}`).join(" ")}`, ws, rec);
+		const made = names.filter((n) => existsSync(join(ws, n)));
+		expect(made).toEqual(names.slice(0, 64));
+		done();
+	});
+
 	test("a target in a directory that does not exist yet is not created or recorded", () => {
 		const rec = new CreatedFiles();
 		const done = watchRedirects("echo x > newdir/f.txt", ws, rec);
