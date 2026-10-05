@@ -164,6 +164,11 @@ export class AgentPool {
 		sessionId: string,
 		channel: string,
 		overrides?: SessionOverrides,
+		/**
+		 * journal: false skips the resume journal write. The boot resume uses
+		 * it so the entry keeps naming the old checkpoint until restore succeeds.
+		 */
+		options: { journal?: boolean } = {},
 	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
@@ -289,7 +294,7 @@ export class AgentPool {
 			clerkId: overrides?.clerkId,
 		});
 
-		if (this.journal) {
+		if (this.journal && options.journal !== false) {
 			try {
 				this.journal.upsert({
 					sessionId,

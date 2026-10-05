@@ -94,6 +94,68 @@ describe("SessionJournal", () => {
 		fs.writeFileSync(journalPath, "{not json");
 		expect(new mod.SessionJournal(journalPath).read()).toEqual([]);
 	});
+
+	test("the journal file is owner-only (0600)", () => {
+		const j = new mod.SessionJournal(journalPath);
+		j.upsert({
+			sessionId: "a",
+			channel: "api",
+			ttSessionId: "session_1",
+			createdAt: 1,
+			overrides: { clerkId: "u1" },
+		});
+		expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
+		// A rewrite keeps it owner-only, even over a file that was looser.
+		fs.chmodSync(journalPath, 0o644);
+		j.upsert({ sessionId: "b", channel: "api", ttSessionId: "session_2", createdAt: 2 });
+		expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
+	});
+
+	test("a failed write throws and leaves no temp file behind", () => {
+		// The journal path is a non-empty directory, so the final rename fails.
+		fs.mkdirSync(journalPath);
+		fs.writeFileSync(path.join(journalPath, "occupied"), "x");
+		const j = new mod.SessionJournal(journalPath);
+		expect(() =>
+			j.upsert({ sessionId: "a", channel: "api", ttSessionId: "session_1", createdAt: 1 }),
+		).toThrow();
+		const leftovers = fs.readdirSync(path.dirname(journalPath)).filter((f) => f.includes(".tmp"));
+		expect(leftovers).toEqual([]);
+	});
+
+	test("malformed entries are dropped on read; valid ones are kept", () => {
+		const good = {
+			sessionId: "table:ws-8gi--x:8TO",
+			channel: "table",
+			ttSessionId: "session_1_ab",
+			createdAt: 1,
+		};
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					good,
+					{ channel: "api", ttSessionId: "session_2", createdAt: 2 },
+					{ sessionId: "b", channel: "api", ttSessionId: "../outside", createdAt: 3 },
+					{ sessionId: "c", channel: "api", ttSessionId: "a/b", createdAt: 4 },
+					{ sessionId: "d", channel: "api", ttSessionId: "session..x", createdAt: 5 },
+					{ sessionId: "e", channel: "api", ttSessionId: "session_5", createdAt: "6" },
+					{
+						sessionId: "f",
+						channel: "api",
+						ttSessionId: "session_6",
+						createdAt: 7,
+						overrides: [1],
+					},
+					{ sessionId: "g\n", channel: "api", ttSessionId: "session_7", createdAt: 8 },
+					null,
+					"s_x",
+				],
+			}),
+		);
+		expect(new mod.SessionJournal(journalPath).read()).toEqual([good]);
+	});
 });
 
 describe("AgentPool journaling", () => {
@@ -146,7 +208,11 @@ describe("resumeJournaledSessions", () => {
 
 		const restored = after.getAgent("s_task")!;
 		expect(restored.getMessageHistory().slice(1)).toEqual(history.slice(1));
-		expect(after.getSessionInfo("s_task")).toEqual({ channel: "api", messageCount: 0, busy: false });
+		expect(after.getSessionInfo("s_task")).toEqual({
+			channel: "api",
+			messageCount: 0,
+			busy: false,
+		});
 
 		// The journal now points at the new agent's lineage, which already
 		// holds the restored state, so a second crash still resumes.
@@ -156,9 +222,75 @@ describe("resumeJournaledSessions", () => {
 		expect(store.latest(entry.ttSessionId)!.toolCallCount).toBe(16);
 	});
 
+	test("a failed restore keeps the old checkpoint in the journal so the next start retries", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		const before = newPool(journal);
+		before.createSession("s_retry", "api", { tenantId: "t1" });
+		const oldTtId = before.getAgent("s_retry")!.getTimeTravelSessionId();
+		const store = new TimeTravelStore({ dataDir: ttDir });
+		const history = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "migrate the db" },
+			{ role: "assistant", content: "halfway" },
+		];
+		store.save(oldTtId, history, { reason: "interval", toolCallCount: 4 });
+
+		// First boot: the restore hits a transient error.
+		const first = newPool(journal);
+		const failing: import("./session-journal").ResumePool = {
+			createSession: (...args) => first.createSession(...args),
+			getAgent: (id) => {
+				const a = first.getAgent(id);
+				if (!a) return null;
+				return {
+					adoptTimeTravelFork: () => {
+						throw new Error("EMFILE: too many open files");
+					},
+					getTimeTravelSessionId: () => a.getTimeTravelSessionId(),
+				};
+			},
+		};
+		const [r1] = mod.resumeJournaledSessions(journal, failing, store);
+		expect(r1.checkpointId).toBeNull();
+		expect(first.hasSession("s_retry")).toBe(true);
+		const kept = journal.read().find((e) => e.sessionId === "s_retry")!;
+		expect(kept.ttSessionId).toBe(oldTtId);
+		expect(kept.overrides).toEqual({ tenantId: "t1" });
+
+		// Next boot: the restore works and the history is back.
+		const second = newPool(journal);
+		const [r2] = mod.resumeJournaledSessions(journal, second, store);
+		expect(r2.toolCallCount).toBe(4);
+		expect(second.getAgent("s_retry")!.getMessageHistory().slice(1)).toEqual(history.slice(1));
+		expect(journal.read().find((e) => e.sessionId === "s_retry")!.ttSessionId).toBe(
+			second.getAgent("s_retry")!.getTimeTravelSessionId(),
+		);
+	});
+
+	test("a crash during restore, before the fork, still leaves the old checkpoint journaled", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_mid",
+			channel: "api",
+			ttSessionId: "session_mid_old",
+			createdAt: 1,
+		});
+		const store = new TimeTravelStore({ dataDir: ttDir });
+		store.save("session_mid_old", [{ role: "user", content: "x" }], { reason: "manual" });
+		// Recreate the session the way resume does, then stop (the "crash").
+		const pool = newPool(journal);
+		pool.createSession("s_mid", "api", undefined, { journal: false });
+		expect(journal.read()[0].ttSessionId).toBe("session_mid_old");
+	});
+
 	test("a missing checkpoint blob leaves the session empty instead of failing boot", () => {
 		const journal = new mod.SessionJournal(journalPath);
-		journal.upsert({ sessionId: "s_gone", channel: "api", ttSessionId: "session_gone", createdAt: 1 });
+		journal.upsert({
+			sessionId: "s_gone",
+			channel: "api",
+			ttSessionId: "session_gone",
+			createdAt: 1,
+		});
 		const store = new TimeTravelStore({ dataDir: ttDir });
 		const meta = store.save("session_gone", [{ role: "user", content: "x" }], { reason: "manual" });
 		fs.rmSync(path.join(ttDir, "blobs"), { recursive: true, force: true });
