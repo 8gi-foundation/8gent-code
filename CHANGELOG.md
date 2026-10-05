@@ -55,6 +55,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added - resumable, seeded benchmark runs (#3557)
 - `benchmarks/runner.ts --resume` continues an interrupted run from the last finished item instead of redoing it, records the seed (`--seed`), and labels resumed runs in reports. Per-item results are written by `benchmarks/run-store.ts`.
 - Tests in `benchmarks/run-store.test.ts`, including an end-to-end subprocess run against a local stub.
+### Added (off by default) - MCP 2026-07-28 protocol with the old handshake as fallback (#3549)
+- With `EIGHT_MCP_MODERN=1`, the MCP client (`packages/mcp/client.ts`, `packages/mcp/transport.ts`) reaches modern-only servers over stdio and HTTP and falls back to the legacy handshake, and the 8gent MCP server (`packages/mcp/server.ts`) answers both eras. Default behaviour is unchanged.
+- Tests in `packages/mcp/era.test.ts` and `packages/mcp/server-era.test.ts`; the flag-off tests pin current behaviour.
 
 ### Added (opt-in) - action-first communication style (#3487)
 - New `communicationStyle` value `action-first`, choice 6 in the onboarding communication step (`packages/self-autonomy/onboarding.ts`), also accepted by name. When picked, `USER_CONTEXT_SEGMENT` in `packages/eight/prompts/system-prompt.ts` adds `ACTION_FIRST_STYLE`: open with the action or answer, numbered steps, lists capped at five, commands in code blocks, plain failure statements, minutes for estimates, no recap or sign-off, and one closing "Next:" line. It opens with a precedence line saying these rules win over the base prompt's joke `COMPLETED` summary (`packages/eight/prompt.ts`) and the greeting and completion phrases in the personality block (`packages/eight/agent.ts`); a required completion marker becomes one plain line just before "Next:". Written in our own words; nothing on screen names a condition.
