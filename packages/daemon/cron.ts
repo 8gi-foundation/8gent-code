@@ -20,6 +20,12 @@ export interface CronJob {
 	lastRun: string | null;
 	nextRun: string | null;
 	recurring: boolean;
+	/** agent-prompt only, EIGHT_CRON_WHEN=1: shell check run before queuing; exit 0 queues, other exits skip. */
+	when?: string;
+	/** After this many consecutive skips the job runs without checking. */
+	maxSkips?: number;
+	/** Consecutive skips so far (written by the gate). */
+	skips?: number;
 }
 
 const CRON_PATH = `${process.env.HOME}/.8gent/cron.json`;
@@ -71,7 +77,59 @@ function matchesCron(expr: string, now: Date): boolean {
 	});
 }
 
+const WHEN_TIMEOUT_MS = 5_000;
+
+/**
+ * Run a job's `when` check. Returns "run" or "skip". Anything that stops the
+ * check from giving a real answer (spawn failure, exit 126/127, signal,
+ * timeout) fails open: the job runs as it would without a check.
+ */
+async function whenGate(job: CronJob): Promise<"run" | "skip"> {
+	const skips = job.skips ?? 0;
+	if (job.maxSkips && job.maxSkips > 0 && skips >= job.maxSkips) {
+		console.log(`[cron] when: ${job.name} skipped ${skips} times, running anyway`);
+		return "run";
+	}
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const sh = shellInvocation(job.when as string);
+		const proc = Bun.spawn([sh.file, ...sh.args], {
+			stdout: "ignore",
+			stderr: "ignore",
+			windowsHide: true,
+			windowsVerbatimArguments: sh.windowsVerbatimArguments,
+		});
+		const timedOut = new Promise<"timeout">((resolve) => {
+			timer = setTimeout(() => {
+				proc.kill();
+				resolve("timeout");
+			}, WHEN_TIMEOUT_MS);
+		});
+		const code = await Promise.race([proc.exited, timedOut]);
+		if (code === 0) return "run";
+		if (code === "timeout" || proc.signalCode || code === 126 || code === 127) {
+			console.log(`[cron] when: ${job.name} check failed (${code === "timeout" ? "timeout" : `exit ${code}`}), running anyway`);
+			return "run";
+		}
+		console.log(`[cron] when: ${job.name} skipped (exit ${code})`);
+		return "skip";
+	} catch (err) {
+		console.log(`[cron] when: ${job.name} check errored (${String(err)}), running anyway`);
+		return "run";
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function executeJob(job: CronJob): Promise<void> {
+	if (process.env.EIGHT_CRON_WHEN === "1" && job.type === "agent-prompt" && job.when) {
+		if ((await whenGate(job)) === "skip") {
+			job.skips = (job.skips ?? 0) + 1;
+			await saveJobs();
+			return;
+		}
+		job.skips = 0;
+	}
 	console.log(`[cron] executing job: ${job.name} (${job.type})`);
 	bus.emit("tool:start", {
 		sessionId: "cron",
