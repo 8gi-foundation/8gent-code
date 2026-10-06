@@ -33,6 +33,12 @@ interface SessionEntry {
 	lastActiveAt: number;
 	messageCount: number;
 	busy: boolean; // true while agent.chat() is in flight
+	/**
+	 * Waiters for this session, FIFO (#3554, EIGHT_SESSION_QUEUE=1 only).
+	 * Each is resolved with true when handed the session, or false when the
+	 * session ends before its turn.
+	 */
+	queue: Array<(admitted: boolean) => void>;
 	/** Tenant attribution for Wave 4 multi-tenant rollout. */
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
@@ -70,6 +76,17 @@ const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** #3554: queue messages to a busy session instead of refusing them. Off by default. */
+function sessionQueueEnabled(): boolean {
+	return process.env.EIGHT_SESSION_QUEUE === "1";
+}
+
+/** #3554: max messages waiting per session (not counting the one running). */
+function sessionQueueMax(): number {
+	const n = Number(process.env.EIGHT_SESSION_QUEUE_MAX);
+	return Number.isInteger(n) && n >= 0 ? n : 32;
+}
 
 /** Known session channels. Add new entries here when wiring a new surface. */
 export const KNOWN_CHANNELS = [
@@ -290,6 +307,7 @@ export class AgentPool {
 			lastActiveAt: now,
 			messageCount: 0,
 			busy: false,
+			queue: [],
 			tenantId,
 			clerkId: overrides?.clerkId,
 		});
@@ -322,12 +340,23 @@ export class AgentPool {
 		}
 
 		if (entry.busy) {
-			bus.emit("agent:error", {
-				sessionId,
-				error: "agent is busy processing another message",
-			});
-			return "[error] agent is busy";
+			if (!sessionQueueEnabled()) {
+				bus.emit("agent:error", {
+					sessionId,
+					error: "agent is busy processing another message",
+				});
+				return "[error] agent is busy";
+			}
+			// #3554: wait in line. The finishing turn hands the session over with
+			// busy still true, so nothing can jump the queue in between.
+			if (entry.queue.length >= sessionQueueMax()) {
+				bus.emit("agent:error", { sessionId, error: "session queue full" });
+				return "[error] session queue full";
+			}
+			const admitted = await new Promise<boolean>((resolve) => entry.queue.push(resolve));
+			if (!admitted) return "[error] session ended";
 		}
+		entry.busy = true;
 
 		// Usage monitor gate - stop burning tokens when limits hit
 		const usage = getUsageMonitor();
@@ -335,6 +364,7 @@ export class AgentPool {
 		if (!budget.allowed) {
 			const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
 			bus.emit("agent:error", { sessionId, error: msg });
+			this.release(entry);
 			return msg;
 		}
 		const warning = usage.getWarning();
@@ -346,7 +376,6 @@ export class AgentPool {
 			});
 		}
 
-		entry.busy = true;
 		entry.messageCount++;
 		entry.lastActiveAt = Date.now();
 		bus.emit("agent:thinking", { sessionId });
@@ -391,8 +420,15 @@ export class AgentPool {
 			bus.emit("agent:error", { sessionId, error: errorMsg });
 			return `[error] ${errorMsg}`;
 		} finally {
-			entry.busy = false;
+			this.release(entry);
 		}
+	}
+
+	/** Hand the session to the next queued message, or mark it idle. */
+	private release(entry: SessionEntry): void {
+		const next = entry.queue.shift();
+		if (next) next(true);
+		else entry.busy = false;
 	}
 
 	/** Destroy a session and its Agent */
@@ -402,6 +438,8 @@ export class AgentPool {
 
 		this.sessions.delete(sessionId);
 		this.unjournal(sessionId);
+		// #3554: queued messages never run on an ended session.
+		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
 	}
 
