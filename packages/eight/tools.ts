@@ -78,6 +78,7 @@ import {
 	search as searchDesignSystems_db,
 	suggestForProject as suggestDesignForProject,
 } from "../design-systems/index.js";
+import { filmCraft } from "../film-craft/index";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, createInfiniteRunner, formatInfiniteState } from "../infinite";
 import {
@@ -1177,6 +1178,33 @@ export class ToolExecutor {
 					},
 				},
 			},
+			// Film craft (#3599): the 8GI film look as presets, applied to slide videos
+			{
+				type: "function",
+				function: {
+					name: "film_craft",
+					description:
+						"[VIDEO] Makes slide videos look designed, not like a default slideshow. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
+					parameters: {
+						type: "object",
+						properties: {
+							action: { type: "string", description: "list | plan | bed | mix" },
+							preset: { type: "string", description: "Film preset name from action=list (default lotus-night)" },
+							grade_from: { type: "string", description: "Optional: take grade, camera and cuts from this preset, titles from preset" },
+							slides: { type: "array", description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order", items: { type: "object" } },
+							out_dir: { type: "string", description: "plan: folder for film.sh, frames and the mp4 (default video)" },
+							out: { type: "string", description: "plan: output mp4 file name in out_dir (default film.mp4); bed: wav path" },
+							width: { type: "number", description: "plan: width (default 1280)" },
+							height: { type: "number", description: "plan: height (default 720)" },
+							narration: { type: "string", description: "plan: narration audio file; the bed ducks under it" },
+							bed: { type: "string", description: "plan: music bed wav from action=bed" },
+							seconds: { type: "number", description: "bed: length in seconds" },
+							hits: { type: "array", items: { type: "number" }, description: "bed: cut times in seconds (risers and booms land on them)" },
+						},
+						required: ["action"],
+					},
+				},
+			},
 			// Design tools
 			{
 				type: "function",
@@ -1925,6 +1953,14 @@ export class ToolExecutor {
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+
+			case "film_craft": {
+				// Every path the recipe touches is absolute, so film.sh runs the same from any folder.
+				const at = (p: unknown, dflt?: string) => (p ? path.resolve(this.workingDirectory, p as string) : dflt);
+				const outDir = at(args.out_dir, path.join(this.workingDirectory, "video")) as string;
+				const out = args.action === "bed" ? at(args.out, path.join(outDir, "bed.wav")) : args.out;
+				return filmCraft({ ...args, out_dir: outDir, out, narration: at(args.narration), bed: at(args.bed) });
+			}
 
 			// Design tools
 			case "suggest_design":
