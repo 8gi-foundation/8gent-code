@@ -226,6 +226,15 @@ describe("nothing drawn", () => {
 		expect(isFlat(slidePixels(textLine(400, 300, 480, 40), () => BG, BG + 20))).toBe(false);
 	});
 
+	test("isFlat compares R, G and B: red text on an equally bright grey is drawn", () => {
+		const px = Buffer.alloc(100 * 4);
+		for (let i = 0; i < 100; i++) px.set(i < 10 ? [255, 0, 0, 255] : [76, 76, 76, 255], i * 4);
+		expect(isFlat(px, 4)).toBe(false);
+		const flat = Buffer.alloc(100 * 4);
+		for (let i = 0; i < 100; i++) flat.set([76, 76, 76, i], i * 4);
+		expect(isFlat(flat, 4)).toBe(true);
+	});
+
 	test("pilot run 2026-10-06_203151: five pure white slides are named as blank", async () => {
 		const dir = tempDir("image-shape-");
 		for (const n of [1, 2, 3, 4, 5])
@@ -236,7 +245,7 @@ describe("nothing drawn", () => {
 		expect(await imagesWrittenLine(dir, Date.now() - 5_000)).toBe(
 			"Images written: 5 (1280x720): video/slides/1.png, video/slides/2.png, video/slides/3.png, video/slides/4.png, video/slides/5.png. " +
 				"Nothing is drawn on video/slides/1.png, video/slides/2.png, video/slides/3.png, video/slides/4.png, video/slides/5.png: each is one flat colour. " +
-				"The draw step did not put anything on them; fix the command that drew them and re-render.",
+				"If they should show content, the command that drew them put nothing on them; fix it and re-render.",
 		);
 	});
 

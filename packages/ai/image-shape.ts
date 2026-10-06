@@ -125,14 +125,23 @@ export function clippedSides(px: Uint8Array | Buffer, width: number, height: num
 	return sides;
 }
 
-/** True when every sampled pixel is within FLAT_RANGE grey levels of the others. */
-export function isFlat(grey: Uint8Array | Buffer): boolean {
-	let lo = 255;
-	let hi = 0;
-	for (const v of grey) {
-		if (v < lo) lo = v;
-		if (v > hi) hi = v;
-		if (hi - lo > FLAT_RANGE) return false;
+/**
+ * True when, in every colour channel, all sampled pixels are within
+ * FLAT_RANGE levels of each other. `channels` is the pixel stride; only the
+ * first three (or one) channels are compared, so alpha is ignored. Checking
+ * R, G and B separately keeps red text on a grey of equal brightness drawn.
+ */
+export function isFlat(px: Uint8Array | Buffer, channels = 1): boolean {
+	const colours = Math.min(channels, 3);
+	for (let c = 0; c < colours; c++) {
+		let lo = 255;
+		let hi = 0;
+		for (let i = c; i < px.length; i += channels) {
+			const v = px[i];
+			if (v < lo) lo = v;
+			if (v > hi) hi = v;
+			if (hi - lo > FLAT_RANGE) return false;
+		}
 	}
 	return true;
 }
@@ -172,7 +181,12 @@ export async function imagesWrittenLine(
 					limitInputPixels: MAX_INPUT_PIXELS,
 					failOn: "error",
 				})
-					.resize({ width: SAMPLE_WIDTH, withoutEnlargement: true })
+					.resize({
+						width: SAMPLE_WIDTH,
+						height: SAMPLE_WIDTH,
+						fit: "inside",
+						withoutEnlargement: true,
+					})
 					.ensureAlpha()
 					.raw()
 					.toBuffer({ resolveWithObject: true });
@@ -198,7 +212,7 @@ export async function imagesWrittenLine(
 					grey[i] = Math.round(
 						0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2],
 					);
-				if (isFlat(grey)) {
+				if (isFlat(data, 4)) {
 					blank.push(rel(file));
 					continue;
 				}
@@ -213,7 +227,7 @@ export async function imagesWrittenLine(
 	];
 	if (blank.length > 0) {
 		parts.push(
-			`Nothing is drawn on ${listNames(blank)}: each is one flat colour. The draw step did not put anything on them; fix the command that drew them and re-render.`,
+			`Nothing is drawn on ${listNames(blank)}: each is one flat colour. If they should show content, the command that drew them put nothing on them; fix it and re-render.`,
 		);
 	}
 	if (clipped.length > 0) {
