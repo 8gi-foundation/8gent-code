@@ -80,6 +80,40 @@ describe("writeShapeLine", () => {
 			expect(writeShapeLine(p, "---\nx\n---\ny\n")).toBe("");
 		}
 	});
+
+	test("front matter with a block value or a list is still front matter", () => {
+		const style = "---\nmarp: true\nstyle: |\n  section { color: red }\n---\n# A\n---\n# B\n";
+		expect(writeShapeLine("deck.md", style)).toContain("; 2 sections separated by ---.");
+		const list = "---\nmarp: true\nheaderTags:\n  - a\n---\n# A\n---\n# B\n";
+		expect(writeShapeLine("deck.md", list)).toContain("; 2 sections separated by ---.");
+	});
+
+	test("--- inside fenced code is not a separator", () => {
+		expect(writeShapeLine("a.md", "# A\n```yaml\n---\nk: v\n---\n```\n")).toBe(
+			"Shape: 6 non-empty lines. If the request named a count, check it matches before moving on.",
+		);
+		expect(writeShapeLine("a.md", "# A\n~~~\n---\n~~~\n---\n# B\n")).toContain(
+			"; 2 sections separated by ---.",
+		);
+	});
+
+	test("text then --- is a separator, as the user means it (the pilot's file)", () => {
+		expect(writeShapeLine("s.md", "Body one.\n---\nBody two.\n")).toContain(
+			"; 2 sections separated by ---.",
+		);
+	});
+
+	test("CRLF and a BOM are handled; front matter is out of both counts", () => {
+		expect(writeShapeLine("s.md", "﻿---\r\nmarp: true\r\n---\r\n# A\r\n---\r\n# B\r\n")).toBe(
+			"Shape: 3 non-empty lines; 2 sections separated by ---. If the request named a count, check it matches before moving on.",
+		);
+	});
+
+	test("an empty write, or front matter only, gets no shape line", () => {
+		expect(writeShapeLine("e.txt", "")).toBe("");
+		expect(writeShapeLine("e.md", "\n\n")).toBe("");
+		expect(writeShapeLine("deck.md", "---\nmarp: true\n---\n")).toBe("");
+	});
 });
 
 describe("write_file reports the shape on both tool paths", () => {

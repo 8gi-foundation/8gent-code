@@ -27,10 +27,10 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { writeShapeLine } from "../ai/write-shape";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
-import { writeShapeLine } from "../ai/write-shape";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -2137,11 +2137,11 @@ export class ToolExecutor {
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
 
-		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		// Report what is on disk so a requested count can be checked (#3580).
 		const shape = writeShapeLine(absolutePath, content);
 		if (shape) designHint += `\n${shape}`;
 
+		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
 		if (deckLine) designHint += `\n${deckLine}`;
 
