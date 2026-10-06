@@ -137,6 +137,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
+import { createEightBrowser } from "../tools/eight-browser";
 import { describeImage, readImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -317,6 +318,11 @@ const MCP_LEAN_TOOL_DEFS = [
 		},
 	},
 ];
+
+/** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
+const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
+let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
+const getEightBrowser = () => (eightBrowser ??= createEightBrowser());
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1200,7 +1206,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a real browser and return the page state (title, URL, clickable elements). Use for web interaction, form filling, scraping dynamic pages.",
+						"Open a URL in a new 8gent Browser tab and return its state: tab id, URL, title, numbered actionable elements, page text. Use for web interaction, form filling, scraping dynamic pages. Then act with browser_task actions.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1211,7 +1217,7 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID for persistent browser sessions",
+								description: "Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
 							},
 						},
 						required: ["url"],
@@ -1229,7 +1235,7 @@ export class ToolExecutor {
 						properties: {
 							session: {
 								type: "string",
-								description: "Session ID (if using persistent sessions)",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
 					},
@@ -1240,13 +1246,18 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Run a complex browser task described in natural language. The browser-use agent will plan and execute multi-step interactions (clicking, typing, navigating) to complete the task.",
+						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=username], input[type=password]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Destructive clicks (delete, pay, buy...) are refused.",
 					parameters: {
 						type: "object",
 						properties: {
+							actions: {
+								type: "array",
+								items: { type: "object" },
+								description: "Ordered steps to run in the tab (see tool description)",
+							},
 							task: {
 								type: "string",
-								description: "Natural language description of the browser task to perform",
+								description: "Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
 							},
 							browser: {
 								type: "string",
@@ -1254,10 +1265,10 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID for persistent browser sessions",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
-						required: ["task"],
+						required: [],
 					},
 				},
 			},
@@ -1839,7 +1850,8 @@ export class ToolExecutor {
 				return this.handleBrowserState(args.session as string | undefined);
 			case "browser_task":
 				return this.handleBrowserTask(
-					args.task as string,
+					args.actions,
+					args.task as string | undefined,
 					args.browser as string | undefined,
 					args.session as string | undefined,
 				);
@@ -3420,6 +3432,7 @@ export class ToolExecutor {
 		session?: string,
 	): Promise<string> {
 		try {
+			if (!useBrowserUse()) return await getEightBrowser().open(url);
 			return browserOpen(url, { browser, session });
 		} catch (err) {
 			return `browser_open failed: ${err}`;
@@ -3428,6 +3441,7 @@ export class ToolExecutor {
 
 	private async handleBrowserState(session?: string): Promise<string> {
 		try {
+			if (!useBrowserUse()) return await getEightBrowser().state(session);
 			return browserState(session);
 		} catch (err) {
 			return `browser_state failed: ${err}`;
@@ -3435,12 +3449,18 @@ export class ToolExecutor {
 	}
 
 	private async handleBrowserTask(
-		task: string,
+		actions: unknown,
+		task: string | undefined,
 		browser?: string,
 		session?: string,
 	): Promise<string> {
 		try {
-			return browserTask(task, { browser, session });
+			if (!useBrowserUse()) {
+				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
+				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
+				return await getEightBrowser().run(actions, session);
+			}
+			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
 			return `browser_task failed: ${err}`;
 		}
