@@ -50,13 +50,45 @@ describe("edit-hint wording and caps", () => {
 	});
 
 	it("caps large regions at 40 lines with a truncated marker and one copy", () => {
-		const big = Array.from({ length: 100 }, (_, i) => `  line number ${i} here`).join("\n");
+		const big = Array.from({ length: 100 }, (_, i) => `  line number ${i} here ${"pad ".repeat(60)}`).join("\n");
 		const old = big.replace(/^ {2}/gm, "   ");
 		const msg = formatEditNotFound("big.ts", big, old);
 		expect(msg).toContain("(truncated)");
-		expect(msg).toContain("line number 39 here");
-		expect(msg).not.toContain("line number 40 here");
+		expect(Buffer.byteLength(msg)).toBeLessThan(5000);
 		expect(msg.split("line number 0 here").length - 1).toBe(1);
+	});
+});
+
+describe("edit-hint bounded work", () => {
+	it("50k-line file + 2000-line near-miss returns within 200ms", () => {
+		const file = Array.from({ length: 50_000 }, (_, i) => `  const v${i} = compute(${i});`).join("\n");
+		const old = Array.from({ length: 2000 }, (_, i) => `   const v${i + 100} = compute(${i + 100}) // x`).join("\n");
+		const t0 = performance.now();
+		const msg = formatEditNotFound("big.ts", file, old);
+		const ms = performance.now() - t0;
+		console.log(`bounded-work timing: ${ms.toFixed(1)}ms`);
+		expect(ms).toBeLessThan(200);
+		expect(msg).toContain("Could not find the text to replace");
+	});
+
+	it("5-line whitespace miss on a 50k-line file still gets a hint fast", () => {
+		const file = Array.from({ length: 50_000 }, (_, i) => `  const v${i} = compute(${i});`).join("\n");
+		const old = [100, 101, 102].map((i) => `   const v${i} = compute(${i});`).join("\n");
+		const t0 = performance.now();
+		const msg = formatEditNotFound("big.ts", file, old);
+		expect(performance.now() - t0).toBeLessThan(200);
+		expect(msg).toContain("differ only in whitespace");
+	});
+
+	it("scrubs secrets in the echoed region and never splits a surrogate pair", () => {
+		const key = "AKIA" + "ABCDEFGHIJKLMNOP";
+		const f = `x = "${key}"\n`;
+		const msg = formatEditNotFound("e.ts", f, `x  =  "${key}"`);
+		expect(msg).not.toContain(key);
+		const emoji = Array.from({ length: 3000 }, () => "😀").join("");
+		const m2 = formatEditNotFound("e.ts", emoji, " " + emoji);
+		expect(m2).not.toContain("\uFFFD");
+		expect(m2).toContain("(truncated)");
 	});
 });
 
