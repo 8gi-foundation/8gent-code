@@ -70,6 +70,44 @@ describe("safePath symlink confinement (#3607)", () => {
 		});
 	}
 
+	test("write and edit through an in-workspace final symlink change the target (CLAUDE.md -> AGENTS.md)", async () => {
+		const { ws, ex } = setup();
+		fs.writeFileSync(path.join(ws, "AGENTS.md"), "old");
+		fs.symlinkSync("AGENTS.md", path.join(ws, "CLAUDE.md"));
+		await ex.execute("edit_file", { path: "CLAUDE.md", oldText: "old", newText: "mid" });
+		expect(fs.readFileSync(path.join(ws, "AGENTS.md"), "utf-8")).toBe("mid");
+		await ex.execute("write_file", { path: "CLAUDE.md", content: "new" });
+		expect(fs.readFileSync(path.join(ws, "AGENTS.md"), "utf-8")).toBe("new");
+		expect(fs.lstatSync(path.join(ws, "CLAUDE.md")).isSymbolicLink()).toBe(true);
+	});
+
+	test("a symlinked workspace root works and still confines", async () => {
+		const { ws, outside } = setup();
+		const alias = path.join(path.dirname(ws), "wsalias");
+		fs.symlinkSync(ws, alias);
+		const ex = new ToolExecutor(alias);
+		expect(await ex.execute("write_file", { path: "a/b.txt", content: "x" })).toContain("File written");
+		expect(fs.readFileSync(path.join(ws, "a/b.txt"), "utf-8")).toBe("x");
+		fs.symlinkSync(outside, path.join(ws, "link"));
+		await expect(ex.execute("write_file", { path: "link/z.txt", content: "x" })).rejects.toThrow(MSG);
+	});
+
+	test("a symlink loop is refused fast with a non-escape message", async () => {
+		const { ws, ex } = setup();
+		fs.symlinkSync("b", path.join(ws, "a"));
+		fs.symlinkSync("a", path.join(ws, "b"));
+		await expect(ex.execute("write_file", { path: "a", content: "x" })).rejects.toThrow("symlink loop");
+		await expect(ex.execute("write_file", { path: "a/c.txt", content: "x" })).rejects.toThrow("symlink loop");
+	});
+
+	test("a dangling in-workspace symlink names the real target and is not called an escape", async () => {
+		const { ws, ex } = setup();
+		fs.symlinkSync("real.txt", path.join(ws, "d"));
+		const err = await ex.execute("write_file", { path: "d", content: "x" }).catch((e) => e as Error);
+		expect(String(err.message)).toContain(path.join(fs.realpathSync(ws), "real.txt"));
+		expect(String(err.message)).not.toContain(MSG);
+	});
+
 	test("a normal nested new path still works", async () => {
 		const { ws, ex } = setup();
 		const out = await ex.execute("write_file", { path: "a/b/c.txt", content: "ok" });

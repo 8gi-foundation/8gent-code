@@ -163,11 +163,7 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-function safePath(
-	userPath: string,
-	workingDirectory: string,
-	intent: "read" | "write" = "read",
-): string {
+function safePath(userPath: string, workingDirectory: string): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
 	const guard = guardPath(userPath, workingDirectory);
@@ -205,29 +201,22 @@ function safePath(
 		);
 	}
 
-	assertNoSymlinkEscape(normalizedTarget, normalizedBase, userPath, intent);
-
-	return normalizedTarget;
+	return assertNoSymlinkEscape(normalizedTarget, normalizedBase, userPath);
 }
 
 /**
  * Lexical containment is not enough: a symlinked directory inside the workspace
  * lets a path that looks inside resolve outside (#3607). Resolve the nearest
  * existing ancestor of the target and require it inside the real workspace.
- * A write refuses any symlink at the final component (dangling ones included,
- * since writing through them creates the link target). A read may follow a
- * symlink only if it resolves inside the workspace.
+ * A symlink at the final component is followed to its fully resolved target,
+ * which is returned (so a write lands on the target, e.g. CLAUDE.md -> AGENTS.md)
+ * only when that target is inside the real workspace. Returns the path to use.
  */
-function assertNoSymlinkEscape(
-	target: string,
-	base: string,
-	userPath: string,
-	intent: "read" | "write",
-): void {
-	const escape = () =>
+function assertNoSymlinkEscape(target: string, base: string, userPath: string): string {
+	const escape = (real?: string) =>
 		new Error(
-			`Path escapes workspace via symlink: "${userPath}". ` +
-				`Files can only be read or written inside ${base}; a symlink there points outside it.`,
+			`Path escapes workspace via symlink: "${userPath}"${real ? ` resolves to ${real}` : ""}, outside ${base}. ` +
+				"Files can only be read or written inside the workspace.",
 		);
 	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
 
@@ -235,36 +224,54 @@ function assertNoSymlinkEscape(
 	try {
 		realBase = fs.realpathSync(base);
 	} catch {
-		return; // workspace itself does not exist yet; nothing to escape through
+		return target; // workspace itself does not exist yet; nothing to escape through
 	}
 
 	const finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (finalStat?.isSymbolicLink()) {
-		if (intent === "write") throw escape();
 		let real: string;
 		try {
 			real = fs.realpathSync(target);
-		} catch {
-			throw escape(); // dangling or looping link
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === "ELOOP") {
+				throw new Error(`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`);
+			}
+			// Dangling: say where it points. Inside the workspace the agent can write that path directly.
+			let dest = "";
+			try {
+				dest = path.resolve(fs.realpathSync(path.dirname(target)), fs.readlinkSync(target));
+			} catch {}
+			if (dest && inside(dest, realBase)) {
+				throw new Error(
+					`Refused: "${userPath}" is a dangling symlink to ${dest} (inside the workspace, not an escape). ` +
+						"Create or write that real path directly.",
+				);
+			}
+			throw escape(dest || undefined);
 		}
-		if (!inside(real, realBase)) throw escape();
-		return;
+		if (!inside(real, realBase)) throw escape(real);
+		return real;
 	}
 
 	// Walk up to the nearest ancestor that exists (lstat, so a dangling link counts as existing).
 	let ancestor = target;
-	while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
-		const parent = path.dirname(ancestor);
-		if (parent === ancestor) return;
-		ancestor = parent;
-	}
 	let realAncestor: string;
 	try {
+		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+			const parent = path.dirname(ancestor);
+			if (parent === ancestor) return target;
+			ancestor = parent;
+		}
 		realAncestor = fs.realpathSync(ancestor);
-	} catch {
-		throw escape(); // dangling or looping link in the ancestor chain
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+		}
+		throw escape();
 	}
-	if (!inside(realAncestor, realBase)) throw escape();
+	if (!inside(realAncestor, realBase)) throw escape(realAncestor);
+	return target;
 }
 
 /**
@@ -1591,11 +1598,11 @@ export class ToolExecutor {
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
-				const safe = safePath(args.path as string, this.workingDirectory, "write");
+				const safe = safePath(args.path as string, this.workingDirectory);
 				return this.writeFile(safe, args.content as string);
 			}
 			case "edit_file": {
-				const safe = safePath(args.path as string, this.workingDirectory, "write");
+				const safe = safePath(args.path as string, this.workingDirectory);
 				return this.editFile(safe, args.oldText as string, args.newText as string);
 			}
 			case "list_files": {
