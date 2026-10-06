@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type BedSpec, generateBed } from "./bed";
 import presets from "./presets.json";
 
@@ -276,7 +276,11 @@ export type Plan = {
 	commands: string[];
 	script: string;
 	output: string;
+	/** Every path film.sh writes (frames, shots, picture, output), for a caller that confines writes. */
+	writes: string[];
 };
+
+const hasDotDot = (p: string) => p.split(/[\\/]/).includes("..");
 
 export function planFilm(o: PlanInput): Plan {
 	const P = typeof o.preset === "string" ? resolvePreset(o.preset) : o.preset;
@@ -286,14 +290,20 @@ export function planFilm(o: PlanInput): Plan {
 	const font = o.resolveFont ?? defaultFontResolver;
 	if (!o.slides?.length) throw new Error("plan needs at least one slide");
 	for (const s of o.slides)
-		if (!(s.seconds > 0) || !s.title?.trim())
-			throw new Error("every slide needs a title and seconds > 0");
+		if (!(Number.isFinite(s.seconds) && s.seconds > 0) || !s.title?.trim())
+			throw new Error("every slide needs a title and finite seconds > 0");
+	const name = o.out ?? "film.mp4";
+	if (basename(name) !== name || name === ".." || !name.endsWith(".mp4"))
+		throw new Error(`out must be a bare .mp4 file name inside out_dir, not a path ("${name}")`);
+	for (const p of [o.outDir, o.narration, o.bed])
+		if (p && hasDotDot(p)) throw new Error(`paths in film.sh may not contain ".." ("${p}")`);
 	const n = o.slides.length;
 	const x = Math.min(P.transition.seconds, ...o.slides.map((s) => s.seconds / 2));
 	const dir = o.outDir;
-	const out = join(dir, o.out ?? "film.mp4");
+	const out = join(dir, name);
 	const pic = join(dir, "film-picture.mp4");
 	const cmds: string[] = [`mkdir -p ${q(join(dir, "frames"))}`, "pids=()"];
+	const writes: string[] = [dir, join(dir, "frames"), pic, out];
 	const graph: string[] = [];
 	const clips: string[] = [];
 	const hits: number[] = [];
@@ -303,6 +313,7 @@ export function planFilm(o: PlanInput): Plan {
 		const soft = join(dir, "frames", `slide-${i + 1}-soft.png`);
 		const sharp = join(dir, "frames", `slide-${i + 1}.png`);
 		const clip = join(dir, "frames", `shot-${i + 1}.mp4`);
+		writes.push(soft, sharp, clip);
 		const L = s.seconds + (i < n - 1 ? x : 0);
 		const frames = Math.max(2, Math.round(L * fps));
 		const tIn = Math.min(P.pacing.textIn, s.seconds / 3);
@@ -312,7 +323,7 @@ export function planFilm(o: PlanInput): Plan {
 		const shot = `[0:v][1:v]xfade=transition=fade:duration=${tIn.toFixed(3)}:offset=${Math.min(x * 0.5, s.seconds / 4).toFixed(3)},scale=${W * 2}:${H * 2}:flags=lanczos,zoompan=z='${z}':x='(iw-iw/zoom)/2*(1+${panX}*${k})':y='(ih-ih/zoom)/2*(1+${panY}*${k})':d=1:s=${W}x${H}:fps=${fps},setsar=1,format=yuv420p`;
 		const loop = (png: string) => `-loop 1 -framerate ${fps} -t ${L.toFixed(3)} -i ${q(png)}`;
 		cmds.push(
-			`( ${slideCommand(P, s, i, W, H, soft, true, font)} && ${slideCommand(P, s, i, W, H, sharp, false, font)} && ffmpeg -y -v error ${loop(soft)} ${loop(sharp)} -filter_complex ${q(shot)} -frames:v ${Math.round(L * fps)} -c:v libx264 -preset veryfast -crf 12 ${q(clip)} ) & pids+=($!)`,
+			`( ${slideCommand(P, s, i, W, H, soft, true, font)} && ${slideCommand(P, s, i, W, H, sharp, false, font)} && ffmpeg -y -v error ${loop(soft)} ${loop(sharp)} -filter_complex ${q(shot)} -frames:v ${Math.round(L * fps)} -c:v libx264 -preset veryfast -crf 18 ${q(clip)} ) & pids+=($!)`,
 		);
 		clips.push(`-i ${q(clip)}`);
 		if (i > 0) hits.push(Number(acc.toFixed(3)));
@@ -358,11 +369,22 @@ export function planFilm(o: PlanInput): Plan {
 		commands: cmds,
 		script: `#!/bin/bash\n# film_craft preset ${P.name}: ${n} slides, ${T} s\nset -euo pipefail\n${cmds.join("\n")}\n`,
 		output: out,
+		writes,
 	};
 }
 
+/**
+ * Confines what the tool touches. write() and read() take a path as the model gave it and return the
+ * absolute path to use, or throw. Without a guard (library use) paths are used as given.
+ */
+export type FilmCraftGuard = { write(p: string): string; read(p: string): string };
+const OPEN: FilmCraftGuard = { write: (p) => p, read: (p) => p };
+
 /** The film_craft tool: list | plan | bed | mix. Returns text for the model; never throws. */
-export async function filmCraft(a: Record<string, unknown>): Promise<string> {
+export async function filmCraft(
+	a: Record<string, unknown>,
+	guard: FilmCraftGuard = OPEN,
+): Promise<string> {
 	try {
 		const preset = (a.preset as string) ?? "lotus-night";
 		const P = a.grade_from ? mixPresets(a.grade_from as string, preset) : resolvePreset(preset);
@@ -374,7 +396,8 @@ export async function filmCraft(a: Record<string, unknown>): Promise<string> {
 			case "mix":
 				return JSON.stringify(P, null, 2);
 			case "bed": {
-				const wav = String(a.out ?? "bed.wav");
+				const wav = guard.write(String(a.out ?? join(String(a.out_dir ?? "video"), "bed.wav")));
+				if (!wav.endsWith(".wav")) throw new Error(`bed out must end in .wav ("${wav}")`);
 				mkdirSync(dirname(wav), { recursive: true });
 				const r = generateBed({
 					seconds: Number(a.seconds),
@@ -386,7 +409,7 @@ export async function filmCraft(a: Record<string, unknown>): Promise<string> {
 			}
 			case "plan": {
 				const slides = (typeof a.slides === "string" ? JSON.parse(a.slides) : a.slides) as Slide[];
-				const dir = String(a.out_dir ?? "video");
+				const dir = guard.write(String(a.out_dir ?? "video"));
 				const p = planFilm({
 					slides,
 					preset: P,
@@ -394,11 +417,13 @@ export async function filmCraft(a: Record<string, unknown>): Promise<string> {
 					out: a.out as string | undefined,
 					width: a.width as number,
 					height: a.height as number,
-					narration: a.narration as string,
-					bed: a.bed as string,
+					narration: a.narration ? guard.read(String(a.narration)) : undefined,
+					bed: a.bed ? guard.read(String(a.bed)) : undefined,
 				});
-				mkdirSync(dir, { recursive: true });
 				const sh = join(dir, "film.sh");
+				// Confine every file the recipe will write before writing anything.
+				for (const w of [...p.writes, sh]) guard.write(w);
+				mkdirSync(dir, { recursive: true });
 				writeFileSync(sh, p.script);
 				return `Preset ${p.preset}: ${slides.length} slides, ${p.total.toFixed(2)} s, cuts at ${p.hits.join(", ") || "none"} s.\nWrote ${sh}. Run: bash ${sh}  -> ${p.output}\nFor a music bed call film_craft action=bed seconds=${p.total.toFixed(2)} hits=[${p.hits.join(",")}] first and pass its wav as bed.\n\n${p.script}`;
 			}

@@ -95,7 +95,12 @@ import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
-import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import {
+	editScopeViolation,
+	emptyOldTextError,
+	filmCraftWriteTargets,
+	normaliseAllowedPaths,
+} from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
@@ -308,6 +313,36 @@ export function resolveSpeakOut(out: unknown, workingDirectory: string): string 
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 	}
+	return target;
+}
+
+/** The nearest existing ancestor's real location must sit under the real workspace. */
+function assertRealInside(target: string, named: string, workingDirectory: string): void {
+	const root = fs.realpathSync(workingDirectory);
+	let ancestor = target;
+	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+	const real = fs.realpathSync(ancestor);
+	if (real !== root && !real.startsWith(root + path.sep)) {
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+	}
+}
+
+/**
+ * A path a tool may write: inside the working directory (safePath, which is lexical), the real
+ * location of its nearest existing parent inside the real workspace, and not itself a symlink.
+ */
+export function confineWrite(named: string, workingDirectory: string): string {
+	const target = safePath(named, workingDirectory);
+	assertRealInside(path.dirname(target), named, workingDirectory);
+	const st = fs.lstatSync(target, { throwIfNoEntry: false });
+	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
+	return target;
+}
+
+/** A path a tool may read: inside the working directory after following every link. */
+export function confineRead(named: string, workingDirectory: string): string {
+	const target = safePath(named, workingDirectory);
+	assertRealInside(target, named, workingDirectory);
 	return target;
 }
 
@@ -1511,6 +1546,8 @@ export class ToolExecutor {
 		// in every mode. mcp_list_tools only reads the local list and stays
 		// ungated.
 		mcp_call_tool: MCP_POLICY_ACTION,
+		// plan and bed write files; list and mix write nothing and skip the gate (#3599).
+		film_craft: "write_file",
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -1609,18 +1646,24 @@ export class ToolExecutor {
 		// through to the engine's default allow and no card appeared.
 		const isDesktop = toolName.startsWith("desktop_") || BROWSER_ASK_FIRST.has(toolName);
 		const isMcpCall = toolName === "mcp_call_tool";
-		const policyAction =
+		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
+		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
+		const writeTarget = (
+			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
+		) as string | undefined;
+		const mappedAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
 					: undefined);
+		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
-				path: (toolName === "speak" ? args.out : args.path) as string,
+				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
 				// Every write tool is checked on what it actually writes, not
@@ -1652,10 +1695,7 @@ export class ToolExecutor {
 				return blockedToolMessage(
 					toolName,
 					policyAction === "write_file",
-					(() => {
-						const target = toolName === "speak" ? args.out : args.path;
-						return typeof target === "string" && target ? target : undefined;
-					})(),
+					typeof writeTarget === "string" && writeTarget ? writeTarget : undefined,
 					gateResult.reason,
 					gateResult.alternative,
 				);
@@ -1954,13 +1994,13 @@ export class ToolExecutor {
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
 
-			case "film_craft": {
-				// Every path the recipe touches is absolute, so film.sh runs the same from any folder.
-				const at = (p: unknown, dflt?: string) => (p ? path.resolve(this.workingDirectory, p as string) : dflt);
-				const outDir = at(args.out_dir, path.join(this.workingDirectory, "video")) as string;
-				const out = args.action === "bed" ? at(args.out, path.join(outDir, "bed.wav")) : args.out;
-				return filmCraft({ ...args, out_dir: outDir, out, narration: at(args.narration), bed: at(args.bed) });
-			}
+			case "film_craft":
+				// Every path is confined to the workspace (no traversal, no symlink out) and made
+				// absolute, so film.sh writes only inside it and runs the same from any folder.
+				return filmCraft(args, {
+					write: (p) => confineWrite(p, this.workingDirectory),
+					read: (p) => confineRead(p, this.workingDirectory),
+				});
 
 			// Design tools
 			case "suggest_design":
