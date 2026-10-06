@@ -15,12 +15,21 @@
  *                                     Only James's chat_id should appear here.
  *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
  *
+ * EIGHT_RESUME_ON_BOOT=1 journals open sessions to sessions-journal.json in
+ * the data dir and restores them from their newest time-travel checkpoint on
+ * the next start, so a crash or power cut does not lose the conversation.
+ * Sessions stay journaled until they are destroyed or evicted for idleness,
+ * and a clean shutdown does neither, so an ordinary restart restores them
+ * too. Intended for single-user local daemons only: do not enable it on a
+ * shared or multi-tenant host.
+ *
  * Secrets are read from process.env or any pre-loaded env file. The daemon
  * never prints token contents. See `packages/daemon/scripts/start-local.ts`
  * for the canonical launcher.
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
 import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
@@ -41,6 +50,7 @@ import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
+import { SessionJournal, resumeJournaledSessions, resumeOnBootEnabled } from "./session-journal";
 import type { DaemonChannel } from "./types";
 import { installFlowTap } from "../telemetry/flow-stream";
 
@@ -239,8 +249,19 @@ export async function main(): Promise<void> {
 		}
 	}
 
-	// Create the agent pool - manages Agent instances per session
-	pool = new AgentPool(poolConfig);
+	// Create the agent pool - manages Agent instances per session.
+	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
+	// them back from their newest checkpoint after a crash or power cut. Only
+	// history is restored; no tool call is run again.
+	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
+	pool = new AgentPool(poolConfig, journal ? { journal } : {});
+	if (journal) {
+		const t0 = Date.now();
+		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
+		console.log(
+			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms`,
+		);
+	}
 
 	// Wire the dispatch protocol (issue #1896). Surfaces register and
 	// fan results across each other; the daemon is the trusted executor.

@@ -11,6 +11,7 @@ import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { bus } from "./events";
+import type { SessionJournal } from "./session-journal";
 
 export interface PoolConfig {
 	/** Default model to use (e.g. "qwen3.5:14b") */
@@ -36,6 +37,33 @@ interface SessionEntry {
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
 	clerkId?: string;
+}
+
+/** Per-session options for AgentPool.createSession. */
+export interface SessionOverrides {
+	maxTurns?: number;
+	tenantId?: string;
+	clerkId?: string;
+	/**
+	 * Restricted policy scope this session's agent gates tool calls under
+	 * (e.g. "__table__"). When set, every tool call routes through ToolG8
+	 * with this id as the agentId, so the deny-by-default rules installed
+	 * for that scope apply. Defaults to the standard "primary" scope.
+	 */
+	agentScope?: string;
+	/**
+	 * Per-session backend routing. Lets a caller (e.g. a Table officer
+	 * pinned to a specific local model) override the pool defaults for
+	 * this one session. `runtime` is still subject to the F4 local-only
+	 * gate for Table sessions; a cloud runtime is downgraded to the safe
+	 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
+	 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
+	 * (and, via createClient, to the LLM client) when set.
+	 */
+	runtime?: AgentConfig["runtime"];
+	model?: string;
+	baseUrl?: string;
+	systemPrompt?: string;
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -77,8 +105,11 @@ export class AgentPool {
 	private sessions = new Map<string, SessionEntry>();
 	private config: PoolConfig;
 	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+	/** Open-session journal for resume after a crash (#3552). Unset by default. */
+	private journal: SessionJournal | null;
 
-	constructor(config: Partial<PoolConfig> = {}) {
+	constructor(config: Partial<PoolConfig> = {}, options: { journal?: SessionJournal } = {}) {
+		this.journal = options.journal ?? null;
 		this.config = {
 			model: config.model || DEFAULT_MODEL,
 			runtime: config.runtime || DEFAULT_RUNTIME,
@@ -122,6 +153,7 @@ export class AgentPool {
 					`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`,
 				);
 				this.sessions.delete(id);
+				this.unjournal(id);
 				bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
 			}
 		}
@@ -131,31 +163,12 @@ export class AgentPool {
 	createSession(
 		sessionId: string,
 		channel: string,
-		overrides?: {
-			maxTurns?: number;
-			tenantId?: string;
-			clerkId?: string;
-			/**
-			 * Restricted policy scope this session's agent gates tool calls under
-			 * (e.g. "__table__"). When set, every tool call routes through ToolG8
-			 * with this id as the agentId, so the deny-by-default rules installed
-			 * for that scope apply. Defaults to the standard "primary" scope.
-			 */
-			agentScope?: string;
-			/**
-			 * Per-session backend routing. Lets a caller (e.g. a Table officer
-			 * pinned to a specific local model) override the pool defaults for
-			 * this one session. `runtime` is still subject to the F4 local-only
-			 * gate for Table sessions; a cloud runtime is downgraded to the safe
-			 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
-			 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
-			 * (and, via createClient, to the LLM client) when set.
-			 */
-			runtime?: AgentConfig["runtime"];
-			model?: string;
-			baseUrl?: string;
-			systemPrompt?: string;
-		},
+		overrides?: SessionOverrides,
+		/**
+		 * journal: false skips the resume journal write. The boot resume uses
+		 * it so the entry keeps naming the old checkpoint until restore succeeds.
+		 */
+		options: { journal?: boolean } = {},
 	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
@@ -281,6 +294,20 @@ export class AgentPool {
 			clerkId: overrides?.clerkId,
 		});
 
+		if (this.journal && options.journal !== false) {
+			try {
+				this.journal.upsert({
+					sessionId,
+					channel,
+					ttSessionId: agent.getTimeTravelSessionId(),
+					createdAt: now,
+					...(overrides ? { overrides } : {}),
+				});
+			} catch (err) {
+				console.error(`[agent-pool] session journal write failed for ${sessionId}: ${String(err)}`);
+			}
+		}
+
 		console.log(
 			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, runtime=${runtime}, model=${model})`,
 		);
@@ -374,7 +401,17 @@ export class AgentPool {
 		if (!entry) return;
 
 		this.sessions.delete(sessionId);
+		this.unjournal(sessionId);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
+	}
+
+	private unjournal(sessionId: string): void {
+		if (!this.journal) return;
+		try {
+			this.journal.remove(sessionId);
+		} catch (err) {
+			console.error(`[agent-pool] session journal remove failed for ${sessionId}: ${String(err)}`);
+		}
 	}
 
 	/** Check if a session exists */
