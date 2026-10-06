@@ -94,6 +94,7 @@ import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "..
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import { filterToolOutput } from "../permissions/output-filter";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
@@ -1325,7 +1326,10 @@ export class ToolExecutor {
 		// signal at this boundary, so we treat all returns as successful.
 		// The cache (#2462) sits BEFORE executeRaw and is independent of this
 		// step; both can co-exist without touching each other.
-		return this.artifactStore.persistAndReplace(result.scrubbed, toolName);
+		// Tool-output injection filter (#3551), off unless EIGHT_OUTPUT_FILTER=1.
+		// Runs on the scrubbed text so no secret reaches the judge.
+		const filtered = await filterToolOutput(toolName, result.scrubbed);
+		return this.artifactStore.persistAndReplace(filtered, toolName);
 	}
 
 	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
