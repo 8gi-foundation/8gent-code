@@ -87,7 +87,7 @@ async function gateShellChild(
 }
 
 export const CHECK_AGENT_DESCRIPTION =
-	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 20s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
+	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 90s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
 
 export const LIST_AGENTS_DESCRIPTION =
 	"[SHELL] Returns a summary of all spawned background agents with their IDs, runtimes, statuses, and elapsed times. Use this to get an overview before checking individual agents, or to find an agentId you lost track of.";
@@ -95,11 +95,16 @@ export const LIST_AGENTS_DESCRIPTION =
 /**
  * How long check_agent waits on a running 8gent agent for it or a sibling to
  * finish (ms). EIGHT_CHECK_AGENT_WAIT_MS overrides; 0 answers at once.
+ *
+ * 90 s (#3583): every pool child runs on the local model, and each early
+ * "still running" costs the parent an inference turn on that same model. At
+ * 20 s the parent of pilot orch-route-three made 35 checks while its children
+ * took 60 to 170 s a step. The wait still ends the moment any agent finishes.
  */
 export function checkAgentWaitMs(): number {
 	const raw = process.env.EIGHT_CHECK_AGENT_WAIT_MS?.trim();
 	const ms = raw ? Number(raw) : Number.NaN;
-	return Number.isFinite(ms) && ms >= 0 ? ms : 20_000;
+	return Number.isFinite(ms) && ms >= 0 ? ms : 90_000;
 }
 
 export async function spawnAgentTool(
