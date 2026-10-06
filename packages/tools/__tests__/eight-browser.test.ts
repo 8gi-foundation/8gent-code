@@ -167,6 +167,16 @@ describe("8gent Browser driver", () => {
 });
 
 describe("state rendering", () => {
+	test("typed values are never echoed back through the element list", async () => {
+		const site = fakeSite();
+		const b = createEightBrowser(site.call, { settleMs: 0 });
+		await b.open("http://127.0.0.1:5/");
+		const out = await b.run([{ action: "type", selector: "input[type=password]", text: "s3cret-pass" }]);
+		expect(out).not.toContain("s3cret-pass");
+		expect(await b.state()).not.toContain("s3cret-pass");
+		expect(JSON.parse(await b.state()).elements[1]).toBe("[1] input (typed, 11 chars)");
+	});
+
 	test("hides invisible elements (a hidden csrf value never reaches the model) and keeps indices stable", async () => {
 		const call: BrowserCall = async (cmd, args = {}) => {
 			if (cmd === "tab.open") return { id: "t9" };
@@ -185,6 +195,9 @@ describe("state rendering", () => {
 		const out = await createEightBrowser(call, { settleMs: 0 }).open("http://127.0.0.1:5/");
 		expect(out).not.toContain("csrf-secret-value");
 		expect(JSON.parse(out).elements).toEqual(["[0] input", "[2] button Sign in"]);
+		const b2 = createEightBrowser(call, { settleMs: 0 });
+		await b2.open("http://127.0.0.1:5/");
+		expect(JSON.parse(await b2.run([{ action: "left_click", index: 1 }])).error).toMatch(/hidden/);
 	});
 });
 

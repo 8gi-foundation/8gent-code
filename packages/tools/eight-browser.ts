@@ -97,6 +97,7 @@ const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?: number } = {}) {
 	const settle = opts.settleMs ?? 400;
 	const owned = new Set<string>();
+	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -123,11 +124,12 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		return id;
 	};
 	const render = (tab: string, o: Awaited<ReturnType<typeof observe>>) =>
-		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.filter((e) => !e.hidden).map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${e.text}`.trim()), text: o.text.slice(0, 3_000) });
+		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.filter((e) => !e.hidden).map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text}`.trim()), text: o.text.slice(0, 3_000) });
 	const clickGuard = (els: El[], a: { index?: number }): string | null => {
 		if (a.index === undefined) return null;
 		const el = els[a.index];
 		if (!el) return `index ${a.index} out of range (${els.length} elements)`;
+		if (el.hidden) return `index ${a.index} is a hidden element`;
 		return DESTRUCTIVE.test(el.text) ? `refusing destructive click on "${el.text}"; ask the user to do it` : null;
 	};
 
@@ -179,6 +181,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 			if (a.action === "type") {
 				row.selector = a.selector;
 				row.text_len = a.text.length;
+				if (a.text) typed.add(clipped(a.text));
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
 					const r = await call("page.type", { tabId: id, selector: a.selector, text: a.text });
@@ -191,7 +194,8 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 			} else if (a.action === "left_click") {
 				const err = clickGuard(before.els, a);
 				if (err) return fail(`step ${i}: ${err}`, steps);
-				row.target = a.index !== undefined ? before.els[a.index]?.text : a.selector;
+				const t = a.index !== undefined ? before.els[a.index]?.text : a.selector;
+				row.target = t !== undefined && typed.has(t) ? "(typed field)" : t;
 				const r = await call("page.click", { tabId: id, index: a.index, selector: a.selector });
 				row.ok = r?.ok !== false;
 				if (!row.ok) row.error = r.error;
