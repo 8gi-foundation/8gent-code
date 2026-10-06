@@ -163,7 +163,11 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-function safePath(userPath: string, workingDirectory: string): string {
+function safePath(
+	userPath: string,
+	workingDirectory: string,
+	intent: "read" | "write" = "read",
+): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
 	const guard = guardPath(userPath, workingDirectory);
@@ -201,7 +205,66 @@ function safePath(userPath: string, workingDirectory: string): string {
 		);
 	}
 
+	assertNoSymlinkEscape(normalizedTarget, normalizedBase, userPath, intent);
+
 	return normalizedTarget;
+}
+
+/**
+ * Lexical containment is not enough: a symlinked directory inside the workspace
+ * lets a path that looks inside resolve outside (#3607). Resolve the nearest
+ * existing ancestor of the target and require it inside the real workspace.
+ * A write refuses any symlink at the final component (dangling ones included,
+ * since writing through them creates the link target). A read may follow a
+ * symlink only if it resolves inside the workspace.
+ */
+function assertNoSymlinkEscape(
+	target: string,
+	base: string,
+	userPath: string,
+	intent: "read" | "write",
+): void {
+	const escape = () =>
+		new Error(
+			`Path escapes workspace via symlink: "${userPath}". ` +
+				`Files can only be read or written inside ${base}; a symlink there points outside it.`,
+		);
+	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
+
+	let realBase: string;
+	try {
+		realBase = fs.realpathSync(base);
+	} catch {
+		return; // workspace itself does not exist yet; nothing to escape through
+	}
+
+	const finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
+	if (finalStat?.isSymbolicLink()) {
+		if (intent === "write") throw escape();
+		let real: string;
+		try {
+			real = fs.realpathSync(target);
+		} catch {
+			throw escape(); // dangling or looping link
+		}
+		if (!inside(real, realBase)) throw escape();
+		return;
+	}
+
+	// Walk up to the nearest ancestor that exists (lstat, so a dangling link counts as existing).
+	let ancestor = target;
+	while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+		const parent = path.dirname(ancestor);
+		if (parent === ancestor) return;
+		ancestor = parent;
+	}
+	let realAncestor: string;
+	try {
+		realAncestor = fs.realpathSync(ancestor);
+	} catch {
+		throw escape(); // dangling or looping link in the ancestor chain
+	}
+	if (!inside(realAncestor, realBase)) throw escape();
 }
 
 /**
@@ -1528,11 +1591,11 @@ export class ToolExecutor {
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.writeFile(safe, args.content as string);
 			}
 			case "edit_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.editFile(safe, args.oldText as string, args.newText as string);
 			}
 			case "list_files": {
