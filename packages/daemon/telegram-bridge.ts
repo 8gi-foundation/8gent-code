@@ -474,6 +474,21 @@ class TelegramDaemonBridge {
 		console.log("[telegram-bridge] ready - polling Telegram, connected to daemon");
 	}
 
+	/**
+	 * Replace the bridge's daemon session: destroy the old agent, then create a
+	 * new one. Telegram sessions are never evicted, so a create without the
+	 * destroy leaks an agent until the daemon restarts (#3538).
+	 */
+	private freshSession(): void {
+		const open = this.ws?.readyState === WebSocket.OPEN;
+		if (open && this.sessionId) {
+			this.ws?.send(JSON.stringify({ type: "session:destroy", sessionId: this.sessionId }));
+		}
+		// Cleared even when offline, so the next connect creates rather than resumes.
+		this.sessionId = null;
+		if (open) this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+	}
+
 	private async connectDaemon(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const url = this.config.daemonUrl;
@@ -489,8 +504,15 @@ class TelegramDaemonBridge {
 					this.ws?.send(JSON.stringify({ type: "auth", token: this.config.authToken }));
 				}
 
-				// Create a session
-				this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+				// Resume the session we already own on reconnect; a fresh create
+				// would leak a never-evicted telegram agent (#3538).
+				this.ws?.send(
+					JSON.stringify(
+						this.sessionId
+							? { type: "session:resume", sessionId: this.sessionId, channel: "telegram" }
+							: { type: "session:create", channel: "telegram" },
+					),
+				);
 			};
 
 			this.ws.onmessage = (event: MessageEvent) => {
@@ -501,8 +523,8 @@ class TelegramDaemonBridge {
 				);
 				this.handleDaemonMessage(msg);
 
-				// Resolve on session creation
-				if (msg.type === "session:created") {
+				// Resolve on session creation or resume
+				if (msg.type === "session:created" || msg.type === "session:resumed") {
 					this.sessionId = msg.sessionId;
 					console.log(`[telegram-bridge] session ${this.sessionId}`);
 					resolve();
@@ -525,6 +547,12 @@ class TelegramDaemonBridge {
 		if (msg.type !== "event") return;
 
 		const { event, payload } = msg;
+
+		// Drop events addressed to a session this bridge no longer owns. Destroying
+		// the old session in freshSession() echoes its session:end back on this
+		// socket after sessionId was cleared; acting on it would mark the bridge
+		// idle and cancel the retry timer armed for the replacement session.
+		if (payload?.sessionId && payload.sessionId !== this.sessionId) return;
 
 		switch (event) {
 			case "agent:stream":
@@ -1067,9 +1095,7 @@ class TelegramDaemonBridge {
 		const timer = setTimeout(() => {
 			if (this.agentBusy) {
 				// Create a new session to clear any stuck state
-				if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-					this.ws.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
-				}
+				this.freshSession();
 				// Retry with next strategy
 				this.retryPrompt(originalText, attempt + 1);
 			}
@@ -1215,8 +1241,7 @@ class TelegramDaemonBridge {
 				// differ - "New task" drops the conversation context.
 				await this.clearKeyboard(query.message?.message_id);
 				if (prefix === CB_PREFIX.taskNew) {
-					this.sessionId = null;
-					this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+					this.freshSession();
 					await tgSend(
 						this.config.telegramToken,
 						this.replyChat(),
