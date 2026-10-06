@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { writeScopeLine } from "../ai/write-scope";
 import { writeShapeLine } from "../ai/write-shape";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
@@ -94,7 +95,7 @@ import {
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
-import { CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
@@ -2133,6 +2134,7 @@ export class ToolExecutor {
 			fs.mkdirSync(dir, { recursive: true });
 		}
 
+		const wasNew = pathAbsent(absolutePath);
 		const recordWrite = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
@@ -2140,6 +2142,9 @@ export class ToolExecutor {
 		// Report what is on disk so a requested count can be checked (#3580).
 		const shape = writeShapeLine(absolutePath, content);
 		if (shape) designHint += `\n${shape}`;
+		// A new top-folder file while the work lives in one subfolder (#3580).
+		const scope = writeScopeLine(this.createdFiles, this.workingDirectory, absolutePath, wasNew);
+		if (scope) designHint += `\n${scope}`;
 
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
