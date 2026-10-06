@@ -28,7 +28,21 @@ export type BrowserAction =
 
 export const BROWSER_ACTION_KINDS = ["open", "left_click", "type", "wait_for", "scroll"] as const;
 const LIMITS = { maxTypeLength: 4_000, maxWaitMs: 10_000, maxScroll: 10_000, maxSteps: 25 };
-const DESTRUCTIVE = /\b(delete|remove|destroy|pay|purchase|buy|transfer|unsubscribe)\b/i;
+/** Clicks that need the person's approval, most sensitive first. purchase and authenticate mirror
+ *  8gent-browser src/main/approval-gate.ts:20-33 (sensitiveCategory); destructive and commit are ours. */
+const SENSITIVE: ReadonlyArray<readonly [string, readonly string[]]> = [
+	["purchase", ["card number", "credit card", "cvv", "cvc", "security code", "iban", "billing", "checkout", "place order", "buy now", "buy", "pay now", "pay", "payment", "purchase", "subscribe", "donate"]],
+	["destructive", ["delete", "remove", "destroy", "transfer", "unsubscribe"]],
+	["authenticate", ["password", "passphrase", "otp", "one-time", "2fa", "mfa", "verification code", "log in", "login", "sign in", "signin", "sign-in", "credential"]],
+	["commit", ["send", "submit", "confirm", "publish", "approve", "merge", "sign"]],
+];
+const wordRe = (t: string) => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`, "i");
+export function sensitiveCategory(text: string): string | null {
+	for (const [cat, terms] of SENSITIVE) if (terms.some((t) => wordRe(t).test(text))) return cat;
+	return null;
+}
+/** Approver for sensitive clicks: resolves true to go ahead. Absent means refuse. */
+export type ApproveFn = (what: string) => Promise<boolean>;
 
 type Check<T> = { ok: true; action: T } | { ok: false; error: string };
 
@@ -74,12 +88,25 @@ export function wsTransport(opts: { port?: number; tokenFile?: string } = {}): B
 				return reject(new Error("8gent Browser control token not found; is 8gent Browser installed and running?"));
 			}
 			const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-			const timer = setTimeout(() => (ws.close(), reject(new Error(`8gent Browser timed out on ${cmd}`))), 30_000);
-			const done = (fn: () => void) => (clearTimeout(timer), ws.close(), fn());
+			let settled = false;
+			const done = (fn: () => void) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				ws.close();
+				fn();
+			};
+			const timer = setTimeout(() => done(() => reject(new Error(`8gent Browser timed out on ${cmd}`))), 30_000);
 			ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
 			ws.onerror = () => done(() => reject(new Error(`8gent Browser not reachable on 127.0.0.1:${port}`)));
+			ws.onclose = () => done(() => reject(new Error(`8gent Browser closed the connection before answering ${cmd}`)));
 			ws.onmessage = (ev) => {
-				const m = JSON.parse(String(ev.data));
+				let m: { type?: string; id?: number; ok?: boolean; result?: unknown; error?: string };
+				try {
+					m = JSON.parse(String(ev.data));
+				} catch {
+					return done(() => reject(new Error(`8gent Browser sent a bad message on ${cmd}`)));
+				}
 				if (m.type === "auth_ok") return ws.send(JSON.stringify({ id: 1, cmd, args }));
 				if (m.type === "error") return done(() => reject(new Error(m.error)));
 				if (m.id === 1) done(() => (m.ok ? resolve(m.result) : reject(new Error(m.error))));
@@ -90,7 +117,7 @@ export function wsTransport(opts: { port?: number; tokenFile?: string } = {}): B
 export const wsCall: BrowserCall = wsTransport();
 
 type Rect = { x: number; y: number; w: number; h: number };
-type El = { index: number; tag: string; text: string; checked?: boolean; hidden?: boolean };
+type El = { index: number; tag: string; text: string; rect?: Rect; checked?: boolean; hidden?: boolean; secret?: boolean };
 /** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
 const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 
@@ -101,14 +128,19 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 	let current: string | undefined;
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+	const rects = async (tabId: string, selector: string) =>
+		new Set<string>(((await call("page.query", { tabId, selector }))?.elements ?? []).map((e: { rect?: Rect }) => JSON.stringify(e.rect)));
 	const elements = async (tabId: string): Promise<El[]> => {
 		const r = await call("page.query", { tabId });
 		// page.query has no checked flag; match :checked elements back by rect so a toggle click is observable.
-		const on = new Set(((await call("page.query", { tabId, selector: ":checked" }))?.elements ?? []).map((e: { rect?: Rect }) => JSON.stringify(e.rect)));
-		return (r?.elements ?? []).map((e: El & { rect?: Rect; visible?: boolean }) => {
-			const el: El = { index: e.index, tag: e.tag, text: e.text };
+		const on = await rects(tabId, ":checked");
+		const pw = await rects(tabId, "input[type=password]"); // value is never rendered, typed by us or not
+		return (r?.elements ?? []).map((e: El & { visible?: boolean }) => {
+			const el: El = { index: e.index, tag: e.tag, text: e.text, rect: e.rect };
+			const key = JSON.stringify(e.rect);
 			if (e.visible === false) el.hidden = true; // kept for stable indices, never rendered (hidden csrf values)
-			if (e.rect && on.has(JSON.stringify(e.rect))) el.checked = true;
+			if (e.rect && on.has(key)) el.checked = true;
+			if (e.rect && pw.has(key)) el.secret = true;
 			return el;
 		});
 	};
@@ -124,13 +156,41 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		return id;
 	};
 	const render = (tab: string, o: Awaited<ReturnType<typeof observe>>) =>
-		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.filter((e) => !e.hidden).map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text}`.trim()), text: o.text.slice(0, 3_000) });
-	const clickGuard = (els: El[], a: { index?: number }): string | null => {
-		if (a.index === undefined) return null;
-		const el = els[a.index];
-		if (!el) return `index ${a.index} out of range (${els.length} elements)`;
-		if (el.hidden) return `index ${a.index} is a hidden element`;
-		return DESTRUCTIVE.test(el.text) ? `refusing destructive click on "${el.text}"; ask the user to do it` : null;
+		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.filter((e) => !e.hidden).map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()), text: o.text.slice(0, 3_000) });
+	const shown = (e: El) => (e.secret ? "(password field)" : typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text);
+	const indexGuard = (els: El[], index?: number): string | null => {
+		if (index === undefined) return null;
+		if (!els[index]) return `index ${index} out of range (${els.length} elements)`;
+		return els[index].hidden ? `index ${index} is a hidden element` : null;
+	};
+	/** Resolve a click to the element it will hit (page.click uses the first selector match), refuse
+	 *  hidden or missing targets, and send a sensitive one (by text, or by aria-label / title / value /
+	 *  name attribute) to the approver. Returns the target's display text, or an error. */
+	const clickTarget = async (id: string, els: El[], a: { index?: number; selector?: string }, approve?: ApproveFn) => {
+		let el: El | undefined;
+		if (a.index !== undefined) {
+			const err = indexGuard(els, a.index);
+			if (err) return { error: err };
+			el = els[a.index];
+		} else {
+			const q = (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0];
+			if (!q) return { error: `no element matched selector ${a.selector}` };
+			if (q.visible === false) return { error: `selector ${a.selector} is a hidden element` };
+			el = els.find((e) => JSON.stringify(e.rect) === JSON.stringify(q.rect)) ?? { index: -1, tag: q.tag, text: String(q.text ?? ""), rect: q.rect };
+		}
+		let cat = sensitiveCategory(el.text);
+		for (const [c, terms] of SENSITIVE) {
+			if (cat) break;
+			const sel = terms.flatMap((t) => ["aria-label", "title", "value", "name"].map((k) => `[${k}*="${t}" i]`)).join(",");
+			if ((await rects(id, sel)).has(JSON.stringify(el.rect))) cat = c;
+		}
+		const text = shown(el);
+		if (cat) {
+			const what = `click "${text}" (${cat})`;
+			if (!approve) return { error: `${what} needs approval; ask the person` };
+			if (!(await approve(what))) return { error: `${what} was declined; nothing clicked` };
+		}
+		return { text };
 	};
 
 	async function open(url: string): Promise<string> {
@@ -151,7 +211,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		}
 	}
 
-	async function run(raw: unknown[], tabId?: string): Promise<string> {
+	async function run(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
 		const fail = (error: string, steps: unknown[] = []) => JSON.stringify({ ok: false, error, steps });
 		let id: string;
 		try {
@@ -171,7 +231,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		for (const [i, a] of plan.entries()) {
 			if (a.action === "open") break;
 			if (a.action !== "left_click") continue;
-			const err = clickGuard(before.els, a);
+			const err = indexGuard(before.els, a.index);
 			if (err) return fail(`dry run: step ${i}: ${err}`);
 			break; // after the first click the page may change; later clicks are re-resolved live
 		}
@@ -192,10 +252,9 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 				}
 				row.ok = row.verified;
 			} else if (a.action === "left_click") {
-				const err = clickGuard(before.els, a);
-				if (err) return fail(`step ${i}: ${err}`, steps);
-				const t = a.index !== undefined ? before.els[a.index]?.text : a.selector;
-				row.target = t !== undefined && typed.has(t) ? "(typed field)" : t;
+				const target = await clickTarget(id, before.els, a, approve);
+				if ("error" in target) return fail(`step ${i}: ${target.error}`, steps);
+				row.target = target.text;
 				const r = await call("page.click", { tabId: id, index: a.index, selector: a.selector });
 				row.ok = r?.ok !== false;
 				if (!row.ok) row.error = r.error;
@@ -235,5 +294,12 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		}
 	}
 
-	return { open, state, run, screenshot };
+	/** Close every tab this driver opened (session end). Never touches other tabs. */
+	async function closeAll(): Promise<void> {
+		for (const id of owned) await call("tab.close", { id }).catch(() => null);
+		owned.clear();
+		current = undefined;
+	}
+
+	return { open, state, run, screenshot, closeAll };
 }

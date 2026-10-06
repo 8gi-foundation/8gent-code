@@ -322,7 +322,29 @@ const MCP_LEAN_TOOL_DEFS = [
 /** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
 const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
-const getEightBrowser = () => (eightBrowser ??= createEightBrowser());
+const getEightBrowser = () => {
+	if (!eightBrowser) {
+		eightBrowser = createEightBrowser();
+		// Session end: close the tabs this process opened (natural exit only; never other tabs).
+		process.once("beforeExit", () => void eightBrowser?.closeAll());
+	}
+	return eightBrowser;
+};
+/**
+ * 8gent Browser tabs share the person's logged-in session partition (8gent-browser #80), so tools that
+ * act or capture there ask first, like desktop_*: gated as desktop_use, where no rule allows them.
+ */
+const BROWSER_ASK_FIRST = new Set(["browser_task", "browser_screenshot"]);
+/** Approval-card view of browser args: typed text shows as its length only. */
+function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknown> {
+	if (!Array.isArray(args.actions)) return args;
+	const actions = args.actions.map((a) =>
+		a && typeof a === "object" && typeof (a as { text?: unknown }).text === "string"
+			? { ...(a as object), text: `<${(a as { text: string }).text.length} chars>` }
+			: a,
+	);
+	return { ...args, actions };
+}
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1246,7 +1268,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=username], input[type=password]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Destructive clicks (delete, pay, buy...) are refused.",
+						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=email]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Sensitive clicks (sign in, buy, delete, send...) ask the person first.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1318,6 +1340,8 @@ export class ToolExecutor {
 		git_commit: "git_commit",
 		web_search: "network_request",
 		web_fetch: "network_request",
+		// browser_open loads a URL in 8gent Browser, in the person's own session partition (#3592).
+		browser_open: "network_request",
 		vercel_list_projects: "network_request",
 		vercel_get_deployments: "network_request",
 		vercel_deploy: "network_request",
@@ -1426,7 +1450,7 @@ export class ToolExecutor {
 		// those rules match on (#3213). It was gated as `computer_use`, which
 		// has no rules, so every desktop call - quitting apps included - fell
 		// through to the engine's default allow and no card appeared.
-		const isDesktop = toolName.startsWith("desktop_");
+		const isDesktop = toolName.startsWith("desktop_") || BROWSER_ASK_FIRST.has(toolName);
 		const isMcpCall = toolName === "mcp_call_tool";
 		const policyAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
@@ -3335,9 +3359,10 @@ export class ToolExecutor {
 		reason: string | undefined,
 	): Promise<string | null> {
 		if (this.permissionManager.isInfiniteMode()) return null;
+		const browser = toolName.startsWith("browser_");
 		const request = {
-			action: "Desktop control",
-			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(args)}`,
+			action: browser ? "Browser control" : "Desktop control",
+			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
 		};
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
@@ -3458,7 +3483,10 @@ export class ToolExecutor {
 			if (!useBrowserUse()) {
 				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
 				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
-				return await getEightBrowser().run(actions, session);
+				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
+				const approve = async (what: string) =>
+					(await this.askDesktopApproval("browser_task", { click: what }, "This click looks sensitive in your logged-in browser.")) === null;
+				return await getEightBrowser().run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
@@ -3468,7 +3496,16 @@ export class ToolExecutor {
 
 	private async handleBrowserScreenshot(filePath?: string, session?: string): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().screenshot(filePath, session);
+			if (!useBrowserUse()) {
+				let out: string | undefined;
+				if (filePath) {
+					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
+					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
+					const abs = path.resolve(this.workingDirectory, filePath);
+					out = abs.startsWith(shots + path.sep) ? abs : safePath(filePath, this.workingDirectory);
+				}
+				return await getEightBrowser().screenshot(out, session);
+			}
 			return browserScreenshot(filePath, session);
 		} catch (err) {
 			return `browser_screenshot failed: ${err}`;
