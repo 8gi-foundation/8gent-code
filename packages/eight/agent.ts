@@ -59,6 +59,8 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { stripDoneMarker } from "../ai/text-tool-loop";
+import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
@@ -945,6 +947,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				call,
 				maxRounds: this.config.maxTurns ?? 6,
 				signal,
+				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
+				// changed files and checked nothing since gets one nudge.
+				finalCheck: () => verifyNudgeFor(this.turnToolLedger),
 			});
 		};
 
@@ -2248,6 +2253,53 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					}
 					this.abortController = null;
 				}
+			}
+
+			// ── Verify-before-done (issue #3550, EIGHT_VERIFY_GATE=1) ────────
+			// A turn that changed files and checked nothing since gets one more
+			// generate with a nudge to run the most targeted check first. Off by
+			// default; a failed or empty follow-up keeps the first reply.
+			const verifyNudge = result?.text ? verifyNudgeFor(this.turnToolLedger) : null;
+			if (verifyNudge) {
+				console.log("[verify-gate] change not checked yet - asking for one targeted check");
+				// agentConfig already holds the provider that answered (chain step
+				// or hedge winner), so the follow-up goes to the same one.
+				const verifyAgent = createEightAgent(agentConfig);
+				this.abortController = new AbortController();
+				// Carry the turn's own transcript (tool calls and results) so the
+				// model can see what it changed instead of guessing from its prose.
+				const turnMessages: any[] = Array.isArray(result.response?.messages)
+					? result.response.messages
+					: [{ role: "assistant" as const, content: result.text as string }];
+				const verifyMessages: any[] = [
+					...messages,
+					...turnMessages,
+					{ role: "user" as const, content: verifyNudge },
+				];
+				let verifyTimedOut = false;
+				try {
+					const verified = await withTurnTimeout(
+						() =>
+							verifyAgent.generate({
+								messages: verifyMessages,
+								abortSignal: this.abortController?.signal,
+							}),
+						attemptTimeoutMs,
+						() => {
+							verifyTimedOut = true;
+							this.abortController?.abort();
+						},
+						"verify-gate",
+					);
+					if (verified?.text?.trim()) {
+						result = { ...verified, text: stripDoneMarker(verified.text) };
+					}
+				} catch (verifyErr: any) {
+					// Only a genuine user ESC re-throws; anything else keeps the first reply.
+					if (verifyErr?.name === "AbortError" && !verifyTimedOut) throw verifyErr;
+					console.log(`[verify-gate] follow-up failed: ${verifyErr?.message}`);
+				}
+				this.abortController = null;
 			}
 
 			// ── Law 1 (issue #2747): no fabricated completion ────────────────
