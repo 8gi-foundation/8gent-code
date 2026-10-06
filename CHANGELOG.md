@@ -46,6 +46,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tests in `packages/daemon/session-journal.test.ts`.
 ### Added (opt-in, off by default) - stream idle gap for local text-tool steps (#3553)
 - `EIGHT_STREAM_IDLE_MS` streams the local text-tool reply and aborts a step only after that many ms with no output, so a slow model that keeps writing is no longer cut off at 5 minutes; with it on the per-step ceiling defaults to 20 minutes unless `EIGHT_TURN_TIMEOUT_MS` is set. Unset, behaviour is unchanged. Documented in `docs/VESSEL-ABILITIES.md`; tests in `packages/ai/stream-idle.test.ts`.
+### Added (off by default) - provider allowlist that fails closed (#3555)
+- With `EIGHT_PROVIDERS_ALLOW` set (for example `ollama,8gent`), failover in `packages/providers/failover.ts` can no longer fall through to a provider outside the list; it throws a typed error instead of a silent cloud hop. Malformed failover chains are discarded fail-closed.
+- Tests in `packages/providers/failover-allowlist.test.ts`.
 
 ### Added (opt-in) - action-first communication style (#3487)
 - New `communicationStyle` value `action-first`, choice 6 in the onboarding communication step (`packages/self-autonomy/onboarding.ts`), also accepted by name. When picked, `USER_CONTEXT_SEGMENT` in `packages/eight/prompts/system-prompt.ts` adds `ACTION_FIRST_STYLE`: open with the action or answer, numbered steps, lists capped at five, commands in code blocks, plain failure statements, minutes for estimates, no recap or sign-off, and one closing "Next:" line. It opens with a precedence line saying these rules win over the base prompt's joke `COMPLETED` summary (`packages/eight/prompt.ts`) and the greeting and completion phrases in the personality block (`packages/eight/agent.ts`); a required completion marker becomes one plain line just before "Next:". Written in our own words; nothing on screen names a condition.
