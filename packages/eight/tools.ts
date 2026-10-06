@@ -211,7 +211,23 @@ export function safePath(userPath: string, workingDirectory: string): string {
 export function resolveSpeakOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : `speak-${Date.now()}.wav`;
 	if (!named.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${named}")`);
-	return safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory);
+	// safePath is lexical. A directory symlink inside the workspace would carry the
+	// write outside it, so check real locations: the nearest existing ancestor of the
+	// parent must sit under the real workspace, and the file itself must not be a link.
+	const root = fs.realpathSync(workingDirectory);
+	let ancestor = path.dirname(target);
+	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+	const real = fs.realpathSync(ancestor);
+	if (real !== root && !real.startsWith(root + path.sep)) {
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+	}
+	try {
+		if (fs.lstatSync(target).isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+	return target;
 }
 
 /**

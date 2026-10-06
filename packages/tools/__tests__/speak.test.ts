@@ -13,7 +13,8 @@ function stub(name: string): string {
 	fs.writeFileSync(
 		p,
 		`#!/usr/bin/env bash
-python3 - "$4" <<'PY'
+if [ "$1" = tts ]; then OUT="$3"; else OUT="$4"; fi
+python3 - "$OUT" <<'PY'
 import sys,struct
 d=b'\\0\\0'*6000
 open(sys.argv[1],'wb').write(b'RIFF'+struct.pack('<I',36+len(d))+b'WAVEfmt '+struct.pack('<IHHIIHH',16,1,1,8000,16000,2,16)+b'data'+struct.pack('<I',len(d))+d)

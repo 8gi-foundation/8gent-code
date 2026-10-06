@@ -80,7 +80,7 @@ async function synth(engine: Engine, id: string, text: string, out: string): Pro
 	if (engine === "supertonic") {
 		const bin = supertonicBin();
 		if (!fs.existsSync(bin)) return false;
-		return (await run(bin, ["tts", text, "-o", out, "--voice", id, "--steps", "8"])) && nonEmpty(out);
+		return (await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text])) && nonEmpty(out);
 	}
 	const py = kittenPy();
 	if (!fs.existsSync(py)) return false;
