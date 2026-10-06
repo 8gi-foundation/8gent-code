@@ -36,10 +36,11 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 import { withImagesWritten } from "./image-shape";
 import { writeShapeLine } from "./write-shape";
+import { writeScopeLine } from "./write-scope";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -398,6 +399,7 @@ const writeFile = tool({
 		const absolutePath = resolvePath(filePath);
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		const wasNew = pathAbsent(absolutePath);
 		const recordWrite = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
@@ -405,7 +407,10 @@ const writeFile = tool({
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
 		// Report what is on disk so a requested count can be checked (#3580).
 		const shape = writeShapeLine(absolutePath, content);
-		return `File written: ${absolutePath}${shape ? `\n${shape}` : ""}${deckLine ? `\n${deckLine}` : ""}`;
+		// A new top-folder file while the work lives in one subfolder (#3580).
+		const { createdFiles, workingDirectory } = getToolContext();
+		const scope = writeScopeLine(createdFiles, workingDirectory, absolutePath, wasNew);
+		return `File written: ${absolutePath}${shape ? `\n${shape}` : ""}${scope ? `\n${scope}` : ""}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 
