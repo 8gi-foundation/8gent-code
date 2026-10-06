@@ -56,34 +56,35 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      # #3575: the release notes are the CHANGELOG.md section built from the
+      # merged PR titles since the previous tag. PR titles are untrusted text:
+      # they only ever reach a file, never the shell source or a ${{ }} body.
       - name: Generate release notes
-        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Get commits since previous tag
-          PREV_TAG=$(git tag --sort=-version:refname | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log ${PREV_TAG}..HEAD --oneline --no-merges)
-          else
-            COMMITS=$(git log --oneline --no-merges -20)
+          # Notes are cosmetic: a failure here must never block the npm publish.
+          if ! bun scripts/changelog-release.ts --version "$VERSION" --to "$TAG" --out section.md; then
+            echo "::warning::changelog-release failed; the release body points at CHANGELOG.md only."
+            printf '## v%s\n\nSee CHANGELOG.md.\n' "$VERSION" > section.md
           fi
-          echo "commits<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMITS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          if ! grep -qF "## [$VERSION]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md on $TAG has no [$VERSION] section. Run 'bun scripts/changelog-release.ts --version $VERSION --write' in the release PR."
+          fi
+          {
+            printf '## 8gent Code v%s\n\n' "$VERSION"
+            printf 'Install: `npm install -g @8gi-foundation/8gent-code`\n\n'
+            tail -n +3 section.md
+            printf '\n---\nFull changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)\n'
+          } > release_notes.md
+          cat release_notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ steps.version.outputs.version }}"
-          body: |
-            ## 8gent Code v${{ steps.version.outputs.version }}
-
-            Install: `npm install -g @8gi-foundation/8gent-code`
-
-            ### Commits
-            ${{ steps.notes.outputs.commits }}
-
-            ---
-            Full changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)
+          body_path: release_notes.md
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
