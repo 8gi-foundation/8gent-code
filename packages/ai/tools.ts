@@ -23,6 +23,7 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
+import { touchesProtectedAgentFile, wrapShellCommand } from "../permissions/seatbelt";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -1228,6 +1229,8 @@ async function runShellCommand(command: string): Promise<string> {
 	const permissionManager = getPermissionManager();
 	const hookManager = getHookManager();
 
+	if (touchesProtectedAgentFile(command))
+		return `[PERMISSION DENIED] Command touches a file agent tools may not use (~/.8gent/settings.json): ${command}`;
 	const permissionCheck = permissionManager.checkPermission(command);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
@@ -1283,7 +1286,7 @@ async function runShellCommand(command: string): Promise<string> {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
+		const proc = spawnShell(wrapShellCommand(finalCommand), {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
