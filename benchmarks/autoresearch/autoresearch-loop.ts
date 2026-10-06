@@ -24,6 +24,14 @@ import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
+import {
+	appendProposal,
+	dropHeldOutMutations,
+	gateCandidates,
+	isGateEnabled,
+	scoreAll,
+	splitIds,
+} from "./mutation-gate";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
 import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
@@ -56,6 +64,7 @@ const TEMPERATURES = [0.3, 0.5, 0.7];
 
 const STATE_FILE = join(ROOT, "autoresearch", "loop-state.json");
 const LOG_FILE = join(ROOT, "autoresearch", "autoresearch.log");
+const PROPOSALS_FILE = join(ROOT, "autoresearch", "mutation-proposals.jsonl");
 
 // ── All Benchmarks ──────────────────────────────────────────────────
 
@@ -637,6 +646,25 @@ async function main(): Promise<void> {
 		};
 	}
 
+	// #3556: with AUTORESEARCH_GATE=1, rules come from tuning failures only and are
+	// kept only if the held-out mean does not drop. Off: unchanged behaviour.
+	const split = isGateEnabled() ? splitIds(benchmarks.map((b) => b.id)) : null;
+	if (split)
+		log(
+			`🚧 Mutation gate ON: tuning=${split.tuning.join(",")} held-out=${split.heldOut.join(",")}`,
+		);
+	if (split) {
+		// Rules restored from loop-state.json may come from held-out tasks; they
+		// would leak into the held-out mean the gate trusts. Drop them first.
+		const { kept, dropped } = dropHeldOutMutations(getMutations(), split);
+		if (dropped.length > 0) {
+			log(`🚧 Dropped ${dropped.length} restored rule(s) derived from held-out tasks:`);
+			for (const m of dropped) log(`     - ${m.slice(0, 100)}`);
+			clearMutations();
+			for (const m of kept) addMutation(m);
+		}
+	}
+
 	for (let iter = state.iteration; iter < MAX_ITERATIONS; iter++) {
 		log(`\n${"═".repeat(60)}`);
 		log(`  ITERATION ${iter + 1}/${MAX_ITERATIONS}`);
@@ -646,7 +674,8 @@ async function main(): Promise<void> {
 		const scores: Record<string, number> = {};
 		const tokens: Record<string, number> = {};
 		const durations: Record<string, number> = {};
-		const newMutations: string[] = [];
+		let newMutations: string[] = [];
+		const candidates: string[] = [];
 		let totalScore = 0;
 		let iterTokens = 0;
 		let iterDuration = 0;
@@ -670,10 +699,15 @@ async function main(): Promise<void> {
 				);
 
 				// Analyze failures and derive mutations
-				const muts = analyzeAndMutate(benchmark, run);
-				for (const m of muts) {
-					newMutations.push(m);
-					addMutation(m);
+				if (split) {
+					if (split.tuning.includes(benchmark.id))
+						candidates.push(...analyzeAndMutate(benchmark, run));
+				} else {
+					const muts = analyzeAndMutate(benchmark, run);
+					for (const m of muts) {
+						newMutations.push(m);
+						addMutation(m);
+					}
 				}
 			} catch (err: any) {
 				log(`  └─ ✗ FAILED: ${err.message}`);
@@ -681,6 +715,42 @@ async function main(): Promise<void> {
 			}
 
 			log("");
+		}
+
+		if (split && candidates.length > 0) {
+			const accepted = getMutations();
+			const gate = await gateCandidates({
+				candidates,
+				accepted,
+				before: scores,
+				split,
+				apply: (ms) => {
+					clearMutations();
+					for (const m of ms) addMutation(m);
+				},
+				rerun: () =>
+					scoreAll(
+						benchmarks,
+						async (b) => (await runBenchmarkSweep(b)).grade.score,
+						(b, err) =>
+							log(
+								`  ✗ rerun ${b.id} FAILED (scored 0): ${err instanceof Error ? err.message : String(err)}`,
+							),
+					),
+			});
+			log(
+				`  🚧 Gate ${gate.keep ? "KEPT" : "DISCARDED"} ${candidates.length} rule(s): ${gate.reason}`,
+			);
+			if (gate.keep) {
+				newMutations = getMutations().filter((m) => !accepted.includes(m));
+				appendProposal(PROPOSALS_FILE, {
+					iteration: iter + 1,
+					timestamp: new Date().toISOString(),
+					reason: gate.reason,
+					split,
+					kept: newMutations,
+				});
+			}
 		}
 
 		const avgScore = Math.round(totalScore / benchmarks.length);
