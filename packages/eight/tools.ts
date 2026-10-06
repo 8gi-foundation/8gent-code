@@ -31,6 +31,7 @@ import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
 import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
+import { touchesProtectedAgentFile, wrapShellCommand } from "../permissions/seatbelt";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import {
@@ -2252,6 +2253,8 @@ export class ToolExecutor {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
 		}
+		if (touchesProtectedAgentFile(command))
+			return `[PERMISSION DENIED] Command touches a file agent tools may not use (~/.8gent/settings.json): ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
@@ -2327,7 +2330,7 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawnShell(finalCommand, {
+			const proc = spawnShell(wrapShellCommand(finalCommand), {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
