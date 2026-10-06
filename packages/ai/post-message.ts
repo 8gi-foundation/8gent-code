@@ -16,7 +16,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir as osHome } from "node:os";
 import { join } from "node:path";
 import { scrub } from "../eight/secret-scanner";
@@ -43,6 +43,12 @@ export interface PostMessageDeps {
 	/** Posts allowed per session; `sent` is the session's running count. */
 	limit: number;
 	sent: { n: number };
+	/** Allowlisted chats a person has not yet confirmed at the card (changed since last confirmed). */
+	unconfirmed: () => string[];
+	/** Record these chats as confirmed by a person. */
+	confirm: (chats: string[]) => void;
+	/** The confirmation card is shown at most once per process. */
+	confirmCard: { shown: boolean };
 }
 
 export const POST_LIMIT_PER_SESSION = 10;
@@ -94,9 +100,30 @@ function postMessageBins(): PostMessageDeps["bins"] {
  * a write through some other tool) cannot grant a recipient (#3595).
  */
 let allowedSnapshot: string[] = readAllowedChats();
-/** Test seam only: re-take the snapshot. Production never calls this. */
+/**
+ * Chats a person has confirmed, in ~/.8gent/post-message-confirmed.json. Only
+ * this module writes it, after the card; path-guard keeps agent tools out. A
+ * chat in settings but not here is unconfirmed: the settings file may have been
+ * changed since a person last looked (the next-launch hole).
+ */
+function confirmedFile(): string {
+	return join(home(), ".8gent", "post-message-confirmed.json");
+}
+function readConfirmed(): string[] {
+	try {
+		const list = JSON.parse(readFileSync(confirmedFile(), "utf8"));
+		return Array.isArray(list) ? list.map(String) : [];
+	} catch {
+		return [];
+	}
+}
+let confirmedSnapshot: string[] = readConfirmed();
+const confirmCardState = { shown: false };
+/** Test seam only: re-take both snapshots and re-arm the card. */
 export function _snapshotAllowedChats(): void {
 	allowedSnapshot = readAllowedChats();
+	confirmedSnapshot = readConfirmed();
+	confirmCardState.shown = false;
 }
 
 export function postMessageDeps(agentId: string, sessionKey = agentId): PostMessageDeps {
@@ -134,6 +161,17 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 		allowedChats: () => allowedSnapshot,
 		log: appendLog,
 		limit: POST_LIMIT_PER_SESSION,
+		unconfirmed: () => allowedSnapshot.filter((c) => !confirmedSnapshot.includes(c)),
+		confirm: (chats) => {
+			confirmedSnapshot = [...new Set([...confirmedSnapshot, ...chats])];
+			try {
+				mkdirSync(join(home(), ".8gent"), { recursive: true });
+				writeFileSync(confirmedFile(), JSON.stringify(confirmedSnapshot));
+			} catch {
+				// unwritable: confirmed for this process only; the card returns next launch
+			}
+		},
+		confirmCard: confirmCardState,
 		sent: sessions.get(sessionKey) ?? sessions.set(sessionKey, { n: 0 }).get(sessionKey)!,
 	};
 }
@@ -142,20 +180,24 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 async function askPerson(args: PostMessageArgs, deps: PostMessageDeps): Promise<string | null> {
 	if (deps.infinite()) return null;
 	const what = args.voice ? `voice note (${args.voice})` : "message";
-	const command = `post_message ${what} to chat ${args.chat}:\n${args.text}`;
-	if (hasTuiApprovalHandler()) {
-		const decision = await requestTuiDecision({
-			action: POST_MESSAGE_APPROVAL_ACTION,
-			command,
-			full: true,
-			details: `Send this ${what} to Telegram chat ${args.chat}.`,
-		});
-		if (decision === "approve") return null;
-		if (decision === "unfit")
-			return "[BLOCKED] post_message was not shown for approval: the card must show the whole text and it does not fit on this screen. Nothing was sent. Post shorter text, or ask the person to make the window larger.";
-		return "[PERMISSION DENIED] The person declined post_message. Nothing was sent. Do not retry.";
+	return card(
+		POST_MESSAGE_APPROVAL_ACTION,
+		`post_message ${what} to chat ${args.chat}:\n${args.text}`,
+		`Send this ${what} to Telegram chat ${args.chat}.`,
+	);
+}
+
+async function card(action: string, command: string, details: string): Promise<string | null> {
+	{
+		if (hasTuiApprovalHandler()) {
+			const decision = await requestTuiDecision({ action, command, full: true, details });
+			if (decision === "approve") return null;
+			if (decision === "unfit")
+				return "[BLOCKED] post_message was not shown for approval: the card must show the whole text and it does not fit on this screen. Nothing was sent. Post shorter text, or ask the person to make the window larger.";
+			return "[PERMISSION DENIED] The person declined post_message. Nothing was sent. Do not retry.";
+		}
+		return "[BLOCKED] post_message needs the person's approval and there is no one to ask in this session. Nothing was sent. Do not retry.";
 	}
-	return "[BLOCKED] post_message needs the person's approval and there is no one to ask in this session. Nothing was sent. Do not retry.";
 }
 
 /** Telegram bot tokens (digits:secret), alone or inside a /bot<token>/ URL; the shared scanner has no rule for them. */
@@ -182,6 +224,23 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	deps.sent.n++;
 	if (!deps.allowedChats().includes(chat))
 		return `[BLOCKED] post_message: chat ${chat} is not on postMessage.allowedChats in ~/.8gent/settings.json. Nothing was sent. Ask the person to add it; do not retry.`;
+
+	// A chat the settings file gained since a person last confirmed it (an edit
+	// made while no one watched) is unconfirmed: refused in Infinite mode, and
+	// otherwise shown once on a card listing every unconfirmed chat.
+	const un = deps.unconfirmed();
+	if (un.includes(chat)) {
+		if (deps.infinite() || deps.confirmCard.shown)
+			return `[BLOCKED] post_message: chat ${chat} was added to postMessage.allowedChats and a person has not confirmed it yet. Nothing was sent. Do not retry.`;
+		deps.confirmCard.shown = true;
+		const refusal = await card(
+			"Confirm Telegram recipients",
+			`post_message recipients not yet confirmed:\n${un.join("\n")}`,
+			"These chats are on postMessage.allowedChats but you have not confirmed them. Approve to let post_message use them.",
+		);
+		if (refusal) return refusal;
+		deps.confirm(un);
+	}
 
 	const g = deps.gate(chat);
 	if (!g.allowed)

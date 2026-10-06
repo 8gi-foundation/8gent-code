@@ -16,11 +16,13 @@ const FAKE_TOKEN = "123456789:AAFakeTokenFakeTokenFakeTokenFake_0123";
 
 let ran: Array<{ bin: string; argv: string[] }> = [];
 let asked = 0;
+let confirmed: string[] = [];
 let logged: Array<Record<string, unknown>> = [];
 
 function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 	ran = [];
 	logged = [];
+	confirmed = [];
 	return {
 		run: async (bin, argv) => {
 			ran.push({ bin, argv });
@@ -33,6 +35,9 @@ function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 		log: (e) => logged.push(e),
 		limit: 10,
 		sent: { n: 0 },
+		unconfirmed: () => [],
+		confirm: (c) => confirmed.push(...c),
+		confirmCard: { shown: false },
 		...over,
 	};
 }
@@ -260,5 +265,41 @@ describe("post_message", () => {
 		expect(out).toStartWith("Posted");
 		expect(ran[0].argv.join(" ")).not.toMatch(/--file|--caption/);
 		expect(ran[0].argv[0]).toBe("text");
+	});
+
+	test("unconfirmed chat, Infinite mode: refused, no card, nothing runs", async () => {
+		person("approve");
+		const out = await postMessage(
+			{ chat: CHAT, text: "hi" },
+			deps({ infinite: () => true, unconfirmed: () => [CHAT] }),
+		);
+		expect(out).toContain("has not confirmed it yet");
+		expect(asked).toBe(0);
+		expect(ran.length).toBe(0);
+	});
+
+	test("unconfirmed chat, person present: one card lists every unconfirmed chat, approval confirms and posts", async () => {
+		const seen: Array<{ action: string; command?: string }> = [];
+		registerTuiApprovalHandler(async (req) => {
+			seen.push(req);
+			return "approve";
+		});
+		const d = deps({ unconfirmed: () => [CHAT, "-100222"] });
+		const out = await postMessage({ chat: CHAT, text: "hi" }, d);
+		expect(out).toStartWith("Posted");
+		expect(seen.length).toBe(2); // the recipients card, then the post card
+		expect(seen[0].command).toContain(CHAT);
+		expect(seen[0].command).toContain("-100222");
+		expect(confirmed).toEqual([CHAT, "-100222"]);
+	});
+
+	test("declining the recipients card refuses, and the card is not shown again", async () => {
+		person("deny");
+		const d = deps({ unconfirmed: () => [CHAT] });
+		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toContain("PERMISSION DENIED");
+		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toContain("has not confirmed it yet");
+		expect(asked).toBe(1);
+		expect(confirmed.length).toBe(0);
+		expect(ran.length).toBe(0);
 	});
 });

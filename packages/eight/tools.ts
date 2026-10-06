@@ -2294,7 +2294,7 @@ export class ToolExecutor {
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen
 		// at process start, so an edit that slips past this cannot take effect.
-		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
+		if (/\.8gent\S*\s*[/\\]+\s*(settings|post-message-confirmed)/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);

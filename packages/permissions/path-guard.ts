@@ -41,7 +41,10 @@ const PROTECTED_DIRS = [".ssh", ".aws", ".kube"];
  * could write it could grant itself recipients. The TUI's own settings store
  * writes with plain fs calls, not through this guard, so it is unaffected.
  */
-const PROTECTED_HOME_FILES = [[".8gent", "settings.json"]];
+const PROTECTED_HOME_FILES = [
+	[".8gent", "settings.json"],
+	[".8gent", "post-message-confirmed.json"],
+];
 
 /** Basenames that always indicate a credential file regardless of location. */
 const PROTECTED_BASENAMES = new Set<string>([
@@ -163,6 +166,12 @@ export function validatePath(
 	const platform = host.platform ?? process.platform;
 	if (typeof rawPath !== "string" || rawPath.length === 0) {
 		return { ok: false, reason: "empty path" };
+	}
+
+	// 0. A leading ~ means home, as the file tools expand it; compare what they will
+	// open, not the spelling (a "~/.8gent/settings.json" bypass, #3595).
+	if (rawPath === "~" || rawPath.startsWith("~/") || rawPath.startsWith("~\\")) {
+		rawPath = pathFor(platform).join(host.home ?? homeDir(), rawPath.slice(1));
 	}
 
 	// 1. UNC paths are rejected before any normalisation.
