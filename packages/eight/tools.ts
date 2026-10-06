@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
@@ -2370,7 +2371,9 @@ export class ToolExecutor {
 					workingDirectory: this.workingDirectory,
 				});
 
-				safeResolve(formatCommandOutput(code, stdout, stderr));
+				const output = formatCommandOutput(code, stdout, stderr);
+				// Report images the command drew, and any cut off at an edge (#3580).
+				withImagesWritten(output, this.workingDirectory, startTime).then(safeResolve, () => safeResolve(output));
 			});
 
 			proc.on("error", (err) => {
