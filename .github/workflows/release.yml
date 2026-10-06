@@ -64,7 +64,11 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          bun scripts/changelog-release.ts --version "$VERSION" --to "$TAG" --out section.md
+          # Notes are cosmetic: a failure here must never block the npm publish.
+          if ! bun scripts/changelog-release.ts --version "$VERSION" --to "$TAG" --out section.md; then
+            echo "::warning::changelog-release failed; the release body points at CHANGELOG.md only."
+            printf '## v%s\n\nSee CHANGELOG.md.\n' "$VERSION" > section.md
+          fi
           if ! grep -qF "## [$VERSION]" CHANGELOG.md; then
             echo "::warning::CHANGELOG.md on $TAG has no [$VERSION] section. Run 'bun scripts/changelog-release.ts --version $VERSION --write' in the release PR."
           fi

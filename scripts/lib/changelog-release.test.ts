@@ -93,8 +93,22 @@ describe("insertSection", () => {
   const base = "# Changelog\n\nintro\n\n## [Unreleased]\n\n### Fixed - old entry\n- detail\n\n## [0.18.0] - 2026-10-01\n- prior\n";
   const section = "## [0.19.0] - 2026-10-06\n\n### Fixed\n- new\n";
 
-  test("goes directly under Unreleased; existing Unreleased notes move into the release", () => {
-    const out = insertSection(base, "0.19.0", section);
+  test("refuses by default when hand-written notes are under Unreleased", () => {
+    expect(() => insertSection(base, "0.19.0", section)).toThrow("--drop-unreleased");
+  });
+  test("an empty Unreleased needs no choice", () => {
+    const empty = "# Changelog\n\n## [Unreleased]\n\n## [0.18.0] - 2026-10-01\n- prior\n";
+    expect(insertSection(empty, "0.19.0", section)).toBe(
+      "# Changelog\n\n## [Unreleased]\n\n## [0.19.0] - 2026-10-06\n\n### Fixed\n- new\n\n## [0.18.0] - 2026-10-01\n- prior\n",
+    );
+  });
+  test("drop: hand-written Unreleased notes are discarded", () => {
+    expect(insertSection(base, "0.19.0", section, "drop")).toBe(
+      "# Changelog\n\nintro\n\n## [Unreleased]\n\n## [0.19.0] - 2026-10-06\n\n### Fixed\n- new\n\n## [0.18.0] - 2026-10-01\n- prior\n",
+    );
+  });
+  test("keep: hand-written Unreleased notes move into the release", () => {
+    const out = insertSection(base, "0.19.0", section, "keep");
     expect(out).toBe(
       "# Changelog\n\nintro\n\n## [Unreleased]\n\n## [0.19.0] - 2026-10-06\n\n### Fixed\n- new\n\n### Fixed - old entry\n- detail\n\n## [0.18.0] - 2026-10-01\n- prior\n",
     );
@@ -139,6 +153,46 @@ describe("CLI against a real git history", () => {
       const written = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
       expect(written).toContain("## [Unreleased]\n\n## [0.2.0] - 2026-02-02\n");
       expect(written.indexOf("## [0.2.0]")).toBeLessThan(written.indexOf("## [0.1.0]"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("CLI previous-release detection", () => {
+  test("a release tag on a bump commit off main starts the range at its merge-base, and old higher-version tags are ignored", () => {
+    const dir = mkdtempSync(join(tmpdir(), "changelog-release-"));
+    const run = (args: string[], env: Record<string, string> = {}) => {
+      const r = spawnSync(args[0], args.slice(1), { cwd: dir, encoding: "utf8", env: { ...process.env, ...env } });
+      if (r.status !== 0) throw new Error(`${args.join(" ")}: ${r.stderr}`);
+      return r.stdout;
+    };
+    // creatordate must differ per tag, so each step gets its own clock.
+    let t = 1_700_000_000;
+    const g = (...a: string[]) => {
+      t += 60;
+      const d = `${t} +0000`;
+      return run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...a], {
+        GIT_AUTHOR_DATE: d,
+        GIT_COMMITTER_DATE: d,
+      });
+    };
+    try {
+      g("init", "-q", "-b", "main");
+      g("commit", "-q", "--allow-empty", "-m", "chore: init");
+      g("tag", "-a", "v2.1.0", "-m", "legacy line, higher version, older"); // must not be picked
+      g("commit", "-q", "--allow-empty", "-m", "fix: shipped in 0.19.0 (#1)");
+      // 0.19.0 is tagged on a bump commit that never reached main.
+      g("checkout", "-q", "-b", "bump");
+      g("commit", "-q", "--allow-empty", "-m", "chore(release): bump version to v0.19.0");
+      g("tag", "-a", "v0.19.0", "-m", "v0.19.0");
+      g("checkout", "-q", "main");
+      g("commit", "-q", "--allow-empty", "-m", "feat: after 0.19.0 (#2)");
+      const cli = join(import.meta.dir, "..", "changelog-release.ts");
+      const out = run([process.execPath, cli, "--version", "0.19.1", "--date", "2026-02-02"]);
+      expect(out).toContain("after 0.19.0");
+      expect(out).not.toContain("shipped in 0.19.0");
+      expect(out).not.toContain("init");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

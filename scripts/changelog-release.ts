@@ -6,11 +6,16 @@
  *   bun scripts/changelog-release.ts --version 0.20.0 --write    also insert it into CHANGELOG.md
  *
  * Options:
- *   --from <rev>   start (exclusive); default: newest v* tag reachable from --to,
- *                  not counting a tag on --to itself
+ *   --from <rev>   start (exclusive); default: merge-base of --to and the most
+ *                  recently created v* tag that is not on --to itself
  *   --to <rev>     end (inclusive); default: HEAD
  *   --date <d>     section date; default: today (UTC, YYYY-MM-DD)
  *   --out <file>   also write the section to this file (release notes body)
+ *   --write        insert the section into CHANGELOG.md under [Unreleased]. If
+ *                  hand-written notes are still under [Unreleased] (from before
+ *                  #3575), it refuses unless told what to do with them:
+ *                  --drop-unreleased   discard them (the generated entries cover the same PRs)
+ *                  --keep-unreleased   keep them inside the new version, below the generated groups
  *
  * Only the first-parent history of --to is read, so each merged PR is one entry.
  * Logic and tests: scripts/lib/changelog-release.ts.
@@ -39,11 +44,18 @@ function main(): void {
     throw new Error("usage: changelog-release.ts --version X.Y.Z [--from rev] [--to rev] [--date d] [--out file] [--write]");
   }
   const to = arg("to") ?? "HEAD";
-  // The previous release: newest v* tag reachable from --to, other than a tag on --to itself.
-  const own = git(["tag", "--points-at", to, "--list", "v*"]).split("\n").filter(Boolean);
-  const from =
-    arg("from") ??
-    git(["describe", "--tags", "--abbrev=0", "--match", "v*", ...own.flatMap((t) => ["--exclude", t]), to]).trim();
+  // The previous release: the most recently created v* tag other than one on --to,
+  // by creation date, not version (old v2.x tags predate the 0.x line). Release
+  // tags can sit on bump commits that never reached main, so the range starts at
+  // the tag's merge-base with --to, not at the tag itself.
+  const toCommit = git(["rev-parse", "--verify", `${to}^{commit}`]).trim();
+  const own = new Set(git(["tag", "--points-at", toCommit, "--list", "v*"]).split("\n").filter(Boolean));
+  const prevTag = git(["tag", "--list", "v*", "--sort=-creatordate"])
+    .split("\n")
+    .filter((t) => t && !own.has(t))[0];
+  const fromArg = arg("from");
+  if (!fromArg && !prevTag) throw new Error("no previous v* tag; pass --from");
+  const from = fromArg ?? git(["merge-base", `${prevTag}^{commit}`, toCommit]).trim();
   const date = arg("date") ?? new Date().toISOString().slice(0, 10);
   const raw = git(["log", "--first-parent", `--format=${GIT_LOG_FORMAT}`, `${from}..${to}`]);
   const section = renderSection(version, date, parseGitLog(raw));
@@ -51,7 +63,11 @@ function main(): void {
   const out = arg("out");
   if (out) writeFileSync(out, section);
   if (process.argv.includes("--write")) {
-    writeFileSync("CHANGELOG.md", insertSection(readFileSync("CHANGELOG.md", "utf8"), version, section));
+    const keep = process.argv.includes("--keep-unreleased");
+    const drop = process.argv.includes("--drop-unreleased");
+    if (keep && drop) throw new Error("pass only one of --keep-unreleased / --drop-unreleased");
+    const mode = keep ? "keep" : drop ? "drop" : "refuse";
+    writeFileSync("CHANGELOG.md", insertSection(readFileSync("CHANGELOG.md", "utf8"), version, section, mode));
     console.error(`CHANGELOG.md: added [${version}] (${from}..${to})`);
   }
 }

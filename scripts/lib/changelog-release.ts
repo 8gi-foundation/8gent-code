@@ -113,13 +113,22 @@ export function renderSection(
   return `${lines.join("\n")}\n`;
 }
 
+export type UnreleasedMode = "refuse" | "keep" | "drop";
+
 /**
  * Insert a rendered section into CHANGELOG.md text, directly under the
- * `## [Unreleased]` heading. Anything already written under Unreleased is
- * part of this release, so it stays below the generated groups inside the new
- * version. Throws if the version already has a section.
+ * `## [Unreleased]` heading. Hand-written notes still under Unreleased (from
+ * before #3575) describe the same PRs the generated groups list, so the caller
+ * must choose: "drop" discards them, "keep" keeps them inside the new version
+ * below the generated groups, "refuse" (default) throws rather than list every
+ * change twice. Throws if the version already has a section.
  */
-export function insertSection(changelog: string, version: string, section: string): string {
+export function insertSection(
+  changelog: string,
+  version: string,
+  section: string,
+  mode: UnreleasedMode = "refuse",
+): string {
   const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`^## \\[${escaped}\\]`, "m").test(changelog)) {
     throw new Error(`CHANGELOG.md already has a section for ${version}`);
@@ -127,6 +136,15 @@ export function insertSection(changelog: string, version: string, section: strin
   const unreleased = /^## \[Unreleased\][^\n]*\n/m.exec(changelog);
   if (!unreleased) throw new Error("CHANGELOG.md has no ## [Unreleased] heading");
   const at = unreleased.index + unreleased[0].length;
-  const rest = changelog.slice(at).replace(/^\n+/, "");
-  return `${changelog.slice(0, at)}\n${section}\n${rest}`;
+  const next = /^## \[/m.exec(changelog.slice(at));
+  const end = next ? at + next.index : changelog.length;
+  const pending = changelog.slice(at, end).replace(/^[\s-]*$/gm, "").trim();
+  if (pending && mode === "refuse") {
+    throw new Error(
+      "hand-written notes are still under [Unreleased]; pass --drop-unreleased (generated entries cover them) or --keep-unreleased",
+    );
+  }
+  const kept = mode === "keep" ? changelog.slice(at, end).replace(/^\n+/, "") : "";
+  const tail = changelog.slice(end);
+  return `${changelog.slice(0, at)}\n${section}\n${kept}${tail}`;
 }

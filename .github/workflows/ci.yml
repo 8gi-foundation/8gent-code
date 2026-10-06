@@ -187,7 +187,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..HEAD 2>/dev/null || git diff --name-only HEAD~1)
-          if echo "$CHANGED" | grep -qx "CHANGELOG.md"; then
+          if echo "$CHANGED" | grep -qxF "CHANGELOG.md"; then
             echo "::warning::This PR edits CHANGELOG.md. Unless it is a release PR, drop that change: the release step builds the changelog from merged PR titles (#3575)."
           else
             echo "No CHANGELOG.md edit - OK"
