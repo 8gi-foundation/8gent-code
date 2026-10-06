@@ -13,6 +13,7 @@
 
 8gent Code - the kernel of the 8gent ecosystem. Open source autonomous coding agent TUI. "Free and local by default" (Principle 2) = adaptive provider routing across local runtimes (Ollama, LM Studio, 8gent localhost) with rate-limit failover to free cloud tiers (OpenRouter `:free`). The free on-ramp to 8gent OS.
 
+- **Screen, GUI and browser work:** we have our own stack (eyes, hands, handeyes, computer-use loop, plus the 8gent-computer CUA and 8gent Browser repos). Read `docs/BODY.md` before reaching for any external tool such as browser-use.
 - **Domain:** 8gent.dev
 - **Runtime:** Bun (not Node - never use Node or npm in scripts)
 - **TUI:** Ink v6 (React for CLI)
@@ -123,6 +124,7 @@ Run `bun run tui` to test before any push. Never push untested code. Run `bun ru
 | `docs/HYPERAGENT-SPEC.md` | HyperAgent metacognitive self-modification spec |
 | `docs/MODEL-SHOOTOUT.md` | Local vs cloud model comparison |
 | `docs/KERNEL-FINETUNING.md` | RL fine-tuning architecture |
+| `docs/BODY.md` | READ BEFORE touching screen, GUI or browser tooling: eyes, hands, handeyes, computer, the computer-use loop, the separate 8gent-computer CUA repo, and 8gent Browser (what `browser_*` really calls, issue #3589) |
 
 ## Core Architecture
 
