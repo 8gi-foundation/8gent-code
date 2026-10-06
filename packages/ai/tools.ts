@@ -827,24 +827,28 @@ const makePdfTool = tool({
 
 const speakTool = tool({
 	description:
-		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav into ~/.8gent/creative/. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
+		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
 	inputSchema: z.object({
 		text: z.string().describe("The words to speak (max 2000 characters)"),
 		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
 		out: z
 			.string()
 			.optional()
-			.describe("Output filename; resolved inside ~/.8gent/creative/ (.wav added if missing)"),
+			.describe("Output .wav path inside the working directory"),
 	}),
 	execute: async ({ text, voice, out }) => {
-		const { speak } = await import("../tools/speak");
 		try {
-			return JSON.stringify(await speak({ text, voice, out }), null, 2);
+			const { resolveSpeakOut } = await import("../eight/tools");
+			const target = resolveSpeakOut(out, getToolContext().workingDirectory);
+			const blocked = gateWrite("speak", { path: target });
+			if (blocked) return blocked;
+			const { speak } = await import("../tools/speak");
+			return JSON.stringify(await speak({ text, voice, out: target }), null, 2);
 		} catch (err) {
 			return JSON.stringify(
 				{
 					error: `speak failed: ${err instanceof Error ? err.message : String(err)}`,
-					hint: "Needs Supertonic or KittenTTS installed locally. If neither is available, use another narration path; do not use say.",
+					hint: "out must be a .wav inside the working directory. Needs Supertonic or KittenTTS installed locally; do not fall back to say.",
 				},
 				null,
 				2,

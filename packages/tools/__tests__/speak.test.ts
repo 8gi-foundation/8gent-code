@@ -37,7 +37,7 @@ describe("speak", () => {
 	test("Supertonic path returns wav path and duration", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = stub("st");
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		const r = await speak({ text: "hello there", voice: "Rishi", out: "t.wav" });
+		const r = await speak({ text: "hello there", voice: "Rishi", out: path.join(dir, "t.wav") });
 		expect(r.engine).toBe("supertonic");
 		expect(r.durationSec).toBe(0.75);
 		expect(fs.existsSync(r.path)).toBe(true);
@@ -47,7 +47,7 @@ describe("speak", () => {
 	test("falls back to Kitten when Supertonic is missing", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = "/nonexistent";
 		process.env.EIGHT_KITTEN_PY = stub("py");
-		const r = await speak({ text: "hello", voice: "Rishi", out: "k" });
+		const r = await speak({ text: "hello", voice: "Rishi", out: path.join(dir, "k.wav") });
 		expect(r.engine).toBe("kitten");
 		expect(r.path.endsWith("k.wav")).toBe(true);
 	});
@@ -55,18 +55,15 @@ describe("speak", () => {
 	test("fails loudly when neither engine is installed, writes nothing", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = "/nonexistent";
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		await expect(speak({ text: "hi", out: "none.wav" })).rejects.toThrow(/no local neural TTS/);
-		expect(fs.existsSync(path.join(dir, ".8gent", "creative", "none.wav"))).toBe(false);
+		await expect(speak({ text: "hi", out: path.join(dir, "none.wav") })).rejects.toThrow(/no local neural TTS/);
+		expect(fs.existsSync(path.join(dir, "none.wav"))).toBe(false);
 	});
 
-	test("rejects unknown voice, empty text, oversize text; strips path from out", async () => {
+	test("rejects unknown voice, empty text, oversize text, non-wav out", async () => {
 		await expect(speak({ text: "hi", voice: "Nobody" })).rejects.toThrow(/unknown voice/);
 		await expect(speak({ text: "  " })).rejects.toThrow(/text is required/);
 		await expect(speak({ text: "x".repeat(2001) })).rejects.toThrow(/cap/);
-		process.env.EIGHT_SUPERTONIC_BIN = stub("st2");
-		const r = await speak({ text: "hi", out: "../../etc/evil.wav" });
-		expect(r.path.includes("..")).toBe(false);
-		expect(path.basename(r.path)).toBe("evil.wav");
+		await expect(speak({ text: "hi", out: path.join(dir, "x.mp3") })).rejects.toThrow(/\.wav/);
 	});
 
 	test("voice list is fixed; non-wav is rejected", () => {

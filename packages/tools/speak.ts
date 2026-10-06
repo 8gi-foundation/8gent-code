@@ -45,7 +45,7 @@ export const MAX_SPEAK_CHARS = 2000;
 export interface SpeakInput {
 	text: string;
 	voice?: string;
-	/** Output filename or path; always resolved inside the creative folder. */
+	/** Absolute .wav path, already checked by the caller; omitted: the creative folder. */
 	out?: string;
 }
 
@@ -109,10 +109,11 @@ export function wavDurationSec(file: string): number {
 	throw new Error("wav has no data chunk");
 }
 
+/** `out` is an absolute path the caller already vetted (safePath); default is the creative folder. */
 function resolveOut(out?: string): string {
-	const base = path.basename((out ?? `speak-${Date.now()}`).trim());
-	const named = base.toLowerCase().endsWith(".wav") ? base : `${base}.wav`;
-	return path.join(creativeDir(), named);
+	if (!out) return path.join(creativeDir(), `speak-${Date.now()}.wav`);
+	if (!out.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${out}")`);
+	return path.resolve(out);
 }
 
 export async function speak(input: SpeakInput): Promise<SpeakResult> {
