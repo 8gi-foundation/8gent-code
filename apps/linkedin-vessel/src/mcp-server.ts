@@ -15,7 +15,7 @@ import {
 	sendMessage,
 } from "./linkedin-api";
 import { isKilled } from "./policy";
-import { ReviewQueue } from "./queue";
+import { ReviewQueue, logActivity, preview } from "./queue";
 import { RateLimiter } from "./rate-limiter";
 import { buildSignalHook, enrichLead } from "./signal-engine";
 import { notifyApprovalNeeded } from "./telegram-notify";
@@ -25,7 +25,20 @@ import { randomId } from "./utils";
 const ACCOUNT_ID = process.env.VESSEL_ACCOUNT_ID || "default";
 const limiter = new RateLimiter(ACCOUNT_ID);
 
-const MAX_MESSAGE_CHARS = 2000;
+// The approval notice shows the whole text, so the cap matches what fits there.
+export const MAX_MESSAGE_CHARS = 1000;
+
+// Tools that touch LinkedIn or local data without sending anything. Each call
+// is written to the activity log (tool name only, never the result).
+const READ_TOOLS = new Set([
+	"linkedin_search_leads",
+	"linkedin_get_profile",
+	"linkedin_get_replies",
+	"linkedin_get_stats",
+	"linkedin_get_insights",
+	"linkedin_trigger_reflection",
+	"linkedin_get_rate_status",
+]);
 const URN_RE = /^urn:li:[A-Za-z_]+:\S{1,200}$/;
 
 // Writes never run from a tool call. They are queued and run on approval.
@@ -182,10 +195,14 @@ export const TOOL_DEFINITIONS = [
 export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 	if (isKilled()) return error("LinkedIn vessel is paused (kill switch on). No actions run.");
 	const args = call.arguments ?? {};
+	if (READ_TOOLS.has(call.name)) logActivity({ event: "read", actionType: call.name });
 
 	try {
 		switch (call.name) {
 			case "linkedin_search_leads": {
+				if (!limiter.canSend("profile_views")) {
+					return error("Daily profile view cap reached. Try tomorrow.");
+				}
 				const leads = await searchPeople({
 					keywords: args.keywords as string,
 					titles: args.titles as string[],
@@ -193,9 +210,11 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 					limit: (args.limit as number) || 25,
 				});
 
-				// Enrich top 10 with signals (rate-limited, don't hammer all)
-				const enriched = await Promise.all(leads.slice(0, 10).map((l) => enrichLead(l)));
-				const rest = leads.slice(10);
+				// Enrichment fetches each profile's activity, so each one is a profile view.
+				const n = Math.min(10, limiter.remaining("profile_views"));
+				for (let i = 0; i < n; i++) limiter.consume("profile_views");
+				const enriched = await Promise.all(leads.slice(0, n).map((l) => enrichLead(l)));
+				const rest = leads.slice(n);
 				const allLeads = [...enriched, ...rest];
 
 				// Save to DB
@@ -215,6 +234,12 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_get_profile": {
+				if (typeof args.publicId !== "string" || args.publicId.trim() === "") {
+					return error("publicId is required");
+				}
+				if (!limiter.consume("profile_views")) {
+					return error("Daily profile view cap reached. Try tomorrow.");
+				}
 				const publicId = (args.publicId as string)
 					.replace("https://www.linkedin.com/in/", "")
 					.replace(/\/$/, "");
@@ -268,8 +293,16 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_get_replies": {
+				// Metadata and a short preview only. Full message text stays in LinkedIn.
 				const replies = await getRecentReplies(args.since as string | undefined);
-				return text(JSON.stringify(replies, null, 2));
+				const safe = replies.map((r) => ({
+					conversationUrn: r.conversationUrn,
+					senderName: r.senderName,
+					timestamp: r.timestamp,
+					isUnread: r.isUnread,
+					preview: preview(r.lastMessage),
+				}));
+				return text(JSON.stringify(safe, null, 2));
 			}
 
 			case "linkedin_get_stats": {
@@ -282,6 +315,9 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_trigger_reflection": {
+				if (process.env.HYPERAGENT_ENABLED !== "1") {
+					return error("Template rewriting is off (HYPERAGENT_ENABLED is not 1).");
+				}
 				const result = await reflect();
 				return text(
 					[

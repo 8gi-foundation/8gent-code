@@ -8,6 +8,7 @@
  *   GET  /queue                  - approver token. Pending items with full text.
  *   POST /queue/:id/approve      - approver token. Runs the item if caps allow.
  *   POST /queue/:id/reject       - approver token.
+ *   POST /queue/reject-all       - approver token. Clears queued junk, frees cap slots.
  *   GET  /activity               - approver token. Append-only log, previews only.
  *
  * Opt-in background work (both off unless enabled, both stopped by the kill switch):
@@ -39,12 +40,16 @@ function json(body: unknown, status = 200, extra: Record<string, string> = {}): 
 }
 
 function guard(req: Request, role: TokenRole): Response | null {
-	if (!requestAllowed()) return json({ error: "Too many requests" }, 429, { "Retry-After": "60" });
 	const auth = authorize(req, role);
-	if (auth.ok) return null;
-	const headers: Record<string, string> =
-		auth.status === 401 ? { "WWW-Authenticate": 'Bearer realm="linkedin-vessel"' } : {};
-	return json({ error: auth.message }, auth.status, headers);
+	if (!auth.ok) {
+		const headers: Record<string, string> =
+			auth.status === 401 ? { "WWW-Authenticate": 'Bearer realm="linkedin-vessel"' } : {};
+		return json({ error: auth.message }, auth.status, headers);
+	}
+	if (!requestAllowed(role)) {
+		return json({ error: "Too many requests" }, 429, { "Retry-After": "60" });
+	}
+	return null;
 }
 
 function manifest(): VesselManifest {
@@ -119,6 +124,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 		return json({ activity: readActivity(limit) });
 	}
 
+	if (url.pathname === "/queue/reject-all" && req.method === "POST") {
+		return guard(req, "approver") ?? json({ ok: true, rejected: getQueue().rejectAll() });
+	}
+
 	const qm = QUEUE_ACTION.exec(url.pathname);
 	if (qm && req.method === "POST") {
 		const denied = guard(req, "approver");
@@ -142,6 +151,18 @@ export async function handleRequest(req: Request): Promise<Response> {
 // Tool calls arriving here go through dispatchTool, so writes are still queued
 // for approval and the kill switch still applies.
 
+/** Exported for tests. Same dispatcher and same rate limit as /mcp. */
+export async function handleControlPlaneMessage(msg: any): Promise<unknown | null> {
+	if (msg?.type === "mcp:call") {
+		const result = requestAllowed("mcp")
+			? await dispatchTool(msg.call ?? {})
+			: { content: [{ type: "text", text: "Too many requests" }], isError: true };
+		return { type: "mcp:result", requestId: msg.requestId, result };
+	}
+	if (msg?.type === "ping") return { type: "pong", vesselId: VESSEL_ID };
+	return null;
+}
+
 let cpWs: WebSocket | null = null;
 let cpReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -159,14 +180,8 @@ function connectToControlPlane(): void {
 
 		cpWs.onmessage = async (event) => {
 			try {
-				const msg = JSON.parse(event.data as string);
-				if (msg.type === "mcp:call") {
-					const result = await dispatchTool(msg.call);
-					cpWs?.send(JSON.stringify({ type: "mcp:result", requestId: msg.requestId, result }));
-				}
-				if (msg.type === "ping") {
-					cpWs?.send(JSON.stringify({ type: "pong", vesselId: VESSEL_ID }));
-				}
+				const reply = await handleControlPlaneMessage(JSON.parse(event.data as string));
+				if (reply) cpWs?.send(JSON.stringify(reply));
 			} catch (e: any) {
 				console.error("[control-plane] Message error:", e.message);
 			}

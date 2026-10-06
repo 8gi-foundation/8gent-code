@@ -34,6 +34,15 @@ LinkedIn outreach automation. You execute - not just suggest.
   `POST /queue/<id>/approve` (or `/reject`) using `LINKEDIN_VESSEL_APPROVER_TOKEN`.
   The two tokens must differ, so a caller cannot approve its own request.
 - Pending items expire after 24h. Text is cleared from the queue once decided.
+- Queued items count against the daily cap. `POST /queue/reject-all` clears junk
+  and frees those slots.
+- An item interrupted mid-send (process restart) is closed as `interrupted`,
+  counted as sent, and never retried.
+- `linkedin_get_replies` returns sender, time, unread flag and a 40-char preview,
+  never full message text. Every read tool call is logged by name.
+- Messages are capped at 1000 chars so the Telegram notice always shows all of it.
+  In the notice, trust only the approve link carrying the item's id; the quoted
+  message text below the marker is the caller's.
 - `GET /activity` returns the append-only activity log (40-char previews only).
 - Kill switch: `LINKEDIN_VESSEL_KILL=1` stops all tool calls and approvals.
 
@@ -56,7 +65,7 @@ The control plane can then:
 
 - Connection requests: 20/day
 - Messages: 50/day
-- Profile views: 80/day
+- Profile views: 80/day (get_profile counts 1; search counts 1 per enriched lead)
 
 These are enforced in rate-limiter.ts. Env vars `LINKEDIN_CAP_CONNECTION_REQUESTS`
 and `LINKEDIN_CAP_MESSAGES` can lower them, never raise them. Approved sends are

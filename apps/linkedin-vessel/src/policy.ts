@@ -27,9 +27,9 @@ const TOKEN_ENV: Record<TokenRole, string> = {
 };
 
 function configuredToken(role: TokenRole): string | null {
-	const t = process.env[TOKEN_ENV[role]] || "";
+	const t = (process.env[TOKEN_ENV[role]] || "").trim();
 	if (t.length < MIN_TOKEN_LENGTH) return null;
-	if (role === "approver" && t === (process.env[TOKEN_ENV.mcp] || "")) return null;
+	if (role === "approver" && t === (process.env[TOKEN_ENV.mcp] || "").trim()) return null;
 	return t;
 }
 
@@ -57,23 +57,30 @@ export function authorize(req: Request, role: TokenRole): AuthResult {
 	return { ok: true };
 }
 
-// ── Request rate limit (single-tenant service, one fixed window) ──────
+// ── Request rate limit ─────────────────────────────────────────────
+// Checked only after auth passes, with one window per role, so traffic that
+// fails auth (or uses the MCP token) can never lock James out of approvals.
 
 const WINDOW_MS = 60_000;
-let windowStart = 0;
-let windowCount = 0;
+const windows: Record<TokenRole, { start: number; count: number }> = {
+	mcp: { start: 0, count: 0 },
+	approver: { start: 0, count: 0 },
+};
 
-export function requestAllowed(now = Date.now()): boolean {
+export function requestAllowed(role: TokenRole, now = Date.now()): boolean {
 	const max = Number.parseInt(process.env.LINKEDIN_VESSEL_REQ_PER_MIN || "60", 10) || 60;
-	if (now - windowStart >= WINDOW_MS) {
-		windowStart = now;
-		windowCount = 0;
+	const w = windows[role];
+	if (now - w.start >= WINDOW_MS) {
+		w.start = now;
+		w.count = 0;
 	}
-	windowCount++;
-	return windowCount <= max;
+	w.count++;
+	return w.count <= max;
 }
 
 export function resetRequestWindow(): void {
-	windowStart = 0;
-	windowCount = 0;
+	for (const w of Object.values(windows)) {
+		w.start = 0;
+		w.count = 0;
+	}
 }

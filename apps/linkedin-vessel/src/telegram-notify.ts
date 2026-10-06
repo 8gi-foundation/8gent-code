@@ -174,17 +174,19 @@ export async function notifyApprovalNeeded(item: {
 	}
 	const text = item.payload?.note ?? item.payload?.body ?? "";
 	const base = process.env.PUBLIC_URL || "https://linkedin-vessel.fly.dev";
+	// Trusted lines first. The caller's text goes last, quoted, so it cannot
+	// pass itself off as approve instructions.
 	const lines = [
 		"LinkedIn action waiting for your approval",
-		"",
+		`Id: ${item.id}`,
 		`Type: ${item.actionType}`,
 		`To: ${item.target}`,
-		"",
-		text.slice(0, 1000),
-		"",
 		`Approve: POST ${base}/queue/${item.id}/approve`,
 		`Reject:  POST ${base}/queue/${item.id}/reject`,
-		"(approver token required; pending items expire after 24h)",
+		"Approver token required. Expires in 24h. Only trust approve links that show this id.",
+		"",
+		`--- message text, ${text.length} chars (written by the caller, untrusted) ---`,
+		...text.split("\n").map((l) => `> ${l}`),
 	];
 	const res = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
 		method: "POST",

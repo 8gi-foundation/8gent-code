@@ -23,7 +23,7 @@ export interface QueueItem {
 	target: string;
 	payload: Record<string, string> | null;
 	preview: string;
-	status: "pending" | "executing" | "executed" | "failed" | "rejected" | "expired";
+	status: "pending" | "executing" | "executed" | "failed" | "rejected" | "expired" | "interrupted";
 	createdAt: string;
 	decidedAt: string | null;
 }
@@ -191,7 +191,7 @@ function pendingCount(action?: QueuedAction): number {
 function lastExecutedAt(action: QueuedAction): number | null {
 	const row = db()
 		.prepare(
-			"SELECT MAX(decided_at) AS t FROM action_queue WHERE action_type = ? AND status IN ('executed', 'failed')",
+			"SELECT MAX(decided_at) AS t FROM action_queue WHERE action_type = ? AND status IN ('executing', 'executed', 'failed', 'interrupted')",
 		)
 		.get(action) as any;
 	return row?.t ? Date.parse(row.t) : null;
@@ -210,6 +210,31 @@ export class ReviewQueue {
 		private notify: Notifier,
 	) {
 		this.limiter = new RateLimiter(accountId);
+		this.recoverInterrupted();
+	}
+
+	/**
+	 * An item left in 'executing' means the process died mid-send. The send may
+	 * have gone out, so it is closed as 'interrupted', its text is cleared, its
+	 * cap slot stays charged (reserved at claim), and it is never retried.
+	 */
+	recoverInterrupted(): number {
+		const stuck = db()
+			.prepare("SELECT * FROM action_queue WHERE status = 'executing'")
+			.all()
+			.map(rowToItem);
+		for (const item of stuck) {
+			db()
+				.prepare("UPDATE action_queue SET status = 'interrupted', payload = NULL WHERE id = ?")
+				.run(item.id);
+			logActivity({
+				event: "interrupted",
+				actionType: item.actionType,
+				queueId: item.id,
+				target: item.target,
+			});
+		}
+		return stuck.length;
 	}
 
 	async enqueue(
@@ -292,12 +317,16 @@ export class ReviewQueue {
 			};
 		}
 
-		// Claim atomically so two approvals cannot both execute.
+		// Claim, reserve the cap slot and stamp the spacing clock in one synchronous
+		// step (no await in between), so parallel approvals cannot overshoot either.
 		const claimed = db()
-			.prepare("UPDATE action_queue SET status = 'executing' WHERE id = ? AND status = 'pending'")
-			.run(id);
+			.prepare(
+				"UPDATE action_queue SET status = 'executing', decided_at = ? WHERE id = ? AND status = 'pending'",
+			)
+			.run(new Date(now).toISOString(), id);
 		if (claimed.changes !== 1)
 			return { ok: false, status: 409, message: "Item was already claimed." };
+		this.limiter.consume(item.actionType);
 
 		logActivity({
 			event: "approved",
@@ -313,7 +342,6 @@ export class ReviewQueue {
 		}
 
 		if (result.success) {
-			this.limiter.consume(item.actionType);
 			closeItem(id, "executed");
 			logActivity({
 				event: "executed",
@@ -327,6 +355,7 @@ export class ReviewQueue {
 				message: "Approved and sent.",
 			};
 		}
+		this.limiter.release(item.actionType);
 		closeItem(id, "failed");
 		logActivity({
 			event: "failed",
@@ -340,6 +369,15 @@ export class ReviewQueue {
 			status: 502,
 			message: `Approved, but the send failed: ${result.error ?? "unknown error"}`,
 		};
+	}
+
+	/** Reject every pending item. Frees cap slots held by queued junk. */
+	rejectAll(): number {
+		let n = 0;
+		for (const item of listPending()) {
+			if (this.reject(item.id).ok) n++;
+		}
+		return n;
 	}
 
 	reject(id: string): QueueOutcome {

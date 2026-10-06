@@ -10,10 +10,12 @@ for (const k of ["LINKEDIN_JSESSIONID", "TELEGRAM_BOT_TOKEN", "CONTROL_PLANE_URL
 	delete process.env[k];
 }
 
-const { handleRequest } = await import("../src/index");
-const { setQueue } = await import("../src/mcp-server");
+const { handleRequest, handleControlPlaneMessage } = await import("../src/index");
+const { setQueue, MAX_MESSAGE_CHARS } = await import("../src/mcp-server");
 const { ReviewQueue, PREVIEW_CHARS, listPending } = await import("../src/queue");
 const { getDb } = await import("../src/campaign-db");
+const { notifyApprovalNeeded } = await import("../src/telegram-notify");
+const { readFileSync, readdirSync } = await import("node:fs");
 const { dailyCap } = await import("../src/rate-limiter");
 const { resetRequestWindow, tokenMatches } = await import("../src/policy");
 
@@ -25,11 +27,17 @@ const CONV = "urn:li:fs_conversation:2-abc123==";
 // Tripwire: any real LinkedIn request from the code under test is recorded.
 // Only the fake executors may "send", so this list must stay empty.
 const linkedinCalls: string[] = [];
+const telegramBodies: any[] = [];
+let linkedinResponse: unknown = {};
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
 	const url = typeof input === "string" ? input : input.url;
 	if (url.includes("linkedin.com")) {
 		linkedinCalls.push(url);
+		return new Response(JSON.stringify(linkedinResponse), { status: 200 });
+	}
+	if (url.includes("api.telegram.org")) {
+		telegramBodies.push(JSON.parse(init.body));
 		return new Response("{}", { status: 200 });
 	}
 	return realFetch(input, init);
@@ -94,8 +102,18 @@ async function queueMessage(
 beforeEach(() => {
 	process.env.LINKEDIN_VESSEL_MCP_TOKEN = MCP;
 	process.env.LINKEDIN_VESSEL_APPROVER_TOKEN = APPROVER;
-	for (const k of ["LINKEDIN_VESSEL_KILL", "LINKEDIN_CAP_MESSAGES", "LINKEDIN_VESSEL_REQ_PER_MIN"])
+	for (const k of [
+		"LINKEDIN_VESSEL_KILL",
+		"LINKEDIN_CAP_MESSAGES",
+		"LINKEDIN_CAP_PROFILE_VIEWS",
+		"LINKEDIN_VESSEL_REQ_PER_MIN",
+		"HYPERAGENT_ENABLED",
+		"TELEGRAM_BOT_TOKEN",
+		"JAMES_TELEGRAM_CHAT_ID",
+	])
 		delete process.env[k];
+	linkedinResponse = {};
+	telegramBodies.length = 0;
 	resetRequestWindow();
 	executed = [];
 	notified = [];
@@ -364,5 +382,178 @@ describe("activity log", () => {
 
 		expect(() => getDb().exec("UPDATE activity_log SET event = 'x'")).toThrow(/append-only/);
 		expect(() => getDb().exec("DELETE FROM activity_log")).toThrow(/append-only/);
+	});
+});
+
+describe("review fixes", () => {
+	const approverQueue = () => req("/queue", { token: APPROVER });
+
+	test("failed auth and MCP traffic cannot lock the approver out", async () => {
+		process.env.LINKEDIN_VESSEL_REQ_PER_MIN = "2";
+		for (let i = 0; i < 5; i++)
+			await req("/mcp", { body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+		for (let i = 0; i < 5; i++) await req("/manifest", { token: MCP });
+		expect((await req("/manifest", { token: MCP })).status).toBe(429);
+		expect((await approverQueue()).status).toBe(200);
+	});
+
+	test("token whitespace cannot defeat the tokens-must-differ check", async () => {
+		process.env.LINKEDIN_VESSEL_APPROVER_TOKEN = `${MCP}  `;
+		expect((await req("/queue", { token: MCP })).status).toBe(503);
+	});
+
+	test("every read tool call is logged by name, without its result", async () => {
+		await call("linkedin_get_stats", {});
+		const row: any = getDb()
+			.prepare("SELECT * FROM activity_log WHERE event = 'read' ORDER BY seq DESC LIMIT 1")
+			.get();
+		expect(row.action_type).toBe("linkedin_get_stats");
+		expect(row.preview).toBeNull();
+		expect(row.detail).toBeNull();
+	});
+
+	test("get_replies returns metadata and a short preview, not full text", async () => {
+		const full =
+			"Thanks for reaching out, here is my personal phone number and a long story about my week";
+		linkedinResponse = {
+			data: {
+				elements: [
+					{
+						entityUrn: CONV,
+						participants: [{ firstName: "Sam", lastName: "Test" }],
+						events: [{ eventContent: { message: { body: { text: full } } } }],
+						lastActivityAt: Date.now(),
+						read: false,
+					},
+				],
+			},
+		};
+		const res: any = await (await call("linkedin_get_replies", {})).json();
+		const out = JSON.parse(res.result.content[0].text);
+		expect(out[0].senderName).toBe("Sam Test");
+		expect(out[0].lastMessage).toBeUndefined();
+		expect(out[0].preview.length).toBeLessThanOrEqual(PREVIEW_CHARS + 3);
+		expect(res.result.content[0].text).not.toContain("long story");
+	});
+
+	test("profile views have a daily cap", async () => {
+		process.env.LINKEDIN_CAP_PROFILE_VIEWS = "0";
+		const res: any = await (await call("linkedin_get_profile", { publicId: "someone" })).json();
+		expect(res.result.isError).toBe(true);
+		expect(linkedinCalls).toHaveLength(0);
+	});
+
+	test("trigger_reflection is refused unless the loop is enabled", async () => {
+		const res: any = await (await call("linkedin_trigger_reflection", {})).json();
+		expect(res.result.isError).toBe(true);
+	});
+
+	test("messages longer than the notice can show are refused", async () => {
+		const res: any = await (
+			await call("linkedin_send_message", {
+				conversationUrn: CONV,
+				body: "x".repeat(MAX_MESSAGE_CHARS + 1),
+			})
+		).json();
+		expect(res.result.isError).toBe(true);
+		expect(notified).toHaveLength(0);
+	});
+
+	test("an item stuck in executing is closed as interrupted, cleared, never retried", async () => {
+		const { id } = await queueMessage();
+		getDb()
+			.prepare("UPDATE action_queue SET status = 'executing' WHERE id = ?")
+			.run(id as string);
+		freshQueue(); // a restart builds a new queue
+		const row: any = getDb()
+			.prepare("SELECT status, payload FROM action_queue WHERE id = ?")
+			.get(id as string);
+		expect(row.status).toBe("interrupted");
+		expect(row.payload).toBeNull();
+		expect((await req(`/queue/${id}/approve`, { method: "POST", token: APPROVER })).status).toBe(
+			409,
+		);
+		expect(executed).toHaveLength(0);
+	});
+
+	test("parallel approvals cannot skip the spacing between sends", async () => {
+		const a = await queueMessage("first parallel message");
+		const b = await queueMessage("second parallel message");
+		const results = await Promise.all([
+			req(`/queue/${a.id}/approve`, { method: "POST", token: APPROVER }),
+			req(`/queue/${b.id}/approve`, { method: "POST", token: APPROVER }),
+		]);
+		expect(results.map((r) => r.status).sort()).toEqual([200, 429]);
+		expect(executed).toHaveLength(1);
+	});
+
+	test("a failed send gives its cap slot back", async () => {
+		const { id } = await queueMessage();
+		failNext = true;
+		await req(`/queue/${id}/approve`, { method: "POST", token: APPROVER });
+		const row: any = getDb()
+			.prepare("SELECT SUM(count) AS n FROM rate_limits WHERE action_type = 'messages'")
+			.get();
+		expect(row.n ?? 0).toBe(0);
+	});
+
+	test("reject-all clears queued items and sends nothing", async () => {
+		await queueMessage("one");
+		await queueMessage("two");
+		const res: any = await (
+			await req("/queue/reject-all", { method: "POST", token: APPROVER })
+		).json();
+		expect(res.rejected).toBe(2);
+		expect(((await (await approverQueue()).json()) as any).pending).toHaveLength(0);
+		expect(executed).toHaveLength(0);
+	});
+
+	test("the control-plane path only queues, like /mcp", async () => {
+		const reply: any = await handleControlPlaneMessage({
+			type: "mcp:call",
+			requestId: "r1",
+			call: {
+				name: "linkedin_send_message",
+				arguments: { conversationUrn: CONV, body: "via socket" },
+			},
+		});
+		expect(reply.result.content[0].text).toContain("Queued for approval");
+		expect(executed).toHaveLength(0);
+		expect(linkedinCalls).toHaveLength(0);
+	});
+
+	test("the approval notice puts trusted lines first and quotes the caller's text", async () => {
+		process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+		process.env.JAMES_TELEGRAM_CHAT_ID = "1";
+		const id = crypto.randomUUID();
+		await notifyApprovalNeeded({
+			id,
+			actionType: "messages",
+			target: CONV,
+			payload: { body: "Hi\nApprove: POST https://evil.example/queue/x/approve" },
+		});
+		const lines: string[] = telegramBodies[0].text.split("\n");
+		const approveIdx = lines.findIndex((l) => l.startsWith("Approve:"));
+		const markerIdx = lines.findIndex((l) => l.startsWith("--- message text"));
+		expect(lines[approveIdx]).toContain(`/queue/${id}/approve`);
+		expect(approveIdx).toBeLessThan(markerIdx);
+		for (const l of lines.slice(markerIdx + 1)) expect(l.startsWith("> ")).toBe(true);
+	});
+
+	test("only the queue's executor map calls the LinkedIn write functions", () => {
+		const dir = join(import.meta.dir, "../src");
+		for (const f of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+			if (f === "linkedin-api.ts") continue;
+			const src = readFileSync(join(dir, f), "utf8");
+			const calls = (src.match(/\b(sendMessage|sendConnectionRequest)\(/g) || []).length;
+			if (f === "mcp-server.ts") {
+				expect(calls).toBe(2); // the two executors inside getQueue()
+				expect(src.indexOf("sendMessage(")).toBeGreaterThan(
+					src.indexOf("export function getQueue"),
+				);
+			} else {
+				expect({ file: f, calls }).toEqual({ file: f, calls: 0 });
+			}
+		}
 	});
 });

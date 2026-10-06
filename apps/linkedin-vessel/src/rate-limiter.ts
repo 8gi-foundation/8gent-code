@@ -82,6 +82,16 @@ export class RateLimiter {
 		return result;
 	}
 
+	/** Give back a slot reserved by consume() when the send did not happen. */
+	release(action: ActionType): void {
+		this.db
+			.prepare(`
+      UPDATE rate_limits SET count = count - 1
+      WHERE account_id = ? AND action_type = ? AND date_key = ? AND count > 0
+    `)
+			.run(this.accountId, action, todayKey());
+	}
+
 	used(action: ActionType): number {
 		return this.getCount(action);
 	}
