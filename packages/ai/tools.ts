@@ -825,6 +825,34 @@ const makePdfTool = tool({
 	},
 });
 
+const speakTool = tool({
+	description:
+		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav into ~/.8gent/creative/. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
+	inputSchema: z.object({
+		text: z.string().describe("The words to speak (max 2000 characters)"),
+		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
+		out: z
+			.string()
+			.optional()
+			.describe("Output filename; resolved inside ~/.8gent/creative/ (.wav added if missing)"),
+	}),
+	execute: async ({ text, voice, out }) => {
+		const { speak } = await import("../tools/speak");
+		try {
+			return JSON.stringify(await speak({ text, voice, out }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{
+					error: `speak failed: ${err instanceof Error ? err.message : String(err)}`,
+					hint: "Needs Supertonic or KittenTTS installed locally. If neither is available, use another narration path; do not use say.",
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
 // ============================================
 // PDF Tools
 // ============================================
@@ -3045,6 +3073,7 @@ export const agentTools = bindToolContext({
 
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
+	speak: speakTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;
