@@ -11,7 +11,7 @@ section {
   font-size: 28px;
   line-height: 1.5;
   letter-spacing: normal;
-  border-left: 14px solid #e31c2d;
+  border-left: 14px solid #e32d1c;
 }
 section h1, section h2, section h3, section h4 {
   font-family: "Fraunces", "Playfair Display", Georgia, serif;
@@ -27,13 +27,13 @@ section p, section li { margin: 0 0 0.45em; }
 section strong { color: #000000; }
 section a { color: #000000; }
 section ul, section ol { padding-left: 1.2em; }
-section li::marker { color: #e31c2d; }
+section li::marker { color: #e32d1c; }
 section blockquote {
   margin: 0.8em 0;
   padding: 0.3em 1em;
   background: #ebe8e0;
   color: #262626;
-  border-left: 6px solid #e31c2d;
+  border-left: 6px solid #e32d1c;
 }
 section code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -43,11 +43,11 @@ section code {
   border-radius: 6px;
   font-size: 0.85em;
 }
-section pre { background: #f9f7f1; border: 1px solid #e31c2d; border-radius: 10px; padding: 0.7em 1em; }
+section pre { background: #f9f7f1; border: 1px solid #e32d1c; border-radius: 10px; padding: 0.7em 1em; }
 section pre code { background: none; padding: 0; }
 section table { border-collapse: collapse; font-size: 0.85em; }
-section th { background: #e31c2d; color: #ffffff; padding: 0.35em 0.8em; text-align: left; }
-section td { border-bottom: 1px solid #e31c2d; padding: 0.35em 0.8em; }
+section th { background: #e32d1c; color: #000000; padding: 0.35em 0.8em; text-align: left; }
+section td { border-bottom: 1px solid #e32d1c; padding: 0.35em 0.8em; }
 section img { max-height: 420px; }
 section footer, section::after { color: #666666; font-size: 18px; }
 
@@ -57,7 +57,7 @@ section.lead {
   flex-direction: column;
   justify-content: center;
   border-left: 0;
-  border-bottom: 18px solid #e31c2d;
+  border-bottom: 18px solid #e32d1c;
 }
 section.lead h1 { font-size: 84px; margin-bottom: 0.25em; }
 section.lead h2, section.lead p { font-size: 34px; color: #666666; font-weight: 400; }
@@ -67,9 +67,9 @@ section.invert {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #e31c2d;
-  color: #ffffff;
+  background: #e32d1c;
+  color: #000000;
   border-left: 0;
 }
-section.invert h1, section.invert h2, section.invert h3, section.invert p { color: #ffffff; }
+section.invert h1, section.invert h2, section.invert h3, section.invert p { color: #000000; }
 section.invert h1 { font-size: 72px; }

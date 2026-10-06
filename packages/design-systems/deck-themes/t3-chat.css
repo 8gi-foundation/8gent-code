@@ -5,8 +5,8 @@ section {
   width: 1280px;
   height: 720px;
   padding: 72px 96px;
-  background: #f7f5fa;
-  color: #2e1854;
+  background: #f6f5fa;
+  color: #271854;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 28px;
   line-height: 1.5;
@@ -31,25 +31,25 @@ section li::marker { color: #a84b43; }
 section blockquote {
   margin: 0.8em 0;
   padding: 0.3em 1em;
-  background: #f4f1f9;
-  color: #2e1854;
+  background: #f3f1f9;
+  color: #271854;
   border-left: 6px solid #f7e9e8;
 }
 section code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #f4f1f9;
-  color: #2e1854;
+  background: #f3f1f9;
+  color: #271854;
   padding: 0.05em 0.35em;
   border-radius: 6px;
   font-size: 0.85em;
 }
-section pre { background: #f7f5fa; border: 1px solid #e8e2f3; border-radius: 10px; padding: 0.7em 1em; }
+section pre { background: #f6f5fa; border: 1px solid #e7e2f3; border-radius: 10px; padding: 0.7em 1em; }
 section pre code { background: none; padding: 0; }
 section table { border-collapse: collapse; font-size: 0.85em; }
 section th { background: #a84b43; color: #ffffff; padding: 0.35em 0.8em; text-align: left; }
-section td { border-bottom: 1px solid #e8e2f3; padding: 0.35em 0.8em; }
+section td { border-bottom: 1px solid #e7e2f3; padding: 0.35em 0.8em; }
 section img { max-height: 420px; }
-section footer, section::after { color: #7559a6; font-size: 18px; }
+section footer, section::after { color: #6c59a6; font-size: 18px; }
 
 /* Title slide: <!-- _class: lead --> */
 section.lead {
@@ -60,7 +60,7 @@ section.lead {
   border-bottom: 18px solid #a84b43;
 }
 section.lead h1 { font-size: 84px; margin-bottom: 0.25em; }
-section.lead h2, section.lead p { font-size: 34px; color: #7559a6; font-weight: 400; }
+section.lead h2, section.lead p { font-size: 34px; color: #6c59a6; font-weight: 400; }
 
 /* Section break: <!-- _class: invert --> */
 section.invert {

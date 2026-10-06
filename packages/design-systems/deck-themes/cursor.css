@@ -24,7 +24,7 @@ section h2 { font-size: 44px; }
 section h3 { font-size: 32px; }
 section h4 { font-size: 28px; }
 section p, section li { margin: 0 0 0.45em; }
-section strong { color: #7c3bed; }
+section strong { color: #673bed; }
 section a { color: #000000; }
 section ul, section ol { padding-left: 1.2em; }
 section li::marker { color: #14b8a5; }
@@ -33,7 +33,7 @@ section blockquote {
   padding: 0.3em 1em;
   background: #eeeff1;
   color: #1a1a1a;
-  border-left: 6px solid #7c3bed;
+  border-left: 6px solid #673bed;
 }
 section code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

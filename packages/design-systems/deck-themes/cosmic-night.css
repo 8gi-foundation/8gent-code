@@ -11,11 +11,11 @@ section {
   font-size: 28px;
   line-height: 1.5;
   letter-spacing: normal;
-  border-left: 14px solid #773cdd;
+  border-left: 14px solid #643cdd;
 }
 section h1, section h2, section h3, section h4 {
   font-family: "Orbitron", "Exo 2", system-ui, sans-serif;
-  color: #773cdd;
+  color: #643cdd;
   line-height: 1.15;
   margin: 0 0 0.5em;
 }
@@ -25,9 +25,9 @@ section h3 { font-size: 32px; }
 section h4 { font-size: 28px; }
 section p, section li { margin: 0 0 0.45em; }
 section strong { color: #000000; }
-section a { color: #773cdd; }
+section a { color: #643cdd; }
 section ul, section ol { padding-left: 1.2em; }
-section li::marker { color: #773cdd; }
+section li::marker { color: #643cdd; }
 section blockquote {
   margin: 0.8em 0;
   padding: 0.3em 1em;
@@ -46,7 +46,7 @@ section code {
 section pre { background: #f4f1f8; border: 1px solid #ded9e8; border-radius: 10px; padding: 0.7em 1em; }
 section pre code { background: none; padding: 0; }
 section table { border-collapse: collapse; font-size: 0.85em; }
-section th { background: #773cdd; color: #ffffff; padding: 0.35em 0.8em; text-align: left; }
+section th { background: #643cdd; color: #ffffff; padding: 0.35em 0.8em; text-align: left; }
 section td { border-bottom: 1px solid #ded9e8; padding: 0.35em 0.8em; }
 section img { max-height: 420px; }
 section footer, section::after { color: #675095; font-size: 18px; }
@@ -57,7 +57,7 @@ section.lead {
   flex-direction: column;
   justify-content: center;
   border-left: 0;
-  border-bottom: 18px solid #773cdd;
+  border-bottom: 18px solid #643cdd;
 }
 section.lead h1 { font-size: 84px; margin-bottom: 0.25em; }
 section.lead h2, section.lead p { font-size: 34px; color: #675095; font-weight: 400; }
@@ -67,7 +67,7 @@ section.invert {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #773cdd;
+  background: #643cdd;
   color: #ffffff;
   border-left: 0;
 }

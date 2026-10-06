@@ -6,12 +6,12 @@ section {
   height: 720px;
   padding: 72px 96px;
   background: #f9f8fb;
-  color: #30293d;
+  color: #2e293d;
   font-family: "Quicksand", "Comfortaa", system-ui, sans-serif;
   font-size: 28px;
   line-height: 1.5;
   letter-spacing: normal;
-  border-left: 14px solid #a685e0;
+  border-left: 14px solid #9c85e0;
 }
 section h1, section h2, section h3, section h4 {
   font-family: "Quicksand", "Comfortaa", system-ui, sans-serif;
@@ -27,29 +27,29 @@ section p, section li { margin: 0 0 0.45em; }
 section strong { color: #000000; }
 section a { color: #000000; }
 section ul, section ol { padding-left: 1.2em; }
-section li::marker { color: #a685e0; }
+section li::marker { color: #9c85e0; }
 section blockquote {
   margin: 0.8em 0;
   padding: 0.3em 1em;
-  background: #e9e6f0;
-  color: #30293d;
+  background: #e8e6f0;
+  color: #2e293d;
   border-left: 6px solid #e59f99;
 }
 section code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #e9e6f0;
-  color: #30293d;
+  background: #e8e6f0;
+  color: #2e293d;
   padding: 0.05em 0.35em;
   border-radius: 6px;
   font-size: 0.85em;
 }
-section pre { background: #f1edf7; border: 1px solid #d6cde4; border-radius: 10px; padding: 0.7em 1em; }
+section pre { background: #f0edf7; border: 1px solid #d3cde4; border-radius: 10px; padding: 0.7em 1em; }
 section pre code { background: none; padding: 0; }
 section table { border-collapse: collapse; font-size: 0.85em; }
-section th { background: #a685e0; color: #241f2e; padding: 0.35em 0.8em; text-align: left; }
-section td { border-bottom: 1px solid #d6cde4; padding: 0.35em 0.8em; }
+section th { background: #9c85e0; color: #221f2e; padding: 0.35em 0.8em; text-align: left; }
+section td { border-bottom: 1px solid #d3cde4; padding: 0.35em 0.8em; }
 section img { max-height: 420px; }
-section footer, section::after { color: #6e6284; font-size: 18px; }
+section footer, section::after { color: #6a6284; font-size: 18px; }
 
 /* Title slide: <!-- _class: lead --> */
 section.lead {
@@ -57,19 +57,19 @@ section.lead {
   flex-direction: column;
   justify-content: center;
   border-left: 0;
-  border-bottom: 18px solid #a685e0;
+  border-bottom: 18px solid #9c85e0;
 }
 section.lead h1 { font-size: 84px; margin-bottom: 0.25em; }
-section.lead h2, section.lead p { font-size: 34px; color: #6e6284; font-weight: 400; }
+section.lead h2, section.lead p { font-size: 34px; color: #6a6284; font-weight: 400; }
 
 /* Section break: <!-- _class: invert --> */
 section.invert {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #a685e0;
-  color: #241f2e;
+  background: #9c85e0;
+  color: #221f2e;
   border-left: 0;
 }
-section.invert h1, section.invert h2, section.invert h3, section.invert p { color: #241f2e; }
+section.invert h1, section.invert h2, section.invert h3, section.invert p { color: #221f2e; }
 section.invert h1 { font-size: 72px; }

@@ -36,8 +36,8 @@ export function remapBannedHue(hsl: string): string {
 	const [h, s, l] = hsl.split(" ").map((p) => Number.parseFloat(p.replace("%", "")));
 	if (Number.isNaN(h) || Number.isNaN(s) || Number.isNaN(l)) return hsl;
 	if (s < 8) return `0 0% ${l}%`; // near-grey: drop the tint entirely
-	if (h < 270 || h > 350) return hsl;
-	const mapped = h < 310 ? 262 : 5; // nearer edge: indigo-blue or warm red
+	if (h < 262 || h > 356) return hsl; // margin so hex rounding cannot land back in the band
+	const mapped = h < 309 ? 255 : 5; // nearer edge: indigo-blue or warm red
 	return `${mapped} ${s}% ${l}%`;
 }
 

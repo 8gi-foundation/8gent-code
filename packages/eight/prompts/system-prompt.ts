@@ -438,6 +438,7 @@ When creating UI components, pages, or any visual interface:
 3. Apply the recommended design system consistently across all UI files
 4. Available query outputs: 'summary' (default), 'css' (CSS variables), 'tailwind' (Tailwind config), 'hex' (hex palette)
 5. If the project already has a design system, query it to stay consistent
+6. A Marp deck with no theme: call \`deck_theme\` with action \`list\`, then \`apply\` (or \`mix\`) so it renders designed
 
 Excellent design is the default, not an afterthought.`;
 

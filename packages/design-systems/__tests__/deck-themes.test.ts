@@ -76,7 +76,7 @@ describe("committed themes", () => {
 			const css = readFileSync(join(THEMES_DIR, `${e.name}.css`), "utf8");
 			for (const hex of css.match(/#[0-9a-f]{6}\b/g) ?? []) {
 				const { h, chroma } = hueOf(hex);
-				if (chroma > 0.06) expect(h < 270 || h > 350).toBe(true);
+				if (chroma > 0) expect(h < 270 || h > 350).toBe(true);
 			}
 		}
 	});
@@ -211,5 +211,31 @@ describe("deck_theme tool wiring", () => {
 		const ok = await run({ action: "apply", deck, name: "apple" });
 		expect(ok.theme).toBe("apple");
 		expect(readFileSync(deck, "utf8")).toContain("theme: apple");
+	});
+});
+
+describe("deck_theme in the local agent path (ToolExecutor + CORE_TOOLS)", () => {
+	test("ToolExecutor defines and executes deck_theme", async () => {
+		const { ToolExecutor } = await import("../../eight/tools");
+		const { dir, deck } = deckWith("# A\n");
+		const ex = new ToolExecutor(dir);
+		expect(JSON.stringify(ex.getToolDefinitions())).toContain('"name":"deck_theme"');
+		const listed = JSON.parse(await ex.execute("deck_theme", { action: "list" }));
+		expect(listed.themes.length).toBeGreaterThanOrEqual(40);
+		const out = JSON.parse(
+			await ex.execute("deck_theme", { action: "apply", deck: "deck.md", name: "apple" }),
+		);
+		expect(out.theme).toBe("apple");
+		expect(readFileSync(deck, "utf8")).toContain("theme: apple");
+		expect(
+			await ex.execute("deck_theme", { action: "mix", deck: "deck.md", palette: "apple" }),
+		).toMatch(/needs palette and type/);
+	});
+	test("agent CORE_TOOLS allowlist and the system prompt name deck_theme", () => {
+		const agent = readFileSync(join(import.meta.dir, "../../eight/agent.ts"), "utf8");
+		const core = agent.slice(agent.indexOf("const CORE_TOOLS = ["));
+		expect(core.slice(0, core.indexOf("];"))).toContain('"deck_theme"');
+		const prompt = readFileSync(join(import.meta.dir, "../../eight/prompts/system-prompt.ts"), "utf8");
+		expect(prompt).toContain("\\`deck_theme\\`");
 	});
 });

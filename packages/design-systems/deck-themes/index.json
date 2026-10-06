@@ -377,13 +377,13 @@
     "style": "bold",
     "swatches": [
       "#f9f8fb",
-      "#773cdd",
+      "#643cdd",
       "#0da6f2"
     ],
     "colors": {
       "background": "#f9f8fb",
       "foreground": "#1b122b",
-      "primary": "#773cdd",
+      "primary": "#643cdd",
       "primaryForeground": "#ffffff",
       "secondary": "#e9e6f0",
       "secondaryForeground": "#281c40",
@@ -394,7 +394,7 @@
       "card": "#f4f1f8",
       "cardForeground": "#1b122b",
       "border": "#ded9e8",
-      "ring": "#773cdd"
+      "ring": "#643cdd"
     },
     "typography": {
       "fontFamily": "\"Orbitron\", \"Exo 2\", system-ui, sans-serif",
@@ -409,7 +409,7 @@
     "swatches": [
       "#f3f4f6",
       "#14b8a5",
-      "#7c3bed"
+      "#673bed"
     ],
     "colors": {
       "background": "#f3f4f6",
@@ -418,7 +418,7 @@
       "primaryForeground": "#ffffff",
       "secondary": "#e5e7eb",
       "secondaryForeground": "#262626",
-      "accent": "#7c3bed",
+      "accent": "#673bed",
       "accentForeground": "#ffffff",
       "muted": "#eeeff1",
       "mutedForeground": "#5d636f",
@@ -595,7 +595,7 @@
     "swatches": [
       "#f2f4f7",
       "#0bc9da",
-      "#8652e0"
+      "#7552e0"
     ],
     "colors": {
       "background": "#f2f4f7",
@@ -604,7 +604,7 @@
       "primaryForeground": "#050d14",
       "secondary": "#e8e2f3",
       "secondaryForeground": "#2e2442",
-      "accent": "#8652e0",
+      "accent": "#7552e0",
       "accentForeground": "#ffffff",
       "muted": "#e0e5eb",
       "mutedForeground": "#5c738a",
@@ -625,24 +625,24 @@
     "style": "retro",
     "swatches": [
       "#f5f2ea",
-      "#e31c2d",
-      "#e31c2d"
+      "#e32d1c",
+      "#e32d1c"
     ],
     "colors": {
       "background": "#f5f2ea",
       "foreground": "#262626",
-      "primary": "#e31c2d",
+      "primary": "#e32d1c",
       "primaryForeground": "#f8f7f1",
       "secondary": "#e8e4d9",
       "secondaryForeground": "#333333",
-      "accent": "#e31c2d",
+      "accent": "#e32d1c",
       "accentForeground": "#f8f7f1",
       "muted": "#ebe8e0",
       "mutedForeground": "#666666",
       "card": "#f9f7f1",
       "cardForeground": "#262626",
-      "border": "#e31c2d",
-      "ring": "#e31c2d"
+      "border": "#e32d1c",
+      "ring": "#e32d1c"
     },
     "typography": {
       "fontFamily": "\"DM Sans\", \"Inter\", ui-sans-serif, system-ui, sans-serif",
@@ -810,25 +810,25 @@
     "mood": "dramatic",
     "style": "elegant",
     "swatches": [
-      "#faf9fb",
-      "#7842d7",
+      "#f9f9fb",
+      "#6742d7",
       "#e6594c"
     ],
     "colors": {
-      "background": "#faf9fb",
-      "foreground": "#1b122b",
-      "primary": "#7842d7",
+      "background": "#f9f9fb",
+      "foreground": "#18122b",
+      "primary": "#6742d7",
       "primaryForeground": "#ffffff",
-      "secondary": "#eae7ef",
-      "secondaryForeground": "#291c40",
+      "secondary": "#e9e7ef",
+      "secondaryForeground": "#251c40",
       "accent": "#e6594c",
       "accentForeground": "#ffffff",
       "muted": "#efedf2",
-      "mutedForeground": "#6a5095",
-      "card": "#f4f2f8",
-      "cardForeground": "#1b122b",
-      "border": "#dfdae7",
-      "ring": "#7842d7"
+      "mutedForeground": "#625095",
+      "card": "#f3f2f8",
+      "cardForeground": "#18122b",
+      "border": "#dddae7",
+      "ring": "#6742d7"
     },
     "typography": {
       "fontFamily": "\"Crimson Text\", \"Crimson Pro\", Georgia, serif",
@@ -1029,7 +1029,7 @@
     "swatches": [
       "#f9f9fb",
       "#22c38e",
-      "#7842d7"
+      "#6742d7"
     ],
     "colors": {
       "background": "#f9f9fb",
@@ -1038,7 +1038,7 @@
       "primaryForeground": "#f9f9fb",
       "secondary": "#e7e9ef",
       "secondaryForeground": "#1c4040",
-      "accent": "#7842d7",
+      "accent": "#6742d7",
       "accentForeground": "#ffffff",
       "muted": "#edeff2",
       "mutedForeground": "#509595",
@@ -1152,24 +1152,24 @@
     "style": "playful",
     "swatches": [
       "#f9f8fb",
-      "#a685e0",
+      "#9c85e0",
       "#e59f99"
     ],
     "colors": {
       "background": "#f9f8fb",
-      "foreground": "#30293d",
-      "primary": "#a685e0",
-      "primaryForeground": "#241f2e",
+      "foreground": "#2e293d",
+      "primary": "#9c85e0",
+      "primaryForeground": "#221f2e",
       "secondary": "#d9eaf2",
-      "secondaryForeground": "#3c334d",
+      "secondaryForeground": "#39334d",
       "accent": "#e59f99",
-      "accentForeground": "#241f2e",
-      "muted": "#e9e6f0",
-      "mutedForeground": "#6e6284",
-      "card": "#f1edf7",
-      "cardForeground": "#30293d",
-      "border": "#d6cde4",
-      "ring": "#a685e0"
+      "accentForeground": "#221f2e",
+      "muted": "#e8e6f0",
+      "mutedForeground": "#6a6284",
+      "card": "#f0edf7",
+      "cardForeground": "#2e293d",
+      "border": "#d3cde4",
+      "ring": "#9c85e0"
     },
     "typography": {
       "fontFamily": "\"Quicksand\", \"Comfortaa\", system-ui, sans-serif",
@@ -1461,24 +1461,24 @@
     "mood": "creative",
     "style": "playful",
     "swatches": [
-      "#f7f5fa",
+      "#f6f5fa",
       "#a84b43",
       "#f7e9e8"
     ],
     "colors": {
-      "background": "#f7f5fa",
-      "foreground": "#2e1854",
+      "background": "#f6f5fa",
+      "foreground": "#271854",
       "primary": "#a84b43",
       "primaryForeground": "#ffffff",
       "secondary": "#f7e9e8",
-      "secondaryForeground": "#6745a1",
+      "secondaryForeground": "#5c45a1",
       "accent": "#f7e9e8",
-      "accentForeground": "#6745a1",
-      "muted": "#f4f1f9",
-      "mutedForeground": "#7559a6",
-      "card": "#f7f5fa",
-      "cardForeground": "#2e1854",
-      "border": "#e8e2f3",
+      "accentForeground": "#5c45a1",
+      "muted": "#f3f1f9",
+      "mutedForeground": "#6c59a6",
+      "card": "#f6f5fa",
+      "cardForeground": "#271854",
+      "border": "#e7e2f3",
       "ring": "#d93526"
     },
     "typography": {
@@ -1664,7 +1664,7 @@
       "mutedForeground": "#525252",
       "card": "#fcfcfc",
       "cardForeground": "#000000",
-      "border": "#e7e5eb",
+      "border": "#e6e5eb",
       "ring": "#000000"
     },
     "typography": {

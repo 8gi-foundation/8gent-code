@@ -43,11 +43,11 @@ section code {
   border-radius: 6px;
   font-size: 0.85em;
 }
-section pre { background: #fcfcfc; border: 1px solid #e7e5eb; border-radius: 10px; padding: 0.7em 1em; }
+section pre { background: #fcfcfc; border: 1px solid #e6e5eb; border-radius: 10px; padding: 0.7em 1em; }
 section pre code { background: none; padding: 0; }
 section table { border-collapse: collapse; font-size: 0.85em; }
 section th { background: #7033ff; color: #ffffff; padding: 0.35em 0.8em; text-align: left; }
-section td { border-bottom: 1px solid #e7e5eb; padding: 0.35em 0.8em; }
+section td { border-bottom: 1px solid #e6e5eb; padding: 0.35em 0.8em; }
 section img { max-height: 420px; }
 section footer, section::after { color: #525252; font-size: 18px; }
 
