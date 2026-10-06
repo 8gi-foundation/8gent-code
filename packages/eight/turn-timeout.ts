@@ -99,3 +99,41 @@ export async function withTurnTimeout<T>(
 		if (timer) clearTimeout(timer);
 	}
 }
+
+/**
+ * Stream idle gap (#3553), opt-in via EIGHT_STREAM_IDLE_MS. When set, the
+ * text-tool path streams its reply and judges a model step by silence instead
+ * of total time: modelFetch re-arms this timer on every body chunk, so a slow
+ * model that keeps writing is never cut off and a silent connection fails after
+ * one quiet gap. Returns null (off) when unset, 0 or not a positive number.
+ * Floor: 1 s.
+ */
+export function resolveStreamIdleMs(
+	env: Record<string, string | undefined> = process.env,
+): number | null {
+	const parsed = Number(env.EIGHT_STREAM_IDLE_MS);
+	if (!env.EIGHT_STREAM_IDLE_MS || !Number.isFinite(parsed) || parsed <= 0) return null;
+	return Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed));
+}
+
+/**
+ * Default wall-clock ceiling for one step when the stream idle gap is on: high
+ * enough that a slow-but-writing local model finishes, still under the 30 min
+ * session watchdog so that watchdog stays the outer bound.
+ */
+export const DEFAULT_STREAM_CEILING_MS = 20 * 60_000;
+
+/**
+ * Wall-clock limit for one streamed text-tool step. Flag off: exactly
+ * resolveTurnTimeoutMs() (unchanged behaviour). Flag on: EIGHT_TURN_TIMEOUT_MS
+ * when set, otherwise DEFAULT_STREAM_CEILING_MS, since the idle gap is now what
+ * catches a dead provider.
+ */
+export function resolveStepCeilingMs(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	if (resolveStreamIdleMs(env) === null || env.EIGHT_TURN_TIMEOUT_MS) {
+		return resolveTurnTimeoutMs(env);
+	}
+	return DEFAULT_STREAM_CEILING_MS;
+}

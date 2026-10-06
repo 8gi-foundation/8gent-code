@@ -25,6 +25,7 @@ import {
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import { resolveStreamIdleMs } from "../eight/turn-timeout";
 import { modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
 import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
@@ -472,6 +473,156 @@ function lookupQwenVariant(
 	return pending;
 }
 
+/** Yield each non-empty line of a streamed body as it arrives. */
+async function* bodyLines(res: Response): AsyncGenerator<string> {
+	if (!res.body) return;
+	const decoder = new TextDecoder();
+	let buf = "";
+	for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+		buf += decoder.decode(chunk, { stream: true });
+		let nl = buf.indexOf("\n");
+		while (nl >= 0) {
+			const line = buf.slice(0, nl).trim();
+			buf = buf.slice(nl + 1);
+			if (line) yield line;
+			nl = buf.indexOf("\n");
+		}
+	}
+	const rest = (buf + decoder.decode()).trim();
+	if (rest) yield rest;
+}
+
+/**
+ * A streamed reply that failed after the 200 status was sent: an in-band
+ * `{"error": ...}` frame, or a stream that closed without its terminator.
+ * `body` is a JSON error body in the shape a non-streamed failure would have,
+ * so the caller can judge it exactly like an HTTP 500 (#3553).
+ */
+export class StreamedReplyError extends Error {
+	readonly body: string;
+	constructor(error: unknown) {
+		const message =
+			typeof error === "string"
+				? error
+				: typeof (error as { message?: unknown } | null)?.message === "string"
+					? (error as { message: string }).message
+					: JSON.stringify(error);
+		super(message);
+		this.name = "StreamedReplyError";
+		this.body = JSON.stringify({ error });
+	}
+}
+
+/** Streamed tool calls are merged by `index`; anything outside 0..cap-1 is not trusted. */
+const MAX_STREAMED_TOOL_CALLS = 128;
+
+/**
+ * Reassemble an OpenAI-compatible streamed chat completion (SSE `data:` lines)
+ * into the non-streamed shape: content deltas joined, tool-call deltas merged
+ * by index (name and argument pieces concatenated), the last finish_reason,
+ * and usage from the final chunk (sent when stream_options.include_usage is
+ * set). Lines that are not JSON are skipped (#3553).
+ *
+ * Throws StreamedReplyError when a frame carries an `error` (Ollama reports a
+ * failure after the first bytes that way), or when the stream closes with
+ * neither `[DONE]` nor a finish_reason: a truncated body is a failure, never
+ * a complete reply. A tool-call `index` that is not a small non-negative
+ * integer falls back to the call's position in its delta.
+ */
+export async function readStreamedChatCompletion(res: Response): Promise<{
+	choices: Array<{ message: { content: string; tool_calls?: unknown[] }; finish_reason?: unknown }>;
+	usage?: unknown;
+}> {
+	let content = "";
+	let finishReason: unknown;
+	let usage: unknown;
+	type StreamedCall = { id?: string; type: string; function: { name: string; arguments: string } };
+	const calls = new Map<number, StreamedCall>();
+	let done = false;
+	for await (const line of bodyLines(res)) {
+		if (!line.startsWith("data:")) continue;
+		const payload = line.slice(5).trim();
+		if (payload === "[DONE]") {
+			done = true;
+			break;
+		}
+		let chunk: {
+			choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: unknown }>;
+			usage?: unknown;
+			error?: unknown;
+		};
+		try {
+			chunk = JSON.parse(payload);
+		} catch {
+			continue;
+		}
+		if (chunk?.error != null) throw new StreamedReplyError(chunk.error);
+		if (chunk?.usage) usage = chunk.usage;
+		const choice = chunk?.choices?.[0];
+		if (!choice) continue;
+		if (choice.finish_reason != null) finishReason = choice.finish_reason;
+		const delta = choice.delta ?? {};
+		if (typeof delta.content === "string") content += delta.content;
+		if (!Array.isArray(delta.tool_calls)) continue;
+		for (const [n, raw] of (delta.tool_calls as Array<Record<string, unknown>>).entries()) {
+			const idx = raw?.index;
+			const i =
+				Number.isInteger(idx) && (idx as number) >= 0 && (idx as number) < MAX_STREAMED_TOOL_CALLS
+					? (idx as number)
+					: n;
+			const fn = (raw?.function ?? {}) as { name?: unknown; arguments?: unknown };
+			let slot = calls.get(i);
+			if (!slot) {
+				slot = { type: "function", function: { name: "", arguments: "" } };
+				calls.set(i, slot);
+			}
+			if (typeof raw?.id === "string") slot.id = raw.id;
+			if (typeof fn.name === "string") slot.function.name += fn.name;
+			if (typeof fn.arguments === "string") slot.function.arguments += fn.arguments;
+			else if (fn.arguments && typeof fn.arguments === "object") {
+				slot.function.arguments = JSON.stringify(fn.arguments);
+			}
+		}
+	}
+	if (!done && finishReason == null) {
+		throw new StreamedReplyError("stream ended before [DONE] or a finish_reason");
+	}
+	const toolCalls = [...calls.keys()].sort((a, b) => a - b).map((k) => calls.get(k) as StreamedCall);
+	return {
+		choices: [
+			{
+				message: { content, ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}) },
+				finish_reason: finishReason,
+			},
+		],
+		...(usage !== undefined ? { usage } : {}),
+	};
+}
+
+/**
+ * Reassemble Ollama's streamed /api/generate reply (one JSON object per line)
+ * into the non-streamed shape: `response` pieces joined, the counts and
+ * done_reason taken from the final line (#3553). Throws StreamedReplyError on
+ * an in-band `error` line, or when no line carried `done: true`.
+ */
+async function readStreamedGenerate(res: Response): Promise<Record<string, unknown>> {
+	let response = "";
+	let last: Record<string, unknown> = {};
+	for await (const line of bodyLines(res)) {
+		let obj: Record<string, unknown>;
+		try {
+			obj = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (obj?.error != null) throw new StreamedReplyError(obj.error);
+		if (typeof obj?.response === "string") response += obj.response;
+		last = obj;
+	}
+	if (last.done !== true) throw new StreamedReplyError("stream ended before a done: true line");
+	return { ...last, response };
+}
+
 /**
  * Build a `call` function for runTextToolAgent that hits a local provider's
  * OpenAI-compatible /v1/chat/completions endpoint. Sends NO `tools` field so a
@@ -487,6 +638,12 @@ function lookupQwenVariant(
  * The request never inherits Bun's hidden 300 s fetch cap: it goes through
  * modelFetch, whose limit is `timeoutMs` (default: EIGHT_TURN_TIMEOUT_MS via
  * resolveTurnTimeoutMs). A step that runs past it rejects with TurnTimeoutError.
+ *
+ * With EIGHT_STREAM_IDLE_MS set (or `idleMs` passed), every request streams
+ * and the step is judged by silence instead (#3553): the idle timer is
+ * re-armed per chunk, `timeoutMs` stays the wall-clock ceiling, and the output
+ * cap is still sent. The streamed reply is reassembled into the same shape, so
+ * everything below behaves the same.
  *
  * When Ollama's built-in tool-call parser eats the reply (a parser 500, see
  * isNativeToolParserFailure, or an empty 200 for generated tokens, see
@@ -546,10 +703,17 @@ export function buildTextToolCall(opts: {
 	 * EIGHT_MAX_OUTPUT_TOKENS governs (#3074).
 	 */
 	maxTokens?: number;
+	/**
+	 * Stream the reply and fail after this many ms with no output (#3553).
+	 * Default: resolveStreamIdleMs(), so EIGHT_STREAM_IDLE_MS governs; null is off.
+	 */
+	idleMs?: number | null;
 }): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 	const maxTokens = opts.maxTokens ?? resolveMaxOutputTokens();
+	const idleMs = opts.idleMs === undefined ? resolveStreamIdleMs() : opts.idleMs;
+	const streamed = idleMs != null;
 	const label = `${opts.provider}/${opts.model}`;
 	const noThink = isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
@@ -569,13 +733,14 @@ export function buildTextToolCall(opts: {
 					messages,
 					temperature,
 					max_tokens: maxTokens,
-					stream: false,
+					stream: streamed,
+					...(streamed ? { stream_options: { include_usage: true } } : {}),
 					...(noThink ? { reasoning_effort: "none" } : {}),
 					...(withTools ? { tools: declared } : {}),
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label },
+			{ timeoutMs: opts.timeoutMs, label, ...(streamed ? { idleMs } : {}) },
 		);
 
 	type Attempt =
@@ -596,7 +761,18 @@ export function buildTextToolCall(opts: {
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
-		const data = (await res.json()) as {
+		let streamedData: Awaited<ReturnType<typeof readStreamedChatCompletion>> | undefined;
+		if (streamed) {
+			try {
+				streamedData = await readStreamedChatCompletion(res);
+			} catch (e) {
+				// A failure after the 200 is judged like the HTTP 500 it would have
+				// been non-streamed, so parser-failure recovery still runs.
+				if (e instanceof StreamedReplyError) return { ok: false, status: 500, body: e.body };
+				throw e;
+			}
+		}
+		const data = (streamed ? streamedData : await res.json()) as {
 			choices?: Array<{
 				message?: { content?: unknown; tool_calls?: unknown };
 				finish_reason?: unknown;
@@ -646,18 +822,29 @@ export function buildTextToolCall(opts: {
 					model: opts.model,
 					prompt: renderQwenChatML(messages, variant, noThink),
 					raw: true,
-					stream: false,
+					stream: streamed,
 					options: { temperature, num_predict: maxTokens },
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label: `${label} (raw)` },
+			{ timeoutMs: opts.timeoutMs, label: `${label} (raw)`, ...(streamed ? { idleMs } : {}) },
 		);
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
 			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
 		}
-		const data = (await res.json()) as {
+		let streamedRaw: Record<string, unknown> | undefined;
+		if (streamed) {
+			try {
+				streamedRaw = await readStreamedGenerate(res);
+			} catch (e) {
+				if (e instanceof StreamedReplyError) {
+					return { ok: false, why: `raw generate stream failed: ${e.message.slice(0, 200)}` };
+				}
+				throw e;
+			}
+		}
+		const data = (streamed ? streamedRaw : await res.json()) as {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;
