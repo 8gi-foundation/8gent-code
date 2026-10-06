@@ -38,7 +38,7 @@ import {
 } from "../permissions/permission-mode";
 import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
-import { imagesWrittenLine } from "./image-shape";
+import { withImagesWritten } from "./image-shape";
 import { writeShapeLine } from "./write-shape";
 
 // Execution context passed to tools
@@ -605,8 +605,7 @@ const runCommand = tool({
 		const startedAt = Date.now();
 		const output = await runShellCommand(command);
 		// Report images the command drew, and any cut off at an edge (#3580).
-		const images = await imagesWrittenLine(getToolContext().workingDirectory, startedAt).catch(() => "");
-		return images ? `${output}\n${images}` : output;
+		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
 	},
 });
 
