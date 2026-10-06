@@ -26,7 +26,7 @@ import {
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
-import { AgentDepthError, processAgentDepthRefusal } from "../orchestration/index";
+import { AgentDepthError, currentAgentDepth, processAgentDepthRefusal } from "../orchestration/index";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
@@ -64,10 +64,10 @@ import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
-import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
+import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
-import { localCatalogOmissions, localDelegationTools } from "./local-tool-scope";
+import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -272,6 +272,9 @@ export class Agent {
 		vectorAvailable: true,
 	});
 
+	/** 0 for a user's session, 1 or more for a spawned sub-agent (#3583). */
+	private readonly agentDepth: number = currentAgentDepth();
+
 	constructor(config: AgentConfig) {
 		// Backstop for #3341: no model loop in a process past MAX_AGENT_DEPTH,
 		// whichever entrypoint built it. Reads the PROCESS depth only, so an
@@ -471,7 +474,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const runtimeName = this.config.runtime as string;
 		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role) })}`;
+		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -1335,7 +1338,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// it's the last user-turn content before generation starts.
 			this.messageHistory.push({
 				role: "user",
-				content: PLANNING_GATE_INSTRUCTION,
+				content: planningGateInstruction(this.agentDepth),
 			});
 		} else {
 			// Simple / short messages go through without a planning gate
@@ -1394,7 +1397,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
-			"update_plan",
+			// A spawned sub-agent has one task and no plan to report (#3583).
+			...localPlanTools(this.agentDepth),
 			"git_status",
 			"git_diff",
 			"git_add",

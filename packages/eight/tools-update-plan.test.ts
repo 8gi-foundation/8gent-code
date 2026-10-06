@@ -13,6 +13,7 @@ import { buildToolSystemPrompt } from "../ai/text-tools";
 import { agentTools } from "../ai/tools";
 import { PLAN_STATUSES, parsePlan, updatePlan } from "../ai/update-plan";
 import { enforceAgenticHonesty } from "./honesty";
+import { planningGateInstruction } from "./local-tool-scope";
 import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { TOOL_CATEGORIES } from "./tool-registry";
 import { ToolExecutor } from "./tools";
@@ -153,7 +154,9 @@ describe("the agent is told to report plan progress", () => {
 
 	test("agent.ts injects the shared constant, not its own copy", () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf8");
-		expect(src).toContain("content: PLANNING_GATE_INSTRUCTION,");
+		// Through planningGateInstruction, which returns the constant at depth 0 (#3583).
+		expect(src).toContain("content: planningGateInstruction(this.agentDepth),");
+		expect(planningGateInstruction(0)).toBe(PLANNING_GATE_INSTRUCTION);
 		expect(src).not.toContain('"[PLANNING] ');
 	});
 });
