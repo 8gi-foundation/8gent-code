@@ -318,6 +318,7 @@ import {
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	declaredModels,
+	filterChatCapable,
 	listsInstalledOllamaModels,
 	missingModelNotice,
 	pickBestChatModel,
@@ -1367,6 +1368,9 @@ export function App({
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	// Ollama's full /api/tags list before chat filtering, so a model that is
+	// installed but cannot chat is not reported as missing (#3548).
+	const installedOllamaModelsRef = useRef<string[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [modelsLoading, setModelsLoading] = useState(false);
@@ -1404,7 +1408,8 @@ export function App({
 					// too, not the registry's declared default that may be absent (#3332).
 					// The configured ollama, which may be remote (#3080). Bounded: a
 					// down host left the model list loading for as long as TCP took (#3115).
-					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
+					const ollamaRoot = resolveOllamaBaseUrl();
+					const res = await fetch(`${ollamaRoot}/api/tags`, {
 						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
 					});
 					if (res.ok) {
@@ -1414,8 +1419,13 @@ export function App({
 					const id = String(m.name ?? "").trim();
 					return id.length > 0 ? [id] : [];
 				});
-						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
-						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
+						// What each model reports it can do decides first, so decision-only
+						// models are never offered for chat; the name filter is the fallback (#3548).
+						const chatModels = await filterChatCapable(ollamaRoot, allModels);
+						if (!cancelled) {
+							installedOllamaModelsRef.current = allModels;
+							setAvailableModels(chatModels);
+						}
 					}
 				} else if (currentProvider === "llama-server") {
 					// llama-server lists the model(s) it serves (#3149).
@@ -1527,6 +1537,7 @@ export function App({
 			from: currentModel,
 			to: next,
 			available: availableModels,
+			installed: installedOllamaModelsRef.current,
 		});
 		if (notice) addSystemMessage(notice);
 		setCurrentModel(next);
