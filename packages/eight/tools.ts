@@ -366,6 +366,8 @@ export class ToolExecutor {
 	 * TUI, with its tab. Undefined: no mode, today's behaviour.
 	 */
 	private permission: PermissionModeHolder | undefined;
+	/** Keys the post_message session limit (#3595); a real session id when one was given. */
+	private postSession: string;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -379,6 +381,7 @@ export class ToolExecutor {
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
+		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
@@ -1599,7 +1602,7 @@ export class ToolExecutor {
 						text: typeof args.text === "string" ? args.text : "",
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
 					},
-					postMessageDeps(this.agentId),
+					postMessageDeps(this.agentId, this.postSession),
 				);
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
@@ -2288,6 +2291,11 @@ export class ToolExecutor {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
 		}
+		// Backstop (#3595): the file that lists post_message recipients is not
+		// for the shell. A minimum, not a parser: the allowlist is also frozen
+		// at process start, so an edit that slips past this cannot take effect.
+		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
+			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 

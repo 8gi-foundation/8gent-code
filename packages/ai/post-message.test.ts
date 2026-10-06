@@ -9,7 +9,7 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../permissions/tui-approval-channel";
-import { type PostMessageDeps, postMessage } from "./post-message";
+import { type PostMessageDeps, postMessage, postMessageDeps } from "./post-message";
 
 const CHAT = "-1004417730052";
 const FAKE_TOKEN = "123456789:AAFakeTokenFakeTokenFakeTokenFake_0123";
@@ -212,14 +212,41 @@ describe("post_message", () => {
 		expect(ran.length).toBe(10);
 	});
 
-	test("a failed post does not spend the limit", async () => {
+	test("attempts count: failed, refused and declined posts spend the limit too", async () => {
 		const d = deps({
 			infinite: () => true,
+			limit: 3,
 			run: async () => ({ code: 1, stdout: "", stderr: "no" }),
 		});
 		await postMessage({ chat: CHAT, text: "x" }, d);
-		expect(d.sent.n).toBe(0);
+		await postMessage({ chat: "-100999", text: "x" }, d);
+		await postMessage({ chat: CHAT, text: "x" }, d);
+		expect(d.sent.n).toBe(3);
+		expect(await postMessage({ chat: CHAT, text: "x" }, d)).toContain("used its 3 posts");
 		expect(logged.length).toBe(0);
+	});
+
+	test("real deps: the counter is keyed by the session key, not the agent id", () => {
+		const a = postMessageDeps("primary", "sess-a");
+		const b = postMessageDeps("primary", "sess-b");
+		a.sent.n = 5;
+		expect(b.sent.n).toBe(0);
+		expect(postMessageDeps("other", "sess-a").sent.n).toBe(5);
+	});
+
+	test("bot tokens are scrubbed from helper errors, stdout and stderr, bare or in a URL", async () => {
+		for (const [stdout, stderr] of [
+			["", `Bad Request bot${FAKE_TOKEN}/sendMessage`],
+			[`token ${FAKE_TOKEN} rejected`, ""],
+		]) {
+			const out = await postMessage(
+				{ chat: CHAT, text: "hi" },
+				deps({ infinite: () => true, run: async () => ({ code: 1, stdout, stderr }) }),
+			);
+			expect(out).toStartWith("[ERROR]");
+			expect(out).not.toContain(FAKE_TOKEN);
+			expect(out).not.toContain("AAFakeToken");
+		}
 	});
 
 	test("text cap holds exactly and no attachment flag can be passed", async () => {

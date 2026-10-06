@@ -88,7 +88,18 @@ function postMessageBins(): PostMessageDeps["bins"] {
 	return { text: join(bin, "tg-group"), voice: join(bin, "say-telegram") };
 }
 
-export function postMessageDeps(agentId: string): PostMessageDeps {
+/**
+ * allowedChats is read ONCE, when this module loads at process start, and
+ * never again: a settings edit made during the session (by an agent that got
+ * a write through some other tool) cannot grant a recipient (#3595).
+ */
+let allowedSnapshot: string[] = readAllowedChats();
+/** Test seam only: re-take the snapshot. Production never calls this. */
+export function _snapshotAllowedChats(): void {
+	allowedSnapshot = readAllowedChats();
+}
+
+export function postMessageDeps(agentId: string, sessionKey = agentId): PostMessageDeps {
 	return {
 		run: (file, argv) =>
 			new Promise((resolve) => {
@@ -120,10 +131,10 @@ export function postMessageDeps(agentId: string): PostMessageDeps {
 		},
 		infinite: () => getPermissionManager().isInfiniteMode(),
 		bins: postMessageBins(),
-		allowedChats: readAllowedChats,
+		allowedChats: () => allowedSnapshot,
 		log: appendLog,
 		limit: POST_LIMIT_PER_SESSION,
-		sent: sessions.get(agentId) ?? sessions.set(agentId, { n: 0 }).get(agentId)!,
+		sent: sessions.get(sessionKey) ?? sessions.set(sessionKey, { n: 0 }).get(sessionKey)!,
 	};
 }
 
@@ -165,10 +176,12 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	if (text.length > (voice ? VOICE_MAX : TEXT_MAX))
 		return `[ERROR] text is ${text.length} characters; the cap is ${voice ? VOICE_MAX : TEXT_MAX}.`;
 
-	if (!deps.allowedChats().includes(chat))
-		return `[BLOCKED] post_message: chat ${chat} is not on postMessage.allowedChats in ~/.8gent/settings.json. Nothing was sent. Ask the person to add it; do not retry.`;
+	// Attempts count, not only successes: a refused or failed post spends the limit.
 	if (deps.sent.n >= deps.limit)
 		return `[BLOCKED] post_message: this session has used its ${deps.limit} posts. Nothing was sent.`;
+	deps.sent.n++;
+	if (!deps.allowedChats().includes(chat))
+		return `[BLOCKED] post_message: chat ${chat} is not on postMessage.allowedChats in ~/.8gent/settings.json. Nothing was sent. Ask the person to add it; do not retry.`;
 
 	const g = deps.gate(chat);
 	if (!g.allowed)
@@ -183,7 +196,6 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	const id = r.stdout.trim().split("\n").pop()?.trim() ?? "";
 	if (r.code !== 0 || !/^\d+$/.test(id))
 		return `[ERROR] post_message failed (exit ${r.code}): ${clip(r.stderr || r.stdout) || "no output"}`;
-	deps.sent.n++;
 	deps.log({ chat, length: text.length, voice: Boolean(voice), at: new Date().toISOString() });
 	return `Posted ${voice ? "voice note" : "message"} to ${chat}, message_id ${id}.`;
 }
