@@ -8,15 +8,16 @@
  *      deny, exfil-domain and any user YAML rules; email_send is not used, its
  *      COPPA gate wants an age proof no tool executor can supply), then
  *   3. the person, on the same approval card channel the MCP gate uses.
- *      Infinite mode skips the card; no card and no TTY means refused.
+ *      The chat must be on the allowlist in every mode, Infinite included;
+ *      Infinite skips only the card, and every post is logged. no card and no TTY means refused.
  * The helpers get argv, never a shell string. They read the bot token
  * themselves; this module never sees it, and everything it returns is
  * scrubbed.
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir as osHome } from "node:os";
 import { join } from "node:path";
 import { scrub } from "../eight/secret-scanner";
 import { getPermissionManager } from "../permissions";
@@ -35,6 +36,40 @@ export interface PostMessageDeps {
 	gate: (chat: string) => { allowed: boolean; reason?: string };
 	infinite: () => boolean;
 	bins: { text: string; voice: string };
+	/** Chats posting is allowed to (settings postMessage.allowedChats). Empty: nothing posts. */
+	allowedChats: () => string[];
+	/** One line per sent post: chat, length, timestamp. Never the text, never a token. */
+	log: (entry: { chat: string; length: number; voice: boolean; at: string }) => void;
+	/** Posts allowed per session; `sent` is the session's running count. */
+	limit: number;
+	sent: { n: number };
+}
+
+export const POST_LIMIT_PER_SESSION = 10;
+const sessions = new Map<string, { n: number }>();
+
+/** HOME at call time: os.homedir() is not re-read when HOME changes. */
+const home = () => process.env.HOME || osHome();
+
+/** postMessage.allowedChats from ~/.8gent/settings.json; any fault means the empty list. */
+export function readAllowedChats(): string[] {
+	try {
+		const raw = JSON.parse(readFileSync(join(home(), ".8gent", "settings.json"), "utf8"));
+		const list = raw?.postMessage?.allowedChats;
+		return Array.isArray(list) ? list.map(String) : [];
+	} catch {
+		return [];
+	}
+}
+
+function appendLog(entry: object): void {
+	try {
+		const dir = join(home(), ".8gent");
+		mkdirSync(dir, { recursive: true });
+		appendFileSync(join(dir, "post-message.log"), `${JSON.stringify(entry)}\n`);
+	} catch {
+		// the post already needs a person or an allowlist; a log fault must not hide the send
+	}
 }
 
 const CHAT_RE = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31})$/;
@@ -49,7 +84,7 @@ export function postMessageAvailable(): boolean {
 }
 
 function postMessageBins(): PostMessageDeps["bins"] {
-	const bin = process.env.EIGHT_TG_BIN_DIR || join(homedir(), ".8gent", "bin");
+	const bin = process.env.EIGHT_TG_BIN_DIR || join(home(), ".8gent", "bin");
 	return { text: join(bin, "tg-group"), voice: join(bin, "say-telegram") };
 }
 
@@ -85,6 +120,10 @@ export function postMessageDeps(agentId: string): PostMessageDeps {
 		},
 		infinite: () => getPermissionManager().isInfiniteMode(),
 		bins: postMessageBins(),
+		allowedChats: readAllowedChats,
+		log: appendLog,
+		limit: POST_LIMIT_PER_SESSION,
+		sent: sessions.get(agentId) ?? sessions.set(agentId, { n: 0 }).get(agentId)!,
 	};
 }
 
@@ -126,6 +165,11 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	if (text.length > (voice ? VOICE_MAX : TEXT_MAX))
 		return `[ERROR] text is ${text.length} characters; the cap is ${voice ? VOICE_MAX : TEXT_MAX}.`;
 
+	if (!deps.allowedChats().includes(chat))
+		return `[BLOCKED] post_message: chat ${chat} is not on postMessage.allowedChats in ~/.8gent/settings.json. Nothing was sent. Ask the person to add it; do not retry.`;
+	if (deps.sent.n >= deps.limit)
+		return `[BLOCKED] post_message: this session has used its ${deps.limit} posts. Nothing was sent.`;
+
 	const g = deps.gate(chat);
 	if (!g.allowed)
 		return `[BLOCKED] post_message was refused by policy: ${g.reason ?? "no reason given"}. Nothing was sent. Do not retry.`;
@@ -139,6 +183,8 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	const id = r.stdout.trim().split("\n").pop()?.trim() ?? "";
 	if (r.code !== 0 || !/^\d+$/.test(id))
 		return `[ERROR] post_message failed (exit ${r.code}): ${clip(r.stderr || r.stdout) || "no output"}`;
+	deps.sent.n++;
+	deps.log({ chat, length: text.length, voice: Boolean(voice), at: new Date().toISOString() });
 	return `Posted ${voice ? "voice note" : "message"} to ${chat}, message_id ${id}.`;
 }
 

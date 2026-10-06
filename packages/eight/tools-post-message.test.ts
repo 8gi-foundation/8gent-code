@@ -3,7 +3,7 @@
  * only with the helper installed, executed only through the approval gate.
  */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,8 +17,18 @@ const work = mkdtempSync(join(tmpdir(), "post-message-work-"));
 const log = join(bins, "calls.log");
 writeFileSync(join(bins, "tg-group"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\necho 777\n`);
 chmodSync(join(bins, "tg-group"), 0o755);
+const home = mkdtempSync(join(tmpdir(), "post-message-home-"));
+mkdirSync(join(home, ".8gent"));
+const settings = join(home, ".8gent", "settings.json");
+const savedHome = process.env.HOME;
+process.env.HOME = home;
+const allow = (chats: string[]) =>
+	writeFileSync(settings, JSON.stringify({ postMessage: { allowedChats: chats } }));
+allow(["-1004417730052"]);
 const saved = process.env.EIGHT_TG_BIN_DIR;
 afterAll(() => {
+	process.env.HOME = savedHome;
+	rmSync(home, { recursive: true, force: true });
 	rmSync(bins, { recursive: true, force: true });
 	rmSync(work, { recursive: true, force: true });
 });
@@ -57,5 +67,29 @@ describe("post_message in ToolExecutor", () => {
 		});
 		expect(out).toContain("PERMISSION DENIED");
 		expect(await Bun.file(log).exists()).toBe(false);
+	});
+
+	test("settings allowlist: an unlisted chat is refused and the helper never runs", async () => {
+		process.env.EIGHT_TG_BIN_DIR = bins;
+		rmSync(log, { force: true });
+		registerTuiApprovalHandler(async () => "approve");
+		const out = await new ToolExecutor(work, "pm-test").execute("post_message", {
+			chat: "-5",
+			text: "hi",
+		});
+		expect(out).toContain("not on postMessage.allowedChats");
+		expect(await Bun.file(log).exists()).toBe(false);
+	});
+
+	test("an approved post is logged to ~/.8gent/post-message.log without the text", async () => {
+		process.env.EIGHT_TG_BIN_DIR = bins;
+		registerTuiApprovalHandler(async () => "approve");
+		await new ToolExecutor(work, "pm-log").execute("post_message", {
+			chat: "-1004417730052",
+			text: "private words",
+		});
+		const line = readFileSync(join(home, ".8gent", "post-message.log"), "utf8");
+		expect(line).toContain("-1004417730052");
+		expect(line).not.toContain("private words");
 	});
 });

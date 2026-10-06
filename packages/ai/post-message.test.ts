@@ -16,9 +16,11 @@ const FAKE_TOKEN = "123456789:AAFakeTokenFakeTokenFakeTokenFake_0123";
 
 let ran: Array<{ bin: string; argv: string[] }> = [];
 let asked = 0;
+let logged: Array<Record<string, unknown>> = [];
 
 function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 	ran = [];
+	logged = [];
 	return {
 		run: async (bin, argv) => {
 			ran.push({ bin, argv });
@@ -27,6 +29,10 @@ function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 		gate: () => ({ allowed: true }),
 		infinite: () => false,
 		bins: { text: "/x/tg-group", voice: "/x/say-telegram" },
+		allowedChats: () => [CHAT],
+		log: (e) => logged.push(e),
+		limit: 10,
+		sent: { n: 0 },
 		...over,
 	};
 }
@@ -157,5 +163,75 @@ describe("post_message", () => {
 			deps({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
 		);
 		expect(out).toStartWith("[ERROR]");
+	});
+
+	test("a chat not on the allowlist is refused in every mode, card or not", async () => {
+		person("approve");
+		for (const infinite of [false, true]) {
+			const out = await postMessage(
+				{ chat: "-100999", text: "hi" },
+				deps({ infinite: () => infinite }),
+			);
+			expect(out).toContain("not on postMessage.allowedChats");
+		}
+		expect(asked).toBe(0);
+		expect(ran.length).toBe(0);
+	});
+
+	test("an empty allowlist posts nothing", async () => {
+		person("approve");
+		const out = await postMessage({ chat: CHAT, text: "hi" }, deps({ allowedChats: () => [] }));
+		expect(out).toStartWith("[BLOCKED]");
+		expect(ran.length).toBe(0);
+	});
+
+	test("infinite mode: allowlisted chat posts without a card and is logged, text and token absent", async () => {
+		const out = await postMessage(
+			{ chat: CHAT, text: "secret caption" },
+			deps({ infinite: () => true }),
+		);
+		expect(out).toStartWith("Posted");
+		expect(logged.length).toBe(1);
+		expect(logged[0]).toMatchObject({ chat: CHAT, length: 14, voice: false });
+		expect(typeof logged[0].at).toBe("string");
+		expect(JSON.stringify(logged[0])).not.toContain("secret caption");
+	});
+
+	test("outside infinite mode the card still shows and a decline logs nothing", async () => {
+		person("deny");
+		await postMessage({ chat: CHAT, text: "hi" }, deps());
+		expect(asked).toBe(1);
+		expect(logged.length).toBe(0);
+	});
+
+	test("session rate limit: the 11th post is refused", async () => {
+		const d = deps({ infinite: () => true });
+		for (let i = 0; i < 10; i++)
+			expect(await postMessage({ chat: CHAT, text: "x" }, d)).toStartWith("Posted");
+		expect(await postMessage({ chat: CHAT, text: "x" }, d)).toContain("used its 10 posts");
+		expect(ran.length).toBe(10);
+	});
+
+	test("a failed post does not spend the limit", async () => {
+		const d = deps({
+			infinite: () => true,
+			run: async () => ({ code: 1, stdout: "", stderr: "no" }),
+		});
+		await postMessage({ chat: CHAT, text: "x" }, d);
+		expect(d.sent.n).toBe(0);
+		expect(logged.length).toBe(0);
+	});
+
+	test("text cap holds exactly and no attachment flag can be passed", async () => {
+		person("approve");
+		const ok = await postMessage({ chat: CHAT, text: "x".repeat(4096) }, deps());
+		expect(ok).toStartWith("Posted");
+		const out = await postMessage(
+			{ chat: CHAT, text: "hi", file: "/etc/hosts", caption: "c" } as never,
+			deps(),
+		);
+		expect(out).toStartWith("Posted");
+		expect(ran[0].argv.join(" ")).not.toMatch(/--file|--caption/);
+		expect(ran[0].argv[0]).toBe("text");
 	});
 });
