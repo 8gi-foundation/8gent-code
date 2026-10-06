@@ -822,6 +822,23 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "speak",
+					description:
+						"[MEDIA] Speak text with a local neural voice (Supertonic, KittenTTS fallback) and write a wav into ~/.8gent/creative/. Returns path and durationSec. Use for video narration instead of espeak or say. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava.",
+					parameters: {
+						type: "object",
+						properties: {
+							text: { type: "string", description: "Words to speak (max 2000 characters)" },
+							voice: { type: "string", description: "Voice name; defaults to Daniel" },
+							out: { type: "string", description: "Output filename inside ~/.8gent/creative/ (.wav added)" },
+						},
+						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "read_pdf",
 					description:
 						"[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
@@ -1629,6 +1646,21 @@ export class ToolExecutor {
 				return this.handleReadImage(args.path as string);
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
+
+			case "speak": {
+				const { speak } = await import("../tools/speak");
+				try {
+					return JSON.stringify(
+						await speak({
+							text: args.text as string,
+							voice: args.voice as string | undefined,
+							out: args.out as string | undefined,
+						}),
+					);
+				} catch (err) {
+					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
 
 			// PDF tools
 			case "read_pdf":
