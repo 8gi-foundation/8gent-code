@@ -6,7 +6,7 @@
  */
 
 import { getCampaignStats, getLead, getTemplates, upsertLead } from "./campaign-db";
-import { getInsights, reflect, startReflectionLoop } from "./hyperagent";
+import { getInsights, reflect } from "./hyperagent";
 import {
 	getProfile,
 	getRecentReplies,
@@ -14,13 +14,60 @@ import {
 	sendConnectionRequest,
 	sendMessage,
 } from "./linkedin-api";
+import { isKilled } from "./policy";
+import { ReviewQueue, logActivity, preview } from "./queue";
 import { RateLimiter } from "./rate-limiter";
 import { buildSignalHook, enrichLead } from "./signal-engine";
+import { notifyApprovalNeeded } from "./telegram-notify";
 import type { MCPToolCall, MCPToolResult } from "./types";
 import { randomId } from "./utils";
 
 const ACCOUNT_ID = process.env.VESSEL_ACCOUNT_ID || "default";
 const limiter = new RateLimiter(ACCOUNT_ID);
+
+// The approval notice shows the whole text, so the cap matches what fits there.
+export const MAX_MESSAGE_CHARS = 1000;
+
+// Tools that touch LinkedIn or local data without sending anything. Each call
+// is written to the activity log (tool name only, never the result).
+const READ_TOOLS = new Set([
+	"linkedin_search_leads",
+	"linkedin_get_profile",
+	"linkedin_get_replies",
+	"linkedin_get_stats",
+	"linkedin_get_insights",
+	"linkedin_trigger_reflection",
+	"linkedin_get_rate_status",
+]);
+const URN_RE = /^urn:li:[A-Za-z_]+:\S{1,200}$/;
+
+// Writes never run from a tool call. They are queued and run on approval.
+let queue: ReviewQueue | null = null;
+
+export function getQueue(): ReviewQueue {
+	if (!queue) {
+		queue = new ReviewQueue(
+			ACCOUNT_ID,
+			{
+				connection_requests: (p) => sendConnectionRequest(p.profileUrn, p.note),
+				messages: (p) => sendMessage(p.conversationUrn, p.body),
+			},
+			notifyApprovalNeeded,
+		);
+	}
+	return queue;
+}
+
+/** Test seam: swap in a queue with fake executors and notifier. */
+export function setQueue(q: ReviewQueue): void {
+	queue = q;
+}
+
+async function queued(
+	outcome: Awaited<ReturnType<ReviewQueue["enqueue"]>>,
+): Promise<MCPToolResult> {
+	return outcome.ok ? text(outcome.message) : error(outcome.message);
+}
 
 // ── Tool definitions (returned on initialize) ─────────────────────────
 
@@ -70,7 +117,7 @@ export const TOOL_DEFINITIONS = [
 	{
 		name: "linkedin_send_connection",
 		description:
-			"Send a connection request with a personalized note. Max 300 chars. Requires rate limit budget.",
+			"Queue a connection request with a personalized note (max 300 chars). It is sent only after James approves it.",
 		inputSchema: {
 			type: "object",
 			required: ["profileUrn", "note"],
@@ -85,7 +132,8 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_send_message",
-		description: "Send a direct message to an existing connection.",
+		description:
+			"Queue a direct message to an existing connection. It is sent only after James approves it.",
 		inputSchema: {
 			type: "object",
 			required: ["conversationUrn", "body"],
@@ -145,11 +193,16 @@ export const TOOL_DEFINITIONS = [
 // ── Tool dispatcher ───────────────────────────────────────────────────
 
 export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
-	const args = call.arguments;
+	if (isKilled()) return error("LinkedIn vessel is paused (kill switch on). No actions run.");
+	const args = call.arguments ?? {};
+	if (READ_TOOLS.has(call.name)) logActivity({ event: "read", actionType: call.name });
 
 	try {
 		switch (call.name) {
 			case "linkedin_search_leads": {
+				if (!limiter.canSend("profile_views")) {
+					return error("Daily profile view cap reached. Try tomorrow.");
+				}
 				const leads = await searchPeople({
 					keywords: args.keywords as string,
 					titles: args.titles as string[],
@@ -157,9 +210,11 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 					limit: (args.limit as number) || 25,
 				});
 
-				// Enrich top 10 with signals (rate-limited, don't hammer all)
-				const enriched = await Promise.all(leads.slice(0, 10).map((l) => enrichLead(l)));
-				const rest = leads.slice(10);
+				// Enrichment fetches each profile's activity, so each one is a profile view.
+				const n = Math.min(10, leads.length, limiter.remaining("profile_views"));
+				for (let i = 0; i < n; i++) limiter.consume("profile_views");
+				const enriched = await Promise.all(leads.slice(0, n).map((l) => enrichLead(l)));
+				const rest = leads.slice(n);
 				const allLeads = [...enriched, ...rest];
 
 				// Save to DB
@@ -179,6 +234,12 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_get_profile": {
+				if (typeof args.publicId !== "string" || args.publicId.trim() === "") {
+					return error("publicId is required");
+				}
+				if (!limiter.consume("profile_views")) {
+					return error("Daily profile view cap reached. Try tomorrow.");
+				}
 				const publicId = (args.publicId as string)
 					.replace("https://www.linkedin.com/in/", "")
 					.replace(/\/$/, "");
@@ -207,47 +268,41 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_send_connection": {
-				if (!limiter.canSend("connection_requests")) {
-					return error(
-						`Daily connection request cap reached (${limiter.remaining("connection_requests")} remaining). Try tomorrow.`,
-					);
+				const { profileUrn, note } = args as { profileUrn?: unknown; note?: unknown };
+				if (typeof profileUrn !== "string" || !URN_RE.test(profileUrn)) {
+					return error("profileUrn must be a LinkedIn URN (urn:li:...)");
 				}
-
-				const { profileUrn, note } = args as {
-					profileUrn: string;
-					note: string;
-				};
+				if (typeof note !== "string" || note.trim() === "") return error("note is required");
 				if (note.length > 300) return error("Note exceeds 300 chars");
-
-				// In production - uncomment this. For safety, confirm in logs first.
-				// const result = await sendConnectionRequest(profileUrn, note);
-				// if (!result.success) return error(result.error!);
-
-				limiter.consume("connection_requests");
-				return text(
-					`Connection request queued for ${profileUrn}. Remaining today: ${limiter.remaining("connection_requests")}`,
+				return queued(
+					await getQueue().enqueue("connection_requests", profileUrn, { profileUrn, note }, note),
 				);
 			}
 
 			case "linkedin_send_message": {
-				if (!limiter.canSend("messages")) {
-					return error(`Daily message cap reached. ${limiter.remaining("messages")} remaining.`);
+				const { conversationUrn, body } = args as { conversationUrn?: unknown; body?: unknown };
+				if (typeof conversationUrn !== "string" || !URN_RE.test(conversationUrn)) {
+					return error("conversationUrn must be a LinkedIn URN (urn:li:...)");
 				}
-
-				const { conversationUrn, body } = args as {
-					conversationUrn: string;
-					body: string;
-				};
-				const result = await sendMessage(conversationUrn, body);
-				if (!result.success) return error(result.error!);
-
-				limiter.consume("messages");
-				return text(`Message sent. Remaining today: ${limiter.remaining("messages")}`);
+				if (typeof body !== "string" || body.trim() === "") return error("body is required");
+				if (body.length > MAX_MESSAGE_CHARS)
+					return error(`Message exceeds ${MAX_MESSAGE_CHARS} chars`);
+				return queued(
+					await getQueue().enqueue("messages", conversationUrn, { conversationUrn, body }, body),
+				);
 			}
 
 			case "linkedin_get_replies": {
+				// Metadata and a short preview only. Full message text stays in LinkedIn.
 				const replies = await getRecentReplies(args.since as string | undefined);
-				return text(JSON.stringify(replies, null, 2));
+				const safe = replies.map((r) => ({
+					conversationUrn: r.conversationUrn,
+					senderName: r.senderName,
+					timestamp: r.timestamp,
+					isUnread: r.isUnread,
+					preview: preview(r.lastMessage),
+				}));
+				return text(JSON.stringify(safe, null, 2));
 			}
 
 			case "linkedin_get_stats": {
@@ -260,6 +315,9 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_trigger_reflection": {
+				if (process.env.HYPERAGENT_ENABLED !== "1") {
+					return error("Template rewriting is off (HYPERAGENT_ENABLED is not 1).");
+				}
 				const result = await reflect();
 				return text(
 					[

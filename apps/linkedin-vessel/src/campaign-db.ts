@@ -20,6 +20,8 @@ export function getDb(): Database {
 	if (_db) return _db;
 	_db = new Database(getDbPath());
 	_db.exec("PRAGMA journal_mode = WAL;");
+	// Cleared queue text is overwritten on disk, not left in free pages.
+	_db.exec("PRAGMA secure_delete = ON;");
 	_db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
       id TEXT PRIMARY KEY,
