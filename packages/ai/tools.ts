@@ -2005,7 +2005,7 @@ const queryDesignSystem = tool({
 
 const deckTheme = tool({
 	description:
-		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it; `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 	inputSchema: z.object({
 		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
 		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
@@ -2018,15 +2018,19 @@ const deckTheme = tool({
 			const dt = await import("../design-systems/deck-themes.js");
 			if (action === "list") return { themes: dt.listThemes() };
 			if (!deck) return { error: `deck_theme ${action} needs deck (path to the deck .md)` };
-			const deckPath = resolvePath(deck);
-			const blocked = gateWrite("write_file", { path: deckPath, content: "" });
-			if (blocked) return { error: blocked };
-			if (action === "apply") {
-				if (!name) return { error: "deck_theme apply needs name" };
-				return dt.applyTheme(deckPath, name);
+			if (action === "apply" && !name) return { error: "deck_theme apply needs name" };
+			if (action === "mix" && (!palette || !type)) {
+				return { error: "deck_theme mix needs palette and type" };
 			}
-			if (!palette || !type) return { error: "deck_theme mix needs palette and type" };
-			return dt.mixTheme(deckPath, palette, type);
+			const cwd = getToolContext().workingDirectory;
+			const deckPath = dt.resolveDeckPath(resolvePath(deck), cwd);
+			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
+			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
+				const blocked = gateWrite("write_file", { path: target, content: "" });
+				if (blocked) return { error: blocked };
+			}
+			if (action === "apply") return dt.applyTheme(deckPath, String(name));
+			return dt.mixTheme(deckPath, String(palette), String(type));
 		} catch (err) {
 			return { error: String(err instanceof Error ? err.message : err) };
 		}

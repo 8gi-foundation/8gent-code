@@ -1029,7 +1029,7 @@ export class ToolExecutor {
 				function: {
 					name: "deck_theme",
 					description:
-						"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it; `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+						"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2917,19 +2917,25 @@ export class ToolExecutor {
 			if (action === "list") return JSON.stringify({ themes: dt.listThemes() }, null, 2);
 			if (action !== "apply" && action !== "mix") return `deck_theme: unknown action "${action}"`;
 			if (!args.deck) return `deck_theme ${action} needs deck (path to the deck .md)`;
-			const deck = path.resolve(this.workingDirectory, String(args.deck));
-			const blocked = gateWriteTool(
-				"primary",
-				"write_file",
-				{ path: deck, content: "" },
-				this.workingDirectory,
-			);
-			if (blocked) return blocked;
+			if (action === "apply" && !args.name) return "deck_theme apply needs name";
+			if (action === "mix" && (!args.palette || !args.type)) {
+				return "deck_theme mix needs palette and type";
+			}
+			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory), this.workingDirectory);
+			const themeName =
+				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
+			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
+				const blocked = gateWriteTool(
+					"primary",
+					"write_file",
+					{ path: target, content: "" },
+					this.workingDirectory,
+				);
+				if (blocked) return blocked;
+			}
 			if (action === "apply") {
-				if (!args.name) return "deck_theme apply needs name";
 				return JSON.stringify(dt.applyTheme(deck, String(args.name)), null, 2);
 			}
-			if (!args.palette || !args.type) return "deck_theme mix needs palette and type";
 			return JSON.stringify(dt.mixTheme(deck, String(args.palette), String(args.type)), null, 2);
 		} catch (err) {
 			return `deck_theme failed: ${err instanceof Error ? err.message : err}`;

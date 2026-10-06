@@ -42,11 +42,7 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
  * given, so a spawn without it behaves exactly as before.
  */
 export function normaliseAllowedPaths(value: unknown): string[] | undefined {
-	const raw = Array.isArray(value)
-		? value
-		: typeof value === "string"
-			? value.split(",")
-			: [];
+	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
 	const paths = raw
 		.filter((p): p is string => typeof p === "string")
 		.map((p) => p.trim())
@@ -66,17 +62,29 @@ export function editScopeViolation(
 	allowedPaths: readonly string[] | undefined,
 ): string | null {
 	if (!allowedPaths || allowedPaths.length === 0) return null;
-	if (!SCOPED_WRITE_TOOLS.has(toolName)) return null;
+	const isDeckTheme = toolName === "deck_theme";
+	if (!SCOPED_WRITE_TOOLS.has(toolName) && !isDeckTheme) return null;
+	if (isDeckTheme && args.action === "list") return null;
 	const scope = allowedPaths.join(", ");
-	const target = typeof args.path === "string" ? args.path.trim() : "";
-	if (target) {
-		const abs = path.resolve(workingDirectory, target);
-		const inside = allowedPaths.some((p) => {
+	const target =
+		typeof (isDeckTheme ? args.deck : args.path) === "string"
+			? String(isDeckTheme ? args.deck : args.path).trim()
+			: "";
+	// deck_theme writes the deck and a <theme>.css beside it: both must be in scope.
+	const targets = [target];
+	if (isDeckTheme && target) {
+		const themeName =
+			args.action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
+		targets.push(path.join(path.dirname(target), `${themeName}.css`));
+	}
+	const isInside = (t: string) => {
+		const abs = path.resolve(workingDirectory, t);
+		return allowedPaths.some((p) => {
 			const allowed = path.resolve(workingDirectory, p);
 			return abs === allowed || abs.startsWith(`${allowed}${path.sep}`);
 		});
-		if (inside) return null;
-	}
+	};
+	if (target && targets.every(isInside)) return null;
 	return (
 		`[SCOPE BLOCKED] ${toolName} did NOT run. Nothing was changed. ` +
 		`Reason: ${target || "(no path)"} is outside this agent's edit scope (${scope}) ` +

@@ -10,9 +10,16 @@
  * Brand ban: hues 270-350 are remapped before any colour reaches a theme.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hslToHex } from "./db";
 import type { ParsedColors, ParsedTypography } from "./schema";
@@ -227,8 +234,50 @@ export function setFrontMatterTheme(md: string, name: string): string {
 	return md.replace(m[0], `---\n${body}\n---${m[2]}`);
 }
 
+const SAFE_NAME = /^\w[\w.-]*$/;
+
+/** Where a theme CSS lands for a deck. One definition, shared with the scope guard. */
+export function cssPathFor(deck: string, name: string): string {
+	return join(dirname(deck), `${name}.css`);
+}
+
+function inside(target: string, root: string): boolean {
+	return target === root || target.startsWith(root + sep);
+}
+
+/**
+ * Resolve a model-supplied deck path to a real .md file inside `root`:
+ * no traversal, no symlink escape, safe filename. Throws otherwise.
+ */
+export function resolveDeckPath(userPath: string, root: string): string {
+	const rootReal = realpathSync(resolve(root));
+	const abs = resolve(rootReal, userPath);
+	if (!existsSync(abs)) throw new Error(`Deck not found: ${userPath}`);
+	const real = realpathSync(abs);
+	if (!inside(real, rootReal)) {
+		throw new Error(`Path blocked: "${userPath}" resolves outside the workspace (${rootReal}).`);
+	}
+	if (!real.endsWith(".md")) throw new Error(`Deck must be a .md file: ${userPath}`);
+	return real;
+}
+
+/** Throws unless the deck is a .md with a safe basename. */
+function assertDeck(deck: string): void {
+	if (!existsSync(deck)) throw new Error(`Deck not found: ${deck}`);
+	if (!deck.endsWith(".md")) throw new Error(`Deck must be a .md file: ${deck}`);
+	if (!SAFE_NAME.test(basename(deck))) {
+		throw new Error(
+			`Deck filename "${basename(deck)}" has characters outside [A-Za-z0-9_.-]; rename it first.`,
+		);
+	}
+}
+
 function install(deck: string, name: string, css: string): { css: string; render: string } {
-	const cssPath = join(dirname(deck), `${name}.css`);
+	const cssPath = cssPathFor(deck, name);
+	// A symlink at the CSS destination must not carry the write elsewhere.
+	if (existsSync(cssPath) && lstatSync(cssPath).isSymbolicLink()) {
+		throw new Error(`Refusing to overwrite symlink ${basename(cssPath)}.`);
+	}
 	writeFileSync(cssPath, css);
 	writeFileSync(deck, setFrontMatterTheme(readFileSync(deck, "utf8"), name));
 	return {
@@ -238,17 +287,14 @@ function install(deck: string, name: string, css: string): { css: string; render
 }
 
 export function applyTheme(deck: string, name: string, dir: string = THEMES_DIR) {
-	if (!existsSync(deck)) throw new Error(`Deck not found: ${deck}`);
+	assertDeck(deck);
 	find(loadIndex(dir), name);
-	const src = join(dir, `${name}.css`);
-	const out = install(deck, name, readFileSync(src, "utf8"));
-	copyFileSync(src, out.css);
-	return { theme: name, ...out };
+	return { theme: name, ...install(deck, name, readFileSync(join(dir, `${name}.css`), "utf8")) };
 }
 
 /** Derived theme: colours from `palette`, fonts from `type`. */
 export function mixTheme(deck: string, palette: string, type: string, dir: string = THEMES_DIR) {
-	if (!existsSync(deck)) throw new Error(`Deck not found: ${deck}`);
+	assertDeck(deck);
 	const index = loadIndex(dir);
 	const name = `${palette}-x-${type}`;
 	const css = buildThemeCss(name, find(index, palette).colors, find(index, type).typography);

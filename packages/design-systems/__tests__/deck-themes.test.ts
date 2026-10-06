@@ -4,7 +4,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -203,13 +211,20 @@ describe("deck_theme tool wiring", () => {
 			(agentTools.deck_theme.execute as (a: unknown, o: unknown) => Promise<any>)(a, {});
 		expect((await run({ action: "list" })).themes.length).toBeGreaterThanOrEqual(40);
 		expect((await run({ action: "apply" })).error).toMatch(/needs deck/);
-		const { deck } = deckWith("# A\n");
+		const { dir, deck } = deckWith("# A\n");
+		const { setToolContext, getToolContext } = await import("../../ai/tools");
+		const prev = getToolContext();
+		setToolContext({ workingDirectory: dir });
+		try {
+			expect((await run({ action: "apply", deck: "../../etc/x.md" })).error).toBeTruthy();
+			expect((await run({ action: "apply", deck: "deck.md", name: "apple" })).theme).toBe("apple");
+		} finally {
+			setToolContext(prev);
+		}
 		expect((await run({ action: "apply", deck })).error).toMatch(/needs name/);
 		expect((await run({ action: "mix", deck, palette: "apple" })).error).toMatch(
 			/palette and type/,
 		);
-		const ok = await run({ action: "apply", deck, name: "apple" });
-		expect(ok.theme).toBe("apple");
 		expect(readFileSync(deck, "utf8")).toContain("theme: apple");
 	});
 });
@@ -235,7 +250,81 @@ describe("deck_theme in the local agent path (ToolExecutor + CORE_TOOLS)", () =>
 		const agent = readFileSync(join(import.meta.dir, "../../eight/agent.ts"), "utf8");
 		const core = agent.slice(agent.indexOf("const CORE_TOOLS = ["));
 		expect(core.slice(0, core.indexOf("];"))).toContain('"deck_theme"');
-		const prompt = readFileSync(join(import.meta.dir, "../../eight/prompts/system-prompt.ts"), "utf8");
+		const prompt = readFileSync(
+			join(import.meta.dir, "../../eight/prompts/system-prompt.ts"),
+			"utf8",
+		);
 		expect(prompt).toContain("\\`deck_theme\\`");
+	});
+});
+
+describe("deck_theme write safety (8SO review)", () => {
+	const mk = async (opts: Record<string, unknown> = {}) => {
+		const { ToolExecutor } = await import("../../eight/tools");
+		const base = tmp();
+		const ws = join(base, "ws");
+		mkdirSync(ws);
+		writeFileSync(join(ws, "deck.md"), "# A\n");
+		return { base, ws, ex: new ToolExecutor(ws, "primary", undefined, opts) };
+	};
+	const apply = (
+		ex: { execute(n: string, a: Record<string, unknown>): Promise<string> },
+		deck: string,
+	) => ex.execute("deck_theme", { action: "apply", deck, name: "apple" });
+
+	test("traversal out of the workspace is refused and nothing is written", async () => {
+		const { base, ex } = await mk();
+		mkdirSync(join(base, "out"));
+		writeFileSync(join(base, "out", "victim.md"), "# V\n");
+		const r = await apply(ex, "../out/victim.md");
+		expect(r).toMatch(/outside|blocked/i);
+		expect(readFileSync(join(base, "out", "victim.md"), "utf8")).toBe("# V\n");
+		expect(existsSync(join(base, "out", "apple.css"))).toBe(false);
+	});
+	test("a symlink pointing outside the workspace is refused", async () => {
+		const { base, ws, ex } = await mk();
+		writeFileSync(join(base, "secret.md"), "# S\n");
+		symlinkSync(join(base, "secret.md"), join(ws, "link.md"));
+		expect(await apply(ex, "link.md")).toMatch(/outside|blocked/i);
+		expect(readFileSync(join(base, "secret.md"), "utf8")).toBe("# S\n");
+	});
+	test("a symlinked CSS destination is not followed", async () => {
+		const { base, ws, ex } = await mk();
+		writeFileSync(join(base, "target.txt"), "keep");
+		symlinkSync(join(base, "target.txt"), join(ws, "apple.css"));
+		expect(await apply(ex, "deck.md")).toMatch(/symlink/i);
+		expect(readFileSync(join(base, "target.txt"), "utf8")).toBe("keep");
+	});
+	test("a non-.md file is refused and left intact", async () => {
+		const { ws, ex } = await mk();
+		writeFileSync(join(ws, "notes.txt"), "plain");
+		expect(await apply(ex, "notes.txt")).toMatch(/\.md/);
+		expect(readFileSync(join(ws, "notes.txt"), "utf8")).toBe("plain");
+	});
+	test("a hostile filename never reaches the returned marp command", async () => {
+		const { ws, ex } = await mk();
+		writeFileSync(join(ws, "x; touch pwned.md"), "# A\n");
+		const r = await apply(ex, "x; touch pwned.md");
+		expect(r).toMatch(/characters outside/);
+		expect(r).not.toContain("marp ");
+		expect(() => applyTheme(join(ws, "x; touch pwned.md"), "apple")).toThrow(/characters outside/);
+		expect(() => mixTheme(join(ws, "x; touch pwned.md"), "apple", "apple")).toThrow(
+			/characters outside/,
+		);
+	});
+	test("edit scope (allowedPaths) covers the deck and its CSS", async () => {
+		const { ws, ex } = await mk({ allowedPaths: ["other.md"] });
+		const r = await apply(ex, "deck.md");
+		expect(r).toContain("SCOPE BLOCKED");
+		expect(readFileSync(join(ws, "deck.md"), "utf8")).toBe("# A\n");
+		const onlyDeck = await mk({ allowedPaths: ["deck.md"] });
+		expect(await apply(onlyDeck.ex, "deck.md")).toContain("SCOPE BLOCKED"); // apple.css is out of scope
+		const both = await mk({ allowedPaths: ["deck.md", "apple.css"] });
+		expect(JSON.parse(await apply(both.ex, "deck.md")).theme).toBe("apple");
+		expect(
+			await mk({ allowedPaths: ["other.md"] }).then((m) =>
+				m.ex.execute("deck_theme", { action: "list" }),
+			),
+		).toContain("themes");
 	});
 });
