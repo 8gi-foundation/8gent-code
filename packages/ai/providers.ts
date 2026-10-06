@@ -9,8 +9,9 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { modelFetchAsFetch } from "./model-fetch";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
+import { resolveLlamaServerUrl } from "../local-model-server/select";
 
-export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel";
+export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel" | "llama-server";
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -20,7 +21,7 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama">, string> = {
+const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, string> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
@@ -34,9 +35,15 @@ const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama">, string> = {
  * ollama it is resolved at call time from OLLAMA_BASE_URL, then OLLAMA_HOST,
  * then localhost (#3080): a hardcoded localhost here sent the TUI's per-turn
  * task-router classify to this machine even with ollama configured remote.
+ *
+ * llama-server resolves the same way, from LLAMA_SERVER_URL then
+ * 127.0.0.1:8080, through the same helper the provider registry uses so the
+ * registry and this factory cannot disagree.
  */
 export function defaultBaseUrl(name: ProviderName): string {
-	return name === "ollama" ? `${resolveOllamaBaseUrl()}/v1` : DEFAULT_URLS[name];
+	if (name === "ollama") return `${resolveOllamaBaseUrl()}/v1`;
+	if (name === "llama-server") return `${resolveLlamaServerUrl()}/v1`;
+	return DEFAULT_URLS[name];
 }
 
 /**
@@ -118,6 +125,10 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 		case "apfel":
 			// apfel optionally accepts a bearer token via APFEL_TOKEN. Default = none.
 			return process.env.APFEL_TOKEN || "apfel";
+		case "llama-server":
+			// llama-server is local and unauthenticated: the provider registry
+			// declares apiKeyEnv: "" for it, so send no key.
+			return undefined;
 	}
 }
 
