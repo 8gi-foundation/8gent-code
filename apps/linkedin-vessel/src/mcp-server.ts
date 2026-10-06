@@ -211,7 +211,7 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 				});
 
 				// Enrichment fetches each profile's activity, so each one is a profile view.
-				const n = Math.min(10, limiter.remaining("profile_views"));
+				const n = Math.min(10, leads.length, limiter.remaining("profile_views"));
 				for (let i = 0; i < n; i++) limiter.consume("profile_views");
 				const enriched = await Promise.all(leads.slice(0, n).map((l) => enrichLead(l)));
 				const rest = leads.slice(n);

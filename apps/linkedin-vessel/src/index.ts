@@ -210,6 +210,8 @@ if (import.meta.main) {
 	console.log(`[linkedin-vessel] Vessel ID: ${VESSEL_ID}`);
 	console.log(`[linkedin-vessel] Paused (kill switch): ${isKilled()}`);
 
+	// Build the queue now so items interrupted by a crash are closed and cleared at boot.
+	getQueue();
 	if (process.env.HYPERAGENT_ENABLED === "1" && !isKilled()) startReflectionLoop();
 	connectToControlPlane();
 
