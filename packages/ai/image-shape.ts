@@ -6,8 +6,11 @@
  * title blank and each body was one 40pt line wider than the 1280 px canvas,
  * cut off at both edges, so four slides looked almost the same. The command
  * printed "BUILD_OK" and the model never saw a pixel. This line puts the
- * images in front of it: how many were written, their size, and which ones
- * have content reaching an edge of a plain background.
+ * images in front of it: how many were written, their size, which ones have
+ * nothing drawn on them (one flat colour), and which have content reaching an
+ * edge of a plain background. In pilot run 2026-10-06_203151 the model's
+ * slides came out pure white and the line, without the flat check, said only
+ * "Images written: 5", so it finished with a blank video.
  *
  * It is read-only and model-free: a bounded walk for image files modified
  * since the command started, then one small decode per image, all inside a
@@ -41,6 +44,8 @@ const INK_THRESHOLD = 48;
 /** A row or column this full of ink is a rule, stripe or border, not text. */
 const LINE_FRACTION = 0.9;
 const SAMPLE_WIDTH = 320;
+/** Grey levels of spread within which an image counts as one flat colour. */
+const FLAT_RANGE = 4;
 /** Results that mean the command never ran. */
 const REFUSED = /^\[(PERMISSION DENIED|BLOCKED|SYSTEM ONE BLOCKED|TOOLG8 BLOCKED)\]/;
 
@@ -120,6 +125,18 @@ export function clippedSides(px: Uint8Array | Buffer, width: number, height: num
 	return sides;
 }
 
+/** True when every sampled pixel is within FLAT_RANGE grey levels of the others. */
+export function isFlat(grey: Uint8Array | Buffer): boolean {
+	let lo = 255;
+	let hi = 0;
+	for (const v of grey) {
+		if (v < lo) lo = v;
+		if (v > hi) hi = v;
+		if (hi - lo > FLAT_RANGE) return false;
+	}
+	return true;
+}
+
 function listNames(names: string[]): string {
 	return names.length <= MAX_LISTED
 		? names.join(", ")
@@ -127,8 +144,8 @@ function listNames(names: string[]): string {
 }
 
 /**
- * One line for a run_command result: the images the command wrote, and any
- * whose content reaches an edge. "" when it wrote no images.
+ * One line for a run_command result: the images the command wrote, any with
+ * nothing drawn on them, and any whose content reaches an edge. "" when it wrote no images.
  */
 export async function imagesWrittenLine(
 	workingDirectory: string,
@@ -146,6 +163,7 @@ export async function imagesWrittenLine(
 	const rel = (f: string) => path.relative(root, f) || f;
 	const sizes = new Set<string>();
 	const clipped: string[] = [];
+	const blank: string[] = [];
 	if (sharp) {
 		for (const { file, bytes } of found) {
 			if (bytes > MAX_DECODE_BYTES) continue;
@@ -168,12 +186,22 @@ export async function imagesWrittenLine(
 					alphaAt(0, height - 1),
 					alphaAt(width - 1, height - 1),
 				].some((a) => a < 250);
-				if (transparent) continue;
+				if (transparent) {
+					// Fully transparent: nothing drawn. Otherwise artwork such as an icon: skip.
+					let opaque = false;
+					for (let i = 3; i < data.length && !opaque; i += 4) opaque = data[i] > 0;
+					if (!opaque) blank.push(rel(file));
+					continue;
+				}
 				const grey = new Uint8Array(width * height);
 				for (let i = 0; i < grey.length; i++)
 					grey[i] = Math.round(
 						0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2],
 					);
+				if (isFlat(grey)) {
+					blank.push(rel(file));
+					continue;
+				}
 				const sides = clippedSides(grey, width, height);
 				if (sides.length > 0) clipped.push(`${rel(file)} (${sides.join(", ")})`);
 			} catch {}
@@ -183,6 +211,11 @@ export async function imagesWrittenLine(
 	const parts = [
 		`Images written: ${found.length}${size}: ${listNames(found.map((f) => rel(f.file)))}.`,
 	];
+	if (blank.length > 0) {
+		parts.push(
+			`Nothing is drawn on ${listNames(blank)}: each is one flat colour. The draw step did not put anything on them; fix the command that drew them and re-render.`,
+		);
+	}
 	if (clipped.length > 0) {
 		parts.push(
 			`Content reaches the edge of a plain background in ${listNames(clipped)}; if that is text, it is cut off. Wrap or shrink it to fit, re-render, and check each image shows its own content.`,

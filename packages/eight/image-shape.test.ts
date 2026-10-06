@@ -21,6 +21,7 @@ import {
 	clippedSides,
 	imagesWrittenLine,
 	imagesWrittenSince,
+	isFlat,
 	withImagesWritten,
 } from "../ai/image-shape";
 import { agentTools, getToolContext, setToolContext } from "../ai/tools";
@@ -215,6 +216,65 @@ describe("imagesWrittenLine", () => {
 	test("a home directory or filesystem root is never listed", async () => {
 		expect(await imagesWrittenLine(homedir(), 0)).toBe("");
 		expect(await imagesWrittenLine("/", 0)).toBe("");
+	});
+});
+
+describe("nothing drawn", () => {
+	test("isFlat: one colour is flat, faint text on it is not", () => {
+		expect(isFlat(slidePixels([], () => 255))).toBe(true);
+		expect(isFlat(slidePixels([]))).toBe(true);
+		expect(isFlat(slidePixels(textLine(400, 300, 480, 40), () => BG, BG + 20))).toBe(false);
+	});
+
+	test("pilot run 2026-10-06_203151: five pure white slides are named as blank", async () => {
+		const dir = tempDir("image-shape-");
+		for (const n of [1, 2, 3, 4, 5])
+			await writePng(
+				path.join(dir, `video/slides/${n}.png`),
+				slidePixels([], () => 255),
+			);
+		expect(await imagesWrittenLine(dir, Date.now() - 5_000)).toBe(
+			"Images written: 5 (1280x720): video/slides/1.png, video/slides/2.png, video/slides/3.png, video/slides/4.png, video/slides/5.png. " +
+				"Nothing is drawn on video/slides/1.png, video/slides/2.png, video/slides/3.png, video/slides/4.png, video/slides/5.png: each is one flat colour. " +
+				"The draw step did not put anything on them; fix the command that drew them and re-render.",
+		);
+	});
+
+	test("a fully transparent image is blank; transparent artwork is not", async () => {
+		const dir = tempDir("image-shape-");
+		await writeRaw(
+			path.join(dir, "empty.png"),
+			iconPixels(64, () => false),
+			64,
+			64,
+			4,
+		);
+		await writeRaw(
+			path.join(dir, "dot.png"),
+			iconPixels(64, (x, y) => (x - 32) ** 2 + (y - 32) ** 2 < 100),
+			64,
+			64,
+			4,
+		);
+		const line = await imagesWrittenLine(dir, Date.now() - 5_000);
+		expect(line).toContain("Nothing is drawn on empty.png: each is one flat colour.");
+		expect(line).not.toContain("dot.png:");
+	});
+
+	test("a navy slide and a white slide from one bad draw are both named, a real slide is not", async () => {
+		const dir = tempDir("image-shape-");
+		await writePng(
+			path.join(dir, "1-0.png"),
+			slidePixels([], () => 40),
+		);
+		await writePng(
+			path.join(dir, "1-1.png"),
+			slidePixels([], () => 255),
+		);
+		await writePng(path.join(dir, "2.png"), slidePixels(FITTED));
+		expect(await imagesWrittenLine(dir, Date.now() - 5_000)).toContain(
+			"Nothing is drawn on 1-0.png, 1-1.png: each",
+		);
 	});
 });
 
