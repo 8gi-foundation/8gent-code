@@ -295,6 +295,14 @@ describe("deck_theme write safety (8SO review)", () => {
 		expect(await apply(ex, "deck.md")).toMatch(/symlink/i);
 		expect(readFileSync(join(base, "target.txt"), "utf8")).toBe("keep");
 	});
+	test("a dangling symlink at the CSS destination is not followed", async () => {
+		const { base, ws, ex } = await mk();
+		mkdirSync(join(base, "out"));
+		symlinkSync(join(base, "out", "pwn.css"), join(ws, "apple.css"));
+		expect(await apply(ex, "deck.md")).toMatch(/symlink/i);
+		expect(existsSync(join(base, "out", "pwn.css"))).toBe(false);
+		expect(readFileSync(join(ws, "deck.md"), "utf8")).toBe("# A\n");
+	});
 	test("a non-.md file is refused and left intact", async () => {
 		const { ws, ex } = await mk();
 		writeFileSync(join(ws, "notes.txt"), "plain");

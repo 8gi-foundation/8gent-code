@@ -42,7 +42,11 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
  * given, so a spawn without it behaves exactly as before.
  */
 export function normaliseAllowedPaths(value: unknown): string[] | undefined {
-	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+	const raw = Array.isArray(value)
+		? value
+		: typeof value === "string"
+			? value.split(",")
+			: [];
 	const paths = raw
 		.filter((p): p is string => typeof p === "string")
 		.map((p) => p.trim())

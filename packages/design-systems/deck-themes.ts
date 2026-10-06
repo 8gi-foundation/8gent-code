@@ -275,7 +275,7 @@ function assertDeck(deck: string): void {
 function install(deck: string, name: string, css: string): { css: string; render: string } {
 	const cssPath = cssPathFor(deck, name);
 	// A symlink at the CSS destination must not carry the write elsewhere.
-	if (existsSync(cssPath) && lstatSync(cssPath).isSymbolicLink()) {
+	if (lstatSync(cssPath, { throwIfNoEntry: false })?.isSymbolicLink()) {
 		throw new Error(`Refusing to overwrite symlink ${basename(cssPath)}.`);
 	}
 	writeFileSync(cssPath, css);
