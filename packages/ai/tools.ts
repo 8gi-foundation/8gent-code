@@ -38,6 +38,7 @@ import {
 } from "../permissions/permission-mode";
 import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
+import { writeShapeLine } from "./write-shape";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -401,7 +402,9 @@ const writeFile = tool({
 		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
-		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
+		// Report what is on disk so a requested count can be checked (#3580).
+		const shape = writeShapeLine(absolutePath, content);
+		return `File written: ${absolutePath}${shape ? `\n${shape}` : ""}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 

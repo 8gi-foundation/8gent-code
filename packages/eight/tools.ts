@@ -30,6 +30,7 @@ import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { writeShapeLine } from "../ai/write-shape";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -2137,6 +2138,10 @@ export class ToolExecutor {
 		recordWrite();
 
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
+		// Report what is on disk so a requested count can be checked (#3580).
+		const shape = writeShapeLine(absolutePath, content);
+		if (shape) designHint += `\n${shape}`;
+
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
 		if (deckLine) designHint += `\n${deckLine}`;
 
