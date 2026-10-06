@@ -15,8 +15,10 @@ FROM oven/bun:1@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f
 #            Linux-only LibsecretVault tests (packages/secrets) run instead of
 #            skipping; run.sh starts a session bus and unlocks a throwaway keyring.
 # xz-utils - to unpack the Node tarball below.
+# zip, rsync - the permissions tests run real archive and sync commands that
+#            remove their source (packages/permissions/s1-created-files.test.ts).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ripgrep procps python3 make g++ libsecret-tools gnome-keyring dbus dbus-daemon xz-utils curl ca-certificates \
+ && apt-get install -y --no-install-recommends git ripgrep procps python3 make g++ libsecret-tools gnome-keyring dbus dbus-daemon xz-utils zip rsync curl ca-certificates \
  && apt-get clean && find /var/lib/apt/lists -type f -delete
 
 # A real Node, for two reasons:
