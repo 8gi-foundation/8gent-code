@@ -38,8 +38,8 @@ import {
 } from "../permissions/permission-mode";
 import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
-import { writeScopeLine } from "./write-scope";
 import { writeShapeLine } from "./write-shape";
+import { writeScopeLine } from "./write-scope";
 
 // Execution context passed to tools
 export interface ToolContext {
