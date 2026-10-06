@@ -326,7 +326,7 @@ OpenRouter `google/gemini-2.5-flash:free` as remote fallback only.
 3. **Multi-file extraction is the bottleneck.** Most battle-test failures come from the LLM not producing clean multi-file output. Any improvement to code extraction in `execution-grader.ts` has outsized impact.
 4. **Temperature matters.** TC001 went from 24 to 93 just by changing temp from 0.5 to 0.7. Always sweep.
 5. **Mutation interference is real.** A learning that helps BT001 can regress TC001. The autoresearch loop handles this via per-category scoping, but be aware of it.
-6. **Version everything.** See versioning rules below. Update CHANGELOG.md with every significant change.
+6. **Version everything.** See versioning rules below. Do not edit CHANGELOG.md in a PR; write a clear PR title, because the release step builds the changelog from merged PR titles.
 
 ## Core Ability Packages (9 Powers)
 
@@ -502,7 +502,7 @@ apps/tui/src/
    - `package.json` - `"version"` (source of truth)
    - `bin/8gent.ts` - `const VERSION`
    - `README.md` - version badge
-2. **CHANGELOG.md is mandatory** - every PR or significant batch of work must add an entry. Follow [Keep a Changelog](https://keepachangelog.com/) format.
+2. **Do not edit CHANGELOG.md in a PR.** Write a clear conventional PR title (`feat(scope): ...`, `fix(scope): ...`), because the release step builds the changelog from merged PR titles: `bun scripts/changelog-release.ts --version X.Y.Z --write` in the release PR (#3575). Sections follow [Keep a Changelog](https://keepachangelog.com/): `feat` goes under Added, `fix` under Fixed, a `security` type or scope under Security, `revert` under Removed, `deprecate` under Deprecated, everything else under Changed.
 3. **SemVer strictly:**
    - PATCH (1.0.x): bug fixes, minor tweaks
    - MINOR (1.x.0): new features, new benchmarks, new packages
