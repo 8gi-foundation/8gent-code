@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -304,7 +304,14 @@ describe("wsTransport (real WebSocket round trip)", () => {
 describe("ToolExecutor gates browser_* (8SO review of #3592)", () => {
 	const dir = mkdtempSync(join(tmpdir(), "browser-gate-"));
 	const prevHeadless = process.env.EIGHT_HEADLESS;
+	const prevPort = process.env.EIGHT_BROWSER_CONTROL_PORT;
+	// A gate regression must never reach the person's real browser: point the driver at a dead port.
+	beforeEach(() => {
+		process.env.EIGHT_BROWSER_CONTROL_PORT = "9";
+	});
 	afterEach(() => {
+		if (prevPort === undefined) Reflect.deleteProperty(process.env, "EIGHT_BROWSER_CONTROL_PORT");
+		else process.env.EIGHT_BROWSER_CONTROL_PORT = prevPort;
 		_resetTuiApprovalChannel();
 		if (prevHeadless === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
 		else process.env.EIGHT_HEADLESS = prevHeadless;
