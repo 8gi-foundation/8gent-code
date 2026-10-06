@@ -17,8 +17,8 @@ import { ToolExecutor } from "./tools";
 afterAll(cleanupTempDirs);
 
 const LINE =
-	"Scope: build_video.sh is a new file in the top folder, but every other file you created is in video/. " +
-	"If the request put the work in video/, write it there instead (helper scripts too) and remove this one.";
+	"Scope: build_video.sh is a new file in the top folder, but every other file you have created with write_file is in video/. " +
+	"If the request put the work in video/, write it as video/build_video.sh instead, then delete the top-folder copy.";
 
 describe("writeScopeLine", () => {
 	const W = "/w";
@@ -63,6 +63,36 @@ describe("writeScopeLine", () => {
 		writeScopeLine(s, W, at("video/b.md"), true);
 		expect(writeScopeLine(s, W, at("scripts/build.sh"), true)).toBe("");
 		expect(writeScopeLine(s, W, "/elsewhere/x.sh", true)).toBe("");
+	});
+
+	test("8PO probes: root files and code roots are never asked to move", () => {
+		const quiet: [string[], string][] = [
+			[["my-app/package.json", "my-app/src/index.ts"], ".gitignore"],
+			[["src/a.ts", "src/b.ts"], "vitest.config.ts"],
+			[["packages/foo/a.ts", "packages/foo/package.json"], "tsconfig.base.json"],
+			[["docs/a.md", "docs/b.md"], "CHANGELOG.md"],
+			[["apps/web/a.ts", "apps/web/b.ts"], "build.sh"],
+			[["src/a.ts", "src/b.ts"], "notes.sh"],
+			[["video/a.md", "video/b.md"], "Dockerfile"],
+			[["video/a.md", "video/b.md"], ".env.example"],
+			[["video/a.md", "video/b.md"], "README.md"],
+			[["video/a.md", "video/b.md"], "package.json"],
+		];
+		for (const [before, root] of quiet) {
+			const s = new CreatedFiles();
+			for (const p of before) writeScopeLine(s, W, at(p), true);
+			expect([root, writeScopeLine(s, W, at(root), true)]).toEqual([root, ""]);
+		}
+	});
+
+	test("names the deepest folder the work shares", () => {
+		const s = new CreatedFiles();
+		writeScopeLine(s, W, at("media/clips/a.md"), true);
+		writeScopeLine(s, W, at("media/clips/b.txt"), true);
+		expect(writeScopeLine(s, W, at("render.sh"), true)).toBe(
+			"Scope: render.sh is a new file in the top folder, but every other file you have created with write_file is in media/clips/. " +
+				"If the request put the work in media/clips/, write it as media/clips/render.sh instead, then delete the top-folder copy.",
+		);
 	});
 
 	test("no session record, no line", () => {
