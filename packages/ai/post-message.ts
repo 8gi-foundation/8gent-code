@@ -265,7 +265,7 @@ export const POST_MESSAGE_TOOL_DEF = {
 	function: {
 		name: "post_message",
 		description:
-			"[MESSAGING] Post a message to a Telegram chat (local tg-group helper), or a voice note when voice is set (say-telegram, officer voice name such as Rishi). The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Never put credentials in the text.",
+			"[MESSAGING] Post a message to a Telegram chat (local tg-group helper), or a voice note when voice is set (say-telegram, officer voice name such as Rishi). The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Only chats on the person's allowlist work. Never put credentials in the text.",
 		parameters: {
 			type: "object",
 			properties: {

@@ -14,6 +14,7 @@
  * cannot read ~/.ssh even if its tool's manifest granted ${home}.
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -242,4 +243,88 @@ export function sessionScratchDir(sessionId: string): string {
 /** Remove a session's scratch dir and everything in it. */
 export function destroySessionScratch(sessionId: string): void {
 	fs.rmSync(scratchPath(sessionId), { recursive: true, force: true });
+}
+
+// ============================================
+// Agent-protected files (#3595)
+// ============================================
+
+/**
+ * Files no agent-run shell command may create, change, replace or unlink:
+ * the post_message allowlist and the list of recipients a person confirmed.
+ * The path-guard stops agent file tools; this stops `sh -c` and anything it
+ * spawns, in the kernel, where no spelling of the path matters.
+ */
+export function protectedAgentFiles(): string[] {
+	const dir = path.join(homeDir(), ".8gent");
+	return [path.join(dir, "settings.json"), path.join(dir, "post-message-confirmed.json")];
+}
+
+/** The path and its realpath (the file may not exist yet: realpath its directory). */
+function pathAndReal(p: string): string[] {
+	let real = p;
+	try {
+		real = fs.realpathSync(p);
+	} catch {
+		try {
+			real = path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+		} catch {}
+	}
+	return [...new Set([path.normalize(p), real])];
+}
+
+/**
+ * An allow-default profile whose only effect is to refuse writes to the given
+ * files (and the unlink of their directory, so the directory cannot be moved
+ * aside and rebuilt). Everything else a command does is unchanged.
+ */
+export function buildProtectedFilesProfile(files: string[] = protectedAgentFiles()): string {
+	const all = [...new Set(files.flatMap(pathAndReal))];
+	const dirs = [...new Set(files.flatMap((f) => pathAndReal(path.dirname(f))))];
+	return `${[
+		"(version 1)",
+		"(allow default)",
+		`(deny file-write* ${all.map((p) => `(literal ${sbplString(p)})`).join(" ")})`,
+		`(deny file-write-unlink ${dirs.map((p) => `(literal ${sbplString(p)})`).join(" ")})`,
+	].join("\n")}\n`;
+}
+
+function shellQuote(s: string): string {
+	return `'${s.replaceAll("'", `'\\''`)}'`;
+}
+
+let nestedProbe: boolean | undefined;
+/** sandbox-exec cannot nest: when the host already sandboxes us, applying a profile fails. */
+export function canApplyProfile(): boolean {
+	if (nestedProbe === undefined) {
+		try {
+			const r = spawnSync(SANDBOX_EXEC, ["-p", "(version 1)(allow default)", "/usr/bin/true"]);
+			nestedProbe = r.status === 0;
+		} catch {
+			nestedProbe = false;
+		}
+	}
+	return nestedProbe;
+}
+
+/**
+ * Wrap a shell command so the protected files above are unwritable to it.
+ * Returned unchanged (and so unprotected) when: not macOS, EIGHT_SEATBELT=0
+ * (the user turned sandboxing off), or the host already sandboxes this
+ * process. Then next-launch confirmation relies on System One alone.
+ */
+export function wrapShellCommand(command: string): string {
+	if (process.env.EIGHT_SEATBELT === "0" || !isSeatbeltAvailable() || !canApplyProfile()) {
+		return command;
+	}
+	return `${SANDBOX_EXEC} -p ${shellQuote(buildProtectedFilesProfile())} /bin/sh -c ${shellQuote(command)}`;
+}
+
+/**
+ * Minimum backstop in front of the kernel rule: a command that names either
+ * protected file is refused outright. Not a parser (a quoted-up path gets
+ * past it); the seatbelt profile above is what holds.
+ */
+export function touchesProtectedAgentFile(command: string): boolean {
+	return /\.8gent\S*\s*[/\\]+\s*["']?\s*(settings|post-message-confirmed)/i.test(command);
 }
