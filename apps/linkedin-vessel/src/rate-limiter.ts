@@ -7,13 +7,23 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "./campaign-db";
 
+// Hard ceilings. An env var may lower a cap, never raise it above these.
 const DAILY_CAPS = {
 	connection_requests: 20,
 	messages: 50,
 	profile_views: 80,
 } as const;
 
-type ActionType = keyof typeof DAILY_CAPS;
+export type ActionType = keyof typeof DAILY_CAPS;
+
+export function dailyCap(action: ActionType): number {
+	const hard = DAILY_CAPS[action];
+	const raw = process.env[`LINKEDIN_CAP_${action.toUpperCase()}`];
+	if (raw === undefined || raw === "") return hard;
+	const n = Number.parseInt(raw, 10);
+	if (!Number.isFinite(n) || n < 0) return hard;
+	return Math.min(n, hard);
+}
 
 function todayKey(): string {
 	return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -42,12 +52,11 @@ export class RateLimiter {
 	}
 
 	canSend(action: ActionType): boolean {
-		const count = this.getCount(action);
-		return count < DAILY_CAPS[action];
+		return this.getCount(action) < dailyCap(action);
 	}
 
 	remaining(action: ActionType): number {
-		return Math.max(0, DAILY_CAPS[action] - this.getCount(action));
+		return Math.max(0, dailyCap(action) - this.getCount(action));
 	}
 
 	consume(action: ActionType): boolean {
@@ -65,11 +74,16 @@ export class RateLimiter {
 
 	getStatus(): Record<ActionType, { used: number; cap: number; remaining: number }> {
 		const result = {} as any;
-		for (const [action, cap] of Object.entries(DAILY_CAPS)) {
-			const used = this.getCount(action as ActionType);
+		for (const action of Object.keys(DAILY_CAPS) as ActionType[]) {
+			const cap = dailyCap(action);
+			const used = this.getCount(action);
 			result[action] = { used, cap, remaining: Math.max(0, cap - used) };
 		}
 		return result;
+	}
+
+	used(action: ActionType): number {
+		return this.getCount(action);
 	}
 
 	private getCount(action: ActionType): number {

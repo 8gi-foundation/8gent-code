@@ -150,3 +150,46 @@ export async function notifyDailySummary(stats: {
 		`LinkedIn daily summary: ${stats.sent} sent, ${stats.replies} replies, ${stats.qualified} qualified.`,
 	);
 }
+
+// ── Approval requests ─────────────────────────────────────────────────
+
+/**
+ * Ask James to review a queued LinkedIn action. Plain text (no parse_mode) so
+ * the message text cannot break formatting. Reads env at call time so the
+ * chat id and token can be rotated without a code change.
+ */
+export async function notifyApprovalNeeded(item: {
+	id: string;
+	actionType: string;
+	target: string;
+	payload: Record<string, string> | null;
+}): Promise<void> {
+	const token = process.env.TELEGRAM_BOT_TOKEN;
+	const chatId = process.env.JAMES_TELEGRAM_CHAT_ID;
+	if (!token || !chatId) {
+		console.warn(
+			"[telegram] approval notice skipped: TELEGRAM_BOT_TOKEN or JAMES_TELEGRAM_CHAT_ID unset",
+		);
+		return;
+	}
+	const text = item.payload?.note ?? item.payload?.body ?? "";
+	const base = process.env.PUBLIC_URL || "https://linkedin-vessel.fly.dev";
+	const lines = [
+		"LinkedIn action waiting for your approval",
+		"",
+		`Type: ${item.actionType}`,
+		`To: ${item.target}`,
+		"",
+		text.slice(0, 1000),
+		"",
+		`Approve: POST ${base}/queue/${item.id}/approve`,
+		`Reject:  POST ${base}/queue/${item.id}/reject`,
+		"(approver token required; pending items expire after 24h)",
+	];
+	const res = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ chat_id: chatId, text: lines.join("\n") }),
+	});
+	if (!res.ok) throw new Error(`Telegram sendMessage ${res.status}`);
+}

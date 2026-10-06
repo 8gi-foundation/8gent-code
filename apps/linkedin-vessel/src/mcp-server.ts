@@ -6,7 +6,7 @@
  */
 
 import { getCampaignStats, getLead, getTemplates, upsertLead } from "./campaign-db";
-import { getInsights, reflect, startReflectionLoop } from "./hyperagent";
+import { getInsights, reflect } from "./hyperagent";
 import {
 	getProfile,
 	getRecentReplies,
@@ -14,13 +14,47 @@ import {
 	sendConnectionRequest,
 	sendMessage,
 } from "./linkedin-api";
+import { isKilled } from "./policy";
+import { ReviewQueue } from "./queue";
 import { RateLimiter } from "./rate-limiter";
 import { buildSignalHook, enrichLead } from "./signal-engine";
+import { notifyApprovalNeeded } from "./telegram-notify";
 import type { MCPToolCall, MCPToolResult } from "./types";
 import { randomId } from "./utils";
 
 const ACCOUNT_ID = process.env.VESSEL_ACCOUNT_ID || "default";
 const limiter = new RateLimiter(ACCOUNT_ID);
+
+const MAX_MESSAGE_CHARS = 2000;
+const URN_RE = /^urn:li:[A-Za-z_]+:\S{1,200}$/;
+
+// Writes never run from a tool call. They are queued and run on approval.
+let queue: ReviewQueue | null = null;
+
+export function getQueue(): ReviewQueue {
+	if (!queue) {
+		queue = new ReviewQueue(
+			ACCOUNT_ID,
+			{
+				connection_requests: (p) => sendConnectionRequest(p.profileUrn, p.note),
+				messages: (p) => sendMessage(p.conversationUrn, p.body),
+			},
+			notifyApprovalNeeded,
+		);
+	}
+	return queue;
+}
+
+/** Test seam: swap in a queue with fake executors and notifier. */
+export function setQueue(q: ReviewQueue): void {
+	queue = q;
+}
+
+async function queued(
+	outcome: Awaited<ReturnType<ReviewQueue["enqueue"]>>,
+): Promise<MCPToolResult> {
+	return outcome.ok ? text(outcome.message) : error(outcome.message);
+}
 
 // ── Tool definitions (returned on initialize) ─────────────────────────
 
@@ -70,7 +104,7 @@ export const TOOL_DEFINITIONS = [
 	{
 		name: "linkedin_send_connection",
 		description:
-			"Send a connection request with a personalized note. Max 300 chars. Requires rate limit budget.",
+			"Queue a connection request with a personalized note (max 300 chars). It is sent only after James approves it.",
 		inputSchema: {
 			type: "object",
 			required: ["profileUrn", "note"],
@@ -85,7 +119,8 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_send_message",
-		description: "Send a direct message to an existing connection.",
+		description:
+			"Queue a direct message to an existing connection. It is sent only after James approves it.",
 		inputSchema: {
 			type: "object",
 			required: ["conversationUrn", "body"],
@@ -145,7 +180,8 @@ export const TOOL_DEFINITIONS = [
 // ── Tool dispatcher ───────────────────────────────────────────────────
 
 export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
-	const args = call.arguments;
+	if (isKilled()) return error("LinkedIn vessel is paused (kill switch on). No actions run.");
+	const args = call.arguments ?? {};
 
 	try {
 		switch (call.name) {
@@ -207,42 +243,28 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 			}
 
 			case "linkedin_send_connection": {
-				if (!limiter.canSend("connection_requests")) {
-					return error(
-						`Daily connection request cap reached (${limiter.remaining("connection_requests")} remaining). Try tomorrow.`,
-					);
+				const { profileUrn, note } = args as { profileUrn?: unknown; note?: unknown };
+				if (typeof profileUrn !== "string" || !URN_RE.test(profileUrn)) {
+					return error("profileUrn must be a LinkedIn URN (urn:li:...)");
 				}
-
-				const { profileUrn, note } = args as {
-					profileUrn: string;
-					note: string;
-				};
+				if (typeof note !== "string" || note.trim() === "") return error("note is required");
 				if (note.length > 300) return error("Note exceeds 300 chars");
-
-				// In production - uncomment this. For safety, confirm in logs first.
-				// const result = await sendConnectionRequest(profileUrn, note);
-				// if (!result.success) return error(result.error!);
-
-				limiter.consume("connection_requests");
-				return text(
-					`Connection request queued for ${profileUrn}. Remaining today: ${limiter.remaining("connection_requests")}`,
+				return queued(
+					await getQueue().enqueue("connection_requests", profileUrn, { profileUrn, note }, note),
 				);
 			}
 
 			case "linkedin_send_message": {
-				if (!limiter.canSend("messages")) {
-					return error(`Daily message cap reached. ${limiter.remaining("messages")} remaining.`);
+				const { conversationUrn, body } = args as { conversationUrn?: unknown; body?: unknown };
+				if (typeof conversationUrn !== "string" || !URN_RE.test(conversationUrn)) {
+					return error("conversationUrn must be a LinkedIn URN (urn:li:...)");
 				}
-
-				const { conversationUrn, body } = args as {
-					conversationUrn: string;
-					body: string;
-				};
-				const result = await sendMessage(conversationUrn, body);
-				if (!result.success) return error(result.error!);
-
-				limiter.consume("messages");
-				return text(`Message sent. Remaining today: ${limiter.remaining("messages")}`);
+				if (typeof body !== "string" || body.trim() === "") return error("body is required");
+				if (body.length > MAX_MESSAGE_CHARS)
+					return error(`Message exceeds ${MAX_MESSAGE_CHARS} chars`);
+				return queued(
+					await getQueue().enqueue("messages", conversationUrn, { conversationUrn, body }, body),
+				);
 			}
 
 			case "linkedin_get_replies": {
