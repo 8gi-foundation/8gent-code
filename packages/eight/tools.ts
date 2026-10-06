@@ -26,6 +26,7 @@ import {
 	LOCATE_INDEX_WAIT_MS,
 	locate as astLocate,
 } from "../ast-index/locate";
+import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -1287,6 +1288,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Posting (#3595): advertised only where the tg-group helper is installed.
+			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
 		];
 	}
 
@@ -1588,6 +1591,16 @@ export class ToolExecutor {
 				return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
+			case "post_message":
+				// Policy gate, then the person, inside postMessage; never a shell string.
+				return postMessage(
+					{
+						chat: String(args.chat ?? ""),
+						text: typeof args.text === "string" ? args.text : "",
+						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
+					},
+					postMessageDeps(this.agentId),
+				);
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
 					"issue",

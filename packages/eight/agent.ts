@@ -59,6 +59,7 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { postMessageAvailable } from "../ai/post-message";
 import { stripDoneMarker } from "../ai/text-tool-loop";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
@@ -1466,6 +1467,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...CORE_TOOLS,
 			...(cuaConfigured ? DESKTOP_TOOLS : []),
 			...localDelegationTools(this.config.role),
+			// Posting (#3595): offered only where the tg-group helper is installed.
+			...(postMessageAvailable() ? ["post_message"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
 		];
