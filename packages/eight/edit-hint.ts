@@ -57,10 +57,30 @@ export function formatEditNotFound(filePath: string, content: string, oldText: s
 	const base = `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 	const r = findClosestRegion(content, oldText);
 	if (!r) return base;
-	const numbered = r.text
-		.split("\n")
-		.map((l, i) => `${r.startLine + i}: ${l}`)
-		.join("\n");
-	const how = r.kind === "whitespace" ? "differs only in whitespace" : "is the closest match";
-	return `${base}\nLines ${r.startLine}-${r.endLine} ${how}. Current text:\n${numbered}\n\nExact text to use:\n${r.text}\n\nRetry edit_file with this exact text; do not rewrite the file.`;
+	const MAX_LINES = 40;
+	const MAX_BYTES = 4096;
+	let shown = r.text.split("\n").slice(0, MAX_LINES);
+	let truncated = r.text.split("\n").length > MAX_LINES;
+	let body = shown.join("\n");
+	if (body.length > MAX_BYTES) {
+		body = body.slice(0, MAX_BYTES);
+		truncated = true;
+	}
+	if (truncated) body += "\n(truncated)";
+	const first = r.startLine;
+	const how =
+		r.kind === "whitespace"
+			? `Lines ${first}-${r.endLine} differ only in whitespace.`
+			: `Lines ${first}-${r.endLine} are the closest match; verify it is what you meant.`;
+	const retry =
+		r.kind === "whitespace"
+			? "Retry edit_file with this exact text; do not rewrite the file."
+			: "Verify it is what you meant, then retry edit_file with the exact text; do not rewrite the file.";
+	// Small windows: numbered view only (line numbers cited, never copied into oldText).
+	// The exact text follows once; large windows get a single copy.
+	if (!truncated && shown.length <= 12) {
+		const numbered = shown.map((l, i) => `${first + i}: ${l}`).join("\n");
+		return `${base}\n${how} Current text with line numbers:\n${numbered}\n\nExact text to use:\n${body}\n\n${retry}`;
+	}
+	return `${base}\n${how} Exact current text (starts at line ${first}):\n${body}\n\n${retry}`;
 }
