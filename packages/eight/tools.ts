@@ -1277,7 +1277,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_screenshot",
 					description:
-						"Take a screenshot of the current browser page. Returns the file path where the screenshot was saved.",
+						"Take a screenshot of an 8gent Browser tab opened with browser_open. Returns the file path where the screenshot was saved.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1287,7 +1287,7 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID (if using persistent sessions)",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
 					},
@@ -3468,6 +3468,7 @@ export class ToolExecutor {
 
 	private async handleBrowserScreenshot(filePath?: string, session?: string): Promise<string> {
 		try {
+			if (!useBrowserUse()) return await getEightBrowser().screenshot(filePath, session);
 			return browserScreenshot(filePath, session);
 		} catch (err) {
 			return `browser_screenshot failed: ${err}`;

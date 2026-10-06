@@ -14,7 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -62,31 +62,37 @@ export function validateBrowserAction(raw: unknown): Check<BrowserAction> {
 	return { ok: false, error: `unknown action kind: ${String(a.action)}` };
 }
 
-/** Default transport: one authenticated WebSocket round trip per command, as 8b-web does. */
-export const wsCall: BrowserCall = (cmd, args = {}) => {
-	const port = Number(process.env.EIGHT_BROWSER_CONTROL_PORT) || 7980;
-	return new Promise((resolve, reject) => {
-		let token: string;
-		try {
-			token = readFileSync(join(homedir(), ".8gent", "browser-control.token"), "utf8").trim();
-		} catch {
-			return reject(new Error("8gent Browser control token not found; is 8gent Browser installed and running?"));
-		}
-		const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-		const timer = setTimeout(() => (ws.close(), reject(new Error(`8gent Browser timed out on ${cmd}`))), 30_000);
-		const done = (fn: () => void) => (clearTimeout(timer), ws.close(), fn());
-		ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
-		ws.onerror = () => done(() => reject(new Error(`8gent Browser not reachable on 127.0.0.1:${port}`)));
-		ws.onmessage = (ev) => {
-			const m = JSON.parse(String(ev.data));
-			if (m.type === "auth_ok") return ws.send(JSON.stringify({ id: 1, cmd, args }));
-			if (m.type === "error") return done(() => reject(new Error(m.error)));
-			if (m.id === 1) done(() => (m.ok ? resolve(m.result) : reject(new Error(m.error))));
-		};
-	});
-};
+/** WebSocket transport: one authenticated round trip per command, as 8b-web does. */
+export function wsTransport(opts: { port?: number; tokenFile?: string } = {}): BrowserCall {
+	return (cmd, args = {}) => {
+		const port = opts.port ?? (Number(process.env.EIGHT_BROWSER_CONTROL_PORT) || 7980);
+		return new Promise((resolve, reject) => {
+			let token: string;
+			try {
+				token = readFileSync(opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"), "utf8").trim();
+			} catch {
+				return reject(new Error("8gent Browser control token not found; is 8gent Browser installed and running?"));
+			}
+			const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+			const timer = setTimeout(() => (ws.close(), reject(new Error(`8gent Browser timed out on ${cmd}`))), 30_000);
+			const done = (fn: () => void) => (clearTimeout(timer), ws.close(), fn());
+			ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
+			ws.onerror = () => done(() => reject(new Error(`8gent Browser not reachable on 127.0.0.1:${port}`)));
+			ws.onmessage = (ev) => {
+				const m = JSON.parse(String(ev.data));
+				if (m.type === "auth_ok") return ws.send(JSON.stringify({ id: 1, cmd, args }));
+				if (m.type === "error") return done(() => reject(new Error(m.error)));
+				if (m.id === 1) done(() => (m.ok ? resolve(m.result) : reject(new Error(m.error))));
+			};
+		});
+	};
+}
+export const wsCall: BrowserCall = wsTransport();
 
-type El = { index: number; tag: string; text: string };
+type Rect = { x: number; y: number; w: number; h: number };
+type El = { index: number; tag: string; text: string; checked?: boolean; hidden?: boolean };
+/** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
+const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 
 export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?: number } = {}) {
 	const settle = opts.settleMs ?? 400;
@@ -96,7 +102,14 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 
 	const elements = async (tabId: string): Promise<El[]> => {
 		const r = await call("page.query", { tabId });
-		return (r?.elements ?? []).map((e: El) => ({ index: e.index, tag: e.tag, text: e.text }));
+		// page.query has no checked flag; match :checked elements back by rect so a toggle click is observable.
+		const on = new Set(((await call("page.query", { tabId, selector: ":checked" }))?.elements ?? []).map((e: { rect?: Rect }) => JSON.stringify(e.rect)));
+		return (r?.elements ?? []).map((e: El & { rect?: Rect; visible?: boolean }) => {
+			const el: El = { index: e.index, tag: e.tag, text: e.text };
+			if (e.visible === false) el.hidden = true; // kept for stable indices, never rendered (hidden csrf values)
+			if (e.rect && on.has(JSON.stringify(e.rect))) el.checked = true;
+			return el;
+		});
 	};
 	const observe = async (tabId: string) => {
 		const snap = (await call("page.read", { tabId }))?.snapshot ?? {};
@@ -110,7 +123,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		return id;
 	};
 	const render = (tab: string, o: Awaited<ReturnType<typeof observe>>) =>
-		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.map((e) => `[${e.index}] ${e.tag} ${e.text}`.trim()), text: o.text.slice(0, 3_000) });
+		JSON.stringify({ tab, url: o.url, title: o.title, elements: o.els.filter((e) => !e.hidden).map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${e.text}`.trim()), text: o.text.slice(0, 3_000) });
 	const clickGuard = (els: El[], a: { index?: number }): string | null => {
 		if (a.index === undefined) return null;
 		const el = els[a.index];
@@ -171,7 +184,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 					const r = await call("page.type", { tabId: id, selector: a.selector, text: a.text });
 					if (r?.ok === false) row.error = r.error;
 					const got = (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]?.text;
-					row.verified = got === a.text;
+					row.verified = got === clipped(a.text);
 					if (row.verified) break;
 				}
 				row.ok = row.verified;
@@ -205,5 +218,18 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		return JSON.stringify({ ok: true, steps, page: JSON.parse(render(id, before)) });
 	}
 
-	return { open, state, run };
+	/** Screenshot an owned tab to `path` (default: 8gent Browser's own ~/.8gent/browser-shots file). */
+	async function screenshot(path?: string, tabId?: string): Promise<string> {
+		try {
+			const r = await call("page.screenshot", { tabId: own(tabId) });
+			if (r?.ok === false) return `browser_screenshot failed: ${r.error}`;
+			if (!path) return String(r?.savedTo ?? "browser_screenshot failed: 8gent Browser saved no file");
+			writeFileSync(path, Buffer.from(String(r?.dataUrl ?? "").replace(/^data:image\/\w+;base64,/, ""), "base64"));
+			return path;
+		} catch (e) {
+			return `browser_screenshot failed: ${(e as Error).message}`;
+		}
+	}
+
+	return { open, state, run, screenshot };
 }

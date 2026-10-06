@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { type BrowserCall, createEightBrowser, validateBrowserAction } from "../eight-browser";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type BrowserCall, createEightBrowser, validateBrowserAction, wsTransport } from "../eight-browser";
 
 // A fake 8gent Browser control channel that behaves like the pilot fixture:
 // a login form, then a settings page with a checkbox and a Save button.
@@ -12,15 +15,19 @@ function fakeSite(opts: { dropTyping?: boolean } = {}) {
 	const els = () =>
 		page === "login"
 			? [
-					{ index: 0, tag: "input", text: values["input[name=username]"] ?? "" },
-					{ index: 1, tag: "input", text: values["input[type=password]"] ?? "" },
-					{ index: 2, tag: "button", text: "Sign in" },
+					{ index: 0, tag: "input", text: clip(values["input[name=username]"]), rect: { x: 0, y: 0, w: 9, h: 9 } },
+					{ index: 1, tag: "input", text: clip(values["input[type=password]"]), rect: { x: 0, y: 10, w: 9, h: 9 } },
+					{ index: 2, tag: "button", text: "Sign in", rect: { x: 0, y: 20, w: 9, h: 9 } },
 				]
 			: [
-					{ index: 0, tag: "input", text: "on" },
-					{ index: 1, tag: "button", text: "Save" },
-					{ index: 2, tag: "button", text: "Delete account" },
+					{ index: 0, tag: "input", text: "on", rect: { x: 0, y: 0, w: 9, h: 9 } },
+					{ index: 1, tag: "button", text: "Save", rect: { x: 0, y: 10, w: 9, h: 9 } },
+					{ index: 2, tag: "button", text: "Delete account", rect: { x: 0, y: 20, w: 9, h: 9 } },
 				];
+	// page.query clips text the way 8gent Browser does: collapsed whitespace, 120 chars.
+	function clip(v?: string) {
+		return (v ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+	}
 	const call: BrowserCall = async (cmd, args = {}) => {
 		calls.push({ cmd, args });
 		switch (cmd) {
@@ -39,8 +46,12 @@ function fakeSite(opts: { dropTyping?: boolean } = {}) {
 				};
 			case "page.query": {
 				const all = els();
+				if (args.selector === ":checked") {
+					const c = page === "settings" && checked ? [all[0]] : [];
+					return { ok: true, elements: c, count: c.length };
+				}
 				if (typeof args.selector === "string") {
-					return { ok: true, elements: all.filter((e) => e.tag === "input").slice(0, 1).map(() => ({ tag: "input", text: values[args.selector as string] ?? "" })), count: 1 };
+					return { ok: true, elements: [{ index: 0, tag: "input", text: clip(values[args.selector as string]) }], count: 1 };
 				}
 				return { ok: true, elements: all, count: all.length };
 			}
@@ -55,6 +66,8 @@ function fakeSite(opts: { dropTyping?: boolean } = {}) {
 				else if (page === "settings" && el.text === "Save") saved = checked ? "on" : "off";
 				return { ok: true, clicked: true };
 			}
+			case "page.screenshot":
+				return { ok: true, dataUrl: `data:image/png;base64,${Buffer.from("PNGBYTES").toString("base64")}`, savedTo: null };
 			case "page.waitFor":
 				return { ok: true, found: true, waitedMs: 1 };
 			default:
@@ -90,7 +103,8 @@ describe("8gent Browser driver", () => {
 		]);
 		const res = JSON.parse(out);
 		expect(res.ok).toBe(true);
-		expect(res.steps.map((s: { verified: boolean }) => s.verified)).toEqual([true, true, true, false, true]);
+		// The checkbox click verifies through its checked state, not page text.
+		expect(res.steps.map((s: { verified: boolean }) => s.verified)).toEqual([true, true, true, true, true]);
 		expect(site.state().saved).toBe("on");
 		// Typed text never echoes back to the model or the log: length only.
 		expect(out).not.toContain("s3cret-pass");
@@ -131,5 +145,78 @@ describe("8gent Browser driver", () => {
 	test("only drives tabs it opened", async () => {
 		const b = createEightBrowser(fakeSite().call, { settleMs: 0 });
 		expect(await b.state("someone-elses-tab")).toMatch(/not opened by 8gent/);
+	});
+
+	test("a type verifies against 8gent Browser's clipped text, not the raw string", async () => {
+		const site = fakeSite();
+		const b = createEightBrowser(site.call, { settleMs: 0 });
+		await b.open("http://127.0.0.1:5/");
+		const long = `  two  spaces ${"x".repeat(200)}`;
+		const res = JSON.parse(await b.run([{ action: "type", selector: "input[name=username]", text: long }]));
+		expect(res.steps[0]).toMatchObject({ verified: true, attempts: 1 });
+	});
+
+	test("screenshot writes the tab's PNG to the requested path", async () => {
+		const b = createEightBrowser(fakeSite().call, { settleMs: 0 });
+		await b.open("http://127.0.0.1:5/");
+		const out = join(mkdtempSync(join(tmpdir(), "8b-shot-")), "s.png");
+		expect(await b.screenshot(out)).toBe(out);
+		expect(readFileSync(out, "utf8")).toBe("PNGBYTES");
+		expect(await b.screenshot(out, "not-mine")).toMatch(/not opened by 8gent/);
+	});
+});
+
+describe("state rendering", () => {
+	test("hides invisible elements (a hidden csrf value never reaches the model) and keeps indices stable", async () => {
+		const call: BrowserCall = async (cmd, args = {}) => {
+			if (cmd === "tab.open") return { id: "t9" };
+			if (cmd === "page.waitFor") return { ok: true, found: true };
+			if (cmd === "page.read") return { snapshot: { url: "http://127.0.0.1:5/", title: "x", text: "" } };
+			if (cmd === "page.query" && args.selector === ":checked") return { ok: true, elements: [] };
+			return {
+				ok: true,
+				elements: [
+					{ index: 0, tag: "input", text: "", visible: true },
+					{ index: 1, tag: "input", text: "csrf-secret-value", visible: false },
+					{ index: 2, tag: "button", text: "Sign in", visible: true },
+				],
+			};
+		};
+		const out = await createEightBrowser(call, { settleMs: 0 }).open("http://127.0.0.1:5/");
+		expect(out).not.toContain("csrf-secret-value");
+		expect(JSON.parse(out).elements).toEqual(["[0] input", "[2] button Sign in"]);
+	});
+});
+
+describe("wsTransport (real WebSocket round trip)", () => {
+	test("authenticates with the token file, then sends the command and returns its result", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "8b-ws-"));
+		writeFileSync(join(dir, "token"), "tok-123\n");
+		const seen: unknown[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: (req, srv) => (srv.upgrade(req) ? undefined : new Response("no", { status: 400 })),
+			websocket: {
+				message(ws, raw) {
+					const m = JSON.parse(String(raw));
+					seen.push(m);
+					let reply: unknown = { id: m.id, ok: true, result: { echoed: m.cmd, args: m.args } };
+					if (m.type === "auth") reply = m.token === "tok-123" ? { type: "auth_ok" } : { type: "error", error: "bad token" };
+					else if (m.cmd === "boom") reply = { id: m.id, ok: false, error: "nope" };
+					ws.send(JSON.stringify(reply));
+				},
+			},
+		});
+		try {
+			const call = wsTransport({ port: server.port, tokenFile: join(dir, "token") });
+			expect(await call("tabs.list", { a: 1 })).toEqual({ echoed: "tabs.list", args: { a: 1 } });
+			await expect(call("boom")).rejects.toThrow("nope");
+			expect(seen[0]).toEqual({ type: "auth", token: "tok-123" });
+			const bad = wsTransport({ port: server.port, tokenFile: join(dir, "missing") });
+			await expect(bad("tabs.list")).rejects.toThrow(/token not found/);
+		} finally {
+			server.stop(true);
+		}
 	});
 });
