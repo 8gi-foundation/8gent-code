@@ -81,10 +81,10 @@ describe("speak is wired into the local agent", () => {
 		symlinkSync(join(root, "outside"), join(work, "linkdir"));
 		const ex = new ToolExecutor(work);
 		const r = await ex.execute("speak", { text: "hi", out: "linkdir/viadir.wav" });
-		expect(r).toMatch(/traversal|blocked/i);
+		expect(r).toMatch(/traversal|blocked|escapes workspace via symlink/i);
 		expect(existsSync(join(root, "outside", "viadir.wav"))).toBe(false);
 		const deep = await ex.execute("speak", { text: "hi", out: "linkdir/new/deeper.wav" });
-		expect(deep).toMatch(/traversal|blocked/i);
+		expect(deep).toMatch(/traversal|blocked|escapes workspace via symlink/i);
 		expect(existsSync(join(root, "outside", "new"))).toBe(false);
 	});
 
