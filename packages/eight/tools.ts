@@ -202,7 +202,85 @@ export function safePath(userPath: string, workingDirectory: string): string {
 		);
 	}
 
-	return normalizedTarget;
+	return assertNoSymlinkEscape(normalizedTarget, normalizedBase, userPath);
+}
+
+/**
+ * Lexical containment is not enough: a symlinked directory inside the workspace
+ * lets a path that looks inside resolve outside (#3607). Resolve the nearest
+ * existing ancestor of the target and require it inside the real workspace.
+ * A symlink at the final component is followed to its fully resolved target,
+ * which is returned (so a write lands on the target, e.g. CLAUDE.md -> AGENTS.md)
+ * only when that target is inside the real workspace. Returns the path to use.
+ */
+function assertNoSymlinkEscape(target: string, base: string, userPath: string): string {
+	const escape = (real?: string) =>
+		new Error(
+			`Path escapes workspace via symlink: "${userPath}"${real ? ` resolves to ${real}` : ""}, outside ${base}. ` +
+				"Files can only be read or written inside the workspace.",
+		);
+	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
+
+	let realBase: string;
+	try {
+		realBase = fs.realpathSync(base);
+	} catch {
+		return target; // workspace itself does not exist yet; nothing to escape through
+	}
+
+	let finalStat: fs.Stats | undefined;
+	try {
+		finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+		}
+		throw err;
+	}
+	if (finalStat?.isSymbolicLink()) {
+		let real: string;
+		try {
+			real = fs.realpathSync(target);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === "ELOOP") {
+				throw new Error(`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`);
+			}
+			// Dangling: say where it points. Inside the workspace the agent can write that path directly.
+			let dest = "";
+			try {
+				dest = path.resolve(fs.realpathSync(path.dirname(target)), fs.readlinkSync(target));
+			} catch {}
+			if (dest && inside(dest, realBase)) {
+				throw new Error(
+					`Refused: "${userPath}" is a dangling symlink to ${dest} (inside the workspace, not an escape). ` +
+						"Create or write that real path directly.",
+				);
+			}
+			throw escape(dest || undefined);
+		}
+		if (!inside(real, realBase)) throw escape(real);
+		return real;
+	}
+
+	// Walk up to the nearest ancestor that exists (lstat, so a dangling link counts as existing).
+	let ancestor = target;
+	let realAncestor: string;
+	try {
+		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+			const parent = path.dirname(ancestor);
+			if (parent === ancestor) return target;
+			ancestor = parent;
+		}
+		realAncestor = fs.realpathSync(ancestor);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+		}
+		throw escape();
+	}
+	if (!inside(realAncestor, realBase)) throw escape(realAncestor);
+	return target;
 }
 
 /**
