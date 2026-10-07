@@ -141,6 +141,13 @@ describe("the agent is told to report plan progress", () => {
 		expect(PLANNING_GATE_INSTRUCTION).toContain("before your final answer");
 	});
 
+	test("a direct question is excused from planning, at depth 0 and in the sub-agent cut (#3640)", () => {
+		const excuse = "If the request is a question you can answer directly, answer it in the format it asks for, with no plan.";
+		expect(PLANNING_GATE_INSTRUCTION).toStartWith(`[PLANNING] ${excuse}`);
+		expect(planningGateInstruction(1)).toContain(excuse);
+		expect(planningGateInstruction(1)).not.toContain("update_plan");
+	});
+
 	test("every status the gate names is one update_plan accepts", () => {
 		for (const status of PLAN_STATUSES) expect(PLANNING_GATE_INSTRUCTION).toContain(status);
 		const plan = PLAN_STATUSES.map((status, i) => ({ step: `Step ${i + 1}`, status }));

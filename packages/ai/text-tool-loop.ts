@@ -48,10 +48,19 @@
  * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
  * A false completion claim is never passed through silently.
  *
+ * When the model answers a completion check with a "DONE:" summary and ran
+ * no tool between the two, the reply the check was sent after is the answer:
+ * the turn returns that reply first, then the summary (#3638). The check
+ * itself still goes out; only what is returned changes.
+ *
  * A final answer that leaves steps of the turn's plan open (pending or in
  * progress in the last update_plan call) gets ONE plan check per turn
  * (planCheckMessage, #3098): report each step's real status or do it, then
  * summarise. The harness never marks a step done on the agent's behalf.
+ * An update_plan call is bookkeeping, not work: a round that ran only
+ * update_plan does not arm the completion check, so the prose after it is
+ * the answer (SIGI G3 baseline, 7 Oct: the check turned one-line answers
+ * into "DONE:" recaps on 13 of 24 harness runs).
  *
  * One reply can ask for many calls (qwen3.8 27B asked for 144 read_file calls
  * in pilot run 2026-09-30_010512). The loop runs at most MAX_CALLS_PER_ROUND of
@@ -433,6 +442,12 @@ export function emptyReplyNote(toolCalls: number): string {
 }
 
 /**
+ * The plan bookkeeping tool (packages/eight/tools.ts, update_plan). Its calls
+ * tick the TUI PLAN column; they are never progress on the task itself.
+ */
+export const PLAN_TOOL_NAME = "update_plan";
+
+/**
  * The plan steps still open when the turn ends (#3098): pending or in
  * progress in the turn's last successful update_plan call. Failed steps are
  * an honest report, so they are not open. No update_plan call, or none that
@@ -441,7 +456,7 @@ export function emptyReplyNote(toolCalls: number): string {
 export function openPlanSteps(toolLog: ReadonlyArray<TextToolLogEntry>): PlanItem[] {
 	for (let i = toolLog.length - 1; i >= 0; i--) {
 		const entry = toolLog[i];
-		if (entry.name !== "update_plan" || isRefusedToolResult(entry.result)) continue;
+		if (entry.name !== PLAN_TOOL_NAME || isRefusedToolResult(entry.result)) continue;
 		const parsed = parsePlan(entry.args.plan);
 		if (!parsed.ok) continue;
 		return parsed.items.filter((s) => s.status === "pending" || s.status === "in_progress");
@@ -529,15 +544,22 @@ export async function runTextToolAgent(
 	// Was the last message we sent a completion check the model has not yet
 	// answered with a tool call? Then prose without DONE_MARKER is not final.
 	let awaitingCheckAnswer = false;
-	// The reply the check was sent after: the summary to fall back on when the
-	// model answers the check with a bare marker ("DONE:") and nothing else.
+	// The reply the check was sent after, marker stripped. When the model
+	// answers the check with "DONE:" and no tool work in between, that reply
+	// was its answer, so it comes first and the summary follows (#3638: the
+	// check used to replace a one-line answer with a recap of what the model
+	// did). Cleared by any round that runs real work: then the reply before the
+	// check was an announcement, and the summary stands alone.
 	let preCheckContent = "";
 	const finalContent = (content: string): string => {
 		const stripped = stripDoneMarker(content);
-		if (stripped.trim() === "" && content.trim() !== "" && preCheckContent.trim() !== "") {
-			return preCheckContent;
-		}
-		return stripped;
+		if (!hasDoneMarker(content) || preCheckContent.trim() === "") return stripped;
+		const answer = preCheckContent.trim();
+		const summary = stripped.trim();
+		// A summary that is empty or repeats the answer adds nothing.
+		if (summary === "" || summary === answer) return answer;
+		if (summary.startsWith(answer)) return summary;
+		return `${answer}\n\n${summary}`;
 	};
 	// The claim check's follow-up fires at most once per turn.
 	let claimFollowUpSent = false;
@@ -673,7 +695,7 @@ export async function runTextToolAgent(
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
-				if (freshStall && replyText.trim() !== "") preCheckContent = replyText;
+				if (freshStall && replyText.trim() !== "") preCheckContent = stripDoneMarker(replyText);
 				prevRoundHadSuccess = false;
 				prevRoundAllRefused = false;
 				messages = [
@@ -758,7 +780,14 @@ export async function runTextToolAgent(
 		const resultParts: string[] = [];
 		prevRoundHadSuccess = false;
 		prevRoundBlockReasons = [];
-		let ranAny = false;
+		// Did this round run a tool other than update_plan? A round of plan
+		// bookkeeping alone is not work (SIGI G3 baseline, 7 Oct): the planning
+		// gate made the model call update_plan, then its one-line answer was
+		// checked as a stall and replaced by a "DONE:" recap of what it did. So
+		// an update_plan-only round neither arms the completion check nor resets
+		// its cap, and the prose after it is final. The plan check (#3098) still
+		// reads every update_plan call from the log.
+		let ranWork = false;
 		// The model resumed tools: a later stall is a fresh one (re-armed).
 		awaitingCheckAnswer = false;
 		const calls = turn.toolCalls;
@@ -785,15 +814,18 @@ export async function runTextToolAgent(
 			}
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
-			ranAny = true;
+			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
+			if (!isPlanUpdate) ranWork = true;
 			// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
 			// progress, exactly like an "Error..." result.
 			if (!isRefusedToolResult(result)) {
-				prevRoundHadSuccess = true;
-				// Real tool work: the next stall starts a fresh run of checks.
-				checksWithoutProgress = 0;
-				blockReasonsSinceProgress = [];
-				stoppedOnBlocks = false;
+				if (!isPlanUpdate) {
+					prevRoundHadSuccess = true;
+					// Real tool work: the next stall starts a fresh run of checks.
+					checksWithoutProgress = 0;
+					blockReasonsSinceProgress = [];
+					stoppedOnBlocks = false;
+				}
 			} else {
 				const reason = blockReason(result);
 				if (reason !== null) {
@@ -811,7 +843,8 @@ export async function runTextToolAgent(
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 
-		prevRoundAllRefused = ranAny && !prevRoundHadSuccess;
+		prevRoundAllRefused = ranWork && !prevRoundHadSuccess;
+		if (ranWork) preCheckContent = "";
 		if (prevRoundHadSuccess) prevRoundBlockReasons = [];
 
 		if (abortedAt >= 0) {
