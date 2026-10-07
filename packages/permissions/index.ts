@@ -24,12 +24,34 @@ export interface ChannelApprovalRequest {
 	details: string;
 	command: string;
 }
-export type ChannelApprover = (req: ChannelApprovalRequest) => Promise<boolean>;
-const _channelApprover = new AsyncLocalStorage<ChannelApprover>();
+/** How a channel approval ended. Only "approved" lets the command run. */
+export type ChannelOutcome = "approved" | "denied" | "expired" | "replaced" | "undelivered";
+export type ChannelApprover = (req: ChannelApprovalRequest) => Promise<ChannelOutcome>;
+interface ChannelScope {
+	approver: ChannelApprover;
+	/** The last outcome in this turn, so the refusal can say what actually happened. */
+	last?: ChannelOutcome;
+}
+const _channelApprover = new AsyncLocalStorage<ChannelScope>();
+
+const NOT_RUN: Partial<Record<ChannelOutcome, string>> = {
+	expired: "Approval expired: nobody answered in time. Nothing ran",
+	replaced: "Approval replaced by a newer request before anyone answered. Nothing ran",
+	undelivered: "The approval card could not be shown to the person. Nothing ran",
+};
+
+/**
+ * The refusal to hand the model after a channel approval came back false, or
+ * null when the person actually declined (or no channel asked).
+ */
+export function channelDenialMessage(command: string): string | null {
+	const why = _channelApprover.getStore()?.last;
+	return why && NOT_RUN[why] ? `[PERMISSION DENIED] ${NOT_RUN[why]}: ${command}` : null;
+}
 
 /** Run fn so a dangerous shell command inside it asks `approver` instead of being denied. */
 export function runWithChannelApprover<T>(approver: ChannelApprover, fn: () => T): T {
-	return _channelApprover.run(approver, fn);
+	return _channelApprover.run({ approver }, fn);
 }
 
 // ============================================
@@ -858,6 +880,9 @@ export class PermissionManager {
 		command?: string,
 		opts: { defaultNo?: boolean } = {},
 	): Promise<boolean> {
+		// A refusal must never quote an earlier call's channel outcome.
+		const channel = _channelApprover.getStore();
+		if (channel) channel.last = undefined;
 		const request: PermissionRequest = {
 			id: `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
 			action,
@@ -972,8 +997,11 @@ export class PermissionManager {
 			}
 			if (command && this.isDangerous(command)) {
 				// A channel with a human behind it asks; push to main never gets this far.
-				const approver = _channelApprover.getStore();
-				if (approver) return approver({ action, details, command });
+				const scope = _channelApprover.getStore();
+				if (scope) {
+					scope.last = await scope.approver({ action, details, command });
+					return scope.last === "approved";
+				}
 				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
 				return false;
 			}

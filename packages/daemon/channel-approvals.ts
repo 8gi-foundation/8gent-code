@@ -18,7 +18,11 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { type ChannelApprovalRequest, runWithChannelApprover } from "../permissions/index";
+import {
+	type ChannelApprovalRequest,
+	type ChannelOutcome,
+	runWithChannelApprover,
+} from "../permissions/index";
 import { bus } from "./events";
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
@@ -29,35 +33,42 @@ export function approvalTtlMs(): number {
 	return Number.isFinite(n) && n > 0 ? n : DEFAULT_TTL_MS;
 }
 
-export type ApprovalDecision = "approve" | "deny" | "allow_chat";
+export type ApprovalDecision = "approve" | "deny" | "allow_chat" | "undelivered";
 export type RespondResult = { ok: true } | { ok: false; reason: "not-live" | "wrong-session" };
 
 interface Pending {
 	sessionId: string;
 	key: string;
-	resolve: (approved: boolean) => void;
+	resolve: (outcome: ChannelOutcome) => void;
 	timer: ReturnType<typeof setTimeout>;
 }
+
+const OUTCOME: Record<ApprovalDecision, ChannelOutcome> = {
+	approve: "approved",
+	allow_chat: "approved",
+	deny: "denied",
+	undelivered: "undelivered",
+};
 
 export class ChannelApprovals {
 	private pending = new Map<string, Pending>();
 	private liveBySession = new Map<string, string>();
 	private chatAllowed = new Map<string, Set<string>>();
 
-	/** Ask the session's surface. Resolves true only on a live, in-time approve. */
+	/** Ask the session's surface. Only a live, in-time approve resolves "approved". */
 	request(
 		sessionId: string,
 		tool: string,
 		input: Record<string, unknown>,
 		key: string,
-	): Promise<boolean> {
-		if (this.chatAllowed.get(sessionId)?.has(key)) return Promise.resolve(true);
+	): Promise<ChannelOutcome> {
+		if (this.chatAllowed.get(sessionId)?.has(key)) return Promise.resolve("approved");
 		const previous = this.liveBySession.get(sessionId);
-		if (previous) this.settle(previous, false);
+		if (previous) this.settle(previous, "replaced");
 
 		const requestId = randomBytes(4).toString("hex");
-		return new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => this.settle(requestId, false), approvalTtlMs());
+		return new Promise<ChannelOutcome>((resolve) => {
+			const timer = setTimeout(() => this.settle(requestId, "expired"), approvalTtlMs());
 			this.pending.set(requestId, { sessionId, key, resolve, timer });
 			this.liveBySession.set(sessionId, requestId);
 			bus.emit("approval:required", { sessionId, tool, input, requestId });
@@ -74,24 +85,28 @@ export class ChannelApprovals {
 			set.add(p.key);
 			this.chatAllowed.set(p.sessionId, set);
 		}
-		this.settle(requestId, decision !== "deny");
+		this.settle(requestId, OUTCOME[decision]);
 		return { ok: true };
 	}
 
-	/** Session gone: deny its live prompt and forget its chat allowances. */
+	/** Session gone: close its live prompt and forget its chat allowances. */
 	endSession(sessionId: string): void {
 		const live = this.liveBySession.get(sessionId);
-		if (live) this.settle(live, false);
+		if (live) this.settle(live, "expired");
 		this.chatAllowed.delete(sessionId);
 	}
 
-	private settle(requestId: string, approved: boolean): void {
+	private settle(requestId: string, outcome: ChannelOutcome): void {
 		const p = this.pending.get(requestId);
 		if (!p) return;
 		clearTimeout(p.timer);
 		this.pending.delete(requestId);
 		if (this.liveBySession.get(p.sessionId) === requestId) this.liveBySession.delete(p.sessionId);
-		p.resolve(approved);
+		// Closed without an answer: tell the surface so the card stops offering buttons.
+		if (outcome === "expired" || outcome === "replaced") {
+			bus.emit("approval:closed", { sessionId: p.sessionId, requestId, outcome });
+		}
+		p.resolve(outcome);
 	}
 }
 

@@ -98,7 +98,14 @@ type InboundMessage =
 	| { type: "cron:add"; job: unknown }
 	| { type: "cron:remove"; jobId: string }
 	| { type: "health" }
-	| { type: "approval:response"; requestId: string; approved: boolean; scope?: "chat" }
+	| {
+			type: "approval:response";
+			requestId: string;
+			approved: boolean;
+			scope?: "chat";
+			/** The surface could not show the card: closes it as undelivered, not declined. */
+			undelivered?: boolean;
+	  }
 	| { type: "ping" }
 	| TimeTravelInbound;
 
@@ -411,7 +418,13 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		case "approval:response": {
 			// Resolve the waiting prompt. This used to re-emit approval:required,
 			// so every press drew a second card and resolved nothing (#3621).
-			const decision = !msg.approved ? "deny" : msg.scope === "chat" ? "allow_chat" : "approve";
+			const decision = msg.undelivered
+				? "undelivered"
+				: !msg.approved
+					? "deny"
+					: msg.scope === "chat"
+						? "allow_chat"
+						: "approve";
 			const result = channelApprovals.respond(state.sessionId, String(msg.requestId), decision);
 			send(ws, { type: "approval:resolved", requestId: String(msg.requestId), ...result });
 			break;
@@ -445,6 +458,7 @@ function subscribeToBus(): void {
 		"agent:error",
 		"memory:saved",
 		"approval:required",
+		"approval:closed",
 		"session:start",
 		"session:end",
 	];

@@ -90,7 +90,12 @@ import {
 } from "../lsp";
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
-import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
+import {
+	type PermissionManager,
+	channelDenialMessage,
+	getPermissionManager,
+	isCommandDangerous,
+} from "../permissions";
 import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
@@ -2589,7 +2594,9 @@ export class ToolExecutor {
 			);
 
 			if (!allowed) {
-				return `[PERMISSION DENIED] User declined to execute: ${command}`;
+				return (
+					channelDenialMessage(command) ?? `[PERMISSION DENIED] User declined to execute: ${command}`
+				);
 			}
 		}
 

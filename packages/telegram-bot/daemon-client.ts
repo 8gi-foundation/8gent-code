@@ -18,6 +18,8 @@ export type DaemonEventName =
 	| "agent:error"
 	| "memory:saved"
 	| "approval:required"
+	| "approval:closed"
+	| "approval:resolved"
 	| "session:start"
 	| "session:end";
 
@@ -57,6 +59,9 @@ export interface EventPayloads {
 	"agent:error": { sessionId: string; error: string };
 	"memory:saved": { sessionId: string; key: string };
 	"approval:required": { sessionId: string; tool: string; input: unknown; requestId: string };
+	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
+	/** The daemon's verdict on an answer this socket sent (not a bus event). */
+	"approval:resolved": { requestId: string; ok: boolean; reason?: string };
 	"session:start": { sessionId: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
 }
@@ -170,6 +175,9 @@ export class DaemonClient {
 				this.dispatch(event, payload);
 				break;
 			}
+			case "approval:resolved":
+				this.dispatch("approval:resolved", msg as unknown as EventPayloads["approval:resolved"]);
+				break;
 			case "pong":
 				break;
 		}
@@ -190,8 +198,12 @@ export class DaemonClient {
 	}
 
 	/** Send an approval response back to the daemon. */
-	respondApproval(requestId: string, approved: boolean, scope?: "chat"): void {
-		this.send({ type: "approval:response", requestId, approved, ...(scope ? { scope } : {}) });
+	respondApproval(
+		requestId: string,
+		approved: boolean,
+		opts: { scope?: "chat"; undelivered?: boolean } = {},
+	): void {
+		this.send({ type: "approval:response", requestId, approved, ...opts });
 	}
 
 	/** Subscribe to a daemon event. Returns an unsubscribe function. */

@@ -9,7 +9,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { PermissionManager } from "../permissions/index";
+import { PermissionManager, channelDenialMessage } from "../permissions/index";
 import { DaemonClient } from "../telegram-bot/daemon-client";
 import type { AgentPool } from "./agent-pool";
 import { withChannelApprovals } from "./channel-approvals";
@@ -23,7 +23,7 @@ const GROUP = -1001;
 /** One turn = one dangerous shell command through the real gate. */
 class GatedPool {
 	live = new Map<string, string>();
-	outcomes: Array<{ command: string; allowed: boolean }> = [];
+	outcomes: Array<{ command: string; allowed: boolean; note: string | null }> = [];
 	size = 0;
 	pm = new PermissionManager("/nonexistent/8gent-permissions.json");
 	createSession(id: string, channel: string) {
@@ -42,14 +42,16 @@ class GatedPool {
 		return {};
 	}
 	async chat(sessionId: string, command: string): Promise<string> {
-		const allowed = await withChannelApprovals(sessionId, () =>
-			this.pm.requestPermission(
+		// The same two calls runCommand makes: the gate, then the refusal text.
+		const { allowed, note } = await withChannelApprovals(sessionId, async () => {
+			const ok = await this.pm.requestPermission(
 				"Execute Shell Command",
 				"This command may cause data loss.",
 				command,
-			),
-		);
-		this.outcomes.push({ command, allowed });
+			);
+			return { allowed: ok, note: ok ? null : channelDenialMessage(command) };
+		});
+		this.outcomes.push({ command, allowed, note });
 		return allowed ? "ran" : "declined";
 	}
 }
@@ -62,7 +64,26 @@ interface TgCall {
 	method: string;
 	// biome-ignore lint/suspicious/noExplicitAny: recorded Telegram API bodies.
 	body: Record<string, any>;
+	accepted: boolean;
 }
+
+/**
+ * Refuse text the way Telegram does: legacy Markdown with an unclosed `_`, `*`
+ * or backtick, and HTML with a bare `<` or `&` that is not a supported tag or entity.
+ */
+function telegramRejects(body: Record<string, unknown>): boolean {
+	const text = String(body.text ?? "");
+	if (body.parse_mode === "Markdown") {
+		return ["_", "*", "`"].some((m) => text.split(m).length % 2 === 0);
+	}
+	if (body.parse_mode === "HTML") {
+		const stripped = text.replace(/<\/?(b|i|code|pre)>/g, "");
+		return /</.test(stripped) || /&(?!(amp|lt|gt|quot);)/.test(stripped);
+	}
+	return false;
+}
+/** Test knobs: refuse every HTML card, or every card. */
+const stub = { rejectHtml: false, rejectCards: false };
 
 const pool = new GatedPool();
 let server: ReturnType<typeof Bun.serve>;
@@ -87,7 +108,10 @@ const settle = () => new Promise((r) => setTimeout(r, 80));
 
 // biome-ignore lint/suspicious/noExplicitAny: private bridge surface under test.
 const priv = () => bridge as any;
-const cards = () => tg.filter((c) => c.method === "sendMessage" && c.body.reply_markup);
+const cards = () =>
+	tg.filter((c) => c.method === "sendMessage" && c.body.reply_markup && c.accepted);
+const edits = () =>
+	tg.filter((c) => c.method === "editMessageText" && c.accepted).map((c) => String(c.body.text));
 const texts = () => tg.filter((c) => c.method === "sendMessage").map((c) => String(c.body.text));
 const button = (card: TgCall, label: string): string =>
 	card.body.reply_markup.inline_keyboard.flat().find((b: TgButton) => b.text === label)
@@ -110,7 +134,21 @@ beforeAll(async () => {
 	process.env.EIGHT_HEADLESS = "1";
 	globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
 		const method = String(url).split("/").pop() as string;
-		tg.push({ method, body: init?.body ? JSON.parse(init.body) : {} });
+		const body = init?.body ? JSON.parse(init.body) : {};
+		const refused =
+			telegramRejects(body) ||
+			(body.reply_markup && (stub.rejectCards || (stub.rejectHtml && body.parse_mode === "HTML")));
+		tg.push({ method, body, accepted: !refused });
+		if (refused) {
+			return new Response(
+				JSON.stringify({
+					ok: false,
+					error_code: 400,
+					description: "Bad Request: can't parse entities",
+				}),
+				{ status: 400, headers: { "Content-Type": "application/json" } },
+			);
+		}
 		return new Response(JSON.stringify({ ok: true, result: { message_id: nextMessageId++ } }), {
 			headers: { "Content-Type": "application/json" },
 		});
@@ -147,6 +185,8 @@ afterAll(() => {
 beforeEach(() => {
 	tg = [];
 	pool.outcomes = [];
+	stub.rejectHtml = false;
+	stub.rejectCards = false;
 	pool.pm = new PermissionManager("/nonexistent/8gent-permissions.json");
 	delete process.env.EIGHT_APPROVAL_TTL_MS;
 });
@@ -163,7 +203,7 @@ describe("Telegram approval loop (#3621)", () => {
 
 		await press(JAMES, button(cards()[0], "Approve"));
 		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toEqual({ command: "rm -rf ./build-a", allowed: true });
+		expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-a", allowed: true });
 		await settle();
 		expect(cards().length).toBe(1); // the press drew no second card
 	});
@@ -202,32 +242,32 @@ describe("Telegram approval loop (#3621)", () => {
 		prompt("rm -rf ./build-d2");
 		await until(() => cards().length === 2);
 		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toEqual({ command: "rm -rf ./build-d1", allowed: false });
+		expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-d1", allowed: false });
 
 		await press(JAMES, button(cards()[0], "Approve"));
 		await settle();
 		expect(pool.outcomes.length).toBe(1);
 		await press(JAMES, button(cards()[1], "Approve"));
 		await until(() => pool.outcomes.length === 2);
-		expect(pool.outcomes[1]).toEqual({ command: "rm -rf ./build-d2", allowed: true });
+		expect(pool.outcomes[1]).toMatchObject({ command: "rm -rf ./build-d2", allowed: true });
 	});
 
 	it("Allow in this chat skips the next identical prompt, not a different one", async () => {
 		prompt("rm -rf ./build-e");
 		await until(() => cards().length === 1);
-		await press(JAMES, button(cards()[0], "Allow in this chat"));
+		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
 		await until(() => pool.outcomes.length === 1);
 
 		prompt("rm -rf ./build-e");
 		await until(() => pool.outcomes.length === 2);
-		expect(pool.outcomes[1]).toEqual({ command: "rm -rf ./build-e", allowed: true });
+		expect(pool.outcomes[1]).toMatchObject({ command: "rm -rf ./build-e", allowed: true });
 		expect(cards().length).toBe(1);
 
 		prompt("rm -rf ./build-other");
 		await until(() => cards().length === 2);
 		await press(JAMES, button(cards()[1], "Deny"));
 		await until(() => pool.outcomes.length === 3);
-		expect(pool.outcomes[2]).toEqual({ command: "rm -rf ./build-other", allowed: false });
+		expect(pool.outcomes[2]).toMatchObject({ command: "rm -rf ./build-other", allowed: false });
 	});
 
 	it("Artale's press is refused; only the operator resolves the card", async () => {
@@ -260,7 +300,96 @@ describe("Telegram approval loop (#3621)", () => {
 			await until(() => cards().length === 1);
 			await press(JAMES, button(cards()[0], "Approve"));
 			await until(() => pool.outcomes.length === 1);
-			expect(pool.outcomes[0]).toEqual({ command: "rm -rf ./build-g", allowed: true });
+			expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-g", allowed: true });
+		} finally {
+			priv().daemonClient = null;
+			client.close();
+		}
+	});
+
+	it("a command full of _ * ` < > & still renders as a card, whole, with Command and Why lines", async () => {
+		const command = "rm -rf node_modules/*_tmp && rm -f *.log && echo `id` <in >out & echo a_b";
+		prompt(command);
+		await until(() => cards().length === 1);
+		const text = String(cards()[0].body.text);
+		expect(text).toContain(
+			"Command: <code>rm -rf node_modules/*_tmp && rm -f *.log".replace(/&/g, "&amp;"),
+		);
+		expect(text).toContain("&lt;in &gt;out &amp; echo a_b</code>");
+		expect(text).toContain("\nWhy: This command may cause data loss.");
+		expect(text).not.toContain("{");
+		await press(JAMES, button(cards()[0], "Approve"));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0]).toMatchObject({ command, allowed: true });
+		expect(edits()).toContain(`Approved: ${command}`);
+	});
+
+	it("a refused HTML card is retried once as plain text", async () => {
+		stub.rejectHtml = true;
+		prompt("rm -rf ./build-h");
+		await until(() => cards().length === 1);
+		expect(cards()[0].body.parse_mode).toBeUndefined();
+		expect(String(cards()[0].body.text)).toContain("Command: rm -rf ./build-h");
+		await press(JAMES, button(cards()[0], "Approve"));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].allowed).toBe(true);
+	});
+
+	it("a card Telegram will not show denies at once, says so, and tells the model why", async () => {
+		stub.rejectCards = true;
+		const started = Date.now();
+		prompt("rm -rf ./build-i");
+		await until(() => pool.outcomes.length === 1);
+		expect(Date.now() - started).toBeLessThan(2000);
+		expect(pool.outcomes[0]).toMatchObject({ allowed: false });
+		expect(pool.outcomes[0].note).toContain("could not be shown");
+		expect(texts().some((t) => t.includes("Could not show an approval card"))).toBe(true);
+	});
+
+	it("Deny posts a fixed line and the closed card keeps the command", async () => {
+		prompt("rm -rf ./build-j");
+		await until(() => cards().length === 1);
+		await press(JAMES, button(cards()[0], "Deny"));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0]).toMatchObject({ allowed: false, note: null });
+		expect(texts()).toContain("Denied. Nothing ran.");
+		expect(edits()).toContain("Denied. Nothing ran: rm -rf ./build-j");
+	});
+
+	it("expiry edits the card and the model hears 'expired', not 'declined'", async () => {
+		process.env.EIGHT_APPROVAL_TTL_MS = "150";
+		prompt("rm -rf ./build-k");
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].note).toContain("Approval expired");
+		await until(() => edits().includes("Expired. Nothing ran: rm -rf ./build-k"));
+	});
+
+	it("a replaced card is edited and the model hears 'replaced'", async () => {
+		prompt("rm -rf ./build-l1");
+		await until(() => cards().length === 1);
+		prompt("rm -rf ./build-l2");
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].note).toContain("Approval replaced");
+		await until(() =>
+			edits().includes("Replaced by a newer request. Nothing ran: rm -rf ./build-l1"),
+		);
+		await until(() => cards().length === 2);
+		await press(JAMES, button(cards()[1], "Allow this command in this chat"));
+		await until(() => edits().includes("Allowed this command in this chat: rm -rf ./build-l2"));
+	});
+
+	it("adapter socket: a refused answer is reported, not silently dropped", async () => {
+		const client = new DaemonClient({
+			url: `ws://127.0.0.1:${server.port}`,
+			channel: "telegram",
+			reconnectDelayMs: 10,
+		});
+		await client.connect();
+		priv().daemonClient = client;
+		priv().watchAdapterApprovals(client);
+		try {
+			client.respondApproval("deadbeef", true);
+			await until(() => texts().some((t) => t.includes("no longer live")));
 		} finally {
 			priv().daemonClient = null;
 			client.close();

@@ -650,6 +650,46 @@ interface PendingApproval {
 const NOT_LIVE =
 	"That request is no longer live (expired, replaced or already answered). Nothing ran.";
 
+/** Longest command a card shows whole; longer ones show head and tail. */
+const CARD_COMMAND_MAX = 3000;
+
+/** The full command, or its head and tail with a note when it would not fit a card. */
+export function cardCommand(command: string): string {
+	if (command.length <= CARD_COMMAND_MAX) return command;
+	return `${command.slice(0, 2000)}\n... [shortened: ${command.length} characters, the middle is not shown] ...\n${command.slice(-800)}`;
+}
+
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** What a card says: the command and why it was gated. Never raw JSON. */
+export function approvalParts(tool: string, input: unknown): { command: string; why: string } {
+	const fields = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+	const command =
+		typeof fields.command === "string" ? fields.command : typeof input === "string" ? input : tool;
+	const why =
+		typeof fields.reason === "string" && fields.reason
+			? fields.reason
+			: `The agent wants to use ${tool}.`;
+	return { command: cardCommand(command), why };
+}
+
+/** The card as Telegram HTML (escaped) and as plain text for the retry. */
+export function approvalCardText(
+	tool: string,
+	input: unknown,
+	ttlMs: number,
+): { html: string; plain: string } {
+	const { command, why } = approvalParts(tool, input);
+	const head = "Permission required";
+	const tail = `(buttons expire in ${Math.round(ttlMs / 60000) || 1} min)`;
+	return {
+		html: `<b>${head}</b> ${tail}\nCommand: <code>${escapeHtml(command)}</code>\nWhy: ${escapeHtml(why)}`,
+		plain: `${head} ${tail}\nCommand: ${command}\nWhy: ${why}`,
+	};
+}
+
 class TelegramDaemonBridge {
 	private config: BridgeConfig;
 	private ws: WebSocket | null = null;
@@ -851,7 +891,7 @@ class TelegramDaemonBridge {
 
 	private handleDaemonMessage(msg: any): void {
 		if (msg.type === "approval:resolved" && msg.ok === false) {
-			tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
+			tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE, "");
 			return;
 		}
 		if (msg.type !== "event") return;
@@ -903,6 +943,10 @@ class TelegramDaemonBridge {
 			case "approval:required":
 				// NemoClaw-style operator approval via Telegram
 				this.sendApprovalRequest(payload, "ws");
+				break;
+
+			case "approval:closed":
+				this.onApprovalClosed(payload);
 				break;
 
 			case "tool:start":
@@ -1597,13 +1641,8 @@ class TelegramDaemonBridge {
 	private async sendApprovalRequest(payload: any, via: PendingApproval["via"]): Promise<void> {
 		const { requestId, tool, input, sessionId } = payload;
 		const now = Date.now();
-		// One live card per session: the daemon has already denied the older
-		// prompt, so take its buttons away. Expired cards are dropped too.
-		for (const [id, p] of this.pendingApprovals) {
-			if (p.sessionId !== sessionId && p.expiresAt > now) continue;
-			this.pendingApprovals.delete(id);
-			if (p.sessionId === sessionId) await this.closeApprovalCard(p, "Replaced by a newer request");
-		}
+		for (const [id, p] of this.pendingApprovals)
+			if (p.expiresAt <= now) this.pendingApprovals.delete(id);
 		// Expire a little before the daemon does, so a press the card accepts is one the daemon still holds.
 		const ttl = approvalTtlMs();
 		const entry: PendingApproval = {
@@ -1616,65 +1655,123 @@ class TelegramDaemonBridge {
 		};
 		this.pendingApprovals.set(requestId, entry);
 
-		const inputPreview =
-			typeof input === "string" ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200);
+		// HTML with everything escaped, then plain text: a command full of
+		// `_`, `*` or `<` must still reach the operator, or the turn waits in silence.
+		const card = approvalCardText(tool, input, ttl);
+		const keyboard = {
+			inline_keyboard: [
+				[
+					{ text: "Approve", callback_data: `approve:${requestId}` },
+					{ text: "Deny", callback_data: `deny:${requestId}` },
+				],
+				[{ text: "Allow this command in this chat", callback_data: `allowchat:${requestId}` }],
+			],
+		};
+		let sent = await this.tgPost("sendMessage", {
+			chat_id: entry.chatId,
+			text: card.html,
+			parse_mode: "HTML",
+			...NO_LINK_PREVIEW,
+			reply_markup: keyboard,
+		});
+		if (!sent.ok) {
+			sent = await this.tgPost("sendMessage", {
+				chat_id: entry.chatId,
+				text: card.plain,
+				...NO_LINK_PREVIEW,
+				reply_markup: keyboard,
+			});
+		}
+		if (sent.ok) {
+			entry.messageId = sent.messageId;
+			return;
+		}
+		// Nobody can see it, so nobody can answer it: close it now, not after the TTL.
+		this.pendingApprovals.delete(requestId);
+		this.answerApproval(requestId, entry, false, { undelivered: true });
+		await tgSend(
+			this.config.telegramToken,
+			entry.chatId,
+			"Could not show an approval card, so the command was not run.",
+			"",
+		);
+	}
 
+	/** One Bot API call; ok only when Telegram accepted it. */
+	private async tgPost(
+		method: string,
+		body: Record<string, unknown>,
+	): Promise<{ ok: boolean; messageId?: number }> {
 		try {
-			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/${method}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					chat_id: entry.chatId,
-					text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}\n\nExpires in ${Math.round(ttl / 60000) || 1} min.`,
-					parse_mode: "Markdown",
-					...NO_LINK_PREVIEW,
-					reply_markup: {
-						inline_keyboard: [
-							[
-								{ text: "Approve", callback_data: `approve:${requestId}` },
-								{ text: "Deny", callback_data: `deny:${requestId}` },
-							],
-							[{ text: "Allow in this chat", callback_data: `allowchat:${requestId}` }],
-						],
-					},
-				}),
+				body: JSON.stringify(body),
 			});
-			const sent = (await res.json().catch(() => null)) as {
+			const data = (await res.json().catch(() => null)) as {
+				ok?: boolean;
 				result?: { message_id?: number };
 			} | null;
-			entry.messageId = sent?.result?.message_id;
+			return { ok: res.ok && data?.ok !== false, messageId: data?.result?.message_id };
 		} catch (err) {
 			console.error(
-				"[telegram-bridge] failed to send approval request:",
+				`[telegram-bridge] ${method} failed:`,
 				scrubErr(err, this.config.telegramToken),
 			);
+			return { ok: false };
 		}
+	}
+
+	/** Send a decision on the socket that owns the session; the daemon re-checks it. */
+	private answerApproval(
+		requestId: string,
+		approval: PendingApproval,
+		approved: boolean,
+		opts: { scope?: "chat"; undelivered?: boolean } = {},
+	): void {
+		if (approval.via === "adapter" && this.daemonClient) {
+			this.daemonClient.respondApproval(requestId, approved, opts);
+		} else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify({ type: "approval:response", requestId, approved, ...opts }));
+		}
+	}
+
+	/** The daemon closed a prompt with no answer: take the buttons away and say so. */
+	private onApprovalClosed(payload: { requestId: string; outcome: string }): void {
+		const approval = this.pendingApprovals.get(payload.requestId);
+		if (!approval) return;
+		this.pendingApprovals.delete(payload.requestId);
+		void this.closeApprovalCard(
+			approval,
+			payload.outcome === "replaced"
+				? "Replaced by a newer request. Nothing ran"
+				: "Expired. Nothing ran",
+		);
 	}
 
 	/**
 	 * Default-mode prompts run on the adapter's own session, so its approval
-	 * cards arrive on that socket, never on this.ws.
+	 * cards, closures and verdicts arrive on that socket, never on this.ws.
 	 */
 	private watchAdapterApprovals(client: DaemonClient): void {
 		client.on("approval:required", (p) => {
 			this.sendApprovalRequest(p, "adapter");
 		});
+		client.on("approval:closed", (p) => this.onApprovalClosed(p));
+		client.on("approval:resolved", (r) => {
+			if (!r.ok) tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE, "");
+		});
 	}
 
-	/** Replace a card's buttons with a line saying how it ended. */
+	/** Replace a card's buttons with how it ended, keeping the command as the record. */
 	private async closeApprovalCard(p: PendingApproval, status: string): Promise<void> {
 		if (!p.messageId) return;
-		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				chat_id: p.chatId,
-				message_id: p.messageId,
-				text: `*${status}:* \`${p.tool}\``,
-				parse_mode: "Markdown",
-				...NO_LINK_PREVIEW,
-			}),
-		}).catch(() => {});
+		await this.tgPost("editMessageText", {
+			chat_id: p.chatId,
+			message_id: p.messageId,
+			text: `${status}: ${approvalParts(p.tool, p.input).command}`,
+			...NO_LINK_PREVIEW,
+		});
 	}
 
 	/**
@@ -1801,7 +1898,7 @@ class TelegramDaemonBridge {
 		const approval = this.pendingApprovals.get(requestId);
 		if (!approval) {
 			// A second press, or a press on a card that was replaced or expired.
-			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
+			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE, "");
 			return;
 		}
 		// An approval belongs to the chat that was asked. With several chats
@@ -1815,8 +1912,8 @@ class TelegramDaemonBridge {
 		}
 		this.pendingApprovals.delete(requestId);
 		if (Date.now() >= approval.expiresAt) {
-			await this.closeApprovalCard(approval, "Expired");
-			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
+			await this.closeApprovalCard(approval, "Expired. Nothing ran");
+			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE, "");
 			return;
 		}
 
@@ -1824,23 +1921,11 @@ class TelegramDaemonBridge {
 		const scope = action === "allowchat" ? "chat" : undefined;
 		await this.closeApprovalCard(
 			{ ...approval, messageId: approval.messageId ?? query.message?.message_id },
-			scope ? "Allowed in this chat" : approved ? "Approved" : "Denied",
+			scope ? "Allowed this command in this chat" : approved ? "Approved" : "Denied. Nothing ran",
 		);
-
-		// The answer goes back on the socket that owns the session; the daemon
-		// re-checks it and says so on this.ws when it no longer counts.
-		if (approval.via === "adapter" && this.daemonClient) {
-			this.daemonClient.respondApproval(requestId, approved, scope);
-		} else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			this.ws.send(
-				JSON.stringify({
-					type: "approval:response",
-					requestId,
-					approved,
-					...(scope ? { scope } : {}),
-				}),
-			);
-		}
+		this.answerApproval(requestId, approval, approved, scope ? { scope } : {});
+		if (!approved)
+			await tgSend(this.config.telegramToken, this.replyChat(), "Denied. Nothing ran.", "");
 	}
 
 	stop(): void {
