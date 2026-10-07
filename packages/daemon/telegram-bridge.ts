@@ -5,11 +5,12 @@
  * streams events back as Telegram messages. Runs inside the Vessel container
  * alongside the daemon process.
  *
- * This gives Eight full autonomous capability via Telegram:
- * - Natural language prompts (routed to agent with all tools)
- * - /run <cmd> for direct shell execution
+ * - Natural language prompts (routed to the agent through its normal gates)
  * - /status for daemon health
- * - /deploy for Vercel/Fly deployments
+ * - Operator-only commands (see OPERATOR_COMMANDS) and a private-chat-only
+ *   gate on /run and /deploy (see PRIVILEGED_COMMANDS). The bridge has no
+ *   handler of its own for either: they are refused outside an operator DM
+ *   and otherwise fall through as ordinary prompts.
  * - Startup notification: "I'm online. What do we work on next?"
  */
 
@@ -366,7 +367,14 @@ export const PRIVILEGED_COMMANDS = ["/run", "/deploy"] as const;
  * unlike PRIVILEGED_COMMANDS they may be used in the operator's group, since
  * they act through the normal agent gates rather than as a raw shell.
  */
-export const OPERATOR_COMMANDS = ["/delegate", "/kill", "/logs"] as const;
+export const OPERATOR_COMMANDS = [
+	"/delegate",
+	"/kill",
+	"/logs",
+	"/goals",
+	"/voice",
+	"/boardroom",
+] as const;
 
 export type SenderTier = "full" | "prompt" | "observe";
 
@@ -801,10 +809,7 @@ class TelegramDaemonBridge {
 										this.replyChat(),
 										`Heard: "${transcript}"`,
 									);
-									await this.handleTelegramMessage(transcript, update.message.chat.id, {
-										chatType: update.message.chat.type,
-										fromId: update.message.from?.id,
-									});
+									await this.dispatchTranscript(transcript, update.message);
 								} else {
 									await tgSend(this.config.telegramToken, this.replyChat(), transcript);
 								}
@@ -857,6 +862,17 @@ class TelegramDaemonBridge {
 	/** Where this turn's output belongs: the originating chat, else the primary. */
 	private replyChat(): string {
 		return this.originChatId ?? this.config.chatId;
+	}
+
+	/** A voice transcript is group text like any other: same sender context, same command gate. */
+	private async dispatchTranscript(
+		transcript: string,
+		message: { chat: { id: number; type?: string }; from?: { id: number } },
+	): Promise<void> {
+		await this.handleTelegramMessage(transcript, message.chat.id, {
+			chatType: message.chat.type,
+			fromId: message.from?.id,
+		});
 	}
 
 	private isAuthorizedSender(chatType: string | undefined, fromId: number | undefined): boolean {
@@ -1566,7 +1582,10 @@ if (import.meta.main) {
 	const authorizedUserIds = splitIds(process.env.TELEGRAM_AUTHORIZED_USER_IDS);
 	const operatorUserIds = splitIds(process.env.TELEGRAM_OPERATOR_USER_IDS);
 	const chatsToWatch = authorizedChatIds.length > 0 ? authorizedChatIds : [chatId];
-	if (botName === "eightgent") assertNotAiJamesToken(token, process.env, undefined, chatsToWatch);
+	// Any bridge with a group allowlisted, and the eightgent bridge always.
+	if (botName === "eightgent" || chatsToWatch.some((id) => id.startsWith("-"))) {
+		assertNotAiJamesToken(token, process.env, undefined, chatsToWatch);
+	}
 	if (authorizedUserIds.length === 0 && chatsToWatch.some((id) => id.startsWith("-"))) {
 		console.warn(
 			"[telegram-bridge] a group chat is allowlisted but TELEGRAM_AUTHORIZED_USER_IDS is empty: every sender in that group will be refused",

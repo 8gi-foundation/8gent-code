@@ -114,6 +114,23 @@ describe("group traffic through the bridge", () => {
 		expect(calls).toEqual([]);
 	});
 
+	test("Artale's /boardroom, /goals and /voice in the group cause no side effect", async () => {
+		for (const text of ["/boardroom topic", "/goals", "/voice on", "/Boardroom@eightbot x"]) {
+			// biome-ignore lint/suspicious/noExplicitAny: private handler under test.
+			await (bridge() as any).handleTelegramMessage(text, GROUP, group(ARTALE));
+		}
+		expect(calls).toEqual([]);
+	});
+
+	test("a voice transcript of /run from Artale goes through the same gate", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: private handler under test.
+		await (bridge() as any).dispatchTranscript("/run ls", {
+			chat: { id: GROUP, type: "supergroup" },
+			from: { id: ARTALE },
+		});
+		expect(calls).toEqual([]);
+	});
+
 	test("James's /run in the group causes no side effect", async () => {
 		// biome-ignore lint/suspicious/noExplicitAny: private handler under test.
 		await (bridge() as any).handleTelegramMessage("/run ls", GROUP, group(JAMES));
