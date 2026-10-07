@@ -157,13 +157,74 @@ function matchGitPushForce(args: string): boolean {
 	return /\bgit\s+push\b[^\n]*(--force\b|-f\b|--force-with-lease\b)/.test(args);
 }
 
+/** Branches a push may never land on without a person approving it. */
+export const PROTECTED_BRANCHES: readonly string[] = ["main", "master"];
+
+/** git options that take the next token as their value. */
+const GIT_GLOBAL_OPTS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+const GIT_PUSH_OPTS_WITH_VALUE = new Set([
+	"-o",
+	"--push-option",
+	"--repo",
+	"--receive-pack",
+	"--exec",
+]);
+/** Flags that push every local branch, protected ones included. */
+const GIT_PUSH_ALL_REFS = new Set(["--all", "--mirror", "--branches"]);
+
+function unquote(token: string): string {
+	return token.replace(/^["'(]+|["');]+$/g, "");
+}
+
+/** Destination branch of a refspec: `src:dst`, `+dst`, `refs/heads/dst`. */
+function refspecTargetsProtected(spec: string): boolean {
+	const dst = (spec.includes(":") ? spec.slice(spec.lastIndexOf(":") + 1) : spec)
+		.replace(/^\+/, "")
+		.replace(/^refs\/heads\//, "")
+		.toLowerCase();
+	return PROTECTED_BRANCHES.includes(dst);
+}
+
+/** True when one shell segment is a `git push` that names a protected branch. */
+function segmentPushesProtected(segment: string): boolean {
+	const tokens = segment.trim().split(/\s+/).map(unquote).filter(Boolean);
+	const gitIdx = tokens.findIndex((t) => t === "git" || t.endsWith("/git"));
+	if (gitIdx < 0) return false;
+	let i = gitIdx + 1;
+	while (i < tokens.length && tokens[i].startsWith("-")) {
+		if (GIT_GLOBAL_OPTS_WITH_VALUE.has(tokens[i])) i++;
+		i++;
+	}
+	if (tokens[i] !== "push") return false;
+
+	const positional: string[] = [];
+	let repoGiven = false;
+	for (let j = i + 1; j < tokens.length; j++) {
+		const t = tokens[j];
+		if (GIT_PUSH_ALL_REFS.has(t)) return true;
+		if (t === "--repo" || t.startsWith("--repo=")) repoGiven = true;
+		if (GIT_PUSH_OPTS_WITH_VALUE.has(t)) {
+			j++;
+			continue;
+		}
+		if (t.startsWith("-")) continue;
+		positional.push(t);
+	}
+	// First positional is the remote unless --repo named it.
+	const refspecs = repoGiven ? positional : positional.slice(1);
+	return refspecs.some(refspecTargetsProtected);
+}
+
 /**
- * Pattern: git push to main or master (with or without --force).
+ * Pattern: git push to a protected branch (with or without --force).
+ * Covers `git push <remote> main`, `HEAD:main`, `refs/heads/main`, `+main`,
+ * `:main`, master, `-u`, `git -C dir push`, chained commands, and `--all` /
+ * `--mirror` (which push every branch). A bare `git push` with no refspec
+ * cannot be resolved without the repo state and is not matched here.
  */
-function matchGitPushProtectedBranch(args: string): boolean {
-	if (!/\bgit\s+push\b/.test(args)) return false;
-	// Match "git push <remote> main" or "git push origin master" or "git push origin HEAD:main"
-	return /\bgit\s+push\s+\S+\s+([^\s:]+:)?(?:main|master)\b/.test(args);
+export function matchGitPushProtectedBranch(args: string): boolean {
+	if (!/\bpush\b/.test(args)) return false;
+	return args.split(/&&|\|\||[;|&\n]|\$\(|`/).some(segmentPushesProtected);
 }
 
 /**

@@ -204,6 +204,28 @@ async function autoDetectOllamaModel(): Promise<string | null> {
 	}
 }
 
+/**
+ * Permission setup for one run.
+ * --yes: auto-approve non-dangerous commands in memory for this run only;
+ * nothing is written to permissions.json, so later sessions are unaffected.
+ * --yes or stream-json: nobody is there to answer a prompt (and stdout is
+ * NDJSON), so anything that would ask is denied instead of prompting.
+ * Dangerous commands and pushes to protected branches are never auto-approved.
+ */
+export async function applyRunPermissions(
+	opts: Pick<RunOptions, "yes" | "outputFormat">,
+): Promise<void> {
+	if (!opts.yes && opts.outputFormat !== "stream-json") return;
+	try {
+		const perms = await import("../permissions");
+		const manager = perms.getPermissionManager();
+		manager.setHeadless(true);
+		if (opts.yes) manager.setAutoApprove(true, { persist: false });
+	} catch (err) {
+		process.stderr.write(`[run] warn: could not configure permissions: ${String(err)}\n`);
+	}
+}
+
 export async function runRunCommand(argv: string[]): Promise<number> {
 	const opts = parseRunArgs(argv);
 
@@ -218,18 +240,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		return 1;
 	}
 
-	// --yes: auto-approve tool calls for the duration of this run.
-	// NemoClaw's PermissionManager.setAutoApprove(true) bypasses prompts for
-	// non-dangerous commands. Catastrophic commands (rm -rf /, push to main
-	// via its own guard, etc.) remain blocked.
-	if (opts.yes) {
-		try {
-			const perms = await import("../permissions");
-			perms.getPermissionManager().setAutoApprove(true);
-		} catch (err) {
-			process.stderr.write(`[run] warn: could not enable auto-approve: ${String(err)}\n`);
-		}
-	}
+	await applyRunPermissions(opts);
 
 	// Resolve provider + model.
 	// If the caller didn't pick a provider, probe ollama once and only

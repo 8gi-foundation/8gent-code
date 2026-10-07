@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { matchGitPushProtectedBranch } from "./go-deny-list.js";
 import { currentPermissionMode } from "./permission-mode.js";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
@@ -507,6 +508,10 @@ export class PermissionManager {
 	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
+	/** Auto-approve for this process only (`8gent run --yes`); never written to disk. */
+	private sessionAutoApprove = false;
+	/** Set by callers with no person to answer a prompt (`8gent run --yes`, stream-json). */
+	private forceHeadless = false;
 
 	constructor(configPath?: string) {
 		const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
@@ -699,6 +704,8 @@ export class PermissionManager {
 		const argsLower = parsed.args.map((a) => a.toLowerCase());
 		const fullCmdLower = normalizedCmd.toLowerCase();
 
+		if (isProtectedBranchPush(normalizedCmd)) return true;
+
 		// Check for dangerous pipe patterns (curl/wget piped to shell)
 		for (const source of DANGEROUS_PIPE_SOURCES) {
 			if (cmdLower === source) {
@@ -847,6 +854,21 @@ export class PermissionManager {
 			timestamp: new Date(),
 		};
 
+		// Protected branches come before infinite mode, auto-approve and the
+		// allow list: a person approves each push, or it does not happen.
+		if (command && isProtectedBranchPush(command)) {
+			const headless = this.isHeadless();
+			if (headless) {
+				console.error(`[permissions] DENIED: ${protectedBranchPushMessage()} Command: ${command}`);
+			}
+			const approved = headless ? false : await this.promptUser(action, details, command, true);
+			request.approved = approved;
+			this.log.requests.push(request);
+			if (approved) this.log.approvedCount++;
+			else this.log.deniedCount++;
+			return approved;
+		}
+
 		// INFINITE MODE: Bypass most permission checks, but block catastrophic commands
 		if (this.isInfiniteMode()) {
 			if (command) {
@@ -877,7 +899,7 @@ export class PermissionManager {
 		}
 
 		// Auto-approve if configured and not dangerous
-		if (this.config.autoApprove && command && !this.isDangerous(command)) {
+		if (this.isAutoApprove() && command && !this.isDangerous(command)) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -918,7 +940,16 @@ export class PermissionManager {
 	 * Detect if running in headless mode (no TTY, e.g. Docker container, daemon)
 	 */
 	private isHeadless(): boolean {
-		return !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS;
+		return this.forceHeadless || !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS;
+	}
+
+	/**
+	 * Mark this process as having no person to answer a prompt, whatever the
+	 * TTY says. Prompts are then never written to stdout: anything that would
+	 * ask is denied instead.
+	 */
+	setHeadless(enabled: boolean): void {
+		this.forceHeadless = enabled;
 	}
 
 	/**
@@ -1003,6 +1034,11 @@ export class PermissionManager {
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
 	checkPermission(command: string): "allowed" | "denied" | "ask" {
+		// Protected branches: never "allowed", whatever the allow list or mode says.
+		if (command && isProtectedBranchPush(command)) {
+			return this.isHeadless() ? "denied" : "ask";
+		}
+
 		// INFINITE MODE: Allow everything except always-blocked commands
 		if (this.isInfiniteMode()) {
 			if (command) {
@@ -1079,11 +1115,22 @@ export class PermissionManager {
 	}
 
 	/**
-	 * Set auto-approve mode
+	 * Set auto-approve mode. `persist: false` keeps it in memory for this
+	 * process only (used by `8gent run --yes` and the daemon's env switch),
+	 * so it never outlives the run in permissions.json. The interactive
+	 * /auto-approve toggle keeps the default and persists.
 	 */
-	setAutoApprove(enabled: boolean): void {
+	setAutoApprove(enabled: boolean, opts: { persist?: boolean } = {}): void {
+		if (opts.persist === false) {
+			this.sessionAutoApprove = enabled;
+			return;
+		}
 		this.config.autoApprove = enabled;
 		this.saveConfig();
+	}
+
+	private isAutoApprove(): boolean {
+		return this.config.autoApprove || this.sessionAutoApprove;
 	}
 
 	/**
@@ -1134,6 +1181,20 @@ export class PermissionManager {
 			}
 		}
 	}
+}
+
+// ============================================
+// Protected branches
+// ============================================
+
+/** A shell command that pushes to main/master (see go-deny-list.ts). */
+export function isProtectedBranchPush(command: string): boolean {
+	return matchGitPushProtectedBranch(command);
+}
+
+/** Why a protected-branch push was refused when no person could approve it. */
+export function protectedBranchPushMessage(): string {
+	return "Pushing to a protected branch (main/master) needs a person to approve it, and this run has no one to ask. Push a feature branch and open a pull request instead.";
 }
 
 // ============================================

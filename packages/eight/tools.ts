@@ -90,7 +90,13 @@ import {
 } from "../lsp";
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
-import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
+import {
+	type PermissionManager,
+	getPermissionManager,
+	isCommandDangerous,
+	isProtectedBranchPush,
+	protectedBranchPushMessage,
+} from "../permissions";
 import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
@@ -2561,6 +2567,8 @@ export class ToolExecutor {
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
 		if (permissionCheck === "denied") {
+			if (isProtectedBranchPush(command))
+				return `[PERMISSION DENIED] ${protectedBranchPushMessage()} Command: ${command}`;
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
@@ -3073,6 +3081,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
+		const refused = await this.protectedBranchGate(command);
+		if (refused) return refused;
 		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
 		try {
@@ -3082,6 +3092,23 @@ export class ToolExecutor {
 		} catch (err) {
 			return `Failed to start background task: ${err}`;
 		}
+	}
+
+	/**
+	 * A push to a protected branch from a tool that does not go through
+	 * runCommand: refused when no one can approve it, otherwise the approval
+	 * card. Null means the command is not such a push, or the person approved.
+	 */
+	private async protectedBranchGate(command: string): Promise<string | null> {
+		if (!isProtectedBranchPush(command)) return null;
+		if (this.permissionManager.checkPermission(command) === "denied")
+			return `[PERMISSION DENIED] ${protectedBranchPushMessage()} Command: ${command}`;
+		const approved = await this.permissionManager.requestPermission(
+			"Execute Shell Command",
+			"The agent wants to push to a protected branch.",
+			command,
+		);
+		return approved ? null : `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
 
 	private async handleBackgroundStatus(taskId: string): Promise<string> {
