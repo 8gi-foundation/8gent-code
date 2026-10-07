@@ -127,6 +127,7 @@ interface TelegramUpdate {
 		message_id: number;
 		from: { id: number; first_name: string; username?: string };
 		chat: { id: number; type?: string };
+		reply_to_message?: { from?: { id?: number; username?: string } };
 		text?: string;
 		voice?: { file_id: string; duration: number };
 		audio?: { file_id: string; duration: number };
@@ -392,6 +393,38 @@ export function cleanText(text: string): string {
 	return text.replace(/[\p{Cf}\u200B-\u200D\u2060\uFEFF]/gu, "").trim();
 }
 
+/**
+ * Group addressing. In a group the bot acts only when spoken to: text that
+ * starts with @<its username>, a reply to one of its own messages, or a
+ * /command@<its username>. A bare /command counts only from an operator.
+ * Everything else, the operator's own chat with people included, is ignored.
+ * Private chats are always addressed. Fails closed: with no known username a
+ * mention cannot match. Returns the text with the leading @mention stripped.
+ */
+export function groupAddressing(
+	rawText: string,
+	input: { chatType?: string; fromId?: number; replyToBot?: boolean },
+	bot: { username?: string | null },
+	config: SenderConfig,
+): { addressed: boolean; text: string } {
+	const text = cleanText(rawText);
+	const type = input.chatType ?? "private";
+	if (type === "private") return { addressed: true, text };
+	const name = bot.username?.replace(/^@/, "").toLowerCase();
+	if (name) {
+		const mention = new RegExp(`^@${name}\\b[:,]?\\s*`, "i");
+		if (mention.test(text)) return { addressed: true, text: text.replace(mention, "") };
+		const m = /^\/[A-Za-z0-9_]+@(\w+)(?:\s|$)/.exec(text);
+		if (m) return { addressed: m[1].toLowerCase() === name, text };
+	}
+	if (input.replyToBot) return { addressed: true, text };
+	if (text.startsWith("/") && commandOf(text)) {
+		const id = typeof input.fromId === "number" ? String(input.fromId) : null;
+		return { addressed: !!id && operatorsOf(config).includes(id), text };
+	}
+	return { addressed: false, text };
+}
+
 /** Redact bot tokens from anything about to be logged: fetch errors embed the URL. */
 export function scrubErr(err: unknown, token?: string): string {
 	let m = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -572,6 +605,12 @@ class TelegramDaemonBridge {
 	constructor(config: BridgeConfig) {
 		this.config = config;
 	}
+
+	/** Set from getMe at startup; group addressing cannot match without it. */
+	private botUsername: string | null = null;
+	private botId: number | null = null;
+	/** One DM refusal per sender per hour. Groups get none. */
+	private refusedDms = new Map<number, number>();
 
 	async start(): Promise<void> {
 		console.log("[telegram-bridge] starting...");
@@ -866,6 +905,7 @@ class TelegramDaemonBridge {
 							await this.handleTelegramMessage(update.message.text, update.message.chat.id, {
 								chatType: update.message.chat.type,
 								fromId: update.message.from?.id,
+								replyToBot: this.isReplyToBot(update.message),
 							});
 						}
 					}
@@ -915,12 +955,27 @@ class TelegramDaemonBridge {
 	/** A voice transcript is group text like any other: same sender context, same command gate. */
 	private async dispatchTranscript(
 		transcript: string,
-		message: { chat: { id: number; type?: string }; from?: { id: number } },
+		message: {
+			chat: { id: number; type?: string };
+			from?: { id: number };
+			reply_to_message?: { from?: { id?: number; username?: string } };
+		},
 	): Promise<void> {
 		await this.handleTelegramMessage(transcript, message.chat.id, {
 			chatType: message.chat.type,
 			fromId: message.from?.id,
+			replyToBot: this.isReplyToBot(message),
 		});
+	}
+
+	/** True when the message replies to one of this bot's own messages. */
+	private isReplyToBot(message: {
+		reply_to_message?: { from?: { id?: number; username?: string } };
+	}): boolean {
+		const f = message.reply_to_message?.from;
+		if (!f) return false;
+		if (this.botId !== null && f.id === this.botId) return true;
+		return !!this.botUsername && f.username?.toLowerCase() === this.botUsername.toLowerCase();
 	}
 
 	/**
@@ -936,7 +991,12 @@ class TelegramDaemonBridge {
 			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken.trim()}/getMe`, {
 				signal: AbortSignal.timeout(10000),
 			});
-			const me = (await res.json()) as { ok?: boolean; result?: { username?: string } };
+			const me = (await res.json()) as {
+				ok?: boolean;
+				result?: { username?: string; id?: number };
+			};
+			this.botUsername = me.result?.username ?? null;
+			this.botId = me.result?.id ?? null;
 			const name = me.result?.username?.toLowerCase();
 			if (me.ok && name === "aijamesosbot") {
 				throw new Error(
@@ -989,7 +1049,7 @@ class TelegramDaemonBridge {
 	private async handleTelegramMessage(
 		text: string,
 		chatId: number,
-		sender?: { chatType?: string; fromId?: number },
+		sender?: { chatType?: string; fromId?: number; replyToBot?: boolean },
 	): Promise<void> {
 		// Only respond to authorized chats. In local mode this is the
 		// hard boundary that prevents a leaked token from driving the
@@ -999,20 +1059,32 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		// Group addressing first: in a group the bot acts only when spoken to.
+		// Unaddressed chatter is ignored, the operator's included.
+		if (sender) {
+			const addr = groupAddressing(text, sender, { username: this.botUsername }, this.config);
+			if (!addr.addressed) return;
+			text = addr.text;
+		}
+
 		// Group text is data. Parse once: the gate and every router below work
-		// from the same cleaned text and the same commandOf() result. Anything
-		// the gate does not recognise is dropped, silently in a group.
+		// from the same cleaned text and the same commandOf() result.
 		if (!isCommandAllowed(text, sender, this.config)) {
 			console.warn(
 				`[telegram-bridge] refused ${commandOf(cleanText(text)) ?? "prompt"} from ${sender?.fromId ?? "unknown"} in ${sender?.chatType ?? "unknown"} chat`,
 			);
-			if (
-				sender?.chatType === "private" ||
-				(sender && senderTier(sender, this.config) === "prompt")
-			) {
-				await tgSend(this.config.telegramToken, String(chatId), "Operator only for now.", "").catch(
-					() => {},
-				);
+			// Silent in groups. In a DM, one reply per sender per hour.
+			if (sender?.chatType === "private" && typeof sender.fromId === "number") {
+				const last = this.refusedDms.get(sender.fromId) ?? 0;
+				if (Date.now() - last >= 60 * 60 * 1000) {
+					this.refusedDms.set(sender.fromId, Date.now());
+					await tgSend(
+						this.config.telegramToken,
+						String(chatId),
+						"Operator only for now. Ask James for access.",
+						"",
+					).catch(() => {});
+				}
 			}
 			return;
 		}

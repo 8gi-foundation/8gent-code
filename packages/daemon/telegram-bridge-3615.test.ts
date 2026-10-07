@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { statSync, rmSync } from "node:fs";
 import {
+	groupAddressing,
 	OBSERVED_LOG,
 	observeUnauthorized,
 	scrubErr,
@@ -117,7 +118,7 @@ describe("group traffic through the bridge", () => {
 	test("Artale's /run in the group causes no side effect beyond a refusal reply", async () => {
 		// biome-ignore lint/suspicious/noExplicitAny: private handler under test.
 		await (bridge() as any).handleTelegramMessage("/run ls", GROUP, group(ARTALE));
-		expect(calls.every((c) => c.includes("sendMessage"))).toBe(true);
+		expect(calls).toEqual([]);
 	});
 
 	test("Artale's /boardroom, /goals and /voice in the group cause no side effect", async () => {
@@ -125,7 +126,7 @@ describe("group traffic through the bridge", () => {
 			// biome-ignore lint/suspicious/noExplicitAny: private handler under test.
 			await (bridge() as any).handleTelegramMessage(text, GROUP, group(ARTALE));
 		}
-		expect(calls.every((c) => c.includes("sendMessage"))).toBe(true);
+		expect(calls).toEqual([]);
 	});
 
 	test("a voice transcript of /run from Artale goes through the same gate", async () => {
@@ -134,7 +135,7 @@ describe("group traffic through the bridge", () => {
 			chat: { id: GROUP, type: "supergroup" },
 			from: { id: ARTALE },
 		});
-		expect(calls.every((c) => c.includes("sendMessage"))).toBe(true);
+		expect(calls).toEqual([]);
 	});
 
 	test("James's /run in the group causes no side effect", async () => {
@@ -247,6 +248,8 @@ describe("F1: non-operator prompts never reach the operator's session", () => {
 		});
 		// biome-ignore lint/suspicious/noExplicitAny: wiring spies into private state.
 		const a = b as any;
+		a.botUsername = "eightbot";
+		a.botId = 999;
 		a.multiStepEnabled = true;
 		a.adapter = {
 			handleUserMessage: async (t: string) => void hits.push(`adapter:${t}`),
@@ -275,8 +278,33 @@ describe("F1: non-operator prompts never reach the operator's session", () => {
 
 	test("James's prompt does reach the session", async () => {
 		const { a, hits } = spied();
-		await a.handleTelegramMessage("hello", GROUP, group(JAMES));
+		await a.handleTelegramMessage("@eightbot hello", GROUP, group(JAMES));
 		expect(hits).toEqual(["adapter:hello"]);
+	});
+
+	test("a plain group message from James is ignored", async () => {
+		const { a, hits } = spied();
+		await a.handleTelegramMessage("hello everyone", GROUP, group(JAMES));
+		expect(hits).toEqual([]);
+	});
+
+	test("a reply to the bot from James is dispatched", async () => {
+		const { a, hits } = spied();
+		await a.handleTelegramMessage("and then?", GROUP, { ...group(JAMES), replyToBot: true });
+		expect(hits).toEqual(["adapter:and then?"]);
+	});
+
+	test("a /command@otherbot is ignored", async () => {
+		const { a, hits } = spied();
+		await a.handleTelegramMessage("/goals@someotherbot", GROUP, group(JAMES));
+		expect(hits).toEqual([]);
+	});
+
+	test("a mention is not enough for Artale", async () => {
+		const { a, hits } = spied();
+		await a.handleTelegramMessage("@eightbot do x", GROUP, group(ARTALE));
+		await a.handleTelegramMessage("do x", GROUP, { ...group(ARTALE), replyToBot: true });
+		expect(hits).toEqual([]);
 	});
 
 	test("James's /goals routes through the cos router with cleaned text", async () => {
@@ -357,5 +385,74 @@ describe("F3 F4 F5", () => {
 		});
 		expect(statSync(OBSERVED_LOG).mode & 0o777).toBe(0o600);
 		rmSync(OBSERVED_LOG);
+	});
+});
+
+describe("replies: silent in groups, once an hour in DMs", () => {
+	const realFetch = globalThis.fetch;
+	let sends: string[] = [];
+	beforeEach(() => {
+		sends = [];
+		globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
+			if (String(url).includes("sendMessage")) sends.push(String(init?.body ?? ""));
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+	});
+	const mk = () => {
+		const b = new TelegramDaemonBridge({
+			telegramToken: "test-token",
+			chatId: String(GROUP),
+			daemonUrl: "ws://127.0.0.1:1",
+			authorizedChatIds: [String(GROUP), String(ARTALE)],
+			authorizedUserIds: cfg.authorizedUserIds,
+			operatorUserIds: cfg.operatorUserIds,
+		});
+		// biome-ignore lint/suspicious/noExplicitAny: private state.
+		(b as any).botUsername = "eightbot";
+		return b;
+	};
+
+	test("5 group messages from Artale produce 0 replies", async () => {
+		const b = mk();
+		for (let i = 0; i < 5; i++) {
+			// biome-ignore lint/suspicious/noExplicitAny: private handler.
+			await (b as any).handleTelegramMessage(`@eightbot do ${i}`, GROUP, group(ARTALE));
+		}
+		expect(sends).toHaveLength(0);
+	});
+
+	test("5 DMs from Artale produce 1 reply, naming who to ask", async () => {
+		const b = mk();
+		for (let i = 0; i < 5; i++) {
+			// biome-ignore lint/suspicious/noExplicitAny: private handler.
+			await (b as any).handleTelegramMessage(`do ${i}`, ARTALE, dm(ARTALE));
+		}
+		expect(sends).toHaveLength(1);
+		expect(sends[0]).toContain("Ask James for access");
+	});
+});
+
+describe("groupAddressing", () => {
+	const bot = { username: "eightbot" };
+	test("mention is stripped", () => {
+		expect(groupAddressing("@EightBot: do x", group(JAMES), bot, cfg)).toEqual({
+			addressed: true,
+			text: "do x",
+		});
+	});
+	test("DMs are always addressed", () => {
+		expect(groupAddressing("hi", dm(JAMES), bot, cfg).addressed).toBe(true);
+	});
+	test("a bare command counts only from an operator", () => {
+		expect(groupAddressing("/status", group(JAMES), bot, cfg).addressed).toBe(true);
+		expect(groupAddressing("/status", group(ARTALE), bot, cfg).addressed).toBe(false);
+	});
+	test("unknown bot username fails closed", () => {
+		expect(groupAddressing("@eightbot hi", group(JAMES), {}, cfg).addressed).toBe(false);
 	});
 });
