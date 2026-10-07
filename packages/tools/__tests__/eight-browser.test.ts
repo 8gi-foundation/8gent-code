@@ -9,7 +9,12 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../../permissions/tui-approval-channel";
-import { type BrowserCall, createEightBrowser, validateBrowserAction, wsTransport } from "../eight-browser";
+import {
+	type BrowserCall,
+	createEightBrowser,
+	validateBrowserAction,
+	wsTransport,
+} from "../eight-browser";
 
 // A fake 8gent Browser control channel that behaves like the pilot fixture:
 // a login form, then a settings page with a checkbox and a Save button.
@@ -24,15 +29,38 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 	const els = () =>
 		page === "login"
 			? [
-					{ index: 0, tag: "input", text: clip(values["input[name=username]"]), rect: { x: 0, y: 0, w: 9, h: 9 } },
-					{ index: 1, tag: "input", text: clip(values["input[type=password]"]), rect: { x: 0, y: 10, w: 9, h: 9 } },
+					{
+						index: 0,
+						tag: "input",
+						text: clip(values["input[name=username]"]),
+						rect: { x: 0, y: 0, w: 9, h: 9 },
+					},
+					{
+						index: 1,
+						tag: "input",
+						text: clip(values["input[type=password]"]),
+						rect: { x: 0, y: 10, w: 9, h: 9 },
+					},
 					{ index: 2, tag: "button", text: "Sign in", rect: { x: 0, y: 20, w: 9, h: 9 } },
 				]
 			: [
 					{ index: 0, tag: "input", text: "on", rect: { x: 0, y: 0, w: 9, h: 9 } },
 					{ index: 1, tag: "button", text: "Save", rect: { x: 0, y: 10, w: 9, h: 9 } },
-					{ index: 2, tag: "button", text: "Delete account", rect: { x: 0, y: 20, w: 9, h: 9 }, sel: "#danger" },
-					{ index: 3, tag: "button", text: "x", rect: { x: 0, y: 30, w: 9, h: 9 }, sel: "#close", aria: "Remove widget" },
+					{
+						index: 2,
+						tag: "button",
+						text: "Delete account",
+						rect: { x: 0, y: 20, w: 9, h: 9 },
+						sel: "#danger",
+					},
+					{
+						index: 3,
+						tag: "button",
+						text: "x",
+						rect: { x: 0, y: 30, w: 9, h: 9 },
+						sel: "#close",
+						aria: "Remove widget",
+					},
 				];
 	// page.query clips text the way 8gent Browser does: collapsed whitespace, 120 chars.
 	function clip(v?: string) {
@@ -63,16 +91,29 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 					const c = page === "settings" && checked ? [all[0]] : [];
 					return { ok: true, elements: c, count: c.length };
 				}
-				if (args.selector === "input[type=password]" && page === "login") return { ok: true, elements: [all[1]], count: 1 };
+				if (args.selector === "input[type=password]" && page === "login")
+					return { ok: true, elements: [all[1]], count: 1 };
 				if (typeof args.selector === "string" && args.selector.startsWith("[aria-label*=")) {
 					const q = String(args.selector).toLowerCase();
-					const hits = all.filter((e) => "aria" in e && e.aria && e.aria.toLowerCase().split(" ").some((w) => q.includes(`"${w}"`)));
+					const hits = all.filter(
+						(e) =>
+							"aria" in e &&
+							e.aria &&
+							e.aria
+								.toLowerCase()
+								.split(" ")
+								.some((w) => q.includes(`"${w}"`)),
+					);
 					return { ok: true, elements: hits, count: hits.length };
 				}
 				const bySel = all.filter((e) => "sel" in e && e.sel === args.selector);
 				if (bySel.length) return { ok: true, elements: bySel, count: 1 };
 				if (typeof args.selector === "string" && args.selector.startsWith("input[")) {
-					return { ok: true, elements: [{ index: 0, tag: "input", text: clip(values[args.selector as string]) }], count: 1 };
+					return {
+						ok: true,
+						elements: [{ index: 0, tag: "input", text: clip(values[args.selector as string]) }],
+						count: 1,
+					};
 				}
 				if (typeof args.selector === "string") return { ok: true, elements: [], count: 0 };
 				return { ok: true, elements: all, count: all.length };
@@ -81,7 +122,10 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 				if (!opts.dropTyping) values[args.selector as string] = String(args.text);
 				return { ok: true, typed: true };
 			case "page.click": {
-				const el = typeof args.index === "number" ? els()[args.index] : els().find((e) => "sel" in e && e.sel === args.selector);
+				const el =
+					typeof args.index === "number"
+						? els()[args.index]
+						: els().find((e) => "sel" in e && e.sel === args.selector);
 				if (!el) return { ok: false, error: "index out of range" };
 				if (page === "login" && el.text === "Sign in") page = "settings";
 				else if (page === "settings" && el.index === 0) checked = !checked;
@@ -89,7 +133,11 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 				return { ok: true, clicked: true };
 			}
 			case "page.screenshot":
-				return { ok: true, dataUrl: `data:image/png;base64,${Buffer.from("PNGBYTES").toString("base64")}`, savedTo: null };
+				return {
+					ok: true,
+					dataUrl: `data:image/png;base64,${Buffer.from("PNGBYTES").toString("base64")}`,
+					savedTo: null,
+				};
 			case "page.waitFor":
 				return { ok: true, found: true, waitedMs: 1 };
 			default:
@@ -103,9 +151,14 @@ describe("validateBrowserAction (CUA action spec)", () => {
 	test("accepts the closed vocabulary and rejects the rest", () => {
 		expect(validateBrowserAction({ action: "left_click", index: 2 }).ok).toBe(true);
 		expect(validateBrowserAction({ action: "type", selector: "input", text: "x" }).ok).toBe(true);
-		expect(validateBrowserAction({ action: "eval", js: "1" })).toEqual({ ok: false, error: "unknown action kind: eval" });
+		expect(validateBrowserAction({ action: "eval", js: "1" })).toEqual({
+			ok: false,
+			error: "unknown action kind: eval",
+		});
 		expect(validateBrowserAction({ action: "left_click" }).ok).toBe(false);
-		expect(validateBrowserAction({ action: "type", selector: "input", text: "x".repeat(4001) }).ok).toBe(false);
+		expect(
+			validateBrowserAction({ action: "type", selector: "input", text: "x".repeat(4001) }).ok,
+		).toBe(false);
 		expect(validateBrowserAction({ action: "open", url: "file:///etc/passwd" }).ok).toBe(false);
 	});
 });
@@ -117,14 +170,17 @@ describe("8gent Browser driver", () => {
 		const opened = await b.open("http://127.0.0.1:5/");
 		expect(opened).toContain('"tab":"t1"');
 		const asked: string[] = [];
-		const approve = async (what: string) => (asked.push(what), true);
+		const approve = async (what: string) => {
+			asked.push(what);
+			return true;
+		};
 		const out = await b.run(
 			[
-			{ action: "type", selector: "input[name=username]", text: "rishi" },
-			{ action: "type", selector: "input[type=password]", text: "s3cret-pass" },
-			{ action: "left_click", index: 2 },
-			{ action: "left_click", index: 0 },
-			{ action: "left_click", index: 1 },
+				{ action: "type", selector: "input[name=username]", text: "rishi" },
+				{ action: "type", selector: "input[type=password]", text: "s3cret-pass" },
+				{ action: "left_click", index: 2 },
+				{ action: "left_click", index: 0 },
+				{ action: "left_click", index: 1 },
 			],
 			undefined,
 			approve,
@@ -134,7 +190,13 @@ describe("8gent Browser driver", () => {
 		expect(asked).toEqual(['click "Sign in" (authenticate)']);
 		expect(res.ok).toBe(true);
 		// The checkbox click verifies through its checked state, not page text.
-		expect(res.steps.map((s: { verified: boolean }) => s.verified)).toEqual([true, true, true, true, true]);
+		expect(res.steps.map((s: { verified: boolean }) => s.verified)).toEqual([
+			true,
+			true,
+			true,
+			true,
+			true,
+		]);
 		expect(site.state().saved).toBe("on");
 		// Typed text never echoes back to the model or the log: length only.
 		expect(out).not.toContain("s3cret-pass");
@@ -145,7 +207,12 @@ describe("8gent Browser driver", () => {
 		const site = fakeSite();
 		const b = createEightBrowser(site.call, { settleMs: 0 });
 		await b.open("http://127.0.0.1:5/");
-		const res = JSON.parse(await b.run([{ action: "type", selector: "input[name=username]", text: "a" }, { action: "left_click", index: 9 }]));
+		const res = JSON.parse(
+			await b.run([
+				{ action: "type", selector: "input[name=username]", text: "a" },
+				{ action: "left_click", index: 9 },
+			]),
+		);
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/dry run/);
 		expect(site.calls.some((c) => c.cmd === "page.type" || c.cmd === "page.click")).toBe(false);
@@ -159,18 +226,33 @@ describe("8gent Browser driver", () => {
 		await b.run([{ action: "left_click", index: 2 }], undefined, yes);
 		const clicks = () => site.calls.filter((c) => c.cmd === "page.click").length;
 		const asked: string[] = [];
-		const no = async (what: string) => (asked.push(what), false);
-		for (const a of [{ action: "left_click", index: 2 }, { action: "left_click", selector: "#danger" }, { action: "left_click", selector: "#close" }]) {
+		const no = async (what: string) => {
+			asked.push(what);
+			return false;
+		};
+		for (const a of [
+			{ action: "left_click", index: 2 },
+			{ action: "left_click", selector: "#danger" },
+			{ action: "left_click", selector: "#close" },
+		]) {
 			const res = JSON.parse(await b.run([a], undefined, no));
 			expect(res.ok).toBe(false);
 			expect(res.error).toMatch(/declined/);
 		}
-		expect(asked).toEqual(['click "Delete account" (destructive)', 'click "Delete account" (destructive)', 'click "x" (destructive)']);
+		expect(asked).toEqual([
+			'click "Delete account" (destructive)',
+			'click "Delete account" (destructive)',
+			'click "x" (destructive)',
+		]);
 		// With no approver at all, a sensitive click is refused, never run.
-		expect(JSON.parse(await b.run([{ action: "left_click", index: 2 }])).error).toMatch(/needs approval/);
+		expect(JSON.parse(await b.run([{ action: "left_click", index: 2 }])).error).toMatch(
+			/needs approval/,
+		);
 		expect(clicks()).toBe(1);
 		// A selector that matches nothing is refused before any click.
-		expect(JSON.parse(await b.run([{ action: "left_click", selector: "#nope" }], undefined, yes)).error).toMatch(/no element/);
+		expect(
+			JSON.parse(await b.run([{ action: "left_click", selector: "#nope" }], undefined, yes)).error,
+		).toMatch(/no element/);
 		expect(clicks()).toBe(1);
 	});
 
@@ -187,7 +269,12 @@ describe("8gent Browser driver", () => {
 		const site = fakeSite({ dropTyping: true });
 		const b = createEightBrowser(site.call, { settleMs: 0 });
 		await b.open("http://127.0.0.1:5/");
-		const res = JSON.parse(await b.run([{ action: "type", selector: "input[name=username]", text: "rishi" }, { action: "left_click", index: 2 }]));
+		const res = JSON.parse(
+			await b.run([
+				{ action: "type", selector: "input[name=username]", text: "rishi" },
+				{ action: "left_click", index: 2 },
+			]),
+		);
 		expect(res.ok).toBe(false);
 		expect(res.steps[0]).toMatchObject({ verified: false, attempts: 2 });
 		expect(site.calls.filter((c) => c.cmd === "page.click").length).toBe(0);
@@ -203,7 +290,9 @@ describe("8gent Browser driver", () => {
 		const b = createEightBrowser(site.call, { settleMs: 0 });
 		await b.open("http://127.0.0.1:5/");
 		const long = `  two  spaces ${"x".repeat(200)}`;
-		const res = JSON.parse(await b.run([{ action: "type", selector: "input[name=username]", text: long }]));
+		const res = JSON.parse(
+			await b.run([{ action: "type", selector: "input[name=username]", text: long }]),
+		);
 		expect(res.steps[0]).toMatchObject({ verified: true, attempts: 1 });
 	});
 
@@ -219,7 +308,9 @@ describe("8gent Browser driver", () => {
 
 describe("state rendering", () => {
 	test("password fields are always masked, even when the agent did not type them", async () => {
-		const b = createEightBrowser(fakeSite({ prefilledPassword: "autofilled-pw" }).call, { settleMs: 0 });
+		const b = createEightBrowser(fakeSite({ prefilledPassword: "autofilled-pw" }).call, {
+			settleMs: 0,
+		});
 		const out = await b.open("http://127.0.0.1:5/");
 		expect(out).not.toContain("autofilled-pw");
 		expect(JSON.parse(out).elements[1]).toBe("[1] input (password field)");
@@ -229,11 +320,15 @@ describe("state rendering", () => {
 		const site = fakeSite();
 		const b = createEightBrowser(site.call, { settleMs: 0 });
 		await b.open("http://127.0.0.1:5/");
-		const out = await b.run([{ action: "type", selector: "input[type=password]", text: "s3cret-pass" }]);
+		const out = await b.run([
+			{ action: "type", selector: "input[type=password]", text: "s3cret-pass" },
+		]);
 		expect(out).not.toContain("s3cret-pass");
 		expect(await b.state()).not.toContain("s3cret-pass");
 		expect(JSON.parse(await b.state()).elements[1]).toBe("[1] input (password field)");
-		const out2 = await b.run([{ action: "type", selector: "input[name=username]", text: "rishi-user" }]);
+		const out2 = await b.run([
+			{ action: "type", selector: "input[name=username]", text: "rishi-user" },
+		]);
 		expect(out2).not.toContain("rishi-user");
 		expect(JSON.parse(await b.state()).elements[0]).toBe("[0] input (typed, 10 chars)");
 	});
@@ -242,14 +337,28 @@ describe("state rendering", () => {
 		const call: BrowserCall = async (cmd, args = {}) => {
 			if (cmd === "tab.open") return { id: "t9" };
 			if (cmd === "page.waitFor") return { ok: true, found: true };
-			if (cmd === "page.read") return { snapshot: { url: "http://127.0.0.1:5/", title: "x", text: "" } };
-			if (cmd === "page.query" && args.selector === "input[name=csrf]") return { ok: true, elements: [{ index: 0, tag: "input", text: "", visible: false, rect: { x: 0, y: 0, w: 0, h: 0 } }] };
-			if (cmd === "page.query" && typeof args.selector === "string") return { ok: true, elements: [] };
+			if (cmd === "page.read")
+				return { snapshot: { url: "http://127.0.0.1:5/", title: "x", text: "" } };
+			if (cmd === "page.query" && args.selector === "input[name=csrf]")
+				return {
+					ok: true,
+					elements: [
+						{ index: 0, tag: "input", text: "", visible: false, rect: { x: 0, y: 0, w: 0, h: 0 } },
+					],
+				};
+			if (cmd === "page.query" && typeof args.selector === "string")
+				return { ok: true, elements: [] };
 			return {
 				ok: true,
 				elements: [
 					{ index: 0, tag: "input", text: "", visible: true },
-					{ index: 1, tag: "input", text: "csrf-secret-value", visible: false, rect: { x: 0, y: 0, w: 0, h: 0 } },
+					{
+						index: 1,
+						tag: "input",
+						text: "csrf-secret-value",
+						visible: false,
+						rect: { x: 0, y: 0, w: 0, h: 0 },
+					},
 					{ index: 2, tag: "button", text: "Sign in", visible: true },
 				],
 			};
@@ -260,7 +369,9 @@ describe("state rendering", () => {
 		const b2 = createEightBrowser(call, { settleMs: 0 });
 		await b2.open("http://127.0.0.1:5/");
 		expect(JSON.parse(await b2.run([{ action: "left_click", index: 1 }])).error).toMatch(/hidden/);
-		expect(JSON.parse(await b2.run([{ action: "left_click", selector: "input[name=csrf]" }])).error).toMatch(/hidden/);
+		expect(
+			JSON.parse(await b2.run([{ action: "left_click", selector: "input[name=csrf]" }])).error,
+		).toMatch(/hidden/);
 	});
 });
 
@@ -278,7 +389,9 @@ describe("wsTransport (real WebSocket round trip)", () => {
 					const m = JSON.parse(String(raw));
 					seen.push(m);
 					let reply: unknown = { id: m.id, ok: true, result: { echoed: m.cmd, args: m.args } };
-					if (m.type === "auth") reply = m.token === "tok-123" ? { type: "auth_ok" } : { type: "error", error: "bad token" };
+					if (m.type === "auth")
+						reply =
+							m.token === "tok-123" ? { type: "auth_ok" } : { type: "error", error: "bad token" };
 					else if (m.cmd === "boom") reply = { id: m.id, ok: false, error: "nope" };
 					else if (m.cmd === "hangup") return void ws.close();
 					else if (m.cmd === "garbage") return void ws.send("{not json");
@@ -318,7 +431,10 @@ describe("ToolExecutor gates browser_* (8SO review of #3592)", () => {
 	});
 	const card = (answer: TuiApprovalDecision) => {
 		const asked: TuiApprovalRequest[] = [];
-		registerTuiApprovalHandler(async (req) => (asked.push(req), answer));
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req);
+			return answer;
+		});
 		return asked;
 	};
 
@@ -343,12 +459,16 @@ describe("ToolExecutor gates browser_* (8SO review of #3592)", () => {
 
 	test("with no one to ask, browser_task is blocked, not run", async () => {
 		process.env.EIGHT_HEADLESS = "1";
-		const out = await new ToolExecutor(dir, "browser-gate-test").execute("browser_task", { actions: [{ action: "scroll", dy: 10 }] });
+		const out = await new ToolExecutor(dir, "browser-gate-test").execute("browser_task", {
+			actions: [{ action: "scroll", dy: 10 }],
+		});
 		expect(out).toContain("[BLOCKED]");
 	});
 
 	test("browser_open is gated as network_request", async () => {
-		const out = await new ToolExecutor(dir, "browser-gate-test").execute("browser_open", { url: "https://pastebin.com/raw/x" });
+		const out = await new ToolExecutor(dir, "browser-gate-test").execute("browser_open", {
+			url: "https://pastebin.com/raw/x",
+		});
 		expect(out).toMatch(/exfil/i);
 		expect(out).not.toContain('"tab"');
 	});
@@ -356,7 +476,9 @@ describe("ToolExecutor gates browser_* (8SO review of #3592)", () => {
 	test("browser_screenshot writes only a .png inside the workspace or ~/.8gent/browser-shots", async () => {
 		card("approve");
 		const exec = new ToolExecutor(dir, "browser-gate-test");
-		expect(await exec.execute("browser_screenshot", { path: "/etc/evil.png" })).toMatch(/browser_screenshot failed: .*(outside|blocked)/i);
+		expect(await exec.execute("browser_screenshot", { path: "/etc/evil.png" })).toMatch(
+			/browser_screenshot failed: .*(outside|blocked)/i,
+		);
 		expect(await exec.execute("browser_screenshot", { path: "shot.jpg" })).toMatch(/\.png/);
 	});
 });
