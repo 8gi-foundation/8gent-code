@@ -324,7 +324,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	lines.push(
 		"",
 		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
-		"**Narration for videos and voice-overs: call `speak` (local neural voice). Never use espeak or say.**",
+		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
 	);
 
 	return lines.join("\n");

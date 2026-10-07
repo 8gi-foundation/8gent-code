@@ -136,6 +136,6 @@ describe("speak is wired into the local agent", () => {
 		expect(core).toContain('"speak"');
 		const cat = buildToolCatalogSegment({ concise: true, omit: [] });
 		expect(cat).toContain("speak");
-		expect(cat).toMatch(/Never use espeak or say/);
+		expect(cat).toMatch(/never espeak or say/);
 	});
 });
