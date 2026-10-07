@@ -34,6 +34,8 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
+	// speak writes a wav to its `out` path (#3596).
+	"speak",
 ]);
 
 /**
@@ -70,10 +72,9 @@ export function editScopeViolation(
 	if (!SCOPED_WRITE_TOOLS.has(toolName) && !isDeckTheme) return null;
 	if (isDeckTheme && args.action === "list") return null;
 	const scope = allowedPaths.join(", ");
-	const target =
-		typeof (isDeckTheme ? args.deck : args.path) === "string"
-			? String(isDeckTheme ? args.deck : args.path).trim()
-			: "";
+	// speak names its file in `out`, deck_theme in `deck`, everything else in `path`.
+	const named = isDeckTheme ? args.deck : toolName === "speak" ? args.out : args.path;
+	const target = typeof named === "string" ? named.trim() : "";
 	// deck_theme writes the deck and a <theme>.css beside it: both must be in scope.
 	const targets = [target];
 	if (isDeckTheme && target) {

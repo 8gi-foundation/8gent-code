@@ -1406,6 +1406,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"git_commit",
 			"web_search",
 			"web_fetch",
+			"speak",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",

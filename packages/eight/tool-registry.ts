@@ -62,7 +62,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"notebook_insert_cell",
 		"notebook_delete_cell",
 	],
-	creative: ["generate_sprite", "make_pdf"],
+	creative: ["generate_sprite", "make_pdf", "speak"],
 	orchestration: [
 		"spawn_agent",
 		"check_agent",

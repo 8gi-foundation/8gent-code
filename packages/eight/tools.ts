@@ -164,7 +164,7 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-function safePath(userPath: string, workingDirectory: string): string {
+export function safePath(userPath: string, workingDirectory: string): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
 	const guard = guardPath(userPath, workingDirectory);
@@ -203,6 +203,32 @@ function safePath(userPath: string, workingDirectory: string): string {
 	}
 
 	return normalizedTarget;
+}
+
+/**
+ * Where speak may write: inside the working directory (safePath), .wav only.
+ * Shared by the text-tool and native handlers.
+ */
+export function resolveSpeakOut(out: unknown, workingDirectory: string): string {
+	const named = typeof out === "string" && out.trim() ? out.trim() : `speak-${Date.now()}.wav`;
+	if (!named.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${named}")`);
+	const target = safePath(named, workingDirectory);
+	// safePath is lexical. A directory symlink inside the workspace would carry the
+	// write outside it, so check real locations: the nearest existing ancestor of the
+	// parent must sit under the real workspace, and the file itself must not be a link.
+	const root = fs.realpathSync(workingDirectory);
+	let ancestor = path.dirname(target);
+	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+	const real = fs.realpathSync(ancestor);
+	if (real !== root && !real.startsWith(root + path.sep)) {
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+	}
+	try {
+		if (fs.lstatSync(target).isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+	return target;
 }
 
 /**
@@ -826,6 +852,23 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "speak",
+					description:
+						"[MEDIA] Speak text with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns path and durationSec. Use for video narration instead of espeak or say. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava.",
+					parameters: {
+						type: "object",
+						properties: {
+							text: { type: "string", description: "Words to speak (max 2000 characters)" },
+							voice: { type: "string", description: "Voice name; defaults to Daniel" },
+							out: { type: "string", description: "Output .wav path inside the working directory" },
+						},
+						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "read_pdf",
 					description:
 						"[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
@@ -1304,6 +1347,7 @@ export class ToolExecutor {
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
 		write_file: "write_file",
+		speak: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
@@ -1435,7 +1479,7 @@ export class ToolExecutor {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
-				path: args.path as string,
+				path: (toolName === "speak" ? args.out : args.path) as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
 				// Every write tool is checked on what it actually writes, not
@@ -1467,7 +1511,10 @@ export class ToolExecutor {
 				return blockedToolMessage(
 					toolName,
 					policyAction === "write_file",
-					typeof args.path === "string" && args.path ? args.path : undefined,
+					(() => {
+						const target = toolName === "speak" ? args.out : args.path;
+						return typeof target === "string" && target ? target : undefined;
+					})(),
 					gateResult.reason,
 					gateResult.alternative,
 				);
@@ -1645,6 +1692,18 @@ export class ToolExecutor {
 				return this.handleReadImage(args.path as string);
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
+
+			case "speak": {
+				try {
+					const out = resolveSpeakOut(args.out, this.workingDirectory);
+					const { speak } = await import("../tools/speak");
+					return JSON.stringify(
+						await speak({ text: args.text as string, voice: args.voice as string | undefined, out }),
+					);
+				} catch (err) {
+					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
 
 			// PDF tools
 			case "read_pdf":
