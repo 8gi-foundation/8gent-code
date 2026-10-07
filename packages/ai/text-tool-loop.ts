@@ -49,9 +49,11 @@
  * A false completion claim is never passed through silently.
  *
  * When the model answers a completion check with a "DONE:" summary and ran
- * no tool between the two, the reply the check was sent after is the answer:
- * the turn returns that reply first, then the summary (#3638). The check
- * itself still goes out; only what is returned changes.
+ * no tool between the two, the reply the check was sent after may be the
+ * answer. With `keepAnswerFirst` (the headless run path, #3638) the turn
+ * returns that reply first, then the summary; without it (the TUI) the
+ * summary alone is returned, and the earlier reply is only the fallback for
+ * a bare "DONE:". The check itself goes out the same way in both modes.
  *
  * A final answer that leaves steps of the turn's plan open (pending or in
  * progress in the last update_plan call) gets ONE plan check per turn
@@ -118,6 +120,15 @@ export interface TextToolAgentOptions {
 	 * answer through. The caller owns what it checks.
 	 */
 	finalCheck?: () => string | null;
+	/**
+	 * Keep the reply a completion check was sent after in front of the "DONE:"
+	 * summary that answers it (#3638). Off by default: in the TUI the reply
+	 * before the check is usually already a summary, and the person would read
+	 * it twice. The headless `run` path turns it on, because a first-line or
+	 * exact-match reader of its final text needs the model's answer, not the
+	 * recap. In both modes the check itself is sent the same way.
+	 */
+	keepAnswerFirst?: boolean;
 }
 
 export interface TextToolAgentResult {
@@ -544,21 +555,23 @@ export async function runTextToolAgent(
 	// Was the last message we sent a completion check the model has not yet
 	// answered with a tool call? Then prose without DONE_MARKER is not final.
 	let awaitingCheckAnswer = false;
-	// The reply the check was sent after, marker stripped. When the model
-	// answers the check with "DONE:" and no tool work in between, that reply
-	// was its answer, so it comes first and the summary follows (#3638: the
-	// check used to replace a one-line answer with a recap of what the model
-	// did). Cleared by any round that runs real work: then the reply before the
-	// check was an announcement, and the summary stands alone.
+	// The reply the check was sent after, marker stripped. It persists until a
+	// round runs real work (an update_plan-only round leaves it alone): then
+	// the reply before the check was an announcement, not an answer. While it
+	// is set, a "DONE:" reply with nothing after the marker falls back to it in
+	// every mode. With keepAnswerFirst (#3638) it also comes first, with the
+	// summary after it: the check used to replace a one-line answer with a
+	// recap of what the model did.
 	let preCheckContent = "";
 	const finalContent = (content: string): string => {
 		const stripped = stripDoneMarker(content);
 		if (!hasDoneMarker(content) || preCheckContent.trim() === "") return stripped;
 		const answer = preCheckContent.trim();
 		const summary = stripped.trim();
-		// A summary that is empty or repeats the answer adds nothing.
-		if (summary === "" || summary === answer) return answer;
-		if (summary.startsWith(answer)) return summary;
+		if (summary === "") return answer;
+		if (!opts.keepAnswerFirst) return stripped;
+		// A summary that repeats or extends the answer already has it first.
+		if (summary === answer || summary.startsWith(answer)) return summary;
 		return `${answer}\n\n${summary}`;
 	};
 	// The claim check's follow-up fires at most once per turn.

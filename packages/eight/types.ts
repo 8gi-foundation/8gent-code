@@ -141,6 +141,14 @@ export interface AgentConfig {
 	 */
 	agentScope?: string;
 	/**
+	 * Headless output (#3638): when the text tool loop's completion check is
+	 * answered with "DONE:", keep the model's reply before the check in front
+	 * of the summary. Set by `8gent run` (packages/eight/run.ts), whose final
+	 * text is read by programs; the TUI leaves it off so a person does not
+	 * read the same summary twice. See TextToolAgentOptions.keepAnswerFirst.
+	 */
+	keepAnswerFirst?: boolean;
+	/**
 	 * Whether this agent runs unattended (autonomous engine, infinite mode,
 	 * heartbeat/improvement loops). When true, destructive tools are gated by the
 	 * maker-checker at the tool-execution chokepoint and require an approved

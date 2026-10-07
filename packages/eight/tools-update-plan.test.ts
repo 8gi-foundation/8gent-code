@@ -141,6 +141,16 @@ describe("the agent is told to report plan progress", () => {
 		expect(PLANNING_GATE_INSTRUCTION).toContain("before your final answer");
 	});
 
+	test("only the headless run path keeps the answer in front of a DONE summary (#3638)", () => {
+		const run = fs.readFileSync(path.join(import.meta.dir, "run.ts"), "utf8");
+		const agent = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf8");
+		expect(run).toContain("keepAnswerFirst: true,");
+		expect(agent).toContain("keepAnswerFirst: this.config.keepAnswerFirst === true,");
+		// The TUI constructs its Agent without the option.
+		const tui = fs.readFileSync(path.join(import.meta.dir, "..", "..", "apps", "tui", "src", "app.tsx"), "utf8");
+		expect(tui).not.toContain("keepAnswerFirst");
+	});
+
 	test("a direct question is excused from planning, at depth 0 and in the sub-agent cut (#3640)", () => {
 		const excuse = "If the request is a question you can answer directly, answer it in the format it asks for, with no plan.";
 		expect(PLANNING_GATE_INSTRUCTION).toStartWith(`[PLANNING] ${excuse}`);

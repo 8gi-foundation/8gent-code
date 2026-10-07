@@ -347,6 +347,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			workingDirectory: opts.cwd || process.cwd(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
+			// The final text is read by programs, so a completion check answered
+			// with "DONE:" keeps the model's answer first (#3638).
+			keepAnswerFirst: true,
 		});
 
 		const finalText = await agent.chat(opts.prompt);
