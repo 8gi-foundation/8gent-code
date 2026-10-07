@@ -280,13 +280,21 @@ export type Plan = {
 	writes: string[];
 };
 
+function intIn(v: unknown, dflt: number, lo: number, hi: number, what: string): number {
+	if (v === undefined || v === null) return dflt;
+	if (typeof v !== "number" || !Number.isInteger(v) || v < lo || v > hi)
+		throw new Error(`${what} must be an integer from ${lo} to ${hi} (got ${JSON.stringify(v)})`);
+	return v;
+}
+
 const hasDotDot = (p: string) => p.split(/[\\/]/).includes("..");
 
 export function planFilm(o: PlanInput): Plan {
 	const P = typeof o.preset === "string" ? resolvePreset(o.preset) : o.preset;
-	const W = o.width ?? 1280;
-	const H = o.height ?? 720;
-	const fps = o.fps ?? 24;
+	// Numbers go into film.sh unquoted, so only real integers in range are accepted.
+	const W = intIn(o.width, 1280, 16, 7680, "width");
+	const H = intIn(o.height, 720, 16, 7680, "height");
+	const fps = intIn(o.fps, 24, 1, 120, "fps");
 	const font = o.resolveFont ?? defaultFontResolver;
 	if (!o.slides?.length) throw new Error("plan needs at least one slide");
 	for (const s of o.slides)
@@ -415,8 +423,9 @@ export async function filmCraft(
 					preset: P,
 					outDir: dir,
 					out: a.out as string | undefined,
-					width: a.width as number,
-					height: a.height as number,
+					width: a.width as number | undefined,
+					height: a.height as number | undefined,
+					fps: a.fps as number | undefined,
 					narration: a.narration ? guard.read(String(a.narration)) : undefined,
 					bed: a.bed ? guard.read(String(a.bed)) : undefined,
 				});

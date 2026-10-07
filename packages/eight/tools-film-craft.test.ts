@@ -123,6 +123,17 @@ describe("film_craft confinement", () => {
 		expect(await ex.execute("film_craft", { action: "list" })).toContain("lotus-night");
 	});
 
+	test("width, height and fps from the model are refused unless integers in range", async () => {
+		const root = tmp("fc-dims-");
+		const ex = new ToolExecutor(root);
+		const marker = path.join(root, "PWNED");
+		for (const bad of [{ width: `1 $(touch ${marker})` }, { height: "tall" }, { fps: "24" }])
+			expect(await ex.execute("film_craft", { action: "plan", slides, ...bad })).toMatch(
+				/^Error: (width|height|fps)/,
+			);
+		expect(fs.existsSync(path.join(root, "video", "film.sh"))).toBe(false);
+	});
+
 	test("bad seconds are refused", async () => {
 		const root = tmp("fc-secs-");
 		const ex = new ToolExecutor(root);

@@ -2,7 +2,7 @@
  * film-craft (#3599): the catalog is whole, the plan is a real recipe, the bed is a real wav.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -131,6 +131,38 @@ describe("plan", () => {
 			}),
 		).toThrow();
 	});
+});
+
+describe("film.sh never runs model text", () => {
+	test("width, height and fps must be integers in range", () => {
+		const base = { slides, preset: "lotus-night", outDir: "/w", resolveFont: fonts };
+		expect(() => planFilm({ ...base, width: "1 $(touch x)" as unknown as number })).toThrow(
+			/width/,
+		);
+		expect(() => planFilm({ ...base, height: "tall" as unknown as number })).toThrow(/height/);
+		expect(() => planFilm({ ...base, fps: "24" as unknown as number })).toThrow(/fps/);
+		expect(() => planFilm({ ...base, width: 8000 })).toThrow(/width/);
+		expect(() => planFilm({ ...base, fps: 23.5 })).toThrow(/fps/);
+	});
+
+	test("slide text with $(), backticks and quotes runs as text, not commands", async () => {
+		const d = tmp("fc-inject-");
+		const marker = join(d, "PWNED");
+		const evil = `$(touch ${marker}) \`touch ${marker}\` "it's" '$(touch ${marker})' %d @x`;
+		const r = await filmCraft({
+			action: "plan",
+			out_dir: d,
+			width: 160,
+			height: 90,
+			fps: 12,
+			slides: [{ title: evil, kicker: evil, sub: evil, lower: evil, seconds: 1 }],
+		});
+		expect(r).toContain("Wrote");
+		const run = Bun.spawnSync(["bash", join(d, "film.sh")], { stdout: "pipe", stderr: "pipe" });
+		expect(run.exitCode).toBe(0);
+		expect(existsSync(marker)).toBe(false);
+		expect(existsSync(join(d, "film.mp4"))).toBe(true);
+	}, 120_000);
 });
 
 describe("mix", () => {
