@@ -485,8 +485,16 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 	}
 }
 
-/** Subscribe the gateway to all bus events and broadcast to relevant sessions */
+/**
+ * Subscribe the gateway to all bus events and broadcast to relevant sessions.
+ * Once per process: the listeners use the module-level client map, so a
+ * second startGateway (a restart, or a second test file) would otherwise
+ * deliver every event twice - two approval cards for one prompt.
+ */
+let busSubscribed = false;
 function subscribeToBus(): void {
+	if (busSubscribed) return;
+	busSubscribed = true;
 	const events: EventName[] = [
 		"tool:start",
 		"tool:result",

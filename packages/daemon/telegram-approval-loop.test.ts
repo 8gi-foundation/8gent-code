@@ -204,6 +204,9 @@ beforeAll(async () => {
 			headers: { "Content-Type": "application/json" },
 		});
 	}) as unknown as typeof fetch;
+	// A gateway started and stopped earlier in the process (as another test
+	// file does on Linux CI) must not make this one deliver events twice.
+	startGateway({ port: 0, authToken: null, pool: pool as unknown as AgentPool }).stop(true);
 	server = startGateway({ port: 0, authToken: null, pool: pool as unknown as AgentPool });
 	bridge = new TelegramDaemonBridge({
 		telegramToken: "test-token",
