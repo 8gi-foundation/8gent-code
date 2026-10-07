@@ -166,16 +166,14 @@ async function askPerson(args: PostMessageArgs, deps: PostMessageDeps): Promise<
 }
 
 async function card(action: string, command: string, details: string): Promise<string | null> {
-	{
-		if (hasTuiApprovalHandler()) {
-			const decision = await requestTuiDecision({ action, command, full: true, details });
-			if (decision === "approve") return null;
-			if (decision === "unfit")
-				return "[BLOCKED] post_message was not shown for approval: the card must show the whole text and it does not fit on this screen. Nothing was sent. Post shorter text, or ask the person to make the window larger.";
-			return "[PERMISSION DENIED] The person declined post_message. Nothing was sent. Do not retry.";
-		}
-		return "[BLOCKED] post_message needs the person's approval and there is no one to ask in this session. Nothing was sent. Do not retry.";
+	if (hasTuiApprovalHandler()) {
+		const decision = await requestTuiDecision({ action, command, full: true, details });
+		if (decision === "approve") return null;
+		if (decision === "unfit")
+			return "[BLOCKED] post_message was not shown for approval: the card must show the whole text and it does not fit on this screen. Nothing was sent. Post shorter text, or ask the person to make the window larger.";
+		return "[PERMISSION DENIED] The person declined post_message. Nothing was sent. Do not retry.";
 	}
+	return "[BLOCKED] post_message needs the person's approval and there is no one to ask in this session. Nothing was sent. Do not retry.";
 }
 
 /** Telegram bot tokens (digits:secret), alone or inside a /bot<token>/ URL; the shared scanner has no rule for them. */
