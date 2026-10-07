@@ -462,11 +462,24 @@ export function assertNotAiJamesToken(
 			return null;
 		}
 	},
-): boolean {
+,
+	chatIds: string[] = []): boolean {
 	const file =
 		env.AI_JAMES_BOT_TOKEN_SHA256_FILE || `${resolveHome()}/.8gent/ai-james-bot-token.sha256`;
 	const ref = (env.AI_JAMES_BOT_TOKEN_SHA256 || readRef(file) || "").trim().toLowerCase();
-	if (!/^[0-9a-f]{64}$/.test(ref)) return false;
+	if (!/^[0-9a-f]{64}$/.test(ref)) {
+		// A check that silently skips is not a check. Group mode (any negative
+		// chat id) refuses to start without a reference; DM-only warns.
+		if (chatIds.some((id) => id.trim().startsWith("-"))) {
+			throw new Error(
+				"refusing to start in group mode: AI_JAMES_BOT_TOKEN_SHA256 is not set (or AI_JAMES_BOT_TOKEN_SHA256_FILE is unreadable), so the shared-token check cannot run. Set it to the SHA-256 hex digest of the AI James bot token.",
+			);
+		}
+		console.warn(
+			"[telegram-bridge] AI_JAMES_BOT_TOKEN_SHA256 is not set: shared-token check skipped (DM-only mode)",
+		);
+		return false;
+	}
 	const mine = createHash("sha256").update(token).digest("hex");
 	if (mine === ref) {
 		throw new Error(
@@ -1498,7 +1511,6 @@ export async function startLocalTelegramBridge(opts: {
 	if (!token) {
 		throw new Error("TELEGRAM_BOT_TOKEN is required to start the local Telegram bridge");
 	}
-	assertNotAiJamesToken(token);
 	const allowlistRaw = process.env.TELEGRAM_AUTHORIZED_CHAT_IDS || "";
 	const authorizedChatIds = allowlistRaw
 		.split(",")
@@ -1507,6 +1519,7 @@ export async function startLocalTelegramBridge(opts: {
 	if (authorizedChatIds.length === 0) {
 		throw new Error("TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode");
 	}
+	assertNotAiJamesToken(token, process.env, undefined, authorizedChatIds);
 	// The first allowlisted chat is the default destination for outbound
 	// messages. Inbound messages from any chat in the allowlist are
 	// accepted; everything else is dropped in handleTelegramMessage.
@@ -1548,12 +1561,12 @@ if (import.meta.main) {
 	}
 	console.log(`[telegram-bridge] BOT_NAME=${botName || "aijames"} (reading ${tokenVar})`);
 	// The 8gent bot must never share the AI James token (one getUpdates lease).
-	if (botName === "eightgent") assertNotAiJamesToken(token);
 
 	const authorizedChatIds = splitIds(process.env.TELEGRAM_AUTHORIZED_CHAT_IDS);
 	const authorizedUserIds = splitIds(process.env.TELEGRAM_AUTHORIZED_USER_IDS);
 	const operatorUserIds = splitIds(process.env.TELEGRAM_OPERATOR_USER_IDS);
 	const chatsToWatch = authorizedChatIds.length > 0 ? authorizedChatIds : [chatId];
+	if (botName === "eightgent") assertNotAiJamesToken(token, process.env, undefined, chatsToWatch);
 	if (authorizedUserIds.length === 0 && chatsToWatch.some((id) => id.startsWith("-"))) {
 		console.warn(
 			"[telegram-bridge] a group chat is allowlisted but TELEGRAM_AUTHORIZED_USER_IDS is empty: every sender in that group will be refused",

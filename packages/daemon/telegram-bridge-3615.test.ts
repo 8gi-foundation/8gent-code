@@ -157,7 +157,21 @@ describe("shared-token startup refusal", () => {
 			true,
 		);
 	});
-	test("no reference configured returns false (unverified)", () => {
-		expect(assertNotAiJamesToken(tok, {}, () => null)).toBe(false);
+	test("no reference, DM-only: warns once and returns false", () => {
+		const warn = console.warn;
+		const lines: string[] = [];
+		console.warn = (m: string) => lines.push(m);
+		try {
+			expect(assertNotAiJamesToken(tok, {}, () => null, ["123"])).toBe(false);
+		} finally {
+			console.warn = warn;
+		}
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("AI_JAMES_BOT_TOKEN_SHA256");
+	});
+	test("no reference, group chat: refuses naming the env var", () => {
+		expect(() => assertNotAiJamesToken(tok, {}, () => null, ["123", "-1001"])).toThrow(
+			"AI_JAMES_BOT_TOKEN_SHA256",
+		);
 	});
 });
