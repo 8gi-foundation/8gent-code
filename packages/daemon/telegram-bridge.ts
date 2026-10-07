@@ -647,7 +647,8 @@ interface PendingApproval {
 	via: "ws" | "adapter";
 }
 
-const NOT_LIVE = "That request is no longer live (expired, replaced or already answered). Nothing ran.";
+const NOT_LIVE =
+	"That request is no longer live (expired, replaced or already answered). Nothing ran.";
 
 class TelegramDaemonBridge {
 	private config: BridgeConfig;
@@ -1638,7 +1639,9 @@ class TelegramDaemonBridge {
 					},
 				}),
 			});
-			const sent = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
+			const sent = (await res.json().catch(() => null)) as {
+				result?: { message_id?: number };
+			} | null;
 			entry.messageId = sent?.result?.message_id;
 		} catch (err) {
 			console.error(

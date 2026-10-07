@@ -43,15 +43,24 @@ class GatedPool {
 	}
 	async chat(sessionId: string, command: string): Promise<string> {
 		const allowed = await withChannelApprovals(sessionId, () =>
-			this.pm.requestPermission("Execute Shell Command", "This command may cause data loss.", command),
+			this.pm.requestPermission(
+				"Execute Shell Command",
+				"This command may cause data loss.",
+				command,
+			),
 		);
 		this.outcomes.push({ command, allowed });
 		return allowed ? "ran" : "declined";
 	}
 }
 
+interface TgButton {
+	text: string;
+	callback_data: string;
+}
 interface TgCall {
 	method: string;
+	// biome-ignore lint/suspicious/noExplicitAny: recorded Telegram API bodies.
 	body: Record<string, any>;
 }
 
@@ -81,7 +90,8 @@ const priv = () => bridge as any;
 const cards = () => tg.filter((c) => c.method === "sendMessage" && c.body.reply_markup);
 const texts = () => tg.filter((c) => c.method === "sendMessage").map((c) => String(c.body.text));
 const button = (card: TgCall, label: string): string =>
-	card.body.reply_markup.inline_keyboard.flat().find((b: any) => b.text === label).callback_data;
+	card.body.reply_markup.inline_keyboard.flat().find((b: TgButton) => b.text === label)
+		.callback_data;
 
 function prompt(command: string): void {
 	priv().ws.send(JSON.stringify({ type: "prompt", text: command }));

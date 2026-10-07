@@ -45,7 +45,12 @@ export class ChannelApprovals {
 	private chatAllowed = new Map<string, Set<string>>();
 
 	/** Ask the session's surface. Resolves true only on a live, in-time approve. */
-	request(sessionId: string, tool: string, input: Record<string, unknown>, key: string): Promise<boolean> {
+	request(
+		sessionId: string,
+		tool: string,
+		input: Record<string, unknown>,
+		key: string,
+	): Promise<boolean> {
 		if (this.chatAllowed.get(sessionId)?.has(key)) return Promise.resolve(true);
 		const previous = this.liveBySession.get(sessionId);
 		if (previous) this.settle(previous, false);
@@ -100,7 +105,12 @@ bus.on("session:end", ({ sessionId, reason }) => {
 export function withChannelApprovals<T>(sessionId: string, fn: () => T): T {
 	return runWithChannelApprover(
 		({ details, command }: ChannelApprovalRequest) =>
-			channelApprovals.request(sessionId, "run_command", { command, reason: details }, `run_command:${command}`),
+			channelApprovals.request(
+				sessionId,
+				"run_command",
+				{ command, reason: details },
+				`run_command:${command}`,
+			),
 		fn,
 	);
 }
