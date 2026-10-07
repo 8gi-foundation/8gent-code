@@ -61,7 +61,7 @@ async function gateShellChild(
 		}
 		const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 		const pm = getPermissionManager();
-		const check = pm.checkPermission(command);
+		const check = pm.checkPermission(command, cwd);
 		if (check === "denied")
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		const { systemOneGate } = await import("../permissions/system-one-gate");
@@ -79,6 +79,7 @@ async function gateShellChild(
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command as a background agent.",
 				command,
+				{ cwd },
 			);
 			if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 		}

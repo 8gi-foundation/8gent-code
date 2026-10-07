@@ -33,7 +33,7 @@
 
 import { ACTION_RISK, AUTONOMY_RUNG, type ActionRisk } from "../daemon/autonomy";
 import { ACTION_STATUS, MakerCheckerStore } from "../daemon/maker-checker";
-import { isCommandDangerous } from "./index";
+import { isCommandDangerous, isProtectedBranchName } from "./index";
 
 /** Typed error thrown when a destructive tool is blocked pending approval. */
 export class MakerCheckerBlockedError extends Error {
@@ -103,11 +103,14 @@ export function resetMakerCheckerEnforcer(): void {
 export function classifyToolAction(
 	toolName: string,
 	args: Record<string, unknown>,
+	cwd?: string,
 ): { action: string; risk: ActionRisk } | null {
 	switch (toolName) {
 		case "git_push": {
+			// The executor resolves the branch the push lands on into `branch`
+			// and sets `protectedPush` when it is main/master or unknown.
 			const branch = String(args.branch ?? "").trim() || "current";
-			const isMain = branch === "main" || branch === "master";
+			const isMain = isProtectedBranchName(branch) || branch === "*" || args.protectedPush === true;
 			return {
 				action: `git:push:${branch}`,
 				risk: isMain ? ACTION_RISK.DESTRUCTIVE : ACTION_RISK.RISKY,
@@ -134,7 +137,8 @@ export function classifyToolAction(
 			if (!cmd) return null;
 			// Reuse the existing danger heuristic. Benign shell is not gated so
 			// autonomous non-destructive work (ls, cat, grep, build) is unaffected.
-			if (isCommandDangerous(cmd)) {
+			// isCommandDangerous includes protected-branch pushes, resolved in cwd.
+			if (isCommandDangerous(cmd, cwd)) {
 				return {
 					action: `shell:${cmd.slice(0, 120)}`,
 					risk: ACTION_RISK.DESTRUCTIVE,
@@ -167,6 +171,8 @@ export interface EnforceOptions {
 	unattended: boolean;
 	/** Identifier of the agent/vessel making the request. */
 	makerId?: string;
+	/** Directory the tool runs in, for resolving where a push lands. */
+	cwd?: string;
 }
 
 /**
@@ -198,7 +204,7 @@ export function assertMakerCheckerApproved(
 ): void {
 	if (!enforcementActive(opts.unattended)) return;
 
-	const classified = classifyToolAction(toolName, args);
+	const classified = classifyToolAction(toolName, args, opts.cwd);
 	if (!classified) return;
 
 	const store = getMakerCheckerStore();

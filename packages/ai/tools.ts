@@ -1260,7 +1260,7 @@ async function runShellCommand(command: string): Promise<string> {
 	const permissionManager = getPermissionManager();
 	const hookManager = getHookManager();
 
-	const permissionCheck = permissionManager.checkPermission(command);
+	const permissionCheck = permissionManager.checkPermission(command, ctx.workingDirectory);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1290,6 +1290,7 @@ async function runShellCommand(command: string): Promise<string> {
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
+			{ cwd: ctx.workingDirectory },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}

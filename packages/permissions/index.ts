@@ -10,8 +10,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { matchGitPushProtectedBranch } from "./go-deny-list.js";
+import { PROTECTED_BRANCHES, matchGitPushProtectedBranch } from "./go-deny-list.js";
 import { currentPermissionMode } from "./permission-mode.js";
+import { gitPushResolver } from "./push-target.js";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
 // ============================================
@@ -697,14 +698,14 @@ export class PermissionManager {
 	 * Check if a command matches any dangerous patterns.
 	 * Uses token-based parsing instead of substring matching.
 	 */
-	isDangerous(command: string): boolean {
+	isDangerous(command: string, cwd?: string): boolean {
 		const normalizedCmd = command.trim();
 		const parsed = parseCommand(normalizedCmd);
 		const cmdLower = parsed.command.toLowerCase();
 		const argsLower = parsed.args.map((a) => a.toLowerCase());
 		const fullCmdLower = normalizedCmd.toLowerCase();
 
-		if (isProtectedBranchPush(normalizedCmd)) return true;
+		if (isProtectedBranchPush(normalizedCmd, cwd)) return true;
 
 		// Check for dangerous pipe patterns (curl/wget piped to shell)
 		for (const source of DANGEROUS_PIPE_SOURCES) {
@@ -844,7 +845,7 @@ export class PermissionManager {
 		action: string,
 		details: string,
 		command?: string,
-		opts: { defaultNo?: boolean } = {},
+		opts: { defaultNo?: boolean; cwd?: string } = {},
 	): Promise<boolean> {
 		const request: PermissionRequest = {
 			id: `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -856,7 +857,7 @@ export class PermissionManager {
 
 		// Protected branches come before infinite mode, auto-approve and the
 		// allow list: a person approves each push, or it does not happen.
-		if (command && isProtectedBranchPush(command)) {
+		if (command && isProtectedBranchPush(command, opts.cwd)) {
 			const headless = this.isHeadless();
 			if (headless) {
 				console.error(`[permissions] DENIED: ${protectedBranchPushMessage()} Command: ${command}`);
@@ -1033,9 +1034,9 @@ export class PermissionManager {
 	 * Check permission for a command without prompting
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
-	checkPermission(command: string): "allowed" | "denied" | "ask" {
+	checkPermission(command: string, cwd?: string): "allowed" | "denied" | "ask" {
 		// Protected branches: never "allowed", whatever the allow list or mode says.
-		if (command && isProtectedBranchPush(command)) {
+		if (command && isProtectedBranchPush(command, cwd)) {
 			return this.isHeadless() ? "denied" : "ask";
 		}
 
@@ -1187,14 +1188,28 @@ export class PermissionManager {
 // Protected branches
 // ============================================
 
-/** A shell command that pushes to main/master (see go-deny-list.ts). */
-export function isProtectedBranchPush(command: string): boolean {
-	return matchGitPushProtectedBranch(command);
+/**
+ * A shell command that pushes to main/master (see go-deny-list.ts). Pushes
+ * that name no branch (`git push`, `git push origin`, `git push origin HEAD`)
+ * and git aliases are resolved in `cwd` (default: this process's directory):
+ * the current branch, its upstream and push.default decide where they land,
+ * and a push whose destination cannot be worked out counts as protected.
+ */
+export function isProtectedBranchPush(command: string, cwd?: string): boolean {
+	return matchGitPushProtectedBranch(command, {
+		cwd: cwd ?? process.cwd(),
+		resolver: gitPushResolver,
+	});
+}
+
+/** A branch name a push may not land on without a person approving it. */
+export function isProtectedBranchName(name: string): boolean {
+	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^refs\/heads\//, ""));
 }
 
 /** Why a protected-branch push was refused when no person could approve it. */
 export function protectedBranchPushMessage(): string {
-	return "Pushing to a protected branch (main/master) needs a person to approve it, and this run has no one to ask. Push a feature branch and open a pull request instead.";
+	return "Pushing to a protected branch (main/master), or to a branch that cannot be worked out from the command and the repository, needs a person to approve it, and this run has no one to ask. Push a feature branch and open a pull request instead.";
 }
 
 // ============================================
@@ -1247,9 +1262,9 @@ export async function requestCommandPermission(command: string): Promise<boolean
 /**
  * Check if command is dangerous (convenience function)
  */
-export function isCommandDangerous(command: string): boolean {
+export function isCommandDangerous(command: string, cwd?: string): boolean {
 	const manager = getPermissionManager();
-	return manager.isDangerous(command);
+	return manager.isDangerous(command, cwd);
 }
 
 /**
@@ -1282,6 +1297,7 @@ export function isInfiniteMode(): boolean {
 // ============================================
 
 export { ToolG8 } from "./toolg8.js";
+export { pushDestinationBranch } from "./push-target.js";
 export {
 	enforceCapability,
 	getToolManifest,
