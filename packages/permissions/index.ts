@@ -25,7 +25,13 @@ export interface ChannelApprovalRequest {
 	command: string;
 }
 /** How a channel approval ended. Only "approved" lets the command run. */
-export type ChannelOutcome = "approved" | "denied" | "expired" | "replaced" | "undelivered";
+export type ChannelOutcome =
+	| "approved"
+	| "denied"
+	| "expired"
+	| "replaced"
+	| "undelivered"
+	| "unshowable";
 export type ChannelApprover = (req: ChannelApprovalRequest) => Promise<ChannelOutcome>;
 interface ChannelScope {
 	approver: ChannelApprover;
@@ -38,6 +44,8 @@ const NOT_RUN: Partial<Record<ChannelOutcome, string>> = {
 	expired: "Approval expired: nobody answered in time. Nothing ran",
 	replaced: "Approval replaced by a newer request before anyone answered. Nothing ran",
 	undelivered: "The approval card could not be shown to the person. Nothing ran",
+	unshowable:
+		"The command is too long to show the person in full, so it was not offered. Nothing ran",
 };
 
 /**
@@ -998,6 +1006,10 @@ export class PermissionManager {
 			if (command && this.isDangerous(command)) {
 				// A channel with a human behind it asks; push to main never gets this far.
 				const scope = _channelApprover.getStore();
+				if (scope && this.isAlwaysBlocked(command).blocked) {
+					console.log(`[permissions] DENIED (always blocked, never offered): ${command}`);
+					return false;
+				}
 				if (scope) {
 					scope.last = await scope.approver({ action, details, command });
 					return scope.last === "approved";
@@ -1063,6 +1075,9 @@ export class PermissionManager {
 			}
 			return "allowed";
 		}
+
+		// A channel turn never offers an always-blocked command (#3621, 8SO M4).
+		if (_channelApprover.getStore() && this.isAlwaysBlocked(command).blocked) return "denied";
 
 		const normalizedCmd = command.toLowerCase().trim();
 

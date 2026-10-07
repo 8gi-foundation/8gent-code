@@ -2,23 +2,37 @@
  * #3621: the Telegram approval loop, end to end on one box.
  *
  * Real gateway on a loopback port, the real TelegramDaemonBridge connected to
- * it, the real permission gate (PermissionManager.requestPermission, headless)
- * and the real coordinator. The pool is a stand-in whose turn is one gated
- * shell command, bound the way AgentPool.chat binds a telegram turn. Telegram
- * itself is a stubbed fetch, so nothing leaves the box.
+ * it (registered as the approval bridge with the in-process secret), the real
+ * permission gate (PermissionManager.requestPermission, headless) and the real
+ * coordinator. The pool is a stand-in whose turn is one gated shell command,
+ * bound exactly as AgentPool.chat binds a bridge turn. Telegram itself is a
+ * stubbed fetch that refuses malformed text the way Telegram does.
+ *
+ * The "8SO" block ports Karen's exploit probes (E1-E4) from the review of
+ * d6e00efc as regressions: each asserts the exploit no longer works.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PermissionManager, channelDenialMessage } from "../permissions/index";
 import { DaemonClient } from "../telegram-bot/daemon-client";
 import type { AgentPool } from "./agent-pool";
-import { withChannelApprovals } from "./channel-approvals";
+import {
+	type ApprovalTurn,
+	allowable,
+	bridgeSecret,
+	withChannelApprovals,
+} from "./channel-approvals";
 import { startGateway } from "./gateway";
-import { TelegramDaemonBridge } from "./telegram-bridge";
+import { TelegramDaemonBridge, visibleText } from "./telegram-bridge";
 
 const JAMES = 5486040131;
 const ARTALE = 8270920648;
 const GROUP = -1001;
+const DEL = ["r", "m"].join("") + " -rf";
+const CWD = "/work/repo";
 
 /** One turn = one dangerous shell command through the real gate. */
 class GatedPool {
@@ -41,16 +55,19 @@ class GatedPool {
 	getStatus() {
 		return {};
 	}
-	async chat(sessionId: string, command: string): Promise<string> {
+	async chat(sessionId: string, command: string, turn?: ApprovalTurn): Promise<string> {
 		// The same two calls runCommand makes: the gate, then the refusal text.
-		const { allowed, note } = await withChannelApprovals(sessionId, async () => {
+		const run = async () => {
 			const ok = await this.pm.requestPermission(
 				"Execute Shell Command",
 				"This command may cause data loss.",
 				command,
 			);
 			return { allowed: ok, note: ok ? null : channelDenialMessage(command) };
-		});
+		};
+		const { allowed, note } = await (turn
+			? withChannelApprovals(sessionId, turn, CWD, run)
+			: run());
 		this.outcomes.push({ command, allowed, note });
 		return allowed ? "ran" : "declined";
 	}
@@ -90,11 +107,14 @@ let server: ReturnType<typeof Bun.serve>;
 let bridge: TelegramDaemonBridge;
 let tg: TgCall[] = [];
 let nextMessageId = 100;
+let dataDir: string;
 const realFetch = globalThis.fetch;
 const saved = {
 	host: process.env.DAEMON_HOSTNAME,
 	headless: process.env.EIGHT_HEADLESS,
 	ttl: process.env.EIGHT_APPROVAL_TTL_MS,
+	allowTtl: process.env.EIGHT_APPROVAL_ALLOW_TTL_MS,
+	data: process.env.EIGHT_DATA_DIR,
 };
 
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
@@ -110,28 +130,59 @@ const settle = () => new Promise((r) => setTimeout(r, 80));
 const priv = () => bridge as any;
 const cards = () =>
 	tg.filter((c) => c.method === "sendMessage" && c.body.reply_markup && c.accepted);
+const texts = () => tg.filter((c) => c.method === "sendMessage").map((c) => String(c.body.text));
 const edits = () =>
 	tg.filter((c) => c.method === "editMessageText" && c.accepted).map((c) => String(c.body.text));
-const texts = () => tg.filter((c) => c.method === "sendMessage").map((c) => String(c.body.text));
+const labels = (card: TgCall): string[] =>
+	card.body.reply_markup.inline_keyboard.flat().map((b: TgButton) => b.text);
 const button = (card: TgCall, label: string): string =>
 	card.body.reply_markup.inline_keyboard.flat().find((b: TgButton) => b.text === label)
 		.callback_data;
 
-function prompt(command: string): void {
-	priv().ws.send(JSON.stringify({ type: "prompt", text: command }));
+const OPERATOR_DM: ApprovalTurn = { chatId: String(JAMES), operator: true };
+
+/** Exactly what the bridge sends for a turn it started. */
+function prompt(command: string, turn: ApprovalTurn = OPERATOR_DM): void {
+	priv().ws.send(JSON.stringify({ type: "prompt", text: command, turn }));
 }
-function press(fromId: number, data: string, messageId?: number): Promise<void> {
+/** A tap in a chat; by default James in his DM with the bot, where cards land. */
+function press(
+	fromId: number,
+	data: string,
+	chat: { id: number; type: string } = { id: fromId, type: "private" },
+): Promise<void> {
 	return priv().handleCallbackQuery({
 		id: `q${Math.random()}`,
 		from: { id: fromId, first_name: "x" },
-		message: { message_id: messageId ?? 1, chat: { id: GROUP, type: "supergroup" } },
+		message: { message_id: 1, chat },
 		data,
 	});
+}
+function rogueSocket(): Promise<{ ws: WebSocket; frames: Array<Record<string, unknown>> }> {
+	const ws = new WebSocket(`ws://127.0.0.1:${server.port}`);
+	const frames: Array<Record<string, unknown>> = [];
+	ws.onmessage = (ev) => frames.push(JSON.parse(String(ev.data)));
+	return new Promise((r) => {
+		ws.onopen = () => r({ ws, frames });
+	});
+}
+function auditLines(): Array<Record<string, unknown>> {
+	try {
+		return readFileSync(join(dataDir, "approvals-audit.jsonl"), "utf-8")
+			.trim()
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l));
+	} catch {
+		return [];
+	}
 }
 
 beforeAll(async () => {
 	process.env.DAEMON_HOSTNAME = "127.0.0.1";
 	process.env.EIGHT_HEADLESS = "1";
+	dataDir = mkdtempSync(join(tmpdir(), "approval-audit-"));
+	process.env.EIGHT_DATA_DIR = dataDir;
 	globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
 		const method = String(url).split("/").pop() as string;
 		const body = init?.body ? JSON.parse(init.body) : {};
@@ -172,12 +223,15 @@ afterAll(() => {
 	priv().ws.close();
 	server.stop(true);
 	globalThis.fetch = realFetch;
+	rmSync(dataDir, { recursive: true, force: true });
 	for (const [k, v] of [
 		["DAEMON_HOSTNAME", saved.host],
 		["EIGHT_HEADLESS", saved.headless],
 		["EIGHT_APPROVAL_TTL_MS", saved.ttl],
+		["EIGHT_APPROVAL_ALLOW_TTL_MS", saved.allowTtl],
+		["EIGHT_DATA_DIR", saved.data],
 	] as const) {
-		if (v === undefined) delete process.env[k];
+		if (v === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = v;
 	}
 });
@@ -188,28 +242,30 @@ beforeEach(() => {
 	stub.rejectHtml = false;
 	stub.rejectCards = false;
 	pool.pm = new PermissionManager("/nonexistent/8gent-permissions.json");
-	delete process.env.EIGHT_APPROVAL_TTL_MS;
+	Reflect.deleteProperty(process.env, "EIGHT_APPROVAL_TTL_MS");
+	Reflect.deleteProperty(process.env, "EIGHT_APPROVAL_ALLOW_TTL_MS");
 });
 afterEach(() => {
 	priv().pendingApprovals.clear();
+	priv().awaitingAck.clear();
 });
 
 describe("Telegram approval loop (#3621)", () => {
 	it("a gated command raises exactly one card, and Approve lets the turn continue", async () => {
-		prompt("rm -rf ./build-a");
+		prompt(`${DEL} ./build-a`);
 		await until(() => cards().length === 1);
 		await settle();
 		expect(pool.outcomes).toEqual([]); // the turn is waiting, not denied
 
 		await press(JAMES, button(cards()[0], "Approve"));
 		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-a", allowed: true });
-		await settle();
+		expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./build-a`, allowed: true });
+		await until(() => edits().includes(`Approved: ${DEL} ./build-a`));
 		expect(cards().length).toBe(1); // the press drew no second card
 	});
 
 	it("a second press, and a replayed answer straight to the daemon, are refused", async () => {
-		prompt("rm -rf ./build-b");
+		prompt(`${DEL} ./build-b`);
 		await until(() => cards().length === 1);
 		const approve = button(cards()[0], "Approve");
 		await press(JAMES, approve);
@@ -223,12 +279,14 @@ describe("Telegram approval loop (#3621)", () => {
 		expect(cards().length).toBe(1);
 	});
 
-	it("a stale card expires after its TTL and fails closed", async () => {
+	it("a stale card expires after its TTL, is edited, and the model hears 'expired'", async () => {
 		process.env.EIGHT_APPROVAL_TTL_MS = "150";
-		prompt("rm -rf ./build-c");
+		prompt(`${DEL} ./build-c`);
 		await until(() => cards().length === 1);
 		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0].allowed).toBe(false);
+		expect(pool.outcomes[0]).toMatchObject({ allowed: false });
+		expect(pool.outcomes[0].note).toContain("Approval expired");
+		await until(() => edits().includes(`Expired. Nothing ran: ${DEL} ./build-c`));
 
 		await press(JAMES, button(cards()[0], "Approve"));
 		await settle();
@@ -236,45 +294,42 @@ describe("Telegram approval loop (#3621)", () => {
 		expect(pool.outcomes.length).toBe(1);
 	});
 
-	it("a new prompt in the session replaces the live one", async () => {
-		prompt("rm -rf ./build-d1");
+	it("a new prompt replaces the live one: old card edited, model hears 'replaced'", async () => {
+		prompt(`${DEL} ./build-d1`);
 		await until(() => cards().length === 1);
-		prompt("rm -rf ./build-d2");
+		prompt(`${DEL} ./build-d2`);
 		await until(() => cards().length === 2);
 		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-d1", allowed: false });
+		expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./build-d1`, allowed: false });
+		expect(pool.outcomes[0].note).toContain("Approval replaced");
+		await until(() =>
+			edits().includes(`Replaced by a newer request. Nothing ran: ${DEL} ./build-d1`),
+		);
 
 		await press(JAMES, button(cards()[0], "Approve"));
 		await settle();
 		expect(pool.outcomes.length).toBe(1);
 		await press(JAMES, button(cards()[1], "Approve"));
 		await until(() => pool.outcomes.length === 2);
-		expect(pool.outcomes[1]).toMatchObject({ command: "rm -rf ./build-d2", allowed: true });
+		expect(pool.outcomes[1]).toMatchObject({ command: `${DEL} ./build-d2`, allowed: true });
 	});
 
-	it("Allow in this chat skips the next identical prompt, not a different one", async () => {
-		prompt("rm -rf ./build-e");
+	it("Deny posts a fixed line, the card keeps the command, the model hears no excuse", async () => {
+		prompt(`${DEL} ./build-j`);
 		await until(() => cards().length === 1);
-		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
+		await press(JAMES, button(cards()[0], "Deny"));
 		await until(() => pool.outcomes.length === 1);
-
-		prompt("rm -rf ./build-e");
-		await until(() => pool.outcomes.length === 2);
-		expect(pool.outcomes[1]).toMatchObject({ command: "rm -rf ./build-e", allowed: true });
-		expect(cards().length).toBe(1);
-
-		prompt("rm -rf ./build-other");
-		await until(() => cards().length === 2);
-		await press(JAMES, button(cards()[1], "Deny"));
-		await until(() => pool.outcomes.length === 3);
-		expect(pool.outcomes[2]).toMatchObject({ command: "rm -rf ./build-other", allowed: false });
+		expect(pool.outcomes[0]).toMatchObject({ allowed: false, note: null });
+		await until(() => texts().includes("Denied. Nothing ran."));
+		expect(edits()).toContain(`Denied. Nothing ran: ${DEL} ./build-j`);
 	});
 
-	it("Artale's press is refused; only the operator resolves the card", async () => {
-		prompt("rm -rf ./build-f");
+	it("Artale's tap is refused; only the operator resolves the card", async () => {
+		prompt(`${DEL} ./build-f`);
 		await until(() => cards().length === 1);
 		const approve = button(cards()[0], "Approve");
 
+		await press(ARTALE, approve, { id: GROUP, type: "supergroup" });
 		await press(ARTALE, approve);
 		await settle();
 		expect(pool.outcomes).toEqual([]);
@@ -286,108 +341,60 @@ describe("Telegram approval loop (#3621)", () => {
 		expect(pool.outcomes[0].allowed).toBe(true);
 	});
 
-	it("default (multi-step) mode: the card comes from the adapter's session and the answer goes back on it", async () => {
-		const client = new DaemonClient({
-			url: `ws://127.0.0.1:${server.port}`,
-			channel: "telegram",
-			reconnectDelayMs: 10,
-		});
-		await client.connect();
-		priv().daemonClient = client;
-		priv().watchAdapterApprovals(client);
-		try {
-			client.sendPrompt("rm -rf ./build-g");
-			await until(() => cards().length === 1);
-			await press(JAMES, button(cards()[0], "Approve"));
-			await until(() => pool.outcomes.length === 1);
-			expect(pool.outcomes[0]).toMatchObject({ command: "rm -rf ./build-g", allowed: true });
-		} finally {
-			priv().daemonClient = null;
-			client.close();
-		}
-	});
-
-	it("a command full of _ * ` < > & still renders as a card, whole, with Command and Why lines", async () => {
-		const command = "rm -rf node_modules/*_tmp && rm -f *.log && echo `id` <in >out & echo a_b";
-		prompt(command);
+	it("a group turn puts a short note in the group and the full card in James's DM", async () => {
+		prompt(`${DEL} ./build-m`, { chatId: String(GROUP), operator: true });
 		await until(() => cards().length === 1);
-		const text = String(cards()[0].body.text);
-		expect(text).toContain(
-			"Command: <code>rm -rf node_modules/*_tmp && rm -f *.log".replace(/&/g, "&amp;"),
-		);
-		expect(text).toContain("&lt;in &gt;out &amp; echo a_b</code>");
-		expect(text).toContain("\nWhy: This command may cause data loss.");
-		expect(text).not.toContain("{");
-		await press(JAMES, button(cards()[0], "Approve"));
-		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toMatchObject({ command, allowed: true });
-		expect(edits()).toContain(`Approved: ${command}`);
-	});
-
-	it("a refused HTML card is retried once as plain text", async () => {
-		stub.rejectHtml = true;
-		prompt("rm -rf ./build-h");
-		await until(() => cards().length === 1);
-		expect(cards()[0].body.parse_mode).toBeUndefined();
-		expect(String(cards()[0].body.text)).toContain("Command: rm -rf ./build-h");
+		expect(cards()[0].body.chat_id).toBe(String(JAMES));
+		expect(
+			tg.some(
+				(c) =>
+					c.method === "sendMessage" &&
+					c.body.chat_id === String(GROUP) &&
+					c.body.text === "Approval needed, check your DM.",
+			),
+		).toBe(true);
+		expect(tg.some((c) => c.body.chat_id === String(GROUP) && c.body.reply_markup)).toBe(false);
 		await press(JAMES, button(cards()[0], "Approve"));
 		await until(() => pool.outcomes.length === 1);
 		expect(pool.outcomes[0].allowed).toBe(true);
 	});
 
-	it("a card Telegram will not show denies at once, says so, and tells the model why", async () => {
-		stub.rejectCards = true;
-		const started = Date.now();
-		prompt("rm -rf ./build-i");
-		await until(() => pool.outcomes.length === 1);
-		expect(Date.now() - started).toBeLessThan(2000);
-		expect(pool.outcomes[0]).toMatchObject({ allowed: false });
-		expect(pool.outcomes[0].note).toContain("could not be shown");
-		expect(texts().some((t) => t.includes("Could not show an approval card"))).toBe(true);
+	it("the card changes only after the daemon confirms the answer counted", async () => {
+		// A card the bridge still shows but the daemon no longer holds.
+		priv().pendingApprovals.set("feedf00d", {
+			tool: "run_command",
+			input: { command: `${DEL} ./ghost` },
+			chatId: String(JAMES),
+			sessionId: priv().sessionId,
+			expiresAt: Date.now() + 60_000,
+			messageId: 7,
+			via: "ws",
+		});
+		await press(JAMES, "approve:feedf00d");
+		await until(() => edits().includes(`No longer live. Nothing ran: ${DEL} ./ghost`));
+		expect(edits().some((t) => t.startsWith("Approved"))).toBe(false);
+		expect(texts().some((t) => t.includes("no longer live"))).toBe(true);
 	});
 
-	it("Deny posts a fixed line and the closed card keeps the command", async () => {
-		prompt("rm -rf ./build-j");
-		await until(() => cards().length === 1);
-		await press(JAMES, button(cards()[0], "Deny"));
-		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toMatchObject({ allowed: false, note: null });
-		expect(texts()).toContain("Denied. Nothing ran.");
-		expect(edits()).toContain("Denied. Nothing ran: rm -rf ./build-j");
-	});
-
-	it("expiry edits the card and the model hears 'expired', not 'declined'", async () => {
-		process.env.EIGHT_APPROVAL_TTL_MS = "150";
-		prompt("rm -rf ./build-k");
-		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0].note).toContain("Approval expired");
-		await until(() => edits().includes("Expired. Nothing ran: rm -rf ./build-k"));
-	});
-
-	it("a replaced card is edited and the model hears 'replaced'", async () => {
-		prompt("rm -rf ./build-l1");
-		await until(() => cards().length === 1);
-		prompt("rm -rf ./build-l2");
-		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0].note).toContain("Approval replaced");
-		await until(() =>
-			edits().includes("Replaced by a newer request. Nothing ran: rm -rf ./build-l1"),
-		);
-		await until(() => cards().length === 2);
-		await press(JAMES, button(cards()[1], "Allow this command in this chat"));
-		await until(() => edits().includes("Allowed this command in this chat: rm -rf ./build-l2"));
-	});
-
-	it("adapter socket: a refused answer is reported, not silently dropped", async () => {
+	it("default (multi-step) mode: the adapter's socket carries the card, the answer and refusals", async () => {
 		const client = new DaemonClient({
 			url: `ws://127.0.0.1:${server.port}`,
 			channel: "telegram",
 			reconnectDelayMs: 10,
+			approvalSecret: bridgeSecret(),
 		});
 		await client.connect();
+		client.turn = OPERATOR_DM;
 		priv().daemonClient = client;
 		priv().watchAdapterApprovals(client);
 		try {
+			client.sendPrompt(`${DEL} ./build-g`);
+			await until(() => cards().length === 1);
+			await press(JAMES, button(cards()[0], "Approve"));
+			await until(() => pool.outcomes.length === 1);
+			expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./build-g`, allowed: true });
+			await until(() => edits().includes(`Approved: ${DEL} ./build-g`));
+
 			client.respondApproval("deadbeef", true);
 			await until(() => texts().some((t) => t.includes("no longer live")));
 		} finally {
@@ -397,10 +404,235 @@ describe("Telegram approval loop (#3621)", () => {
 	});
 
 	it("push to main is never offered for approval", async () => {
-		const allowed = await withChannelApprovals("no-surface", () =>
+		const allowed = await withChannelApprovals("no-surface", OPERATOR_DM, CWD, () =>
 			pool.pm.requestPermission("Execute Shell Command", "x", "git push origin main --force"),
 		);
 		expect(allowed).toBe(false);
 		expect(cards().length).toBe(0);
+	});
+});
+
+describe("card rendering (8PO item 1, 8SO HIGH-2)", () => {
+	it("a command full of _ * ` < > & renders whole, with Command, In and Why lines", async () => {
+		const command = `${DEL} node_modules/a_tmp && echo \`id\` <in >out & echo a_b`;
+		prompt(command);
+		await until(() => cards().length === 1);
+		const text = String(cards()[0].body.text);
+		expect(cards()[0].body.parse_mode).toBe("HTML");
+		expect(text).toContain(
+			`Command: <code>${DEL} node_modules/a_tmp &amp;&amp; echo \`id\` &lt;in &gt;out &amp; echo a_b</code>`,
+		);
+		expect(text).toContain(`\nIn: <code>${CWD}</code>`);
+		expect(text).toContain("\nWhy: This command may cause data loss.");
+		await press(JAMES, button(cards()[0], "Approve"));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0]).toMatchObject({ command, allowed: true });
+		await until(() => edits().includes(`Approved: ${command}`));
+	});
+
+	it("a refused HTML card is retried once as plain text", async () => {
+		stub.rejectHtml = true;
+		prompt(`${DEL} ./build-h`);
+		await until(() => cards().length === 1);
+		expect(cards()[0].body.parse_mode).toBeUndefined();
+		expect(String(cards()[0].body.text)).toContain(`Command: ${DEL} ./build-h`);
+		await press(JAMES, button(cards()[0], "Approve"));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].allowed).toBe(true);
+	});
+
+	it("a card Telegram will not show denies at once, says so, and tells the model why", async () => {
+		stub.rejectCards = true;
+		const started = Date.now();
+		prompt(`${DEL} ./build-i`);
+		await until(() => pool.outcomes.length === 1);
+		expect(Date.now() - started).toBeLessThan(2000);
+		expect(pool.outcomes[0]).toMatchObject({ allowed: false });
+		expect(pool.outcomes[0].note).toContain("could not be shown");
+		expect(texts().some((t) => t.includes("Could not show an approval card"))).toBe(true);
+	});
+
+	it("invisible characters are shown as escapes", () => {
+		expect(visibleText("a‮b​c\nd e")).toBe("a\\u{202e}b\\u{200b}c\\u{a}d\\u{a0}e");
+	});
+});
+
+describe("allow in this chat (8SO HIGH-3)", () => {
+	it("skips the next identical prompt in the same chat, not a different command", async () => {
+		prompt(`${DEL} ./build-e`);
+		await until(() => cards().length === 1);
+		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
+		await until(() => pool.outcomes.length === 1);
+		await until(() => edits().includes(`Allowed this command in this chat: ${DEL} ./build-e`));
+
+		prompt(`${DEL} ./build-e`);
+		await until(() => pool.outcomes.length === 2);
+		expect(pool.outcomes[1]).toMatchObject({ allowed: true });
+		expect(cards().length).toBe(1);
+
+		prompt(`${DEL} ./build-other`);
+		await until(() => cards().length === 2);
+		await press(JAMES, button(cards()[1], "Deny"));
+		await until(() => pool.outcomes.length === 3);
+		expect(pool.outcomes[2]).toMatchObject({ allowed: false });
+	});
+
+	it("does not carry to another chat, or to a turn the operator did not start", async () => {
+		prompt(`${DEL} ./build-n`);
+		await until(() => cards().length === 1);
+		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
+		await until(() => pool.outcomes.length === 1);
+
+		prompt(`${DEL} ./build-n`, { chatId: String(GROUP), operator: true });
+		await until(() => cards().length === 2);
+		await press(JAMES, button(cards()[1], "Deny"));
+		await until(() => pool.outcomes.length === 2);
+
+		prompt(`${DEL} ./build-n`, { chatId: String(JAMES), operator: false });
+		await until(() => cards().length === 3);
+		await press(JAMES, button(cards()[2], "Deny"));
+		await until(() => pool.outcomes.length === 3);
+		expect(pool.outcomes.map((o) => o.allowed)).toEqual([true, false, false]);
+	});
+
+	it("expires after its TTL", async () => {
+		process.env.EIGHT_APPROVAL_ALLOW_TTL_MS = "100";
+		prompt(`${DEL} ./build-o`);
+		await until(() => cards().length === 1);
+		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
+		await until(() => pool.outcomes.length === 1);
+		await new Promise((r) => setTimeout(r, 150));
+		prompt(`${DEL} ./build-o`);
+		await until(() => cards().length === 2);
+		await press(JAMES, button(cards()[1], "Deny"));
+		await until(() => pool.outcomes.length === 2);
+	});
+
+	it("is never offered for scripts, interpreters or expanding commands, and a forged allow is one approve", async () => {
+		for (const c of [
+			"bash ./x.sh",
+			"python3 tool.py",
+			`${DEL} $HOME/x`,
+			`${DEL} ./*.log`,
+			`${DEL} ~/x`,
+			`${DEL} \`pwd\`/x`,
+		]) {
+			expect(allowable(c)).toBe(false);
+		}
+		expect(allowable(`${DEL} ./build`)).toBe(true);
+
+		const command = `${DEL} ./*.tmp`;
+		prompt(command);
+		await until(() => cards().length === 1);
+		expect(labels(cards()[0])).toEqual(["Approve", "Deny"]);
+		const id = button(cards()[0], "Approve").split(":")[1];
+		await press(JAMES, `allowchat:${id}`);
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].allowed).toBe(true);
+
+		prompt(command);
+		await until(() => cards().length === 2);
+		await press(JAMES, button(cards()[1], "Deny"));
+		await until(() => pool.outcomes.length === 2);
+		expect(pool.outcomes[1].allowed).toBe(false);
+	});
+});
+
+describe("audit log (8SO MEDIUM-5)", () => {
+	it("records every decision and auto-pass with who, where and what, in a 0600 file", async () => {
+		prompt(`${DEL} ./build-p`);
+		await until(() => cards().length === 1);
+		await press(JAMES, button(cards()[0], "Allow this command in this chat"));
+		await until(() => pool.outcomes.length === 1);
+		prompt(`${DEL} ./build-p`);
+		await until(() => pool.outcomes.length === 2);
+
+		const lines = auditLines().filter((l) => l.command === `${DEL} ./build-p`);
+		expect(lines.map((l) => l.decision)).toEqual(["allow_chat", "auto-allow"]);
+		expect(lines[0]).toMatchObject({ approver: String(JAMES), chat: String(JAMES) });
+		expect(typeof lines[0].requestId).toBe("string");
+		expect(typeof lines[0].ts).toBe("string");
+		expect(statSync(join(dataDir, "approvals-audit.jsonl")).mode & 0o777).toBe(0o600);
+	});
+});
+
+describe("8SO exploit probes, as regressions (#3624 review)", () => {
+	it("E1: a second loopback client on the bridge's session cannot see, answer, or raise approvals", async () => {
+		const sid = priv().sessionId as string;
+		const rogue = await rogueSocket();
+		rogue.ws.send(JSON.stringify({ type: "session:resume", sessionId: sid, channel: "telegram" }));
+		await settle();
+
+		prompt(`${DEL} ./e1`);
+		await until(() => cards().length === 1);
+		await settle();
+		expect(rogue.frames.some((f) => String(f.event ?? "").startsWith("approval:"))).toBe(false);
+
+		// Even holding the id (read off the card), its answer is refused.
+		const id = button(cards()[0], "Approve").split(":")[1];
+		rogue.ws.send(
+			JSON.stringify({ type: "approval:response", requestId: id, approved: true, scope: "chat" }),
+		);
+		await until(() => rogue.frames.some((f) => f.type === "approval:resolved"));
+		expect(rogue.frames.find((f) => f.type === "approval:resolved")).toMatchObject({
+			ok: false,
+			reason: "not-bridge",
+		});
+		expect(pool.outcomes).toEqual([]);
+
+		// A forged registration fails, and a turn it claims raises no card: flat deny.
+		rogue.ws.send(JSON.stringify({ type: "approvals:register", secret: "guess" }));
+		rogue.ws.send(JSON.stringify({ type: "prompt", text: `${DEL} ./e1-rogue`, turn: OPERATOR_DM }));
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./e1-rogue`, allowed: false });
+		expect(rogue.frames.find((f) => f.type === "approvals:registered")).toMatchObject({
+			ok: false,
+		});
+
+		// L8: the rogue leaving does not cancel the bridge's live prompt.
+		rogue.ws.close();
+		await settle();
+		await press(JAMES, button(cards()[0], "Deny"));
+		await until(() => pool.outcomes.length === 2);
+		expect(pool.outcomes[1]).toMatchObject({ command: `${DEL} ./e1`, allowed: false, note: null });
+	});
+
+	it("E2: the card shows the whole command; one too long to show is never offered", async () => {
+		const cmd = `${DEL} ./build ./${"a".repeat(190)} ~/important`;
+		prompt(cmd);
+		await until(() => cards().length === 1);
+		expect(String(cards()[0].body.text)).toContain("~/important</code>");
+		await press(JAMES, button(cards()[0], "Deny"));
+		await until(() => pool.outcomes.length === 1);
+
+		const huge = `${DEL} ./${"b".repeat(3100)} ~/important`;
+		prompt(huge);
+		await until(() => pool.outcomes.length === 2);
+		expect(pool.outcomes[1].allowed).toBe(false);
+		expect(pool.outcomes[1].note).toContain("too long to show");
+		expect(cards().length).toBe(1);
+	});
+
+	it("E3: bidi and zero-width characters reach the card as visible escapes", async () => {
+		const cmd = `${DEL} ./safe‮etadpu​`;
+		prompt(cmd);
+		await until(() => cards().length === 1);
+		const text = String(cards()[0].body.text);
+		expect(text.includes("‮")).toBe(false);
+		expect(text.includes("​")).toBe(false);
+		expect(text).toContain("safe\\u{202e}etadpu\\u{200b}");
+		await press(JAMES, button(cards()[0], "Deny"));
+		await until(() => pool.outcomes.length === 1);
+	});
+
+	it("E4: an always-blocked catastrophic command is denied flat, never offered", async () => {
+		prompt(`${DEL} /*`);
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0].allowed).toBe(false);
+		expect(cards().length).toBe(0);
+		const pm = new PermissionManager("/nonexistent/8gent-permissions.json");
+		expect(withChannelApprovals("s", OPERATOR_DM, CWD, () => pm.checkPermission(`${DEL} /*`))).toBe(
+			"denied",
+		);
 	});
 });

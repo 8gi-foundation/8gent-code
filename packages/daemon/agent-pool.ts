@@ -10,7 +10,7 @@ import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
-import { withChannelApprovals } from "./channel-approvals";
+import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import { bus } from "./events";
 import type { SessionJournal } from "./session-journal";
 
@@ -333,7 +333,11 @@ export class AgentPool {
 	}
 
 	/** Send a message to an agent and stream the response via the event bus */
-	async chat(sessionId: string, text: string): Promise<string> {
+	/**
+	 * `turn` is set only for a turn the Telegram bridge started on its own
+	 * authenticated socket (#3621); then a dangerous command asks the operator.
+	 */
+	async chat(sessionId: string, text: string, turn?: ApprovalTurn): Promise<string> {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) {
 			bus.emit("agent:error", { sessionId, error: "session not found" });
@@ -383,9 +387,10 @@ export class AgentPool {
 
 		const startMs = Date.now();
 		try {
-			// A Telegram turn asks the operator for a dangerous command (#3621).
-			const response = await (entry.channel === "telegram"
-				? withChannelApprovals(sessionId, () => entry.agent.chat(text))
+			const response = await (turn
+				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), () =>
+						entry.agent.chat(text),
+					)
 				: entry.agent.chat(text));
 
 			// Track token usage (estimate: ~4 chars/token).

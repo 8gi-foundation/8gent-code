@@ -19,7 +19,7 @@ import type {
 	SurfaceRegistry,
 	TokenVerifier,
 } from "./dispatch";
-import { channelApprovals } from "./channel-approvals";
+import { channelApprovals, isBridgeSecret, parseTurn } from "./channel-approvals";
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import {
@@ -71,6 +71,8 @@ interface ClientState {
 	channel: string; // "os", "telegram", "discord", "api", "computer"
 	sessionId: string | null;
 	authenticated: boolean;
+	/** Proved it is the Telegram approval bridge (#3621): only it answers approvals. */
+	approvalBridge?: boolean;
 	/** Marks a connection upgraded on the /computer route. */
 	isComputerRoute?: boolean;
 	/** Marks a connection upgraded on the /dispatch route. */
@@ -92,7 +94,9 @@ type InboundMessage =
 	| { type: "session:resume"; sessionId: string; channel?: string }
 	| { type: "session:compact"; sessionId: string }
 	| { type: "session:destroy"; sessionId: string }
-	| { type: "prompt"; text: string }
+	/** `turn` counts only from the registered approval bridge (#3621). */
+	| { type: "prompt"; text: string; turn?: unknown }
+	| { type: "approvals:register"; secret: string }
 	| { type: "sessions:list" }
 	| { type: "cron:list" }
 	| { type: "cron:add"; job: unknown }
@@ -105,6 +109,8 @@ type InboundMessage =
 			scope?: "chat";
 			/** The surface could not show the card: closes it as undelivered, not declined. */
 			undelivered?: boolean;
+			/** Telegram id of who pressed, for the audit log. */
+			approver?: string;
 	  }
 	| { type: "ping" }
 	| TimeTravelInbound;
@@ -123,6 +129,7 @@ type OutboundMessage =
 	| { type: "error"; message: string }
 	| { type: "pong" }
 	| { type: "approval:resolved"; requestId: string; ok: boolean; reason?: string }
+	| { type: "approvals:registered"; ok: boolean }
 	| TimeTravelOutbound;
 
 const clients = new Map<any, ClientState>();
@@ -170,6 +177,8 @@ function broadcastToSession(sessionId: string, event: EventName, payload: unknow
 		// Computer-route clients use the v1.1 protocol envelope; the legacy v1.0
 		// broadcast skips them so they only see the typed StreamEvent stream.
 		if (state.isComputerRoute) continue;
+		// Approval traffic names commands and carries live ids: the bridge only.
+		if (event.startsWith("approval:") && !state.approvalBridge) continue;
 		if (state.sessionId === sessionId && state.authenticated) {
 			send(ws, { type: "event", event, payload });
 		}
@@ -323,6 +332,8 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 		case "session:destroy": {
 			if (msg.sessionId) {
+				// Only the bridge's own socket may cancel its live prompt.
+				if (state.approvalBridge) channelApprovals.endSession(msg.sessionId);
 				pool.destroySession(msg.sessionId);
 				bus.emit("session:end", {
 					sessionId: msg.sessionId,
@@ -344,8 +355,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// Route the message to the agent via the pool
 			// This runs async - events will be broadcast as the agent works
 			const sid = state.sessionId;
+			// Only the bridge's own socket can make a turn ask for approval; a
+			// client that merely resumed the session cannot.
+			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
 			pool
-				.chat(sid, msg.text)
+				.chat(sid, msg.text, turn)
 				.then((response) => {
 					// Final response - signal session:end for this turn
 					bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
@@ -415,9 +429,27 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			break;
 		}
 
+		case "approvals:register": {
+			state.approvalBridge = isBridgeSecret(msg.secret);
+			if (!state.approvalBridge)
+				console.warn(`[gateway] client ${state.id} failed approval-bridge registration`);
+			send(ws, { type: "approvals:registered", ok: state.approvalBridge });
+			break;
+		}
+
 		case "approval:response": {
 			// Resolve the waiting prompt. This used to re-emit approval:required,
 			// so every press drew a second card and resolved nothing (#3621).
+			if (!state.approvalBridge) {
+				console.warn(`[gateway] refused approval:response from non-bridge client ${state.id}`);
+				send(ws, {
+					type: "approval:resolved",
+					requestId: String(msg.requestId),
+					ok: false,
+					reason: "not-bridge",
+				});
+				break;
+			}
 			const decision = msg.undelivered
 				? "undelivered"
 				: !msg.approved
@@ -425,7 +457,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					: msg.scope === "chat"
 						? "allow_chat"
 						: "approve";
-			const result = channelApprovals.respond(state.sessionId, String(msg.requestId), decision);
+			const result = channelApprovals.respond(
+				state.sessionId,
+				String(msg.requestId),
+				decision,
+				typeof msg.approver === "string" ? msg.approver : null,
+			);
 			send(ws, { type: "approval:resolved", requestId: String(msg.requestId), ...result });
 			break;
 		}
@@ -726,6 +763,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					} else if (state.isStoreRoute) {
 						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
+						if (state.approvalBridge) channelApprovals.endSession(state.sessionId);
 						bus.emit("session:end", {
 							sessionId: state.sessionId,
 							reason: "client-disconnect",

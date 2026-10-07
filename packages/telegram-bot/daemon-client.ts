@@ -35,6 +35,8 @@ export interface DaemonClientConfig {
 	reconnectDelayMs?: number;
 	pingIntervalMs?: number;
 	socketFactory?: (url: string) => WebSocketLike;
+	/** Register this socket as the approval bridge (#3621). Never logged. */
+	approvalSecret?: string;
 }
 
 export interface WebSocketLike {
@@ -88,6 +90,7 @@ export class DaemonClient {
 			reconnectDelayMs: config.reconnectDelayMs ?? 5000,
 			pingIntervalMs: config.pingIntervalMs ?? 10 * 60 * 1000,
 			socketFactory: config.socketFactory,
+			approvalSecret: config.approvalSecret,
 		};
 	}
 
@@ -112,6 +115,9 @@ export class DaemonClient {
 		ws.onopen = () => {
 			if (this.config.authToken) {
 				this.send({ type: "auth", token: this.config.authToken });
+			}
+			if (this.config.approvalSecret) {
+				this.send({ type: "approvals:register", secret: this.config.approvalSecret });
 			}
 			// Reconnect: resume the session we already own rather than leaking a
 			// new never-evicted agent and dropping the conversation (#3538).
@@ -183,9 +189,12 @@ export class DaemonClient {
 		}
 	}
 
+	/** Who started the next turn and where; the daemon trusts it only from the bridge. */
+	turn: { chatId: string; operator: boolean } | null = null;
+
 	/** Send a prompt to the current session. */
 	sendPrompt(text: string): void {
-		this.send({ type: "prompt", text });
+		this.send({ type: "prompt", text, ...(this.turn ? { turn: this.turn } : {}) });
 	}
 
 	/** Force a fresh session (e.g. on cancel / new task). */
@@ -201,7 +210,7 @@ export class DaemonClient {
 	respondApproval(
 		requestId: string,
 		approved: boolean,
-		opts: { scope?: "chat"; undelivered?: boolean } = {},
+		opts: { scope?: "chat"; undelivered?: boolean; approver?: string } = {},
 	): void {
 		this.send({ type: "approval:response", requestId, approved, ...opts });
 	}
