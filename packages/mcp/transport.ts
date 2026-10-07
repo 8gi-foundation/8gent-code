@@ -283,6 +283,53 @@ export class StdioTransport implements Transport {
 
 // ── SSE Transport ────────────────────────────────────────────────
 
+export const MAX_REDIRECTS = 5;
+
+/**
+ * fetch() for the configured MCP endpoint. Follow redirects only within the
+ * configured origin (scheme, host and port); any other target, or more than
+ * MAX_REDIRECTS hops, is an error. 307/308 repeat the request as sent; 303,
+ * and 301/302 after a POST, become a bodiless GET, as the fetch spec does.
+ */
+export async function sameOriginFetch(url: string, init: RequestInit = {}): Promise<Response> {
+	const origin = new URL(url).origin;
+	let current = url;
+	let req: RequestInit = init;
+	for (let hop = 0; ; hop++) {
+		const res = await fetch(current, { ...req, redirect: "manual" });
+		const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+		if (!location) return res;
+		const next = new URL(location, current);
+		if (next.origin !== origin) {
+			throw new Error(
+				`MCP endpoint ${origin} redirected to a different origin (${next.origin}); configure the final URL instead`,
+			);
+		}
+		if (hop >= MAX_REDIRECTS) {
+			throw new Error(`MCP endpoint ${origin} redirected more than ${MAX_REDIRECTS} times`);
+		}
+		const method = (req.method ?? "GET").toUpperCase();
+		if (
+			(res.status === 303 && method !== "HEAD") ||
+			((res.status === 301 || res.status === 302) && method === "POST")
+		) {
+			const headers = new Headers(req.headers);
+			for (const h of [
+				"content-type",
+				"content-length",
+				"content-encoding",
+				"content-language",
+				"content-location",
+			]) {
+				headers.delete(h);
+			}
+			req = { ...req, method: "GET", body: undefined, headers };
+		}
+		await res.body?.cancel();
+		current = next.href;
+	}
+}
+
 export class SSETransport implements Transport {
 	private requestId = 0;
 	private endpoint: string;
@@ -301,7 +348,7 @@ export class SSETransport implements Transport {
 
 		const modern = modernHeaders(method, params);
 
-		const res = await fetch(this.endpoint, {
+		const res = await sameOriginFetch(this.endpoint, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -330,7 +377,7 @@ export class SSETransport implements Transport {
 
 	notify(method: string, params?: unknown): void {
 		const req: JSONRPCRequest = { jsonrpc: "2.0", method, params };
-		fetch(this.endpoint, {
+		sameOriginFetch(this.endpoint, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", ...this.headers },
 			body: JSON.stringify(req),
