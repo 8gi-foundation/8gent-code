@@ -86,24 +86,34 @@ describe("safePath symlink confinement (#3607)", () => {
 		const alias = path.join(path.dirname(ws), "wsalias");
 		fs.symlinkSync(ws, alias);
 		const ex = new ToolExecutor(alias);
-		expect(await ex.execute("write_file", { path: "a/b.txt", content: "x" })).toContain("File written");
+		expect(await ex.execute("write_file", { path: "a/b.txt", content: "x" })).toContain(
+			"File written",
+		);
 		expect(fs.readFileSync(path.join(ws, "a/b.txt"), "utf-8")).toBe("x");
 		fs.symlinkSync(outside, path.join(ws, "link"));
-		await expect(ex.execute("write_file", { path: "link/z.txt", content: "x" })).rejects.toThrow(MSG);
+		await expect(ex.execute("write_file", { path: "link/z.txt", content: "x" })).rejects.toThrow(
+			MSG,
+		);
 	});
 
 	test("a symlink loop is refused fast with a non-escape message", async () => {
 		const { ws, ex } = setup();
 		fs.symlinkSync("b", path.join(ws, "a"));
 		fs.symlinkSync("a", path.join(ws, "b"));
-		await expect(ex.execute("write_file", { path: "a", content: "x" })).rejects.toThrow("symlink loop");
-		await expect(ex.execute("write_file", { path: "a/c.txt", content: "x" })).rejects.toThrow("symlink loop");
+		await expect(ex.execute("write_file", { path: "a", content: "x" })).rejects.toThrow(
+			"symlink loop",
+		);
+		await expect(ex.execute("write_file", { path: "a/c.txt", content: "x" })).rejects.toThrow(
+			"symlink loop",
+		);
 	});
 
 	test("a dangling in-workspace symlink names the real target and is not called an escape", async () => {
 		const { ws, ex } = setup();
 		fs.symlinkSync("real.txt", path.join(ws, "d"));
-		const err = await ex.execute("write_file", { path: "d", content: "x" }).catch((e) => e as Error);
+		const err = (await ex
+			.execute("write_file", { path: "d", content: "x" })
+			.catch((e: unknown) => e)) as Error;
 		expect(String(err.message)).toContain(path.join(fs.realpathSync(ws), "real.txt"));
 		expect(String(err.message)).not.toContain(MSG);
 	});
@@ -113,7 +123,11 @@ describe("safePath symlink confinement (#3607)", () => {
 		const out = await ex.execute("write_file", { path: "a/b/c.txt", content: "ok" });
 		expect(out).toContain("File written");
 		expect(fs.readFileSync(path.join(ws, "a/b/c.txt"), "utf-8")).toBe("ok");
-		const edit = await ex.execute("edit_file", { path: "a/b/c.txt", oldText: "ok", newText: "fine" });
+		const edit = await ex.execute("edit_file", {
+			path: "a/b/c.txt",
+			oldText: "ok",
+			newText: "fine",
+		});
 		expect(edit).not.toContain(MSG);
 		expect(fs.readFileSync(path.join(ws, "a/b/c.txt"), "utf-8")).toBe("fine");
 	});
@@ -124,7 +138,9 @@ describe("safePath symlink confinement (#3607)", () => {
 		fs.writeFileSync(path.join(ws, "real/x.txt"), "hello");
 		fs.symlinkSync(path.join(ws, "real"), path.join(ws, "alias"));
 		expect(await ex.execute("read_file", { path: "alias/x.txt" })).toContain("hello");
-		expect(await ex.execute("write_file", { path: "alias/y.txt", content: "y" })).toContain("File written");
+		expect(await ex.execute("write_file", { path: "alias/y.txt", content: "y" })).toContain(
+			"File written",
+		);
 	});
 
 	test("read_file through an escaping symlink is refused", async () => {
