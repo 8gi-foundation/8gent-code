@@ -82,7 +82,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 	background: ["background_start", "background_status", "background_output"],
 	travel: ["travel_resolve_location", "travel_search_flights"],
 	mcp: ["mcp_list_tools", "mcp_call_tool"],
-	design: ["suggest_design", "query_design_system"],
+	design: ["suggest_design", "query_design_system", "deck_theme"],
 	self: ["self_inspect", "self_tune", "self_append_context"],
 	memory: ["remember", "recall"],
 	computer: [

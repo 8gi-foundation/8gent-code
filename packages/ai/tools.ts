@@ -2003,6 +2003,40 @@ const queryDesignSystem = tool({
 	},
 });
 
+const deckTheme = tool({
+	description:
+		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+	inputSchema: z.object({
+		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
+		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
+		name: z.string().optional().describe("Theme name from list (apply)"),
+		palette: z.string().optional().describe("Theme name to take colours from (mix)"),
+		type: z.string().optional().describe("Theme name to take fonts from (mix)"),
+	}),
+	execute: async ({ action, deck, name, palette, type }) => {
+		try {
+			const dt = await import("../design-systems/deck-themes.js");
+			if (action === "list") return { themes: dt.listThemes() };
+			if (!deck) return { error: `deck_theme ${action} needs deck (path to the deck .md)` };
+			if (action === "apply" && !name) return { error: "deck_theme apply needs name" };
+			if (action === "mix" && (!palette || !type)) {
+				return { error: "deck_theme mix needs palette and type" };
+			}
+			const cwd = getToolContext().workingDirectory;
+			const deckPath = dt.resolveDeckPath(resolvePath(deck), cwd);
+			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
+			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
+				const blocked = gateWrite("write_file", { path: target, content: "" });
+				if (blocked) return { error: blocked };
+			}
+			if (action === "apply") return dt.applyTheme(deckPath, String(name));
+			return dt.mixTheme(deckPath, String(palette), String(type));
+		} catch (err) {
+			return { error: String(err instanceof Error ? err.message : err) };
+		}
+	},
+});
+
 // ============================================================================
 // Desktop / Computer Use (hands)
 // ============================================================================
@@ -2966,6 +3000,7 @@ export const agentTools = bindToolContext({
 	// Design
 	suggest_design: suggestDesign,
 	query_design_system: queryDesignSystem,
+	deck_theme: deckTheme,
 
 	// Self-awareness
 	self_inspect: selfInspect,

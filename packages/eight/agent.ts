@@ -1407,6 +1407,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_fetch",
 			"suggest_design",
 			"query_design_system",
+			"deck_theme",
 			"self_inspect",
 			"self_tune",
 			"self_append_context",

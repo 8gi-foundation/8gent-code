@@ -96,6 +96,7 @@ import {
 import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -1026,6 +1027,25 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "deck_theme",
+					description:
+						"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+					parameters: {
+						type: "object",
+						properties: {
+							action: { type: "string", description: "list | apply | mix" },
+							deck: { type: "string", description: "Path to the deck .md (apply, mix)" },
+							name: { type: "string", description: "Theme name from list (apply)" },
+							palette: { type: "string", description: "Theme name to take colours from (mix)" },
+							type: { type: "string", description: "Theme name to take fonts from (mix)" },
+						},
+						required: ["action"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "suggest_design",
 					description:
 						"[DESIGN] Returns design system recommendations including color palettes, typography, and component libraries matched to your task. Use this BEFORE writing any UI code to get curated design guidance. Typically the first design tool to call - follow up with query_design_system for specific palette/component details. Prefer this over guessing colors or fonts.",
@@ -1723,6 +1743,8 @@ export class ToolExecutor {
 					args.task as string,
 					args.projectType as string | undefined,
 				);
+			case "deck_theme":
+				return this.handleDeckTheme(args);
 			case "query_design_system":
 				return this.handleQueryDesignSystem(args);
 
@@ -2885,6 +2907,38 @@ export class ToolExecutor {
 			);
 		} catch (err) {
 			return `Design suggestion failed: ${err}`;
+		}
+	}
+
+	private async handleDeckTheme(args: Record<string, unknown>): Promise<string> {
+		try {
+			const action = String(args.action);
+			const dt = await import("../design-systems/deck-themes.js");
+			if (action === "list") return JSON.stringify({ themes: dt.listThemes() }, null, 2);
+			if (action !== "apply" && action !== "mix") return `deck_theme: unknown action "${action}"`;
+			if (!args.deck) return `deck_theme ${action} needs deck (path to the deck .md)`;
+			if (action === "apply" && !args.name) return "deck_theme apply needs name";
+			if (action === "mix" && (!args.palette || !args.type)) {
+				return "deck_theme mix needs palette and type";
+			}
+			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory), this.workingDirectory);
+			const themeName =
+				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
+			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
+				const blocked = gateWriteTool(
+					"primary",
+					"write_file",
+					{ path: target, content: "" },
+					this.workingDirectory,
+				);
+				if (blocked) return blocked;
+			}
+			if (action === "apply") {
+				return JSON.stringify(dt.applyTheme(deck, String(args.name)), null, 2);
+			}
+			return JSON.stringify(dt.mixTheme(deck, String(args.palette), String(args.type)), null, 2);
+		} catch (err) {
+			return `deck_theme failed: ${err instanceof Error ? err.message : err}`;
 		}
 	}
 
