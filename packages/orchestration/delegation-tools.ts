@@ -51,9 +51,9 @@ async function legacyParentMode(): Promise<PermissionMode> {
 async function gateShellChild(
 	command: string,
 	cwd: string,
-	holder: PermissionModeHolder,
+	holder: PermissionModeHolder | undefined,
 ): Promise<string | null> {
-	return runWithPermissionHolder(holder, async () => {
+	const gate = async (): Promise<string | null> => {
 		const mode = currentPermissionMode();
 		if (mode === "plan") {
 			const refusal = await planModeRefusal("run_command", { command });
@@ -67,7 +67,7 @@ async function gateShellChild(
 		const { systemOneGate } = await import("../permissions/system-one-gate");
 		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
 		if (!systemOne.run) return systemOne.message as string;
-		const dangerous = isCommandDangerous(command);
+		const dangerous = isCommandDangerous(command, cwd);
 		if (
 			check === "ask" &&
 			systemOne.humanApproved !== true &&
@@ -84,7 +84,8 @@ async function gateShellChild(
 			if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 		}
 		return null;
-	});
+	};
+	return holder ? runWithPermissionHolder(holder, gate) : gate();
 }
 
 export const CHECK_AGENT_DESCRIPTION =
@@ -146,13 +147,11 @@ export async function spawnAgentTool(
 		// CLI runtimes: claude and shell
 		if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
 			// runtime "shell" runs the task through sh -c, so it is a shell command.
-			if (effectiveRuntime === "shell" && child) {
+			// With no permission holder it passes the same gate in the
+			// process-wide mode: permission check, System One, then the card.
+			if (effectiveRuntime === "shell") {
 				const blocked = await gateShellChild(task, workingDirectory, child);
 				if (blocked) return blocked;
-			} else if (effectiveRuntime === "shell") {
-				const { systemOneGate } = await import("../permissions/system-one-gate");
-				const systemOne = await systemOneGate(task);
-				if (!systemOne.run) return systemOne.message as string;
 			}
 			const { spawnCLIAgent } = await import("./index");
 			const agent = spawnCLIAgent(effectiveRuntime, task, {

@@ -84,6 +84,7 @@ describe("headless (no TTY)", () => {
 	});
 	afterEach(() => {
 		if (stdinTty) Object.defineProperty(process.stdin, "isTTY", stdinTty);
+		else Reflect.deleteProperty(process.stdin, "isTTY");
 		if (savedHeadless !== undefined) process.env.EIGHT_HEADLESS = savedHeadless;
 	});
 
@@ -147,6 +148,7 @@ describe("interactive (TTY with the TUI card)", () => {
 	afterEach(() => {
 		_resetTuiApprovalChannel();
 		if (stdinTty) Object.defineProperty(process.stdin, "isTTY", stdinTty);
+		else Reflect.deleteProperty(process.stdin, "isTTY");
 		if (savedHeadless !== undefined) process.env.EIGHT_HEADLESS = savedHeadless;
 	});
 

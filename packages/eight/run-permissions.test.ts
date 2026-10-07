@@ -33,6 +33,7 @@ beforeEach(() => {
 afterEach(() => {
 	resetPermissionManager();
 	if (stdinTty) Object.defineProperty(process.stdin, "isTTY", stdinTty);
+	else Reflect.deleteProperty(process.stdin, "isTTY");
 	for (const k of ENV_KEYS) {
 		if (savedEnv[k] === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = savedEnv[k];

@@ -53,6 +53,7 @@ afterEach(() => {
 	_resetTuiApprovalChannel();
 	resetPermissionManager();
 	if (stdinTty) Object.defineProperty(process.stdin, "isTTY", stdinTty);
+	else Reflect.deleteProperty(process.stdin, "isTTY");
 	for (const k of ENV_KEYS) {
 		if (savedEnv[k] === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = savedEnv[k];
@@ -237,5 +238,73 @@ describe("git_push tool", () => {
 		await exec.execute("git_push", {});
 		expect(git(remote, "rev-parse", "main")).toBe(git(work, "rev-parse", "HEAD"));
 		expect(cards).toEqual(["git push", "git push"]);
+	});
+});
+
+describe("commands that change the repository before they push", () => {
+	test("background_start: checkout main then a bare push is refused, main does not move", async () => {
+		await applyRunPermissions({ yes: true, outputFormat: "text" });
+		const { work, remote, mainSha } = world();
+		git(work, "checkout", "-q", "-b", "feat/seq");
+		git(work, "push", "-q", "-u", "origin", "HEAD");
+		const exec = new ToolExecutor(work, "push-res-test");
+		for (const command of [
+			"git checkout -q main && git push",
+			"git switch -q main; git push origin HEAD",
+			"git -c push.default=matching push origin",
+		]) {
+			const out = String(await exec.execute("background_start", { command }));
+			expect(out).toContain("[PERMISSION DENIED]");
+		}
+		expect(git(work, "rev-parse", "--abbrev-ref", "HEAD")).toBe("feat/seq");
+		expect(git(remote, "rev-parse", "main")).toBe(mainSha);
+	});
+});
+
+describe("spawn_agent runtime shell, no one to approve", () => {
+	async function settle(remote: string, ref: string): Promise<string> {
+		for (let i = 0; i < 100; i++) {
+			try {
+				return git(remote, "rev-parse", "--verify", ref);
+			} catch {
+				await new Promise((r) => setTimeout(r, 100));
+			}
+		}
+		return "";
+	}
+
+	test("a push to main is refused and main does not move; a feature push still runs", async () => {
+		await applyRunPermissions({ yes: true, outputFormat: "text" });
+		const { work, remote, mainSha } = world();
+		const exec = new ToolExecutor(work, "push-res-test");
+		for (const task of ["git push origin main", "git push", "git checkout -q main && git push"]) {
+			const out = String(await exec.execute("spawn_agent", { runtime: "shell", task }));
+			expect(out).toContain("[PERMISSION DENIED]");
+		}
+		git(work, "checkout", "-q", "-b", "feat/shell");
+		const started = String(
+			await exec.execute("spawn_agent", { runtime: "shell", task: "git push -u origin HEAD" }),
+		);
+		expect(started).toContain("spawned and running");
+		expect(await settle(remote, "feat/shell")).toBe(git(work, "rev-parse", "HEAD"));
+		expect(git(remote, "rev-parse", "main")).toBe(mainSha);
+	});
+});
+
+describe("the process runs outside the repository", () => {
+	const savedCwd = process.cwd();
+	afterEach(() => process.chdir(savedCwd));
+
+	test("feature pushes resolve in the tool's directory, not the process's", async () => {
+		await applyRunPermissions({ yes: true, outputFormat: "text" });
+		const { work, remote, mainSha } = world();
+		git(work, "checkout", "-q", "-b", "feat/elsewhere");
+		process.chdir(tempDir("push-res-notrepo-"));
+		const exec = new ToolExecutor(work, "push-res-test");
+		const out = String(await exec.execute("run_command", { command: "git push -u origin HEAD" }));
+		expect(out).not.toContain("[PERMISSION DENIED]");
+		expect(git(remote, "rev-parse", "feat/elsewhere")).toBe(git(work, "rev-parse", "HEAD"));
+		await exec.execute("git_push", {});
+		expect(git(remote, "rev-parse", "main")).toBe(mainSha);
 	});
 });

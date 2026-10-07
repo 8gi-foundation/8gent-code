@@ -260,3 +260,79 @@ describe("pushes that name no branch, resolved in the repository", () => {
 		expect(isProtectedBranchPush("git push", sub)).toBe(true);
 	});
 });
+
+describe("commands the repository state alone cannot answer", () => {
+	test("heads/main is main", () => {
+		for (const c of [
+			"git push origin heads/main",
+			"git push origin HEAD:heads/main",
+			"git push origin feat:heads/main",
+			"git push origin HEAD:refs/heads/main",
+		]) {
+			expect(matchGitPushProtectedBranch(c)).toBe(true);
+		}
+		expect(matchGitPushProtectedBranch("git push origin heads/feat")).toBe(false);
+	});
+
+	test("config that changes where a push lands, set for one command", () => {
+		const feat = repo("feat/cfg");
+		git(feat, "push", "-q", "-u", "origin", "HEAD");
+		for (const c of [
+			"git -c push.default=matching push origin",
+			"git -c push.default=upstream push",
+			"git --config-env=push.default=PD push",
+			"git --config-env push.default=PD push",
+			"git -c branch.feat/cfg.merge=refs/heads/main push",
+			"git -c remote.origin.url=/elsewhere push",
+			"git -c include.path=/elsewhere/config push",
+			"git -c includeIf.onbranch:feat/cfg.path=/elsewhere/config push",
+		]) {
+			expect(isProtectedBranchPush(c, feat)).toBe(true);
+		}
+		expect(isProtectedBranchPush("git -c core.quotepath=off push", feat)).toBe(false);
+	});
+
+	test("an earlier command in the same line makes later implicit pushes unresolvable", () => {
+		const main = repo("main");
+		const feat = repo("feat/seq");
+		git(feat, "push", "-q", "-u", "origin", "HEAD");
+		const fromFeat = [
+			"git checkout main && git push",
+			"git switch main; git push origin HEAD",
+			"git config push.default matching; git push",
+			`builtin cd ${main} && git push`,
+			`command cd ${main} && git push`,
+			`eval cd ${main}; git push`,
+			`sh -c 'cd ${main} && git push'`,
+			`bash -c "cd ${main}; git push"`,
+			`export GIT_DIR=${main}/.git; git push`,
+			`export GIT_CONFIG_PARAMETERS="'alias.p'='push origin HEAD:main'"; git p`,
+			"export GIT_CONFIG_GLOBAL=/elsewhere; git p",
+			`HOME=${main}; cd ~ && git push`,
+			`env -C ${main} git push`,
+			"true && git push",
+		];
+		for (const c of fromFeat) {
+			if (!isProtectedBranchPush(c, feat)) throw new Error(`not protected from feat: ${c}`);
+		}
+		const fromMain = [
+			`pushd ${feat}; popd; git push`,
+			`(cd ${feat}) && git push`,
+			`cd ${feat} || git push`,
+			`cd ${feat} | git push`,
+		];
+		for (const c of fromMain) {
+			if (!isProtectedBranchPush(c, main)) throw new Error(`not protected from main: ${c}`);
+		}
+		// A plain cd is still followed.
+		expect(isProtectedBranchPush(`cd ${feat} && git push`, main)).toBe(false);
+		expect(isProtectedBranchPush(`cd ${feat}; git push -u origin HEAD`, main)).toBe(false);
+		expect(isProtectedBranchPush(`cd ${main} && git push`, feat)).toBe(true);
+	});
+
+	test("no directory given: a push that names no branch counts as protected", () => {
+		expect(isProtectedBranchPush("git push")).toBe(true);
+		expect(isProtectedBranchPush("git push -u origin HEAD")).toBe(true);
+		expect(isProtectedBranchPush("git push origin HEAD:feat/x")).toBe(false);
+	});
+});

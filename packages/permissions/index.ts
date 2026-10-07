@@ -862,7 +862,9 @@ export class PermissionManager {
 			if (headless) {
 				console.error(`[permissions] DENIED: ${protectedBranchPushMessage()} Command: ${command}`);
 			}
-			const approved = headless ? false : await this.promptUser(action, details, command, true);
+			const approved = headless
+				? false
+				: await this.promptUser(action, details, command, true, opts.cwd);
 			request.approved = approved;
 			this.log.requests.push(request);
 			if (approved) this.log.approvedCount++;
@@ -900,7 +902,7 @@ export class PermissionManager {
 		}
 
 		// Auto-approve if configured and not dangerous
-		if (this.isAutoApprove() && command && !this.isDangerous(command)) {
+		if (this.isAutoApprove() && command && !this.isDangerous(command, opts.cwd)) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -909,7 +911,7 @@ export class PermissionManager {
 		}
 
 		// Check if already approved or safe
-		if (command && this.isAllowed(command) && !this.isDangerous(command)) {
+		if (command && this.isAllowed(command) && !this.isDangerous(command, opts.cwd)) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -918,7 +920,7 @@ export class PermissionManager {
 		}
 
 		// Interactive prompt
-		const approved = await this.promptUser(action, details, command, opts.defaultNo);
+		const approved = await this.promptUser(action, details, command, opts.defaultNo, opts.cwd);
 		request.approved = approved;
 		this.log.requests.push(request);
 
@@ -975,11 +977,12 @@ export class PermissionManager {
 		details: string,
 		command?: string,
 		defaultNo = false,
+		cwd?: string,
 	): Promise<boolean> {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
 			if (defaultNo) return false;
-			if (command && this.isDangerous(command)) {
+			if (command && this.isDangerous(command, cwd)) {
 				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
 				return false;
 			}
@@ -1013,7 +1016,7 @@ export class PermissionManager {
 			prompt += `Details: ${details}\n`;
 			if (command) {
 				prompt += `Command: \x1b[36m${command}\x1b[0m\n`;
-				if (this.isDangerous(command)) {
+				if (this.isDangerous(command, cwd)) {
 					prompt +=
 						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
 				}
@@ -1066,7 +1069,7 @@ export class PermissionManager {
 		}
 
 		// Check if dangerous (always ask)
-		if (this.isDangerous(command)) {
+		if (this.isDangerous(command, cwd)) {
 			return "ask";
 		}
 
@@ -1191,20 +1194,22 @@ export class PermissionManager {
 /**
  * A shell command that pushes to main/master (see go-deny-list.ts). Pushes
  * that name no branch (`git push`, `git push origin`, `git push origin HEAD`)
- * and git aliases are resolved in `cwd` (default: this process's directory):
+ * and git aliases are resolved in `cwd` (none given: they count as protected):
  * the current branch, its upstream and push.default decide where they land,
  * and a push whose destination cannot be worked out counts as protected.
  */
 export function isProtectedBranchPush(command: string, cwd?: string): boolean {
 	return matchGitPushProtectedBranch(command, {
-		cwd: cwd ?? process.cwd(),
+		// No directory: a push that names no branch cannot be resolved, so it
+		// counts as protected. Callers pass the directory the command runs in.
+		cwd: cwd ?? null,
 		resolver: gitPushResolver,
 	});
 }
 
 /** A branch name a push may not land on without a person approving it. */
 export function isProtectedBranchName(name: string): boolean {
-	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^refs\/heads\//, ""));
+	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^(refs\/)?heads\//, ""));
 }
 
 /** Why a protected-branch push was refused when no person could approve it. */

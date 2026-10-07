@@ -2613,11 +2613,11 @@ export class ToolExecutor {
 		if (
 			permissionCheck === "ask" &&
 			systemOne.humanApproved !== true &&
-			!guardedSkipsCard(mode, systemOne, isCommandDangerous(command))
+			!guardedSkipsCard(mode, systemOne, isCommandDangerous(command, this.workingDirectory))
 		) {
 			const allowed = await this.permissionManager.requestPermission(
 				"Execute Shell Command",
-				isCommandDangerous(command)
+				isCommandDangerous(command, this.workingDirectory)
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,

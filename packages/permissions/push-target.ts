@@ -30,9 +30,9 @@ function currentBranch(dir: string): string | null {
 	return branch && branch !== "HEAD" ? branch : null;
 }
 
-/** `refs/heads/x` -> `x`. */
+/** `refs/heads/x` and `heads/x` -> `x`. */
 function shortRef(ref: string): string {
-	return ref.replace(/^refs\/heads\//, "");
+	return ref.replace(/^(refs\/)?heads\//, "");
 }
 
 /**

@@ -221,6 +221,13 @@ const GIT_BUILTINS = new Set(
 		"update-ref var verify-commit version whatchanged worktree"
 	).split(" "),
 );
+/**
+ * Config keys that can change what a push does or where it lands: aliases,
+ * push.default, branch upstreams and push remotes, remote refspecs and URLs,
+ * and included config files that may set any of these.
+ */
+const CONFIG_THAT_MOVES_PUSHES = /^(alias|push|branch|remote|include|includeif)\./;
+
 /** Builtins that run further git commands, which inherit `-c` config. */
 const GIT_NESTING_BUILTINS = new Set(["rebase", "submodule", "bisect", "worktree"]);
 
@@ -229,7 +236,8 @@ function unquote(token: string): string {
 }
 
 function isProtectedName(name: string): boolean {
-	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^refs\/heads\//, ""));
+	// git reads `heads/main` as `refs/heads/main`.
+	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^(refs\/)?heads\//, ""));
 }
 
 /** Destination part of a refspec: `src:dst`, `+dst`, `dst`. */
@@ -313,7 +321,10 @@ function gitInvocationPushesProtected(
 	const argsFromStdin = before.some((t) => t === "xargs" || t.endsWith("/xargs"));
 	// GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT / GIT_CONFIG_GLOBAL can set aliases and push refspecs.
 	let configChangesPush = before.some((t) => /^GIT_CONFIG/.test(t));
-	let repoUnknown = before.some((t) => /^GIT_(DIR|WORK_TREE)=/.test(t));
+	// `env -C dir git ...` runs git somewhere else.
+	let repoUnknown =
+		before.some((t) => /^GIT_(DIR|WORK_TREE)=/.test(t)) ||
+		(before.includes("env") && before.some((t) => /^(-C|--chdir)/.test(t)));
 	let gitDir = dir;
 
 	let i = g + 1;
@@ -333,7 +344,7 @@ function gitInvocationPushesProtected(
 		if (name === "--git-dir" || name === "--work-tree") repoUnknown = true;
 		if ((name === "-c" || name === "--config-env") && value !== undefined) {
 			const key = value.split("=")[0].toLowerCase();
-			if (key.startsWith("alias.") || /^remote\..*\.push$/.test(key)) configChangesPush = true;
+			if (CONFIG_THAT_MOVES_PUSHES.test(key)) configChangesPush = true;
 		}
 		i++;
 	}
@@ -374,6 +385,18 @@ function gitInvocationPushesProtected(
 	return false;
 }
 
+/**
+ * `cd <dir>` / `pushd <dir>` that leaves the shell in <dir> for what follows:
+ * not in a subshell or pipeline, and followed by `&&`, `;` or a newline
+ * (after `||` the next command runs only if the cd failed).
+ */
+function isPlainCd(words: string[], segment: string, next: string | undefined): boolean {
+	if (words[0] !== "cd" && words[0] !== "pushd") return false;
+	// `${VAR}` is not a group; parentheses and braces otherwise mean a subshell or group.
+	if (words.length > 2 || /[(){}]/.test(segment.replace(/\$\{\w+\}/g, ""))) return false;
+	return next === undefined || next === "&&" || next === ";" || next === "\n";
+}
+
 /** One reading of the command: split into segments, track `cd`, check every git invocation. */
 function viewPushesProtected(view: string, opts: PushMatchOptions): boolean {
 	let dir = opts.cwd ?? null;
@@ -383,15 +406,21 @@ function viewPushesProtected(view: string, opts: PushMatchOptions): boolean {
 	for (let k = 0; k < parts.length; k += 2) {
 		const words = shellWords(parts[k]);
 		if (words.length === 0) continue;
-		if (words[0] === "cd" || words[0] === "pushd") {
+		const next = parts[k + 1];
+		if (isPlainCd(words, parts[k], next)) {
 			dir = cdTarget(dir, words[1]);
 			continue;
 		}
-		const substituted = parts[k + 1] === "$(" || parts[k + 1] === "`";
+		const substituted = next === "$(" || next === "`";
 		for (let g = 0; g < words.length; g++) {
 			if (!isGitWord(words[g])) continue;
 			if (gitInvocationPushesProtected(words, g, dir, opts.resolver, substituted)) return true;
 		}
+		// Anything but a plain cd may have changed the branch, the config,
+		// the environment or the directory (git checkout, git config, export,
+		// eval, sh -c, popd, ...). Later pushes that name no branch cannot be
+		// resolved from the repository as it is now: they count as protected.
+		dir = null;
 	}
 	return false;
 }

@@ -1282,11 +1282,11 @@ async function runShellCommand(command: string): Promise<string> {
 	if (
 		permissionCheck === "ask" &&
 		systemOne.humanApproved !== true &&
-		!guardedSkipsCard(mode, systemOne, isCommandDangerous(command))
+		!guardedSkipsCard(mode, systemOne, isCommandDangerous(command, ctx.workingDirectory))
 	) {
 		const allowed = await permissionManager.requestPermission(
 			"Execute Shell Command",
-			isCommandDangerous(command)
+			isCommandDangerous(command, ctx.workingDirectory)
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
