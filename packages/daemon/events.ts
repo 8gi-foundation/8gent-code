@@ -23,6 +23,8 @@ export interface DaemonEvents {
 		input: unknown;
 		requestId: string;
 	};
+	/** A channel approval closed with no answer (#3621). */
+	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
 	"session:start": { sessionId: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
 	// CEO task lifecycle events
