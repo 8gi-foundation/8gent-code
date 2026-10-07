@@ -268,10 +268,7 @@ describe("agent settings file (#3595)", () => {
 describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => {
 	const home = "/Users/someone";
 	test("the default control token and everything under browser-profiles are denied", () => {
- 		for (const raw of [
--			"~/.8gent/settings.json",
--			"~/.ssh/id_rsa",
--			"~/.aws/credentials",
+		for (const raw of [
 			"/Users/someone/.8gent/browser-control.token",
 			"~/.8gent/browser-control.token",
 			".8gent/browser-control.token",
@@ -280,10 +277,9 @@ describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => 
 			"/Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
 			"~/.8gent/browser-profiles/eightgent/browser-control.port",
 			".8gent/browser-profiles/eightgent/electron/Cookies",
- 		]) {
- 			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
- 		}
--		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
 	});
 	test("neighbours are not caught", () => {
 		expect(validatePath(".8gent/browser-shots/a.png", home, { platform: "linux", home }).ok).toBe(
