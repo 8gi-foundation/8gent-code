@@ -1410,6 +1410,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",
+			"film_craft",
 			"self_inspect",
 			"self_tune",
 			"self_append_context",

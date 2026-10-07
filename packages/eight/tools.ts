@@ -78,6 +78,7 @@ import {
 	search as searchDesignSystems_db,
 	suggestForProject as suggestDesignForProject,
 } from "../design-systems/index.js";
+import { filmCraft } from "../film-craft/index";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, createInfiniteRunner, formatInfiniteState } from "../infinite";
 import {
@@ -94,7 +95,12 @@ import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
-import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import {
+	editScopeViolation,
+	emptyOldTextError,
+	filmCraftWriteTargets,
+	normaliseAllowedPaths,
+} from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
@@ -307,6 +313,36 @@ export function resolveSpeakOut(out: unknown, workingDirectory: string): string 
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 	}
+	return target;
+}
+
+/** The nearest existing ancestor's real location must sit under the real workspace. */
+function assertRealInside(target: string, named: string, workingDirectory: string): void {
+	const root = fs.realpathSync(workingDirectory);
+	let ancestor = target;
+	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+	const real = fs.realpathSync(ancestor);
+	if (real !== root && !real.startsWith(root + path.sep)) {
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+	}
+}
+
+/**
+ * A path a tool may write: inside the working directory (safePath, which is lexical), the real
+ * location of its nearest existing parent inside the real workspace, and not itself a symlink.
+ */
+export function confineWrite(named: string, workingDirectory: string): string {
+	const target = safePath(named, workingDirectory);
+	assertRealInside(path.dirname(target), named, workingDirectory);
+	const st = fs.lstatSync(target, { throwIfNoEntry: false });
+	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
+	return target;
+}
+
+/** A path a tool may read: inside the working directory after following every link. */
+export function confineRead(named: string, workingDirectory: string): string {
+	const target = safePath(named, workingDirectory);
+	assertRealInside(target, named, workingDirectory);
 	return target;
 }
 
@@ -1177,6 +1213,33 @@ export class ToolExecutor {
 					},
 				},
 			},
+			// Film craft (#3599): the 8GI film look as presets, applied to slide videos
+			{
+				type: "function",
+				function: {
+					name: "film_craft",
+					description:
+						"[VIDEO] Makes slide videos look designed, not like a default slideshow. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
+					parameters: {
+						type: "object",
+						properties: {
+							action: { type: "string", description: "list | plan | bed | mix" },
+							preset: { type: "string", description: "Film preset name from action=list (default lotus-night)" },
+							grade_from: { type: "string", description: "Optional: take grade, camera and cuts from this preset, titles from preset" },
+							slides: { type: "array", description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order", items: { type: "object" } },
+							out_dir: { type: "string", description: "plan: folder for film.sh, frames and the mp4 (default video)" },
+							out: { type: "string", description: "plan: output mp4 file name in out_dir (default film.mp4); bed: wav path" },
+							width: { type: "number", description: "plan: width (default 1280)" },
+							height: { type: "number", description: "plan: height (default 720)" },
+							narration: { type: "string", description: "plan: narration audio file; the bed ducks under it" },
+							bed: { type: "string", description: "plan: music bed wav from action=bed" },
+							seconds: { type: "number", description: "bed: length in seconds" },
+							hits: { type: "array", items: { type: "number" }, description: "bed: cut times in seconds (risers and booms land on them)" },
+						},
+						required: ["action"],
+					},
+				},
+			},
 			// Design tools
 			{
 				type: "function",
@@ -1483,6 +1546,8 @@ export class ToolExecutor {
 		// in every mode. mcp_list_tools only reads the local list and stays
 		// ungated.
 		mcp_call_tool: MCP_POLICY_ACTION,
+		// plan and bed write files; list and mix write nothing and skip the gate (#3599).
+		film_craft: "write_file",
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -1581,18 +1646,24 @@ export class ToolExecutor {
 		// through to the engine's default allow and no card appeared.
 		const isDesktop = toolName.startsWith("desktop_") || BROWSER_ASK_FIRST.has(toolName);
 		const isMcpCall = toolName === "mcp_call_tool";
-		const policyAction =
+		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
+		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
+		const writeTarget = (
+			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
+		) as string | undefined;
+		const mappedAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
 					: undefined);
+		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
-				path: (toolName === "speak" ? args.out : args.path) as string,
+				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
 				// Every write tool is checked on what it actually writes, not
@@ -1624,10 +1695,7 @@ export class ToolExecutor {
 				return blockedToolMessage(
 					toolName,
 					policyAction === "write_file",
-					(() => {
-						const target = toolName === "speak" ? args.out : args.path;
-						return typeof target === "string" && target ? target : undefined;
-					})(),
+					typeof writeTarget === "string" && writeTarget ? writeTarget : undefined,
 					gateResult.reason,
 					gateResult.alternative,
 				);
@@ -1925,6 +1993,14 @@ export class ToolExecutor {
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+
+			case "film_craft":
+				// Every path is confined to the workspace (no traversal, no symlink out) and made
+				// absolute, so film.sh writes only inside it and runs the same from any folder.
+				return filmCraft(args, {
+					write: (p) => confineWrite(p, this.workingDirectory),
+					read: (p) => confineRead(p, this.workingDirectory),
+				});
 
 			// Design tools
 			case "suggest_design":

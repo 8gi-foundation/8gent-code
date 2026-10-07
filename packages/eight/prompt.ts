@@ -192,6 +192,7 @@ Your tools are provided via the API's native function calling mechanism. Simply 
 - **Background**: background_start, background_status, background_output
 - **Multi-Agent**: spawn_agent (spawn a background agent; supports runtime='8gent', 'claude', or 'shell'), check_agent (check status/result by ID, works with all runtimes), list_agents (show all agents across all runtimes)
 - **Design**: suggest_design (get design system recommendations for a task), query_design_system (query the design database for components, palettes, typography)
+- **Video**: film_craft (designed slide videos: list film presets, plan a magick + ffmpeg recipe with camera moves, transitions and a grade, generate an original music bed). Use it for any slide or narrated video instead of plain slides joined with ffmpeg.
 
 ## Common Framework Patterns (USE THESE, do NOT guess)
 
