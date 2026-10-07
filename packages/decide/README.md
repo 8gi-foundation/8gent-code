@@ -87,6 +87,25 @@ what makes same input give same output: Ollama's float output drifts in the
   - Default timeout 60s per question (covers a cold model load).
 - **mock** (`backends/mock.ts`) - deterministic word-overlap heuristic. Tests
   only, or `createDecider({ backend: "mock" })`. Never auto-selected.
+- **jev** (`backends/jev.ts`) - HOSTED, OPT-IN. TypeSafe AI's decision model
+  `typesafe-ai/jev` through the Vercel AI Gateway, `POST
+  https://ai-gateway.vercel.sh/v1/evaluate` with `zeroDataRetention: true`.
+  Off unless env `EIGHT_DECIDE_BACKEND=jev` AND `AI_GATEWAY_API_KEY` is set
+  (the key is read from that env var only, never a file). With both, `auto`
+  becomes Jev in front of the local probe: any error or timeout (5 s default)
+  sends the same request to the local judge, built once on first need, and
+  every decision is logged on stderr as `[decide] backend=<name>
+  model=<model> latency_ms=<n>` plus `fallback_from=jev reason=...` when it
+  fell back (`createDecider({ log })` captures it). Without the env the
+  default path is unchanged and nothing reaches the gateway. Field map: noul
+  -> `type: "boolean"`, choice options -> `criteria {option: option}` (keys
+  made unique when options repeat), score levels -> `criteria [...]`;
+  probabilities come back keyed by option (choice) or level index (score)
+  and are renormalised here. Hard rules: the state of every question leaves
+  the machine on this path, so it never takes part in a SIGI scored run or
+  anything labelled local, and no secrets or user data go in `state`. No
+  training on its output (TypeSafe MCA s2.3(b)). `backend: "jev"` is the
+  bare backend with no fallback, for evals.
 
 `probe.ts` `detectBackend()` tries llamacpp (only when a GGUF resolves AND
 `node-llama-cpp` imports; the package is not imported when no GGUF resolves),
