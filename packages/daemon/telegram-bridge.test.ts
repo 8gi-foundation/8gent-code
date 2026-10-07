@@ -193,12 +193,18 @@ describe("handleCallbackQuery sender authorization", () => {
 		expect(calls).toEqual([]);
 	});
 
-	test("a refused sender gets one plain refusal, then silence for an hour", async () => {
+	test("a refused sender is observed, never answered", async () => {
 		const bridge = makeGroupBridge([String(OPERATOR)]);
 		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
-		await (bridge as any).refuseSender(GROUP_CHAT, STRANGER);
-		// biome-ignore lint/suspicious/noExplicitAny: reaching a private handler is the point of the test.
-		await (bridge as any).refuseSender(GROUP_CHAT, STRANGER);
-		expect(calls.filter((c) => c.includes("sendMessage"))).toHaveLength(1);
+		(bridge as any).observeSender({
+			update_id: 1,
+			message: {
+				message_id: 1,
+				from: { id: STRANGER },
+				chat: { id: GROUP_CHAT, type: "supergroup" },
+				text: "hi",
+			},
+		});
+		expect(calls.filter((c) => c.includes("sendMessage"))).toHaveLength(0);
 	});
 });
