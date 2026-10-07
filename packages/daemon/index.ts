@@ -242,7 +242,7 @@ export async function main(): Promise<void> {
 	if (process.env.EIGHT_AUTO_APPROVE === "1") {
 		try {
 			const perms = await import("../permissions");
-			perms.getPermissionManager().setAutoApprove(true);
+			perms.getPermissionManager().setAutoApprove(true, { persist: false });
 			console.log("[daemon] auto-approve ON (EIGHT_AUTO_APPROVE=1) — dangerous bash/keys still blocked");
 		} catch (err) {
 			console.error(`[daemon] warn: could not enable auto-approve: ${String(err)}`);

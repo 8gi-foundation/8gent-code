@@ -90,7 +90,13 @@ import {
 } from "../lsp";
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
-import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
+import {
+	type PermissionManager,
+	getPermissionManager,
+	isCommandDangerous,
+	isProtectedBranchPush,
+	protectedBranchPushMessage,
+} from "../permissions";
 import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
@@ -2561,6 +2567,8 @@ export class ToolExecutor {
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
 		if (permissionCheck === "denied") {
+			if (isProtectedBranchPush(command))
+				return `[PERMISSION DENIED] ${protectedBranchPushMessage()} Command: ${command}`;
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
