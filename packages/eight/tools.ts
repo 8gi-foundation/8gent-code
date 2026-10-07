@@ -154,6 +154,7 @@ import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../
 import { ArtifactStore } from "./artifact-store";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
+import { formatEditNotFound } from "./edit-hint";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
@@ -2229,7 +2230,7 @@ export class ToolExecutor {
 			if (hasLineNumberGutter(oldText)) {
 				return `Error: Could not find the text to replace in ${filePath}. oldText starts each line with a read_file line-number prefix (number + tab). That prefix is not in the file: send the line text only.`;
 			}
-			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
+			return formatEditNotFound(filePath, content, oldText);
 		}
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
