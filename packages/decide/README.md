@@ -96,8 +96,13 @@ what makes same input give same output: Ollama's float output drifts in the
   sends the same request to the local judge, built once on first need, and
   every decision is logged on stderr as `[decide] backend=<name>
   model=<model> latency_ms=<n>` plus `fallback_from=jev reason=...` when it
-  fell back (`createDecider({ log })` captures it). Without the env the
-  default path is unchanged and nothing reaches the gateway. Field map: noul
+  fell back (`createDecider({ log })` captures it). A gateway error is
+  reported as its HTTP status plus the fixed `error.type` code only, never
+  the body's free text (it can carry the state). `jevForbidden` refuses the
+  hosted judge under env `SIGI_RUN` or `PILOT_RUN`, or while
+  `~/.8gent/rishi-pilot/pilot.lock` exists: `auto` goes local and logs why,
+  `backend: "jev"` throws. Without the env the default path is unchanged
+  and nothing reaches the gateway. Field map: noul
   -> `type: "boolean"`, choice options -> `criteria {option: option}` (keys
   made unique when options repeat), score levels -> `criteria [...]`;
   probabilities come back keyed by option (choice) or level index (score)
