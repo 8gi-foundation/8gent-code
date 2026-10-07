@@ -462,8 +462,8 @@ export function assertNotAiJamesToken(
 			return null;
 		}
 	},
-,
-	chatIds: string[] = []): boolean {
+	chatIds: string[] = [],
+): boolean {
 	const file =
 		env.AI_JAMES_BOT_TOKEN_SHA256_FILE || `${resolveHome()}/.8gent/ai-james-bot-token.sha256`;
 	const ref = (env.AI_JAMES_BOT_TOKEN_SHA256 || readRef(file) || "").trim().toLowerCase();
