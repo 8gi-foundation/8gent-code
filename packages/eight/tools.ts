@@ -227,7 +227,15 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		return target; // workspace itself does not exist yet; nothing to escape through
 	}
 
-	const finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
+	let finalStat: fs.Stats | undefined;
+	try {
+		finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+		}
+		throw err;
+	}
 	if (finalStat?.isSymbolicLink()) {
 		let real: string;
 		try {
