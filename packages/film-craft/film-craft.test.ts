@@ -3,7 +3,15 @@
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -173,6 +181,57 @@ describe("film.sh never runs model text", () => {
 		},
 		120_000,
 	);
+
+	// Runs on every runner, with or without ImageMagick and ffmpeg: stub magick and ffmpeg
+	// first on PATH (each touches its last argument, the output file, and logs its name),
+	// then run the generated film.sh with real bash. Everything stays inside one temp dir.
+	test("slide text with $(), backticks and quotes runs as text under real bash (stubbed tools)", async () => {
+		const d = tmp("fc-inject-stub-");
+		const stubs = join(d, "stub-bin");
+		mkdirSync(stubs);
+		const log = join(d, "stub.log");
+		for (const tool of ["magick", "ffmpeg"]) {
+			const stub = join(stubs, tool);
+			writeFileSync(
+				stub,
+				`#!/bin/bash\necho ${tool} >> "$STUB_LOG"\nfor last; do :; done\ntouch -- "$last"\nexit 0\n`,
+			);
+			chmodSync(stub, 0o755);
+		}
+		const out = join(d, "film");
+		const marker = join(d, "PWNED");
+		const evil = `$(touch ${marker}) \`touch ${marker}\` "it's" '$(touch ${marker})' %d @x`;
+		const r = await filmCraft({
+			action: "plan",
+			out_dir: out,
+			width: 160,
+			height: 90,
+			fps: 12,
+			slides: [{ title: evil, kicker: evil, sub: evil, lower: evil, seconds: 1 }],
+		});
+		expect(r).toContain("Wrote");
+		const script = readFileSync(join(out, "film.sh"), "utf8");
+		expect(script).toContain("touch"); // the evil text is in the script, as text
+		const run = Bun.spawnSync(["bash", join(out, "film.sh")], {
+			cwd: d,
+			env: { ...process.env, PATH: `${stubs}:${process.env.PATH ?? ""}`, STUB_LOG: log },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(run.stderr.toString()).toBe("");
+		expect(run.exitCode).toBe(0);
+		expect(existsSync(marker)).toBe(false);
+		// The stubs, not real binaries, did the work: two magick frames and two ffmpeg passes.
+		expect(readFileSync(log, "utf8").trim().split("\n").sort()).toEqual([
+			"ffmpeg",
+			"ffmpeg",
+			"magick",
+			"magick",
+		]);
+		// The final mv found the picture the last ffmpeg stub wrote.
+		expect(existsSync(join(out, "film.mp4"))).toBe(true);
+		expect(existsSync(join(out, "film-picture.mp4"))).toBe(false);
+	});
 });
 
 describe("mix", () => {
