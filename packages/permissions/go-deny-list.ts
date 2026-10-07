@@ -8,6 +8,7 @@
  * Owner: 8SO. Edits require a security review checkpoint.
  */
 
+import * as os from "node:os";
 import * as path from "node:path";
 
 export interface DenyListPattern {
@@ -282,8 +283,21 @@ const isGitWord = (t: string): boolean => t === "git" || t.endsWith("/git");
 
 /** Where a `cd` leaves the shell; null when the shell decides it at run time. */
 function cdTarget(dir: string | null, arg: string | undefined): string | null {
-	if (!dir || !arg || arg === "-" || /[$`~*?{]/.test(arg)) return null;
-	return path.resolve(dir, arg);
+	if (!dir || !arg || arg === "-") return null;
+	const target = expandHome(arg);
+	if (/[$`~*?{]/.test(target)) return null;
+	return path.resolve(dir, target);
+}
+
+/**
+ * `~`, `~/x`, `$HOME/x` and `${HOME}/x` are the home directory, as the shell
+ * expands them. Other variables, `~user` and substitutions stay unexpanded,
+ * so the caller treats them as decided at run time.
+ */
+function expandHome(arg: string): string {
+	const m = arg.match(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/);
+	if (!m) return arg;
+	return (process.env.HOME || os.homedir()) + arg.slice(m[0].length);
 }
 
 /** One `git ...` invocation starting at words[g]. */

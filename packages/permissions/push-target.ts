@@ -64,11 +64,13 @@ function implicitDestinations(dir: string, branch: string): string[] | null {
 	switch (mode) {
 		case "nothing":
 		case "current":
+		// simple pushes to the same name; git refuses when the upstream on
+		// that remote has a different name, so it never lands there.
+		case "simple":
 			return dsts;
 		case "matching":
 			// Every branch that exists on both sides, protected ones included.
 			return [...dsts, "*"];
-		case "simple":
 		case "upstream":
 		case "tracking": {
 			// The upstream is where these modes push: @{u}, read as the

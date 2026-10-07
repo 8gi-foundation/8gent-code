@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { matchGitPushProtectedBranch } from "../go-deny-list";
@@ -139,15 +139,36 @@ describe("pushes that name no branch, resolved in the repository", () => {
 		expect(pushDestinationBranch(work, "implicit")).toBe("feat/x");
 	});
 
-	test("a feature branch whose upstream is main: a bare push is protected, HEAD is not", () => {
+	test("upstream mode, a feature branch whose upstream is main: a bare push is protected, HEAD is not", () => {
 		const work = repo("feat/y", "main");
-		expect(isProtectedBranchPush("git push", work)).toBe(true);
 		git(work, "config", "push.default", "upstream");
+		expect(isProtectedBranchPush("git push", work)).toBe(true);
 		expect(isProtectedBranchPush("git push origin", work)).toBe(true);
 		// `git push origin HEAD` pushes to the same name, whatever the upstream.
 		expect(isProtectedBranchPush("git push origin HEAD", work)).toBe(false);
 		git(work, "config", "push.default", "current");
 		expect(isProtectedBranchPush("git push", work)).toBe(false);
+	});
+
+	test("simple mode (the default) pushes to the same name, not to a differently named upstream", () => {
+		// A fork: feat tracks upstream/main; `git push origin` pushes feat to feat.
+		const work = repo("feat/fork");
+		const upstreamRemote = join(tempDir("push-target-upstream-"), "up.git");
+		execFileSync("git", [
+			"clone",
+			"-q",
+			"--bare",
+			git(work, "remote", "get-url", "origin"),
+			upstreamRemote,
+		]);
+		git(work, "remote", "add", "upstream", upstreamRemote);
+		git(work, "fetch", "-q", "upstream");
+		git(work, "branch", "--set-upstream-to=upstream/main");
+		expect(isProtectedBranchPush("git push origin", work)).toBe(false);
+		git(work, "config", "push.default", "simple");
+		expect(isProtectedBranchPush("git push origin", work)).toBe(false);
+		expect(isProtectedBranchPush("git push", work)).toBe(false);
+		expect(pushDestinationBranch(work, "implicit")).toBe("feat/fork");
 	});
 
 	test("push.default=matching and unknown modes fail closed", () => {
@@ -187,6 +208,32 @@ describe("pushes that name no branch, resolved in the repository", () => {
 		expect(isProtectedBranchPush(`git -C ${main} push`, feat)).toBe(true);
 		expect(isProtectedBranchPush(`cd ${feat} && git push`, main)).toBe(false);
 		expect(isProtectedBranchPush("git push", feat)).toBe(false);
+	});
+
+	test("~, $HOME and ${HOME} resolve to the home directory; other run-time forms fail closed", () => {
+		const home = process.env.HOME as string;
+		const feat = repo("feat/home");
+		git(feat, "push", "-q", "-u", "origin", "HEAD");
+		const main = repo("main");
+		const featName = join("repos", "feat-home");
+		const mainName = join("repos", "main-home");
+		mkdirSync(join(home, "repos"), { recursive: true });
+		renameSync(join(feat, ".."), join(home, featName));
+		renameSync(join(main, ".."), join(home, mainName));
+		const elsewhere = tempDir("push-target-cwd-");
+		for (const prefix of ["~", "$HOME", "${HOME}"]) {
+			const f = `${prefix}/${featName}/work`;
+			const m = `${prefix}/${mainName}/work`;
+			expect(isProtectedBranchPush(`cd ${f} && git push -u origin HEAD`, elsewhere)).toBe(false);
+			expect(isProtectedBranchPush(`cd ${f} && git push`, elsewhere)).toBe(false);
+			expect(isProtectedBranchPush(`git -C ${f} push -u origin HEAD`, elsewhere)).toBe(false);
+			expect(isProtectedBranchPush(`git -C ${f} push`, elsewhere)).toBe(false);
+			expect(isProtectedBranchPush(`cd ${m} && git push -u origin HEAD`, elsewhere)).toBe(true);
+			expect(isProtectedBranchPush(`git -C ${m} push`, elsewhere)).toBe(true);
+		}
+		expect(isProtectedBranchPush(`cd ~someone/${featName}/work && git push`, elsewhere)).toBe(true);
+		expect(isProtectedBranchPush("cd $REPO_DIR && git push", elsewhere)).toBe(true);
+		expect(isProtectedBranchPush(`cd $HOMEX/${featName}/work && git push`, elsewhere)).toBe(true);
 	});
 
 	test("aliases in the repository config are expanded", () => {
