@@ -264,3 +264,29 @@ describe("agent settings file (#3595)", () => {
 		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
 	});
 });
+
+describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => {
+	const home = "/Users/someone";
+	test("the default control token and everything under browser-profiles are denied", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/browser-control.token",
+			"~/.8gent/browser-control.token",
+			".8gent/browser-control.token",
+			"./x/../.8gent/browser-control.token",
+			"/Users/someone/.8gent/browser-profiles",
+			"/Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
+			"~/.8gent/browser-profiles/eightgent/browser-control.port",
+			".8gent/browser-profiles/eightgent/electron/Cookies",
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+	});
+	test("neighbours are not caught", () => {
+		expect(validatePath(".8gent/browser-shots/a.png", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+		expect(validatePath("/work/browser-profiles/x", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+});

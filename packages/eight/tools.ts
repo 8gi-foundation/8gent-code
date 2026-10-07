@@ -144,7 +144,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser } from "../tools/eight-browser";
+import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
 import { describeImage, readImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -466,7 +466,9 @@ const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
 const getEightBrowser = () => {
 	if (!eightBrowser) {
-		eightBrowser = createEightBrowser();
+		// A named profile (#3622) is the bot's own login-free browser: it never types into password or
+		// payment fields and never opens loopback or private hosts.
+		eightBrowser = createEightBrowser(undefined, { isolated: () => isolatedBrowser() });
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -475,6 +477,9 @@ const getEightBrowser = () => {
 /**
  * 8gent Browser tabs share the person's logged-in session partition (8gent-browser #80), so tools that
  * act or capture there ask first, like desktop_*: gated as desktop_use, where no rule allows them.
+ * Exception (#3622, James 7 Oct): under a valid named EIGHT_BROWSER_PROFILE the calls go to that
+ * profile's own login-free instance, so the tool-level card is skipped. Sensitive clicks still go to the
+ * approver, and password or payment fields are never typed into.
  */
 const BROWSER_ASK_FIRST = new Set(["browser_task", "browser_screenshot"]);
 /** Approval-card view of browser args: typed text shows as its length only. */
@@ -1679,8 +1684,11 @@ export class ToolExecutor {
 			});
 			const askFirst = !gateResult.allowed && gateResult.requiresApproval;
 			if (askFirst && isDesktop) {
-				const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
-				if (refusal) return refusal;
+				const ownBrowser = BROWSER_ASK_FIRST.has(toolName) && isolatedBrowser();
+				if (!ownBrowser) {
+					const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
+					if (refusal) return refusal;
+				}
 			} else if (askFirst && isMcpCall) {
 				// Ask in Ask and Guarded; Infinite runs; no card means no call.
 				const refusal = await askMcpApproval(
@@ -2545,6 +2553,10 @@ export class ToolExecutor {
 		// at process start, so an edit that slips past this cannot take effect.
 		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
+		// bump only; the boundary is seatbelting run_command (#3612).
+		if (touchesBrowserSecrets(command))
+			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
@@ -3719,8 +3731,9 @@ export class ToolExecutor {
 				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
 				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
 				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
+				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
 				const approve = async (what: string) =>
-					(await this.askDesktopApproval("browser_task", { click: what }, "This click looks sensitive in your logged-in browser.")) === null;
+					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
 				return await getEightBrowser().run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
@@ -3737,7 +3750,10 @@ export class ToolExecutor {
 					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
-					out = abs.startsWith(shots + path.sep) ? abs : safePath(filePath, this.workingDirectory);
+					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
+					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory);
+				} else if (isolatedBrowser()) {
+					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory);
 				}
 				return await getEightBrowser().screenshot(out, session);
 			}

@@ -11,6 +11,11 @@
  *     once, then stops the plan (verify.ts). Clicks are never retried: a retried toggle undoes itself.
  *   - action log: one row per step, typed text logged as length only (actionLog.ts)
  * Only tabs this process opened are driven, never the user's own tabs.
+ *
+ * Named profile (#3622, paired with 8gent-browser #82): EIGHT_BROWSER_PROFILE=<name> points every call at
+ * that profile's own isolated 8gent Browser instance (its token and port file under
+ * ~/.8gent/browser-profiles/<name>/), never the person's logged-in default profile. A bad name, or a profile
+ * that is not running, is an error: there is no fallback to the default token or port 7980.
  */
 
 import { createHash } from "node:crypto";
@@ -85,15 +90,78 @@ export type ApproveFn = (what: string) => Promise<boolean>;
 
 type Check<T> = { ok: true; action: T } | { ok: false; error: string };
 
-export function validateBrowserAction(raw: unknown): Check<BrowserAction> {
+// ── Named profile: loopback and private hosts (#3622, 8SO review) ────────────
+// The same rule 8gent-browser enforces at its network layer (src/main/private-net.ts);
+// checked here first so a refused URL never reaches the browser. WHATWG URL parsing
+// normalises numeric hosts (2130706433, 0x7f000001, 0177.0.0.1 -> 127.0.0.1).
+
+function v4Private(h: string): boolean {
+	const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+	if (!m) return false;
+	const [a, b] = [Number(m[1]), Number(m[2])];
+	return (
+		a === 127 ||
+		a === 10 ||
+		a === 0 ||
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 168) ||
+		(a === 169 && b === 254) ||
+		(a === 100 && b >= 64 && b <= 127)
+	);
+}
+
+/** Why `url` is refused in a named profile, or null: non-http(s), credentials in the URL,
+ *  or a loopback / private / link-local / CGNAT / .local / localhost host. */
+export function blockedForProfile(url: string): string | null {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return "unparseable URL";
+	}
+	if (u.protocol !== "http:" && u.protocol !== "https:") return `scheme ${u.protocol} not allowed`;
+	if (u.username || u.password) return "credentials in URL";
+	let host = u.hostname.toLowerCase();
+	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	if (host.endsWith(".")) host = host.slice(0, -1); // "localhost." and "127.0.0.1." are the same hosts
+	if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
+		return "private address";
+	if (v4Private(host)) return "private address";
+	if (host.includes(":")) {
+		if (host === "::1" || host === "::") return "private address";
+		if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host))
+			return "private address";
+		// IPv4 carried in IPv6: mapped (::ffff:), translated (::ffff:0:), compatible (::a.b.c.d,
+		// which WHATWG prints as ::7f00:1) and NAT64 (64:ff9b::). Check the embedded address.
+		const mapped = host.match(/^(?:::ffff:(?:0:)?|::|64:ff9b::)(.+)$/);
+		if (mapped) {
+			if (v4Private(mapped[1])) return "private address";
+			const hex = mapped[1].match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+			if (hex) {
+				const n = (Number.parseInt(hex[1], 16) << 16) | Number.parseInt(hex[2], 16);
+				if (v4Private([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".")))
+					return "private address";
+			}
+		}
+	}
+	return null;
+}
+
+export function validateBrowserAction(
+	raw: unknown,
+	opts: { isolated?: boolean } = {},
+): Check<BrowserAction> {
 	if (!raw || typeof raw !== "object") return { ok: false, error: "action must be an object" };
 	const a = raw as Record<string, unknown>;
 	const sel = typeof a.selector === "string" && a.selector.trim() ? a.selector : undefined;
 	switch (a.action) {
-		case "open":
+		case "open": {
 			if (typeof a.url !== "string" || !/^https?:\/\//.test(a.url))
 				return { ok: false, error: "open.url must be http(s)" };
+			const why = opts.isolated ? blockedForProfile(a.url) : null;
+			if (why) return { ok: false, error: `open.url refused in this browser profile: ${why}` };
 			return { ok: true, action: { action: "open", url: a.url } };
+		}
 		case "left_click": {
 			const index =
 				Number.isInteger(a.index) && (a.index as number) >= 0 ? (a.index as number) : undefined;
@@ -130,17 +198,125 @@ export function validateBrowserAction(raw: unknown): Check<BrowserAction> {
 	return { ok: false, error: `unknown action kind: ${String(a.action)}` };
 }
 
+type Env = Record<string, string | undefined>;
+export type BrowserProfile = { name: string; tokenFile: string; portFile: string };
+const DEFAULT_CONTROL_PORT = 7980;
+const PROFILE_NAME = /^[a-z][a-z0-9-]{1,31}$/; // same rule as 8gent-browser src/main/profile.ts
+let profileHomeOverride: string | null = null;
+/** Test seam: resolve profiles under this HOME instead of the real one. Never set outside tests. */
+export function _setProfileHomeForTest(home: string | null): void {
+	profileHomeOverride = home;
+}
+
+/**
+ * The named 8gent Browser profile this process uses, or null for the default profile (unset, empty or
+ * "default"). A name that is not a short lowercase slug throws: it never falls back to the default profile,
+ * and since it cannot contain "/" or "." it can never resolve to the default token.
+ */
+export function browserProfile(
+	env: Env = process.env,
+	home: string = profileHomeOverride ?? homedir(),
+): BrowserProfile | null {
+	const name = env.EIGHT_BROWSER_PROFILE;
+	if (name === undefined || name === "" || name === "default") return null;
+	if (!PROFILE_NAME.test(name))
+		throw new Error(
+			`EIGHT_BROWSER_PROFILE must be a lowercase slug (a-z, 0-9, -; 2-32 chars, starting with a letter); refusing ${JSON.stringify(name)}`,
+		);
+	const dir = join(home, ".8gent", "browser-profiles", name);
+	return {
+		name,
+		tokenFile: join(dir, "browser-control.token"),
+		portFile: join(dir, "browser-control.port"),
+	};
+}
+
+/** True only when a valid named profile is configured AND 8gent Browser is the backend: the
+ *  bot's own login-free browser. The opt-in browser-use backend never gets the exemptions. */
+export function isolatedBrowser(env: Env = process.env): boolean {
+	if (env.EIGHT_BROWSER_BACKEND === "browser-use") return false;
+	try {
+		return browserProfile(env) !== null;
+	} catch {
+		return false;
+	}
+}
+
+/** One warning line for a bad EIGHT_BROWSER_PROFILE, or null. Printed once when a local session starts. */
+export function browserProfileWarning(env: Env = process.env): string | null {
+	try {
+		browserProfile(env);
+		return null;
+	} catch (e) {
+		return `${(e as Error).message}; this session has no browser tools`;
+	}
+}
+
+/** Browser tools a local-model session may see: none unless a named profile is configured. */
+export function localBrowserTools(env: Env = process.env): string[] {
+	return isolatedBrowser(env)
+		? ["browser_open", "browser_state", "browser_task", "browser_screenshot"]
+		: [];
+}
+
+/** Where to connect: a named profile's own token and published port, else the default token and port. */
+function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
+	port: number;
+	tokenFile: string;
+	profile?: string;
+} {
+	const env = opts.env ?? process.env;
+	const profile = browserProfile(env);
+	if (profile) {
+		// Defence in depth (8SO HIGH-2): a process configured for a named profile never reaches the
+		// default browser, whatever port or token file a caller passes.
+		if (opts.port === DEFAULT_CONTROL_PORT)
+			throw new Error(
+				`EIGHT_BROWSER_PROFILE is set: refusing port ${DEFAULT_CONTROL_PORT}, the default profile's port`,
+			);
+		if (opts.tokenFile && opts.tokenFile !== profile.tokenFile)
+			throw new Error(
+				"EIGHT_BROWSER_PROFILE is set: refusing a control token that is not the profile's (default token)",
+			);
+	}
+	if (!profile)
+		return {
+			port: opts.port ?? (Number(env.EIGHT_BROWSER_CONTROL_PORT) || DEFAULT_CONTROL_PORT),
+			tokenFile: opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
+		};
+	let raw: string;
+	try {
+		raw = readFileSync(profile.portFile, "utf8").trim();
+		readFileSync(profile.tokenFile, "utf8");
+	} catch {
+		throw new Error(
+			`8gent Browser profile "${profile.name}" is not running (no token or port file in ~/.8gent/browser-profiles/${profile.name}/)`,
+		);
+	}
+	const port = /^\d+$/.test(raw) ? Number(raw) : 0;
+	if (port <= 0 || port >= 65536 || port === DEFAULT_CONTROL_PORT)
+		throw new Error(
+			`8gent Browser profile "${profile.name}" published an invalid port (${JSON.stringify(raw)}); refusing`,
+		);
+	return { port, tokenFile: profile.tokenFile, profile: profile.name };
+}
+
 /** WebSocket transport: one authenticated round trip per command, as 8b-web does. */
-export function wsTransport(opts: { port?: number; tokenFile?: string } = {}): BrowserCall {
+export function wsTransport(
+	opts: { port?: number; tokenFile?: string; env?: Env } = {},
+): BrowserCall {
 	return (cmd, args = {}) => {
-		const port = opts.port ?? (Number(process.env.EIGHT_BROWSER_CONTROL_PORT) || 7980);
+		let port: number;
+		let tokenFile: string;
+		try {
+			({ port, tokenFile } = endpoint(opts));
+		} catch (e) {
+			return Promise.reject(e);
+		}
 		return new Promise((resolve, reject) => {
 			let token: string;
 			try {
-				token = readFileSync(
-					opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
-					"utf8",
-				).trim();
+				token = readFileSync(tokenFile, "utf8").trim();
 			} catch {
 				return reject(
 					new Error(
@@ -197,8 +373,162 @@ type El = {
 /** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
 const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 
-export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?: number } = {}) {
+// ── run_command backstop (#3622, 8SO HIGH-2) ──────────────────────────────────
+// A SPEED BUMP, not a boundary. run_command is neither path-guarded nor seatbelted, so a
+// shell or `bun -e` could read ~/.8gent/browser-control.token and drive the person's
+// logged-in browser. The real fix is seatbelting run_command (#3612); until that merges the
+// bot's launcher does not set EIGHT_BROWSER_PROFILE. After decoding escapes, base64/hex
+// literals and char codes, and stripping quoting, this refuses:
+//   - the token and profile names (browser-control, browser-profiles, browser-*);
+//   - ".8gent" with a glob, a $variable or browser/token/control/profile after it;
+//   - ".8gent" in a command that lists directories (readdir, listdir, ls, find, glob...);
+//   - any glob segment, other than a bare "*", that could expand to one of those names.
+
+const SECRET_NAMES = [
+	".8gent",
+	"browser-control.token",
+	"browser-control.port",
+	"browser-profiles",
+];
+
+/** A shell glob segment as a regex: * ? [..] and {a,b} (treated as a wildcard). */
+function globRe(seg: string): RegExp {
+	let re = "";
+	for (let i = 0; i < seg.length; i++) {
+		const c = seg[i];
+		const close = c === "[" ? seg.indexOf("]", i + 1) : c === "{" ? seg.indexOf("}", i + 1) : -1;
+		if (c === "*") re += ".*";
+		else if (c === "?") re += ".";
+		else if (c === "[" && close > 0) {
+			const body = seg
+				.slice(i + 1, close)
+				.replace(/^!/, "^")
+				.replace(/[\\\]]/g, "\\$&");
+			re += `[${body}]`;
+			i = close;
+		} else if (c === "{" && close > 0) {
+			re += ".*";
+			i = close;
+		} else re += c.replace(/[.+^$()|[\]{}\\]/g, "\\$&");
+	}
+	return new RegExp(`^${re}$`, "i");
+}
+
+/** The command as a reader would see it: as written, plus escapes, base64/hex literals and
+ *  String.fromCharCode / chr() lists decoded. */
+function decodedViews(command: string): string[] {
+	const views = [command];
+	views.push(
+		command
+			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
+			.replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
+			.replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(Number.parseInt(o, 8))),
+	);
+	for (const t of command.match(/[A-Za-z0-9+/_-]{12,}={0,2}/g) ?? [])
+		views.push(Buffer.from(t, "base64").toString("latin1"));
+	for (const t of command.match(/(?:[0-9a-f]{2}){8,}/gi) ?? [])
+		views.push(Buffer.from(t, "hex").toString("latin1"));
+	for (const m of command.matchAll(/(?:fromCharCode|chr)\s*\(([\d\s,]+)\)/g))
+		views.push(String.fromCharCode(...m[1].split(",").map((n) => Number(n.trim()))));
+	return views;
+}
+
+/** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
+export function touchesBrowserSecrets(command: string): boolean {
+	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b/i.test(command);
+	for (const view of decodedViews(command)) {
+		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
+		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
+		const lower = flat.toLowerCase();
+		if (/browser-(control|profiles|[*?[{$])/.test(lower)) return true;
+		const at = lower.indexOf(".8gent");
+		if (at >= 0) {
+			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
+			if (lists) return true;
+		}
+		for (const token of flat.split(/[\s;|&()<>=]+/)) {
+			if (!/[*?[{]/.test(token)) continue;
+			for (const seg of token.split("/")) {
+				if (seg === "*" || !/[*?[{]/.test(seg)) continue;
+				const re = globRe(seg);
+				if (SECRET_NAMES.some((n) => re.test(n))) return true;
+			}
+		}
+	}
+	return false;
+}
+
+/** Password, payment, PIN and OTP fields. Under a named profile no step types into one
+ *  (#3622). Kept identical to 8gent-browser src/main/secret-fields.ts, which also checks
+ *  label text in the page on the exact element. Refusing too much is the safe direction. */
+const SECRET_FIELDS = [
+	"input[type=password]",
+	...[
+		"current-password",
+		"new-password",
+		"one-time-code",
+		"cc-name",
+		"cc-given-name",
+		"cc-additional-name",
+		"cc-family-name",
+		"cc-number",
+		"cc-exp",
+		"cc-exp-month",
+		"cc-exp-year",
+		"cc-csc",
+		"cc-type",
+	].map((t) => `[autocomplete~="${t}" i]`),
+	'[autocomplete^="cc-" i]',
+	...[
+		"pass",
+		"pwd",
+		"pin",
+		"otp",
+		"one-time",
+		"ssn",
+		"exp",
+		"ccnum",
+		"cardnumber",
+		"card",
+		"cvc",
+		"cvv",
+		"csc",
+		"iban",
+		"security-code",
+		"securitycode",
+	].flatMap((t) => [`[name*="${t}" i]`, `[id*="${t}" i]`]),
+	...[
+		"password",
+		"passcode",
+		"card",
+		"cvv",
+		"cvc",
+		"security code",
+		"iban",
+		"one-time",
+		"pin",
+	].flatMap((t) => [`[aria-label*="${t}" i]`, `[placeholder*="${t}" i]`]),
+	"[contenteditable]",
+].join(",");
+
+export function createEightBrowser(
+	call: BrowserCall = wsCall,
+	/** isolated: a named profile (#3622). No typing into secret fields, no private hosts. */
+	opts: { settleMs?: number; isolated?: boolean | (() => boolean) } = {},
+) {
+	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
 	const settle = opts.settleMs ?? 400;
+	/** Does `selector` reach a password, payment or contenteditable field? Asked of the page
+	 *  itself, so it holds for any selector. Fails closed: an error reply (a malformed
+	 *  selector) or anything but an elements array counts as secret. */
+	const secretField = async (tabId: string, selector: string): Promise<boolean> => {
+		const r = await call("page.query", {
+			tabId,
+			selector: `:is(${selector}):is(${SECRET_FIELDS})`,
+		});
+		if (!r || r.ok === false || !Array.isArray(r.elements)) return true;
+		return r.elements.length > 0;
+	};
 	const owned = new Set<string>();
 	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
@@ -305,7 +635,7 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 	};
 
 	async function open(url: string): Promise<string> {
-		const v = validateBrowserAction({ action: "open", url });
+		const v = validateBrowserAction({ action: "open", url }, { isolated: isolated() });
 		if (!v.ok) return `browser_open failed: ${v.error}`;
 		const r = await call("tab.open", { url });
 		owned.add((current = String(r.id)));
@@ -337,10 +667,20 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 		const plan: BrowserAction[] = [];
 		let before = await observe(id);
 		for (const [i, r] of raw.entries()) {
-			const v = validateBrowserAction(r);
+			const v = validateBrowserAction(r, { isolated: isolated() });
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
 			plan.push(v.action);
 		}
+		const refuseSecret = (i: number, sel: string) =>
+			fail(
+				`step ${i}: ${sel} is a password or payment field; this browser profile never types into one`,
+				steps,
+			);
+		const steps: Record<string, unknown>[] = [];
+		if (isolated())
+			for (const [i, a] of plan.entries())
+				if (a.action === "type" && (await secretField(id, a.selector)))
+					return refuseSecret(i, a.selector);
 		for (const [i, a] of plan.entries()) {
 			if (a.action === "open") break;
 			if (a.action !== "left_click") continue;
@@ -348,10 +688,11 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 			if (err) return fail(`dry run: step ${i}: ${err}`);
 			break; // after the first click the page may change; later clicks are re-resolved live
 		}
-		const steps: Record<string, unknown>[] = [];
 		for (const [i, a] of plan.entries()) {
 			const row: Record<string, unknown> = { step: i, action: a.action, attempts: 1 };
 			if (a.action === "type") {
+				// Re-checked live: an earlier step may have changed the page since the dry run.
+				if (isolated() && (await secretField(id, a.selector))) return refuseSecret(i, a.selector);
 				row.selector = a.selector;
 				row.text_len = a.text.length;
 				if (a.text) typed.add(clipped(a.text));

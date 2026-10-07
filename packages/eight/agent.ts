@@ -64,6 +64,8 @@ import { stripDoneMarker } from "../ai/text-tool-loop";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
+import { browserProfileWarning, localBrowserTools } from "../tools/eight-browser";
+
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -148,6 +150,9 @@ import {
 	toolDefsToSpecs,
 } from "../ai";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+
+/** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
+let browserProfileWarned = false;
 
 /**
  * Did the harness refuse this call before it ran (#3409)? Decided from the
@@ -1428,6 +1433,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
 		if (isLocalProvider) {
+			// A bad EIGHT_BROWSER_PROFILE leaves the session without browser tools; say so once (#3622).
+			const browserWarning = browserProfileWarning();
+			if (browserWarning && !browserProfileWarned) {
+				browserProfileWarned = true;
+				console.warn(`[8gent] ${browserWarning}`);
+			}
 			this.toolRegistry.loadCategory("web");
 			this.toolRegistry.loadCategory("git");
 			this.toolRegistry.loadCategory("design");
@@ -1473,6 +1484,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...(postMessageAvailable() ? ["post_message"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
+			// 8gent Browser (#3622): only with a named EIGHT_BROWSER_PROFILE, the bot's own login-free
+			// instance. Without one a local model gets no browser, so it never reaches the person's profile.
+			...localBrowserTools(),
 		];
 		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
