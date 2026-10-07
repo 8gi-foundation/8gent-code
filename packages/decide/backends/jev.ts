@@ -5,9 +5,10 @@
  * Off unless env EIGHT_DECIDE_BACKEND=jev (see index.ts), and then only
  * with AI_GATEWAY_API_KEY in env. The state of every question leaves the
  * machine, so this backend never takes part in a SIGI scored run or in
- * anything labelled local. The decider wraps it in `FallbackBackend`: on
- * any error or timeout the local judge answers, and every decision is
- * logged with the backend that made it.
+ * anything labelled local: `jevForbidden` refuses it under SIGI_RUN or
+ * PILOT_RUN, or while the pilot lock exists. The decider wraps it in
+ * `FallbackBackend`: on any error or timeout the local judge answers, and
+ * every decision is logged with the backend that made it.
  *
  * Wire shape (checked against the gateway's own validator on 2026-10-07;
  * TypeSafe's primitives docs for the answer fields):
@@ -22,8 +23,15 @@
  * Probabilities are renormalised here and `chosen` / `confidence` are
  * recomputed from them (as the laya backend does), so the gateway cannot
  * hand the harness a self-inconsistent answer. Code owns thresholds.
+ *
+ * Nothing from the gateway's error body reaches a log or an error message
+ * except the HTTP status and its fixed `error.type` code: the body can
+ * carry the request state, and free text is not something to log.
  */
 
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	type Answer,
 	type ChoiceQuestion,
@@ -46,6 +54,8 @@ export const JEV_MODEL = "typesafe-ai/jev";
 export const JEV_KEY_ENV = "AI_GATEWAY_API_KEY";
 /** Hosted round trip is 70 to 500 ms when it works; past this the local judge answers. */
 export const JEV_DEFAULT_TIMEOUT_MS = 5_000;
+/** The pilot's lock, relative to HOME. While it exists a scored or pilot run owns this machine. */
+export const PILOT_LOCK_RELATIVE = ".8gent/rishi-pilot/pilot.lock";
 
 export interface JevBackendOptions {
 	/** Required. From env AI_GATEWAY_API_KEY via `resolveJevKey`. */
@@ -64,18 +74,32 @@ export function resolveJevKey(
 }
 
 /**
+ * Why the hosted judge must not run right now, or null. A SIGI or pilot run
+ * (env SIGI_RUN / PILOT_RUN set to anything non-empty) and the pilot lock
+ * both mean a hosted call could land in a scored result. `exists` is
+ * injectable for tests; HOME comes from env so a test can point it at a
+ * temp dir.
+ */
+export function jevForbidden(
+	env: Record<string, string | undefined> = process.env,
+	exists: (p: string) => boolean = existsSync,
+): string | null {
+	for (const v of ["SIGI_RUN", "PILOT_RUN"])
+		if (env[v]?.trim()) return `${v} is set: hosted judge not allowed in a scored or pilot run`;
+	const lock = join(env.HOME?.trim() || homedir(), PILOT_LOCK_RELATIVE);
+	if (exists(lock))
+		return `pilot lock present at ${lock}: hosted judge not allowed while a pilot run owns this machine`;
+	return null;
+}
+
+/**
  * Criteria keys for a choice question. Jev keys its answer by these, so they
  * must be unique and stable. Option text is used verbatim when every option
  * is distinct (it carries meaning for the model); otherwise the index is
  * appended to the duplicates.
  */
 export function choiceKeys(options: string[]): string[] {
-	const seen = new Map<string, number>();
-	return options.map((o, i) => {
-		const n = seen.get(o) ?? 0;
-		seen.set(o, n + 1);
-		return n === 0 && options.indexOf(o) === options.lastIndexOf(o) ? o : `${o} (${i})`;
-	});
+	return options.map((o, i) => (options.indexOf(o) === options.lastIndexOf(o) ? o : `${o} (${i})`));
 }
 
 type JevQuestion =
@@ -124,12 +148,13 @@ export function fromJevAnswer(question: Question, raw: unknown): number[] {
 			: null;
 	if (question.kind === "noul") {
 		// The gateway documents `probability`; TypeSafe's native API says `noul`. Accept either, then the map.
+		const no = num(probs?.false);
 		const yes =
 			num(a.probability) ??
 			num(a.noul) ??
 			num(a.boolean) ??
 			num(probs?.true) ??
-			(num(probs?.false) !== undefined ? 1 - (num(probs?.false) as number) : undefined);
+			(no === undefined ? undefined : 1 - no);
 		if (yes === undefined || yes < 0 || yes > 1)
 			throw new DecideError(`jev: noul answer "${question.id}" has no usable probability`);
 		return [yes, 1 - yes];
@@ -144,6 +169,16 @@ export function fromJevAnswer(question: Question, raw: unknown): number[] {
 	const levels = (question as ScoreQuestion).levels;
 	if (probs) return renormalise(levels.map((_, i) => num(probs[String(i)]) ?? 0));
 	throw new DecideError(`jev: score answer "${question.id}" has no probabilities`);
+}
+
+/** The gateway's fixed error code (`error.type`, e.g. no_providers_available), or "unknown". Never its free text. */
+function errorCode(text: string): string {
+	try {
+		const t = (JSON.parse(text) as { error?: { type?: unknown } })?.error?.type;
+		return typeof t === "string" && /^[a-z0-9_]{1,64}$/i.test(t) ? t : "unknown";
+	} catch {
+		return "unknown";
+	}
 }
 
 export class JevBackend implements DecideBackend {
@@ -174,22 +209,12 @@ export class JevBackend implements DecideBackend {
 				signal: AbortSignal.timeout(this.timeoutMs),
 			});
 		} catch (err) {
-			throw new DecideUnavailableError(`jev unreachable: ${(err as Error).message}`);
+			// A fetch error message can quote the URL, never the body or the key; the error name is enough.
+			throw new DecideUnavailableError(`jev unreachable: ${(err as Error)?.name ?? "error"}`);
 		}
 		if (!res.ok) {
-			// Never echo the body raw: it can carry the request state. The gateway's message field is enough.
 			const text = await res.text().catch(() => "");
-			let message = "";
-			try {
-				message = String(
-					(JSON.parse(text) as { error?: { message?: string } })?.error?.message ?? "",
-				);
-			} catch {
-				message = "";
-			}
-			throw new DecideUnavailableError(
-				`jev /v1/evaluate ${res.status}${message ? `: ${message.slice(0, 160)}` : ""}`,
-			);
+			throw new DecideUnavailableError(`jev /v1/evaluate ${res.status} ${errorCode(text)}`);
 		}
 		const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
 		const rawAnswers =
@@ -214,9 +239,10 @@ export class JevBackend implements DecideBackend {
 /**
  * Primary backend with a lazily built fallback. Any error from the primary
  * (timeout, refused, 4xx, 5xx, unreadable answer) sends the same request
- * to the fallback, built once on first need. Every decision is reported
- * through `log` with the backend that made it, so a hosted judge that is
- * silently failing over cannot pass for one that is working.
+ * to the fallback, built once on first need. A primary that hangs past
+ * `timeoutMs` without failing is treated the same way. Every decision is
+ * reported through `log` with the backend that made it, so a hosted judge
+ * that is silently failing over cannot pass for one that is working.
  */
 export interface FallbackLog {
 	backend: string;
@@ -228,12 +254,16 @@ export interface FallbackLog {
 
 export class FallbackBackend implements DecideBackend {
 	private secondary: Promise<DecideBackend> | null = null;
+	private readonly timeoutMs: number;
 
 	constructor(
 		private readonly primary: DecideBackend,
 		private readonly buildSecondary: () => Promise<DecideBackend>,
 		private readonly log: (entry: FallbackLog) => void,
-	) {}
+		timeoutMs = JEV_DEFAULT_TIMEOUT_MS,
+	) {
+		this.timeoutMs = timeoutMs;
+	}
 
 	get name(): string {
 		return this.primary.name;
@@ -243,9 +273,23 @@ export class FallbackBackend implements DecideBackend {
 		return this.primary.model;
 	}
 
+	private withTimeout(p: Promise<SystemOneResponse>): Promise<SystemOneResponse> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<never>((_, reject) => {
+			timer = setTimeout(
+				() =>
+					reject(
+						new DecideUnavailableError(`${this.primary.name} timed out after ${this.timeoutMs} ms`),
+					),
+				this.timeoutMs,
+			);
+		});
+		return Promise.race([p, late]).finally(() => clearTimeout(timer));
+	}
+
 	async ask(request: SystemOneRequest): Promise<SystemOneResponse> {
 		try {
-			const res = await this.primary.ask(request);
+			const res = await this.withTimeout(this.primary.ask(request));
 			this.log({ backend: res.backend, model: res.model, latencyMs: res.latencyMs });
 			return res;
 		} catch (err) {
