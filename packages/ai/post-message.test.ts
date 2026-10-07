@@ -16,13 +16,11 @@ const FAKE_TOKEN = "123456789:AAFakeTokenFakeTokenFakeTokenFake_0123";
 
 let ran: Array<{ bin: string; argv: string[] }> = [];
 let asked = 0;
-let confirmed: string[] = [];
 let logged: Array<Record<string, unknown>> = [];
 
 function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 	ran = [];
 	logged = [];
-	confirmed = [];
 	return {
 		run: async (bin, argv) => {
 			ran.push({ bin, argv });
@@ -35,9 +33,8 @@ function deps(over: Partial<PostMessageDeps> = {}): PostMessageDeps {
 		log: (e) => logged.push(e),
 		limit: 10,
 		sent: { n: 0 },
-		unconfirmed: () => [],
-		confirm: (c) => confirmed.push(...c),
-		confirmCard: { shown: false },
+		approved: new Set([CHAT]),
+		declined: new Set(),
 		...over,
 	};
 }
@@ -267,39 +264,46 @@ describe("post_message", () => {
 		expect(ran[0].argv[0]).toBe("text");
 	});
 
-	test("unconfirmed chat, Infinite mode: refused, no card, nothing runs", async () => {
+	test("not approved in this process, Infinite mode: refused, no card, nothing runs", async () => {
 		person("approve");
 		const out = await postMessage(
 			{ chat: CHAT, text: "hi" },
-			deps({ infinite: () => true, unconfirmed: () => [CHAT] }),
+			deps({ infinite: () => true, approved: new Set() }),
 		);
-		expect(out).toContain("has not confirmed it yet");
+		expect(out).toContain("no person has approved chat");
 		expect(asked).toBe(0);
 		expect(ran.length).toBe(0);
 	});
 
-	test("unconfirmed chat, person present: one card lists every unconfirmed chat, approval confirms and posts", async () => {
+	test("not approved, person present: a recipient card, approval lets it post and sticks for Infinite", async () => {
 		const seen: Array<{ action: string; command?: string }> = [];
 		registerTuiApprovalHandler(async (req) => {
 			seen.push(req);
 			return "approve";
 		});
-		const d = deps({ unconfirmed: () => [CHAT, "-100222"] });
-		const out = await postMessage({ chat: CHAT, text: "hi" }, d);
-		expect(out).toStartWith("Posted");
-		expect(seen.length).toBe(2); // the recipients card, then the post card
+		let infinite = false;
+		const d = deps({ approved: new Set(), infinite: () => infinite });
+		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toStartWith("Posted");
+		expect(seen.length).toBe(2); // the recipient card, then the post card
 		expect(seen[0].command).toContain(CHAT);
-		expect(seen[0].command).toContain("-100222");
-		expect(confirmed).toEqual([CHAT, "-100222"]);
+		expect(d.approved.has(CHAT)).toBe(true);
+		infinite = true;
+		expect(await postMessage({ chat: CHAT, text: "again" }, d)).toStartWith("Posted");
+		expect(seen.length).toBe(2); // Infinite asked no one
 	});
 
-	test("declining the recipients card refuses, and the card is not shown again", async () => {
+	test("declining the recipient card refuses, and the chat is not asked about again", async () => {
 		person("deny");
-		const d = deps({ unconfirmed: () => [CHAT] });
+		const d = deps({ approved: new Set() });
 		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toContain("PERMISSION DENIED");
-		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toContain("has not confirmed it yet");
+		expect(await postMessage({ chat: CHAT, text: "hi" }, d)).toContain(
+			"no person has approved chat",
+		);
 		expect(asked).toBe(1);
-		expect(confirmed.length).toBe(0);
 		expect(ran.length).toBe(0);
+	});
+
+	test("real deps: approvals live in memory only, and a new process starts with none", () => {
+		expect(postMessageDeps("primary", "s1").approved.size).toBe(0);
 	});
 });

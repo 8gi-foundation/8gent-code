@@ -16,7 +16,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir as osHome } from "node:os";
 import { join } from "node:path";
 import { scrub } from "../eight/secret-scanner";
@@ -43,12 +43,10 @@ export interface PostMessageDeps {
 	/** Posts allowed per session; `sent` is the session's running count. */
 	limit: number;
 	sent: { n: number };
-	/** Allowlisted chats a person has not yet confirmed at the card (changed since last confirmed). */
-	unconfirmed: () => string[];
-	/** Record these chats as confirmed by a person. */
-	confirm: (chats: string[]) => void;
-	/** The confirmation card is shown at most once per process. */
-	confirmCard: { shown: boolean };
+	/** Chats a person approved on a card in this process (memory only). */
+	approved: Set<string>;
+	/** Chats a person declined in this process; not asked again. */
+	declined: Set<string>;
 }
 
 export const POST_LIMIT_PER_SESSION = 10;
@@ -101,29 +99,18 @@ function postMessageBins(): PostMessageDeps["bins"] {
  */
 let allowedSnapshot: string[] = readAllowedChats();
 /**
- * Chats a person has confirmed, in ~/.8gent/post-message-confirmed.json. Only
- * this module writes it, after the card; path-guard keeps agent tools out. A
- * chat in settings but not here is unconfirmed: the settings file may have been
- * changed since a person last looked (the next-launch hole).
+ * Chats a person approved on a card in THIS process. Memory only: nothing on
+ * disk can authorise a post, so nothing an agent can write can either. Every
+ * launch starts with none approved. Infinite mode has no person, so it can
+ * post only to chats approved earlier in the same process.
  */
-function confirmedFile(): string {
-	return join(home(), ".8gent", "post-message-confirmed.json");
-}
-function readConfirmed(): string[] {
-	try {
-		const list = JSON.parse(readFileSync(confirmedFile(), "utf8"));
-		return Array.isArray(list) ? list.map(String) : [];
-	} catch {
-		return [];
-	}
-}
-let confirmedSnapshot: string[] = readConfirmed();
-const confirmCardState = { shown: false };
-/** Test seam only: re-take both snapshots and re-arm the card. */
+const approvedChats = new Set<string>();
+const declinedChats = new Set<string>();
+/** Test seam only: re-take the allowlist and forget approvals, as a new process would. */
 export function _snapshotAllowedChats(): void {
 	allowedSnapshot = readAllowedChats();
-	confirmedSnapshot = readConfirmed();
-	confirmCardState.shown = false;
+	approvedChats.clear();
+	declinedChats.clear();
 }
 
 export function postMessageDeps(agentId: string, sessionKey = agentId): PostMessageDeps {
@@ -161,17 +148,8 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 		allowedChats: () => allowedSnapshot,
 		log: appendLog,
 		limit: POST_LIMIT_PER_SESSION,
-		unconfirmed: () => allowedSnapshot.filter((c) => !confirmedSnapshot.includes(c)),
-		confirm: (chats) => {
-			confirmedSnapshot = [...new Set([...confirmedSnapshot, ...chats])];
-			try {
-				mkdirSync(join(home(), ".8gent"), { recursive: true });
-				writeFileSync(confirmedFile(), JSON.stringify(confirmedSnapshot));
-			} catch {
-				// unwritable: confirmed for this process only; the card returns next launch
-			}
-		},
-		confirmCard: confirmCardState,
+		approved: approvedChats,
+		declined: declinedChats,
 		sent: sessions.get(sessionKey) ?? sessions.set(sessionKey, { n: 0 }).get(sessionKey)!,
 	};
 }
@@ -225,21 +203,21 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	if (!deps.allowedChats().includes(chat))
 		return `[BLOCKED] post_message: chat ${chat} is not on postMessage.allowedChats in ~/.8gent/settings.json. Nothing was sent. Ask the person to add it; do not retry.`;
 
-	// A chat the settings file gained since a person last confirmed it (an edit
-	// made while no one watched) is unconfirmed: refused in Infinite mode, and
-	// otherwise shown once on a card listing every unconfirmed chat.
-	const un = deps.unconfirmed();
-	if (un.includes(chat)) {
-		if (deps.infinite() || deps.confirmCard.shown)
-			return `[BLOCKED] post_message: chat ${chat} was added to postMessage.allowedChats and a person has not confirmed it yet. Nothing was sent. Do not retry.`;
-		deps.confirmCard.shown = true;
+	// On the allowlist is not enough: a person must have approved this chat on a
+	// card in this process. Infinite mode has no person to ask.
+	if (!deps.approved.has(chat)) {
+		if (deps.infinite() || deps.declined.has(chat))
+			return `[BLOCKED] post_message: no person has approved chat ${chat} in this session. Nothing was sent. Do not retry.`;
 		const refusal = await card(
-			"Confirm Telegram recipients",
-			`post_message recipients not yet confirmed:\n${un.join("\n")}`,
-			"These chats are on postMessage.allowedChats but you have not confirmed them. Approve to let post_message use them.",
+			"Allow Telegram recipient",
+			`post_message wants to post to chat ${chat} for the rest of this session.`,
+			`Chat ${chat} is on postMessage.allowedChats. Approve to let post_message use it until this session ends, including when no one is watching.`,
 		);
-		if (refusal) return refusal;
-		deps.confirm(un);
+		if (refusal) {
+			deps.declined.add(chat);
+			return refusal;
+		}
+		deps.approved.add(chat);
 	}
 
 	const g = deps.gate(chat);

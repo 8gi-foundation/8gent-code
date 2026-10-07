@@ -7,6 +7,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _snapshotAllowedChats } from "../ai/post-message";
+import { getPermissionManager } from "../permissions";
 import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
@@ -27,8 +28,6 @@ process.env.EIGHT_FAKE_HOME = home;
 const allow = (chats: string[]) =>
 	writeFileSync(settings, JSON.stringify({ postMessage: { allowedChats: chats } }));
 allow(["-1004417730052"]);
-const confirmedFile = join(home, ".8gent", "post-message-confirmed.json");
-writeFileSync(confirmedFile, JSON.stringify(["-1004417730052"]));
 _snapshotAllowedChats();
 const saved = process.env.EIGHT_TG_BIN_DIR;
 afterAll(() => {
@@ -39,6 +38,7 @@ afterAll(() => {
 	rmSync(work, { recursive: true, force: true });
 });
 afterEach(() => {
+	_snapshotAllowedChats(); // each test is a new process: nothing approved
 	_resetTuiApprovalChannel();
 	if (saved === undefined) Reflect.deleteProperty(process.env, "EIGHT_TG_BIN_DIR");
 	else process.env.EIGHT_TG_BIN_DIR = saved;
@@ -125,29 +125,35 @@ describe("post_message in ToolExecutor", () => {
 	test("write_file with a ~ path to settings.json is denied and the file is unchanged", async () => {
 		const exec = new ToolExecutor(home, "pm-tilde");
 		const before = readFileSync(settings, "utf8");
-		for (const p of ["~/.8gent/settings.json", "~/.8gent/post-message-confirmed.json"]) {
+		for (const p of ["~/.8gent/settings.json"]) {
 			expect(await denied(() => exec.execute("write_file", { path: p, content: "HACK" }))).toBe(
 				true,
 			);
 		}
 		expect(readFileSync(settings, "utf8")).toBe(before);
-		expect(readFileSync(confirmedFile, "utf8")).toBe(JSON.stringify(["-1004417730052"]));
 	});
 
-	test("a chat added to settings but never confirmed is refused when no person confirms it (next-launch hole)", async () => {
+	test("next launch: an edited settings file posts nothing without a person (Infinite, no card)", async () => {
 		process.env.EIGHT_TG_BIN_DIR = bins;
 		rmSync(log, { force: true });
+		// the file was edited between launches to add a chat; the new process has approved nothing
 		allow(["-1004417730052", "-888"]);
-		_snapshotAllowedChats(); // a new process start
-		const prev = process.env.EIGHT_INFINITE;
-		const exec = new ToolExecutor(work, "pm-next");
-		// no card handler: only the unconfirmed check can refuse a chat that is on the list
-		const out = await exec.execute("post_message", { chat: "-888", text: "hi" });
-		expect(out).toMatch(/not confirmed|no one to ask|PERMISSION|BLOCKED/);
-		expect(await Bun.file(log).exists()).toBe(false);
-		allow(["-1004417730052"]);
 		_snapshotAllowedChats();
-		if (prev !== undefined) process.env.EIGHT_INFINITE = prev;
+		const pm = getPermissionManager();
+		pm.enableInfiniteMode();
+		try {
+			for (const chat of ["-888", "-1004417730052"]) {
+				const out = await new ToolExecutor(work, "pm-next").execute("post_message", {
+					chat,
+					text: "hi",
+				});
+				expect(out).toContain("no person has approved chat");
+			}
+			expect(await Bun.file(log).exists()).toBe(false);
+		} finally {
+			pm.disableInfiniteMode();
+			allow(["-1004417730052"]);
+		}
 	});
 
 	test("write_file to ~/.8gent/settings.json is denied even with cwd = HOME", async () => {

@@ -43,7 +43,6 @@ const PROTECTED_DIRS = [".ssh", ".aws", ".kube"];
  */
 const PROTECTED_HOME_FILES = [
 	[".8gent", "settings.json"],
-	[".8gent", "post-message-confirmed.json"],
 ];
 
 /** Basenames that always indicate a credential file regardless of location. */
