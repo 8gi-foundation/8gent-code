@@ -11,6 +11,7 @@ import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { getPermissionManager, resetPermissionManager } from "../permissions";
 import { SYSTEM_ONE_FLAG } from "../permissions/system-one-gate";
 import { _resetTuiApprovalChannel } from "../permissions/tui-approval-channel";
+import { getBackgroundTaskManager } from "../tools/background";
 import { applyRunPermissions } from "./run";
 import { ToolExecutor } from "./tools";
 
@@ -154,6 +155,28 @@ describe("run_command against a local bare remote", () => {
 		);
 		expect(forced).not.toContain("Exit code: 0");
 		expect(() => git(remote, "rev-parse", "--verify", "feat/y")).toThrow();
+		expect(git(remote, "rev-parse", "main")).toBe(mainSha);
+	});
+
+	test("headless background_start: protected push refused, feature push still runs", async () => {
+		setTty(false);
+		const { work, remote, mainSha } = world();
+		const exec = new ToolExecutor(work, "run-perms-test");
+		const refused = String(
+			await exec.execute("background_start", { command: "git push origin main" }),
+		);
+		expect(refused).toContain("[PERMISSION DENIED]");
+		expect(refused).toContain("protected branch");
+		expect(refused).not.toContain("Background task started");
+
+		// Positive control: the same tool really runs a push that is allowed.
+		const started = String(
+			await exec.execute("background_start", { command: "git push origin HEAD:feat/bg" }),
+		);
+		const taskId = started.match(/Background task started: (\S+)/)?.[1];
+		expect(taskId).toBeTruthy();
+		await getBackgroundTaskManager().waitForTask(taskId as string, 20_000);
+		expect(git(remote, "rev-parse", "feat/bg")).toBe(git(work, "rev-parse", "HEAD"));
 		expect(git(remote, "rev-parse", "main")).toBe(mainSha);
 	});
 });
