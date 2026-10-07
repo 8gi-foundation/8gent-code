@@ -19,6 +19,7 @@ import type {
 	SurfaceRegistry,
 	TokenVerifier,
 } from "./dispatch";
+import { channelApprovals } from "./channel-approvals";
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import {
@@ -97,7 +98,7 @@ type InboundMessage =
 	| { type: "cron:add"; job: unknown }
 	| { type: "cron:remove"; jobId: string }
 	| { type: "health" }
-	| { type: "approval:response"; requestId: string; approved: boolean }
+	| { type: "approval:response"; requestId: string; approved: boolean; scope?: "chat" }
 	| { type: "ping" }
 	| TimeTravelInbound;
 
@@ -114,6 +115,7 @@ type OutboundMessage =
 	| { type: "event"; event: EventName; payload: unknown }
 	| { type: "error"; message: string }
 	| { type: "pong" }
+	| { type: "approval:resolved"; requestId: string; ok: boolean; reason?: string }
 	| TimeTravelOutbound;
 
 const clients = new Map<any, ClientState>();
@@ -407,13 +409,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		}
 
 		case "approval:response": {
-			// Route approval decision back through the event bus
-			bus.emit("approval:required", {
-				sessionId: state.sessionId || "unknown",
-				tool: "approval-response",
-				input: { requestId: msg.requestId, approved: msg.approved },
-				requestId: msg.requestId,
-			});
+			// Resolve the waiting prompt. This used to re-emit approval:required,
+			// so every press drew a second card and resolved nothing (#3621).
+			const decision = !msg.approved ? "deny" : msg.scope === "chat" ? "allow_chat" : "approve";
+			const result = channelApprovals.respond(state.sessionId, String(msg.requestId), decision);
+			send(ws, { type: "approval:resolved", requestId: String(msg.requestId), ...result });
 			break;
 		}
 

@@ -10,6 +10,7 @@ import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import { withChannelApprovals } from "./channel-approvals";
 import { bus } from "./events";
 import type { SessionJournal } from "./session-journal";
 
@@ -382,7 +383,10 @@ export class AgentPool {
 
 		const startMs = Date.now();
 		try {
-			const response = await entry.agent.chat(text);
+			// A Telegram turn asks the operator for a dangerous command (#3621).
+			const response = await (entry.channel === "telegram"
+				? withChannelApprovals(sessionId, () => entry.agent.chat(text))
+				: entry.agent.chat(text));
 
 			// Track token usage (estimate: ~4 chars/token).
 			const promptTokens = Math.ceil(text.length / 4);

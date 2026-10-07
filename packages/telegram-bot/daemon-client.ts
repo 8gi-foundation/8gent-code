@@ -190,8 +190,8 @@ export class DaemonClient {
 	}
 
 	/** Send an approval response back to the daemon. */
-	respondApproval(requestId: string, approved: boolean): void {
-		this.send({ type: "approval:response", requestId, approved });
+	respondApproval(requestId: string, approved: boolean, scope?: "chat"): void {
+		this.send({ type: "approval:response", requestId, approved, ...(scope ? { scope } : {}) });
 	}
 
 	/** Subscribe to a daemon event. Returns an unsubscribe function. */

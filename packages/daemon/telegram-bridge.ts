@@ -38,6 +38,7 @@ import {
 	runBoardroom,
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { approvalTtlMs } from "./channel-approvals";
 import { NO_LINK_PREVIEW } from "./notifications";
 import {
 	decideVoice,
@@ -635,6 +636,19 @@ export function assertNotAiJamesToken(
 // Import CoS router lazily to avoid circular deps
 const CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
 
+interface PendingApproval {
+	tool: string;
+	input: unknown;
+	chatId: string;
+	sessionId: string;
+	expiresAt: number;
+	messageId?: number;
+	/** The socket that owns the session: the answer must go back on it. */
+	via: "ws" | "adapter";
+}
+
+const NOT_LIVE = "That request is no longer live (expired, replaced or already answered). Nothing ran.";
+
 class TelegramDaemonBridge {
 	private config: BridgeConfig;
 	private ws: WebSocket | null = null;
@@ -643,7 +657,8 @@ class TelegramDaemonBridge {
 	private polling = false;
 	private agentReady = false;
 	private agentBusy = false;
-	private pendingApprovals = new Map<string, { tool: string; input: unknown; chatId: string }>();
+	/** Live approval cards by daemon request id (#3621). The daemon re-checks every answer. */
+	private pendingApprovals = new Map<string, PendingApproval>();
 	private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
 
 	// Multi-step task runtime (issue #1906 / #1913).
@@ -693,6 +708,7 @@ class TelegramDaemonBridge {
 					sessionStore: this.sessionStore,
 					onFinalReply: (text) => this.maybeSpeak(text),
 				});
+				this.watchAdapterApprovals(this.daemonClient);
 				console.log("[telegram-bridge] multi-step task adapter attached");
 			} catch (err) {
 				console.error("[telegram-bridge] multi-step adapter failed, falling back:", err);
@@ -833,6 +849,10 @@ class TelegramDaemonBridge {
 	}
 
 	private handleDaemonMessage(msg: any): void {
+		if (msg.type === "approval:resolved" && msg.ok === false) {
+			tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
+			return;
+		}
 		if (msg.type !== "event") return;
 
 		const { event, payload } = msg;
@@ -881,7 +901,7 @@ class TelegramDaemonBridge {
 
 			case "approval:required":
 				// NemoClaw-style operator approval via Telegram
-				this.sendApprovalRequest(payload);
+				this.sendApprovalRequest(payload, "ws");
 				break;
 
 			case "tool:start":
@@ -1573,20 +1593,38 @@ class TelegramDaemonBridge {
 
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-	private async sendApprovalRequest(payload: any): Promise<void> {
-		const { requestId, tool, input } = payload;
-		this.pendingApprovals.set(requestId, { tool, input, chatId: this.replyChat() });
+	private async sendApprovalRequest(payload: any, via: PendingApproval["via"]): Promise<void> {
+		const { requestId, tool, input, sessionId } = payload;
+		const now = Date.now();
+		// One live card per session: the daemon has already denied the older
+		// prompt, so take its buttons away. Expired cards are dropped too.
+		for (const [id, p] of this.pendingApprovals) {
+			if (p.sessionId !== sessionId && p.expiresAt > now) continue;
+			this.pendingApprovals.delete(id);
+			if (p.sessionId === sessionId) await this.closeApprovalCard(p, "Replaced by a newer request");
+		}
+		// Expire a little before the daemon does, so a press the card accepts is one the daemon still holds.
+		const ttl = approvalTtlMs();
+		const entry: PendingApproval = {
+			tool,
+			input,
+			chatId: this.replyChat(),
+			sessionId,
+			expiresAt: now + ttl - Math.min(5000, ttl / 10),
+			via,
+		};
+		this.pendingApprovals.set(requestId, entry);
 
 		const inputPreview =
 			typeof input === "string" ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200);
 
 		try {
-			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					chat_id: this.replyChat(),
-					text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}`,
+					chat_id: entry.chatId,
+					text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}\n\nExpires in ${Math.round(ttl / 60000) || 1} min.`,
 					parse_mode: "Markdown",
 					...NO_LINK_PREVIEW,
 					reply_markup: {
@@ -1595,16 +1633,45 @@ class TelegramDaemonBridge {
 								{ text: "Approve", callback_data: `approve:${requestId}` },
 								{ text: "Deny", callback_data: `deny:${requestId}` },
 							],
+							[{ text: "Allow in this chat", callback_data: `allowchat:${requestId}` }],
 						],
 					},
 				}),
 			});
+			const sent = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
+			entry.messageId = sent?.result?.message_id;
 		} catch (err) {
 			console.error(
 				"[telegram-bridge] failed to send approval request:",
 				scrubErr(err, this.config.telegramToken),
 			);
 		}
+	}
+
+	/**
+	 * Default-mode prompts run on the adapter's own session, so its approval
+	 * cards arrive on that socket, never on this.ws.
+	 */
+	private watchAdapterApprovals(client: DaemonClient): void {
+		client.on("approval:required", (p) => {
+			this.sendApprovalRequest(p, "adapter");
+		});
+	}
+
+	/** Replace a card's buttons with a line saying how it ended. */
+	private async closeApprovalCard(p: PendingApproval, status: string): Promise<void> {
+		if (!p.messageId) return;
+		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				chat_id: p.chatId,
+				message_id: p.messageId,
+				text: `*${status}:* \`${p.tool}\``,
+				parse_mode: "Markdown",
+				...NO_LINK_PREVIEW,
+			}),
+		}).catch(() => {});
 	}
 
 	/**
@@ -1727,11 +1794,13 @@ class TelegramDaemonBridge {
 		}
 
 		const action = prefix;
-		if (!requestId || !this.pendingApprovals.has(requestId)) {
+		if (action !== "approve" && action !== "deny" && action !== "allowchat") return;
+		const approval = this.pendingApprovals.get(requestId);
+		if (!approval) {
+			// A second press, or a press on a card that was replaced or expired.
+			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
 			return;
 		}
-
-		const approval = this.pendingApprovals.get(requestId)!;
 		// An approval belongs to the chat that was asked. With several chats
 		// allowlisted, being in ANY of them is not permission to answer a
 		// prompt raised in another one.
@@ -1742,32 +1811,30 @@ class TelegramDaemonBridge {
 			return;
 		}
 		this.pendingApprovals.delete(requestId);
-
-		const approved = action === "approve";
-		const statusText = approved ? "Approved" : "Denied";
-
-		// Update the message to show the decision
-		if (query.message) {
-			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					chat_id: query.message.chat.id,
-					message_id: query.message.message_id,
-					text: `*${statusText}:* \`${approval.tool}\``,
-					parse_mode: "Markdown",
-					...NO_LINK_PREVIEW,
-				}),
-			}).catch(() => {});
+		if (Date.now() >= approval.expiresAt) {
+			await this.closeApprovalCard(approval, "Expired");
+			await tgSend(this.config.telegramToken, this.replyChat(), NOT_LIVE);
+			return;
 		}
 
-		// Send the approval decision back to the daemon
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+		const approved = action !== "deny";
+		const scope = action === "allowchat" ? "chat" : undefined;
+		await this.closeApprovalCard(
+			{ ...approval, messageId: approval.messageId ?? query.message?.message_id },
+			scope ? "Allowed in this chat" : approved ? "Approved" : "Denied",
+		);
+
+		// The answer goes back on the socket that owns the session; the daemon
+		// re-checks it and says so on this.ws when it no longer counts.
+		if (approval.via === "adapter" && this.daemonClient) {
+			this.daemonClient.respondApproval(requestId, approved, scope);
+		} else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
 			this.ws.send(
 				JSON.stringify({
 					type: "approval:response",
 					requestId,
 					approved,
+					...(scope ? { scope } : {}),
 				}),
 			);
 		}

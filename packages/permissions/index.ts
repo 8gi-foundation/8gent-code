@@ -6,12 +6,31 @@
  * interactive human-in-the-loop approval for scoped capabilities.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { currentPermissionMode } from "./permission-mode.js";
 import { requestTuiApproval } from "./tui-approval-channel.js";
+
+/**
+ * A headless channel's way to ask its human (#3621). The daemon binds one per
+ * agent turn (a Telegram session's operator); with none bound, headless
+ * behaves exactly as before.
+ */
+export interface ChannelApprovalRequest {
+	action: string;
+	details: string;
+	command: string;
+}
+export type ChannelApprover = (req: ChannelApprovalRequest) => Promise<boolean>;
+const _channelApprover = new AsyncLocalStorage<ChannelApprover>();
+
+/** Run fn so a dangerous shell command inside it asks `approver` instead of being denied. */
+export function runWithChannelApprover<T>(approver: ChannelApprover, fn: () => T): T {
+	return _channelApprover.run(approver, fn);
+}
 
 // ============================================
 // Types
@@ -947,12 +966,15 @@ export class PermissionManager {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
 			if (defaultNo) return false;
-			if (command && this.isDangerous(command)) {
-				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
-				return false;
-			}
 			if (command && this.isPushToMain(command)) {
 				console.log(`[permissions] DENIED (headless, push to main): ${command}`);
+				return false;
+			}
+			if (command && this.isDangerous(command)) {
+				// A channel with a human behind it asks; push to main never gets this far.
+				const approver = _channelApprover.getStore();
+				if (approver) return approver({ action, details, command });
+				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
 				return false;
 			}
 			// Auto-approve non-dangerous commands in headless mode
