@@ -90,7 +90,14 @@ import {
 } from "../lsp";
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
-import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
+import {
+	type PermissionManager,
+	getPermissionManager,
+	isCommandDangerous,
+	isProtectedBranchPush,
+	protectedBranchPushMessage,
+	pushDestinationBranch,
+} from "../permissions";
 import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
@@ -363,6 +370,11 @@ const SPAWN_NON_INTERACTIVE_ENV = {
 	DEBIAN_FRONTEND: "noninteractive",
 	NPM_CONFIG_YES: "true",
 };
+
+/** argv for the git_push tool: a bare push, or `-u origin HEAD`. */
+function gitPushArgs(args: Record<string, unknown>): string[] {
+	return args.setUpstream ? ["push", "-u", "origin", "HEAD"] : ["push"];
+}
 
 function spawnGit(args: string[], cwd: string): Promise<string> {
 	const TIMEOUT_MS = 30_000;
@@ -1596,10 +1608,15 @@ export class ToolExecutor {
 		// destructive tool (rm, git_push, vercel_deploy, vercel_set_env,
 		// enable_infinite_mode) cannot run without an approved CheckerDecision.
 		// Note: this deliberately sits outside the infinite-mode permission bypass.
+		// git_push names no branch: it pushes whatever is checked out. The
+		// branch it lands on is resolved here, so the maker-checker and ToolG8
+		// rules for main/master see it.
+		const gateArgs = toolName === "git_push" ? this.gitPushGateArgs(args) : args;
 		try {
-			assertMakerCheckerApproved(toolName, args, {
+			assertMakerCheckerApproved(toolName, gateArgs, {
 				unattended: this.unattended,
 				makerId: this.agentId,
+				cwd: this.workingDirectory,
 			});
 		} catch (err) {
 			if (err instanceof MakerCheckerBlockedError) {
@@ -1678,7 +1695,7 @@ export class ToolExecutor {
 					? writtenContentFor(toolName, args, this.workingDirectory)
 					: (args.content as string),
 				command: args.command as string,
-				branch: args.branch as string,
+				branch: gateArgs.branch as string,
 				url: args.url as string,
 				key: args.key as string,
 			});
@@ -1698,6 +1715,9 @@ export class ToolExecutor {
 					gateResult.reason,
 				);
 				if (refusal) return refusal;
+			} else if (askFirst && toolName === "git_push" && gateArgs.protectedPush === true) {
+				// A push to a protected branch: the git_push case asks the
+				// person once, or refuses when no one can be asked.
 			} else if (!gateResult.allowed) {
 				// Say plainly that nothing happened (see blockedToolMessage).
 				return blockedToolMessage(
@@ -1809,8 +1829,9 @@ export class ToolExecutor {
 					spawnGit(["commit", "-m", String(args.message)], this.workingDirectory),
 				);
 			case "git_push": {
-				const pushArgs = ["push"];
-				if (args.setUpstream) pushArgs.push("-u", "origin", "HEAD");
+				const pushArgs = gitPushArgs(args);
+				const refused = await this.protectedBranchGate(`git ${pushArgs.join(" ")}`);
+				if (refused) return refused;
 				return spawnGit(pushArgs, this.workingDirectory);
 			}
 
@@ -2558,9 +2579,11 @@ export class ToolExecutor {
 		if (touchesBrowserSecrets(command))
 			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
-		const permissionCheck = this.permissionManager.checkPermission(command);
+		const permissionCheck = this.permissionManager.checkPermission(command, this.workingDirectory);
 
 		if (permissionCheck === "denied") {
+			if (isProtectedBranchPush(command, this.workingDirectory))
+				return `[PERMISSION DENIED] ${protectedBranchPushMessage()} Command: ${command}`;
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
@@ -2590,14 +2613,15 @@ export class ToolExecutor {
 		if (
 			permissionCheck === "ask" &&
 			systemOne.humanApproved !== true &&
-			!guardedSkipsCard(mode, systemOne, isCommandDangerous(command))
+			!guardedSkipsCard(mode, systemOne, isCommandDangerous(command, this.workingDirectory))
 		) {
 			const allowed = await this.permissionManager.requestPermission(
 				"Execute Shell Command",
-				isCommandDangerous(command)
+				isCommandDangerous(command, this.workingDirectory)
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,
+				{ cwd: this.workingDirectory },
 			);
 
 			if (!allowed) {
@@ -3073,6 +3097,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
+		const refused = await this.protectedBranchGate(command);
+		if (refused) return refused;
 		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
 		try {
@@ -3082,6 +3108,40 @@ export class ToolExecutor {
 		} catch (err) {
 			return `Failed to start background task: ${err}`;
 		}
+	}
+
+	/**
+	 * A push to a protected branch from a tool that does not go through
+	 * runCommand: refused when no one can approve it, otherwise the approval
+	 * card. Null means the command is not such a push, or the person approved.
+	 */
+	private async protectedBranchGate(command: string): Promise<string | null> {
+		const cwd = this.workingDirectory;
+		if (!isProtectedBranchPush(command, cwd)) return null;
+		if (this.permissionManager.checkPermission(command, cwd) === "denied")
+			return `[PERMISSION DENIED] ${protectedBranchPushMessage()} Command: ${command}`;
+		const approved = await this.permissionManager.requestPermission(
+			"Execute Shell Command",
+			"The agent wants to push to a protected branch.",
+			command,
+			{ cwd },
+		);
+		return approved ? null : `[PERMISSION DENIED] User declined to execute: ${command}`;
+	}
+
+	/**
+	 * Policy and maker-checker context for a git_push call: the branch it
+	 * lands on (current branch, or its upstream for a bare push) and whether
+	 * that is protected. A branch that cannot be resolved counts as protected.
+	 */
+	private gitPushGateArgs(args: Record<string, unknown>): Record<string, unknown> {
+		const command = `git ${gitPushArgs(args).join(" ")}`;
+		const kind = args.setUpstream ? "head" : "implicit";
+		return {
+			...args,
+			branch: pushDestinationBranch(this.workingDirectory, kind) ?? "unresolved",
+			protectedPush: isProtectedBranchPush(command, this.workingDirectory),
+		};
 	}
 
 	private async handleBackgroundStatus(taskId: string): Promise<string> {

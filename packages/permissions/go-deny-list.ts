@@ -8,6 +8,9 @@
  * Owner: 8SO. Edits require a security review checkpoint.
  */
 
+import * as os from "node:os";
+import * as path from "node:path";
+
 export interface DenyListPattern {
 	/** Stable id for audit logs */
 	id: string;
@@ -157,13 +160,294 @@ function matchGitPushForce(args: string): boolean {
 	return /\bgit\s+push\b[^\n]*(--force\b|-f\b|--force-with-lease\b)/.test(args);
 }
 
+/** Branches a push may never land on without a person approving it. */
+export const PROTECTED_BRANCHES: readonly string[] = ["main", "master"];
+
 /**
- * Pattern: git push to main or master (with or without --force).
+ * Where a push that names no destination branch lands, read from the
+ * repository (see push-target.ts). Without one, such pushes are not matched
+ * (the deny list has no repository to look at).
  */
-function matchGitPushProtectedBranch(args: string): boolean {
-	if (!/\bgit\s+push\b/.test(args)) return false;
-	// Match "git push <remote> main" or "git push origin master" or "git push origin HEAD:main"
-	return /\bgit\s+push\s+\S+\s+([^\s:]+:)?(?:main|master)\b/.test(args);
+export interface PushResolver {
+	/**
+	 * Destination branches of `git push` / `git push <remote>` (kind
+	 * "implicit") or `git push <remote> HEAD` (kind "head") run in `dir`.
+	 * null when they cannot be worked out, which callers treat as protected.
+	 */
+	destinations(dir: string | null, kind: "implicit" | "head"): string[] | null;
+	/** True when `git <name>` in `dir` is an alias that may push (or cannot be read). */
+	aliasMayPush(dir: string | null, name: string): boolean;
+}
+
+export interface PushMatchOptions {
+	/** Directory the command runs in; null or absent when unknown. */
+	cwd?: string | null;
+	resolver?: PushResolver;
+}
+
+/** git options that take the next token as their value. */
+const GIT_GLOBAL_OPTS_WITH_VALUE = new Set([
+	"-C",
+	"-c",
+	"--git-dir",
+	"--work-tree",
+	"--namespace",
+	"--config-env",
+	"--attr-source",
+	"--super-prefix",
+]);
+const GIT_PUSH_OPTS_WITH_VALUE = new Set([
+	"-o",
+	"--push-option",
+	"--repo",
+	"--receive-pack",
+	"--exec",
+]);
+/** Flags that push every local branch, protected ones included. */
+const GIT_PUSH_ALL_REFS = new Set(["--all", "--mirror", "--branches"]);
+
+/**
+ * git's own commands. git never lets an alias shadow one of these, so a
+ * subcommand outside this set may be an alias and is looked up.
+ */
+const GIT_BUILTINS = new Set(
+	(
+		"add am annotate apply archive bisect blame branch bundle cat-file check-ignore checkout " +
+		"cherry cherry-pick clean clone commit config count-objects describe diff diff-files " +
+		"diff-index diff-tree difftool fetch for-each-ref format-patch fsck gc grep help init " +
+		"log ls-files ls-remote ls-tree merge merge-base mv notes pull push range-diff rebase " +
+		"reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show " +
+		"show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index " +
+		"update-ref var verify-commit version whatchanged worktree"
+	).split(" "),
+);
+/**
+ * Config keys that can change what a push does or where it lands: aliases,
+ * push.default, branch upstreams and push remotes, remote refspecs and URLs,
+ * and included config files that may set any of these.
+ */
+const CONFIG_THAT_MOVES_PUSHES = /^(alias|push|branch|remote|include|includeif)\./;
+
+/** Builtins that run further git commands, which inherit `-c` config. */
+const GIT_NESTING_BUILTINS = new Set(["rebase", "submodule", "bisect", "worktree"]);
+
+function unquote(token: string): string {
+	return token.replace(/^["'(]+|["');]+$/g, "");
+}
+
+function isProtectedName(name: string): boolean {
+	// git reads `heads/main` as `refs/heads/main`.
+	return PROTECTED_BRANCHES.includes(name.toLowerCase().replace(/^(refs\/)?heads\//, ""));
+}
+
+/** Destination part of a refspec: `src:dst`, `+dst`, `dst`. */
+function refspecDestination(spec: string): string {
+	return (spec.includes(":") ? spec.slice(spec.lastIndexOf(":") + 1) : spec).replace(/^\+/, "");
+}
+
+/** Destination branch of a refspec is protected: `src:dst`, `+dst`, `refs/heads/dst`. */
+function refspecTargetsProtected(spec: string): boolean {
+	return isProtectedName(refspecDestination(spec));
+}
+
+/**
+ * The shell decides the destination at run time (a variable, a glob, a
+ * brace list), or the refspec is `:` (every matching branch). Fail closed.
+ */
+function refspecDestinationUnknown(spec: string): boolean {
+	const dst = refspecDestination(spec);
+	return dst === "" || /[$`*?[\]{}~]/.test(dst);
+}
+
+/** `HEAD` or `@` with no destination: lands on the current branch's name. */
+function isHeadRefspec(spec: string): boolean {
+	return /^\+?(HEAD|@)$/.test(spec);
+}
+
+/** Destinations from the repository: protected, or unknown (null), fails closed. */
+export function destinationsProtected(dsts: string[] | null): boolean {
+	return dsts === null || dsts.some((d) => d.includes("*") || isProtectedName(d));
+}
+
+/**
+ * Split one shell segment into words. Redirections are dropped together
+ * with their target, so `main>/dev/null` is the word `main`.
+ */
+function shellWords(segment: string): string[] {
+	const marked = segment.replace(/(?:(?<=^|\s)\d+|&)?(?:>>|>\||>&|<&|<<<|<<|<>|>|<)/g, " \u0001 ");
+	const raw = marked.trim().split(/\s+/).map(unquote).filter(Boolean);
+	const words: string[] = [];
+	for (let i = 0; i < raw.length; i++) {
+		if (raw[i] === "\u0001") {
+			i++; // the redirection target
+			continue;
+		}
+		words.push(raw[i]);
+	}
+	return words;
+}
+
+const isGitWord = (t: string): boolean => t === "git" || t.endsWith("/git");
+
+/** Where a `cd` leaves the shell; null when the shell decides it at run time. */
+function cdTarget(dir: string | null, arg: string | undefined): string | null {
+	if (!dir || !arg || arg === "-") return null;
+	const target = expandHome(arg);
+	if (/[$`~*?{]/.test(target)) return null;
+	return path.resolve(dir, target);
+}
+
+/**
+ * `~`, `~/x`, `$HOME/x` and `${HOME}/x` are the home directory, as the shell
+ * expands them. Other variables, `~user` and substitutions stay unexpanded,
+ * so the caller treats them as decided at run time.
+ */
+function expandHome(arg: string): string {
+	const m = arg.match(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/);
+	if (!m) return arg;
+	return (process.env.HOME || os.homedir()) + arg.slice(m[0].length);
+}
+
+/** One `git ...` invocation starting at words[g]. */
+function gitInvocationPushesProtected(
+	words: string[],
+	g: number,
+	dir: string | null,
+	resolver: PushResolver | undefined,
+	argsFromSubstitution: boolean,
+): boolean {
+	const before = words.slice(0, g);
+	// `xargs git push origin`: xargs appends the refspec from stdin.
+	const argsFromStdin = before.some((t) => t === "xargs" || t.endsWith("/xargs"));
+	// GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT / GIT_CONFIG_GLOBAL can set aliases and push refspecs.
+	let configChangesPush = before.some((t) => /^GIT_CONFIG/.test(t));
+	// `env -C dir git ...` runs git somewhere else.
+	let repoUnknown =
+		before.some((t) => /^GIT_(DIR|WORK_TREE)=/.test(t)) ||
+		(before.includes("env") && before.some((t) => /^(-C|--chdir)/.test(t)));
+	let gitDir = dir;
+
+	let i = g + 1;
+	while (i < words.length && words[i].startsWith("-")) {
+		const t = words[i];
+		let name = t;
+		let value: string | undefined;
+		const eq = t.indexOf("=");
+		if (t.startsWith("--") && eq > 0) {
+			name = t.slice(0, eq);
+			value = t.slice(eq + 1);
+		} else if (GIT_GLOBAL_OPTS_WITH_VALUE.has(t)) {
+			value = words[i + 1];
+			i++;
+		}
+		if (name === "-C") gitDir = cdTarget(gitDir, value);
+		if (name === "--git-dir" || name === "--work-tree") repoUnknown = true;
+		if ((name === "-c" || name === "--config-env") && value !== undefined) {
+			const key = value.split("=")[0].toLowerCase();
+			if (CONFIG_THAT_MOVES_PUSHES.test(key)) configChangesPush = true;
+		}
+		i++;
+	}
+
+	const sub = words[i];
+	if (sub === undefined) return false;
+	const mayPush = sub === "push" || !GIT_BUILTINS.has(sub) || GIT_NESTING_BUILTINS.has(sub);
+	if (configChangesPush && mayPush) return true;
+	if (sub !== "push") {
+		if (GIT_BUILTINS.has(sub) || !resolver) return false;
+		return resolver.aliasMayPush(repoUnknown ? null : gitDir, sub);
+	}
+
+	const positional: string[] = [];
+	let repoGiven = false;
+	for (let j = i + 1; j < words.length; j++) {
+		const t = words[j];
+		if (GIT_PUSH_ALL_REFS.has(t)) return true;
+		if (t === "--repo" || t.startsWith("--repo=")) repoGiven = true;
+		if (GIT_PUSH_OPTS_WITH_VALUE.has(t)) {
+			j++;
+			continue;
+		}
+		if (t.startsWith("-")) continue;
+		positional.push(t);
+	}
+	// First positional is the remote unless --repo named it.
+	const refspecs = repoGiven ? positional : positional.slice(1);
+	if (refspecs.some(refspecTargetsProtected)) return true;
+	if (argsFromStdin || argsFromSubstitution) return true;
+	if (refspecs.some(refspecDestinationUnknown)) return true;
+	if (!resolver) return false;
+
+	const where = repoUnknown ? null : gitDir;
+	if (refspecs.length === 0) return destinationsProtected(resolver.destinations(where, "implicit"));
+	if (refspecs.some(isHeadRefspec))
+		return destinationsProtected(resolver.destinations(where, "head"));
+	return false;
+}
+
+/**
+ * `cd <dir>` / `pushd <dir>` that leaves the shell in <dir> for what follows:
+ * not in a subshell or pipeline, and followed by `&&`, `;` or a newline
+ * (after `||` the next command runs only if the cd failed).
+ */
+function isPlainCd(words: string[], segment: string, next: string | undefined): boolean {
+	if (words[0] !== "cd" && words[0] !== "pushd") return false;
+	// `${VAR}` is not a group; parentheses and braces otherwise mean a subshell or group.
+	if (words.length > 2 || /[(){}]/.test(segment.replace(/\$\{\w+\}/g, ""))) return false;
+	return next === undefined || next === "&&" || next === ";" || next === "\n";
+}
+
+/** One reading of the command: split into segments, track `cd`, check every git invocation. */
+function viewPushesProtected(view: string, opts: PushMatchOptions): boolean {
+	let dir = opts.cwd ?? null;
+	// Odd indexes are the separators; a segment followed by `$(` or a
+	// backtick has more words that the shell fills in at run time.
+	const parts = view.split(/(&&|\|\||[;|&\n]|\$\(|`)/);
+	for (let k = 0; k < parts.length; k += 2) {
+		const words = shellWords(parts[k]);
+		if (words.length === 0) continue;
+		const next = parts[k + 1];
+		if (isPlainCd(words, parts[k], next)) {
+			dir = cdTarget(dir, words[1]);
+			continue;
+		}
+		const substituted = next === "$(" || next === "`";
+		for (let g = 0; g < words.length; g++) {
+			if (!isGitWord(words[g])) continue;
+			if (gitInvocationPushesProtected(words, g, dir, opts.resolver, substituted)) return true;
+		}
+		// Anything but a plain cd may have changed the branch, the config,
+		// the environment or the directory (git checkout, git config, export,
+		// eval, sh -c, popd, ...). Later pushes that name no branch cannot be
+		// resolved from the repository as it is now: they count as protected.
+		dir = null;
+	}
+	return false;
+}
+
+/**
+ * Pattern: git push to a protected branch (with or without --force).
+ * Covers `git push <remote> main`, `HEAD:main`, `refs/heads/main`, `+main`,
+ * `:main`, master, `-u`, `git -C dir push`, chained commands, and `--all` /
+ * `--mirror` (which push every branch).
+ *
+ * The command is read twice: as written, and with shell quoting, backslash
+ * escapes and line continuations removed (`ma""in`, `m\ain`, `\<newline>main`
+ * are all `main` to the shell). A hit in either reading is a hit, so the
+ * matcher errs towards refusing. Also protected: refspecs the shell fills in
+ * at run time (`$VAR`, `$(...)`, globs, `xargs` stdin), and any git
+ * invocation that sets `alias.*` or `remote.*.push` via `-c` /
+ * `--config-env` / `GIT_CONFIG*` with a command that can push.
+ *
+ * With `opts.resolver`, pushes that name no destination (`git push`,
+ * `git push origin`, `git push origin HEAD`) and aliases are resolved
+ * against the repository in `opts.cwd`; anything that cannot be resolved is
+ * treated as protected. Without one, they are not matched.
+ */
+export function matchGitPushProtectedBranch(args: string, opts: PushMatchOptions = {}): boolean {
+	const flattened = args.replace(/\\\r?\n/g, "").replace(/["'\\]/g, "");
+	if (!/git/.test(flattened)) return false;
+	return viewPushesProtected(args, opts) || viewPushesProtected(flattened, opts);
 }
 
 /**
