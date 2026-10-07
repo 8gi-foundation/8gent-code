@@ -144,7 +144,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
+import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
 import { describeImage, readImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -2553,6 +2553,10 @@ export class ToolExecutor {
 		// at process start, so an edit that slips past this cannot take effect.
 		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
+		// bump only; the boundary is seatbelting run_command (#3612).
+		if (touchesBrowserSecrets(command))
+			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 

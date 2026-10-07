@@ -123,6 +123,7 @@ export function blockedForProfile(url: string): string | null {
 	if (u.username || u.password) return "credentials in URL";
 	let host = u.hostname.toLowerCase();
 	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	if (host.endsWith(".")) host = host.slice(0, -1); // "localhost." and "127.0.0.1." are the same hosts
 	if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
 		return "private address";
 	if (v4Private(host)) return "private address";
@@ -130,7 +131,9 @@ export function blockedForProfile(url: string): string | null {
 		if (host === "::1" || host === "::") return "private address";
 		if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host))
 			return "private address";
-		const mapped = host.match(/^::ffff:(.+)$/);
+		// IPv4 carried in IPv6: mapped (::ffff:), translated (::ffff:0:), compatible (::a.b.c.d,
+		// which WHATWG prints as ::7f00:1) and NAT64 (64:ff9b::). Check the embedded address.
+		const mapped = host.match(/^(?:::ffff:(?:0:)?|::|64:ff9b::)(.+)$/);
 		if (mapped) {
 			if (v4Private(mapped[1])) return "private address";
 			const hex = mapped[1].match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
@@ -264,6 +267,18 @@ function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
 } {
 	const env = opts.env ?? process.env;
 	const profile = browserProfile(env);
+	if (profile) {
+		// Defence in depth (8SO HIGH-2): a process configured for a named profile never reaches the
+		// default browser, whatever port or token file a caller passes.
+		if (opts.port === DEFAULT_CONTROL_PORT)
+			throw new Error(
+				`EIGHT_BROWSER_PROFILE is set: refusing port ${DEFAULT_CONTROL_PORT}, the default profile's port`,
+			);
+		if (opts.tokenFile && opts.tokenFile !== profile.tokenFile)
+			throw new Error(
+				"EIGHT_BROWSER_PROFILE is set: refusing a control token that is not the profile's (default token)",
+			);
+	}
 	if (!profile)
 		return {
 			port: opts.port ?? (Number(env.EIGHT_BROWSER_CONTROL_PORT) || DEFAULT_CONTROL_PORT),
@@ -357,6 +372,91 @@ type El = {
 };
 /** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
 const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
+
+// ── run_command backstop (#3622, 8SO HIGH-2) ──────────────────────────────────
+// A SPEED BUMP, not a boundary. run_command is neither path-guarded nor seatbelted, so a
+// shell or `bun -e` could read ~/.8gent/browser-control.token and drive the person's
+// logged-in browser. The real fix is seatbelting run_command (#3612); until that merges the
+// bot's launcher does not set EIGHT_BROWSER_PROFILE. After decoding escapes, base64/hex
+// literals and char codes, and stripping quoting, this refuses:
+//   - the token and profile names (browser-control, browser-profiles, browser-*);
+//   - ".8gent" with a glob, a $variable or browser/token/control/profile after it;
+//   - ".8gent" in a command that lists directories (readdir, listdir, ls, find, glob...);
+//   - any glob segment, other than a bare "*", that could expand to one of those names.
+
+const SECRET_NAMES = [
+	".8gent",
+	"browser-control.token",
+	"browser-control.port",
+	"browser-profiles",
+];
+
+/** A shell glob segment as a regex: * ? [..] and {a,b} (treated as a wildcard). */
+function globRe(seg: string): RegExp {
+	let re = "";
+	for (let i = 0; i < seg.length; i++) {
+		const c = seg[i];
+		const close = c === "[" ? seg.indexOf("]", i + 1) : c === "{" ? seg.indexOf("}", i + 1) : -1;
+		if (c === "*") re += ".*";
+		else if (c === "?") re += ".";
+		else if (c === "[" && close > 0) {
+			const body = seg
+				.slice(i + 1, close)
+				.replace(/^!/, "^")
+				.replace(/[\\\]]/g, "\\$&");
+			re += `[${body}]`;
+			i = close;
+		} else if (c === "{" && close > 0) {
+			re += ".*";
+			i = close;
+		} else re += c.replace(/[.+^$()|[\]{}\\]/g, "\\$&");
+	}
+	return new RegExp(`^${re}$`, "i");
+}
+
+/** The command as a reader would see it: as written, plus escapes, base64/hex literals and
+ *  String.fromCharCode / chr() lists decoded. */
+function decodedViews(command: string): string[] {
+	const views = [command];
+	views.push(
+		command
+			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
+			.replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
+			.replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(Number.parseInt(o, 8))),
+	);
+	for (const t of command.match(/[A-Za-z0-9+/_-]{12,}={0,2}/g) ?? [])
+		views.push(Buffer.from(t, "base64").toString("latin1"));
+	for (const t of command.match(/(?:[0-9a-f]{2}){8,}/gi) ?? [])
+		views.push(Buffer.from(t, "hex").toString("latin1"));
+	for (const m of command.matchAll(/(?:fromCharCode|chr)\s*\(([\d\s,]+)\)/g))
+		views.push(String.fromCharCode(...m[1].split(",").map((n) => Number(n.trim()))));
+	return views;
+}
+
+/** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
+export function touchesBrowserSecrets(command: string): boolean {
+	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b/i.test(command);
+	for (const view of decodedViews(command)) {
+		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
+		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
+		const lower = flat.toLowerCase();
+		if (/browser-(control|profiles|[*?[{$])/.test(lower)) return true;
+		const at = lower.indexOf(".8gent");
+		if (at >= 0) {
+			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
+			if (lists) return true;
+		}
+		for (const token of flat.split(/[\s;|&()<>=]+/)) {
+			if (!/[*?[{]/.test(token)) continue;
+			for (const seg of token.split("/")) {
+				if (seg === "*" || !/[*?[{]/.test(seg)) continue;
+				const re = globRe(seg);
+				if (SECRET_NAMES.some((n) => re.test(n))) return true;
+			}
+		}
+	}
+	return false;
+}
 
 /** Password, payment, PIN and OTP fields. Under a named profile no step types into one
  *  (#3622). Kept identical to 8gent-browser src/main/secret-fields.ts, which also checks

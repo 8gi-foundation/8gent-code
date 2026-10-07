@@ -13,7 +13,9 @@ import {
 	type BrowserCall,
 	_setProfileHomeForTest,
 	browserProfile,
+	blockedForProfile,
 	browserProfileWarning,
+	touchesBrowserSecrets,
 	createEightBrowser,
 	localBrowserTools,
 	validateBrowserAction,
@@ -1012,4 +1014,109 @@ describe("ToolExecutor, review round", () => {
 			server.stop(true);
 		}
 	});
+});
+
+// ── 8SO HIGH-2 follow-up: run_command backstop (a speed bump until #3612 seatbelts it) ──
+
+describe("touchesBrowserSecrets: run_command may not reach the browser token or profiles", () => {
+	const b64 = (t: string) => Buffer.from(t).toString("base64");
+	const hex = (t: string) => Buffer.from(t).toString("hex");
+	const refused = [
+		"cat ~/.8gent/browser-control.token",
+		"cat $HOME/.8gent/browser-control.token",
+		"cat /Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
+		"cd ~/.8gent && cat browser-control.token",
+		"ls ~/.8gent/browser-profiles",
+		"cat ~/.8gent/*",
+		"cat $HOME/.8gent/*",
+		"cat ~/.8gent/browser-c*",
+		"cat ~/.8gent/b?owser-control.token",
+		"cat ~/.8*/b*",
+		"cat ~/.?gent/[b]rowser-control.token",
+		"cat ~/.{8,9}gent/x",
+		"find ~ -name 'browser-*'",
+		"find ~ -name 'b*'",
+		'cat ~/".8"gent/browser-control.token',
+		"cat ~/'.8gent'/'browser'-'control'.token",
+		"cat ~/.8gent/browser-control.token",
+		"cat $'\x7e/\x2e8gent/browser-control.token'",
+		"X=control; cat ~/.8gent/browser-$X.token",
+		"D=.8gent; cat ~/$D/browser-control.token",
+		`bun -e "console.log(require('fs').readFileSync(require('os').homedir()+'/.8gent/browser-control.token','utf8'))"`,
+		`node -e "const f=require('fs');console.log(f.readFileSync(process.env.HOME+'/.8gent/browser-'+'control.token','utf8'))"`,
+		`python3 -c "print(open(__import__('os').path.expanduser('~/.8gent/browser-control.token')).read())"`,
+		`python -c "import os;print([f for f in os.listdir(os.path.expanduser('~/.8gent'))])"`,
+		`bun -e "for (const f of require('fs').readdirSync(require('os').homedir()+'/.8gent')) if (f.endsWith('.token')) console.log(f)"`,
+		`echo ${b64("~/.8gent/browser-control.token")} | base64 -d | xargs cat`,
+		`cat $(echo ${hex("/Users/someone/.8gent/browser-control.token")} | xxd -r -p)`,
+		`bun -e "console.log(require('fs').readFileSync(Buffer.from('${b64("/Users/someone/.8gent/browser-control.token")}','base64').toString()))"`,
+		`python3 -c "import base64,os;print(open(base64.b64decode('${b64("/Users/someone/.8gent/browser-control.token")}')).read())"`,
+		`node -e "const p=String.fromCharCode(${[..."/Users/someone/.8gent"].map((c) => c.charCodeAt(0)).join(",")});console.log(require('fs').readdirSync(p))"`,
+	];
+	for (const cmd of refused)
+		test(`refuses: ${cmd.slice(0, 90)}`, () => expect(touchesBrowserSecrets(cmd)).toBe(true));
+
+	const allowed = [
+		"ls -la",
+		"cat README.md",
+		"bun test packages/tools",
+		"git status",
+		"ls *.ts",
+		"cat ~/.8gent/settings.example",
+		"echo hello | base64",
+		"grep -r browser packages/tools",
+		'node -e "console.log(1+1)"',
+	];
+	for (const cmd of allowed)
+		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
+});
+
+describe("ToolExecutor.runCommand refuses browser-secret commands before anything runs", () => {
+	test("cat, bun -e, python -c and node -e are all denied", async () => {
+		const exec = new ToolExecutor(mkdtempSync(join(tmpdir(), "rc-guard-")), "rc-guard");
+		for (const cmd of [
+			"cat ~/.8gent/browser-control.token",
+			`bun -e "require('fs').readFileSync(require('os').homedir()+'/.8gent/browser-control.token')"`,
+			`python3 -c "open(__import__('os').path.expanduser('~/.8gent/browser-profiles/eightgent/browser-control.token')).read()"`,
+			`node -e "require('fs').readdirSync(process.env.HOME+'/.8gent')"`,
+		]) {
+			const out = await exec.runCommand(cmd);
+			expect(out).toMatch(/^\[PERMISSION DENIED\] Command touches 8gent Browser control tokens/);
+		}
+	});
+});
+
+describe("defence in depth: with EIGHT_BROWSER_PROFILE set, never the default browser", () => {
+	afterEach(() => _setProfileHomeForTest(null));
+	test("an explicit default port or default token is refused when a named profile is configured", async () => {
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
+		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: 7981 }));
+		await expect(wsTransport({ env, port: 7980 })("tabs.list")).rejects.toThrow(/7980/);
+		await expect(
+			wsTransport({ env, tokenFile: "/Users/someone/.8gent/browser-control.token" })("tabs.list"),
+		).rejects.toThrow(/default/);
+	});
+	test("an invalid profile name is refused, never the default", async () => {
+		await expect(
+			wsTransport({ env: { EIGHT_BROWSER_PROFILE: "BAD" }, port: 7980 })("tabs.list"),
+		).rejects.toThrow(/EIGHT_BROWSER_PROFILE/);
+	});
+});
+
+describe("blockedForProfile: trailing dots and IPv6-embedded IPv4", () => {
+	const at = (scheme: string, rest: string) => `${scheme}:/` + `/${rest}`;
+	for (const rest of [
+		"localhost./",
+		"127.0.0.1./",
+		"printer.local./",
+		"10.0.0.1./",
+		"[::7f00:1]/",
+		"[::127.0.0.1]/",
+		"[::a00:1]/",
+		"[64:ff9b::7f00:1]/",
+		"[::ffff:0:7f00:1]/",
+	])
+		test(`refuses ${rest}`, () => expect(blockedForProfile(at("http", rest))).toMatch(/private/));
+	test("public names with a trailing dot pass", () =>
+		expect(blockedForProfile(at("https", "example.com./"))).toBeNull());
 });
