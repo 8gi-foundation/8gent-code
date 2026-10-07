@@ -144,7 +144,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser } from "../tools/eight-browser";
+import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -466,7 +466,8 @@ const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
 const getEightBrowser = () => {
 	if (!eightBrowser) {
-		eightBrowser = createEightBrowser();
+		// A named profile (#3622) is the bot's own login-free browser: it never types into password or payment fields.
+		eightBrowser = createEightBrowser(undefined, { refuseSecretFields: () => isolatedBrowser() });
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -475,6 +476,9 @@ const getEightBrowser = () => {
 /**
  * 8gent Browser tabs share the person's logged-in session partition (8gent-browser #80), so tools that
  * act or capture there ask first, like desktop_*: gated as desktop_use, where no rule allows them.
+ * Exception (#3622, James 7 Oct): under a valid named EIGHT_BROWSER_PROFILE the calls go to that
+ * profile's own login-free instance, so the tool-level card is skipped. Sensitive clicks still go to the
+ * approver, and password or payment fields are never typed into.
  */
 const BROWSER_ASK_FIRST = new Set(["browser_task", "browser_screenshot"]);
 /** Approval-card view of browser args: typed text shows as its length only. */
@@ -1679,8 +1683,11 @@ export class ToolExecutor {
 			});
 			const askFirst = !gateResult.allowed && gateResult.requiresApproval;
 			if (askFirst && isDesktop) {
-				const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
-				if (refusal) return refusal;
+				const ownBrowser = BROWSER_ASK_FIRST.has(toolName) && isolatedBrowser();
+				if (!ownBrowser) {
+					const refusal = await this.askDesktopApproval(toolName, args, gateResult.reason);
+					if (refusal) return refusal;
+				}
 			} else if (askFirst && isMcpCall) {
 				// Ask in Ask and Guarded; Infinite runs; no card means no call.
 				const refusal = await askMcpApproval(

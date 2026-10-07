@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -11,7 +11,10 @@ import {
 } from "../../permissions/tui-approval-channel";
 import {
 	type BrowserCall,
+	_setProfileHomeForTest,
+	browserProfile,
 	createEightBrowser,
+	localBrowserTools,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
@@ -481,4 +484,347 @@ describe("ToolExecutor gates browser_* (8SO review of #3592)", () => {
 		);
 		expect(await exec.execute("browser_screenshot", { path: "shot.jpg" })).toMatch(/\.png/);
 	});
+});
+
+// ── Named profile (#3622): the bot's own login-free 8gent Browser ────────────
+
+/** Serve a BrowserCall over a real token-gated WebSocket, like 8gent Browser's control server. */
+function serveCall(call: BrowserCall, token: string) {
+	const tokens: string[] = [];
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch: (req, srv) => (srv.upgrade(req) ? undefined : new Response("no", { status: 400 })),
+		websocket: {
+			async message(ws, raw) {
+				const m = JSON.parse(String(raw));
+				if (m.type === "auth") {
+					tokens.push(m.token);
+					return void ws.send(
+						JSON.stringify(
+							m.token === token ? { type: "auth_ok" } : { type: "error", error: "bad token" },
+						),
+					);
+				}
+				try {
+					ws.send(JSON.stringify({ id: m.id, ok: true, result: await call(m.cmd, m.args) }));
+				} catch (e) {
+					ws.send(JSON.stringify({ id: m.id, ok: false, error: (e as Error).message }));
+				}
+			},
+		},
+	});
+	return { server, tokens };
+}
+
+/** A temp HOME holding a running named profile's token and port files. */
+function profileHome(name: string, files: { token?: string; port?: number | string }) {
+	const home = mkdtempSync(join(tmpdir(), "8b-profile-"));
+	const dir = join(home, ".8gent", "browser-profiles", name);
+	mkdirSync(dir, { recursive: true });
+	if (files.token !== undefined)
+		writeFileSync(join(dir, "browser-control.token"), `${files.token}\n`);
+	if (files.port !== undefined)
+		writeFileSync(join(dir, "browser-control.port"), String(files.port));
+	return home;
+}
+
+/** The secret-field probe 8gent Browser answers: `:is(<selector>):is(<password/payment fields>)`. */
+const SECRET_TARGETS = ["input[type=password]", "input[autocomplete=cc-number]"];
+function withSecretFields(call: BrowserCall): BrowserCall {
+	return async (cmd, args = {}) => {
+		const sel = typeof args.selector === "string" ? args.selector : "";
+		if (cmd === "page.query" && sel.startsWith(":is(")) {
+			const target = sel.slice(4, sel.indexOf("):is("));
+			const hit = SECRET_TARGETS.includes(target);
+			return {
+				ok: true,
+				elements: hit ? [{ index: 1, tag: "input", text: "" }] : [],
+				count: hit ? 1 : 0,
+			};
+		}
+		return call(cmd, args);
+	};
+}
+
+/** One page, one harmless button: a click that is not sensitive and visibly changes the page. */
+function nextSite() {
+	let clicks = 0;
+	const calls: string[] = [];
+	const call: BrowserCall = async (cmd, args = {}) => {
+		calls.push(cmd);
+		switch (cmd) {
+			case "tab.open":
+				return { id: "t9" };
+			case "tab.close":
+				return { closed: args.id };
+			case "page.waitFor":
+				return { ok: true, found: true };
+			case "page.read":
+				return {
+					snapshot: { url: "https://example.com/", title: "Example", text: `clicked ${clicks}` },
+				};
+			case "page.query":
+				if (typeof args.selector === "string") return { ok: true, elements: [], count: 0 };
+				return {
+					ok: true,
+					elements: [{ index: 0, tag: "button", text: "Next", rect: { x: 0, y: 0, w: 9, h: 9 } }],
+				};
+			case "page.click":
+				clicks++;
+				return { ok: true, clicked: true };
+			case "page.type":
+				return { ok: true, typed: true };
+			default:
+				throw new Error(`unexpected ${cmd}`);
+		}
+	};
+	return { call, calls, clicks: () => clicks };
+}
+
+describe("browserProfile", () => {
+	const HOME = "/Users/someone";
+	test('unset, empty and "default" are the default profile', () => {
+		for (const v of [undefined, "", "default"])
+			expect(browserProfile({ EIGHT_BROWSER_PROFILE: v }, HOME)).toBeNull();
+	});
+	test("a named profile lives under ~/.8gent/browser-profiles/<name>, never at the default token", () => {
+		const p = browserProfile({ EIGHT_BROWSER_PROFILE: "eightgent" }, HOME);
+		const dir = join(HOME, ".8gent", "browser-profiles", "eightgent");
+		expect(p).toEqual({
+			name: "eightgent",
+			tokenFile: join(dir, "browser-control.token"),
+			portFile: join(dir, "browser-control.port"),
+		});
+		expect(p?.tokenFile).not.toBe(join(HOME, ".8gent", "browser-control.token"));
+	});
+	test("hostile names throw instead of falling back to the default profile", () => {
+		for (const v of [
+			"DEFAULT",
+			"..",
+			"../x",
+			"/abs",
+			"a/b",
+			".hidden",
+			"a.b",
+			"x",
+			"a".repeat(33),
+			"1a",
+			"-a",
+			"has space",
+		])
+			expect(() => browserProfile({ EIGHT_BROWSER_PROFILE: v }, HOME)).toThrow(
+				/EIGHT_BROWSER_PROFILE/,
+			);
+	});
+});
+
+describe("localBrowserTools (local sessions get a browser only with a named profile)", () => {
+	test("none for the default profile or a bad name, all four for a named one", () => {
+		expect(localBrowserTools({})).toEqual([]);
+		expect(localBrowserTools({ EIGHT_BROWSER_PROFILE: "default" })).toEqual([]);
+		expect(localBrowserTools({ EIGHT_BROWSER_PROFILE: "../x" })).toEqual([]);
+		expect(localBrowserTools({ EIGHT_BROWSER_PROFILE: "eightgent" })).toEqual([
+			"browser_open",
+			"browser_state",
+			"browser_task",
+			"browser_screenshot",
+		]);
+	});
+});
+
+describe("wsTransport with a named profile", () => {
+	afterEach(() => _setProfileHomeForTest(null));
+
+	test("uses the profile's own token and port file, not the default token or EIGHT_BROWSER_CONTROL_PORT", async () => {
+		const { server, tokens } = serveCall(nextSite().call, "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			const call = wsTransport({
+				env: { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_CONTROL_PORT: "9" },
+			});
+			expect(await call("tab.open", { url: "https://example.com/" })).toEqual({ id: "t9" });
+			expect(tokens).toEqual(["bot-tok"]);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("fails closed, without connecting, when the profile is not running", async () => {
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
+		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
+		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+			/profile "eightgent" is not running/,
+		);
+		_setProfileHomeForTest(profileHome("eightgent", { port: 7981 }));
+		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+			/profile "eightgent" is not running/,
+		);
+	});
+
+	test("refuses a port file that points at the default profile's port 7980, or junk", async () => {
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
+		for (const port of [7980, "abc", 0]) {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port }));
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(/port/);
+		}
+	});
+
+	test("a bad profile name is an error, never the default browser", async () => {
+		await expect(
+			wsTransport({ env: { EIGHT_BROWSER_PROFILE: "../x" } })("tabs.list"),
+		).rejects.toThrow(/EIGHT_BROWSER_PROFILE/);
+	});
+});
+
+describe("refuseSecretFields (named profile): no typing into password or payment fields", () => {
+	test("a password field is refused in the dry run: nothing is typed, not even earlier steps", async () => {
+		const site = fakeSite();
+		const b = createEightBrowser(withSecretFields(site.call), {
+			settleMs: 0,
+			refuseSecretFields: true,
+		});
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(
+			await b.run([
+				{ action: "type", selector: "input[name=username]", text: "bot" },
+				{ action: "type", selector: "input[type=password]", text: "hunter2" },
+			]),
+		);
+		expect(out.ok).toBe(false);
+		expect(out.error).toMatch(/step 1: .*password or payment field/);
+		expect(site.calls.some((c) => c.cmd === "page.type")).toBe(false);
+	});
+
+	test("a payment field is refused too", async () => {
+		const site = fakeSite();
+		const b = createEightBrowser(withSecretFields(site.call), {
+			settleMs: 0,
+			refuseSecretFields: true,
+		});
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(
+			await b.run([
+				{ action: "type", selector: "input[autocomplete=cc-number]", text: "4242424242424242" },
+			]),
+		);
+		expect(out.ok).toBe(false);
+		expect(site.calls.some((c) => c.cmd === "page.type")).toBe(false);
+	});
+
+	test("ordinary fields still type", async () => {
+		const site = fakeSite();
+		const b = createEightBrowser(withSecretFields(site.call), {
+			settleMs: 0,
+			refuseSecretFields: true,
+		});
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(
+			await b.run([{ action: "type", selector: "input[name=username]", text: "bot" }]),
+		);
+		expect(out.ok).toBe(true);
+	});
+});
+
+describe("ToolExecutor: named profile acts without a card; default profile still asks", () => {
+	const dir = mkdtempSync(join(tmpdir(), "browser-profile-gate-"));
+	const saved = {
+		profile: process.env.EIGHT_BROWSER_PROFILE,
+		port: process.env.EIGHT_BROWSER_CONTROL_PORT,
+		headless: process.env.EIGHT_HEADLESS,
+	};
+	const restore = (k: string, v: string | undefined) =>
+		v === undefined ? Reflect.deleteProperty(process.env, k) : (process.env[k] = v);
+	afterEach(() => {
+		restore("EIGHT_BROWSER_PROFILE", saved.profile);
+		restore("EIGHT_BROWSER_CONTROL_PORT", saved.port);
+		restore("EIGHT_HEADLESS", saved.headless);
+		_setProfileHomeForTest(null);
+		_resetTuiApprovalChannel();
+	});
+	const recordAsks = () => {
+		const asked: TuiApprovalRequest[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req);
+			return "deny";
+		});
+		return asked;
+	};
+
+	test("named profile: a click goes through with no approval call, even headless", async () => {
+		const site = nextSite();
+		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+			process.env.EIGHT_BROWSER_CONTROL_PORT = "9"; // ignored: the profile's port file wins
+			process.env.EIGHT_HEADLESS = "1";
+			const asked = recordAsks();
+			const exec = new ToolExecutor(dir, "browser-profile-gate");
+			expect(await exec.execute("browser_open", { url: "https://example.com/" })).toContain(
+				'"tab":"t9"',
+			);
+			const out = JSON.parse(
+				await exec.execute("browser_task", { actions: [{ action: "left_click", index: 0 }] }),
+			);
+			expect(out.ok).toBe(true);
+			expect(site.clicks()).toBe(1);
+			expect(asked.length).toBe(0);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("named profile: a password field is still refused", async () => {
+		const site = fakeSite();
+		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+			process.env.EIGHT_HEADLESS = "1";
+			const exec = new ToolExecutor(dir, "browser-profile-gate");
+			await exec.execute("browser_open", { url: "https://example.com/" });
+			const out = await exec.execute("browser_task", {
+				actions: [{ action: "type", selector: "input[type=password]", text: "hunter2" }],
+			});
+			expect(out).toMatch(/password or payment field/);
+			expect(site.calls.some((c) => c.cmd === "page.type")).toBe(false);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("named profile: a sensitive click still needs approval (and headless means refused)", async () => {
+		const site = fakeSite();
+		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+			process.env.EIGHT_HEADLESS = "1";
+			const exec = new ToolExecutor(dir, "browser-profile-gate");
+			await exec.execute("browser_open", { url: "https://example.com/" });
+			const out = JSON.parse(
+				await exec.execute("browser_task", { actions: [{ action: "left_click", index: 2 }] }),
+			);
+			expect(out.ok).toBe(false);
+			expect(out.error).toMatch(/Sign in.*(declined|approval)/);
+			expect(site.calls.some((c) => c.cmd === "page.click")).toBe(false);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	for (const v of [undefined, "default"]) {
+		test(`default profile (EIGHT_BROWSER_PROFILE=${v}): the same click still asks first`, async () => {
+			restore("EIGHT_BROWSER_PROFILE", v);
+			process.env.EIGHT_BROWSER_CONTROL_PORT = "9"; // never the person's real browser
+			const asked = recordAsks();
+			const out = await new ToolExecutor(dir, "browser-profile-gate").execute("browser_task", {
+				actions: [{ action: "left_click", index: 0 }],
+			});
+			expect(asked.length).toBe(1);
+			expect(asked[0].action).toBe("Browser control");
+			expect(out).toContain("[PERMISSION DENIED]");
+		});
+	}
 });

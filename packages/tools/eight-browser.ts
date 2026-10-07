@@ -11,6 +11,11 @@
  *     once, then stops the plan (verify.ts). Clicks are never retried: a retried toggle undoes itself.
  *   - action log: one row per step, typed text logged as length only (actionLog.ts)
  * Only tabs this process opened are driven, never the user's own tabs.
+ *
+ * Named profile (#3622, paired with 8gent-browser #82): EIGHT_BROWSER_PROFILE=<name> points every call at
+ * that profile's own isolated 8gent Browser instance (its token and port file under
+ * ~/.8gent/browser-profiles/<name>/), never the person's logged-in default profile. A bad name, or a profile
+ * that is not running, is an error: there is no fallback to the default token or port 7980.
  */
 
 import { createHash } from "node:crypto";
@@ -130,17 +135,101 @@ export function validateBrowserAction(raw: unknown): Check<BrowserAction> {
 	return { ok: false, error: `unknown action kind: ${String(a.action)}` };
 }
 
+type Env = Record<string, string | undefined>;
+export type BrowserProfile = { name: string; tokenFile: string; portFile: string };
+const DEFAULT_CONTROL_PORT = 7980;
+const PROFILE_NAME = /^[a-z][a-z0-9-]{1,31}$/; // same rule as 8gent-browser src/main/profile.ts
+let profileHomeOverride: string | null = null;
+/** Test seam: resolve profiles under this HOME instead of the real one. Never set outside tests. */
+export function _setProfileHomeForTest(home: string | null): void {
+	profileHomeOverride = home;
+}
+
+/**
+ * The named 8gent Browser profile this process uses, or null for the default profile (unset, empty or
+ * "default"). A name that is not a short lowercase slug throws: it never falls back to the default profile,
+ * and since it cannot contain "/" or "." it can never resolve to the default token.
+ */
+export function browserProfile(
+	env: Env = process.env,
+	home: string = profileHomeOverride ?? homedir(),
+): BrowserProfile | null {
+	const name = env.EIGHT_BROWSER_PROFILE;
+	if (name === undefined || name === "" || name === "default") return null;
+	if (!PROFILE_NAME.test(name))
+		throw new Error(
+			`EIGHT_BROWSER_PROFILE must be a lowercase slug (a-z, 0-9, -; 2-32 chars, starting with a letter); refusing ${JSON.stringify(name)}`,
+		);
+	const dir = join(home, ".8gent", "browser-profiles", name);
+	return {
+		name,
+		tokenFile: join(dir, "browser-control.token"),
+		portFile: join(dir, "browser-control.port"),
+	};
+}
+
+/** True only when a valid named profile is configured: the bot's own login-free browser. */
+export function isolatedBrowser(env: Env = process.env): boolean {
+	try {
+		return browserProfile(env) !== null;
+	} catch {
+		return false;
+	}
+}
+
+/** Browser tools a local-model session may see: none unless a named profile is configured. */
+export function localBrowserTools(env: Env = process.env): string[] {
+	return isolatedBrowser(env)
+		? ["browser_open", "browser_state", "browser_task", "browser_screenshot"]
+		: [];
+}
+
+/** Where to connect: a named profile's own token and published port, else the default token and port. */
+function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
+	port: number;
+	tokenFile: string;
+	profile?: string;
+} {
+	const env = opts.env ?? process.env;
+	const profile = browserProfile(env);
+	if (!profile)
+		return {
+			port: opts.port ?? (Number(env.EIGHT_BROWSER_CONTROL_PORT) || DEFAULT_CONTROL_PORT),
+			tokenFile: opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
+		};
+	let raw: string;
+	try {
+		raw = readFileSync(profile.portFile, "utf8").trim();
+		readFileSync(profile.tokenFile, "utf8");
+	} catch {
+		throw new Error(
+			`8gent Browser profile "${profile.name}" is not running (no token or port file in ~/.8gent/browser-profiles/${profile.name}/)`,
+		);
+	}
+	const port = /^\d+$/.test(raw) ? Number(raw) : 0;
+	if (port <= 0 || port >= 65536 || port === DEFAULT_CONTROL_PORT)
+		throw new Error(
+			`8gent Browser profile "${profile.name}" published an invalid port (${JSON.stringify(raw)}); refusing`,
+		);
+	return { port, tokenFile: profile.tokenFile, profile: profile.name };
+}
+
 /** WebSocket transport: one authenticated round trip per command, as 8b-web does. */
-export function wsTransport(opts: { port?: number; tokenFile?: string } = {}): BrowserCall {
+export function wsTransport(
+	opts: { port?: number; tokenFile?: string; env?: Env } = {},
+): BrowserCall {
 	return (cmd, args = {}) => {
-		const port = opts.port ?? (Number(process.env.EIGHT_BROWSER_CONTROL_PORT) || 7980);
+		let port: number;
+		let tokenFile: string;
+		try {
+			({ port, tokenFile } = endpoint(opts));
+		} catch (e) {
+			return Promise.reject(e);
+		}
 		return new Promise((resolve, reject) => {
 			let token: string;
 			try {
-				token = readFileSync(
-					opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
-					"utf8",
-				).trim();
+				token = readFileSync(tokenFile, "utf8").trim();
 			} catch {
 				return reject(
 					new Error(
@@ -197,8 +286,43 @@ type El = {
 /** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
 const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 
-export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?: number } = {}) {
+/** Password and payment fields. Under a named profile no step may type into one (#3622). */
+const SECRET_FIELDS = [
+	"input[type=password]",
+	'[autocomplete~="current-password" i]',
+	'[autocomplete~="new-password" i]',
+	'[autocomplete="one-time-code" i]',
+	'[autocomplete^="cc-" i]',
+	...[
+		"password",
+		"passcode",
+		"cvv",
+		"cvc",
+		"card",
+		"iban",
+		"security-code",
+		"securitycode",
+	].flatMap((t) => ["name", "id"].map((k) => `[${k}*="${t}" i]`)),
+	...["password", "card number", "security code", "cvv", "cvc", "iban", "expiry"].map(
+		(t) => `[aria-label*="${t}" i]`,
+	),
+].join(",");
+
+export function createEightBrowser(
+	call: BrowserCall = wsCall,
+	opts: { settleMs?: number; refuseSecretFields?: boolean | (() => boolean) } = {},
+) {
+	const refuseSecretFields = () =>
+		typeof opts.refuseSecretFields === "function"
+			? opts.refuseSecretFields()
+			: !!opts.refuseSecretFields;
 	const settle = opts.settleMs ?? 400;
+	/** Does `selector` reach a password or payment field? Asked of the page itself, so it holds for any selector. */
+	const secretField = async (tabId: string, selector: string): Promise<boolean> =>
+		(
+			(await call("page.query", { tabId, selector: `:is(${selector}):is(${SECRET_FIELDS})` }))
+				?.elements ?? []
+		).length > 0;
 	const owned = new Set<string>();
 	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
@@ -341,6 +465,16 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
 			plan.push(v.action);
 		}
+		const refuseSecret = (i: number, sel: string) =>
+			fail(
+				`step ${i}: ${sel} is a password or payment field; this browser profile never types into one`,
+				steps,
+			);
+		const steps: Record<string, unknown>[] = [];
+		if (refuseSecretFields())
+			for (const [i, a] of plan.entries())
+				if (a.action === "type" && (await secretField(id, a.selector)))
+					return refuseSecret(i, a.selector);
 		for (const [i, a] of plan.entries()) {
 			if (a.action === "open") break;
 			if (a.action !== "left_click") continue;
@@ -348,10 +482,12 @@ export function createEightBrowser(call: BrowserCall = wsCall, opts: { settleMs?
 			if (err) return fail(`dry run: step ${i}: ${err}`);
 			break; // after the first click the page may change; later clicks are re-resolved live
 		}
-		const steps: Record<string, unknown>[] = [];
 		for (const [i, a] of plan.entries()) {
 			const row: Record<string, unknown> = { step: i, action: a.action, attempts: 1 };
 			if (a.action === "type") {
+				// Re-checked live: an earlier step may have changed the page since the dry run.
+				if (refuseSecretFields() && (await secretField(id, a.selector)))
+					return refuseSecret(i, a.selector);
 				row.selector = a.selector;
 				row.text_len = a.text.length;
 				if (a.text) typed.add(clipped(a.text));
