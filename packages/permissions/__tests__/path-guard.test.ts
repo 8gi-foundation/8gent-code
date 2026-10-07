@@ -8,8 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { evaluatePolicy } from "../policy-engine";
 import { validatePath } from "../path-guard";
+import { evaluatePolicy } from "../policy-engine";
 
 // Real on-disk fixtures so realpathSync resolves symlinks.
 const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "pg-home-"));
@@ -231,5 +231,36 @@ describe("Integration: evaluatePolicy denies before consulting other rules", () 
 		if (!decision.allowed) {
 			expect(decision.reason).not.toMatch(/path-guard/i);
 		}
+	});
+});
+
+describe("agent settings file (#3595)", () => {
+	const home = "/Users/someone";
+	test("~/.8gent/settings.json is denied however it is spelled", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/settings.json",
+			".8gent/settings.json",
+			"./x/../.8gent/settings.json",
+		]) {
+			const r = validatePath(raw, home, { platform: "linux", home });
+			expect(r.ok).toBe(false);
+		}
+	});
+	test("other files under ~/.8gent and a settings.json elsewhere are not caught", () => {
+		expect(validatePath(".8gent/other.json", home, { platform: "linux", home }).ok).toBe(true);
+		expect(validatePath("/work/proj/settings.json", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+
+	test("a leading ~ is expanded before the compare: settings, confirmation file and credentials", () => {
+		for (const raw of [
+			"~/.8gent/settings.json",
+			"~/.ssh/id_rsa",
+			"~/.aws/credentials",
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
 	});
 });

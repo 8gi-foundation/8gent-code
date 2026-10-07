@@ -35,6 +35,16 @@ export interface PathGuardHost {
 /** Directories whose contents are always credential-bearing. */
 const PROTECTED_DIRS = [".ssh", ".aws", ".kube"];
 
+/**
+ * Files under the home directory that agent tools must never touch, read or
+ * write (#3595). settings.json holds postMessage.allowedChats: an agent that
+ * could write it could grant itself recipients. The TUI's own settings store
+ * writes with plain fs calls, not through this guard, so it is unaffected.
+ */
+const PROTECTED_HOME_FILES = [
+	[".8gent", "settings.json"],
+];
+
 /** Basenames that always indicate a credential file regardless of location. */
 const PROTECTED_BASENAMES = new Set<string>([
 	".gitconfig",
@@ -157,6 +167,12 @@ export function validatePath(
 		return { ok: false, reason: "empty path" };
 	}
 
+	// 0. A leading ~ means home, as the file tools expand it; compare what they will
+	// open, not the spelling (a "~/.8gent/settings.json" bypass, #3595).
+	if (rawPath === "~" || rawPath.startsWith("~/") || rawPath.startsWith("~\\")) {
+		rawPath = pathFor(platform).join(host.home ?? homeDir(), rawPath.slice(1));
+	}
+
 	// 1. UNC paths are rejected before any normalisation.
 	if (isUncPath(rawPath)) {
 		return { ok: false, reason: "UNC path not allowed" };
@@ -181,6 +197,16 @@ export function validatePath(
 	// 5. Protected directories under the user's home.
 	if (isUnderProtectedDir(resolved, host.home ?? homeDir(), platform)) {
 		return { ok: false, reason: "protected credential file" };
+	}
+
+	// 5b. Protected files under home, compared on the realpath of both sides.
+	{
+		const flavor = pathFor(platform);
+		const home = host.home ?? homeDir();
+		for (const parts of PROTECTED_HOME_FILES) {
+			const target = resolveSafe(flavor.join(home, ...parts), home, platform);
+			if (resolved === target) return { ok: false, reason: "protected settings file" };
+		}
 	}
 
 	// 6. Protected basenames anywhere (e.g. a .netrc dropped into the project).

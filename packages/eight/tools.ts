@@ -26,6 +26,7 @@ import {
 	LOCATE_INDEX_WAIT_MS,
 	locate as astLocate,
 } from "../ast-index/locate";
+import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -365,6 +366,8 @@ export class ToolExecutor {
 	 * TUI, with its tab. Undefined: no mode, today's behaviour.
 	 */
 	private permission: PermissionModeHolder | undefined;
+	/** Keys the post_message session limit (#3595); a real session id when one was given. */
+	private postSession: string;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -378,6 +381,7 @@ export class ToolExecutor {
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
+		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
@@ -1287,6 +1291,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Posting (#3595): advertised only where the tg-group helper is installed.
+			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
 		];
 	}
 
@@ -1588,6 +1594,16 @@ export class ToolExecutor {
 				return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
+			case "post_message":
+				// Policy gate, then the person, inside postMessage; never a shell string.
+				return postMessage(
+					{
+						chat: String(args.chat ?? ""),
+						text: typeof args.text === "string" ? args.text : "",
+						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
+					},
+					postMessageDeps(this.agentId, this.postSession),
+				);
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
 					"issue",
@@ -2275,6 +2291,11 @@ export class ToolExecutor {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
 		}
+		// Backstop (#3595): the file that lists post_message recipients is not
+		// for the shell. A minimum, not a parser: the allowlist is also frozen
+		// at process start, so an edit that slips past this cannot take effect.
+		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
+			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
