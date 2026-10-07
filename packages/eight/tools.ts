@@ -138,6 +138,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
+import { createEightBrowser } from "../tools/eight-browser";
 import { describeImage, readImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -423,6 +424,33 @@ const MCP_LEAN_TOOL_DEFS = [
 		},
 	},
 ];
+
+/** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
+const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
+let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
+const getEightBrowser = () => {
+	if (!eightBrowser) {
+		eightBrowser = createEightBrowser();
+		// Session end: close the tabs this process opened (natural exit only; never other tabs).
+		process.once("beforeExit", () => void eightBrowser?.closeAll());
+	}
+	return eightBrowser;
+};
+/**
+ * 8gent Browser tabs share the person's logged-in session partition (8gent-browser #80), so tools that
+ * act or capture there ask first, like desktop_*: gated as desktop_use, where no rule allows them.
+ */
+const BROWSER_ASK_FIRST = new Set(["browser_task", "browser_screenshot"]);
+/** Approval-card view of browser args: typed text shows as its length only. */
+function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknown> {
+	if (!Array.isArray(args.actions)) return args;
+	const actions = args.actions.map((a) =>
+		a && typeof a === "object" && typeof (a as { text?: unknown }).text === "string"
+			? { ...(a as object), text: `<${(a as { text: string }).text.length} chars>` }
+			: a,
+	);
+	return { ...args, actions };
+}
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1326,7 +1354,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a real browser and return the page state (title, URL, clickable elements). Use for web interaction, form filling, scraping dynamic pages.",
+						"Open a URL in a new 8gent Browser tab and return its state: tab id, URL, title, numbered actionable elements, page text. Use for web interaction, form filling, scraping dynamic pages. Then act with browser_task actions.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1337,7 +1365,7 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID for persistent browser sessions",
+								description: "Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
 							},
 						},
 						required: ["url"],
@@ -1355,7 +1383,7 @@ export class ToolExecutor {
 						properties: {
 							session: {
 								type: "string",
-								description: "Session ID (if using persistent sessions)",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
 					},
@@ -1366,13 +1394,18 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Run a complex browser task described in natural language. The browser-use agent will plan and execute multi-step interactions (clicking, typing, navigating) to complete the task.",
+						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=email]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Sensitive clicks (sign in, buy, delete, send...) ask the person first.",
 					parameters: {
 						type: "object",
 						properties: {
+							actions: {
+								type: "array",
+								items: { type: "object" },
+								description: "Ordered steps to run in the tab (see tool description)",
+							},
 							task: {
 								type: "string",
-								description: "Natural language description of the browser task to perform",
+								description: "Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
 							},
 							browser: {
 								type: "string",
@@ -1380,10 +1413,10 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID for persistent browser sessions",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
-						required: ["task"],
+						required: [],
 					},
 				},
 			},
@@ -1392,7 +1425,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_screenshot",
 					description:
-						"Take a screenshot of the current browser page. Returns the file path where the screenshot was saved.",
+						"Take a screenshot of an 8gent Browser tab opened with browser_open. Returns the file path where the screenshot was saved.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1402,7 +1435,7 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Session ID (if using persistent sessions)",
+								description: "Tab id from browser_open (default: the last tab opened)",
 							},
 						},
 					},
@@ -1436,6 +1469,8 @@ export class ToolExecutor {
 		git_commit: "git_commit",
 		web_search: "network_request",
 		web_fetch: "network_request",
+		// browser_open loads a URL in 8gent Browser, in the person's own session partition (#3592).
+		browser_open: "network_request",
 		vercel_list_projects: "network_request",
 		vercel_get_deployments: "network_request",
 		vercel_deploy: "network_request",
@@ -1544,7 +1579,7 @@ export class ToolExecutor {
 		// those rules match on (#3213). It was gated as `computer_use`, which
 		// has no rules, so every desktop call - quitting apps included - fell
 		// through to the engine's default allow and no card appeared.
-		const isDesktop = toolName.startsWith("desktop_");
+		const isDesktop = toolName.startsWith("desktop_") || BROWSER_ASK_FIRST.has(toolName);
 		const isMcpCall = toolName === "mcp_call_tool";
 		const policyAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
@@ -1993,7 +2028,8 @@ export class ToolExecutor {
 				return this.handleBrowserState(args.session as string | undefined);
 			case "browser_task":
 				return this.handleBrowserTask(
-					args.task as string,
+					args.actions,
+					args.task as string | undefined,
 					args.browser as string | undefined,
 					args.session as string | undefined,
 				);
@@ -3482,9 +3518,10 @@ export class ToolExecutor {
 		reason: string | undefined,
 	): Promise<string | null> {
 		if (this.permissionManager.isInfiniteMode()) return null;
+		const browser = toolName.startsWith("browser_");
 		const request = {
-			action: "Desktop control",
-			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(args)}`,
+			action: browser ? "Browser control" : "Desktop control",
+			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
 		};
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
@@ -3579,6 +3616,7 @@ export class ToolExecutor {
 		session?: string,
 	): Promise<string> {
 		try {
+			if (!useBrowserUse()) return await getEightBrowser().open(url);
 			return browserOpen(url, { browser, session });
 		} catch (err) {
 			return `browser_open failed: ${err}`;
@@ -3587,6 +3625,7 @@ export class ToolExecutor {
 
 	private async handleBrowserState(session?: string): Promise<string> {
 		try {
+			if (!useBrowserUse()) return await getEightBrowser().state(session);
 			return browserState(session);
 		} catch (err) {
 			return `browser_state failed: ${err}`;
@@ -3594,12 +3633,21 @@ export class ToolExecutor {
 	}
 
 	private async handleBrowserTask(
-		task: string,
+		actions: unknown,
+		task: string | undefined,
 		browser?: string,
 		session?: string,
 	): Promise<string> {
 		try {
-			return browserTask(task, { browser, session });
+			if (!useBrowserUse()) {
+				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
+				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
+				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
+				const approve = async (what: string) =>
+					(await this.askDesktopApproval("browser_task", { click: what }, "This click looks sensitive in your logged-in browser.")) === null;
+				return await getEightBrowser().run(actions, session, approve);
+			}
+			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
 			return `browser_task failed: ${err}`;
 		}
@@ -3607,6 +3655,16 @@ export class ToolExecutor {
 
 	private async handleBrowserScreenshot(filePath?: string, session?: string): Promise<string> {
 		try {
+			if (!useBrowserUse()) {
+				let out: string | undefined;
+				if (filePath) {
+					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
+					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
+					const abs = path.resolve(this.workingDirectory, filePath);
+					out = abs.startsWith(shots + path.sep) ? abs : safePath(filePath, this.workingDirectory);
+				}
+				return await getEightBrowser().screenshot(out, session);
+			}
 			return browserScreenshot(filePath, session);
 		} catch (err) {
 			return `browser_screenshot failed: ${err}`;
