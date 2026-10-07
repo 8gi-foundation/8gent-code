@@ -61,7 +61,9 @@ describe("film_craft confinement", () => {
 		const root = tmp("fc-link-");
 		fs.symlinkSync(outside, path.join(root, "video"));
 		const r = await new ToolExecutor(root).execute("film_craft", { action: "bed", seconds: 1 });
-		expect(r).toMatch(/^Error: .*link outside the working directory/);
+		expect(r).toMatch(
+			/^Error: .*(link outside the working directory|escapes workspace via symlink)/,
+		);
 		expect(listOutside()).toEqual([]);
 	});
 
@@ -107,7 +109,9 @@ describe("film_craft confinement", () => {
 			slides,
 			narration: "voice.wav",
 		});
-		expect(r).toMatch(/^Error: .*link outside the working directory/);
+		expect(r).toMatch(
+			/^Error: .*(link outside the working directory|escapes workspace via symlink)/,
+		);
 		fs.rmSync(path.join(outside, "voice.wav"));
 	});
 
