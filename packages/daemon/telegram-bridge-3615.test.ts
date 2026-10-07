@@ -652,6 +652,19 @@ describe("gate order and authority", () => {
 		expect(texts[0]).not.toContain("Sessions");
 	});
 
+	test("N1: Artale's /status@bot and /help@bot in the group leave James's DM turn on James's DM", async () => {
+		const { a } = mk();
+		a.originChatId = String(JAMES);
+		for (const c of ["/status@eightbot", "/help@eightbot"]) {
+			await a.handleTelegramMessage(c, GROUP, group(ARTALE));
+		}
+		expect(a.originChatId).toBe(String(JAMES));
+		expect(a.replyChat()).toBe(String(JAMES));
+		const sends = sent.filter((c) => c.url.includes("sendMessage"));
+		expect(sends).toHaveLength(2);
+		for (const c of sends) expect(c.body).toContain(String(GROUP));
+	});
+
 	test("N2: /status for the operator still routes to the task list", async () => {
 		const { a, hits } = mk();
 		await a.handleTelegramMessage("/status", GROUP, group(JAMES));

@@ -1177,6 +1177,31 @@ class TelegramDaemonBridge {
 		const cmd = commandOf(text, this.botUsername);
 		const fullTier = !!sender && senderTier(sender, gate) === "full";
 
+		// An authorised non-operator (prompt tier) may only reach /status and
+		// /help. They are answered straight to the chat they came from and never
+		// touch originChatId, or they could redirect the operator's in-flight turn.
+		if (sender && !fullTier) {
+			let reply = "Operator only for now. Ask James for access.";
+			if (cmd === "/status") {
+				try {
+					const res = await fetch(
+						`${this.config.daemonUrl
+							.replace("ws", "http")
+							.replace("wss", "https")
+							.replace(/:\d+/, ":18789")}/health`,
+					);
+					const health = await res.json();
+					reply = `Status: ${health.status === "ok" ? "up" : "down"}`;
+				} catch {
+					reply = "Could not reach daemon health endpoint.";
+				}
+			} else if (cmd === "/help") {
+				reply = "/status - up or down\n/help - this message";
+			}
+			await tgSend(this.config.telegramToken, String(chatId), reply, "").catch(() => {});
+			return;
+		}
+
 		// From here until the daemon's terminal event, this turn's output
 		// belongs to this chat. Set before the first typing indicator so even
 		// that lands in the right room.
