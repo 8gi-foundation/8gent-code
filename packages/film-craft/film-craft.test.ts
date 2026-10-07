@@ -2,6 +2,7 @@
  * film-craft (#3599): the catalog is whole, the plan is a real recipe, the bed is a real wav.
  */
 import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,11 @@ import {
 	planFilm,
 	resolvePreset,
 } from "./index";
+
+// film.sh shells out to ImageMagick 7 (magick) and ffmpeg; a runner without them cannot render.
+const hasBin = (bin: string, flag: string) =>
+	spawnSync(bin, [flag], { encoding: "utf8" }).status === 0;
+const canRender = hasBin("magick", "-version") && hasBin("ffmpeg", "-version");
 
 const made: string[] = [];
 const tmp = (p: string) => {
@@ -145,24 +151,28 @@ describe("film.sh never runs model text", () => {
 		expect(() => planFilm({ ...base, fps: 23.5 })).toThrow(/fps/);
 	});
 
-	test("slide text with $(), backticks and quotes runs as text, not commands", async () => {
-		const d = tmp("fc-inject-");
-		const marker = join(d, "PWNED");
-		const evil = `$(touch ${marker}) \`touch ${marker}\` "it's" '$(touch ${marker})' %d @x`;
-		const r = await filmCraft({
-			action: "plan",
-			out_dir: d,
-			width: 160,
-			height: 90,
-			fps: 12,
-			slides: [{ title: evil, kicker: evil, sub: evil, lower: evil, seconds: 1 }],
-		});
-		expect(r).toContain("Wrote");
-		const run = Bun.spawnSync(["bash", join(d, "film.sh")], { stdout: "pipe", stderr: "pipe" });
-		expect(run.exitCode).toBe(0);
-		expect(existsSync(marker)).toBe(false);
-		expect(existsSync(join(d, "film.mp4"))).toBe(true);
-	}, 120_000);
+	test.skipIf(!canRender)(
+		"slide text with $(), backticks and quotes runs as text, not commands",
+		async () => {
+			const d = tmp("fc-inject-");
+			const marker = join(d, "PWNED");
+			const evil = `$(touch ${marker}) \`touch ${marker}\` "it's" '$(touch ${marker})' %d @x`;
+			const r = await filmCraft({
+				action: "plan",
+				out_dir: d,
+				width: 160,
+				height: 90,
+				fps: 12,
+				slides: [{ title: evil, kicker: evil, sub: evil, lower: evil, seconds: 1 }],
+			});
+			expect(r).toContain("Wrote");
+			const run = Bun.spawnSync(["bash", join(d, "film.sh")], { stdout: "pipe", stderr: "pipe" });
+			expect(run.exitCode).toBe(0);
+			expect(existsSync(marker)).toBe(false);
+			expect(existsSync(join(d, "film.mp4"))).toBe(true);
+		},
+		120_000,
+	);
 });
 
 describe("mix", () => {
