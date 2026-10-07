@@ -2244,6 +2244,108 @@ describe("runTextToolAgent - an update_plan-only round is not progress (#3639)",
 		expect(model.calls()).toBe(2);
 		expect(result.content).toBe("No");
 	});
+
+	// 8SO probes (review of #3645 at eac63bfe): an update_plan-only round must
+	// be transparent to the stall state, not reset it. It neither answers a
+	// pending check nor forgets a blocked round.
+	test("probe A: write_file, announcement, check, update_plan, another announcement: re-checked, not returned", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			"Now creating the deck from the outline.",
+			tc("update_plan", plan("done", "in_progress")),
+			"Creating deck/deck.md now.",
+			tc("write_file", { path: "deck/deck.md", content: "# What" }),
+			tc("update_plan", plan("done", "done")),
+			"DONE: Wrote deck/outline.md and deck/deck.md.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Write deck/outline.md, then deck/deck.md." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 10,
+		});
+		// Check 1 after the first announcement; the plan-only round does not
+		// answer it, so the second announcement gets check 2. The closing
+		// update_plan keeps the plan check (#3098) out of this probe.
+		expect(model.seen.filter(isCheck)).toHaveLength(2);
+		expect(isCheck(model.seen[2])).toBe(true);
+		expect(isCheck(model.seen[4])).toBe(true);
+		expect(ws.files.get("deck/deck.md")).toBe("# What");
+		expect(model.calls()).toBe(7);
+		expect(result.content).toBe("Wrote deck/outline.md and deck/deck.md.");
+	});
+
+	test("probe C: a blocked push, 'Pushing now.', blocked check, update_plan, 'Pushed to main.': the blocked note is carried", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			tc("run_command", { command: RUN_014230_CHAIN_CMD }),
+			"Pushing now.",
+			tc("update_plan", plan("done", "done")),
+			// Repeated by the scripted model: the turn ends on this line at the cap.
+			"Pushed to main.",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Push the branch to main." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 10,
+		});
+		const blockedChecks = model.seen.map(lastUserMessage).filter((m) => m.startsWith("Your last tool calls were blocked"));
+		expect(blockedChecks).toHaveLength(1);
+		// The plan-only round did not answer the blocked check: "Pushed to main."
+		// is checked again, then the cap ends the turn with the note.
+		expect(model.seen.filter(isCheck)).toHaveLength(MAX_CONSECUTIVE_CHECKS - 1);
+		expect(ws.commands).toEqual([]);
+		expect(result.content).toContain(blockedStopNote([CHAIN_REASON]));
+		expect(result.content).toStartWith("Pushed to main.");
+	});
+
+	test("probe D (keepAnswerFirst): a plan-only round after a sent check drops the stale pre-check reply", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "a.md", content: "a" }),
+			"Now writing b.md.",
+			tc("update_plan", plan("done", "done")),
+			"DONE: Wrote a.md.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Write a.md." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 10,
+			keepAnswerFirst: true,
+		});
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(result.content).toBe("Wrote a.md.");
+		expect(result.content).not.toContain("Now writing b.md.");
+	});
+
+	test("a plan-only round after a real round keeps that round's state: the prose after it is still checked", async () => {
+		const ws = fakeWorkspace();
+		const model = scriptedModel([
+			tc("write_file", { path: "deck/outline.md", content: "1. What" }),
+			tc("update_plan", plan("done", "in_progress")),
+			"Now creating the deck from the outline.",
+			tc("write_file", { path: "deck/deck.md", content: "# What" }),
+			tc("update_plan", plan("done", "done")),
+			"DONE: Wrote deck/outline.md and deck/deck.md.",
+			"UNREACHED",
+		]);
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Write deck/outline.md, then deck/deck.md." }],
+			tools: [...ws.tools, PLAN_TOOL],
+			call: model.call,
+			maxRounds: 10,
+		});
+		expect(model.seen.filter(isCheck)).toHaveLength(1);
+		expect(isCheck(model.seen[3])).toBe(true);
+		expect(ws.files.get("deck/deck.md")).toBe("# What");
+		expect(model.calls()).toBe(6);
+		expect(result.content).toBe("Wrote deck/outline.md and deck/deck.md.");
+	});
 });
 
 // ── The completion check keeps the answer (8CO finding, #3638) ──────────────
