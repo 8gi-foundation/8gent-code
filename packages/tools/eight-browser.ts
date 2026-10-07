@@ -90,15 +90,75 @@ export type ApproveFn = (what: string) => Promise<boolean>;
 
 type Check<T> = { ok: true; action: T } | { ok: false; error: string };
 
-export function validateBrowserAction(raw: unknown): Check<BrowserAction> {
+// ── Named profile: loopback and private hosts (#3622, 8SO review) ────────────
+// The same rule 8gent-browser enforces at its network layer (src/main/private-net.ts);
+// checked here first so a refused URL never reaches the browser. WHATWG URL parsing
+// normalises numeric hosts (2130706433, 0x7f000001, 0177.0.0.1 -> 127.0.0.1).
+
+function v4Private(h: string): boolean {
+	const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+	if (!m) return false;
+	const [a, b] = [Number(m[1]), Number(m[2])];
+	return (
+		a === 127 ||
+		a === 10 ||
+		a === 0 ||
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 168) ||
+		(a === 169 && b === 254) ||
+		(a === 100 && b >= 64 && b <= 127)
+	);
+}
+
+/** Why `url` is refused in a named profile, or null: non-http(s), credentials in the URL,
+ *  or a loopback / private / link-local / CGNAT / .local / localhost host. */
+export function blockedForProfile(url: string): string | null {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return "unparseable URL";
+	}
+	if (u.protocol !== "http:" && u.protocol !== "https:") return `scheme ${u.protocol} not allowed`;
+	if (u.username || u.password) return "credentials in URL";
+	let host = u.hostname.toLowerCase();
+	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
+		return "private address";
+	if (v4Private(host)) return "private address";
+	if (host.includes(":")) {
+		if (host === "::1" || host === "::") return "private address";
+		if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host))
+			return "private address";
+		const mapped = host.match(/^::ffff:(.+)$/);
+		if (mapped) {
+			if (v4Private(mapped[1])) return "private address";
+			const hex = mapped[1].match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+			if (hex) {
+				const n = (Number.parseInt(hex[1], 16) << 16) | Number.parseInt(hex[2], 16);
+				if (v4Private([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".")))
+					return "private address";
+			}
+		}
+	}
+	return null;
+}
+
+export function validateBrowserAction(
+	raw: unknown,
+	opts: { isolated?: boolean } = {},
+): Check<BrowserAction> {
 	if (!raw || typeof raw !== "object") return { ok: false, error: "action must be an object" };
 	const a = raw as Record<string, unknown>;
 	const sel = typeof a.selector === "string" && a.selector.trim() ? a.selector : undefined;
 	switch (a.action) {
-		case "open":
+		case "open": {
 			if (typeof a.url !== "string" || !/^https?:\/\//.test(a.url))
 				return { ok: false, error: "open.url must be http(s)" };
+			const why = opts.isolated ? blockedForProfile(a.url) : null;
+			if (why) return { ok: false, error: `open.url refused in this browser profile: ${why}` };
 			return { ok: true, action: { action: "open", url: a.url } };
+		}
 		case "left_click": {
 			const index =
 				Number.isInteger(a.index) && (a.index as number) >= 0 ? (a.index as number) : undefined;
@@ -168,12 +228,24 @@ export function browserProfile(
 	};
 }
 
-/** True only when a valid named profile is configured: the bot's own login-free browser. */
+/** True only when a valid named profile is configured AND 8gent Browser is the backend: the
+ *  bot's own login-free browser. The opt-in browser-use backend never gets the exemptions. */
 export function isolatedBrowser(env: Env = process.env): boolean {
+	if (env.EIGHT_BROWSER_BACKEND === "browser-use") return false;
 	try {
 		return browserProfile(env) !== null;
 	} catch {
 		return false;
+	}
+}
+
+/** One warning line for a bad EIGHT_BROWSER_PROFILE, or null. Printed once when a local session starts. */
+export function browserProfileWarning(env: Env = process.env): string | null {
+	try {
+		browserProfile(env);
+		return null;
+	} catch (e) {
+		return `${(e as Error).message}; this session has no browser tools`;
 	}
 }
 
@@ -286,43 +358,77 @@ type El = {
 /** page.query's text form: whitespace collapsed, 120 chars (8gent-browser automation.ts queryElements). */
 const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 
-/** Password and payment fields. Under a named profile no step may type into one (#3622). */
+/** Password, payment, PIN and OTP fields. Under a named profile no step types into one
+ *  (#3622). Kept identical to 8gent-browser src/main/secret-fields.ts, which also checks
+ *  label text in the page on the exact element. Refusing too much is the safe direction. */
 const SECRET_FIELDS = [
 	"input[type=password]",
-	'[autocomplete~="current-password" i]',
-	'[autocomplete~="new-password" i]',
-	'[autocomplete="one-time-code" i]',
+	...[
+		"current-password",
+		"new-password",
+		"one-time-code",
+		"cc-name",
+		"cc-given-name",
+		"cc-additional-name",
+		"cc-family-name",
+		"cc-number",
+		"cc-exp",
+		"cc-exp-month",
+		"cc-exp-year",
+		"cc-csc",
+		"cc-type",
+	].map((t) => `[autocomplete~="${t}" i]`),
 	'[autocomplete^="cc-" i]',
 	...[
-		"password",
-		"passcode",
-		"cvv",
-		"cvc",
+		"pass",
+		"pwd",
+		"pin",
+		"otp",
+		"one-time",
+		"ssn",
+		"exp",
+		"ccnum",
+		"cardnumber",
 		"card",
+		"cvc",
+		"cvv",
+		"csc",
 		"iban",
 		"security-code",
 		"securitycode",
-	].flatMap((t) => ["name", "id"].map((k) => `[${k}*="${t}" i]`)),
-	...["password", "card number", "security code", "cvv", "cvc", "iban", "expiry"].map(
-		(t) => `[aria-label*="${t}" i]`,
-	),
+	].flatMap((t) => [`[name*="${t}" i]`, `[id*="${t}" i]`]),
+	...[
+		"password",
+		"passcode",
+		"card",
+		"cvv",
+		"cvc",
+		"security code",
+		"iban",
+		"one-time",
+		"pin",
+	].flatMap((t) => [`[aria-label*="${t}" i]`, `[placeholder*="${t}" i]`]),
+	"[contenteditable]",
 ].join(",");
 
 export function createEightBrowser(
 	call: BrowserCall = wsCall,
-	opts: { settleMs?: number; refuseSecretFields?: boolean | (() => boolean) } = {},
+	/** isolated: a named profile (#3622). No typing into secret fields, no private hosts. */
+	opts: { settleMs?: number; isolated?: boolean | (() => boolean) } = {},
 ) {
-	const refuseSecretFields = () =>
-		typeof opts.refuseSecretFields === "function"
-			? opts.refuseSecretFields()
-			: !!opts.refuseSecretFields;
+	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
 	const settle = opts.settleMs ?? 400;
-	/** Does `selector` reach a password or payment field? Asked of the page itself, so it holds for any selector. */
-	const secretField = async (tabId: string, selector: string): Promise<boolean> =>
-		(
-			(await call("page.query", { tabId, selector: `:is(${selector}):is(${SECRET_FIELDS})` }))
-				?.elements ?? []
-		).length > 0;
+	/** Does `selector` reach a password, payment or contenteditable field? Asked of the page
+	 *  itself, so it holds for any selector. Fails closed: an error reply (a malformed
+	 *  selector) or anything but an elements array counts as secret. */
+	const secretField = async (tabId: string, selector: string): Promise<boolean> => {
+		const r = await call("page.query", {
+			tabId,
+			selector: `:is(${selector}):is(${SECRET_FIELDS})`,
+		});
+		if (!r || r.ok === false || !Array.isArray(r.elements)) return true;
+		return r.elements.length > 0;
+	};
 	const owned = new Set<string>();
 	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
@@ -429,7 +535,7 @@ export function createEightBrowser(
 	};
 
 	async function open(url: string): Promise<string> {
-		const v = validateBrowserAction({ action: "open", url });
+		const v = validateBrowserAction({ action: "open", url }, { isolated: isolated() });
 		if (!v.ok) return `browser_open failed: ${v.error}`;
 		const r = await call("tab.open", { url });
 		owned.add((current = String(r.id)));
@@ -461,7 +567,7 @@ export function createEightBrowser(
 		const plan: BrowserAction[] = [];
 		let before = await observe(id);
 		for (const [i, r] of raw.entries()) {
-			const v = validateBrowserAction(r);
+			const v = validateBrowserAction(r, { isolated: isolated() });
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
 			plan.push(v.action);
 		}
@@ -471,7 +577,7 @@ export function createEightBrowser(
 				steps,
 			);
 		const steps: Record<string, unknown>[] = [];
-		if (refuseSecretFields())
+		if (isolated())
 			for (const [i, a] of plan.entries())
 				if (a.action === "type" && (await secretField(id, a.selector)))
 					return refuseSecret(i, a.selector);
@@ -486,8 +592,7 @@ export function createEightBrowser(
 			const row: Record<string, unknown> = { step: i, action: a.action, attempts: 1 };
 			if (a.action === "type") {
 				// Re-checked live: an earlier step may have changed the page since the dry run.
-				if (refuseSecretFields() && (await secretField(id, a.selector)))
-					return refuseSecret(i, a.selector);
+				if (isolated() && (await secretField(id, a.selector))) return refuseSecret(i, a.selector);
 				row.selector = a.selector;
 				row.text_len = a.text.length;
 				if (a.text) typed.add(clipped(a.text));

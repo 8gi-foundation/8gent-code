@@ -466,8 +466,9 @@ const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
 const getEightBrowser = () => {
 	if (!eightBrowser) {
-		// A named profile (#3622) is the bot's own login-free browser: it never types into password or payment fields.
-		eightBrowser = createEightBrowser(undefined, { refuseSecretFields: () => isolatedBrowser() });
+		// A named profile (#3622) is the bot's own login-free browser: it never types into password or
+		// payment fields and never opens loopback or private hosts.
+		eightBrowser = createEightBrowser(undefined, { isolated: () => isolatedBrowser() });
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -3726,8 +3727,9 @@ export class ToolExecutor {
 				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
 				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
 				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
+				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
 				const approve = async (what: string) =>
-					(await this.askDesktopApproval("browser_task", { click: what }, "This click looks sensitive in your logged-in browser.")) === null;
+					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
 				return await getEightBrowser().run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
@@ -3744,7 +3746,10 @@ export class ToolExecutor {
 					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
-					out = abs.startsWith(shots + path.sep) ? abs : safePath(filePath, this.workingDirectory);
+					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
+					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory);
+				} else if (isolatedBrowser()) {
+					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory);
 				}
 				return await getEightBrowser().screenshot(out, session);
 			}

@@ -32,8 +32,9 @@ export interface PathGuardHost {
 // Protected configuration
 // ============================================
 
-/** Directories whose contents are always credential-bearing. */
-const PROTECTED_DIRS = [".ssh", ".aws", ".kube"];
+/** Directories whose contents are always credential-bearing. browser-profiles holds each named
+ *  8gent Browser profile's control token, port file and cookies (#3622). */
+const PROTECTED_DIRS = [".ssh", ".aws", ".kube", ".8gent/browser-profiles"];
 
 /**
  * Files under the home directory that agent tools must never touch, read or
@@ -43,6 +44,8 @@ const PROTECTED_DIRS = [".ssh", ".aws", ".kube"];
  */
 const PROTECTED_HOME_FILES = [
 	[".8gent", "settings.json"],
+	// The default 8gent Browser control token drives the person's logged-in browser (#3622).
+	[".8gent", "browser-control.token"],
 ];
 
 /** Basenames that always indicate a credential file regardless of location. */
@@ -142,7 +145,9 @@ function parseSafePaths(): string[] {
 function isUnderProtectedDir(resolved: string, home: string, platform: NodeJS.Platform): boolean {
 	const flavor = pathFor(platform);
 	const canonicalHome = resolveSafe(home, home, platform);
-	return PROTECTED_DIRS.some((dir) => isPathWithin(resolved, flavor.join(canonicalHome, dir), platform));
+	return PROTECTED_DIRS.some((dir) =>
+		isPathWithin(resolved, flavor.join(canonicalHome, ...dir.split("/")), platform),
+	);
 }
 
 // ============================================

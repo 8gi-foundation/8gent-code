@@ -111,6 +111,9 @@ describe("buildSeatbeltProfile", () => {
 			expect(paths).toContain(path.join(FAKE_HOME, ".ssh"));
 			expect(paths).toContain(path.join(FAKE_HOME, ".aws"));
 			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "keys"));
+			// 8gent Browser control tokens and named profiles (#3622, 8SO HIGH-2).
+			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "browser-control.token"));
+			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "browser-profiles"));
 		} finally {
 			if (savedDataDir !== undefined) process.env.EIGHT_DATA_DIR = savedDataDir;
 		}

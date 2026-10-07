@@ -13,6 +13,7 @@ import {
 	type BrowserCall,
 	_setProfileHomeForTest,
 	browserProfile,
+	browserProfileWarning,
 	createEightBrowser,
 	localBrowserTools,
 	validateBrowserAction,
@@ -677,14 +678,14 @@ describe("wsTransport with a named profile", () => {
 	});
 });
 
-describe("refuseSecretFields (named profile): no typing into password or payment fields", () => {
+describe("isolated driver (named profile): no typing into password or payment fields", () => {
 	test("a password field is refused in the dry run: nothing is typed, not even earlier steps", async () => {
 		const site = fakeSite();
 		const b = createEightBrowser(withSecretFields(site.call), {
 			settleMs: 0,
-			refuseSecretFields: true,
+			isolated: true,
 		});
-		await b.open("http://127.0.0.1:5/");
+		await b.open("https://example.com/");
 		const out = JSON.parse(
 			await b.run([
 				{ action: "type", selector: "input[name=username]", text: "bot" },
@@ -700,9 +701,9 @@ describe("refuseSecretFields (named profile): no typing into password or payment
 		const site = fakeSite();
 		const b = createEightBrowser(withSecretFields(site.call), {
 			settleMs: 0,
-			refuseSecretFields: true,
+			isolated: true,
 		});
-		await b.open("http://127.0.0.1:5/");
+		await b.open("https://example.com/");
 		const out = JSON.parse(
 			await b.run([
 				{ action: "type", selector: "input[autocomplete=cc-number]", text: "4242424242424242" },
@@ -716,9 +717,9 @@ describe("refuseSecretFields (named profile): no typing into password or payment
 		const site = fakeSite();
 		const b = createEightBrowser(withSecretFields(site.call), {
 			settleMs: 0,
-			refuseSecretFields: true,
+			isolated: true,
 		});
-		await b.open("http://127.0.0.1:5/");
+		await b.open("https://example.com/");
 		const out = JSON.parse(
 			await b.run([{ action: "type", selector: "input[name=username]", text: "bot" }]),
 		);
@@ -827,4 +828,188 @@ describe("ToolExecutor: named profile acts without a card; default profile still
 			expect(out).toContain("[PERMISSION DENIED]");
 		});
 	}
+});
+
+// ── 8PO + 8SO review round ───────────────────────────────────────────────────
+
+describe("secret-field check fails closed", () => {
+	const probe = (answer: unknown): BrowserCall => {
+		const site = fakeSite();
+		return async (cmd, args = {}) => {
+			if (
+				cmd === "page.query" &&
+				typeof args.selector === "string" &&
+				args.selector.startsWith(":is(")
+			)
+				return answer;
+			return site.call(cmd, args);
+		};
+	};
+	for (const [label, answer] of [
+		["ok:false (malformed selector)", { ok: false, error: "SyntaxError" }],
+		["no elements array", { ok: true }],
+		["elements not an array", { ok: true, elements: "x" }],
+		["null reply", null],
+	] as const) {
+		test(`${label}: refused, nothing typed`, async () => {
+			const calls: string[] = [];
+			const inner = probe(answer);
+			const call: BrowserCall = async (cmd, args) => {
+				calls.push(cmd);
+				return inner(cmd, args);
+			};
+			const b = createEightBrowser(call, { settleMs: 0, isolated: true });
+			await b.open("http://example.com/");
+			const out = JSON.parse(
+				await b.run([{ action: "type", selector: 'input[type="password', text: "hunter2" }]),
+			);
+			expect(out.ok).toBe(false);
+			expect(calls).not.toContain("page.type");
+		});
+	}
+});
+
+describe("named profile: no loopback or private hosts from the client either", () => {
+	const at = (scheme: string, rest: string) => `${scheme}:/` + `/${rest}`;
+	test("validateBrowserAction refuses private, userinfo and non-http URLs only when isolated", () => {
+		for (const u of [
+			at("http", "127.0.0.1:7981/"),
+			at("http", "2130706433/"),
+			at("http", "0x7f000001/"),
+			at("http", "0177.0.0.1/"),
+			at("http", "[::ffff:127.0.0.1]/"),
+			at("http", "[::1]/"),
+			at("http", "localhost:18789/"),
+			at("http", "printer.local/"),
+			at("http", "10.1.2.3/"),
+			at("http", "172.20.0.1/"),
+			at("http", "192.168.0.1/"),
+			at("http", "169.254.169.254/"),
+			at("http", "100.100.100.100/"),
+			at("https", "user:pass@127.0.0.1/"),
+			at("https", "example.com@127.0.0.1/"),
+			at("https", "user@example.com/"),
+		]) {
+			expect(validateBrowserAction({ action: "open", url: u }, { isolated: true }).ok).toBe(false);
+		}
+		expect(
+			validateBrowserAction(
+				{ action: "open", url: at("https", "example.com/") },
+				{ isolated: true },
+			).ok,
+		).toBe(true);
+		// Default profile: unchanged (the pilot fixtures run on 127.0.0.1).
+		expect(validateBrowserAction({ action: "open", url: at("http", "127.0.0.1:5/") }).ok).toBe(
+			true,
+		);
+	});
+	test("the isolated driver refuses browser_open and an open step to a private host before calling the browser", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, { settleMs: 0, isolated: true });
+		expect(await b.open(at("http", "127.0.0.1:7980/"))).toMatch(/browser_open failed: .*private/);
+		expect(site.calls).not.toContain("tab.open");
+		await b.open(at("https", "example.com/"));
+		const out = JSON.parse(await b.run([{ action: "open", url: at("http", "192.168.1.1/") }]));
+		expect(out.ok).toBe(false);
+		expect(site.calls).not.toContain("nav.go");
+	});
+});
+
+describe("browser-use backend never gets the named-profile exemptions", () => {
+	test("localBrowserTools offers nothing with EIGHT_BROWSER_BACKEND=browser-use", () => {
+		expect(
+			localBrowserTools({
+				EIGHT_BROWSER_PROFILE: "eightgent",
+				EIGHT_BROWSER_BACKEND: "browser-use",
+			}),
+		).toEqual([]);
+	});
+	test("browserProfileWarning: one line for a bad name, nothing otherwise", () => {
+		expect(browserProfileWarning({})).toBeNull();
+		expect(browserProfileWarning({ EIGHT_BROWSER_PROFILE: "eightgent" })).toBeNull();
+		expect(browserProfileWarning({ EIGHT_BROWSER_PROFILE: "../x" })).toMatch(
+			/EIGHT_BROWSER_PROFILE.*no browser/,
+		);
+	});
+});
+
+describe("ToolExecutor, review round", () => {
+	const dir = mkdtempSync(join(tmpdir(), "browser-review-"));
+	const keys = [
+		"EIGHT_BROWSER_PROFILE",
+		"EIGHT_BROWSER_CONTROL_PORT",
+		"EIGHT_HEADLESS",
+		"EIGHT_BROWSER_BACKEND",
+	];
+	const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+	afterEach(() => {
+		for (const k of keys)
+			saved[k] === undefined ? Reflect.deleteProperty(process.env, k) : (process.env[k] = saved[k]);
+		_setProfileHomeForTest(null);
+		_resetTuiApprovalChannel();
+	});
+	const recordAsks = () => {
+		const asked: TuiApprovalRequest[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req);
+			return "deny";
+		});
+		return asked;
+	};
+
+	test("named profile + browser-use backend: browser_task still asks first", async () => {
+		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: 7981 }));
+		process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+		process.env.EIGHT_BROWSER_BACKEND = "browser-use";
+		const asked = recordAsks();
+		const out = await new ToolExecutor(dir, "browser-review").execute("browser_task", {
+			task: "x",
+		});
+		expect(asked.length).toBe(1);
+		expect(out).toContain("[PERMISSION DENIED]");
+	});
+
+	test("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
+		const site = fakeSite();
+		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+			const asked = recordAsks();
+			const exec = new ToolExecutor(dir, "browser-review");
+			await exec.execute("browser_open", { url: "https://example.com/" });
+			await exec.execute("browser_task", { actions: [{ action: "left_click", index: 2 }] });
+			expect(asked.length).toBe(1);
+			expect(asked[0].details).not.toMatch(/logged-in/);
+			expect(asked[0].details).toMatch(/bot's own browser profile/);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
+		const site = nextSite();
+		const shot: BrowserCall = async (cmd, args) =>
+			cmd === "page.screenshot"
+				? {
+						ok: true,
+						dataUrl: `data:image/png;base64,${Buffer.from("PNG").toString("base64")}`,
+						savedTo: "/x/.8gent/browser-profiles/eightgent/browser-shots/a.png",
+					}
+				: site.call(cmd, args);
+		const { server } = serveCall(shot, "bot-tok");
+		try {
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok", port: server.port }));
+			process.env.EIGHT_BROWSER_PROFILE = "eightgent";
+			process.env.EIGHT_HEADLESS = "1";
+			const exec = new ToolExecutor(dir, "browser-review");
+			await exec.execute("browser_open", { url: "https://example.com/" });
+			const out = await exec.execute("browser_screenshot", {});
+			expect(out.startsWith(dir)).toBe(true);
+			expect(out).not.toContain("browser-profiles");
+			expect(readFileSync(out, "utf8")).toBe("PNG");
+		} finally {
+			server.stop(true);
+		}
+	});
 });
