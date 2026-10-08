@@ -17,16 +17,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	DEFAULT_STREAM_CEILING_MS,
+	DEFAULT_STREAM_IDLE_MS,
 	DEFAULT_TURN_TIMEOUT_MS,
+	TurnTimeoutError,
 	resolveStepCeilingMs,
 	resolveStreamIdleMs,
-	TurnTimeoutError,
 } from "../eight/turn-timeout";
 import { modelFetch } from "./model-fetch";
 import {
+	type TextToolUsage,
 	buildTextToolCall,
 	readStreamedChatCompletion,
-	type TextToolUsage,
 } from "./text-tool-endpoint";
 
 const enc = new TextEncoder();
@@ -154,13 +155,24 @@ afterAll(() => {
 });
 
 describe("resolveStreamIdleMs / resolveStepCeilingMs (EIGHT_STREAM_IDLE_MS)", () => {
-	it("is off by default and the step limit stays the 300 s wall clock", () => {
-		expect(resolveStreamIdleMs({})).toBeNull();
-		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "" })).toBeNull();
+	it("is on by default (#3657): the old 300 s wall clock becomes the no-progress gap", () => {
+		expect(DEFAULT_STREAM_IDLE_MS).toBe(DEFAULT_TURN_TIMEOUT_MS);
+		expect(resolveStreamIdleMs({})).toBe(DEFAULT_STREAM_IDLE_MS);
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "" })).toBe(DEFAULT_STREAM_IDLE_MS);
+		// A typo never silently turns progress-based judging off.
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "abc" })).toBe(DEFAULT_STREAM_IDLE_MS);
+		// With the gap on, the step wall clock is the higher safety net.
+		expect(resolveStepCeilingMs({})).toBe(DEFAULT_STREAM_CEILING_MS);
+	});
+
+	it("0 or off turns the gap off and the step limit is the 300 s wall clock again", () => {
 		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "0" })).toBeNull();
-		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "abc" })).toBeNull();
-		expect(resolveStepCeilingMs({})).toBe(DEFAULT_TURN_TIMEOUT_MS);
-		expect(resolveStepCeilingMs({ EIGHT_TURN_TIMEOUT_MS: "5000" })).toBe(5000);
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "off" })).toBeNull();
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "-5" })).toBeNull();
+		expect(resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "0" })).toBe(DEFAULT_TURN_TIMEOUT_MS);
+		expect(resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "0", EIGHT_TURN_TIMEOUT_MS: "5000" })).toBe(
+			5000,
+		);
 	});
 
 	it("reads a positive idle gap with a 1 s floor", () => {
@@ -168,11 +180,12 @@ describe("resolveStreamIdleMs / resolveStepCeilingMs (EIGHT_STREAM_IDLE_MS)", ()
 		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "10" })).toBe(1000);
 	});
 
-	it("with the flag on, raises the default ceiling but never above an explicit EIGHT_TURN_TIMEOUT_MS", () => {
+	it("an explicit EIGHT_TURN_TIMEOUT_MS is always the ceiling, gap on or off", () => {
 		expect(resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "60000" })).toBe(DEFAULT_STREAM_CEILING_MS);
 		expect(DEFAULT_STREAM_CEILING_MS).toBeGreaterThan(DEFAULT_TURN_TIMEOUT_MS);
 		// Below the 30 min session watchdog, so the session cap stays the outer bound.
 		expect(DEFAULT_STREAM_CEILING_MS).toBeLessThan(30 * 60 * 1000);
+		expect(resolveStepCeilingMs({ EIGHT_TURN_TIMEOUT_MS: "5000" })).toBe(5000);
 		expect(
 			resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "60000", EIGHT_TURN_TIMEOUT_MS: "900000" }),
 		).toBe(900_000);
@@ -190,11 +203,19 @@ describe("EIGHT_STREAM_IDLE_MS is documented with the values the code uses", () 
 		const idleIdx = docs.indexOf(para);
 		expect(turnIdx).toBeGreaterThan(-1);
 		expect(idleIdx).toBeGreaterThan(turnIdx);
-		expect(docs.slice(turnIdx, idleIdx).split("\n").filter((l) => l.trim()).length).toBe(1);
+		expect(
+			docs
+				.slice(turnIdx, idleIdx)
+				.split("\n")
+				.filter((l) => l.trim()).length,
+		).toBe(1);
 	});
 
-	it("states off by default, the floor, the ceiling, the caps and the prefill warning", () => {
-		expect(para).toContain("off by default");
+	it("states on by default with the default gap, the off switch, the floor, the ceiling, the caps and the prefill warning", () => {
+		expect(para).toContain(`on by default at \`${DEFAULT_STREAM_IDLE_MS}\``);
+		expect(para).toContain(`${DEFAULT_STREAM_IDLE_MS / 60_000} minutes`);
+		expect(para).toContain("Set `0` (or `off`) to turn the gap off");
+		expect(para).toContain("reasoning tokens included");
 		expect(para).toContain(`${resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "1" })} ms floor`);
 		expect(para).toContain(`\`${DEFAULT_STREAM_CEILING_MS}\``);
 		expect(para).toContain(`${DEFAULT_STREAM_CEILING_MS / 60_000} minutes`);
@@ -285,9 +306,11 @@ describe("modelFetch idleMs", () => {
 });
 
 describe("buildTextToolCall with a stream idle gap (#3553)", () => {
-	it("default (flag off) still sends stream: false", async () => {
-		const prev = process.env.EIGHT_STREAM_IDLE_MS;
-		delete process.env.EIGHT_STREAM_IDLE_MS;
+	// Swap fetch for a stub that records the request body and answers with one
+	// JSON document, as a runtime that ignores `stream: true` would.
+	async function withJsonStub(
+		run: () => Promise<void>,
+	): Promise<Record<string, unknown> | undefined> {
 		const realFetch = globalThis.fetch;
 		let sent: Record<string, unknown> | undefined;
 		globalThis.fetch = (async (_i: unknown, init?: { body?: string }) => {
@@ -295,12 +318,41 @@ describe("buildTextToolCall with a stream idle gap (#3553)", () => {
 			return Response.json({ choices: [{ message: { content: "ok" } }] });
 		}) as unknown as typeof fetch;
 		try {
-			const call = buildTextToolCall({ provider: "ollama", model: "m", timeoutMs: 5_000 });
-			expect(await call([{ role: "user", content: "hi" }])).toBe("ok");
-			expect(sent?.stream).toBe(false);
+			await run();
 		} finally {
 			globalThis.fetch = realFetch;
+		}
+		return sent;
+	}
+
+	it("default (env unset) streams, and a JSON reply to a streamed request is still read (#3657)", async () => {
+		const prev = process.env.EIGHT_STREAM_IDLE_MS;
+		delete process.env.EIGHT_STREAM_IDLE_MS;
+		try {
+			const sent = await withJsonStub(async () => {
+				const call = buildTextToolCall({ provider: "ollama", model: "m", timeoutMs: 5_000 });
+				expect(await call([{ role: "user", content: "hi" }])).toBe("ok");
+			});
+			expect(sent?.stream).toBe(true);
+			expect(sent?.stream_options).toEqual({ include_usage: true });
+		} finally {
 			if (prev !== undefined) process.env.EIGHT_STREAM_IDLE_MS = prev;
+		}
+	});
+
+	it("EIGHT_STREAM_IDLE_MS=0 turns the gap off and sends stream: false", async () => {
+		const prev = process.env.EIGHT_STREAM_IDLE_MS;
+		process.env.EIGHT_STREAM_IDLE_MS = "0";
+		try {
+			const sent = await withJsonStub(async () => {
+				const call = buildTextToolCall({ provider: "ollama", model: "m", timeoutMs: 5_000 });
+				expect(await call([{ role: "user", content: "hi" }])).toBe("ok");
+			});
+			expect(sent?.stream).toBe(false);
+			expect(sent?.stream_options).toBeUndefined();
+		} finally {
+			if (prev === undefined) delete process.env.EIGHT_STREAM_IDLE_MS;
+			else process.env.EIGHT_STREAM_IDLE_MS = prev;
 		}
 	});
 
@@ -559,7 +611,10 @@ describe("streamed failures are failures, not empty successes (#3553 review F1)"
 
 	it("an error frame on the raw generate stream is reported with its message, not as 'no answer'", async () => {
 		const f = fakeOllama(SWALLOWED_CHAT, () =>
-			ndjson([{ response: "<think>", done: false }, { error: "llama runner process has terminated" }]),
+			ndjson([
+				{ response: "<think>", done: false },
+				{ error: "llama runner process has terminated" },
+			]),
 		);
 		try {
 			const call = buildTextToolCall({
@@ -627,9 +682,9 @@ describe("streamed tool-call index is bounded (#3553 review F2)", () => {
 		const out = await readStreamedChatCompletion(streamOf(1e9));
 		expect(Date.now() - started).toBeLessThan(500);
 		expect(out.choices[0].message.tool_calls).toHaveLength(1);
-		expect((out.choices[0].message.tool_calls?.[0] as { function: { name: string } }).function.name).toBe(
-			"read_file",
-		);
+		expect(
+			(out.choices[0].message.tool_calls?.[0] as { function: { name: string } }).function.name,
+		).toBe("read_file");
 	});
 
 	it("a negative or fractional index does not silently drop the call", async () => {
@@ -644,12 +699,18 @@ describe("streamed tool-call index is bounded (#3553 review F2)", () => {
 			[
 				sse({
 					choices: [
-						{ index: 0, delta: { tool_calls: [{ index: 1, function: { name: "b", arguments: "{}" } }] } },
+						{
+							index: 0,
+							delta: { tool_calls: [{ index: 1, function: { name: "b", arguments: "{}" } }] },
+						},
 					],
 				}),
 				sse({
 					choices: [
-						{ index: 0, delta: { tool_calls: [{ index: 0, function: { name: "a", arguments: "{}" } }] } },
+						{
+							index: 0,
+							delta: { tool_calls: [{ index: 0, function: { name: "a", arguments: "{}" } }] },
+						},
 					],
 				}),
 				"data: [DONE]\n\n",

@@ -855,7 +855,8 @@ describe("buildTextToolCall output cap (#3074)", () => {
 		expect(await call([{ role: "user", content: "hi" }])).toBe("done");
 		expect(seen[0].body.max_tokens).toBe(resolveMaxOutputTokens());
 		expect(seen[0].body.max_tokens).toBeGreaterThan(0);
-		expect(seen[0].body.stream).toBe(false);
+		// Streamed by default since #3657 (judged by progress, not wall time).
+		expect(seen[0].body.stream).toBe(true);
 	});
 
 	it("honours an explicit maxTokens", async () => {

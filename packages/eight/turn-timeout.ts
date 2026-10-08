@@ -15,17 +15,27 @@
  * the chain, and - once the bounded chain is exhausted - throw a clean
  * "All providers exhausted" error that unblocks the caller.
  *
- * Default: 300s (5 min) per attempt. Override with EIGHT_TURN_TIMEOUT_MS.
+ * Two policies live here:
  *
- * Why 5 min and not something tighter: this is a LOCAL-FIRST daemon. A cold
- * local model (eight-1.0-q3:14b / qwen3:14b) on a busy machine can legitimately
- * take a long time for ONE attempt - first token after loading weights from
- * disk, a large context, a CPU-only fallback, or a long reasoning turn. A 5 min
- * bound gives a slow-but-alive local generation real headroom while still
- * defeating the 30-min session-watchdog hang with margin: even the worst case
- * (all 6 providers in the chain stall) caps the turn near the watchdog, and the
- * realistic case (one or two unreachable providers) fails over in minutes. Fast
- * cloud-only setups can lower this via EIGHT_TURN_TIMEOUT_MS.
+ *  - Native (non-streamed) path: one wall-clock bound per attempt,
+ *    DEFAULT_TURN_TIMEOUT_MS (5 min), override with EIGHT_TURN_TIMEOUT_MS.
+ *    A generate() that does not stream gives no progress signal, so total time
+ *    is the only thing we can judge. 5 min is the compromise for a LOCAL-FIRST
+ *    daemon: a cold local model on a busy machine can legitimately need that
+ *    long for ONE attempt, while a dead provider still fails over in minutes
+ *    and the worst case (every provider in the chain stalls) stays near the
+ *    30 min watchdog. Fast cloud-only setups lower it.
+ *
+ *  - Text-tool path (local models: ollama, lmstudio, llama-server; #3657):
+ *    the reply streams and a step fails on NO PROGRESS - no bytes for
+ *    resolveStreamIdleMs() (default DEFAULT_STREAM_IDLE_MS) - not on total
+ *    time. The wall clock becomes a much higher safety net,
+ *    resolveStepCeilingMs() (default DEFAULT_STREAM_CEILING_MS). A thinking
+ *    model that needs ten minutes of reasoning tokens before its first answer
+ *    is never cut off while it is still writing, and a connection that goes
+ *    quiet is still caught after one gap. EIGHT_TURN_TIMEOUT_MS, when set,
+ *    stays the explicit ceiling for users who want a hard wall-clock limit;
+ *    EIGHT_STREAM_IDLE_MS=0 turns the gap off and restores wall time only.
  */
 
 export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
@@ -33,14 +43,19 @@ export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 /** Floor so a misconfigured env can never make attempts effectively instant. */
 const MIN_TURN_TIMEOUT_MS = 1_000;
 
+/** Which limit fired: the wall-clock ceiling, or a quiet gap with no output. */
+export type TurnTimeoutKind = "ceiling" | "idle";
+
 export class TurnTimeoutError extends Error {
 	readonly timeoutMs: number;
-	constructor(timeoutMs: number, label?: string) {
+	readonly kind: TurnTimeoutKind;
+	constructor(timeoutMs: number, label?: string, kind: TurnTimeoutKind = "ceiling") {
 		super(
 			`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}`,
 		);
 		this.name = "TurnTimeoutError";
 		this.timeoutMs = timeoutMs;
+		this.kind = kind;
 	}
 }
 
@@ -101,18 +116,38 @@ export async function withTurnTimeout<T>(
 }
 
 /**
- * Stream idle gap (#3553), opt-in via EIGHT_STREAM_IDLE_MS. When set, the
- * text-tool path streams its reply and judges a model step by silence instead
- * of total time: modelFetch re-arms this timer on every body chunk, so a slow
- * model that keeps writing is never cut off and a silent connection fails after
- * one quiet gap. Returns null (off) when unset, 0 or not a positive number.
- * Floor: 1 s.
+ * Default no-progress gap for a streamed text-tool step (#3657). It is the
+ * old wall-clock default on purpose: anything that answered inside 5 minutes
+ * before still does, a dead endpoint (socket accepted, no body) is still
+ * caught at the same 5 minutes, and only the case that used to fail - a model
+ * still writing at 5 minutes - now continues. The gap counts bytes, so
+ * reasoning deltas keep a thinking model alive, but prompt prefill sends
+ * nothing; 5 minutes also covers the worst-case prefill of a large context on
+ * slow hardware without a special case.
+ */
+export const DEFAULT_STREAM_IDLE_MS = DEFAULT_TURN_TIMEOUT_MS;
+
+/**
+ * Stream idle gap (#3553, on by default since #3657) via EIGHT_STREAM_IDLE_MS.
+ * The text-tool path streams its reply and judges a model step by silence
+ * instead of total time: modelFetch re-arms this timer on every body chunk, so
+ * a slow model that keeps writing is never cut off and a silent connection
+ * fails after one quiet gap.
+ *
+ *  - unset / empty       -> DEFAULT_STREAM_IDLE_MS
+ *  - "0" / "off" / < 0   -> null: gap off, wall time only (the pre-#3553 policy)
+ *  - a positive number   -> that many ms, floor 1 s
+ *  - anything else       -> DEFAULT_STREAM_IDLE_MS (a typo never turns it off)
  */
 export function resolveStreamIdleMs(
 	env: Record<string, string | undefined> = process.env,
 ): number | null {
-	const parsed = Number(env.EIGHT_STREAM_IDLE_MS);
-	if (!env.EIGHT_STREAM_IDLE_MS || !Number.isFinite(parsed) || parsed <= 0) return null;
+	const raw = (env.EIGHT_STREAM_IDLE_MS ?? "").trim();
+	if (raw === "") return DEFAULT_STREAM_IDLE_MS;
+	if (raw.toLowerCase() === "off") return null;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return DEFAULT_STREAM_IDLE_MS;
+	if (parsed <= 0) return null;
 	return Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed));
 }
 
@@ -124,10 +159,10 @@ export function resolveStreamIdleMs(
 export const DEFAULT_STREAM_CEILING_MS = 20 * 60_000;
 
 /**
- * Wall-clock limit for one streamed text-tool step. Flag off: exactly
- * resolveTurnTimeoutMs() (unchanged behaviour). Flag on: EIGHT_TURN_TIMEOUT_MS
- * when set, otherwise DEFAULT_STREAM_CEILING_MS, since the idle gap is now what
- * catches a dead provider.
+ * Wall-clock limit for one streamed text-tool step. Gap off
+ * (EIGHT_STREAM_IDLE_MS=0): exactly resolveTurnTimeoutMs(). Gap on:
+ * EIGHT_TURN_TIMEOUT_MS when set (the explicit override), otherwise
+ * DEFAULT_STREAM_CEILING_MS, since the idle gap is what catches a dead provider.
  */
 export function resolveStepCeilingMs(
 	env: Record<string, string | undefined> = process.env,
