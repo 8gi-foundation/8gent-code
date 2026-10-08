@@ -313,7 +313,22 @@ export class AgentPool extends EventEmitter {
 			}
 
 			// Execute the task
-			const result = await agent.chat(spawnedAgent.task.description);
+			let result = await agent.chat(spawnedAgent.task.description);
+
+			// A child that ended with part of its scope unwritten (the note beside
+			// its edit) is asked to finish by the same child, which still holds the
+			// task in its history, instead of leaving a new child to write it.
+			const { unwrittenScopeFiles, finishScopePrompt, MAX_FINISH_FOLLOW_UPS } = await import(
+				"./agent-outcome"
+			);
+			for (let i = 0; i < MAX_FINISH_FOLLOW_UPS; i++) {
+				const unwritten = unwrittenScopeFiles(
+					spawnedAgent,
+					Object.keys(spawnedAgent.scopeBaseline),
+				);
+				if (unwritten.length === 0) break;
+				result = await agent.chat(finishScopePrompt(unwritten));
+			}
 
 			// Evidence before "completed": did the scoped files change, and do their tests pass?
 			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {

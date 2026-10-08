@@ -62,6 +62,30 @@ export function needsRespawn(agent: AgentOutcomeInput): boolean {
 	});
 }
 
+/** How many times the pool asks the SAME child to finish its scope before letting it end. */
+export const MAX_FINISH_FOLLOW_UPS = 2;
+
+/**
+ * Scoped files (not directories) the agent has not written yet. A child that
+ * ends with some of these unwritten, such as the note beside its edit, is asked
+ * to finish by the pool, so the Orchestrator never has to hand the rest to a
+ * new child (pilot orch-route-three: the note was then written by a fourth
+ * child, which failed each_note_by_its_own_child).
+ */
+export function unwrittenScopeFiles(
+	agent: Pick<AgentOutcomeInput, "filesChanged" | "config">,
+	scopeFiles: readonly string[],
+): string[] {
+	const wd = agent.config.workingDirectory;
+	const written = new Set((agent.filesChanged ?? []).map((f) => path.resolve(wd, f)));
+	return scopeFiles.filter((f) => !written.has(path.resolve(wd, f)));
+}
+
+/** The follow-up prompt for a child that ended with scoped files unwritten. */
+export function finishScopePrompt(unwritten: readonly string[]): string {
+	return `You have not written ${unwritten.join(", ")} yet, and it is part of your job. Write it now with write_file, then say you are done. If it truly needs no change, say why in one sentence.`;
+}
+
 /** One sentence on what this agent did, and what the Orchestrator should do next. */
 export function agentOutcome(agent: AgentOutcomeInput): string {
 	const changed = agent.filesChanged ?? [];
