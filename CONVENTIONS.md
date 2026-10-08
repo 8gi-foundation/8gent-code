@@ -219,9 +219,9 @@ Consult the design system before building any UI.
 ## Versioning & Release
 
 1. **Version in 3 places** - keep in sync: `package.json` (source of truth), `bin/8gent.ts`, `README.md`
-2. **Do not edit CHANGELOG.md in a PR.** Write a clear conventional PR title (`feat(scope): ...`, `fix(scope): ...`), because the release step builds the changelog from merged PR titles: `bun scripts/changelog-release.ts --version X.Y.Z --write` in the release PR (#3575). [Keep a Changelog](https://keepachangelog.com/) format.
-3. **SemVer strictly:** PATCH = bug fixes, MINOR = new features, MAJOR = breaking changes
-4. **Tag releases** with `git tag v1.x.0` after version bumps.
+2. **Do not edit CHANGELOG.md or the version in a PR.** Write a clear conventional PR title (`feat(scope): ...`, `fix(scope): ...`), because the release PR builds the changelog from merged PR titles (`scripts/changelog-release.ts`, #3575). [Keep a Changelog](https://keepachangelog.com/) format.
+3. **SemVer strictly:** PATCH = bug fixes, MINOR = new features, MAJOR = breaking changes. The bump is a patch unless a merged PR title or body carries `[bump:minor]` or `[bump:major]`.
+4. **Releases go through a PR, never a push to main** (#3658). After every merge, the Release PR workflow (`.github/workflows/release-pr.yml`) opens or refreshes `release: vX.Y.Z` with the version bump and the changelog section; merging it tags and publishes. Never tag by hand. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ---
 
