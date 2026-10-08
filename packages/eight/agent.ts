@@ -93,7 +93,7 @@ import {
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
-import { VisionInterpreter } from "./vision-interpreter";
+import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -1255,7 +1255,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				onError: (_id, message) => {
 					visionFailed = true;
 					this.config.events?.onStepFinish?.({
-						text: "Image could not be interpreted, continuing without it.",
+						text: `Image could not be interpreted, continuing without it. (${oneLineError(message)})`,
 						stepNumber: 0,
 						toolCalls: [],
 						usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
@@ -1266,7 +1266,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					this.messageHistory.push({
 						role: "user",
 						content: harnessNote(
-							`[Vision Unavailable] The attached image could not be interpreted (${message.slice(0, 200)}). Do not wait for it or try to decode the image with scripts. Work from the text of the request, state plainly what you could not see, and write the deliverable anyway.`,
+							`[Vision Unavailable] The attached image could not be interpreted (${oneLineError(message)}). Do not wait for it or try to decode the image with scripts. Work from the text of the request, state plainly what you could not see, and write the deliverable anyway.`,
 						),
 					});
 				},

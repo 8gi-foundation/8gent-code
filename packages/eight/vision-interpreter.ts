@@ -37,11 +37,23 @@ interface PendingVision {
 	startedAt: number;
 }
 
+/** Ollama vision timeout. Default 180 s is NOT measured (#3724). */
+export function visionTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+	const n = Number(env.EIGHT_VISION_TIMEOUT_MS);
+	return Number.isFinite(n) && n > 0 ? n : 180000;
+}
+
+/** One line, control characters stripped, capped, for user-visible errors. */
+export function oneLineError(message: string, max = 200): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping is the point
+	return message.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
+}
+
 /**
  * Call a vision model to interpret an image.
  * Works with both Ollama and OpenRouter vision models.
  */
-async function callVisionModel(
+export async function callVisionModel(
 	model: VisionModel,
 	imageBase64: string,
 	mimeType: string,
@@ -55,7 +67,7 @@ async function callVisionModel(
 		const res = await fetch("http://localhost:11434/api/chat", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			signal: AbortSignal.timeout(60000),
+			signal: AbortSignal.timeout(visionTimeoutMs()),
 			body: JSON.stringify({
 				model: model.model,
 				messages: [
@@ -66,6 +78,7 @@ async function callVisionModel(
 					},
 				],
 				stream: false,
+				keep_alive: "10m", // keep the vision model warm between images (#3724)
 			}),
 		});
 
