@@ -81,3 +81,25 @@ describe("chat markdown at 80 columns", () => {
 		}
 	});
 });
+
+// #3536: the estimate counted code points, but a CJK ideograph or an emoji
+// takes two terminal cells, so wide replies drew more rows than budgeted.
+describe("row estimate counts terminal cells, not code points (#3536)", () => {
+	const WIDTH = 40;
+	const cases: Array<[string, string]> = [
+		["80 CJK characters", "漢".repeat(80)],
+		["20 rocket emoji", "🚀".repeat(20)],
+		["a CJK code line", `\`\`\`\n${"漢字".repeat(30)}\n\`\`\``],
+		["an emoji code line", `\`\`\`\n${"🚀".repeat(30)}\n\`\`\``],
+		["plain English", "The quick brown fox jumps over the lazy dog and keeps running until the row budget is spent."],
+	];
+	for (const [name, content] of cases) {
+		test(`${name}: estimate == drawn rows at width ${WIDTH}`, () => {
+			const drawn = renderReply(content, WIDTH);
+			while (drawn.length && drawn[drawn.length - 1].trim() === "") drawn.pop();
+			const wrap = bubbleWidths(WIDTH, "assistant").wrap;
+			const est = estimateMessageRowsForTest({ id: "a1", role: "assistant", content, timestamp: at }, wrap);
+			expect(drawn.length).toBe(est - 1);
+		});
+	}
+});
