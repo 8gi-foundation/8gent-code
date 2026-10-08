@@ -136,7 +136,8 @@ function main(): void {
 			return;
 		case "apply":
 		case "commit": {
-			if (!value || !parseSemver(value) || value.startsWith("v")) {
+			// Exact X.Y.Z: no "v", no whitespace, nothing that parseSemver would trim.
+			if (!value || !/^\d+\.\d+\.\d+$/.test(value)) {
 				throw new Error(`${cmd} needs a version X.Y.Z, not ${JSON.stringify(value)}`);
 			}
 			if (cmd === "apply") cmdApply(value);

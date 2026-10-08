@@ -122,6 +122,19 @@ describe("version files", () => {
 	});
 });
 
+describe("CLI argument validation", () => {
+	const cli = join(ROOT, "scripts", "release-version.ts");
+	test("apply and commit take an exact X.Y.Z: no v, no whitespace, no suffix", () => {
+		for (const bad of [" 1.2.3", "1.2.3 ", "v1.2.3", "1.2", "1.2.3-beta", '1.2.3"; touch x']) {
+			for (const cmd of ["apply", "commit"]) {
+				const r = spawnSync(process.execPath, [cli, cmd, bad], { cwd: tmpdir(), encoding: "utf8" });
+				expect(r.status, `${cmd} ${JSON.stringify(bad)}`).toBe(1);
+				expect(r.stderr).toContain("needs a version X.Y.Z");
+			}
+		}
+	});
+});
+
 /** A repo in the exact state that wedged the pipeline on 1 Oct. */
 function wedgedRepo(): {
 	dir: string;

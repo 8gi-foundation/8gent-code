@@ -42,7 +42,11 @@ default `GITHUB_TOKEN`. Two ways to get CI on the release PR:
 
 - Set a repository secret `RELEASE_PAT`: a fine-grained token with contents
   and pull-requests write on this repository. The workflow uses it to push
-  the branch and open the PR, and CI runs on every refresh.
+  the branch and open the PR, and CI runs on every refresh. The token must
+  belong to a machine account that is not a bypass actor on the main
+  ruleset, be scoped to this repository with contents and pull-requests
+  write only, and carry an expiry; otherwise the token could do what this
+  workflow exists to prevent.
 - Without it, close and reopen the release PR (or push an empty commit to
   `release/next`) to start CI before merging.
 

@@ -58,6 +58,10 @@ concurrency:
 jobs:
   decide:
     name: Is the current version tagged
+    # Only main is ever proposed from, tagged or published. A workflow_dispatch
+    # on any other ref would otherwise read that branch's package.json, tag an
+    # off-main commit and publish it. propose and tag inherit this through needs.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,7 +76,15 @@ jobs:
       - name: Decide
         id: decide
         run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::release-pr runs on refs/heads/main only, not ${GITHUB_REF}"
+            exit 1
+          fi
           VERSION="$(node -p "require('./package.json').version")"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json version is not X.Y.Z: ${VERSION}"
+            exit 1
+          fi
           if git rev-parse -q --verify "refs/tags/v${VERSION}^{commit}" >/dev/null; then
             MODE=propose
             echo "package.json is ${VERSION} and v${VERSION} is tagged: propose the next release"

@@ -139,6 +139,21 @@ describe("#3214: no expression is expanded inside a run: script", () => {
 			expect(unpinned).toEqual([]);
 		});
 
+		test(`${file} runs on refs/heads/main only, including workflow_dispatch`, () => {
+			const wf = workflow(file) as {
+				on?: Record<string, unknown>;
+				jobs: Record<string, Job & { if?: string; needs?: string }>;
+			};
+			// workflow_dispatch can target any ref; the first job refuses every ref but main
+			// in both its if: and its script, and every other job hangs off it through needs.
+			expect(wf.on).toHaveProperty("workflow_dispatch");
+			expect(wf.jobs.decide.if).toBe("github.ref == 'refs/heads/main'");
+			expect(step(file, "decide").run).toContain('[ "$GITHUB_REF" != "refs/heads/main" ]');
+			for (const [name, job] of Object.entries(wf.jobs)) {
+				if (name !== "decide") expect(job.needs, `job ${name} needs decide`).toBe("decide");
+			}
+		});
+
 		test(`${file} grants nothing at the top and only what each job needs`, () => {
 			const wf = workflow(file);
 			expect(wf.permissions).toEqual({});
