@@ -171,6 +171,13 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 }
 
 /**
+ * The two notes from the tool catalog a headless run keeps: the model has the
+ * internet, and narration goes through `speak`. Same wording as the catalog.
+ */
+const HEADLESS_TOOL_NOTES =
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**";
+
+/**
  * Decide whether Agent.chat() should drive tools through the harness-side text
  * protocol instead of the AI SDK native tool loop. Mirrors bin/8gent.ts
  * chatCommand: lmstudio/ollama are the tool-incapable local providers whose
@@ -480,7 +487,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const runtimeName = this.config.runtime as string;
 		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
+		// A headless run keeps the honesty line and the two catalog notes but drops
+		// the category catalog: the tool-call protocol already lists every tool this
+		// path offers with its signature, and the catalog also named tools it does
+		// not offer (desktop_*, lsp_*, gh_*). No person shares personal facts in a
+		// one-shot run, so the remember nudge goes too.
+		const compactLocalPrompt = config.headless
+			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -936,6 +950,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
 				tools: tools.map((t) => t.spec),
+				// Headless: name and parameters only; the system prompt carries the
+				// descriptions, so a run does not pay for them twice on every call.
+				declareDescriptions: this.config.headless !== true,
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;

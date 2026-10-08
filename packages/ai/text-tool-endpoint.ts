@@ -722,6 +722,13 @@ export function buildTextToolCall(opts: {
 	 */
 	tools?: ToolSpec[];
 	/**
+	 * Send each declared tool's description (default true). False declares name
+	 * and parameters only: the parser needs only those to keep a native call,
+	 * and the text protocol in the system prompt already describes every tool,
+	 * so a headless run does not pay for the descriptions twice per call.
+	 */
+	declareDescriptions?: boolean;
+	/**
 	 * Output token budget per model step. Default: resolveMaxOutputTokens(), so
 	 * EIGHT_MAX_OUTPUT_TOKENS governs (#3074).
 	 */
@@ -755,7 +762,10 @@ export function buildTextToolCall(opts: {
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",
-		function: { name: t.name, description: t.description, parameters: t.parameters },
+		function:
+			opts.declareDescriptions === false
+				? { name: t.name, parameters: t.parameters }
+				: { name: t.name, description: t.description, parameters: t.parameters },
 	}));
 
 	const post = (messages: ChatMessage[], withTools: boolean) =>
