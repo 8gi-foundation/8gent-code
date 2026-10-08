@@ -2,14 +2,25 @@
 import { describe, expect, test } from "bun:test";
 import { TOOL_PATTERNS_SEGMENT, getFullSystemPrompt } from "./system-prompt";
 
+const section = TOOL_PATTERNS_SEGMENT.slice(TOOL_PATTERNS_SEGMENT.indexOf("### Recovering a lost file"));
+
 describe("lost file recovery guidance", () => {
-	test("tells the agent to restore from the last commit that had the file", () => {
-		expect(TOOL_PATTERNS_SEGMENT).toContain("git checkout <sha> -- <path>");
-		expect(TOOL_PATTERNS_SEGMENT).toContain("git log --all --oneline -- <path>");
+	test("uncommitted deletion uses git restore", () => {
+		expect(section).toContain('" D <path>"');
+		expect(section).toContain("git restore <path>");
 	});
-	test("forbids retyping contents and requires a diff check", () => {
-		expect(TOOL_PATTERNS_SEGMENT).toContain("Never retype");
-		expect(TOOL_PATTERNS_SEGMENT).toContain("git diff <sha> -- <path>");
+	test("committed deletion restores from the parent of the deleting commit", () => {
+		expect(section).toContain("git log --diff-filter=D --oneline -- <path>");
+		expect(section).toContain("deleting commit");
+		expect(section).toContain("git checkout <sha>^ -- <path>");
+	});
+	test("does not claim checkout HEAD is a no-op in general", () => {
+		expect(section).not.toContain("does nothing");
+	});
+	test("keeps verify and never-retype lines, within size budget", () => {
+		expect(section).toContain("never retype");
+		expect(section).toContain("must print nothing");
+		expect(section.length).toBeLessThan(560);
 	});
 	test("reaches the full prompt", () => {
 		expect(getFullSystemPrompt()).toContain("Recovering a lost file");
