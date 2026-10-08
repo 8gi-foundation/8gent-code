@@ -1365,6 +1365,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Run one command through this agent's own gated run_command (permissions,
+	 * sanitizer, policy), outside any model turn. The headless done gate uses it
+	 * to run the project's build and tests after the agent answers.
+	 */
+	runGatedCommand(command: string, timeoutSec: number): Promise<string> {
+		return this.executor.runCommand(command, timeoutSec);
+	}
+
+	/**
 	 * One turn. Children this turn spawns inherit this agent's provider, model
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
