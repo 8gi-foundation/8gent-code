@@ -10,6 +10,8 @@
 import { describe, expect, it } from "bun:test";
 import {
 	DEFAULT_TURN_TIMEOUT_MS,
+	MAX_TIMER_MS,
+	resolveStreamIdleMs,
 	TurnTimeoutError,
 	resolveTurnTimeoutMs,
 	withTurnTimeout,
@@ -92,5 +94,25 @@ describe("withTurnTimeout", () => {
 		expect(out).toBe("fast");
 		await new Promise((r) => setTimeout(r, 60));
 		expect(firedAfterSuccess).toBe(false);
+	});
+});
+
+describe("timer clamp (#3671)", () => {
+	it("MAX_TIMER_MS is the setTimeout limit", () => {
+		expect(MAX_TIMER_MS).toBe(2_147_483_647);
+	});
+
+	for (const v of ["1e12", "99999999999", "2147483648"]) {
+		it(`clamps EIGHT_TURN_TIMEOUT_MS=${v}`, () => {
+			expect(resolveTurnTimeoutMs({ EIGHT_TURN_TIMEOUT_MS: v })).toBe(2_147_483_647);
+		});
+		it(`clamps EIGHT_STREAM_IDLE_MS=${v}`, () => {
+			expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: v })).toBe(2_147_483_647);
+		});
+	}
+
+	it("leaves in-range values alone", () => {
+		expect(resolveTurnTimeoutMs({ EIGHT_TURN_TIMEOUT_MS: "2147483647" })).toBe(2_147_483_647);
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "60000" })).toBe(60_000);
 	});
 });
