@@ -221,6 +221,12 @@ describe("rankPaths", () => {
 });
 
 describe("grep ranking", () => {
+	test("parseRgLines normalises a Windows backslash path to forward slashes", () => {
+		expect(parseRgLines(".\\src\\a.ts\u00004:x")).toEqual([
+			{ file: "src/a.ts", line: 4, text: "x" },
+		]);
+	});
+
 	test("parseRgLines reads path NUL line:text (rg --null) and drops ./", () => {
 		expect(parseRgLines("./a/b.ts\u000012:  const x = 1\nnot a hit\nc.md\u00003:x: y")).toEqual([
 			{ file: "a/b.ts", line: 12, text: "  const x = 1" },
