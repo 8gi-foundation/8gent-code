@@ -19,6 +19,8 @@
  * runs again, up to EIGHT_DONE_GATE_ATTEMPTS fix rounds (default 2); still worse ends the
  * run as a failure. Red before and no new failures is reported as pre-existing and the
  * run succeeds, so a docs edit in an already-red repo is not sent off to "fix" tests.
+ * Pre-existing needs failures recognised on both sides (cargo, rustc, bun, go, tsc);
+ * red to red on any other runner is reported as unverified, exit 0.
  * A check (before or after) that times out or cannot start makes the result unverified,
  * never green. EIGHT_DONE_GATE=0 turns it off; EIGHT_DONE_GATE_TIMEOUT_SEC bounds each
  * check run (default and ceiling 300).
@@ -273,9 +275,18 @@ export async function finishWithProjectCheck(opts: {
 			};
 		let added: string[] = [];
 		if (before.kind === "fail") {
+			// Comparing needs failures recognised on both sides. Output from a runner the
+			// gate cannot parse (jest, vitest, mocha, free text) proves nothing either way.
+			if (baseline.outcome.signatures.size === 0 || signatures.size === 0)
+				return {
+					status: "unverified",
+					command,
+					fixRounds: round,
+					detail: `\`${command}\` was already failing before this run; could not tell whether this run added failures`,
+					finalText,
+				};
 			added = newFailures(baseline.outcome.signatures, signatures);
-			// No failure the baseline lacked (also when neither output is recognised):
-			// nothing shows this run made it worse, so it is not sent back.
+			// Both sides parsed and every failure now was there before: not this run's doing.
 			if (added.length === 0)
 				return {
 					status: "pre-existing",
