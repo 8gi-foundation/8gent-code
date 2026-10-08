@@ -353,30 +353,32 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		});
 
 		const workDir = opts.cwd || process.cwd();
-		const { finishWithProjectCheck, projectFingerprint } = await import("./done-gate");
+		const { baselineCheck, finishWithProjectCheck, projectFingerprint, verdictNotice } =
+			await import("./done-gate");
+		const run = (command: string, timeoutSec: number) => agent.runGatedCommand(command, timeoutSec);
+		// Done gate: the project's check before and after the run. A run that made
+		// it worse goes back to the model, then fails loud (packages/eight/done-gate.ts).
+		const baseline = await baselineCheck({ cwd: workDir, run });
 		const before = projectFingerprint(workDir);
 		const answer = await agent.chat(opts.prompt);
-
-		// Done gate: a run that changed the project must leave its build and
-		// tests green, or end as a failure. A red check goes back to the model.
 		const check = await finishWithProjectCheck({
-			cwd: workDir,
+			baseline,
 			changed: projectFingerprint(workDir) !== before,
 			finalText: answer,
-			run: (command, timeoutSec) => agent.runGatedCommand(command, timeoutSec),
+			run,
 			chat: (message) => agent.chat(message),
 		});
-		const finalText = check.finalText;
+		const notice = verdictNotice(check);
+		const finalText = notice ? `${check.finalText}\n\n${notice}` : check.finalText;
 		const projectCheck = {
 			status: check.status,
 			command: check.command ?? null,
 			fix_rounds: check.fixRounds,
 			detail: check.detail ?? null,
+			notice,
 		};
 		if (check.status === "fail") exitCode = 1;
-		if (check.status === "fail" || check.status === "unverified") {
-			process.stderr.write(`[done-gate] ${check.status}: ${check.detail}\n`);
-		}
+		if (notice) process.stderr.write(`${notice}\n`);
 
 		if (isStreamJson) {
 			emit({

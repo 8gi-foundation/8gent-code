@@ -8,15 +8,20 @@
  * and counts a read_file as a check, and the commit gate (#3402) only fires on a
  * commit and only knows package.json test scripts, so a Cargo crate had no check at all.
  *
- * So after the agent answers, when the run changed files in the working directory, the
- * harness runs the project's check itself, through the agent's own gated run_command:
+ * So the harness runs the project's check itself, through the agent's own gated
+ * run_command, once before the agent starts (the baseline) and again after it answers
+ * when the run changed files:
  *   - Cargo.toml: `cargo test` (compiles the crate and its tests, then runs them)
  *   - package.json test script: the commit gate's detected command
  *   - go.mod: `go test ./...`
- * Red: the failure goes back to the model as a new message and the check runs again,
- * up to EIGHT_DONE_GATE_ATTEMPTS fix rounds (default 2). Still red: the run ends as a
- * failure. A check that times out or cannot start is reported as unverified, never green.
- * EIGHT_DONE_GATE=0 turns it off.
+ * Only a result worse than the baseline counts: green before and red now, or failures
+ * the baseline did not have. That goes back to the model as a new message and the check
+ * runs again, up to EIGHT_DONE_GATE_ATTEMPTS fix rounds (default 2); still worse ends the
+ * run as a failure. Red before and no new failures is reported as pre-existing and the
+ * run succeeds, so a docs edit in an already-red repo is not sent off to "fix" tests.
+ * A check (before or after) that times out or cannot start makes the result unverified,
+ * never green. EIGHT_DONE_GATE=0 turns it off; EIGHT_DONE_GATE_TIMEOUT_SEC bounds each
+ * check run (default and ceiling 300).
  */
 
 import { createHash } from "node:crypto";
@@ -130,9 +135,50 @@ export function readCheck(output: string, timeoutSec: number): CheckRead {
 	return { kind: "pass" };
 }
 
-export function fixMessage(command: string, red: { firstFailure: string; tail: string }): string {
+/**
+ * What identifies each failure in a check's output, as a count per signature. Line
+ * numbers are dropped (they move with every edit); the file is kept when the next
+ * line names it. Compared baseline vs after to tell "got worse" from "was already red".
+ */
+export function failureSignatures(output: string): Map<string, number> {
+	const lines = output.split("\n").map((l) => l.trim());
+	const sigs = new Map<string, number>();
+	const add = (k: string) => sigs.set(k, (sigs.get(k) ?? 0) + 1);
+	for (let i = 0; i < lines.length; i++) {
+		const l = lines[i];
+		const rustc = /^error(\[E\d+\]: .*)$/.exec(l);
+		const cargoTest = /^test (\S+) \.\.\. FAILED$/.exec(l);
+		const bun = /^\(fail\) (.+?)(?: \[[\d.]+m?s\])?$/.exec(l);
+		const go = /^--- FAIL: (\S+)/.exec(l);
+		const tsc = /^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$/.exec(l);
+		if (rustc) {
+			const at = /^--> (.+?):\d+/.exec(lines[i + 1] ?? "");
+			add(`rustc ${rustc[1]}${at ? ` @ ${at[1]}` : ""}`);
+		} else if (cargoTest) add(`cargo test ${cargoTest[1]}`);
+		else if (bun) add(`bun ${bun[1]}`);
+		else if (go) add(`go ${go[1]}`);
+		else if (tsc) add(`tsc ${tsc[1]} ${tsc[2]}: ${tsc[3]}`);
+	}
+	return sigs;
+}
+
+/** Signatures whose count went up from `before` to `after`. */
+export function newFailures(before: Map<string, number>, after: Map<string, number>): string[] {
+	return [...after].filter(([k, n]) => n > (before.get(k) ?? 0)).map(([k]) => k);
+}
+
+export function fixMessage(
+	command: string,
+	red: { firstFailure: string; tail: string },
+	introduced: readonly string[] = [],
+): string {
 	return [
 		`${DONE_GATE_TAG} You are not done: \`${command}\` fails in this project.`,
+		...(introduced.length
+			? [
+					`It was already failing before you started, but these failures are new: ${introduced.slice(0, 10).join("; ")}`,
+				]
+			: []),
 		"Fix the code so it builds and the tests pass, run the command yourself to confirm,",
 		'then reply with your final summary starting with "DONE:".',
 		`First failure: ${red.firstFailure}`,
@@ -141,8 +187,42 @@ export function fixMessage(command: string, red: { firstFailure: string; tail: s
 	].join("\n");
 }
 
+export type CheckOutcome = { read: CheckRead; signatures: Map<string, number> };
+
+/** The project check before the agent runs: what "not worse" is measured against. */
+export type Baseline = { command: string; outcome: CheckOutcome } | { command: null };
+
+async function runCheck(run: GatedRun, command: string, timeoutSec: number): Promise<CheckOutcome> {
+	const output = await run(command, timeoutSec);
+	const read = readCheck(output, timeoutSec);
+	return { read, signatures: read.kind === "fail" ? failureSignatures(output) : new Map() };
+}
+
+/**
+ * Run the project check once before the agent starts. Costs one check run, bounded by
+ * the same EIGHT_DONE_GATE_TIMEOUT_SEC cap. No check when the gate is off or no command
+ * is known.
+ */
+export async function baselineCheck(opts: {
+	cwd: string;
+	run: GatedRun;
+	env?: Env;
+}): Promise<Baseline> {
+	const env = opts.env ?? process.env;
+	if (!doneGateEnabled(env)) return { command: null };
+	const command = detectProjectCheck(opts.cwd);
+	if (!command) return { command: null };
+	return { command, outcome: await runCheck(opts.run, command, doneGateTimeoutSec(env)) };
+}
+
 export type DoneVerdict = {
-	status: "pass" | "fail" | "unverified" | "skipped";
+	/**
+	 * pass: green after the run. fail: worse than before and not fixed in budget.
+	 * pre-existing: red, but no failure the baseline did not already have.
+	 * unverified: a check (baseline or after) timed out or could not run.
+	 * skipped: gate off, no known check, or the run changed nothing.
+	 */
+	status: "pass" | "fail" | "pre-existing" | "unverified" | "skipped";
 	command?: string;
 	/** Fix rounds sent to the model. */
 	fixRounds: number;
@@ -151,11 +231,12 @@ export type DoneVerdict = {
 };
 
 /**
- * Run the project's check after the agent answered; feed a red result back through
- * `chat` and check again, within the attempt budget.
+ * Run the project's check after the agent answered and compare with the baseline. Only a
+ * result worse than the baseline (green before and red now, or new failures) goes back
+ * to the model through `chat`, within the attempt budget.
  */
 export async function finishWithProjectCheck(opts: {
-	cwd: string;
+	baseline: Baseline;
 	changed: boolean;
 	finalText: string;
 	run: GatedRun;
@@ -164,16 +245,46 @@ export async function finishWithProjectCheck(opts: {
 }): Promise<DoneVerdict> {
 	const env = opts.env ?? process.env;
 	let finalText = opts.finalText;
-	if (!doneGateEnabled(env) || !opts.changed) return { status: "skipped", fixRounds: 0, finalText };
-	const command = detectProjectCheck(opts.cwd);
-	if (!command) return { status: "skipped", fixRounds: 0, finalText };
+	const { baseline } = opts;
+	if (baseline.command === null || !opts.changed)
+		return { status: "skipped", fixRounds: 0, finalText };
+	const { command } = baseline;
+	const before = baseline.outcome.read;
+	if (before.kind === "unverified")
+		return {
+			status: "unverified",
+			command,
+			fixRounds: 0,
+			detail: `\`${command}\` ${before.reason} before the run, so the result cannot be compared`,
+			finalText,
+		};
 	const attempts = doneGateAttempts(env);
 	const timeoutSec = doneGateTimeoutSec(env);
 	for (let round = 0; ; round++) {
-		const read = readCheck(await opts.run(command, timeoutSec), timeoutSec);
+		const { read, signatures } = await runCheck(opts.run, command, timeoutSec);
 		if (read.kind === "pass") return { status: "pass", command, fixRounds: round, finalText };
 		if (read.kind === "unverified")
-			return { status: "unverified", command, fixRounds: round, detail: read.reason, finalText };
+			return {
+				status: "unverified",
+				command,
+				fixRounds: round,
+				detail: `\`${command}\` ${read.reason}`,
+				finalText,
+			};
+		let added: string[] = [];
+		if (before.kind === "fail") {
+			added = newFailures(baseline.outcome.signatures, signatures);
+			// No failure the baseline lacked (also when neither output is recognised):
+			// nothing shows this run made it worse, so it is not sent back.
+			if (added.length === 0)
+				return {
+					status: "pre-existing",
+					command,
+					fixRounds: round,
+					detail: `\`${command}\` was already failing before this run (${before.firstFailure}); pre-existing failures, not caused by this run`,
+					finalText,
+				};
+		}
 		if (round >= attempts)
 			return {
 				status: "fail",
@@ -182,6 +293,20 @@ export async function finishWithProjectCheck(opts: {
 				detail: `\`${command}\` still fails: ${read.firstFailure}`,
 				finalText,
 			};
-		finalText = await opts.chat(fixMessage(command, read));
+		finalText = await opts.chat(fixMessage(command, read, added));
+	}
+}
+
+/** The line a reader sees under the final answer, or null when there is nothing to say. */
+export function verdictNotice(v: DoneVerdict): string | null {
+	switch (v.status) {
+		case "fail":
+			return `${DONE_GATE_TAG} FAILED: ${v.detail}. This run did not leave the project building and passing.`;
+		case "unverified":
+			return `${DONE_GATE_TAG} NOT VERIFIED: ${v.detail}. The project's build and tests were not confirmed.`;
+		case "pre-existing":
+			return `${DONE_GATE_TAG} ${v.detail}.`;
+		default:
+			return null;
 	}
 }

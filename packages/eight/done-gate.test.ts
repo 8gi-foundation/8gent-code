@@ -3,13 +3,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	type Baseline,
 	DONE_GATE_TAG,
+	baselineCheck,
 	detectProjectCheck,
 	doneGateAttempts,
 	doneGateTimeoutSec,
+	failureSignatures,
 	finishWithProjectCheck,
+	newFailures,
 	projectFingerprint,
 	readCheck,
+	verdictNotice,
 } from "./done-gate";
 
 const dirs: string[] = [];
@@ -94,18 +99,75 @@ describe("projectFingerprint", () => {
 	});
 });
 
-describe("finishWithProjectCheck", () => {
-	const cargo = () => {
+const CARGO_TEST_RED =
+	"Exit code 101:\nrunning 1 test\ntest adds ... FAILED\n\nfailures:\nerror: test failed, to rerun pass `--test add`\n";
+
+describe("failureSignatures / newFailures", () => {
+	test("rustc errors keep the file, drop the line number", () => {
+		const a = failureSignatures("error[E0308]: mismatched types\n --> src/lib.rs:1:40\n");
+		const b = failureSignatures("error[E0308]: mismatched types\n --> src/lib.rs:9:2\n");
+		expect([...a.keys()]).toEqual(["rustc [E0308]: mismatched types @ src/lib.rs"]);
+		expect(newFailures(a, b)).toEqual([]);
+	});
+	test("cargo, bun, go and tsc failures are recognised", () => {
+		const sigs = failureSignatures(
+			[
+				"test adds ... FAILED",
+				"(fail) add zero [0.12ms]",
+				"--- FAIL: TestAdd (0.00s)",
+				"src/a.ts(3,5): error TS2322: Type 'string' is not assignable",
+			].join("\n"),
+		);
+		expect([...sigs.keys()]).toEqual([
+			"cargo test adds",
+			"bun add zero",
+			"go TestAdd",
+			"tsc src/a.ts TS2322: Type 'string' is not assignable",
+		]);
+	});
+	test("a second copy of the same failure is new", () => {
+		const one = failureSignatures("(fail) x");
+		const two = failureSignatures("(fail) x\n(fail) x");
+		expect(newFailures(one, two)).toEqual(["bun x"]);
+		expect(newFailures(two, one)).toEqual([]);
+	});
+});
+
+describe("baselineCheck", () => {
+	test("runs the detected check once; nothing when off or unknown", async () => {
 		const d = dir();
 		writeFileSync(join(d, "Cargo.toml"), "[package]\nname='x'\n");
-		return d;
-	};
+		const ran: string[] = [];
+		const run = async (c: string) => {
+			ran.push(c);
+			return CARGO_TEST_RED;
+		};
+		const b = await baselineCheck({ cwd: d, run, env: {} });
+		expect(ran).toEqual(["cargo test"]);
+		expect(b.command).toBe("cargo test");
+		expect(
+			(await baselineCheck({ cwd: d, run, env: { EIGHT_DONE_GATE: "0" } })).command,
+		).toBeNull();
+		expect((await baselineCheck({ cwd: dir(), run, env: {} })).command).toBeNull();
+		expect(ran).toHaveLength(1);
+	});
+});
 
-	test("red, then the model fixes it: pass after one fix round, failure fed back", async () => {
+const base = (output: string): Baseline => {
+	const read = readCheck(output, 300);
+	return {
+		command: "cargo test",
+		outcome: { read, signatures: read.kind === "fail" ? failureSignatures(output) : new Map() },
+	};
+};
+const GREEN = base("running 1 test\ntest adds ... ok");
+
+describe("finishWithProjectCheck", () => {
+	test("green before, red after, then fixed: pass after one fix round, failure fed back", async () => {
 		const outputs = [RUST_RED, "test result: ok"];
 		const sent: string[] = [];
 		const v = await finishWithProjectCheck({
-			cwd: cargo(),
+			baseline: GREEN,
 			changed: true,
 			finalText: "DONE: first",
 			run: async () => outputs.shift() as string,
@@ -121,13 +183,14 @@ describe("finishWithProjectCheck", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toContain(DONE_GATE_TAG);
 		expect(sent[0]).toContain("error[E0308]: mismatched types");
+		expect(verdictNotice(v)).toBeNull();
 	});
 
-	test("still red after the budget: fail, exactly `attempts` fix rounds", async () => {
+	test("still worse after the budget: fail, exactly `attempts` fix rounds", async () => {
 		let runs = 0;
 		let chats = 0;
 		const v = await finishWithProjectCheck({
-			cwd: cargo(),
+			baseline: GREEN,
 			changed: true,
 			finalText: "DONE",
 			run: async () => {
@@ -144,33 +207,65 @@ describe("finishWithProjectCheck", () => {
 		expect(chats).toBe(2);
 		expect(runs).toBe(3);
 		expect(v.detail).toContain("cargo test");
+		expect(verdictNotice(v)).toContain("FAILED");
 	});
 
-	test("unchanged project, gate off, or no known check: skipped, nothing run", async () => {
+	test("red before, same failures after: pre-existing, not sent back", async () => {
+		let chats = 0;
+		const v = await finishWithProjectCheck({
+			baseline: base(CARGO_TEST_RED),
+			changed: true,
+			finalText: "DONE: docs",
+			run: async () => CARGO_TEST_RED,
+			chat: async () => {
+				chats++;
+				return "";
+			},
+			env: {},
+		});
+		expect(v.status).toBe("pre-existing");
+		expect(chats).toBe(0);
+		expect(verdictNotice(v)).toContain("pre-existing failures, not caused by this run");
+	});
+
+	test("red before, new failures after: sent back naming the new ones", async () => {
+		const sent: string[] = [];
+		const v = await finishWithProjectCheck({
+			baseline: base(CARGO_TEST_RED),
+			changed: true,
+			finalText: "DONE",
+			run: async () => RUST_RED,
+			chat: async (m) => {
+				sent.push(m);
+				return "DONE";
+			},
+			env: { EIGHT_DONE_GATE_ATTEMPTS: "1" },
+		});
+		expect(v.status).toBe("fail");
+		expect(sent[0]).toContain("these failures are new: rustc [E0308]: mismatched types");
+	});
+
+	test("baseline unverified: result unverified, no check run, visible notice", async () => {
 		const never = async () => {
 			throw new Error("must not run");
 		};
-		for (const [cwd, changed, env] of [
-			[cargo(), false, {}],
-			[cargo(), true, { EIGHT_DONE_GATE: "0" }],
-			[dir(), true, {}],
-		] as const) {
-			const v = await finishWithProjectCheck({
-				cwd,
-				changed,
-				finalText: "DONE",
-				run: never,
-				chat: never,
-				env,
-			});
-			expect(v.status).toBe("skipped");
-		}
+		const v = await finishWithProjectCheck({
+			baseline: base("TIMEOUT after 300s."),
+			changed: true,
+			finalText: "DONE",
+			run: never,
+			chat: never,
+			env: {},
+		});
+		expect(v.status).toBe("unverified");
+		expect(verdictNotice(v)).toContain("NOT VERIFIED");
+		expect(verdictNotice(v)).toContain("before the run");
 	});
 
-	test("timeout is unverified and does not loop", async () => {
+	test("after-check timeout is unverified and does not loop", async () => {
 		let chats = 0;
 		const v = await finishWithProjectCheck({
-			cwd: cargo(),
+			baseline: GREEN,
 			changed: true,
 			finalText: "DONE",
 			run: async () => "TIMEOUT after 300s.",
@@ -182,5 +277,26 @@ describe("finishWithProjectCheck", () => {
 		});
 		expect(v.status).toBe("unverified");
 		expect(chats).toBe(0);
+		expect(verdictNotice(v)).toContain("NOT VERIFIED: `cargo test` did not finish in 300s");
+	});
+
+	test("unchanged project or no baseline command: skipped, nothing run", async () => {
+		const never = async () => {
+			throw new Error("must not run");
+		};
+		for (const [baseline, changed] of [
+			[GREEN, false],
+			[{ command: null }, true],
+		] as const) {
+			const v = await finishWithProjectCheck({
+				baseline,
+				changed,
+				finalText: "DONE",
+				run: never,
+				chat: never,
+				env: {},
+			});
+			expect(v.status).toBe("skipped");
+		}
 	});
 });
