@@ -23,9 +23,27 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { hostedAllowed } from "../providers/failover";
 
 export const SPAWN_AGENT_DESCRIPTION =
-	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.";
+	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='8gent' (default) for coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. Omit model to run the agent on this session's model.";
+
+export const SPAWN_RUNTIME_DESCRIPTION =
+	"Runtime: '8gent' (default, this session's model) or 'shell' (sh -c). 'claude' is a hosted runtime and is off by default.";
+
+export const SPAWN_MODEL_DESCRIPTION =
+	"Optional model for the 8gent runtime, run on this session's provider. Omit it to use this session's model.";
+
+/** Null when the claude runtime (the hosted Claude CLI) may run; otherwise why not (#3710). */
+function claudeHostedRefusal(): string | null {
+	if (hostedAllowed()) return null;
+	return `[HOSTED BLOCKED] spawn_agent runtime "claude" was not run: it sends the task to a hosted model, and hosted providers are off unless the user sets EIGHT_ALLOW_HOSTED=1. Use runtime "8gent", which runs on this session's model.`;
+}
+
+/** True for a model id that only a hosted provider serves: auto:free and OpenRouter's ":free" ids. */
+function isHostedModelId(model: string): boolean {
+	return model === "auto:free" || model.endsWith(":free");
+}
 
 export const ALLOWED_PATHS_DESCRIPTION =
 	"Only for 8gent runtime: the files (or directories) this agent may write or edit. Writes and edits anywhere else are refused and never run. Omit for no limit.";
@@ -137,6 +155,11 @@ export async function spawnAgentTool(
 		} else if (requested) {
 			child = createPermissionHolder(clampChildMode(await legacyParentMode(), requested));
 		}
+		// The claude runtime is a hosted model: opt-in first, whatever the mode (#3710).
+		if (effectiveRuntime === "claude") {
+			const hosted = claudeHostedRefusal();
+			if (hosted) return hosted;
+		}
 		if (child && effectiveRuntime === "claude") {
 			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
 			if (refusal) return refusal;
@@ -173,23 +196,27 @@ export async function spawnAgentTool(
 			);
 		}
 
-		// Default: 8gent runtime
-		// Resolve "auto:free" to the best available free model via OpenRouter
-		let resolvedModel = model;
-		if (model === "auto:free") {
-			try {
+		// Default: 8gent runtime, on the parent session's provider (#3710). A
+		// hosted model is resolved and used only with EIGHT_ALLOW_HOSTED=1.
+		const { hostedChildRefusal } = await import("./index");
+		let childRuntime: string | undefined;
+		let resolvedModel = model?.trim() || undefined;
+		if (resolvedModel && isHostedModelId(resolvedModel)) {
+			const refusal = hostedChildRefusal("openrouter", resolvedModel);
+			if (refusal) return refusal;
+			if (resolvedModel === "auto:free") {
 				const { resolveModel } = await import("../providers");
-				const resolved = await resolveModel(model);
+				// Strict: an unreachable list is an error, never a guessed model id.
+				const resolved = await resolveModel(resolvedModel, { strict: true });
 				resolvedModel = resolved.model;
-			} catch {
-				// Fall back to default if provider resolution fails
-				resolvedModel = undefined;
 			}
+			childRuntime = "openrouter";
 		}
 		const { getAgentPool } = await import("./index");
 		const pool = getAgentPool();
 		const agent = await pool.spawnAgent(task, {
-			model: resolvedModel || undefined,
+			model: resolvedModel,
+			...(childRuntime ? { runtime: childRuntime } : {}),
 			workingDirectory: workingDirectory,
 			allowedPaths,
 			...(child ? { permission: child } : {}),
