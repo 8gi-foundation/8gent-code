@@ -60,6 +60,17 @@ export class TurnTimeoutError extends Error {
 }
 
 /**
+ * Largest delay setTimeout honours (2^31-1 ms, about 24.8 days). Above it Bun
+ * fires after 1 ms, so an env value meaning "never" would time out at once
+ * (#3671). Both resolvers clamp to it.
+ */
+export const MAX_TIMER_MS = 2_147_483_647;
+
+function clampTimerMs(ms: number): number {
+	return Math.min(MAX_TIMER_MS, ms);
+}
+
+/**
  * Resolve the per-attempt timeout in ms. Reads EIGHT_TURN_TIMEOUT_MS when set
  * to a positive finite number, otherwise falls back to DEFAULT_TURN_TIMEOUT_MS.
  * A value of 0 or a non-numeric value is treated as "unset" so the default
@@ -72,7 +83,7 @@ export function resolveTurnTimeoutMs(
 	if (raw == null || raw === "") return DEFAULT_TURN_TIMEOUT_MS;
 	const parsed = Number(raw);
 	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TURN_TIMEOUT_MS;
-	return Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed));
+	return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
 }
 
 /**
@@ -148,7 +159,7 @@ export function resolveStreamIdleMs(
 	const parsed = Number(raw);
 	if (!Number.isFinite(parsed)) return DEFAULT_STREAM_IDLE_MS;
 	if (parsed <= 0) return null;
-	return Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed));
+	return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
 }
 
 /**
