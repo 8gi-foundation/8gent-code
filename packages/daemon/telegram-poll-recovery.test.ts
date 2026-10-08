@@ -80,6 +80,45 @@ async function until(cond: () => boolean, ms = 4000) {
 }
 
 describe("telegram poll recovery", () => {
+	it("a handler running past the watchdog window neither duplicates nor loses updates", async () => {
+		server.stop(true);
+		const queue = [1, 2, 3].map((id) => ({
+			update_id: id,
+			message: { message_id: id, chat: { id: 42, type: "private" }, from: { id: 42 }, text: `m${id}` },
+		}));
+		server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			async fetch(req) {
+				const url = new URL(req.url);
+				if (!url.pathname.endsWith("/getUpdates")) return Response.json({ ok: true, result: [] });
+				const offset = Number(url.searchParams.get("offset") ?? "0");
+				const result = queue.filter((u) => u.update_id >= offset);
+				if (result.length === 0) await new Promise((r) => setTimeout(r, 50));
+				return Response.json({ ok: true, result });
+			},
+		});
+		const { bridge, delivered } = makeBridge({ watchdogMs: 150, watchdogCheckMs: 30 });
+		(bridge as any).handleTelegramMessage = async (text: string) => {
+			delivered.push(text);
+			if (text === "m1") await new Promise((r) => setTimeout(r, 500)); // past the window
+		};
+		const origErr = console.error;
+		const origWarn = console.warn;
+		console.error = () => {};
+		console.warn = () => {};
+		try {
+			bridge.startPolling();
+			await until(() => delivered.length >= 3);
+			await new Promise((r) => setTimeout(r, 700)); // let any duplicate show up
+		} finally {
+			bridge.stop();
+			console.error = origErr;
+			console.warn = origWarn;
+		}
+		expect([...delivered].sort()).toEqual(["m1", "m2", "m3"]);
+	});
+
 	it("survives N timeouts, logs one recovery line, delivers the next update", async () => {
 		const logs: string[] = [];
 		const origLog = console.log;

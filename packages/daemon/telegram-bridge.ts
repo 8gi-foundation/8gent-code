@@ -1073,6 +1073,13 @@ class TelegramDaemonBridge {
 
 				if (data.ok && data.result) {
 					for (const update of data.result as TelegramUpdate[]) {
+						// A loop the watchdog replaced stops here: it must not handle
+						// more of its batch (the new loop refetches from lastUpdateId)
+						// and must never write lastUpdateId.
+						if (gen !== this.pollGen) return;
+						// Handler progress counts as liveness, so the watchdog only
+						// fires on a handler that is genuinely stuck.
+						this.lastPollDoneAt = Date.now();
 						this.lastUpdateId = update.update_id;
 						// Drop messages from unauthorized chats before any side effect
 						// (transcription, typing indicators, agent dispatch).
@@ -1138,6 +1145,7 @@ class TelegramDaemonBridge {
 						}
 					}
 				}
+				if (gen !== this.pollGen) return;
 				this.lastPollDoneAt = Date.now();
 			} catch (err) {
 				clearTimeout(timer);
