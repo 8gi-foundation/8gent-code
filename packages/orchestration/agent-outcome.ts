@@ -29,6 +29,8 @@ export interface AgentOutcomeInput {
 	filesChanged?: string[];
 	/** Per scoped file, set by the pool when the agent ends: hash compare plus its sibling test. */
 	verification?: FileVerdict[];
+	/** Scoped files (not directories) hashed at spawn; its keys are the files the agent must write. */
+	scopeBaseline?: Record<string, string | null>;
 }
 
 /** A file path relative to the agent's working directory, for display and matching. */
@@ -83,11 +85,21 @@ export function unwrittenScopeFiles(
 
 /** The follow-up prompt for a child that ended with scoped files unwritten. */
 export function finishScopePrompt(unwritten: readonly string[]): string {
-	return `You have not written ${unwritten.join(", ")} yet, and it is part of your job. Write it now with write_file, then say you are done. If it truly needs no change, say why in one sentence.`;
+	return `You have not written ${unwritten.map((f) => JSON.stringify(f)).join(", ")} yet, and it is part of your job. Write it now with write_file, then say you are done. If it truly needs no change, say why in one sentence.`;
 }
 
 /** One sentence on what this agent did, and what the Orchestrator should do next. */
 export function agentOutcome(agent: AgentOutcomeInput): string {
+	const said = baseOutcome(agent);
+	if (agent.status !== "completed") return said;
+	const unwritten = unwrittenScopeFiles(agent, Object.keys(agent.scopeBaseline ?? {}));
+	const wrote = (agent.filesChanged ?? []).length > 0;
+	return wrote && unwritten.length > 0
+		? `PARTLY DONE: ${said}; it did not write ${unwritten.join(", ")}.`
+		: said;
+}
+
+function baseOutcome(agent: AgentOutcomeInput): string {
 	const changed = agent.filesChanged ?? [];
 	const scope = agent.config.allowedPaths ?? [];
 	if (agent.status === "running" || agent.status === "idle") {

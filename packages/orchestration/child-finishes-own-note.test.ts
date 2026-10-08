@@ -57,6 +57,7 @@ class FakeAgent {
 mock.module("../eight", () => ({ Agent: FakeAgent }));
 
 const { AgentPool } = await import("./index");
+const { agentOutcome } = await import("./agent-outcome");
 
 let dir: string;
 beforeEach(() => {
@@ -131,5 +132,45 @@ describe("a child finishes its own scope", () => {
 		};
 		await run(["ABOUT.md", "notes"]);
 		expect(prompts).toHaveLength(1);
+	});
+});
+
+describe("cancel and wording", () => {
+	test("a child cancelled after its first chat gets no follow-up and stays cancelled", async () => {
+		const pool = new AgentPool(4);
+		let id = "";
+		script = (_t, _p, _wd, write) => {
+			write("ABOUT.md", "x\n");
+			pool.cancelAgent(id);
+			return "done";
+		};
+		const a = await pool.spawnAgent("edit then note", {
+			workingDirectory: dir,
+			allowedPaths: ["ABOUT.md", "notes/8MO.md"],
+		});
+		id = a.id;
+		await new Promise((r) => setTimeout(r, 400));
+		expect(prompts).toHaveLength(1);
+		expect(a.status).toBe("cancelled");
+	});
+
+	test("the follow-up prompt quotes each path", async () => {
+		script = (turn, _p, _wd, write) => {
+			if (turn === 0) write("ABOUT.md", "x\n");
+			return "done";
+		};
+		await run(["ABOUT.md", "notes/8MO.md"]);
+		expect(prompts[1]).toContain(JSON.stringify("notes/8MO.md"));
+	});
+
+	test("some scoped files written, not all: the outcome says partly done", async () => {
+		script = (_t, _p, _wd, write) => {
+			write("ABOUT.md", "x\n");
+			return "done";
+		};
+		const a = await run(["ABOUT.md", "notes/8MO.md"]);
+		const out = agentOutcome(a);
+		expect(out).toContain("PARTLY DONE");
+		expect(out).toContain("notes/8MO.md");
 	});
 });
