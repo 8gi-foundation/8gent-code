@@ -252,3 +252,130 @@ describe("JSONB double-encoding guard", () => {
 		expect(retrieved2.version).toBe(3);
 	});
 });
+
+// ── FTS5 query building (#3537) ──────────────────────────────────────
+//
+// _ftsSearch used to pass bare FTS5 operators (AND, NOT, NEAR) straight into
+// MATCH, where they became syntax errors swallowed as [], and stripped every
+// non-ASCII letter, so "Éire" was queried as "ire*" against an index that
+// unicode61 had folded to "eire". These cases run the shipping _ftsSearch on
+// an in-memory store built by MemoryStore itself (same schema, same tokenizer).
+
+const FTS_CORPUS: Array<[string, string]> = [
+	["fts-01", "Git hooks: the pre-commit hook runs biome before every commit"],
+	["fts-02", "Hook ordering: what runs first, the hook or the formatter"],
+	["fts-03", "Cats: James does not like cats in the office"],
+	["fts-04", "Dogs and walks: dogs need a walk after lunch"],
+	["fts-05", "State name: Éire is the name of the state in its own language"],
+	["fts-06", "Follow-up: send the follow-up email to the board on Friday"],
+	["fts-07", "Commit style: never commit without running the pre-commit checks"],
+	["fts-08", "Contractions: don't use em dashes, don't pad stats"],
+	["fts-09", "Identifiers: the foo_bar helper lives in the utils package"],
+	["fts-10", "Coffee: the café on the corner opens at eight"],
+	["fts-11", "Preferences: James prefers short commit messages"],
+	["fts-12", "Email triage: answer email from the board within a day"],
+	["fts-13", "Deploy: the daemon deploys to Fly.io in Amsterdam"],
+	["fts-14", "Memory store: SQLite with FTS5 and a porter stemmer"],
+	["fts-15", "Walking: a long walk with the dogs clears the head"],
+	["fts-16", "Formatter: biome formats TypeScript before the commit lands"],
+];
+
+/** The pre-#3537 query builder, kept as the oracle for "same rows, same order". */
+function legacyFtsQuery(query: string): string {
+	return query
+		.replace(/[^\w\s]/g, "")
+		.split(/\s+/)
+		.filter((t) => t.length > 2)
+		.map((t) => `${t}*`)
+		.join(" OR ");
+}
+
+describe("FTS5 query building (#3537)", () => {
+	let ftsStore: MemoryStore;
+
+	const ftsIds = (query: string): string[] =>
+		(
+			ftsStore as unknown as {
+				_ftsSearch(q: string, o: { limit: number }): Array<{ memory: Memory }>;
+			}
+		)
+			._ftsSearch(query, { limit: 50 })
+			.map((r) => r.memory.id);
+
+	const legacyIds = (query: string): string[] => {
+		const q = legacyFtsQuery(query);
+		if (!q) return [];
+		return (
+			ftsStore
+				.getDb()
+				.prepare(
+					`SELECT m.id FROM memories_fts fts JOIN memories m ON m.rowid = fts.rowid
+           WHERE memories_fts MATCH ? AND m.deleted_at IS NULL ORDER BY rank LIMIT 100`,
+				)
+				.all(q) as Array<{ id: string }>
+		).map((r) => r.id);
+	};
+
+	beforeEach(() => {
+		ftsStore = new MemoryStore(":memory:");
+		for (const [id, text] of FTS_CORPUS) {
+			const [title, content] = text.split(": ");
+			ftsStore.write(makeCoreMemory({ id, key: id, title, content, tags: [] }));
+		}
+	});
+
+	afterEach(() => {
+		ftsStore.close();
+	});
+
+	it("treats a bare AND as a word, not an operator", () => {
+		const ids = ftsIds("what AND hook");
+		expect(ids).toContain("fts-02");
+		expect(ids).toContain("fts-01");
+	});
+
+	it("treats a leading NOT as a word, not an operator", () => {
+		const ids = ftsIds("NOT cats");
+		expect(ids).toContain("fts-03");
+	});
+
+	it("survives a trailing AND", () => {
+		const ids = ftsIds("dogs AND");
+		expect(ids).toContain("fts-04");
+		expect(ids).toContain("fts-15");
+	});
+
+	it("matches accented words against the diacritic-folded index", () => {
+		expect(ftsIds("Éire")).toEqual(["fts-05"]);
+	});
+
+	const PLAIN_QUERIES = [
+		"pre-commit hook",
+		"follow-up email",
+		"don't",
+		"foo_bar",
+		"café",
+		"commit messages",
+		"dogs walk",
+		"board email Friday",
+		"biome formatter",
+		"state language",
+		"daemon deploy Amsterdam",
+		"SQLite porter stemmer",
+		"James prefers",
+		"the corner",
+		"hooks",
+	];
+
+	// unicode61 splits "don't" into "don" + "t", so the stripped token "dont"
+	// matched nothing before and must still match nothing.
+	const KNOWN_EMPTY = new Set(["don't"]);
+
+	for (const query of PLAIN_QUERIES) {
+		it(`keeps plain query "${query}" on the same rows in the same order`, () => {
+			const before = legacyIds(query);
+			if (!KNOWN_EMPTY.has(query)) expect(before.length).toBeGreaterThan(0);
+			expect(ftsIds(query)).toEqual(before);
+		});
+	}
+});

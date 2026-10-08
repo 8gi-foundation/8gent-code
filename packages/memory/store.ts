@@ -819,12 +819,14 @@ export class MemoryStore {
 	private _ftsSearch(query: string, options: SearchOptions): SearchResult[] {
 		if (!query) return [];
 
-		// Build FTS5 query — prefix-expanded OR queries for porter stemmer matching
+		// Build FTS5 query - prefix-expanded OR queries for porter stemmer matching.
+		// Keep Unicode letters (unicode61 folds "Éire" to "eire" on both sides) and
+		// quote each term so AND/NOT/NEAR are searched as words, not operators.
 		const ftsQuery = query
-			.replace(/[^\w\s]/g, "")
+			.replace(/[^\p{L}\p{N}_\s]/gu, "")
 			.split(/\s+/)
-			.filter((t) => t.length > 2)
-			.map((t) => `${t}*`)
+			.filter((t) => [...t].length > 2)
+			.map((t) => `"${t}"*`)
 			.join(" OR ");
 
 		if (!ftsQuery) return [];
