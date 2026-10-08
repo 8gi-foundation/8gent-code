@@ -22,6 +22,11 @@ import {
 	isNativeToolParserFailure,
 	isOllamaNoThink,
 	isToolsUnsupported,
+	MAX_STREAMED_LINE_BYTES,
+	MAX_STREAMED_REPLY_BYTES,
+	readStreamedChatCompletion,
+	readStreamedGenerate,
+	StreamedReplyError,
 	NATIVE_TOOL_MARKUP_REMINDER,
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
@@ -1048,5 +1053,40 @@ describe("EIGHT_OLLAMA_NO_THINK turns thinking off per Ollama model", () => {
 		expect(renderQwenChatML([{ role: "user", content: "q" }], "qwen3.5", true)).toBe(
 			"<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
 		);
+	});
+});
+
+describe("streamed reply size caps (#3671)", () => {
+	const streamOf = (chunks: string[]): Response =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					const enc = new TextEncoder();
+					for (const k of chunks) c.enqueue(enc.encode(k));
+					c.close();
+				},
+			}),
+		);
+
+	it("rejects a single line longer than the line cap", async () => {
+		const huge = `data: {"choices":[{"delta":{"content":"${"a".repeat(MAX_STREAMED_LINE_BYTES + 10)}"}}]}`;
+		const err = await readStreamedChatCompletion(streamOf([huge])).catch((e) => e);
+		expect(err).toBeInstanceOf(StreamedReplyError);
+		expect(String(err.message)).toContain("line exceeded");
+	});
+
+	it("rejects a body that grows past the reply cap across many small lines", async () => {
+		const line = `{"response":"${"b".repeat(100_000)}"}\n`;
+		const n = Math.ceil(MAX_STREAMED_REPLY_BYTES / line.length) + 2;
+		const err = await readStreamedGenerate(streamOf(Array(n).fill(line))).catch((e) => e);
+		expect(err).toBeInstanceOf(StreamedReplyError);
+		expect(String(err.message)).toContain("reply exceeded");
+	});
+
+	it("still reads a normal streamed reply", async () => {
+		const out = await readStreamedGenerate(
+			streamOf(['{"response":"hi "}\n', '{"response":"there","done":true}\n']),
+		);
+		expect(out.response).toBe("hi there");
 	});
 });

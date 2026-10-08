@@ -473,12 +473,32 @@ function lookupQwenVariant(
 	return pending;
 }
 
-/** Yield each non-empty line of a streamed body as it arrives. */
-async function* bodyLines(res: Response): AsyncGenerator<string> {
+/** Cap on one streamed reply body. A few MB is far above any real model step (#3671). */
+export const MAX_STREAMED_REPLY_BYTES = 8 * 1024 * 1024;
+/** Cap on one line of a streamed body (one SSE frame or one JSON object). */
+export const MAX_STREAMED_LINE_BYTES = 1024 * 1024;
+
+/**
+ * Yield each non-empty line of a streamed body as it arrives. Fails with a
+ * StreamedReplyError when the body passes `maxBytes` or one line passes
+ * `maxLineBytes`, so a runaway server cannot grow the reassembly buffers
+ * without bound (the idle timer alone does not stop a server that keeps
+ * writing).
+ */
+async function* bodyLines(
+	res: Response,
+	maxBytes = MAX_STREAMED_REPLY_BYTES,
+	maxLineBytes = MAX_STREAMED_LINE_BYTES,
+): AsyncGenerator<string> {
 	if (!res.body) return;
 	const decoder = new TextDecoder();
 	let buf = "";
+	let total = 0;
 	for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+		total += chunk.byteLength;
+		if (total > maxBytes) {
+			throw new StreamedReplyError(`streamed reply exceeded ${maxBytes} bytes`);
+		}
 		buf += decoder.decode(chunk, { stream: true });
 		let nl = buf.indexOf("\n");
 		while (nl >= 0) {
@@ -486,6 +506,9 @@ async function* bodyLines(res: Response): AsyncGenerator<string> {
 			buf = buf.slice(nl + 1);
 			if (line) yield line;
 			nl = buf.indexOf("\n");
+		}
+		if (buf.length > maxLineBytes) {
+			throw new StreamedReplyError(`streamed reply line exceeded ${maxLineBytes} bytes`);
 		}
 	}
 	const rest = (buf + decoder.decode()).trim();
@@ -605,7 +628,7 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
  * done_reason taken from the final line (#3553). Throws StreamedReplyError on
  * an in-band `error` line, or when no line carried `done: true`.
  */
-async function readStreamedGenerate(res: Response): Promise<Record<string, unknown>> {
+export async function readStreamedGenerate(res: Response): Promise<Record<string, unknown>> {
 	let response = "";
 	let last: Record<string, unknown> = {};
 	for await (const line of bodyLines(res)) {
