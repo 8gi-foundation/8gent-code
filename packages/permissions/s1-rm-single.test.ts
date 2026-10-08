@@ -421,7 +421,9 @@ describe("systemOneGate", () => {
 		"rm -f run/g/index.lock",
 		"unlink run/worker.lock run/other.lock",
 		"mv run/worker.lock run/worker.lock.stale",
-		"rm -f run/case.lock",
+		// a case twin only exists on a case-insensitive filesystem; on Linux run/case.lock is absent,
+		// and removing an absent file is already allowed by the rm-of-nothing rule
+		...(process.platform === "darwin" ? ["rm -f run/case.lock"] : []),
 		"rm -f run/:colon.lock",
 		"rm -f run/nested/a.lock",
 		"rm -f run/mod/m.lock",
