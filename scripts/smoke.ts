@@ -25,10 +25,8 @@ import { generateText } from "ai";
 import { createModel, type ProviderName } from "../packages/ai/providers";
 import { agentTools } from "../packages/ai/tools";
 import { ROLE_REGISTRY } from "../packages/orchestration/role-registry";
-import {
-	BUILT_IN_SLASH_COMMANDS,
-	getBuiltInSlashCommands,
-} from "../apps/tui/src/lib/slash-commands";
+import { BUILT_IN_SLASH_COMMANDS } from "../apps/tui/src/lib/slash-commands";
+import { getBuiltInSlashCommands } from "../apps/tui/src/lib/slash-registry";
 import {
 	EXTERNAL_AGENT_PRESETS,
 	getPreset,
