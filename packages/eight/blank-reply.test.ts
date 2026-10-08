@@ -116,3 +116,65 @@ describe("#3524 blank model reply is a failed turn, not a finished one", () => {
 		expect(calls).toBe(1);
 	}, 60_000);
 });
+
+describe("#3524 headless run does not report a blank reply as success", () => {
+	const runWith = async (format: "text" | "stream-json") => {
+		const { runRunCommand } = await import("./run");
+		const out: string[] = [];
+		const err: string[] = [];
+		const ow = process.stdout.write.bind(process.stdout);
+		const ew = process.stderr.write.bind(process.stderr);
+		process.stdout.write = ((c: unknown) => (out.push(String(c)), true)) as typeof process.stdout.write;
+		process.stderr.write = ((c: unknown) => (err.push(String(c)), true)) as typeof process.stderr.write;
+		let code: number;
+		try {
+			code = await runRunCommand([
+				PROMPT,
+				"--provider",
+				"ollama",
+				"--model",
+				"m",
+				"--cwd",
+				repo,
+				"--output-format",
+				format,
+			]);
+		} finally {
+			process.stdout.write = ow;
+			process.stderr.write = ew;
+		}
+		return { code, out: out.join(""), err: err.join("") };
+	};
+
+	test("text mode exits non-zero and does not print the note as an answer", async () => {
+		calls = 0;
+		script = () => "";
+		const r = await runWith("text");
+		expect(r.code).toBe(1);
+		expect(r.out).not.toContain("No reply");
+		expect(r.err).toContain("[harness] No reply:");
+	}, 60_000);
+
+	test("stream-json emits a result with subtype error and exits non-zero", async () => {
+		calls = 0;
+		script = () => "  ";
+		const r = await runWith("stream-json");
+		expect(r.code).toBe(1);
+		const results = r.out
+			.split("\n")
+			.filter((l) => l.startsWith("{"))
+			.map((l) => JSON.parse(l))
+			.filter((e) => e.type === "result");
+		expect(results.length).toBe(1);
+		expect(results[0].subtype).toBe("error");
+		expect(results[0].error).toContain("[harness] No reply:");
+	}, 60_000);
+
+	test("a real reply still exits 0 with subtype ok", async () => {
+		calls = 0;
+		script = () => "A generic constraint limits which types a type parameter accepts.";
+		const r = await runWith("stream-json");
+		expect(r.code).toBe(0);
+		expect(r.out).toContain('"subtype":"ok"');
+	}, 60_000);
+});
