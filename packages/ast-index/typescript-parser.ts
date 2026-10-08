@@ -49,6 +49,15 @@ export function parseTypeScriptFile(filePath: string): FileOutline {
 	};
 }
 
+/**
+ * TypeScript normalises fileName to "/" separators. Absolute paths in symbols
+ * (filePath, id prefix) stay native, like path.join; only repo-relative
+ * paths are forward-slash (#3662).
+ */
+function nativeFileName(sourceFile: ts.SourceFile): string {
+	return path.normalize(sourceFile.fileName);
+}
+
 function extractSymbol(
 	node: ts.Node,
 	sourceFile: ts.SourceFile,
@@ -60,10 +69,10 @@ function extractSymbol(
 	// Function declarations
 	if (ts.isFunctionDeclaration(node) && node.name) {
 		return {
-			id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
+			id: buildSymbolId(nativeFileName(sourceFile), node.name.text, parentPath),
 			name: node.name.text,
 			kind: "function",
-			filePath: sourceFile.fileName,
+			filePath: nativeFileName(sourceFile),
 			startLine: startLine + 1,
 			endLine: endLine + 1,
 			signature: getFunctionSignature(node, sourceFile),
@@ -77,10 +86,10 @@ function extractSymbol(
 			const name = ts.isIdentifier(node.name) ? node.name.text : null;
 			if (name) {
 				return {
-					id: buildSymbolId(sourceFile.fileName, name, parentPath),
+					id: buildSymbolId(nativeFileName(sourceFile), name, parentPath),
 					name,
 					kind: "function",
-					filePath: sourceFile.fileName,
+					filePath: nativeFileName(sourceFile),
 					startLine: startLine + 1,
 					endLine: endLine + 1,
 					signature: getArrowFunctionSignature(node, sourceFile),
@@ -93,10 +102,10 @@ function extractSymbol(
 	// Class declarations
 	if (ts.isClassDeclaration(node) && node.name) {
 		return {
-			id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
+			id: buildSymbolId(nativeFileName(sourceFile), node.name.text, parentPath),
 			name: node.name.text,
 			kind: "class",
-			filePath: sourceFile.fileName,
+			filePath: nativeFileName(sourceFile),
 			startLine: startLine + 1,
 			endLine: endLine + 1,
 			signature: `class ${node.name.text}`,
@@ -108,10 +117,10 @@ function extractSymbol(
 	if (ts.isMethodDeclaration(node) && node.name) {
 		const name = ts.isIdentifier(node.name) ? node.name.text : node.name.getText(sourceFile);
 		return {
-			id: buildSymbolId(sourceFile.fileName, name, parentPath),
+			id: buildSymbolId(nativeFileName(sourceFile), name, parentPath),
 			name,
 			kind: "method",
-			filePath: sourceFile.fileName,
+			filePath: nativeFileName(sourceFile),
 			startLine: startLine + 1,
 			endLine: endLine + 1,
 			signature: getMethodSignature(node, sourceFile),
@@ -122,10 +131,10 @@ function extractSymbol(
 	// Interface declarations
 	if (ts.isInterfaceDeclaration(node)) {
 		return {
-			id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
+			id: buildSymbolId(nativeFileName(sourceFile), node.name.text, parentPath),
 			name: node.name.text,
 			kind: "interface" as SymbolKind,
-			filePath: sourceFile.fileName,
+			filePath: nativeFileName(sourceFile),
 			startLine: startLine + 1,
 			endLine: endLine + 1,
 			signature: `interface ${node.name.text}`,
@@ -136,10 +145,10 @@ function extractSymbol(
 	// Type alias declarations
 	if (ts.isTypeAliasDeclaration(node)) {
 		return {
-			id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
+			id: buildSymbolId(nativeFileName(sourceFile), node.name.text, parentPath),
 			name: node.name.text,
 			kind: "type",
-			filePath: sourceFile.fileName,
+			filePath: nativeFileName(sourceFile),
 			startLine: startLine + 1,
 			endLine: endLine + 1,
 			signature: `type ${node.name.text}`,
@@ -160,10 +169,10 @@ function extractSymbol(
 				!ts.isFunctionExpression(initializer)
 			) {
 				return {
-					id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
+					id: buildSymbolId(nativeFileName(sourceFile), node.name.text, parentPath),
 					name: node.name.text,
 					kind: "constant",
-					filePath: sourceFile.fileName,
+					filePath: nativeFileName(sourceFile),
 					startLine: startLine + 1,
 					endLine: endLine + 1,
 					signature: `const ${node.name.text}`,

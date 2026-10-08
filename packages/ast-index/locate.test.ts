@@ -561,7 +561,10 @@ describe("refreshDue", () => {
 	});
 });
 
-describe("ripgrep timeout", () => {
+// The stand-in rg is a #!/bin/sh script, which Windows cannot spawn.
+const describePosix = process.platform === "win32" ? describe.skip : describe;
+
+describePosix("ripgrep timeout", () => {
 	let slowDir: string;
 	let slowRg: string;
 	let countFile: string;
@@ -622,7 +625,8 @@ describe("ripgrep timeout", () => {
 	});
 });
 
-describe("a file name that contains :digits:", () => {
+// ":" is not a legal file name character on Windows.
+describePosix("a file name that contains :digits:", () => {
 	test("grep returns the whole file name", async () => {
 		write("odd/a:12:b.ts", "export const colonNamedMarker = 1;\n");
 		const r = await locate('"colonNamedMarker"', ctx());
