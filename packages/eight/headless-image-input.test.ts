@@ -109,7 +109,9 @@ beforeAll(async () => {
 	process.env.OLLAMA_HOST = `http://127.0.0.1:${server.port}`;
 	({ Agent } = await import("./agent"));
 	({ runRunCommand, parseRunArgs } = await import("./run"));
-});
+	// The two imports load the agent's module graph (about 6.7 s measured
+	// locally), past bun's 5 s default hook limit; the setup itself is cheap.
+}, 30_000);
 
 afterAll(() => {
 	server?.stop(true);
