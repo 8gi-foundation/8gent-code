@@ -26,6 +26,7 @@ import { createModel, type ProviderName } from "../packages/ai/providers";
 import { agentTools } from "../packages/ai/tools";
 import { ROLE_REGISTRY } from "../packages/orchestration/role-registry";
 import { BUILT_IN_SLASH_COMMANDS } from "../apps/tui/src/lib/slash-commands";
+import { findUndispatched } from "./lib/slash-dispatch";
 import { getBuiltInSlashCommands } from "../apps/tui/src/lib/slash-registry";
 import {
 	EXTERNAL_AGENT_PRESETS,
@@ -442,11 +443,23 @@ async function testSlashDispatchCoverage(): Promise<SmokeResult> {
 		// well within that window in current app.tsx.
 		const slice = src.slice(startIdx, startIdx + 250_000);
 		const cmds = getBuiltInSlashCommands();
-		const missing: string[] = [];
-		for (const c of cmds) {
-			const re = new RegExp(`case\\s+["']${c.name}["']`);
-			if (!re.test(slice)) missing.push(c.name);
-		}
+		// Commands are dispatched in app.tsx (switch cases plus the default
+		// branch) or, for /goal and /subgoal, inside the command-input component.
+		const inputPath = path.join(
+			import.meta.dir,
+			"..",
+			"apps",
+			"tui",
+			"src",
+			"components",
+			"command-input.tsx",
+		);
+		const inputSrc = fs.existsSync(inputPath) ? fs.readFileSync(inputPath, "utf-8") : "";
+		const missing = findUndispatched(
+			cmds.map((c) => c.name),
+			[slice],
+			[inputSrc],
+		);
 		if (missing.length > 0) {
 			return {
 				ok: false,

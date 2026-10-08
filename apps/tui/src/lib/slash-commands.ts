@@ -11,7 +11,6 @@ export type SlashCommand =
 	| "provider"
 	| "voice"
 	| "theme"
-	| "language"
 	| "infinite"
 	| "onboarding"
 	| "preferences"
@@ -36,8 +35,6 @@ export type SlashCommand =
 	| "debug"
 	| "music"
 	| "dj"
-	| "sprite"
-	| "animate"
 	| "pet"
 	| "export"
 	| "fork"
@@ -120,12 +117,6 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/theme [light|dark|auto]",
 	},
 	{
-		name: "language",
-		aliases: ["lang", "l"],
-		description: "Set response language",
-		usage: "/language [code]",
-	},
-	{
 		name: "infinite",
 		aliases: ["inf", "∞"],
 		description: "Enable infinite mode (autonomous until done)",
@@ -172,18 +163,6 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["play", "radio"],
 		description: "DJ Eight - YouTube, radio, produce, mix",
 		usage: "/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
-	},
-	{
-		name: "sprite",
-		aliases: ["spr"],
-		description: "Generate a 2D sprite animation from a prompt (Wave 74)",
-		usage: "/sprite [a walking robot] [--frames 8] [--gif|--webp]",
-	},
-	{
-		name: "animate",
-		aliases: ["anim8"],
-		description: "List generated sprite assets or generate a new animation",
-		usage: "/animate [list|gen <prompt>]",
 	},
 	{
 		name: "pet",

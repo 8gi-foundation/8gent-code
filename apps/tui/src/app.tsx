@@ -5042,6 +5042,74 @@ export function App({
 					else if (command === ("vision" as any)) {
 						handleVisionCommand(args);
 					}
+					// Handle /toolshed command: skill registry list | search | stats
+					else if ((command as string) === "toolshed") {
+						const sub = args[0] || "stats";
+						import("../../../packages/toolshed/skill-registry.js")
+							.then(({ getSkillRegistry }) => {
+								const registry = getSkillRegistry();
+								if (sub === "stats") {
+									const st = registry.getStats();
+									addSystemMessage(
+										`Toolshed: ${st.skillCount} skills, ${st.capabilities} capabilities, ~${st.totalTokens} tokens (avg ${st.avgTokensPerSkill}).`,
+									);
+								} else if (sub === "list" || sub === "search") {
+									const pattern = sub === "search" ? args.slice(1).join(" ") : "";
+									if (sub === "search" && !pattern) {
+										addSystemMessage("Usage: /toolshed search <pattern>");
+										return;
+									}
+									const found = registry.search(pattern || ".");
+									addSystemMessage(
+										found.length === 0
+											? "Toolshed: no skills match."
+											: `Toolshed: ${found.length} skills\n${found
+													.slice(0, 40)
+													.map((k) => `  ${k.name}  ${k.description}`)
+													.join("\n")}`,
+									);
+								} else {
+									addSystemMessage("Usage: /toolshed [list|search <pattern>|stats]");
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`Toolshed: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
+					// Handle /quarantine command: skill quarantine manager
+					else if ((command as string) === "quarantine") {
+						const sub = args[0] || "list";
+						const rest = args.slice(1);
+						import("../../../packages/quarantine/index.js")
+							.then(async ({ getQuarantineManager }) => {
+								const qm = getQuarantineManager();
+								if (sub === "list") {
+									const entries = qm.list(rest[0] as never);
+									addSystemMessage(
+										entries.length === 0
+											? "Quarantine: empty."
+											: entries.map((e) => `  ${e.id}  ${e.status}  ${e.name}`).join("\n"),
+									);
+								} else if (sub === "add" && rest[0]) {
+									const entry = await qm.quarantine(rest[0]);
+									addSystemMessage(`Quarantined ${entry.name} as ${entry.id}. Run /quarantine scan ${entry.id}.`);
+								} else if (sub === "scan" && rest[0]) {
+									const result = await qm.scan(rest[0]);
+									addSystemMessage(`Scan ${rest[0]}: ${result.verdict}`);
+								} else if (sub === "release" && rest[0]) {
+									await qm.release(rest[0]);
+									addSystemMessage(`Released ${rest[0]} to the toolshed.`);
+								} else if (sub === "reject" && rest[0]) {
+									await qm.reject(rest[0], rest.slice(1).join(" ") || "rejected from TUI");
+									addSystemMessage(`Rejected ${rest[0]}.`);
+								} else {
+									addSystemMessage("Usage: /quarantine [add <source>|scan <id>|list [status]|release <id>|reject <id> [reason]]");
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`Quarantine: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// Workspace tab commands
 					else if (command === ("notes" as any)) {
 						workspaceTabs.addTab("notes");
