@@ -195,3 +195,79 @@ describe("describe_image goes through the vision router (#3642)", () => {
 		expect(result).toContain("ollama pull");
 	});
 });
+
+// The image tools take the same path guard and policy action as read_file.
+// Added test-first: a path outside the workspace is refused whether or not
+// the file exists, so the refusal is not an existence oracle, and the policy
+// engine sees both tools as file reads.
+describe("read_image and describe_image use the standard path guard and policy", () => {
+	let outsideDir: string;
+	beforeAll(async () => {
+		outsideDir = tempDir("tools-read-image-outside-");
+		const px = Buffer.alloc(32 * 32 * 3, 90);
+		await sharp(px, { raw: { width: 32, height: 32, channels: 3 } })
+			.png()
+			.toFile(path.join(outsideDir, "outside.png"));
+	});
+
+	const seeing = () =>
+		new ToolExecutor(root, "primary", undefined, { visionCapable: async () => true });
+
+	test("a relative path that escapes the workspace is refused, nothing attached", async () => {
+		const rel = path.relative(root, path.join(outsideDir, "outside.png"));
+		expect(rel.startsWith("..")).toBe(true);
+		const result = await seeing().execute("read_image", { path: rel });
+		expect(result.startsWith("Error reading image:")).toBe(true);
+		expect(result).toContain("outside working directory");
+		expect(result).not.toContain(IMAGE_ATTACHMENT_MARKER);
+	});
+
+	test("an absolute path outside the workspace gets the same refusal whether the file exists or not", async () => {
+		const existing = await seeing().execute("read_image", {
+			path: path.join(outsideDir, "outside.png"),
+		});
+		const missing = await seeing().execute("read_image", {
+			path: path.join(outsideDir, "nope.png"),
+		});
+		expect(existing).toContain("outside working directory");
+		expect(missing).toContain("outside working directory");
+		expect(existing).not.toContain("not found");
+		expect(missing).not.toContain("not found");
+		// Identical apart from the path the caller supplied.
+		expect(existing.replace("outside.png", "X")).toBe(missing.replace("nope.png", "X"));
+	});
+
+	test("a credential path is refused by the policy gate before the handler runs", async () => {
+		// Mapped to the read_file action, so ToolG8 answers first, with the
+		// path guard's reason; the handler never sees the path.
+		const result = await seeing().execute("read_image", { path: "~/.ssh/id_ed25519" });
+		expect(result).toContain("[TOOLG8 BLOCKED]");
+		expect(result).toContain("did NOT run");
+		expect(result).toContain("credential");
+		expect(result).not.toContain("not found");
+		expect(result).not.toContain(IMAGE_ATTACHMENT_MARKER);
+	});
+
+	test("describe_image is refused before any vision model is consulted", async () => {
+		let resolverCalled = false;
+		const executor = new ToolExecutor(root, "primary", undefined, {
+			resolveVisionModel: async () => {
+				resolverCalled = true;
+				throw new Error("resolver must not run for a refused path");
+			},
+		});
+		const result = await executor.execute("describe_image", {
+			path: path.join(outsideDir, "outside.png"),
+		});
+		expect(result.startsWith("Error describing image:")).toBe(true);
+		expect(result).toContain("outside working directory");
+		expect(resolverCalled).toBe(false);
+	});
+
+	test("both tools map to the read_file policy action", () => {
+		const map = (ToolExecutor as unknown as { TOOL_ACTION_MAP: Record<string, string> })
+			.TOOL_ACTION_MAP;
+		expect(map.read_image).toBe("read_file");
+		expect(map.describe_image).toBe("read_file");
+	});
+});

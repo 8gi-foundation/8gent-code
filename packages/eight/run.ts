@@ -50,9 +50,12 @@ export interface RunOptions {
  *
  * --image limits (v1, #3641): one image per run; it reaches the model only
  * on the local text-tool path (ollama, lmstudio, llama-server) when the
- * model can see, otherwise a side vision model describes it; the native AI
- * SDK path (cloud providers) is unchanged; Ollama's raw ChatML recovery
- * path sends text only.
+ * model can see, otherwise a side vision model describes it (local first;
+ * with OPENROUTER_API_KEY set, the VisionInterpreter may use a hosted vision
+ * model for that description, as in the TUI); the native AI SDK path (cloud
+ * providers) is unchanged; Ollama's raw ChatML recovery path sends text
+ * only; files over 20 MB are refused and the image is downscaled to fit
+ * 1024x1024 before it leaves the process.
  */
 export function parseRunArgs(argv: string[]): RunOptions {
 	let yes = false;
@@ -169,10 +172,16 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	".webp": "image/webp",
 };
 
+/** Largest --image file accepted, before decoding (#3641). */
+export const MAX_RUN_IMAGE_BYTES = 20 * 1024 * 1024;
+
 /**
  * The `--image` file as the agent takes it: base64 plus its media type (#3641).
- * A missing file or an unsupported extension is a usage error, reported the
- * way a missing prompt is, before any model is contacted.
+ * A missing file, an unsupported extension or a file over MAX_RUN_IMAGE_BYTES
+ * is a usage error, reported the way a missing prompt is, before any model is
+ * contacted. The image is downscaled to fit 1024x1024 exactly as read_image
+ * does, so what reaches the model is bounded the same way on both paths;
+ * sharp's own pixel limit bounds the decode.
  */
 export async function loadRunImage(
 	file: string,
@@ -181,8 +190,7 @@ export async function loadRunImage(
 	const path = await import("node:path");
 	const fs = await import("node:fs");
 	const absolute = path.isAbsolute(file) ? file : path.join(cwd, file);
-	const mimeType = IMAGE_MIME_TYPES[path.extname(absolute).toLowerCase()];
-	if (!mimeType) {
+	if (!IMAGE_MIME_TYPES[path.extname(absolute).toLowerCase()]) {
 		return {
 			error: `Error: --image must be a png, jpg, gif or webp file, got "${file}".`,
 		};
@@ -190,7 +198,22 @@ export async function loadRunImage(
 	if (!fs.existsSync(absolute)) {
 		return { error: `Error: --image file not found: ${absolute}` };
 	}
-	return { base64: fs.readFileSync(absolute).toString("base64"), mimeType };
+	const size = fs.statSync(absolute).size;
+	if (size > MAX_RUN_IMAGE_BYTES) {
+		return {
+			error: `Error: --image file is too large (${(size / (1024 * 1024)).toFixed(1)} MB, limit ${MAX_RUN_IMAGE_BYTES / (1024 * 1024)} MB): ${absolute}`,
+		};
+	}
+	try {
+		const { resizeImage } = await import("../tools/image");
+		const shown = await resizeImage(absolute, 1024, 1024);
+		const format = shown.format === "jpg" ? "jpeg" : shown.format;
+		return { base64: shown.base64, mimeType: `image/${format}` };
+	} catch (err) {
+		return {
+			error: `Error: --image could not be decoded as an image: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
 }
 
 /**

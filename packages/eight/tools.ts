@@ -1580,6 +1580,9 @@ export class ToolExecutor {
 	 */
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
+		// Image tools read a file the model names, so they take the read gate too.
+		read_image: "read_file",
+		describe_image: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
 		edit_file: "write_file",
@@ -2785,9 +2788,15 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleReadImage(imagePath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(imagePath)
-			? imagePath
-			: path.join(this.workingDirectory, imagePath);
+		// The same path guard as read_file: workspace containment, credential
+		// and device paths, symlink escapes. It runs before any existence check,
+		// so a refused path reads the same whether or not the file is there.
+		let absolutePath: string;
+		try {
+			absolutePath = safePath(imagePath, this.workingDirectory);
+		} catch (err) {
+			return `Error reading image: ${err instanceof Error ? err.message : String(err)}`;
+		}
 
 		try {
 			// A model that can see gets the pixels (#3641): downscaled to fit
@@ -2832,9 +2841,13 @@ export class ToolExecutor {
 	}
 
 	private async handleDescribeImage(imagePath: string, prompt?: string): Promise<string> {
-		const absolutePath = path.isAbsolute(imagePath)
-			? imagePath
-			: path.join(this.workingDirectory, imagePath);
+		// Same guard as read_image, and before the vision router is consulted.
+		let absolutePath: string;
+		try {
+			absolutePath = safePath(imagePath, this.workingDirectory);
+		} catch (err) {
+			return `Error describing image: ${err instanceof Error ? err.message : String(err)}`;
+		}
 
 		try {
 			// The vision router picks the model (#3642): whatever vision model is

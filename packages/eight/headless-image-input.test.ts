@@ -14,7 +14,15 @@
  */
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -365,4 +373,86 @@ describe("`8gent run --image` (#3641)", () => {
 		expect(bodies.length).toBe(start);
 		expect(err.join("")).toContain("png, jpg, gif or webp");
 	});
+});
+
+// Added test-first: the --image file is capped by size and downscaled the
+// same way read_image downscales, before anything reaches a model.
+describe("`8gent run --image` size cap and downscale", () => {
+	test("an oversize --image is a usage error before any model request", async () => {
+		const start = bodies.length;
+		const big = join(repo, "huge.png");
+		writeFileSync(big, Buffer.alloc(21 * 1024 * 1024, 1));
+		const out: string[] = [];
+		const write = spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+			out.push(String(chunk));
+			return true;
+		}) as typeof process.stdout.write);
+		let code: number;
+		try {
+			code = await runRunCommand([
+				"--provider",
+				"ollama",
+				"--model",
+				"see",
+				"--cwd",
+				repo,
+				"--image",
+				"huge.png",
+				"--output-format",
+				"stream-json",
+				"Which button do I click?",
+			]);
+		} finally {
+			write.mockRestore();
+		}
+		expect(code).toBe(1);
+		expect(bodies.length).toBe(start);
+		const events = out
+			.join("")
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l) as { type: string; subtype?: string; message?: string });
+		const err = events.find((e) => e.type === "error");
+		expect(err?.subtype).toBe("usage");
+		expect(err?.message).toMatch(/too large|MB/);
+	});
+
+	test("a large --image reaches the model downscaled to fit 1024x1024", async () => {
+		const start = bodies.length;
+		const px = Buffer.alloc(1400 * 900 * 3, 40);
+		await sharp(px, { raw: { width: 1400, height: 900, channels: 3 } })
+			.png()
+			.toFile(join(repo, "wide.png"));
+		const write = spyOn(process.stdout, "write").mockImplementation(
+			(() => true) as typeof process.stdout.write,
+		);
+		let code: number;
+		try {
+			code = await runRunCommand([
+				"--provider",
+				"ollama",
+				"--model",
+				"see",
+				"--cwd",
+				repo,
+				"--image",
+				"wide.png",
+				"--output-format",
+				"stream-json",
+				"Here is a wide screenshot of the editor. Which button do I click to save the document? Answer in one line.",
+			]);
+		} finally {
+			write.mockRestore();
+		}
+		expect(code).toBe(0);
+		const parts = imageParts(bodies[start]);
+		expect(parts).toHaveLength(1);
+		const url = parts[0].image_url?.url ?? "";
+		expect(url.startsWith("data:image/png;base64,")).toBe(true);
+		const meta = await sharp(
+			Buffer.from(url.slice("data:image/png;base64,".length), "base64"),
+		).metadata();
+		expect(meta.width).toBe(1024);
+		expect(meta.height).toBe(658);
+	}, 60_000);
 });
