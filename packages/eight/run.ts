@@ -47,6 +47,12 @@ export interface RunOptions {
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp)
  *   <prompt tokens...>           everything positional, joined with spaces
+ *
+ * --image limits (v1, #3641): one image per run; it reaches the model only
+ * on the local text-tool path (ollama, lmstudio, llama-server) when the
+ * model can see, otherwise a side vision model describes it; the native AI
+ * SDK path (cloud providers) is unchanged; Ollama's raw ChatML recovery
+ * path sends text only.
  */
 export function parseRunArgs(argv: string[]): RunOptions {
 	let yes = false;

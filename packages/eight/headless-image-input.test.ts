@@ -14,7 +14,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -163,8 +163,63 @@ describe("read_image on a headless text-tool turn (#3641)", () => {
 		expect(text).toContain("Tool read_image returned:");
 		expect(text).toContain('"width": 64');
 		expect(text).not.toContain("[image-attachment]");
-		// A tool_use/tool_result event pair fired for the call.
 		await agent.cleanup();
+	}, 60_000);
+
+	test("the pixels never reach bookkeeping: session file, honesty ledger, tool events", async () => {
+		// 8PO review of #3677: the run wrapper booked the raw executor result,
+		// attachment and all, before the loop stripped it.
+		const previews: string[] = [];
+		const agent = build("see", {
+			onToolStart: () => {},
+			onToolEnd: (e: { toolName: string; resultPreview?: string }) => {
+				if (e.toolName === "read_image") previews.push(e.resultPreview ?? "");
+			},
+		});
+		await agent.chat(PROMPT);
+		await agent.cleanup();
+
+		expect(previews.length).toBeGreaterThanOrEqual(1);
+		for (const p of previews) {
+			expect(p).toContain('"width": 64');
+			expect(p).not.toContain("data:image");
+			expect(p).not.toContain("base64,");
+			expect(p).not.toContain("[image-attachment]");
+		}
+
+		const ledger = (agent as unknown as { turnToolLedger: Array<{ name: string; result: string }> })
+			.turnToolLedger;
+		const entries = ledger.filter((e) => e.name === "read_image");
+		expect(entries.length).toBeGreaterThanOrEqual(1);
+		for (const e of entries) {
+			expect(e.result).toContain('"width": 64');
+			expect(e.result).not.toContain("data:image");
+			expect(e.result).not.toContain("base64,");
+		}
+
+		// The session file this agent wrote (SessionWriter resolves its directory
+		// from os.homedir() at module load, so it is read from the writer itself,
+		// not guessed from $HOME): it records the read_image call and carries no
+		// data URL or base64 payload.
+		const sessionFile = (agent as unknown as { sessionWriter: { filePath: string } }).sessionWriter
+			.filePath;
+		const session = readFileSync(sessionFile, "utf-8");
+		expect(session).toContain('"name":"read_image"');
+		// The metadata text is there (JSON-escaped inside the jsonl line).
+		expect(session).toContain("attached to this message for you to look at");
+		expect(session).not.toContain("data:image");
+		expect(session).not.toContain("base64,");
+		expect(session).not.toContain("[image-attachment]");
+
+		// And nothing else the agent wrote under the faked $HOME carries pixels.
+		const files = (readdirSync(home, { recursive: true }) as string[])
+			.map((f) => join(home, f))
+			.filter((f) => statSync(f).isFile());
+		for (const f of files) {
+			const text = readFileSync(f, "utf-8");
+			expect(text, f).not.toContain("data:image");
+			expect(text, f).not.toContain("base64,");
+		}
 	}, 60_000);
 
 	test("a model that cannot see gets metadata, and no request carries an image", async () => {

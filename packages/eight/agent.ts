@@ -60,7 +60,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { stripDoneMarker } from "../ai/text-tool-loop";
+import { splitImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
@@ -832,24 +832,31 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					step,
 				);
 
+				// `result` is what the loop gets, attachment included; `shown` is the
+				// text part, and the only thing the ledger, the session file, the
+				// error check and the events ever see (#3641). Pixels are for the
+				// model, not for bookkeeping.
 				let result = "";
+				let shown = "";
 				let success = true;
 				try {
 					result = await this.executor.execute(toolName, args);
+					shown = splitImageAttachment(result).text;
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
 					// for event + session bookkeeping.
-					success = !isErrorToolResult(result);
+					success = !isErrorToolResult(shown);
 				} catch (err) {
 					success = false;
 					result = `Error running tool "${toolName}": ${err instanceof Error ? err.message : String(err)}`;
+					shown = result;
 				}
 
 				const durationMs = Date.now() - startedAt;
 
 				// Honesty ledger (issue #2747): record the REAL outcome so the final
 				// reply can be gated against what actually happened.
-				this.turnToolLedger.push({ name: toolName, args, success, result: result.slice(0, 500) });
+				this.turnToolLedger.push({ name: toolName, args, success, result: shown.slice(0, 500) });
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				// A call refused before it ran does not spend the global budget (#3409).
@@ -865,7 +872,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					this.sessionWriter.writeToolResult(
 						toolCallId,
 						true,
-						result.slice(0, 2000),
+						shown.slice(0, 2000),
 						durationMs,
 						toolName,
 						step,
@@ -875,12 +882,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					} else if (toolName === "edit_file" && typeof toolPath === "string") {
 						this.sessionWriter.trackFileModified(toolPath);
 					}
-					if (toolName === "git_commit" && result.includes("[")) {
-						const commitHash = extractCommitHash(result);
+					if (toolName === "git_commit" && shown.includes("[")) {
+						const commitHash = extractCommitHash(shown);
 						if (commitHash) this.sessionWriter.trackGitCommit(commitHash);
 					}
 				} else {
-					this.sessionWriter.writeToolError(toolCallId, toolName, result, step);
+					this.sessionWriter.writeToolError(toolCallId, toolName, shown, step);
 				}
 
 				this.events.onToolEnd?.({
@@ -890,7 +897,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					success,
 					durationMs,
 					stepNumber: step,
-					resultPreview: result.slice(0, 200),
+					resultPreview: shown.slice(0, 200),
 				});
 
 				return result;
