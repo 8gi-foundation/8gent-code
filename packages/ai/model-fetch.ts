@@ -23,6 +23,12 @@
  * ceiling and fires as TurnTimeoutError(timeoutMs, label, "ceiling"). Only
  * pass `idleMs` for a STREAMED request: a non-streamed reply sends nothing
  * until it is done, so its whole generation would count as one quiet gap.
+ *
+ * First-token budget (#3643): a local runtime sends nothing, often not even
+ * headers, while it prefills the prompt. With `firstByteMs`, the wait for the
+ * FIRST body byte is bounded by that budget instead of `idleMs`; the idle gap
+ * takes over once bytes flow. It fires as TurnTimeoutError(firstByteMs,
+ * "no first output ...", "idle").
  */
 
 import { TurnTimeoutError, resolveTurnTimeoutMs } from "../eight/turn-timeout";
@@ -40,6 +46,11 @@ export type ModelFetchOptions = {
 	label?: string;
 	/** Fail after this many ms with no bytes (re-armed per chunk). Default: off. */
 	idleMs?: number;
+	/**
+	 * With `idleMs`: how long to wait for the first body byte (prompt prefill).
+	 * Default: `idleMs`.
+	 */
+	firstByteMs?: number;
 	/** Timer source. Default: the global setTimeout/clearTimeout. */
 	timers?: ModelFetchTimers;
 };
@@ -66,10 +77,13 @@ export async function modelFetch(
 	const timer = timers.setTimeout(() => fire("ceiling"), timeoutMs);
 	(timer as { unref?: () => void })?.unref?.();
 	let idleTimer: unknown = null;
+	// Until the first body byte the gap is the first-token budget (prefill).
+	let gotFirstByte = false;
+	const firstByteMs = idleMs == null ? undefined : (opts.firstByteMs ?? idleMs);
 	const armIdle = () => {
 		if (idleMs == null) return;
 		if (idleTimer != null) timers.clearTimeout(idleTimer);
-		idleTimer = timers.setTimeout(() => fire("idle"), idleMs);
+		idleTimer = timers.setTimeout(() => fire("idle"), gotFirstByte ? idleMs : (firstByteMs ?? idleMs));
 		(idleTimer as { unref?: () => void })?.unref?.();
 	};
 	const stop = () => {
@@ -80,8 +94,12 @@ export async function modelFetch(
 	const asTimeout = (err: unknown): unknown => {
 		if (!deadline.signal.aborted || init.signal?.aborted) return err;
 		if (firedBy === "idle" && idleMs != null) {
-			const what = `no output for ${idleMs}ms`;
-			return new TurnTimeoutError(idleMs, opts.label ? `${opts.label}, ${what}` : what, "idle");
+			const ms = gotFirstByte ? idleMs : (firstByteMs ?? idleMs);
+			const what =
+				gotFirstByte || ms === idleMs
+					? `no output for ${ms}ms`
+					: `no first output for ${ms}ms (prompt prefill budget)`;
+			return new TurnTimeoutError(ms, opts.label ? `${opts.label}, ${what}` : what, "idle");
 		}
 		return new TurnTimeoutError(timeoutMs, opts.label, "ceiling");
 	};
@@ -103,7 +121,8 @@ export async function modelFetch(
 	}
 
 	// Re-arm the idle gap on every chunk; any abort ends the read at once.
-	armIdle();
+	// Headers alone are not output: the first-token timer keeps running until
+	// the first body byte (some servers send headers before prefill).
 	const reader = res.body.getReader();
 	const aborted = new Promise<never>((_, reject) => {
 		const onAbort = () => reject(signal.reason);
@@ -120,6 +139,7 @@ export async function modelFetch(
 					controller.close();
 					return;
 				}
+				gotFirstByte = true;
 				armIdle();
 				controller.enqueue(chunk.value);
 			} catch (err) {
