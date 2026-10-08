@@ -300,3 +300,30 @@ describe("finishWithProjectCheck", () => {
 		}
 	});
 });
+
+describe("finishWithProjectCheck, red to red without recognised failures", () => {
+	const never = async () => {
+		throw new Error("must not chat");
+	};
+	const FREE = "Exit code 1:\nSome specs did not pass\n";
+	for (const [label, before, after] of [
+		["neither side parsed", FREE, FREE],
+		["before not parsed", FREE, CARGO_TEST_RED],
+		["after not parsed", CARGO_TEST_RED, FREE],
+	] as const) {
+		test(`${label}: unverified, not pre-existing, not sent back`, async () => {
+			const v = await finishWithProjectCheck({
+				baseline: base(before),
+				changed: true,
+				finalText: "DONE",
+				run: async () => after,
+				chat: never,
+				env: {},
+			});
+			expect(v.status).toBe("unverified");
+			expect(verdictNotice(v)).toContain(
+				"NOT VERIFIED: `cargo test` was already failing before this run; could not tell whether this run added failures",
+			);
+		});
+	}
+});

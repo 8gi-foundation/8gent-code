@@ -280,3 +280,36 @@ for (const l of LANGS) {
 		}, 180_000);
 	});
 }
+
+describe("done gate, unrecognised test runner", () => {
+	test("red before and after with free-text output: NOT VERIFIED, exit 0, not sent back", async () => {
+		lang = {
+			name: "freetext",
+			available: true,
+			setup: (dir, start) => {
+				writeFileSync(
+					join(dir, "package.json"),
+					JSON.stringify({
+						name: "ex",
+						scripts: { test: "echo 'Some specs did not pass, see report' && exit 1" },
+					}),
+				);
+				writeFileSync(join(dir, "index.js"), start);
+			},
+			file: "index.js",
+			green: "",
+			red: "module.exports = 1;\n",
+			broken: "module.exports = 2;\n",
+		};
+		plan = "break";
+		const { code, events } = await headless(lang.red);
+		const result = resultOf(events);
+		expect(result?.subtype).toBe("ok");
+		expect(result?.project_check?.status).toBe("unverified");
+		expect(result?.project_check?.notice).toContain("NOT VERIFIED");
+		expect(result?.final_text).toContain("could not tell whether this run added failures");
+		expect(result?.final_text).not.toContain("pre-existing");
+		expect(code).toBe(0);
+		expect(bodies.some(sawGate)).toBe(false);
+	}, 180_000);
+});

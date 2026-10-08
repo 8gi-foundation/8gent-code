@@ -230,6 +230,9 @@ RUN DONE GATE (8gent run):
   still worse ends the run with exit 1 and a result/error event. Failures that were
   already there before the run are reported as pre-existing, exit 0. A check that
   times out or cannot run is reported as NOT VERIFIED in the final message.
+  Trade-off: failures are only told apart for cargo/rustc, bun, go and tsc output.
+  If the project was already red and its runner prints anything else (jest, vitest,
+  mocha, free text), the run is NOT VERIFIED, exit 0: new failures are not caught.
   EIGHT_DONE_GATE=0              Turn the gate off (old behaviour, nothing checked)
   EIGHT_DONE_GATE_ATTEMPTS=<n>   Fix rounds sent back to the agent (default 2, max 5)
   EIGHT_DONE_GATE_TIMEOUT_SEC=<s>  Bound on each check run (default and max 300)
