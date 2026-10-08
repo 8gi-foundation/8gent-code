@@ -71,7 +71,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import { emptyReplyNote, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
@@ -2558,7 +2558,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
 			}
-			const content = gatedNative.content;
+			// #3524: a blank reply is a failed turn, never a finished one.
+			const content = gatedNative.content.trim() === ""
+				? emptyReplyNote(this.turnToolLedger.length)
+				: gatedNative.content;
 
 			// Apply personality voice flavoring to the response (never on a reply
 			// the honesty gate rewrote - no celebration on a failure).
