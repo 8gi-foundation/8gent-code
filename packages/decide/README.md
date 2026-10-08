@@ -321,6 +321,21 @@ and replaces Selene.
   `rm -f /tmp/todos.json` with no such file skips the judge (#3381). The
   rules' text test for temp paths is not trusted for this. An existing file
   in a temp root always goes to the judge.
+- **rm of one stale scratch file (#3669).** Under the same flag, `rm <file>`,
+  `rm -f <file>` or `unlink <file>` skips the judge when the one operand is
+  an untracked regular file inside the workspace that is scratch-style: a
+  directory segment of its real relative path is `run`, `tmp` or `.cache`,
+  or its name ends in `.lock` or `.pid`
+  (`packages/permissions/s1-rm-single.ts`). The pilot's stale
+  `run/worker.lock`, whose owner pid had exited, is the case. Still judged:
+  any tracked or staged file (under `run/` or not), an untracked file that
+  is not scratch-style (`.env`, `old.log`), a directory, a symlink (pointing
+  anywhere), a path under a symlinked directory that resolves outside, a
+  glob, brace, quote or `$`, `-r`/`-R`/`-d`/`--`, two or more operands, an
+  absolute or `..` path, anything under `.git/` (by written or real path),
+  and `mv`, for which no rule fires. When the command was close to that
+  shape but refused, the block message says why in plain words and what is
+  allowed, so a block is not a dead end.
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.
