@@ -121,8 +121,44 @@ beforeEach(() => {
 	symlinkSync(join(outside, "locks"), join(ws, "escape"));
 	symlinkSync(join(ws, "run", "worker.lock"), join(ws, "run", "alias.lock"));
 	symlinkSync(join(ws, ".git"), join(ws, "run", "g"));
-	// A .git internal that looks exactly like a stale lock.
+	// Tracked files whose names need the literal, case-insensitive check:
+	// a capitalised twin and a name that starts with a colon.
+	writeFileSync(join(ws, "run", "Case.lock"), "pid=1");
+	writeFileSync(join(ws, "run", ":colon.lock"), "pid=1");
+	git(ws, "add", "--", "run/Case.lock", ":(literal)run/:colon.lock");
+	git(ws, "commit", "-qm", "names");
+	writeFileSync(join(ws, "run", ":free.lock"), "pid=1");
+	// An independent repository nested under run/, with a tracked lock.
+	mkdirSync(join(ws, "run", "nested"));
+	git(join(ws, "run", "nested"), "init", "-q");
+	writeFileSync(join(ws, "run", "nested", "a.lock"), "pid=1");
+	writeFileSync(join(ws, "run", "nested", "free.lock"), "pid=1");
+	git(join(ws, "run", "nested"), "add", "a.lock");
+	git(join(ws, "run", "nested"), "commit", "-qm", "nested");
+	// A submodule under run/, with a tracked lock of its own.
+	const modSrc = join(outside, "modsrc");
+	mkdirSync(modSrc);
+	git(modSrc, "init", "-q");
+	writeFileSync(join(modSrc, "m.lock"), "pid=1");
+	git(modSrc, "add", "m.lock");
+	git(modSrc, "commit", "-qm", "mod");
+	git(ws, "-c", "protocol.file.allow=always", "submodule", "add", "-q", modSrc, "run/mod");
+	git(ws, "commit", "-qm", "submodule");
+	// A .git internal that looks exactly like a stale lock. Written after the
+	// last git command above, since git refuses to work while it exists.
 	writeFileSync(join(ws, ".git", "index.lock"), "");
+	// Dependency lockfiles and sensitive names in scratch places, all untracked.
+	writeFileSync(join(ws, "run", "bun.lock"), "{}");
+	writeFileSync(join(ws, "tmp", "yarn.lock"), "");
+	writeFileSync(join(ws, "Cargo.lock"), "");
+	writeFileSync(join(ws, "run", ".env"), "SECRET=1");
+	writeFileSync(join(ws, "run", ".env.local"), "SECRET=1");
+	writeFileSync(join(ws, ".cache", "credentials.pem"), "");
+	writeFileSync(join(ws, ".cache", "id.key"), "");
+	writeFileSync(join(ws, "run", "cert.p12"), "");
+	writeFileSync(join(ws, "tmp", "data.sqlite"), "");
+	writeFileSync(join(ws, "tmp", "data.sqlite3"), "");
+	writeFileSync(join(ws, "tmp", "app.db"), "");
 	judge = new AlwaysDangerous();
 	_setSystemOneOverridesForTests({
 		createDecider: () => createDecider({ backend: judge, cacheSize: 0 }),
@@ -190,6 +226,25 @@ describe("singleFileDelete", () => {
 		["a chain", "rm -f run/worker.lock; echo done"],
 		["mv of the lock", "mv run/worker.lock run/worker.lock.stale"],
 		["a different binary", "shred run/worker.lock"],
+		// Tracked status is read from the file's own directory, by literal name.
+		["a tracked file spelt in another case", "rm -f run/case.lock"],
+		["a tracked file spelt in its own case", "rm -f run/Case.lock"],
+		["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"],
+		["a file tracked by a nested repository", "rm -f run/nested/a.lock"],
+		["a file tracked by a submodule", "rm -f run/mod/m.lock"],
+		// Dependency lockfiles are project state, not scratch.
+		["bun.lock under run/", "rm -f run/bun.lock"],
+		["yarn.lock under tmp/", "rm -f tmp/yarn.lock"],
+		["Cargo.lock at the root", "rm -f Cargo.lock"],
+		// Sensitive names, even inside scratch directories.
+		[".env under run/", "rm -f run/.env"],
+		[".env.local under run/", "rm -f run/.env.local"],
+		["a .pem under .cache/", "rm -f .cache/credentials.pem"],
+		["a .key under .cache/", "rm -f .cache/id.key"],
+		["a .p12 under run/", "rm -f run/cert.p12"],
+		["a .sqlite under tmp/", "rm -f tmp/data.sqlite"],
+		["a .sqlite3 under tmp/", "rm -f tmp/data.sqlite3"],
+		["a .db under tmp/", "rm -f tmp/app.db"],
 	];
 	for (const [why, cmd] of refused) {
 		test(`refuses ${why}: ${cmd}`, () => {
@@ -205,6 +260,75 @@ describe("singleFileDelete", () => {
 		// An absolute path to the lock itself, inside the workspace, is still refused:
 		// the rule takes relative paths only.
 		expect(singleFileDelete(`rm -f ${join(ws, "run", "worker.lock")}`, ws).ok).toBe(false);
+	});
+
+	test("literal names: an untracked colon-named lock, and an untracked lock in a nested repository, still pass", () => {
+		expect(singleFileDelete("rm -f run/:free.lock", ws)).toEqual({
+			ok: true,
+			rel: "run/:free.lock",
+		});
+		expect(singleFileDelete("rm -f run/nested/free.lock", ws)).toEqual({
+			ok: true,
+			rel: "run/nested/free.lock",
+		});
+	});
+
+	test("a root that is not a repository, holding a nested repository with a tracked lock", () => {
+		const plain = tempDir("s1-single-plainnest-");
+		mkdirSync(join(plain, "run", "inner"), { recursive: true });
+		git(join(plain, "run", "inner"), "init", "-q");
+		writeFileSync(join(plain, "run", "inner", "t.lock"), "pid=1");
+		writeFileSync(join(plain, "run", "inner", "u.lock"), "pid=1");
+		git(join(plain, "run", "inner"), "add", "t.lock");
+		git(join(plain, "run", "inner"), "commit", "-qm", "inner");
+		expect(singleFileDelete("rm -f run/inner/t.lock", plain).ok).toBe(false);
+		expect(singleFileDelete("rm -f run/inner/u.lock", plain).ok).toBe(true);
+		rmSync(plain, { recursive: true, force: true });
+	});
+
+	describe("inherited git env does not change which repository is asked", () => {
+		const GIT_KEYS = [
+			"GIT_DIR",
+			"GIT_WORK_TREE",
+			"GIT_INDEX_FILE",
+			"GIT_COMMON_DIR",
+			"GIT_CEILING_DIRECTORIES",
+		];
+		const was: Record<string, string | undefined> = {};
+		beforeEach(() => {
+			for (const k of GIT_KEYS) was[k] = process.env[k];
+		});
+		afterEach(() => {
+			for (const k of GIT_KEYS) {
+				if (was[k] === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = was[k];
+			}
+		});
+
+		const cases: Array<[string, () => void]> = [
+			["GIT_DIR to a missing path", () => (process.env.GIT_DIR = "/nonexistent/.git")],
+			[
+				"GIT_DIR to the outside repository",
+				() => (process.env.GIT_DIR = join(outside, "modsrc", ".git")),
+			],
+			["GIT_WORK_TREE to the outside directory", () => (process.env.GIT_WORK_TREE = outside)],
+			[
+				"GIT_INDEX_FILE to a missing path",
+				() => (process.env.GIT_INDEX_FILE = "/nonexistent/index"),
+			],
+			["GIT_COMMON_DIR to a missing path", () => (process.env.GIT_COMMON_DIR = "/nonexistent")],
+			[
+				"GIT_CEILING_DIRECTORIES at the workspace",
+				() => (process.env.GIT_CEILING_DIRECTORIES = ws),
+			],
+		];
+		for (const [why, set] of cases) {
+			test(`${why}: the tracked lock is still refused and the stale one still passes`, () => {
+				set();
+				expect(singleFileDelete("rm -f run/tracked.lock", ws).ok).toBe(false);
+				expect(singleFileDelete(PILOT, ws)).toEqual({ ok: true, rel: "run/worker.lock" });
+			});
+		}
 	});
 
 	test("no working directory, or a relative one", () => {
@@ -227,6 +351,15 @@ describe("singleFileDelete", () => {
 		};
 		expect(hint("rm -f old.log")).toStartWith("That file is not a scratch file.");
 		expect(hint("rm -f run/tracked.lock")).toStartWith("That file is tracked by git.");
+		expect(hint("rm -f run/mod/m.lock")).toStartWith("That file is tracked by git.");
+		expect(hint("rm -f run/nested/a.lock")).toStartWith("That file is tracked by git.");
+		expect(hint("rm -f run/:colon.lock")).toStartWith("That file is tracked by git.");
+		// On a case-insensitive file system the other spelling names the same
+		// file, and it is the tracked check that refuses it, not the lstat.
+		if (process.platform === "darwin")
+			expect(hint("rm -f run/case.lock")).toStartWith("That file is tracked by git.");
+		expect(hint("rm -f run/bun.lock")).toStartWith("That is a dependency lockfile");
+		expect(hint("rm -f run/.env")).toStartWith("That file name needs review.");
 		expect(hint("rm -f run/worker.lock run/other.lock")).toStartWith(
 			"Remove one file per command.",
 		);
@@ -288,6 +421,13 @@ describe("systemOneGate", () => {
 		"rm -f run/g/index.lock",
 		"unlink run/worker.lock run/other.lock",
 		"mv run/worker.lock run/worker.lock.stale",
+		"rm -f run/case.lock",
+		"rm -f run/:colon.lock",
+		"rm -f run/nested/a.lock",
+		"rm -f run/mod/m.lock",
+		"rm -f run/bun.lock",
+		"rm -f run/.env",
+		"rm -f tmp/data.sqlite",
 	]) {
 		test(`still judged and blocked: ${cmd}`, async () => {
 			const g = await systemOneGate(cmd, process.env, ws);

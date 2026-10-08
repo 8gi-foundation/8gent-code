@@ -32,8 +32,18 @@
  *     real relative path has no `.git` segment either;
  *   - it is scratch-style: a directory segment of the real relative path is
  *     one of run, tmp, .cache, or the base name ends in .lock or .pid;
- *   - git does not track it: `git ls-files` lists nothing for it (staged
- *     counts as tracked), or the working directory is outside any repository.
+ *   - its base name is not a dependency lockfile (bun.lock, yarn.lock,
+ *     Cargo.lock, ... see LOCKFILES) and not a sensitive name (.env*, *.pem,
+ *     *.key, *.p12, *.sqlite*, *.db), scratch directory or not;
+ *   - git does not track it. The check runs from the file's own real
+ *     directory, so a nested repository or submodule there is the one asked,
+ *     and matches the base name literally and case-insensitively, so a
+ *     different spelling of the same name on a case-insensitive file system
+ *     is the same file. Staged counts as tracked. A directory outside any
+ *     repository tracks nothing. The spawn env drops GIT_DIR, GIT_WORK_TREE,
+ *     GIT_INDEX_FILE, GIT_COMMON_DIR and GIT_CEILING_DIRECTORIES, so the
+ *     repository asked is always the one on disk at that directory. Git
+ *     missing or failing otherwise counts as tracked.
  *
  * Not covered on purpose: `mv` (no rule fires for it, and a move has two
  * endpoints and can clobber its destination); more than one operand; any
@@ -59,6 +69,33 @@ const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 const RM_FLAG = /^-[fv]+$/;
 const SCRATCH_DIRS = new Set(["run", "tmp", ".cache"]);
 const SCRATCH_NAME = /\.(lock|pid)$/;
+/** Dependency lockfiles end in .lock too, but they are project state, not scratch (compared lower-cased). */
+const LOCKFILES = new Set([
+	"bun.lock",
+	"bun.lockb",
+	"yarn.lock",
+	"cargo.lock",
+	"gemfile.lock",
+	"poetry.lock",
+	"uv.lock",
+	"pdm.lock",
+	"composer.lock",
+	"mix.lock",
+	"pubspec.lock",
+	"podfile.lock",
+	"flake.lock",
+	"deno.lock",
+]);
+/** Names that are never scratch, whatever directory they sit in. */
+const SENSITIVE_NAME = /^\.env(\.|$)|\.(pem|key|p12|db)$|\.sqlite/i;
+/** Inherited git env that would point the tracked check at a different repository. */
+const GIT_REDIRECT_ENV = new Set([
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_COMMON_DIR",
+	"GIT_CEILING_DIRECTORIES",
+]);
 
 export type SingleFileDelete =
 	| { ok: true; rel: string }
@@ -87,15 +124,24 @@ function scratchStyle(rel: string): boolean {
 }
 
 /**
- * True when git tracks `rel` under `root` (index entries included). A root
- * outside any repository tracks nothing. Git missing or failing otherwise
- * counts as tracked, so the judge is asked.
+ * True when the repository that owns `dir` (the file's real parent) tracks a
+ * file named `base` there, index entries included. Asked from `dir` itself,
+ * so a nested repository or submodule is the one that answers; the name is
+ * matched as literal text, case-insensitively (`:(literal,icase)`), so no
+ * glob or magic in it is interpreted and a different spelling of the same
+ * name on a case-insensitive file system still counts. GIT_REDIRECT_ENV is
+ * dropped from the spawn env. A directory outside any repository tracks
+ * nothing. Git missing or failing otherwise counts as tracked, so the judge
+ * is asked.
  */
-function tracked(root: string, rel: string): boolean {
-	const r = spawnSync("git", ["-C", root, "ls-files", "-z", "--", rel], {
+function tracked(dir: string, base: string): boolean {
+	const env = { ...process.env };
+	for (const k of GIT_REDIRECT_ENV) delete env[k];
+	const r = spawnSync("git", ["-C", dir, "ls-files", "-z", "--", `:(literal,icase)${base}`], {
 		encoding: "utf8",
 		timeout: 5_000,
 		stdio: ["ignore", "pipe", "pipe"],
+		env,
 	});
 	if (r.error) return true;
 	if (r.status === 0) return r.stdout.length > 0;
@@ -150,10 +196,14 @@ export function singleFileDelete(command: string, cwd: string | undefined): Sing
 			return no("Only a regular file (not a symlink) can be removed without review.");
 		const realParent = realpathSync(path.dirname(abs));
 		if (!inside(realParent, root)) return no("That path resolves outside the working directory.");
-		const rel = path.relative(root, path.join(realParent, path.basename(abs)));
+		const base = path.basename(abs);
+		const rel = path.relative(root, path.join(realParent, base));
 		if (hasGitSegment(rel)) return no();
 		if (!scratchStyle(rel)) return no("That file is not a scratch file.");
-		if (tracked(root, rel)) return no("That file is tracked by git.");
+		if (LOCKFILES.has(base.toLowerCase()))
+			return no("That is a dependency lockfile, not a scratch file.");
+		if (SENSITIVE_NAME.test(base)) return no("That file name needs review.");
+		if (tracked(realParent, base)) return no("That file is tracked by git.");
 		return { ok: true, rel };
 	} catch {
 		return no();

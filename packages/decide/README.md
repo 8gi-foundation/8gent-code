@@ -327,9 +327,18 @@ and replaces Selene.
   directory segment of its real relative path is `run`, `tmp` or `.cache`,
   or its name ends in `.lock` or `.pid`
   (`packages/permissions/s1-rm-single.ts`). The pilot's stale
-  `run/worker.lock`, whose owner pid had exited, is the case. Still judged:
-  any tracked or staged file (under `run/` or not), an untracked file that
-  is not scratch-style (`.env`, `old.log`), a directory, a symlink (pointing
+  `run/worker.lock`, whose owner pid had exited, is the case. Tracked status
+  is read from the file's own real directory (so a nested repository or
+  submodule there is the one asked) with a literal, case-insensitive match
+  on the base name, and with `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+  `GIT_COMMON_DIR` and `GIT_CEILING_DIRECTORIES` dropped from the spawn env.
+  Still judged: any tracked or staged file (under `run/` or not), a
+  dependency lockfile by name (`bun.lock`, `yarn.lock`, `Cargo.lock`,
+  `Gemfile.lock`, `poetry.lock`, `uv.lock`, `pdm.lock`, `composer.lock`,
+  `mix.lock`, `pubspec.lock`, `Podfile.lock`, `flake.lock`, `deno.lock`,
+  `bun.lockb`), a sensitive name even inside a scratch directory (`.env*`,
+  `*.pem`, `*.key`, `*.p12`, `*.sqlite*`, `*.db`), an untracked file that
+  is not scratch-style (`old.log`), a directory, a symlink (pointing
   anywhere), a path under a symlinked directory that resolves outside, a
   glob, brace, quote or `$`, `-r`/`-R`/`-d`/`--`, two or more operands, an
   absolute or `..` path, anything under `.git/` (by written or real path),
