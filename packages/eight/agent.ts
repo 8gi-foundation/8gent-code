@@ -60,7 +60,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { emptyReplyNote, stripDoneMarker } from "../ai/text-tool-loop";
+import { emptyReplyNote, emptyReplyStall, stripDoneMarker } from "../ai/text-tool-loop";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -2345,7 +2345,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
 			}
 			// #3524: a blank reply is a failed turn, never a finished one.
-			const content = gatedNative.content.trim() === ""
+			const blankNative = gatedNative.content.trim() === "";
+			const content = blankNative
 				? emptyReplyNote(this.turnToolLedger.length)
 				: gatedNative.content;
 
@@ -2474,6 +2475,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
 					prompt: textForAgent.slice(0, 120),
+					...(blankNative ? { unverified: [emptyReplyStall(this.turnToolLedger.length)] } : {}),
 				});
 			}
 			const finalContent = flavoredContent;

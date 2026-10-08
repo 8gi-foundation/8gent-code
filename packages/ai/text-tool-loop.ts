@@ -457,6 +457,11 @@ export function emptyReplyNote(toolCalls: number): string {
 	return `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
 }
 
+/** True when a turn's reply is the no-reply note: the turn is not done (#3524). */
+export function isEmptyReplyNote(reply: string): boolean {
+	return reply.startsWith("[harness] No reply:");
+}
+
 /**
  * The plan bookkeeping tool (packages/eight/tools.ts, update_plan). Its calls
  * tick the TUI PLAN column; they are never progress on the task itself.
