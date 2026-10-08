@@ -29,6 +29,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { scrub as scrubSecrets } from "../eight/secret-scanner";
 import { toolReplayClass } from "../eight/tools";
 import type { SessionOverrides } from "./agent-pool";
 
@@ -58,15 +59,20 @@ const ARG_SUMMARY_CHARS = 200;
 
 /**
  * What is journaled for a call. A replayable read keeps its args so it can be
- * re-run. Any other call keeps only short primitive values: enough for the
- * model to see what it was, without file contents or long commands on disk.
+ * re-run. Any other call keeps only short primitive values, secrets scrubbed
+ * before truncation: enough for the model to see what it was, without file
+ * contents, long commands or tokens on disk.
  */
 export function journalArgs(tool: string, args: Record<string, unknown>): Record<string, unknown> {
 	if (toolReplayClass(tool) === "replay") return args;
 	const out: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(args)) {
 		if (typeof v === "string") {
-			out[k] = v.length > ARG_SUMMARY_CHARS ? `${v.slice(0, ARG_SUMMARY_CHARS)}... (${v.length} chars)` : v;
+			const clean = scrubSecrets(v).scrubbed;
+			out[k] =
+				clean.length > ARG_SUMMARY_CHARS
+					? `${clean.slice(0, ARG_SUMMARY_CHARS)}... (${clean.length} chars)`
+					: clean;
 		} else if (typeof v === "number" || typeof v === "boolean") {
 			out[k] = v;
 		}
@@ -337,8 +343,9 @@ export interface SettleResult {
 /** Longest re-run result put into the note. */
 const REPLAY_RESULT_CHARS = 8000;
 
+/** Scrubbed: the args come from disk and may predate scrubbing. */
 function describeCall(call: InFlightToolCall): string {
-	return `${call.tool} ${JSON.stringify(call.args)}`;
+	return scrubSecrets(`${call.tool} ${JSON.stringify(call.args)}`).scrubbed;
 }
 
 /**

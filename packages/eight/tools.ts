@@ -174,7 +174,7 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 /**
  * Replay class per tool (#3653), used when a crashed session resumes with a
  * tool call that was still running (EIGHT_RESUME_ON_BOOT=1).
- *  - "replay": a local read with no side effect; safe to run again.
+ *  - "replay": a checked local read with no side effect; safe to run again.
  *  - "never":  writes, shell, git changes, messages, network and desktop
  *              actions; it may already have happened, so it is never rerun.
  *  - "ask":    anything not listed (the default); not rerun either, the
@@ -182,27 +182,15 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
  */
 export type ReplayClass = "replay" | "never" | "ask";
 
-const REPLAY_SAFE_TOOLS = new Set([
-	"read_file",
-	"list_files",
-	"get_outline",
-	"get_symbol",
-	"search_symbols",
-	"locate",
-	"get_project_outline",
-	"lsp_goto_definition",
-	"lsp_find_references",
-	"lsp_hover",
-	"lsp_document_symbols",
-	"lsp_diagnostics",
-	"git_status",
-	"git_diff",
-	"git_log",
-	"read_pdf",
-	"read_pdf_page",
-	"search_pdf",
-	"read_notebook",
-]);
+/**
+ * Only reads with no side effect that pass the same path and policy checks
+ * as a live call: read_file (safePath + ToolG8 read_file) and git_log (no
+ * repo-configured helpers run). Language-server tools can start a server that
+ * runs project code; git status/diff can run fsmonitor, external diff and
+ * textconv helpers; the PDF, notebook, outline and listing readers take paths
+ * without the full checks. Those stay "ask" (#3653 review).
+ */
+const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
 const NEVER_REPLAY_TOOLS = new Set([
 	"write_file",
