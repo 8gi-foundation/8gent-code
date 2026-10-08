@@ -8,6 +8,7 @@
  * deterministic mock for tests.
  */
 
+import { FallbackBackend, type FallbackLog, JEV_KEY_ENV, JevBackend, jevForbidden, logDecisionToStderr, resolveJevKey } from "./backends/jev";
 import { LayaBackend } from "./backends/laya";
 import { LlamaCppBackend, type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
 import { MockBackend } from "./backends/mock";
@@ -27,6 +28,22 @@ import {
 export * from "./types";
 export { LayaBackend, mapProbabilities, resolveLayaUrl } from "./backends/laya";
 export { MockBackend } from "./backends/mock";
+export {
+	FallbackBackend,
+	type FallbackLog,
+	JevBackend,
+	JEV_DEFAULT_TIMEOUT_MS,
+	JEV_KEY_ENV,
+	JEV_MODEL,
+	JEV_URL,
+	PILOT_LOCK_RELATIVE,
+	choiceKeys,
+	fromJevAnswer,
+	jevForbidden,
+	logDecisionToStderr,
+	resolveJevKey,
+	toJevBody,
+} from "./backends/jev";
 export {
 	LlamaCppBackend,
 	type LlamaCppLoader,
@@ -59,11 +76,23 @@ export {
 } from "./guard";
 export { decideRules, BLOCK_RULES, type RuleResult, type RuleVerdict } from "./rules";
 
-export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock";
+export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock" | "jev";
+
+/** Env knob that puts the HOSTED Jev judge in front of the local one. Only the value "jev" is read; anything else is the default. */
+export const DECIDE_BACKEND_ENV = "EIGHT_DECIDE_BACKEND";
 
 export interface DeciderOptions {
-	/** A ready backend instance, or which kind to build. Default "auto". */
+	/**
+	 * A ready backend instance, or which kind to build. Default "auto": the
+	 * local probe (llamacpp, laya, Ollama). With env EIGHT_DECIDE_BACKEND=jev
+	 * and AI_GATEWAY_API_KEY set, "auto" becomes hosted Jev with the local
+	 * probe as fallback on any error, and every decision is logged. "jev"
+	 * here is the bare hosted backend with no fallback (evals). Both refuse
+	 * under a SIGI or pilot run (`jevForbidden`).
+	 */
 	backend?: DecideBackend | BackendSelection;
+	/** Where decisions on the Jev path are reported. Default: one stderr line each. Tests capture it. */
+	log?: (entry: FallbackLog) => void;
 	/** Model override (Ollama name; llamacpp resolves it in the Ollama store). Defaults to env EIGHT_DECIDE_MODEL, then probe choice. */
 	model?: string;
 	timeoutMs?: number;
@@ -104,6 +133,24 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 	const env = opts.env ?? process.env;
 	const common = { timeoutMs: opts.timeoutMs, fetch: opts.fetch, env };
 	if (sel === "mock") return local(new MockBackend());
+	if (sel === "jev") {
+		const forbidden = jevForbidden(env);
+		if (forbidden) throw new DecideUnavailableError(`jev refused: ${forbidden}`);
+		return local(new JevBackend({ apiKey: resolveJevKey(env) ?? "", timeoutMs: opts.timeoutMs, fetch: opts.fetch }));
+	}
+	if (sel === "auto" && env[DECIDE_BACKEND_ENV]?.trim().toLowerCase() === "jev") {
+		// Opt-in hosted judge. No key, or a SIGI / pilot run, means the default path, said once through `log`, never a silent swap.
+		const key = resolveJevKey(env);
+		const log = opts.log ?? logDecisionToStderr;
+		const localOpts: DeciderOptions = { ...opts, env: { ...env, [DECIDE_BACKEND_ENV]: undefined } };
+		const skip = jevForbidden(env) ?? (key ? null : `no ${JEV_KEY_ENV} in env`);
+		if (skip) {
+			log({ backend: "local", model: "", latencyMs: 0, fellBackFrom: { backend: "jev", reason: skip } });
+			return buildBackend(localOpts, avoidShared);
+		}
+		const jev = new JevBackend({ apiKey: key as string, timeoutMs: opts.timeoutMs, fetch: opts.fetch });
+		return local(new FallbackBackend(jev, async () => (await buildBackend(localOpts, avoidShared)).backend, log));
+	}
 	if (sel === "laya") return local(new LayaBackend(common));
 	const model = opts.model ?? env.EIGHT_DECIDE_MODEL;
 	if (sel === "llamacpp") {
