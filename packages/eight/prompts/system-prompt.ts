@@ -370,7 +370,13 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`json
 {"tool": "git_add", "arguments": {"files": "."}}
 {"tool": "git_commit", "arguments": {"message": "feat: add feature"}}
-\`\`\``;
+\`\`\`
+
+### Recovering a lost file
+A tracked file that is missing was deleted in a commit. Restore it, never retype it.
+1. \`git log --all --oneline -- <path>\` to find the last commit that had it.
+2. \`git checkout <sha> -- <path>\` using the commit BEFORE the delete (\`git checkout HEAD -- <path>\` does nothing, HEAD has it deleted).
+3. \`git diff <sha> -- <path>\` must print nothing. Never retype contents from a \`git show\`: whitespace drifts.`;
 
 export const ERROR_RECOVERY_SEGMENT = `## ERROR RECOVERY
 
