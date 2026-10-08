@@ -9,10 +9,12 @@
  * multi-step turn. It asks for the plan AND for progress reports, because
  * update_plan is the only thing that may tick a step in the TUI PLAN column
  * (apps/tui/src/lib/plan-state.ts). Without the second half the model plans,
- * does the work, and every step stays pending (#3082).
+ * does the work, and every step stays pending (#3082). It opens by excusing a
+ * direct question (#3640): the gate fires on prompt length alone, and a
+ * Yes/No question with a few-shot preamble is longer than 100 characters.
  */
 export const PLANNING_GATE_INSTRUCTION =
-	"[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute. Report progress as you go: when a step finishes, call update_plan with every step of the plan and its status (done, in_progress, pending or failed) in the same response as your next tool call, and once more before your final answer. Mark a step done only when its work is actually finished.";
+	"[PLANNING] If the request is a question you can answer directly, answer it in the format it asks for, with no plan. Otherwise output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute. Report progress as you go: when a step finishes, call update_plan with every step of the plan and its status (done, in_progress, pending or failed) in the same response as your next tool call, and once more before your final answer. Mark a step done only when its work is actually finished.";
 
 export const DEFAULT_SYSTEM_PROMPT = `You are 8gent, an AUTONOMOUS AI coding agent powered by the BMAD Method.
 

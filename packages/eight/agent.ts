@@ -959,6 +959,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				call,
 				maxRounds: this.config.maxTurns ?? 6,
 				signal,
+				// Headless run: the answer stays in front of a DONE summary (#3638).
+				keepAnswerFirst: this.config.keepAnswerFirst === true,
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
 				finalCheck: () => verifyNudgeFor(this.turnToolLedger),

@@ -48,10 +48,24 @@
  * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
  * A false completion claim is never passed through silently.
  *
+ * When the model answers a completion check with a "DONE:" summary and ran
+ * no tool between the two, the reply the check was sent after may be the
+ * answer. With `keepAnswerFirst` (the headless run path, #3638) the turn
+ * returns that reply first, then the summary; without it (the TUI) the
+ * summary alone is returned, and the earlier reply is only the fallback for
+ * a bare "DONE:". The check itself goes out the same way in both modes.
+ *
  * A final answer that leaves steps of the turn's plan open (pending or in
  * progress in the last update_plan call) gets ONE plan check per turn
  * (planCheckMessage, #3098): report each step's real status or do it, then
  * summarise. The harness never marks a step done on the agent's behalf.
+ * An update_plan call is bookkeeping, not work: a round that ran only
+ * update_plan is transparent to the stall state. It does not arm the
+ * completion check, so on a direct question the prose after it is the answer
+ * (SIGI G3 baseline, 7 Oct: the check turned one-line answers into "DONE:"
+ * recaps on 13 of 24 harness runs); and it does not answer a pending check or
+ * clear a blocked round, so the prose after it is still checked when the
+ * round before it earned a check.
  *
  * One reply can ask for many calls (qwen3.8 27B asked for 144 read_file calls
  * in pilot run 2026-09-30_010512). The loop runs at most MAX_CALLS_PER_ROUND of
@@ -109,6 +123,15 @@ export interface TextToolAgentOptions {
 	 * answer through. The caller owns what it checks.
 	 */
 	finalCheck?: () => string | null;
+	/**
+	 * Keep the reply a completion check was sent after in front of the "DONE:"
+	 * summary that answers it (#3638). Off by default: in the TUI the reply
+	 * before the check is usually already a summary, and the person would read
+	 * it twice. The headless `run` path turns it on, because a first-line or
+	 * exact-match reader of its final text needs the model's answer, not the
+	 * recap. In both modes the check itself is sent the same way.
+	 */
+	keepAnswerFirst?: boolean;
 }
 
 export interface TextToolAgentResult {
@@ -433,6 +456,12 @@ export function emptyReplyNote(toolCalls: number): string {
 }
 
 /**
+ * The plan bookkeeping tool (packages/eight/tools.ts, update_plan). Its calls
+ * tick the TUI PLAN column; they are never progress on the task itself.
+ */
+export const PLAN_TOOL_NAME = "update_plan";
+
+/**
  * The plan steps still open when the turn ends (#3098): pending or in
  * progress in the turn's last successful update_plan call. Failed steps are
  * an honest report, so they are not open. No update_plan call, or none that
@@ -441,7 +470,7 @@ export function emptyReplyNote(toolCalls: number): string {
 export function openPlanSteps(toolLog: ReadonlyArray<TextToolLogEntry>): PlanItem[] {
 	for (let i = toolLog.length - 1; i >= 0; i--) {
 		const entry = toolLog[i];
-		if (entry.name !== "update_plan" || isRefusedToolResult(entry.result)) continue;
+		if (entry.name !== PLAN_TOOL_NAME || isRefusedToolResult(entry.result)) continue;
 		const parsed = parsePlan(entry.args.plan);
 		if (!parsed.ok) continue;
 		return parsed.items.filter((s) => s.status === "pending" || s.status === "in_progress");
@@ -529,15 +558,25 @@ export async function runTextToolAgent(
 	// Was the last message we sent a completion check the model has not yet
 	// answered with a tool call? Then prose without DONE_MARKER is not final.
 	let awaitingCheckAnswer = false;
-	// The reply the check was sent after: the summary to fall back on when the
-	// model answers the check with a bare marker ("DONE:") and nothing else.
+	// The reply the check was sent after, marker stripped. It persists until a
+	// round runs real work (or, with keepAnswerFirst, until an update_plan-only
+	// round answers a pending check): then the reply before the check was an
+	// announcement, not an answer. While it
+	// is set, a "DONE:" reply with nothing after the marker falls back to it in
+	// every mode. With keepAnswerFirst (#3638) it also comes first, with the
+	// summary after it: the check used to replace a one-line answer with a
+	// recap of what the model did.
 	let preCheckContent = "";
 	const finalContent = (content: string): string => {
 		const stripped = stripDoneMarker(content);
-		if (stripped.trim() === "" && content.trim() !== "" && preCheckContent.trim() !== "") {
-			return preCheckContent;
-		}
-		return stripped;
+		if (!hasDoneMarker(content) || preCheckContent.trim() === "") return stripped;
+		const answer = preCheckContent.trim();
+		const summary = stripped.trim();
+		if (summary === "") return answer;
+		if (!opts.keepAnswerFirst) return stripped;
+		// A summary that repeats or extends the answer already has it first.
+		if (summary === answer || summary.startsWith(answer)) return summary;
+		return `${answer}\n\n${summary}`;
 	};
 	// The claim check's follow-up fires at most once per turn.
 	let claimFollowUpSent = false;
@@ -673,7 +712,7 @@ export async function runTextToolAgent(
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
-				if (freshStall && replyText.trim() !== "") preCheckContent = replyText;
+				if (freshStall && replyText.trim() !== "") preCheckContent = stripDoneMarker(replyText);
 				prevRoundHadSuccess = false;
 				prevRoundAllRefused = false;
 				messages = [
@@ -756,11 +795,18 @@ export async function runTextToolAgent(
 
 		// Execute every requested tool and build a single labelled result block.
 		const resultParts: string[] = [];
-		prevRoundHadSuccess = false;
-		prevRoundBlockReasons = [];
-		let ranAny = false;
-		// The model resumed tools: a later stall is a fresh one (re-armed).
-		awaitingCheckAnswer = false;
+		// Did this round run a tool other than update_plan? A round of plan
+		// bookkeeping alone is not work (SIGI G3 baseline, 7 Oct): the planning
+		// gate made the model call update_plan, then its one-line answer was
+		// checked as a stall and replaced by a "DONE:" recap of what it did. So
+		// an update_plan-only round is transparent to the stall state: it does
+		// not arm the completion check, reset its cap, answer a pending check, or
+		// forget a blocked round. The state below is written only when real work
+		// ran (8SO review of #3645). The plan check (#3098) still reads every
+		// update_plan call from the log.
+		let ranWork = false;
+		let roundHadSuccess = false;
+		const roundBlockReasons: string[] = [];
 		const calls = turn.toolCalls;
 		let abortedAt = -1;
 		for (let k = 0; k < calls.length; k++) {
@@ -785,20 +831,23 @@ export async function runTextToolAgent(
 			}
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
-			ranAny = true;
-			// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
-			// progress, exactly like an "Error..." result.
-			if (!isRefusedToolResult(result)) {
-				prevRoundHadSuccess = true;
-				// Real tool work: the next stall starts a fresh run of checks.
-				checksWithoutProgress = 0;
-				blockReasonsSinceProgress = [];
-				stoppedOnBlocks = false;
-			} else {
-				const reason = blockReason(result);
-				if (reason !== null) {
-					if (!prevRoundBlockReasons.includes(reason)) prevRoundBlockReasons.push(reason);
-					if (!blockReasonsSinceProgress.includes(reason)) blockReasonsSinceProgress.push(reason);
+			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
+			if (!isPlanUpdate) {
+				ranWork = true;
+				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
+				// progress, exactly like an "Error..." result.
+				if (!isRefusedToolResult(result)) {
+					roundHadSuccess = true;
+					// Real tool work: the next stall starts a fresh run of checks.
+					checksWithoutProgress = 0;
+					blockReasonsSinceProgress = [];
+					stoppedOnBlocks = false;
+				} else {
+					const reason = blockReason(result);
+					if (reason !== null) {
+						if (!roundBlockReasons.includes(reason)) roundBlockReasons.push(reason);
+						if (!blockReasonsSinceProgress.includes(reason)) blockReasonsSinceProgress.push(reason);
+					}
 				}
 			}
 			// Deterministic guard (Bug B): if the model wrote file contents through
@@ -811,8 +860,20 @@ export async function runTextToolAgent(
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 
-		prevRoundAllRefused = ranAny && !prevRoundHadSuccess;
-		if (prevRoundHadSuccess) prevRoundBlockReasons = [];
+		if (ranWork) {
+			prevRoundHadSuccess = roundHadSuccess;
+			prevRoundAllRefused = !roundHadSuccess;
+			prevRoundBlockReasons = roundHadSuccess ? [] : roundBlockReasons;
+			// The model resumed tools: a later stall is a fresh one (re-armed),
+			// and the reply before any earlier check was an announcement.
+			awaitingCheckAnswer = false;
+			preCheckContent = "";
+		} else if (awaitingCheckAnswer && opts.keepAnswerFirst) {
+			// Plan bookkeeping in answer to a check: the reply the check was sent
+			// after is stale, so a DONE summary after this stands alone (8SO probe
+			// D: "Now writing b.md." led the output). The check stays pending.
+			preCheckContent = "";
+		}
 
 		if (abortedAt >= 0) {
 			// Aborted mid-round: every call not reached is logged as not run,
