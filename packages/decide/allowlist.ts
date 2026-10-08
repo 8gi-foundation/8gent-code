@@ -116,29 +116,20 @@ const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
 /**
- * `curl` / `wget` that only GET this machine's own loopback address (#3714).
- * A fetch of 127.0.0.1 sends nothing off the machine, yet the 8B judge false-
- * blocked it (pYes 0.43 to 0.56) in 3 of 3 browser-op-practice runs. Passes only
- * when every URL is http(s) on 127.0.0.1, localhost or [::1] (never the Ollama
- * port), every flag is on the lists below, output and cookie files are stdout,
- * /dev/null or /tmp, and nothing uploads, reads an @file, uses a proxy or
- * config, or follows a redirect. POST bodies are already escalated by the rules.
+ * `curl` GETs of this machine's own loopback address (#3714). Passes only when
+ * every URL is http(s) on 127.0.0.1, localhost or [::1] (never the Ollama port),
+ * every flag is on the list below, and output and cookie files are stdout,
+ * /dev/null or /tmp. No -w/--write-out, upload, @file, proxy, config or
+ * redirect-following; anything else goes to the judge. wget is not covered.
+ * POST bodies are already escalated by the rules.
  */
 const LOOPBACK_URL = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
 const OLLAMA_PORT = "11434";
-const FETCH_FLAGS: Record<string, { bare: string; valued: string; longBare: Set<string>; longValued: Set<string> }> = {
-	curl: {
-		bare: "sSiIfv",
-		valued: "ocbwHmX",
-		longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
-		longValued: new Set(["--output", "--cookie-jar", "--cookie", "--write-out", "--header", "--max-time", "--connect-timeout"]),
-	},
-	wget: {
-		bare: "qSv",
-		valued: "O",
-		longBare: new Set(["--quiet", "--server-response", "--spider"]),
-		longValued: new Set(["--output-document"]),
-	},
+const FETCH_FLAGS = {
+	bare: "sSiIfv",
+	valued: "ocbHmX",
+	longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
+	longValued: new Set(["--output", "--cookie-jar", "--cookie", "--header", "--max-time", "--connect-timeout"]),
 };
 
 function fetchTargetOk(v: string): boolean {
@@ -147,17 +138,17 @@ function fetchTargetOk(v: string): boolean {
 
 function fetchValueOk(bin: string, flag: string, v: string): string | null {
 	const f = flag.replace(/^-+/, "");
-	if (f === "o" || f === "O" || f === "output" || f === "output-document" || f === "c" || f === "cookie-jar")
+	if (f === "o" || f === "output" || f === "c" || f === "cookie-jar")
 		return fetchTargetOk(v) ? null : `${bin} writes to ${v}`;
 	if (f === "b" || f === "cookie") return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
-	if (f === "w" || f === "write-out" || f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
+	if (f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
 	if (f === "m" || f === "max-time" || f === "connect-timeout") return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
 	if (f === "X") return v === "GET" || v === "HEAD" ? null : `${bin} -X ${v}`;
 	return `${bin} flag ${flag}`;
 }
 
 function loopbackFetchOk(bin: string, args: string[]): string | null {
-	const spec = FETCH_FLAGS[bin];
+	const spec = FETCH_FLAGS;
 	const urls: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
@@ -213,7 +204,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (b === "cd") return null;
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
-	if (b === "curl" || b === "wget") return loopbackFetchOk(b, args);
+	if (b === "curl") return loopbackFetchOk(b, args);
 	if (b === "git") return gitOk(args);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";

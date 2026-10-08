@@ -11,12 +11,10 @@ import { readOnlyAllowlist } from "./allowlist";
 
 const PASS: string[] = [
 	"curl -s -c /tmp/cj.txt -b /tmp/cj.txt http://127.0.0.1:63103/ -o /tmp/login_page.html",
-	'curl -s -c /tmp/cookies.txt http://127.0.0.1:62308/ -o /tmp/index.html -w "HTTP %{http_code}\\n"; echo ----; head -c 4000 /tmp/index.html',
-	"wget -O - http://127.0.0.1:62308/ 2>&1 | head -c 3000",
+	"curl -s -c /tmp/cookies.txt http://127.0.0.1:62308/ -o /tmp/index.html; echo ----; head -c 4000 /tmp/index.html",
 	"curl -sS http://localhost:3000/health",
 	"curl -sI http://[::1]:8080/",
 	"curl -s -H 'Accept: text/html' --max-time 5 'http://127.0.0.1:9/x?y=1'",
-	"wget -qO- http://127.0.0.1:4000/",
 	"curl -s -X GET http://127.0.0.1:4000/",
 ];
 
@@ -36,6 +34,13 @@ const NONE: string[] = [
 	"curl -s -K /tmp/cfg http://127.0.0.1:63103/",
 	"curl -s -H @/tmp/h http://127.0.0.1:63103/",
 	"curl -s -w @/tmp/fmt http://127.0.0.1:63103/",
+	"curl -s -w '%output{/tmp/x}' http://127.0.0.1:63103/",
+	"curl -s --write-out '%{http_code}' http://127.0.0.1:63103/",
+	"curl -s -w '%{http_code}' http://127.0.0.1:63103/",
+	"wget http://127.0.0.1:63103/",
+	"wget -O - http://127.0.0.1:62308/ 2>&1 | head -c 3000",
+	"wget -qO- http://127.0.0.1:4000/",
+	"wget -O /tmp/x http://127.0.0.1:4000/",
 	"curl -s -X DELETE http://127.0.0.1:63103/item/1",
 	"curl -s -d 'a=b' http://127.0.0.1:63103/login",
 	"curl -s -T /tmp/f http://127.0.0.1:63103/",
