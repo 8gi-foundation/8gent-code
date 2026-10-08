@@ -1,0 +1,208 @@
+name: Release PR
+
+# Releases go through a pull request (#3658). Nothing here pushes to main.
+#
+# On every push to main this workflow asks one question: is the version in
+# package.json already tagged?
+#
+#   yes -> propose: compute the next version (past every existing tag), write
+#          it into package.json, bin/8gent.ts and the README badge, build the
+#          CHANGELOG.md section from the merged PR titles (#3575), and open or
+#          refresh the single "release: vX.Y.Z" pull request on branch
+#          release/next. The branch is rebuilt from main on every run, so the
+#          PR always shows exactly what merging it would release.
+#   no  -> tag: the release PR has just merged. Tag the commit where the
+#          version landed and start release.yml (GitHub Release + npm) and
+#          release-binaries.yml (installers). A tag pushed with GITHUB_TOKEN
+#          does not fire their `on: push: tags` triggers, so they are started
+#          with workflow_dispatch on the tag.
+#
+# Merging the release PR is a human decision and stays with the maintainer.
+# The main ruleset is untouched: no bypass actor, no settings change.
+#
+# Bump level: patch, unless a PR title or body merged since the previous
+# release carries [bump:minor] or [bump:major]. Run this workflow by hand with
+# bump=minor or bump=major to override the next proposal. `feat:` alone does
+# not raise the level; a minor or major release is an explicit decision.
+#
+# History: on 1 Oct 2026 auto-release.yml tagged v0.18.1 and v0.19.0 and then
+# pushed its bump commit straight to main. The ruleset rejected that push, so
+# package.json stayed at 0.18.0 and every later run failed on "tag already
+# exists". scripts/release-version.ts computes past existing tags, so that
+# state can never wedge the pipeline again.
+#
+# Security (#3214): this workflow holds write tokens. No event payload, input
+# or step output is expanded with ${{ }} inside a run: script; values arrive
+# through env: and are read as quoted shell variables. PR titles only ever
+# reach files (git log inside the bun scripts, --body-file for the PR), never
+# shell source. Every action is pinned to a commit SHA. Each job holds only the
+# permissions its path needs.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Bump level for the next release proposal"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+permissions: {}
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Is the current version tagged
+    # Only main is ever proposed from, tagged or published. A workflow_dispatch
+    # on any other ref would otherwise read that branch's package.json, tag an
+    # off-main commit and publish it. propose and tag inherit this through needs.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.decide.outputs.mode }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Decide
+        id: decide
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::release-pr runs on refs/heads/main only, not ${GITHUB_REF}"
+            exit 1
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json version is not X.Y.Z: ${VERSION}"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${VERSION}^{commit}" >/dev/null; then
+            MODE=propose
+            echo "package.json is ${VERSION} and v${VERSION} is tagged: propose the next release"
+          else
+            MODE=tag
+            echo "package.json is ${VERSION} and v${VERSION} is not tagged: tag and publish it"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+
+  propose:
+    name: Open or refresh the release PR
+    needs: decide
+    if: needs.decide.outputs.mode == 'propose'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          # Optional RELEASE_PAT: a fine-grained token with contents and
+          # pull-requests write on this repository. With it, GitHub runs CI on
+          # the release PR. With the default GITHUB_TOKEN, GitHub does not start
+          # pull_request workflows for a PR that token created, so CI on the
+          # release PR has to be started by hand (close and reopen it).
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Compute the next version
+        id: next
+        env:
+          BUMP: ${{ github.event.inputs.bump }}
+        run: |
+          NEXT="$(bun scripts/release-version.ts next --bump "${BUMP:-auto}")"
+          echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "next version: ${NEXT} (bump: ${BUMP:-auto})"
+
+      - name: Build the release branch
+        env:
+          NEXT: ${{ steps.next.outputs.next }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B release/next
+          bun scripts/release-version.ts apply "$NEXT"
+          # Hand-written notes still under [Unreleased] (from before #3575) are
+          # kept inside the new section rather than dropped: lossless by default,
+          # the maintainer trims in the release PR if needed.
+          bun scripts/changelog-release.ts --version "$NEXT" --write --keep-unreleased --out section.md
+          git add package.json bin/8gent.ts README.md CHANGELOG.md
+          git commit -m "release: v${NEXT}"
+          git push --force origin release/next
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.next.outputs.next }}
+          REPO: ${{ github.repository }}
+        run: |
+          TITLE="release: v${NEXT}"
+          {
+            printf 'Merging this pull request releases **v%s**: the merge is tagged, release.yml publishes the GitHub Release and the npm package, release-binaries.yml attaches the installers.\n\n' "$NEXT"
+            printf 'The Release PR workflow rebuilds this branch from main after every merge, so do not edit it by hand. To change the bump level, run that workflow with bump=minor or bump=major, or put [bump:minor] or [bump:major] in a PR title.\n\n'
+            cat section.md
+          } > pr_body.md
+          EXISTING="$(gh pr list --repo "$REPO" --head release/next --base main --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --repo "$REPO" --title "$TITLE" --body-file pr_body.md
+            echo "updated release PR #${EXISTING}: ${TITLE}"
+            echo "Updated release PR #${EXISTING}: ${TITLE}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create --repo "$REPO" --base main --head release/next --title "$TITLE" --body-file pr_body.md
+            echo "opened release PR: ${TITLE}"
+            echo "Opened release PR: ${TITLE}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  tag:
+    name: Tag and publish the merged release
+    needs: decide
+    if: needs.decide.outputs.mode == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Tag the release commit
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The commit where package.json first carried this version, so a
+          # later merge that landed before this run does not get tagged instead.
+          TARGET="$(bun scripts/release-version.ts commit "$VERSION")"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}" "$TARGET"
+          git push origin "refs/tags/v${VERSION}"
+          echo "tagged v${VERSION} at ${TARGET}"
+          echo "Tagged v${VERSION} at ${TARGET}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start the publish workflows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh workflow run release.yml --repo "$REPO" --ref "v${VERSION}"
+          gh workflow run release-binaries.yml --repo "$REPO" --ref "v${VERSION}"
+          echo "started release.yml and release-binaries.yml on v${VERSION}"

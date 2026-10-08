@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  # #3658: the Release PR workflow tags with GITHUB_TOKEN, and a tag pushed by
+  # that token does not fire the push trigger above, so it starts this
+  # workflow on the tag with workflow_dispatch instead.
+  workflow_dispatch:
 
 permissions:
   contents: write

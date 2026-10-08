@@ -502,12 +502,12 @@ apps/tui/src/
    - `package.json` - `"version"` (source of truth)
    - `bin/8gent.ts` - `const VERSION`
    - `README.md` - version badge
-2. **Do not edit CHANGELOG.md in a PR.** Write a clear conventional PR title (`feat(scope): ...`, `fix(scope): ...`), because the release step builds the changelog from merged PR titles: `bun scripts/changelog-release.ts --version X.Y.Z --write` in the release PR (#3575). Sections follow [Keep a Changelog](https://keepachangelog.com/): `feat` goes under Added, `fix` under Fixed, a `security` type or scope under Security, `revert` under Removed, `deprecate` under Deprecated, everything else under Changed.
+2. **Do not edit CHANGELOG.md or the version in a PR.** Write a clear conventional PR title (`feat(scope): ...`, `fix(scope): ...`), because the release PR builds the changelog from merged PR titles (`scripts/changelog-release.ts`, #3575). Sections follow [Keep a Changelog](https://keepachangelog.com/): `feat` goes under Added, `fix` under Fixed, a `security` type or scope under Security, `revert` under Removed, `deprecate` under Deprecated, everything else under Changed.
 3. **SemVer strictly:**
-   - PATCH (1.0.x): bug fixes, minor tweaks
-   - MINOR (1.x.0): new features, new benchmarks, new packages
-   - MAJOR (x.0.0): breaking changes to CLI, session format, or API
-4. **Tag releases** with `git tag v1.x.0` after version bumps.
+   - PATCH (1.0.x): bug fixes, minor tweaks. The default.
+   - MINOR (1.x.0): new features, new benchmarks, new packages. Put `[bump:minor]` in the PR title or body.
+   - MAJOR (x.0.0): breaking changes to CLI, session format, or API. Put `[bump:major]` in the PR title or body.
+4. **Releases go through a PR, never a push to main** (#3658). After every merge to main, the Release PR workflow (`.github/workflows/release-pr.yml`) opens or refreshes one PR titled `release: vX.Y.Z` carrying the version bump (`scripts/release-version.ts`, computed past every existing tag) and the changelog section. Merging it tags the release and starts the publish workflows. Never tag by hand. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Personalization System
 
