@@ -50,9 +50,16 @@ export type GateRun = (command: string, timeoutSec: number, env: Env) => Promise
 const SECRET_NAME =
 	/(^|_)(KEY|KEYS|APIKEY|TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PASS|CREDENTIAL|CREDENTIALS|PAT|AUTH)(_|$)/i;
 
+// npm's camelCase auth settings: npm_config__authToken, npm_config_//host/:_authToken.
+const AUTH_NAME = /_auth/i;
+// A URL carrying user:pass@ (proxy or database URLs). Dropping a proxy URL can stop a
+// build that needs the network behind that proxy; a credential leak is the worse failure.
+const URL_CREDENTIALS = /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]*@/i;
+
 /**
  * The environment a gate check runs with: the parent's, minus every variable whose
- * name marks a credential or whose value the secret scanner recognises as one. The
+ * name marks a credential (including npm's _auth settings), whose value holds a URL with
+ * credentials, or whose value the secret scanner recognises as one. The
  * check runs repo code (build scripts, test scripts) the model never chose, so provider
  * keys and tokens must not reach it. PATH, HOME and the toolchain variables (CARGO_*,
  * RUSTUP_*, GO*, npm_config_*) stay.
@@ -60,8 +67,8 @@ const SECRET_NAME =
 export function scrubbedEnv(env: Env): Env {
 	const out: Env = {};
 	for (const [k, v] of Object.entries(env)) {
-		if (SECRET_NAME.test(k)) continue;
-		if (v && scrub(v).scrubbed !== v) continue;
+		if (SECRET_NAME.test(k) || AUTH_NAME.test(k)) continue;
+		if (v && (URL_CREDENTIALS.test(v) || scrub(v).scrubbed !== v)) continue;
 		out[k] = v;
 	}
 	return out;
