@@ -68,12 +68,26 @@ export function describeLocalTurnFailure(
 	if (kind === "timeout") {
 		const ms = err instanceof TurnTimeoutError ? err.timeoutMs : ctx.timeoutMs;
 		const seconds = Math.round(ms / 1000);
+		// The no-progress gap fired (#3657): the model stopped sending bytes,
+		// which is a stall or a very long prefill, not a slow answer. Name the
+		// knob that moves THIS limit; raising the wall clock would not help.
+		if (err instanceof TurnTimeoutError && err.kind === "idle") {
+			const hint =
+				"A model that is still thinking keeps sending tokens; silence this long usually means a stalled request or a very long prompt prefill. " +
+				"Allow a longer quiet gap with EIGHT_STREAM_IDLE_MS (milliseconds), for example EIGHT_STREAM_IDLE_MS=600000 for 10 minutes, " +
+				"or set EIGHT_STREAM_IDLE_MS=0 to judge by total time (EIGHT_TURN_TIMEOUT_MS) only.";
+			return {
+				kind,
+				message: `The local model (${ctx.endpoint}) sent nothing for ${seconds} seconds, so the turn was stopped. ${hint}`,
+				reason: `timeout: no output for ${seconds} seconds (${raw})`,
+			};
+		}
+		const hint =
+			"It is running, just slow. Raise the limit with EIGHT_TURN_TIMEOUT_MS (milliseconds), " +
+			"for example EIGHT_TURN_TIMEOUT_MS=1800000 for 30 minutes.";
 		return {
 			kind,
-			message:
-				`The local model (${ctx.endpoint}) took longer than ${seconds} seconds to answer, so the turn was stopped. ` +
-				`It is running, just slow. Raise the limit with EIGHT_TURN_TIMEOUT_MS (milliseconds), ` +
-				`for example EIGHT_TURN_TIMEOUT_MS=900000 for 15 minutes.`,
+			message: `The local model (${ctx.endpoint}) took longer than ${seconds} seconds to answer, so the turn was stopped. ${hint}`,
 			reason: `timeout: took longer than ${seconds} seconds (${raw})`,
 		};
 	}

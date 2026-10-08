@@ -26,7 +26,7 @@ import {
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 import { resolveStreamIdleMs } from "../eight/turn-timeout";
-import { modelFetch } from "./model-fetch";
+import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
 import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
 import type { TextTool } from "./text-tool-loop";
@@ -704,16 +704,29 @@ export function buildTextToolCall(opts: {
 	 */
 	maxTokens?: number;
 	/**
-	 * Stream the reply and fail after this many ms with no output (#3553).
-	 * Default: resolveStreamIdleMs(), so EIGHT_STREAM_IDLE_MS governs; null is off.
+	 * Stream the reply and fail after this many ms with no output (#3553, on by
+	 * default since #3657). Default: resolveStreamIdleMs(), so
+	 * EIGHT_STREAM_IDLE_MS governs; null is off (wall time only).
 	 */
 	idleMs?: number | null;
+	/** Timer source for the step's limits. Default: the global timers. */
+	timers?: ModelFetchTimers;
 }): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 	const maxTokens = opts.maxTokens ?? resolveMaxOutputTokens();
 	const idleMs = opts.idleMs === undefined ? resolveStreamIdleMs() : opts.idleMs;
 	const streamed = idleMs != null;
+	const limits = {
+		timeoutMs: opts.timeoutMs,
+		...(streamed ? { idleMs } : {}),
+		...(opts.timers ? { timers: opts.timers } : {}),
+	};
+	// A server that answers `stream: true` with one JSON document (some
+	// OpenAI-compatible runtimes, every non-streamed fixture) is read as JSON;
+	// only an event stream goes through the SSE reader.
+	const isJsonReply = (res: Response) =>
+		(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json");
 	const label = `${opts.provider}/${opts.model}`;
 	const noThink = isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
@@ -740,7 +753,7 @@ export function buildTextToolCall(opts: {
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label, ...(streamed ? { idleMs } : {}) },
+			{ ...limits, label },
 		);
 
 	type Attempt =
@@ -762,7 +775,8 @@ export function buildTextToolCall(opts: {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
 		let streamedData: Awaited<ReturnType<typeof readStreamedChatCompletion>> | undefined;
-		if (streamed) {
+		const sse = streamed && !isJsonReply(res);
+		if (sse) {
 			try {
 				streamedData = await readStreamedChatCompletion(res);
 			} catch (e) {
@@ -772,7 +786,7 @@ export function buildTextToolCall(opts: {
 				throw e;
 			}
 		}
-		const data = (streamed ? streamedData : await res.json()) as {
+		const data = (sse ? streamedData : await res.json()) as {
 			choices?: Array<{
 				message?: { content?: unknown; tool_calls?: unknown };
 				finish_reason?: unknown;
@@ -827,14 +841,15 @@ export function buildTextToolCall(opts: {
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label: `${label} (raw)`, ...(streamed ? { idleMs } : {}) },
+			{ ...limits, label: `${label} (raw)` },
 		);
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
 			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
 		}
 		let streamedRaw: Record<string, unknown> | undefined;
-		if (streamed) {
+		const ndjson = streamed && !isJsonReply(res);
+		if (ndjson) {
 			try {
 				streamedRaw = await readStreamedGenerate(res);
 			} catch (e) {
@@ -844,7 +859,7 @@ export function buildTextToolCall(opts: {
 				throw e;
 			}
 		}
-		const data = (streamed ? streamedRaw : await res.json()) as {
+		const data = (ndjson ? streamedRaw : await res.json()) as {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;

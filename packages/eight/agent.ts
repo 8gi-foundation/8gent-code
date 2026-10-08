@@ -893,10 +893,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// round is wrapped in withTurnTimeout: a single stalled round (socket
 		// accepted, no body - maxRounds bounds round COUNT, not a stuck round)
 		// aborts the shared signal and rejects, ending the turn in bounded time
-		// instead of hanging for the full session watchdog. With
-		// EIGHT_STREAM_IDLE_MS set the reply streams and a silent gap is what
-		// fails the step, so this becomes a higher ceiling (#3553); unset, it is
-		// exactly resolveTurnTimeoutMs().
+		// instead of hanging for the full session watchdog. The reply streams and
+		// a step fails on NO PROGRESS (no bytes for EIGHT_STREAM_IDLE_MS, default
+		// 5 min) rather than on total time (#3553, #3657), so this wall clock is
+		// a higher safety net: 20 min by default, EIGHT_TURN_TIMEOUT_MS when set.
+		// With EIGHT_STREAM_IDLE_MS=0 the gap is off and it is exactly
+		// resolveTurnTimeoutMs() again.
 		const attemptTimeoutMs = resolveStepCeilingMs();
 		// #2805: the OpenAI-compatible local endpoints (ollama, LM Studio) report
 		// REAL usage on each completion. Forward it through onStepFinish so
@@ -927,8 +929,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				baseUrl: this.config.baseUrl,
 				temperature: this.runtimeParams.temperature ?? 0.2,
 				signal,
-				// Same limit as withTurnTimeout below, so EIGHT_TURN_TIMEOUT_MS is the
-				// only thing that bounds a model step (never Bun's hidden 300 s cap).
+				// Same ceiling as withTurnTimeout below, so one wall-clock limit bounds
+				// a model step (never Bun's hidden 300 s cap); the no-progress gap
+				// inside buildTextToolCall is what normally ends a dead step.
 				timeoutMs: attemptTimeoutMs,
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
