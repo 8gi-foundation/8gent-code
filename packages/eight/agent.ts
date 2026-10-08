@@ -2929,6 +2929,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Crash resume (#3653): run one tool outside a model turn, through the
+	 * same executor (permissions, secret scrub) as a normal call. The caller
+	 * only uses it for tools whose replay class is "replay".
+	 */
+	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		return this.executor.execute(toolName, args);
+	}
+
+	/** Crash resume (#3653): add a harness note the model sees next turn. */
+	addHarnessNote(body: string): void {
+		this.messageHistory.push({ role: "user", content: harnessNote(body) });
+	}
+
+	/**
 	 * Restore conversation from a checkpoint.
 	 * Injects historical messages into the agent context.
 	 */

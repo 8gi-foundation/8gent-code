@@ -429,7 +429,20 @@ export class AgentPool {
 			bus.emit("agent:error", { sessionId, error: errorMsg });
 			return `[error] ${errorMsg}`;
 		} finally {
+			// A call aborted mid-turn never sends onToolEnd; the turn is over,
+			// so nothing is running any more (#3653).
+			this.journalTool(sessionId, () => this.journal?.clearInFlight(sessionId));
 			this.release(entry);
+		}
+	}
+
+	/** In-flight tool journaling (#3653). Only with EIGHT_RESUME_ON_BOOT; never fails a turn. */
+	private journalTool(sessionId: string, write: () => void): void {
+		if (!this.journal) return;
+		try {
+			write();
+		} catch (err) {
+			console.error(`[agent-pool] in-flight tool journal write failed for ${sessionId}: ${String(err)}`);
 		}
 	}
 
@@ -552,6 +565,14 @@ export class AgentPool {
 	private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
 		return {
 			onToolStart: (event) => {
+				this.journalTool(sessionId, () =>
+					this.journal?.markToolStart(sessionId, {
+						id: event.toolCallId,
+						tool: event.toolName,
+						args: event.args ?? {},
+						startedAt: Date.now(),
+					}),
+				);
 				bus.emit("tool:start", {
 					sessionId,
 					tool: event.toolName,
@@ -560,6 +581,7 @@ export class AgentPool {
 			},
 
 			onToolEnd: (event) => {
+				this.journalTool(sessionId, () => this.journal?.markToolEnd(sessionId, event.toolCallId));
 				bus.emit("tool:result", {
 					sessionId,
 					tool: event.toolName,

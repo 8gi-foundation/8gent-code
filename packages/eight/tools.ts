@@ -172,6 +172,77 @@ import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
 /**
+ * Replay class per tool (#3653), used when a crashed session resumes with a
+ * tool call that was still running (EIGHT_RESUME_ON_BOOT=1).
+ *  - "replay": a local read with no side effect; safe to run again.
+ *  - "never":  writes, shell, git changes, messages, network and desktop
+ *              actions; it may already have happened, so it is never rerun.
+ *  - "ask":    anything not listed (the default); not rerun either, the
+ *              model is told to check with the user first.
+ */
+export type ReplayClass = "replay" | "never" | "ask";
+
+const REPLAY_SAFE_TOOLS = new Set([
+	"read_file",
+	"list_files",
+	"get_outline",
+	"get_symbol",
+	"search_symbols",
+	"locate",
+	"get_project_outline",
+	"lsp_goto_definition",
+	"lsp_find_references",
+	"lsp_hover",
+	"lsp_document_symbols",
+	"lsp_diagnostics",
+	"git_status",
+	"git_diff",
+	"git_log",
+	"read_pdf",
+	"read_pdf_page",
+	"search_pdf",
+	"read_notebook",
+]);
+
+const NEVER_REPLAY_TOOLS = new Set([
+	"write_file",
+	"edit_file",
+	"run_command",
+	"git_checkout",
+	"git_create_branch",
+	"git_add",
+	"git_commit",
+	"git_push",
+	"gh_pr_create",
+	"gh_issue_create",
+	"post_message",
+	"spawn_agent",
+	"speak",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"web_search",
+	"web_fetch",
+	"vercel_deploy",
+	"vercel_set_env",
+	"mcp_call_tool",
+	"background_start",
+	"remember",
+	"enable_infinite_mode",
+	"run_computer_task",
+]);
+
+/** Prefixes whose tools act on the desktop or a browser: never replayed. */
+const NEVER_REPLAY_PREFIXES = ["desktop_", "browser_"];
+
+export function toolReplayClass(toolName: string): ReplayClass {
+	if (REPLAY_SAFE_TOOLS.has(toolName)) return "replay";
+	if (NEVER_REPLAY_TOOLS.has(toolName)) return "never";
+	if (NEVER_REPLAY_PREFIXES.some((p) => toolName.startsWith(p))) return "never";
+	return "ask";
+}
+
+/**
  * Validate that a user-provided path stays within the working directory.
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
