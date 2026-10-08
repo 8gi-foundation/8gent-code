@@ -373,10 +373,10 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Recovering a lost file
-Restore from git, never retype contents (whitespace drifts).
-1. Uncommitted delete (\`git status\` shows " D <path>"): \`git restore <path>\`.
-2. Committed delete: \`git log --diff-filter=D --oneline -- <path>\`; the first hit <sha> is the deleting commit. Run \`git checkout <sha>^ -- <path>\`.
-3. \`git diff <sha>^ -- <path>\` (or \`git diff HEAD -- <path>\`) must print nothing.`;
+Restore from git, never retype contents.
+1. Uncommitted delete (" D <path>" in \`git status\`): \`git checkout HEAD -- <path>\` (\`git restore\` may be denied).
+2. Committed delete: if \`test -e <path>\` succeeds, stop and tell the user, never overwrite. Else the first \`git log --diff-filter=D --oneline -- <path>\` hit <sha> is the deleting commit; run \`git checkout <sha>^ -- <path>\`.
+3. \`git diff <sha>^ -- <path>\` (or HEAD) must print nothing.`;
 
 export const ERROR_RECOVERY_SEGMENT = `## ERROR RECOVERY
 
