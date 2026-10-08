@@ -359,6 +359,21 @@ describe("gate hardening (8SO)", () => {
 		);
 	});
 
+	test("scrubbedEnv drops npm auth names and URL credentials", () => {
+		const env = scrubbedEnv({
+			PATH: "/bin",
+			HOME: "/home/x",
+			CARGO_HOME: "/home/x/.cargo",
+			npm_config__authToken: "x",
+			"npm_config_//registry.npmjs.org/:_authToken": "x",
+			NPM_CONFIG__AUTH: "x",
+			HTTPS_PROXY: "http://user:pw@proxy.local:8080",
+			DATABASE_URL: "postgres://app:hunter2@db.local/app",
+			PLAIN_PROXY: "http://proxy.local:8080",
+		});
+		expect(Object.keys(env).sort()).toEqual(["CARGO_HOME", "HOME", "PATH", "PLAIN_PROXY"]);
+	});
+
 	test("baseline and after-check both run with the scrubbed environment", async () => {
 		const d = dir();
 		writeFileSync(join(d, "Cargo.toml"), "[package]\nname='x'\n");
