@@ -233,6 +233,10 @@ RUN DONE GATE (8gent run):
   Trade-off: failures are only told apart for cargo/rustc, bun, go and tsc output.
   If the project was already red and its runner prints anything else (jest, vitest,
   mocha, free text), the run is NOT VERIFIED, exit 0: new failures are not caught.
+  The check runs the project's own build and test code, so it runs only with --yes
+  (until run_command has an OS sandbox) and with credential variables (*_KEY,
+  *_TOKEN, *_SECRET, *_PASSWORD, ...) removed from its environment. Without --yes
+  the result says "done gate skipped (needs --yes)".
   EIGHT_DONE_GATE=0              Turn the gate off (old behaviour, nothing checked)
   EIGHT_DONE_GATE_ATTEMPTS=<n>   Fix rounds sent back to the agent (default 2, max 5)
   EIGHT_DONE_GATE_TIMEOUT_SEC=<s>  Bound on each check run (default and max 300)

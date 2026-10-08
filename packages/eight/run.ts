@@ -355,10 +355,12 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		const workDir = opts.cwd || process.cwd();
 		const { baselineCheck, finishWithProjectCheck, projectFingerprint, verdictNotice } =
 			await import("./done-gate");
-		const run = (command: string, timeoutSec: number) => agent.runGatedCommand(command, timeoutSec);
+		const run = (command: string, timeoutSec: number, env: Record<string, string | undefined>) =>
+			agent.runGatedCommand(command, timeoutSec, env);
 		// Done gate: the project's check before and after the run. A run that made
 		// it worse goes back to the model, then fails loud (packages/eight/done-gate.ts).
-		const baseline = await baselineCheck({ cwd: workDir, run });
+		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
+		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
 		const answer = await agent.chat(opts.prompt);
 		const check = await finishWithProjectCheck({

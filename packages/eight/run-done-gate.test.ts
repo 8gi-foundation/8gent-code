@@ -176,6 +176,7 @@ afterEach(() => {
 async function headless(
 	start: string,
 	format: "stream-json" | "text" = "stream-json",
+	yes = true,
 ): Promise<{ code: number; events: Event[]; stdout: string }> {
 	repo = mkdtempSync(join(tmpdir(), `donegate-${lang.name}-`));
 	lang.setup(repo, start);
@@ -191,7 +192,7 @@ async function headless(
 	let code: number;
 	try {
 		code = await runRunCommand([
-			"--yes",
+			...(yes ? ["--yes"] : []),
 			"--provider",
 			"ollama",
 			"--model",
@@ -311,5 +312,53 @@ describe("done gate, unrecognised test runner", () => {
 		expect(result?.final_text).not.toContain("pre-existing");
 		expect(code).toBe(0);
 		expect(bodies.some(sawGate)).toBe(false);
+	}, 180_000);
+});
+
+describe("done gate, hardening", () => {
+	const envOut = () => join(home, `env-${Date.now()}-${Math.random()}.txt`);
+	const envLang = (out: string): Lang => ({
+		name: "envdump",
+		available: true,
+		setup: (dir, start) => {
+			writeFileSync(
+				join(dir, "package.json"),
+				JSON.stringify({ name: "ex", scripts: { test: `env > '${out}'` } }),
+			);
+			writeFileSync(join(dir, "index.js"), start);
+		},
+		file: "index.js",
+		green: "module.exports = 1;\n",
+		red: "",
+		broken: "module.exports = 2;\n",
+	});
+
+	afterEach(() => {
+		Reflect.deleteProperty(process.env, "FAKE_SVC_TOKEN");
+	});
+
+	test("a secret in the parent environment is not visible to the check command", async () => {
+		process.env.FAKE_SVC_TOKEN = "do-not-leak-3693";
+		const out = envOut();
+		lang = envLang(out);
+		plan = "break";
+		const { events } = await headless(lang.green);
+		expect(resultOf(events)?.project_check?.status).toBe("pass");
+		const dumped = await Bun.file(out).text();
+		expect(dumped).toContain("PATH=");
+		expect(dumped).not.toContain("do-not-leak-3693");
+	}, 180_000);
+
+	test("without --yes the gate does not run and says so", async () => {
+		const out = envOut();
+		lang = envLang(out);
+		plan = "break";
+		const { code, events } = await headless(lang.green, "stream-json", false);
+		const result = resultOf(events);
+		expect(result?.project_check?.status).toBe("skipped");
+		expect(result?.project_check?.notice).toContain("done gate skipped (needs --yes)");
+		expect(result?.final_text).toContain("done gate skipped (needs --yes)");
+		expect(code).toBe(0);
+		expect(await Bun.file(out).exists()).toBe(false);
 	}, 180_000);
 });

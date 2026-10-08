@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 	newFailures,
 	projectFingerprint,
 	readCheck,
+	scrubbedEnv,
 	verdictNotice,
 } from "./done-gate";
 
@@ -142,13 +143,13 @@ describe("baselineCheck", () => {
 			ran.push(c);
 			return CARGO_TEST_RED;
 		};
-		const b = await baselineCheck({ cwd: d, run, env: {} });
+		const b = await baselineCheck({ cwd: d, run, env: {}, consent: true });
 		expect(ran).toEqual(["cargo test"]);
 		expect(b.command).toBe("cargo test");
 		expect(
-			(await baselineCheck({ cwd: d, run, env: { EIGHT_DONE_GATE: "0" } })).command,
+			(await baselineCheck({ cwd: d, run, env: { EIGHT_DONE_GATE: "0" }, consent: true })).command,
 		).toBeNull();
-		expect((await baselineCheck({ cwd: dir(), run, env: {} })).command).toBeNull();
+		expect((await baselineCheck({ cwd: dir(), run, env: {}, consent: true })).command).toBeNull();
 		expect(ran).toHaveLength(1);
 	});
 });
@@ -326,4 +327,111 @@ describe("finishWithProjectCheck, red to red without recognised failures", () =>
 			);
 		});
 	}
+});
+
+describe("gate hardening (8SO)", () => {
+	const FAKE_GH = `ghp_${"a".repeat(36)}`;
+
+	test("scrubbedEnv drops secret-looking names, keeps what builds need", () => {
+		const env = scrubbedEnv({
+			PATH: "/bin",
+			HOME: "/h",
+			CARGO_HOME: "/c",
+			RUSTUP_HOME: "/r",
+			GOPATH: "/g",
+			npm_config_cache: "/n",
+			OPENROUTER_API_KEY: "x",
+			ANTHROPIC_API_KEY: "x",
+			GH_TOKEN: "x",
+			GITHUB_TOKEN: "x",
+			AWS_SECRET_ACCESS_KEY: "x",
+			AWS_ACCESS_KEY_ID: "x",
+			AWS_SESSION_TOKEN: "x",
+			DB_PASSWORD: "x",
+			CLIENT_SECRET: "x",
+			my_service_token: "x",
+			TELEGRAM_BOT_TOKEN: "x",
+			NPM_TOKEN: "x",
+			GOOGLE_APPLICATION_CREDENTIALS: "x",
+		});
+		expect(Object.keys(env).sort()).toEqual(
+			["CARGO_HOME", "GOPATH", "HOME", "PATH", "RUSTUP_HOME", "npm_config_cache"].sort(),
+		);
+	});
+
+	test("baseline and after-check both run with the scrubbed environment", async () => {
+		const d = dir();
+		writeFileSync(join(d, "Cargo.toml"), "[package]\nname='x'\n");
+		const envs: Array<Record<string, string | undefined>> = [];
+		const run = async (_c: string, _t: number, env: Record<string, string | undefined>) => {
+			envs.push(env);
+			return "test result: ok";
+		};
+		const parent = { PATH: "/bin", FAKE_SVC_TOKEN: "leak-me" };
+		const baseline = await baselineCheck({ cwd: d, run, env: parent, consent: true });
+		await finishWithProjectCheck({
+			baseline,
+			changed: true,
+			finalText: "DONE",
+			run,
+			chat: async () => "",
+			env: parent,
+		});
+		expect(envs).toHaveLength(2);
+		for (const e of envs) {
+			expect(e.FAKE_SVC_TOKEN).toBeUndefined();
+			expect(e.PATH).toBe("/bin");
+		}
+	});
+
+	test("no consent (no --yes): nothing runs, skipped with a visible reason", async () => {
+		const d = dir();
+		writeFileSync(join(d, "Cargo.toml"), "[package]\nname='x'\n");
+		const never = async () => {
+			throw new Error("must not run");
+		};
+		const baseline = await baselineCheck({ cwd: d, run: never, env: {}, consent: false });
+		const v = await finishWithProjectCheck({
+			baseline,
+			changed: true,
+			finalText: "DONE",
+			run: never,
+			chat: never,
+			env: {},
+		});
+		expect(v.status).toBe("skipped");
+		expect(v.detail).toContain("done gate skipped (needs --yes)");
+		expect(verdictNotice(v)).toContain("done gate skipped (needs --yes)");
+	});
+
+	test("failure signatures come from scrubbed output", async () => {
+		const red = `Exit code 1:\n(fail) token ${FAKE_GH} rejected\n`;
+		const sent: string[] = [];
+		await finishWithProjectCheck({
+			baseline: base("Exit code 1:\n(fail) other\n"),
+			changed: true,
+			finalText: "DONE",
+			run: async () => red,
+			chat: async (m) => {
+				sent.push(m);
+				return "";
+			},
+			env: { EIGHT_DONE_GATE_ATTEMPTS: "1" },
+		});
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("these failures are new: bun token");
+		expect(sent[0]).not.toContain(FAKE_GH);
+	});
+
+	test("projectFingerprint does not follow symlinks out of the project", () => {
+		const d = dir();
+		const outside = dir();
+		writeFileSync(join(outside, "f"), "a");
+		writeFileSync(join(d, "x"), "a");
+		symlinkSync(outside, join(d, "link"));
+		const a = projectFingerprint(d);
+		writeFileSync(join(outside, "f"), "changed outside");
+		writeFileSync(join(outside, "g"), "new outside");
+		expect(projectFingerprint(d)).toBe(a);
+	});
 });

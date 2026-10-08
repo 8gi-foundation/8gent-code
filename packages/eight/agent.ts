@@ -1234,8 +1234,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * sanitizer, policy), outside any model turn. The headless done gate uses it
 	 * to run the project's build and tests after the agent answers.
 	 */
-	runGatedCommand(command: string, timeoutSec: number): Promise<string> {
-		return this.executor.runCommand(command, timeoutSec);
+	runGatedCommand(
+		command: string,
+		timeoutSec: number,
+		env?: Record<string, string | undefined>,
+	): Promise<string> {
+		return this.executor.runCommand(command, timeoutSec, env);
 	}
 
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
