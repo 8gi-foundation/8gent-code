@@ -38,6 +38,7 @@ import {
 	runBoardroom,
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { NO_LINK_PREVIEW } from "./notifications";
 import {
@@ -153,6 +154,20 @@ interface TelegramUpdate {
 }
 
 interface BridgeConfig {
+	/** Test seam: replaces https://api.telegram.org/bot for getUpdates only. */
+	telegramApiBase?: string;
+	/** Poll-loop tuning (#3708). Defaults are production values. */
+	poll?: {
+		/** getUpdates long-poll seconds. Default 30. */
+		timeoutSec?: number;
+		/** Extra ms above the long-poll before the client aborts. Default 5000. */
+		abortGraceMs?: number;
+		backoffBaseMs?: number; // default 1000
+		backoffMaxMs?: number; // default 60000
+		/** Restart the loop if no poll completed for this long. Default 5 min. */
+		watchdogMs?: number;
+		watchdogCheckMs?: number; // default 30000
+	};
 	telegramToken: string;
 	chatId: string;
 	daemonUrl: string; // ws://localhost:18789 (same container)
@@ -715,6 +730,11 @@ class TelegramDaemonBridge {
 	private sessionId: string | null = null;
 	private lastUpdateId = 0;
 	private polling = false;
+	/** Poll-loop generation; the watchdog bumps it to retire a wedged loop (#3708). */
+	private pollGen = 0;
+	private pollAbort: AbortController | null = null;
+	private lastPollDoneAt = Date.now();
+	private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 	private agentReady = false;
 	private agentBusy = false;
 	/** Live approval cards by daemon request id (#3621). The daemon re-checks every answer. */
@@ -837,8 +857,7 @@ class TelegramDaemonBridge {
 		); // Every 10 minutes
 
 		// Start Telegram polling
-		this.polling = true;
-		this.poll();
+		this.startPolling();
 
 		console.log("[telegram-bridge] ready - polling Telegram, connected to daemon");
 	}
@@ -980,14 +999,77 @@ class TelegramDaemonBridge {
 		}
 	}
 
-	private async poll(): Promise<void> {
-		while (this.polling) {
+	/**
+	 * Start the poll loop and its watchdog (#3708). Public so a test can drive
+	 * the loop without the daemon and agent start-up in start().
+	 */
+	startPolling(): void {
+		this.polling = true;
+		registerTelegramBridge();
+		this.lastPollDoneAt = Date.now();
+		this.launchPollLoop();
+		const checkMs = this.config.poll?.watchdogCheckMs ?? 30_000;
+		if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+		this.watchdogTimer = setInterval(() => this.watchdogTick(), checkMs);
+		this.watchdogTimer.unref?.();
+	}
+
+	private launchPollLoop(): void {
+		const gen = ++this.pollGen;
+		// The loop catches everything itself; the .catch is the last line of
+		// defence so an unhandled rejection can never end polling silently.
+		this.poll(gen).catch((err) => {
+			console.error("[telegram-bridge] poll loop crashed:", scrubErr(err, this.config.telegramToken));
+			if (this.polling && gen === this.pollGen) setTimeout(() => this.launchPollLoop(), 1000);
+		});
+	}
+
+	private watchdogTick(): void {
+		if (!this.polling) return;
+		const limit = this.config.poll?.watchdogMs ?? 5 * 60_000;
+		const idle = Date.now() - this.lastPollDoneAt;
+		if (idle < limit) return;
+		console.warn(
+			`[telegram-bridge] watchdog: no poll completed for ${Math.round(idle / 1000)}s, restarting poll loop`,
+		);
+		this.pollAbort?.abort();
+		this.lastPollDoneAt = Date.now();
+		this.launchPollLoop();
+	}
+
+	private async poll(gen: number): Promise<void> {
+		const cfg = this.config.poll ?? {};
+		const timeoutSec = cfg.timeoutSec ?? 30;
+		const graceMs = cfg.abortGraceMs ?? 5000;
+		const base = cfg.backoffBaseMs ?? 1000;
+		const max = cfg.backoffMaxMs ?? 60_000;
+		const apiBase = this.config.telegramApiBase ?? TELEGRAM_API;
+		let failures = 0;
+		// gen !== pollGen means the watchdog replaced this loop; it must exit
+		// without touching shared state again.
+		while (this.polling && gen === this.pollGen) {
+			// Each getUpdates owns its AbortController: a stuck socket cannot
+			// outlive timeout + grace, and the watchdog can cancel it.
+			const ac = new AbortController();
+			this.pollAbort = ac;
+			const timer = setTimeout(
+				() => ac.abort(new Error("getUpdates timed out")),
+				timeoutSec * 1000 + graceMs,
+			);
 			try {
 				const res = await fetch(
-					`${TELEGRAM_API}${this.config.telegramToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=30`,
-					{ signal: AbortSignal.timeout(35000) },
+					`${apiBase}${this.config.telegramToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=${timeoutSec}`,
+					{ signal: ac.signal },
 				);
 				const data = await res.json();
+				clearTimeout(timer);
+				if (gen !== this.pollGen) return;
+				if (failures > 0) {
+					console.log(`[telegram-bridge] poll recovered after ${failures} failed attempt(s)`);
+					failures = 0;
+				}
+				recordTelegramPoll();
+				this.lastPollDoneAt = Date.now();
 
 				if (data.ok && data.result) {
 					for (const update of data.result as TelegramUpdate[]) {
@@ -1056,11 +1138,20 @@ class TelegramDaemonBridge {
 						}
 					}
 				}
+				this.lastPollDoneAt = Date.now();
 			} catch (err) {
-				// Timeout or network error - just retry
-				if (String(err).includes("abort")) continue;
-				console.error("[telegram-bridge] poll error:", scrubErr(err, this.config.telegramToken));
-				await new Promise((r) => setTimeout(r, 2000));
+				clearTimeout(timer);
+				if (gen !== this.pollGen) return;
+				failures++;
+				const delay = Math.min(max, base * 2 ** Math.min(failures - 1, 16));
+				console.error(
+					`[telegram-bridge] poll error (attempt ${failures}, retry in ${Math.round(delay)}ms):`,
+					scrubErr(err, this.config.telegramToken),
+				);
+				// A failed poll is not a stalled loop: keep the watchdog quiet
+				// while backoff is doing its job.
+				this.lastPollDoneAt = Date.now();
+				await new Promise((r) => setTimeout(r, delay));
 			}
 		}
 	}
@@ -2016,6 +2107,9 @@ class TelegramDaemonBridge {
 
 	stop(): void {
 		this.polling = false;
+		this.pollAbort?.abort();
+		if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+		this.watchdogTimer = null;
 		this.adapter?.close();
 		this.adapter = null;
 		this.daemonClient?.close();
