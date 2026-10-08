@@ -25,7 +25,7 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type ChoiceAnswer, DecideError, answerFromDistribution, renormalise } from "../types";
 
 /** The model truncates past this, so we do not send it. */
@@ -63,6 +63,8 @@ export interface AudioDecideRequest {
 	/** WAV bytes (16 kHz mono PCM is what the recorder produces). */
 	audio: Uint8Array;
 	candidates: AudioCandidate[];
+	/** Aborted by the caller on timeout; the backend must stop its child process. */
+	signal?: AbortSignal;
 }
 
 export interface AudioDecideResponse {
@@ -160,29 +162,57 @@ export class MockAudioBackend implements AudioDecideBackend {
 }
 
 /** Runs NeuDecide on a WAV path with a tools JSON string; returns its stdout. */
-export type NeuDecideRunner = (wavPath: string, toolsJson: string) => Promise<string>;
+export type NeuDecideRunner = (
+	wavPath: string,
+	toolsJson: string,
+	signal?: AbortSignal,
+) => Promise<string>;
+
+/** Minimal spawn shape, injectable so tests can check args, cwd and kill. */
+export type SpawnFn = (
+	cmd: string[],
+	opts: Record<string, unknown>,
+) => {
+	stdout: ReadableStream | null;
+	stderr: ReadableStream | null;
+	exited: Promise<number>;
+	kill: (sig?: number | string) => void;
+};
 
 const PY = `import json, sys
 from neudecide import NeuDecide
 calls = NeuDecide.from_pretrained().generate(sys.argv[1], json.loads(sys.argv[2]))
 print(json.dumps(calls))`;
 
-/** Default runner: `python3 -c` against an installed `neudecide`, offline only. */
+/**
+ * Default runner: `python3 -I -c` against an installed `neudecide`, offline
+ * only. Isolated mode plus a cwd in the private temp dir (never the project)
+ * means nothing in the working tree can be imported by the child.
+ */
 export function pythonRunner(
 	env: Record<string, string | undefined> = process.env,
+	spawn: SpawnFn = Bun.spawn as unknown as SpawnFn,
 ): NeuDecideRunner {
 	const python = env.EIGHT_NEUDECIDE_PYTHON?.trim() || "python3";
-	return async (wavPath, toolsJson) => {
-		const proc = Bun.spawn([python, "-c", PY, wavPath, toolsJson], {
+	return async (wavPath, toolsJson, signal) => {
+		const proc = spawn([python, "-I", "-c", PY, wavPath, toolsJson], {
 			stdout: "pipe",
 			stderr: "pipe",
+			cwd: dirname(wavPath),
 			env: { ...env, HF_HUB_OFFLINE: "1" },
 		});
+		const kill = () => {
+			try {
+				proc.kill();
+			} catch {}
+		};
+		if (signal?.aborted) kill();
+		else signal?.addEventListener("abort", kill, { once: true });
 		const [out, err, code] = await Promise.all([
 			new Response(proc.stdout).text(),
 			new Response(proc.stderr).text(),
 			proc.exited,
-		]);
+		]).finally(() => signal?.removeEventListener("abort", kill));
 		if (code !== 0)
 			throw new DecideError(`neudecide exited ${code}: ${err.trim().split("\n").pop() ?? ""}`);
 		return out;
@@ -217,7 +247,7 @@ export class NeuDecideBackend implements AudioDecideBackend {
 		let out: string;
 		try {
 			writeFileSync(wavPath, request.audio);
-			out = await this.run(wavPath, JSON.stringify(tools));
+			out = await this.run(wavPath, JSON.stringify(tools), request.signal);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -273,14 +303,17 @@ export async function routeVoiceAudio(
 	if (ms === null) return { routed: false, reason: "not-wav" };
 	if (ms > MAX_AUDIO_MS) return { routed: false, reason: "too-long" };
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	const ctl = new AbortController();
 	try {
 		const timeout = new Promise<never>((_, reject) => {
-			timer = setTimeout(
-				() => reject(new DecideError("timeout")),
-				opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-			);
+			timer = setTimeout(() => {
+				ctl.abort();
+				reject(new DecideError("timeout"));
+			}, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 		});
-		const res = await Promise.race([backend.ask({ audio, candidates }), timeout]);
+		const pending = backend.ask({ audio, candidates, signal: ctl.signal });
+		pending.catch(() => {});
+		const res = await Promise.race([pending, timeout]);
 		const pick = pickIntent(res, candidates, opts.minConfidence);
 		if (pick === "unsure") return { routed: false, reason: "unsure" };
 		return { routed: true, choice: pick.choice, confidence: pick.confidence, backend: res.backend };

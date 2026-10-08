@@ -10,6 +10,7 @@ import {
 	MockAudioBackend,
 	NeuDecideBackend,
 	pickIntent,
+	pythonRunner,
 	routeVoiceAudio,
 	voiceDecideEnabled,
 	wavDurationMs,
@@ -177,5 +178,50 @@ describe("routeVoiceAudio", () => {
 		const r = await routeVoiceAudio(backend, wav(800), CANDIDATES, { timeoutMs: 20 });
 		expect(r.routed).toBe(false);
 		if (!r.routed) expect(r.reason).toBe("error");
+	});
+});
+
+describe("pythonRunner (mocked spawn)", () => {
+	function fakeSpawn(hang = false) {
+		const calls: { cmd: string[]; opts: Record<string, unknown> }[] = [];
+		let killed = 0;
+		let release: (n: number) => void = () => {};
+		const spawn = (cmd: string[], opts: Record<string, unknown>) => {
+			calls.push({ cmd, opts });
+			const text = (t: string) => new Response(t).body;
+			const exited = hang
+				? new Promise<number>((r) => {
+						release = r;
+					})
+				: Promise.resolve(0);
+			return {
+				stdout: text("[]"),
+				stderr: text(""),
+				exited,
+				kill: () => {
+					killed++;
+					release(137);
+				},
+			};
+		};
+		return { spawn, calls, killed: () => killed };
+	}
+
+	it("runs python isolated (-I) from the wav's temp dir, not the project dir", async () => {
+		const f = fakeSpawn();
+		const run = pythonRunner({ EIGHT_NEUDECIDE_PYTHON: "py" }, f.spawn);
+		await run("/tmp/8gent-neudecide-x/in.wav", "[]");
+		expect(f.calls[0].cmd.slice(0, 3)).toEqual(["py", "-I", "-c"]);
+		expect(f.calls[0].opts.cwd).toBe("/tmp/8gent-neudecide-x");
+		expect(f.calls[0].opts.cwd).not.toBe(process.cwd());
+	});
+	it("kills the child when the router times out", async () => {
+		const f = fakeSpawn(true);
+		const backend = new NeuDecideBackend({ run: pythonRunner({}, f.spawn) });
+		const r = await routeVoiceAudio(backend, wav(800), CANDIDATES, { timeoutMs: 20 });
+		expect(r.routed).toBe(false);
+		if (!r.routed) expect(r.detail).toBe("timeout");
+		await new Promise((res) => setTimeout(res, 10));
+		expect(f.killed()).toBe(1);
 	});
 });
