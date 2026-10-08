@@ -1251,6 +1251,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
+				onError: (_id, message) => {
+					// Without this the agent waits on a description that never comes and
+					// spends the turn probing the image with scripts (#3715).
+					this.messageHistory.push({
+						role: "user",
+						content: harnessNote(
+							`[Vision Unavailable] The attached image could not be interpreted (${message.slice(0, 200)}). Do not wait for it or try to decode the image with scripts. Work from the text of the request, state plainly what you could not see, and write the deliverable anyway.`,
+						),
+					});
+				},
 				onResult: (_id, result) => {
 					// Inject vision description as a harness note: a second system
 					// message would be dropped before the model call (#3260).

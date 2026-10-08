@@ -139,13 +139,17 @@ export class VisionInterpreter {
 	private pending = new Map<string, PendingVision>();
 	private apiKey?: string;
 	private onResult?: (id: string, result: VisionInterpretation) => void;
+	private onError?: (id: string, message: string) => void;
 
 	constructor(options?: {
 		apiKey?: string;
 		onResult?: (id: string, result: VisionInterpretation) => void;
+		/** Called when interpretation fails, so the agent is not left waiting (#3715). */
+		onError?: (id: string, message: string) => void;
 	}) {
 		this.apiKey = options?.apiKey || process.env.OPENROUTER_API_KEY;
 		this.onResult = options?.onResult;
+		this.onError = options?.onError;
 	}
 
 	/**
@@ -209,6 +213,7 @@ export class VisionInterpreter {
 			.catch((err) => {
 				entry.status = "error";
 				entry.error = err instanceof Error ? err.message : String(err);
+				this.onError?.(id, entry.error);
 			});
 
 		this.pending.set(id, entry);
