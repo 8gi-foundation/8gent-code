@@ -55,6 +55,11 @@ beforeAll(async () => {
 		port: 0,
 		async fetch(req) {
 			if (req.method !== "POST") return Response.json({ models: [], data: [] });
+			// The vision probe (#3641): a text-only model, so the interpreter
+			// path under test stays the one that runs.
+			if (new URL(req.url).pathname === "/api/show") {
+				return Response.json({ capabilities: ["completion", "tools"] });
+			}
 			bodies.push((await req.json()) as Body);
 			return Response.json({
 				id: "c1",

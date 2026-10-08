@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
+import { imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -150,7 +151,7 @@ import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
 import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
-import { describeImage, readImage } from "../tools/image";
+import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
@@ -170,6 +171,7 @@ import { formatCommandOutput } from "./command-output";
 import { formatEditNotFound } from "./edit-hint";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
+import { type VisionRouterResult, findVisionModel } from "./vision-router";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -546,6 +548,15 @@ export class ToolExecutor {
 	private permission: PermissionModeHolder | undefined;
 	/** Keys the post_message session limit (#3595); a real session id when one was given. */
 	private postSession: string;
+	/**
+	 * Can the model driving this executor see images (#3641)? Asked when
+	 * read_image runs, never before, so a turn that reads no image costs no
+	 * probe. True: read_image attaches the pixels for the model. False (the
+	 * default): read_image returns metadata, as it always did.
+	 */
+	private visionCapable: () => Promise<boolean>;
+	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
+	private resolveVisionModel: () => Promise<VisionRouterResult>;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -556,11 +567,16 @@ export class ToolExecutor {
 			allowedPaths?: string[];
 			openOnWrite?: boolean;
 			permission?: PermissionModeHolder;
+			visionCapable?: () => Promise<boolean>;
+			resolveVisionModel?: () => Promise<VisionRouterResult>;
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
 		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
+		this.visionCapable = options.visionCapable ?? (async () => false);
+		this.resolveVisionModel =
+			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
@@ -1015,6 +1031,40 @@ export class ToolExecutor {
 							out: { type: "string", description: "Output .wav path inside the working directory" },
 						},
 						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "read_image",
+					description:
+						"[FILE] Reads an image file (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
+					parameters: {
+						type: "object",
+						properties: {
+							path: { type: "string", description: "Path to the image file" },
+						},
+						required: ["path"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "describe_image",
+					description:
+						"[FILE] Describes an image file in words using a local vision model. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
+					parameters: {
+						type: "object",
+						properties: {
+							path: { type: "string", description: "Path to the image file" },
+							prompt: {
+								type: "string",
+								description: "What to look for or ask about the image (optional)",
+							},
+						},
+						required: ["path"],
 					},
 				},
 			},
@@ -2740,6 +2790,26 @@ export class ToolExecutor {
 			: path.join(this.workingDirectory, imagePath);
 
 		try {
+			// A model that can see gets the pixels (#3641): downscaled to fit
+			// 1024x1024 so a Retina screenshot does not swamp its context, and
+			// attached to the next message by the text-tool loop. The text part
+			// is the metadata the model always had.
+			if (await this.visionCapable()) {
+				const shown = await resizeImage(absolutePath, 1024, 1024);
+				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
+				const text = JSON.stringify(
+					{
+						path: shown.path,
+						width: shown.width,
+						height: shown.height,
+						format: shown.format,
+						attached: "The image is attached to this message for you to look at.",
+					},
+					null,
+					2,
+				);
+				return imageAttachmentResult(text, mimeType, shown.base64);
+			}
 			const imageInfo = await readImage(absolutePath);
 			return JSON.stringify(
 				{
@@ -2767,10 +2837,22 @@ export class ToolExecutor {
 			: path.join(this.workingDirectory, imagePath);
 
 		try {
+			// The vision router picks the model (#3642): whatever vision model is
+			// installed locally, never a fixed "llava". describeImage speaks to
+			// Ollama only, so a cloud-only result is reported as nothing local,
+			// with the router's own install hint.
+			const found = await this.resolveVisionModel();
+			const local = found.found && found.model?.provider === "ollama" ? found.model : null;
+			if (!local) {
+				const hint =
+					found.error ??
+					"No local vision model found. Pull one: `ollama pull qwen2.5vl` or `ollama pull llava`.";
+				return `Error describing image: no local vision model is available. ${hint}`;
+			}
 			const description = await describeImage(
 				absolutePath,
 				prompt || "Describe this image in detail.",
-				"llava",
+				local.model,
 			);
 			return JSON.stringify(
 				{

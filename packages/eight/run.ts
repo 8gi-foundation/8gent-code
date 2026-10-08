@@ -30,6 +30,8 @@ export interface RunOptions {
 	model?: string;
 	cwd?: string;
 	maxTurns?: number;
+	/** An image file to attach to the prompt (#3641); one per run. */
+	image?: string;
 }
 
 /**
@@ -43,6 +45,7 @@ export interface RunOptions {
  *   --model <name>               or --model=<name>
  *   --cwd <dir>                  or --cwd=<dir>
  *   --max-turns <n>              or --max-turns=<n>
+ *   --image <path>               or --image=<path>   (png, jpg, gif, webp)
  *   <prompt tokens...>           everything positional, joined with spaces
  */
 export function parseRunArgs(argv: string[]): RunOptions {
@@ -52,6 +55,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let model: string | undefined;
 	let cwd: string | undefined;
 	let maxTurns: number | undefined;
+	let image: string | undefined;
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
@@ -122,6 +126,18 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			maxTurns = Number.parseInt(a.slice("--max-turns=".length), 10);
 			continue;
 		}
+		if (a === "--image") {
+			const next = argv[i + 1];
+			if (next && !next.startsWith("-")) {
+				image = next;
+				i++;
+			}
+			continue;
+		}
+		if (a.startsWith("--image=")) {
+			image = a.slice("--image=".length);
+			continue;
+		}
 		// Any other flag is ignored silently so Orchestra can pass extras
 		if (a.startsWith("-")) continue;
 		positional.push(a);
@@ -135,7 +151,40 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		model,
 		cwd,
 		maxTurns,
+		image,
 	};
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+};
+
+/**
+ * The `--image` file as the agent takes it: base64 plus its media type (#3641).
+ * A missing file or an unsupported extension is a usage error, reported the
+ * way a missing prompt is, before any model is contacted.
+ */
+export async function loadRunImage(
+	file: string,
+	cwd: string,
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+	const path = await import("node:path");
+	const fs = await import("node:fs");
+	const absolute = path.isAbsolute(file) ? file : path.join(cwd, file);
+	const mimeType = IMAGE_MIME_TYPES[path.extname(absolute).toLowerCase()];
+	if (!mimeType) {
+		return {
+			error: `Error: --image must be a png, jpg, gif or webp file, got "${file}".`,
+		};
+	}
+	if (!fs.existsSync(absolute)) {
+		return { error: `Error: --image file not found: ${absolute}` };
+	}
+	return { base64: fs.readFileSync(absolute).toString("base64"), mimeType };
 }
 
 /**
@@ -340,6 +389,29 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 
 	let exitCode = 0;
 	try {
+		// --image: the file is read before the agent exists, so a bad path is a
+		// usage error and never a model turn (#3641).
+		let image: { base64: string; mimeType: string } | undefined;
+		if (opts.image) {
+			const loaded = await loadRunImage(opts.image, opts.cwd || process.cwd());
+			if ("error" in loaded) {
+				if (isStreamJson) {
+					emit({ type: "error", subtype: "usage", message: loaded.error });
+					emit({
+						type: "result",
+						subtype: "error",
+						session_id: sessionId,
+						ended_at: new Date().toISOString(),
+						error: loaded.error,
+					});
+				} else {
+					process.stderr.write(`${loaded.error}\n`);
+				}
+				return 1;
+			}
+			image = loaded;
+		}
+
 		const { Agent } = await import("./agent");
 		const agent = new Agent({
 			model,
@@ -352,7 +424,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			keepAnswerFirst: true,
 		});
 
-		const finalText = await agent.chat(opts.prompt);
+		const finalText = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
 
 		if (isStreamJson) {
 			emit({
