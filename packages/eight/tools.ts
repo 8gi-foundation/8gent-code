@@ -2719,9 +2719,16 @@ export class ToolExecutor {
 		return gate.note ? `${gate.note}\n${out}` : out;
 	}
 
-	async runCommand(command: string, timeoutSec?: number): Promise<string> {
+	/** `env` replaces process.env for the child (the done gate passes a scrubbed one). */
+	async runCommand(
+		command: string,
+		timeoutSec?: number,
+		env?: Record<string, string | undefined>,
+	): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
-			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
+			return runWithPermissionHolder(this.permission, () =>
+				this.runCommand(command, timeoutSec, env),
+			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
 		if (commandDir() !== this.workingDirectory) {
@@ -2820,7 +2827,7 @@ export class ToolExecutor {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
-				env: { ...process.env, ...SPAWN_NON_INTERACTIVE_ENV },
+				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
 			let stdout = "";

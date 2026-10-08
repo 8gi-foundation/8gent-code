@@ -22,15 +22,17 @@
  * Pre-existing needs failures recognised on both sides (cargo, rustc, bun, go, tsc);
  * red to red on any other runner is reported as unverified, exit 0.
  * A check (before or after) that times out or cannot start makes the result unverified,
- * never green. EIGHT_DONE_GATE=0 turns it off; EIGHT_DONE_GATE_TIMEOUT_SEC bounds each
+ * never green. Checks run with a scrubbed environment (no credential variables) and only
+ * when the run has --yes, until run_command has an OS sandbox (#3612).
+ * EIGHT_DONE_GATE=0 turns it off; EIGHT_DONE_GATE_TIMEOUT_SEC bounds each
  * check run (default and ceiling 300).
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { firstFailure } from "../orchestration/verify-scope";
-import { type GatedRun, detectTestCommand } from "./commit-gate";
+import { detectTestCommand } from "./commit-gate";
 import { scrub } from "./secret-scanner";
 
 export const DONE_GATE_TAG = "[DONE GATE]";
@@ -39,6 +41,31 @@ const MAX_FILES = 20_000;
 const SKIP_DIRS = new Set([".git", ".8gent", "node_modules", "target", "dist", "build", ".next"]);
 
 type Env = Record<string, string | undefined>;
+
+/** Runs one check command through the agent's gated run_command, with this environment. */
+export type GateRun = (command: string, timeoutSec: number, env: Env) => Promise<string>;
+
+// A name segment that marks a credential: OPENROUTER_API_KEY, GH_TOKEN, CLIENT_SECRET,
+// DB_PASSWORD, AWS_ACCESS_KEY_ID, GOOGLE_APPLICATION_CREDENTIALS, ...
+const SECRET_NAME =
+	/(^|_)(KEY|KEYS|APIKEY|TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PASS|CREDENTIAL|CREDENTIALS|PAT|AUTH)(_|$)/i;
+
+/**
+ * The environment a gate check runs with: the parent's, minus every variable whose
+ * name marks a credential or whose value the secret scanner recognises as one. The
+ * check runs repo code (build scripts, test scripts) the model never chose, so provider
+ * keys and tokens must not reach it. PATH, HOME and the toolchain variables (CARGO_*,
+ * RUSTUP_*, GO*, npm_config_*) stay.
+ */
+export function scrubbedEnv(env: Env): Env {
+	const out: Env = {};
+	for (const [k, v] of Object.entries(env)) {
+		if (SECRET_NAME.test(k)) continue;
+		if (v && scrub(v).scrubbed !== v) continue;
+		out[k] = v;
+	}
+	return out;
+}
 
 export function doneGateEnabled(env: Env = process.env): boolean {
 	return env.EIGHT_DONE_GATE?.trim() !== "0";
@@ -82,9 +109,10 @@ export function projectFingerprint(cwd: string): string {
 		}
 		for (const name of names) {
 			const abs = path.join(dir, name);
-			let st: ReturnType<typeof statSync>;
+			let st: ReturnType<typeof lstatSync>;
 			try {
-				st = statSync(abs);
+				// lstat: a symlink is hashed as itself, never followed out of the project.
+				st = lstatSync(abs);
 			} catch {
 				continue;
 			}
@@ -192,29 +220,45 @@ export function fixMessage(
 export type CheckOutcome = { read: CheckRead; signatures: Map<string, number> };
 
 /** The project check before the agent runs: what "not worse" is measured against. */
-export type Baseline = { command: string; outcome: CheckOutcome } | { command: null };
+export type Baseline =
+	| { command: string; outcome: CheckOutcome }
+	| { command: string; skipped: string }
+	| { command: null };
 
-async function runCheck(run: GatedRun, command: string, timeoutSec: number): Promise<CheckOutcome> {
-	const output = await run(command, timeoutSec);
+async function runCheck(
+	run: GateRun,
+	command: string,
+	timeoutSec: number,
+	env: Env,
+): Promise<CheckOutcome> {
+	const output = await run(command, timeoutSec, scrubbedEnv(env));
 	const read = readCheck(output, timeoutSec);
-	return { read, signatures: read.kind === "fail" ? failureSignatures(output) : new Map() };
+	// Signatures reach the model (fixMessage), so they come from scrubbed output.
+	const signatures = read.kind === "fail" ? failureSignatures(scrub(output).scrubbed) : new Map();
+	return { read, signatures };
 }
+
+export const NEEDS_YES = "done gate skipped (needs --yes)";
 
 /**
  * Run the project check once before the agent starts. Costs one check run, bounded by
  * the same EIGHT_DONE_GATE_TIMEOUT_SEC cap. No check when the gate is off or no command
- * is known.
+ * is known. Without consent (the run had no --yes) nothing runs: the check executes repo
+ * code, so until run_command has an OS sandbox it needs the same consent as an
+ * autonomous shell.
  */
 export async function baselineCheck(opts: {
 	cwd: string;
-	run: GatedRun;
+	run: GateRun;
+	consent: boolean;
 	env?: Env;
 }): Promise<Baseline> {
 	const env = opts.env ?? process.env;
 	if (!doneGateEnabled(env)) return { command: null };
 	const command = detectProjectCheck(opts.cwd);
 	if (!command) return { command: null };
-	return { command, outcome: await runCheck(opts.run, command, doneGateTimeoutSec(env)) };
+	if (!opts.consent) return { command, skipped: NEEDS_YES };
+	return { command, outcome: await runCheck(opts.run, command, doneGateTimeoutSec(env), env) };
 }
 
 export type DoneVerdict = {
@@ -241,7 +285,7 @@ export async function finishWithProjectCheck(opts: {
 	baseline: Baseline;
 	changed: boolean;
 	finalText: string;
-	run: GatedRun;
+	run: GateRun;
 	chat: (message: string) => Promise<string>;
 	env?: Env;
 }): Promise<DoneVerdict> {
@@ -250,6 +294,14 @@ export async function finishWithProjectCheck(opts: {
 	const { baseline } = opts;
 	if (baseline.command === null || !opts.changed)
 		return { status: "skipped", fixRounds: 0, finalText };
+	if ("skipped" in baseline)
+		return {
+			status: "skipped",
+			command: baseline.command,
+			fixRounds: 0,
+			detail: baseline.skipped,
+			finalText,
+		};
 	const { command } = baseline;
 	const before = baseline.outcome.read;
 	if (before.kind === "unverified")
@@ -263,7 +315,7 @@ export async function finishWithProjectCheck(opts: {
 	const attempts = doneGateAttempts(env);
 	const timeoutSec = doneGateTimeoutSec(env);
 	for (let round = 0; ; round++) {
-		const { read, signatures } = await runCheck(opts.run, command, timeoutSec);
+		const { read, signatures } = await runCheck(opts.run, command, timeoutSec, env);
 		if (read.kind === "pass") return { status: "pass", command, fixRounds: round, finalText };
 		if (read.kind === "unverified")
 			return {
@@ -317,6 +369,8 @@ export function verdictNotice(v: DoneVerdict): string | null {
 			return `${DONE_GATE_TAG} NOT VERIFIED: ${v.detail}. The project's build and tests were not confirmed.`;
 		case "pre-existing":
 			return `${DONE_GATE_TAG} ${v.detail}.`;
+		case "skipped":
+			return v.detail ? `${DONE_GATE_TAG} ${v.detail}: \`${v.command}\` was not run.` : null;
 		default:
 			return null;
 	}
