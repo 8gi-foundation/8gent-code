@@ -26,11 +26,7 @@ import {
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
-import {
-	AgentDepthError,
-	currentAgentDepth,
-	processAgentDepthRefusal,
-} from "../orchestration/index";
+import { AgentDepthError, currentAgentDepth, processAgentDepthRefusal } from "../orchestration/index";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
@@ -74,12 +70,7 @@ import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./p
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
-import {
-	localCatalogOmissions,
-	localDelegationTools,
-	localPlanTools,
-	planningGateInstruction,
-} from "./local-tool-scope";
+import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -122,13 +113,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
-import {
-	CONTEXT_NOTE_HEADER,
-	type SentSections,
-	contextNote,
-	harnessNote,
-	withStyleReminder,
-} from "./context-note";
+import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -533,20 +518,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-					? // #3487: the user context (style, name, role, language, board briefing)
-						// trails the project instructions so the cached prefix stays stable (#3222).
-						// The board briefing goes only to a model on this machine (#3236 rule).
-						compactLocalPrompt +
+				? // #3487: the user context (style, name, role, language, board briefing)
+					// trails the project instructions so the cached prefix stays stable (#3222).
+					// The board briefing goes only to a model on this machine (#3236 rule).
+					compactLocalPrompt +
 						projectInstructionsBlock +
 						(onBox ? userContextBlock : userContextNoBoard)
-					: basePrompt +
-						vesselContext +
-						userContextBlock +
-						personalityBlock +
-						orchestratorBlock +
-						deferredToolBlock +
-						languageInstruction +
-						projectInstructionsBlock,
+				: basePrompt +
+					vesselContext +
+					userContextBlock +
+					personalityBlock +
+					orchestratorBlock +
+					deferredToolBlock +
+					languageInstruction +
+					projectInstructionsBlock,
 		});
 		// #3487: a turn can be rerouted to another local provider after this
 		// prompt is built (resolveToolCapableModel, callLocalModelWithReroute), and
@@ -576,11 +561,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const systemPromptFull =
 			this.config.agentScope === "__table__"
 				? basePrompt + languageInstruction
-				: basePrompt +
-					userContextBlock +
-					personalityBlock +
-					orchestratorBlock +
-					languageInstruction;
+				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
 		// TurnRecord with it. Avoids re-hashing per turn for large prompts.
 		this.turnJournal = new TurnJournal(this.sessionId);
@@ -1309,7 +1290,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Fire and forget — runs in parallel while main agent works
 			visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
 
-			if (!visionFailed)
+			if (!visionFailed) {
 				this.config.events?.onStepFinish?.({
 					text: "Image attached — vision interpreter running in the background.",
 					stepNumber: 0,
@@ -1317,6 +1298,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
 					finishReason: "other",
 				});
+			}
 		}
 
 		// ── Proactive Questioning Gate ─────────────────────────────────
@@ -2409,7 +2391,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// traceCapture is opted in, processTurn still returns null (loop off)
 			// and collectSessionTrace persists the scrubbed trajectory locally.
 			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
-				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
+				const toolCallsSucceeded =
+					this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
 				const responseForKernel = flavoredContent;
