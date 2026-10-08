@@ -132,9 +132,9 @@ export async function withTurnTimeout<T>(
  * before still does, a dead endpoint (socket accepted, no body) is still
  * caught at the same 5 minutes, and only the case that used to fail - a model
  * still writing at 5 minutes - now continues. The gap counts bytes, so
- * reasoning deltas keep a thinking model alive, but prompt prefill sends
- * nothing; 5 minutes also covers the worst-case prefill of a large context on
- * slow hardware without a special case.
+ * reasoning deltas keep a thinking model alive. Prompt prefill sends nothing
+ * and can take far longer than 5 minutes for a long document (#3643), so the
+ * wait for the first byte has its own budget: resolveFirstTokenMs.
  */
 export const DEFAULT_STREAM_IDLE_MS = DEFAULT_TURN_TIMEOUT_MS;
 
@@ -182,4 +182,43 @@ export function resolveStepCeilingMs(
 		return resolveTurnTimeoutMs(env);
 	}
 	return DEFAULT_STREAM_CEILING_MS;
+}
+
+/**
+ * Prompt prefill rate assumed when sizing the first-token budget, in tokens
+ * per second. Deliberately slow: a large local model on a busy laptop with a
+ * long KV cache, plus a cold model load. Overestimating only delays failover
+ * for a long prompt on a dead endpoint; underestimating kills a healthy step
+ * (#3643: 3 of 4 long-document runs died at 300 s in prefill).
+ */
+export const PREFILL_FLOOR_TOKENS_PER_S = 50;
+
+/** Characters per token used for the prompt-size estimate. */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * How long a streamed step may wait for its FIRST byte (#3643). Ollama sends
+ * nothing, not even headers, until the whole prompt is prefilled, so the idle
+ * gap must not count that time as silence. The budget is the idle gap plus
+ * the prompt's estimated prefill time at PREFILL_FLOOR_TOKENS_PER_S, never
+ * below the idle gap and never above the step ceiling. A short prompt gets
+ * exactly the idle gap, so a dead endpoint still fails over in one gap.
+ * EIGHT_FIRST_TOKEN_MS (positive ms, 1 s floor) replaces the estimate; any
+ * other value falls back to it.
+ */
+export function resolveFirstTokenMs(args: {
+	idleMs: number;
+	promptChars: number;
+	ceilingMs: number;
+	env?: Record<string, string | undefined>;
+}): number {
+	const env = args.env ?? process.env;
+	const raw = (env.EIGHT_FIRST_TOKEN_MS ?? "").trim();
+	const parsed = raw === "" ? Number.NaN : Number(raw);
+	if (Number.isFinite(parsed) && parsed > 0) {
+		return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
+	}
+	const tokens = Math.max(0, args.promptChars) / CHARS_PER_TOKEN;
+	const prefillMs = Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
+	return clampTimerMs(Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs)));
 }
