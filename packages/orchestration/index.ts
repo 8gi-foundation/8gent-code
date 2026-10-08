@@ -390,6 +390,7 @@ export class AgentPool extends EventEmitter {
 				"./agent-outcome"
 			);
 			for (let i = 0; i < MAX_FINISH_FOLLOW_UPS; i++) {
+				if (spawnedAgent.status !== "running") break;
 				const unwritten = unwrittenScopeFiles(
 					spawnedAgent,
 					Object.keys(spawnedAgent.scopeBaseline),
@@ -427,6 +428,7 @@ export class AgentPool extends EventEmitter {
 				}
 			}
 
+			if (spawnedAgent.status === "cancelled") return;
 			spawnedAgent.status = "completed";
 			spawnedAgent.task.status = "completed";
 			spawnedAgent.task.result = result;
