@@ -1229,6 +1229,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.contextNoteMessages.push(message);
 	}
 
+	/**
+	 * Run one command through this agent's own gated run_command (permissions,
+	 * sanitizer, policy), outside any model turn. The headless done gate uses it
+	 * to run the project's build and tests after the agent answers.
+	 */
+	runGatedCommand(command: string, timeoutSec: number): Promise<string> {
+		return this.executor.runCommand(command, timeoutSec);
+	}
+
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
