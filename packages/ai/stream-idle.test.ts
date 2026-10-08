@@ -204,11 +204,16 @@ describe("EIGHT_STREAM_IDLE_MS is documented with the values the code uses", () 
 		expect(para).toContain("prefill");
 	});
 
-	it("has a CHANGELOG entry under Unreleased", () => {
+	it("has a CHANGELOG entry", () => {
+		// The entry starts under [Unreleased] and moves into a version section at release (#3658),
+		// so look for it in any section, not only under [Unreleased].
 		const log = readFileSync(join(root, "CHANGELOG.md"), "utf8");
-		const unreleased = log.slice(log.indexOf("## [Unreleased]"), log.indexOf("\n## [", log.indexOf("## [Unreleased]") + 1));
-		expect(unreleased).toMatch(/^### .*\(#3553\)$/m);
-		expect(unreleased).toContain("`EIGHT_STREAM_IDLE_MS`");
+		const heading = log.match(/^### .*\(#3553\)$/m);
+		expect(heading).not.toBeNull();
+		const bodyStart = (heading?.index ?? 0) + (heading?.[0].length ?? 0);
+		const next = log.slice(bodyStart).search(/^##+ /m);
+		const entry = next === -1 ? log.slice(bodyStart) : log.slice(bodyStart, bodyStart + next);
+		expect(entry).toContain("`EIGHT_STREAM_IDLE_MS`");
 	});
 });
 
