@@ -45,7 +45,8 @@ export interface RunOptions {
  *   --model <name>               or --model=<name>
  *   --cwd <dir>                  or --cwd=<dir>
  *   --max-turns <n>              or --max-turns=<n>
- *   --image <path>               or --image=<path>   (png, jpg, gif, webp)
+ *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
+ *                                downscaled to fit 1024x1024; inside the working directory)
  *   <prompt tokens...>           everything positional, joined with spaces
  *
  * --image limits (v1, #3641): one image per run; it reaches the model only
@@ -189,7 +190,17 @@ export async function loadRunImage(
 ): Promise<{ base64: string; mimeType: string } | { error: string }> {
 	const path = await import("node:path");
 	const fs = await import("node:fs");
-	const absolute = path.isAbsolute(file) ? file : path.join(cwd, file);
+	// Same containment as every file tool: inside the working directory, no
+	// credential or device paths, no symlink escape. Refused before any read.
+	let absolute: string;
+	try {
+		const { safePath } = await import("./tools");
+		absolute = safePath(file, cwd);
+	} catch (err) {
+		return {
+			error: `Error: --image must be inside the working directory: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
 	if (!IMAGE_MIME_TYPES[path.extname(absolute).toLowerCase()]) {
 		return {
 			error: `Error: --image must be a png, jpg, gif or webp file, got "${file}".`,

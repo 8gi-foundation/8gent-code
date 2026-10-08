@@ -456,3 +456,50 @@ describe("`8gent run --image` size cap and downscale", () => {
 		expect(meta.height).toBe(658);
 	}, 60_000);
 });
+
+// Added test-first: --image must name a file inside the working directory,
+// the same containment every file tool has.
+describe("`8gent run --image` stays inside the working directory", () => {
+	test("an --image outside the working directory is a usage error before any model request", async () => {
+		const start = bodies.length;
+		const outside = mkdtempSync(join(tmpdir(), "img3641-outside-"));
+		const px = Buffer.alloc(16 * 16 * 3, 70);
+		await sharp(px, { raw: { width: 16, height: 16, channels: 3 } })
+			.png()
+			.toFile(join(outside, "elsewhere.png"));
+		const out: string[] = [];
+		const write = spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+			out.push(String(chunk));
+			return true;
+		}) as typeof process.stdout.write);
+		let code: number;
+		try {
+			code = await runRunCommand([
+				"--provider",
+				"ollama",
+				"--model",
+				"see",
+				"--cwd",
+				repo,
+				"--image",
+				join(outside, "elsewhere.png"),
+				"--output-format",
+				"stream-json",
+				"Which button do I click?",
+			]);
+		} finally {
+			write.mockRestore();
+			rmSync(outside, { recursive: true, force: true });
+		}
+		expect(code).toBe(1);
+		expect(bodies.length).toBe(start);
+		const events = out
+			.join("")
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l) as { type: string; subtype?: string; message?: string });
+		const err = events.find((e) => e.type === "error");
+		expect(err?.subtype).toBe("usage");
+		expect(err?.message).toContain("working directory");
+	});
+});

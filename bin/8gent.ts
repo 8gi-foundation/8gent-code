@@ -94,7 +94,8 @@ USAGE:
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
-                              --image <path> attaches one png/jpg/gif/webp (local vision model, text-tool path only)
+                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
+                              must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
   update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
