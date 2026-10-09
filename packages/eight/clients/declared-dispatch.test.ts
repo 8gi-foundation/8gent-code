@@ -129,7 +129,8 @@ describe("PII gate applies to egress, not to on-device endpoints", () => {
 		});
 		try {
 			const port = server.port ?? 0;
-			const client = new OpenRouterClient("test-model", "", baseUrlFor(port));
+			// A key, as a hosted endpoint needs one: with none, nothing is sent (#3746).
+			const client = new OpenRouterClient("test-model", "sk-test", baseUrlFor(port));
 			await client.chat([
 				{ role: "user", content: "My name is James Spalding, email james@example.com" },
 			]);

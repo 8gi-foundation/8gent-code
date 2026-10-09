@@ -34,7 +34,7 @@ export interface PathGuardHost {
 
 /** Directories whose contents are always credential-bearing. browser-profiles holds each named
  *  8gent Browser profile's control token, port file and cookies (#3622). */
-const PROTECTED_DIRS = [".ssh", ".aws", ".kube", ".8gent/browser-profiles"];
+const PROTECTED_DIRS = [".ssh", ".aws", ".kube", ".8gent/browser-profiles", ".8gent/audit"];
 
 /**
  * Files under the home directory that agent tools must never touch, read or
@@ -46,7 +46,14 @@ const PROTECTED_HOME_FILES = [
 	[".8gent", "settings.json"],
 	// The default 8gent Browser control token drives the person's logged-in browser (#3622).
 	[".8gent", "browser-control.token"],
+	// Agent audit files: the record of what agent tools did is not for agent tools to change (#3735).
+	[".8gent", "audit.jsonl"],
+	[".8gent", "permissions-audit.jsonl"],
 ];
+
+/** Audit locations under the data dir (EIGHT_DATA_DIR, default ~/.8gent), relative to it. */
+const AUDIT_DATA_DIR_DIRS = ["audit"];
+const AUDIT_DATA_DIR_FILES = ["audit.jsonl", "permissions-audit.jsonl"];
 
 /** Basenames that always indicate a credential file regardless of location. */
 const PROTECTED_BASENAMES = new Set<string>([
@@ -214,6 +221,21 @@ export function validatePath(
 		}
 	}
 
+	// 5c. The same audit files under a relocated data dir (EIGHT_DATA_DIR) (#3735).
+	{
+		const dataDir = process.env.EIGHT_DATA_DIR;
+		if (dataDir) {
+			const flavor = pathFor(platform);
+			const root = resolveSafe(dataDir, dataDir, platform);
+			if (
+				AUDIT_DATA_DIR_DIRS.some((d) => isPathWithin(resolved, flavor.join(root, d), platform)) ||
+				AUDIT_DATA_DIR_FILES.some((f) => resolved === flavor.join(root, f))
+			) {
+				return { ok: false, reason: "protected audit file" };
+			}
+		}
+	}
+
 	// 6. Protected basenames anywhere (e.g. a .netrc dropped into the project).
 	// NTFS matches names case-insensitively, so ID_RSA opens id_rsa.
 	const base = pathFor(platform).basename(resolved);
@@ -222,4 +244,21 @@ export function validatePath(
 	}
 
 	return { ok: true };
+}
+
+/**
+ * True when a shell command names an agent audit file or directory. A speed
+ * bump, not a parser: the file-tool checks above are the boundary. Quoting,
+ * escapes and string concatenation are stripped before matching (#3735).
+ */
+export function commandTouchesAuditFiles(command: string): boolean {
+	const dataDir = process.env.EIGHT_DATA_DIR;
+	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "").toLowerCase();
+	if (/(?:^|[^a-z0-9_-])(?:permissions-)?audit\.jsonl\b/.test(flat)) return true;
+	if (/\.8gent\/+audit\b/.test(flat)) return true;
+	if (dataDir) {
+		const d = dataDir.toLowerCase().replace(/\/+$/, "");
+		if (flat.includes(`${d}/audit`) || flat.includes(`${d}/permissions-audit`)) return true;
+	}
+	return false;
 }
