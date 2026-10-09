@@ -172,7 +172,10 @@ describe("PII gate applies to egress, not to on-device endpoints", () => {
 		// Same server, reached by a name that is not loopback. isCloudProvider is
 		// deliberately strict, and that fail-safe direction must not regress.
 		const sent = JSON.stringify(
-			await captureRequest((port) => `http://egress.example.test:${port}/v1`, "egress.example.test"),
+			await captureRequest(
+				(port) => `http://egress.example.test:${port}/v1`,
+				"egress.example.test",
+			),
 		);
 		// The listener received a request (the capture is not empty) and it carries no raw email.
 		expect(sent).toContain("test-model");
