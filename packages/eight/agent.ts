@@ -1116,6 +1116,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				provider: effectiveProvider,
 				model: effectiveModel,
 				run: runTurn,
+				// A named provider stays put: reroute only within it (#3746).
+				pinned: this.config.providerPinned,
+				pinnedMessage: (model, error) => pinnedProviderError(effectiveProvider, model, error).message,
 				onReroute: (missing, chosen) => {
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,

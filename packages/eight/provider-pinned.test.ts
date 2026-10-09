@@ -224,6 +224,8 @@ describe("hosted providers need a key before any request (#3746)", () => {
 		const { hostedWithoutKey } = await import("../ai/providers");
 		expect(hostedWithoutKey("openrouter", "https://openrouter.ai/api/v1", undefined)).toBe(true);
 		expect(hostedWithoutKey("openrouter", "https://openrouter.ai/api/v1", "")).toBe(true);
+		// A key of only spaces is no key.
+		expect(hostedWithoutKey("openrouter", "https://openrouter.ai/api/v1", "   ")).toBe(true);
 		expect(hostedWithoutKey("openrouter", "https://openrouter.ai/api/v1", "k")).toBe(false);
 		expect(hostedWithoutKey("openrouter", "http://127.0.0.1:9/v1", undefined)).toBe(false);
 		expect(hostedWithoutKey("ollama", "http://gpu-box.lan:11434/v1", undefined)).toBe(false);
@@ -258,6 +260,7 @@ describe("hosted providers need a key before any request (#3746)", () => {
 		const before = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
 		const client = new OpenRouterClient("m", "");
 		expect(await client.isAvailable()).toBe(false);
+		expect(await new OpenRouterClient("m", "  ").isAvailable()).toBe(false);
 		await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toThrow("No API key for openrouter");
 		const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
 		expect(after).toBe(before);

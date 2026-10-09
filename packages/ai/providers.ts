@@ -119,7 +119,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
  * Keyless local providers and loopback endpoints never count as hosted.
  */
 export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
-	if (apiKey) return false;
+	if (apiKey?.trim()) return false;
 	if (KEYLESS_PROVIDERS.has(name)) return false;
 	let host: string;
 	try {

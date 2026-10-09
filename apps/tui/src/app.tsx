@@ -2577,6 +2577,10 @@ export function App({
 				const decision = await readinessCacheRef.current({
 					provider: currentProvider,
 					model: currentModel,
+					// A launch --provider is never swapped for another provider (#3746).
+					pinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 				});
 				if (cancelled) return;
 				if (decision.kind !== "none") setUnreachableNote(null);

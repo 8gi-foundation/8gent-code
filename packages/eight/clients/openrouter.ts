@@ -130,7 +130,7 @@ export class OpenRouterClient implements LLMClient {
 
 	/** True when this client points at a hosted endpoint and has no key (#3746). */
 	private hostedWithoutKey(): boolean {
-		return !this.apiKey && isCloudProvider({ baseUrl: this.baseUrl });
+		return !this.apiKey?.trim() && isCloudProvider({ baseUrl: this.baseUrl });
 	}
 
 	async isAvailable(): Promise<boolean> {
