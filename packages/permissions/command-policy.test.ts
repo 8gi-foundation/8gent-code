@@ -16,7 +16,9 @@ import {
 	mustAskReason,
 	networkUse,
 	pushTargetsDefaultBranch,
+	repoGitState,
 	stripPrefix,
+	withCommandDir,
 } from "./command-policy";
 import { PermissionManager } from "./index";
 import { _resetTuiApprovalChannel, registerTuiApprovalHandler } from "./tui-approval-channel";
@@ -245,16 +247,33 @@ describe("pushTargetsDefaultBranch: aliases", () => {
 		expect(pushTargetsDefaultBranch(argv("git P origin main"), g)).toBe(true);
 	});
 
-	test("a shell alias that can reach push fails closed; one that cannot does not", () => {
+	test("a shell alias that can reach push fails closed", () => {
 		const g = gitOn(
 			"feature",
 			undefined,
 			{},
-			{ up: "!git push", p: "push", up2: "!f() { git p; }; f", st: "!git status" },
+			{ up: "!sh -c push", p: "push", up2: "!f() { p; }; f" },
 		);
 		expect(pushTargetsDefaultBranch(argv("git up"), g)).toBe(true);
 		expect(pushTargetsDefaultBranch(argv("git up2"), g)).toBe(true);
-		expect(pushTargetsDefaultBranch(argv("git st"), g)).toBe(false);
+	});
+
+	test("a shell alias that runs git asks, whatever its arguments", () => {
+		const g = gitOn("feature", undefined, {}, { g: "!git", st: "!git status", run: "!sh -c" });
+		expect(pushTargetsDefaultBranch(argv("git g"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git g push origin main"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git st"), g)).toBe(true);
+	});
+
+	test("a shell alias given further arguments asks; one with no git and no arguments does not", () => {
+		const g = gitOn("feature", undefined, {}, { run: "!sh -c", hi: "!echo hi" });
+		expect(pushTargetsDefaultBranch(argv("git run anything"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git hi"), g)).toBe(false);
+	});
+
+	test("built-in git commands are never read as aliases", () => {
+		const g = gitOn("feature", undefined, {}, { status: "push origin main" });
+		expect(pushTargetsDefaultBranch(argv("git status"), g)).toBe(false);
 	});
 
 	test("an alias for something else is not a push", () => {
@@ -470,9 +489,9 @@ describe("mustAskReason", () => {
 				ctx(),
 			),
 		).toContain("default branch");
-		expect(mustAskReason("export GIT_CONFIG_PARAMETERS=x; git status", ctx())).toContain(
-			"default branch",
-		);
+		expect(
+			mustAskReason("export GIT_CONFIG_PARAMETERS=x; git push origin feature", ctx()),
+		).toContain("default branch");
 		expect(mustAskReason("git -c alias.y=push y origin main", ctx())).toContain("default branch");
 	});
 
@@ -494,6 +513,124 @@ describe("mustAskReason", () => {
 		expect(mustAskReason("curl https://x", ctx())).toBeNull();
 		expect(mustAskReason("bun test 2>&1 | tail -5", ctx())).toBeNull();
 		expect(mustAskReason("ls -la && cat README.md", ctx())).toBeNull();
+	});
+});
+
+describe("mustAskReason: repository state the check cannot see", () => {
+	test("pointing git at another git dir or work tree fails closed for a push", () => {
+		expect(mustAskReason("git --git-dir=/elsewhere/.git push origin feature", ctx())).toContain(
+			"default branch",
+		);
+		expect(mustAskReason("git --work-tree /elsewhere push", ctx())).toContain("default branch");
+		// A built-in that cannot push is unaffected.
+		expect(mustAskReason("git --git-dir=/elsewhere/.git status", ctx())).toBeNull();
+	});
+
+	test("environment that redirects git's repository or configuration fails closed for a push", () => {
+		for (const prefix of [
+			"GIT_DIR=/x/.git",
+			"GIT_WORK_TREE=/x",
+			"HOME=/tmp/h",
+			"XDG_CONFIG_HOME=/tmp/c",
+		]) {
+			expect(mustAskReason(`${prefix} git push origin feature`, ctx())).toContain("default branch");
+			// A non-built-in subcommand could be an alias from that configuration.
+			expect(mustAskReason(`${prefix} git sync`, ctx())).toContain("default branch");
+		}
+		expect(mustAskReason("HOME=/tmp/h git log", ctx())).toBeNull();
+		expect(mustAskReason("env -i git push origin feature", ctx())).toContain("default branch");
+		expect(mustAskReason("sudo git push origin feature", ctx())).toContain("default branch");
+		expect(mustAskReason("export HOME=/tmp/h && git push origin feature", ctx())).toContain(
+			"default branch",
+		);
+	});
+
+	test("a git config change earlier on the same line makes a later push ask", () => {
+		for (const c of [
+			"git config alias.s push && git s origin main",
+			"git config push.default matching; git push",
+			"git config --global alias.s push\ngit s origin feature",
+			"git branch --set-upstream-to=origin/main && git push",
+			"git remote add up https://x && git push up",
+			"echo x >> .git/config && git push",
+		]) {
+			expect(mustAskReason(c, ctx())).toContain("default branch");
+		}
+		// Reading config does not.
+		expect(
+			mustAskReason("git config --get push.default && git push origin feature", ctx()),
+		).toBeNull();
+	});
+
+	test("-C is resolved, and the push is judged against that directory", () => {
+		const seen: (string | undefined)[] = [];
+		const g: GitState = {
+			currentBranch: (dir) => {
+				seen.push(dir);
+				return dir?.endsWith("other") ? "main" : "feature";
+			},
+			defaultBranches: () => ["main"],
+			config: () => [],
+			aliases: () => ({}),
+		};
+		expect(
+			mustAskReason("git -C sub/other push", { git: g, pinnedLocalProvider: false }),
+		).toContain("default branch");
+		expect(mustAskReason("git -C sub push", { git: g, pinnedLocalProvider: false })).toBeNull();
+		expect(
+			mustAskReason("cd sub && git -C other push", { git: g, pinnedLocalProvider: false }),
+		).toContain("default branch");
+		expect(seen).toContain(path.join("sub", "other"));
+		// A -C target the shell decides at run time fails closed.
+		expect(
+			mustAskReason("git -C $D push origin feature", { git: g, pinnedLocalProvider: false }),
+		).toContain("default branch");
+	});
+
+	test("a cd earlier on the line, including after a newline, moves where git state is read", () => {
+		const g: GitState = {
+			currentBranch: (dir) => (dir === "other" ? "main" : "feature"),
+			defaultBranches: () => ["main"],
+			config: () => [],
+			aliases: () => ({}),
+		};
+		const c = { git: g, pinnedLocalProvider: false };
+		expect(mustAskReason("cd other && git push", c)).toContain("default branch");
+		expect(mustAskReason("cd other\ngit push", c)).toContain("default branch");
+		expect(mustAskReason("git push", c)).toBeNull();
+		expect(mustAskReason("cd - && git push origin feature", c)).toContain("default branch");
+	});
+});
+
+describe("repoGitState", () => {
+	function repo(branch: string): string {
+		const dir = tempDir("cmd-policy-repo-");
+		const run = (...a: string[]) => Bun.spawnSync(["git", "-C", dir, ...a]);
+		run("init", "-q", "-b", "main");
+		run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+		if (branch !== "main") run("checkout", "-q", "-b", branch);
+		return dir;
+	}
+
+	test("reads the bound command directory, not the process directory", () => {
+		const onMain = repo("main");
+		const onFeature = repo("feature");
+		const git = repoGitState();
+		const c = { git, pinnedLocalProvider: false };
+		expect(withCommandDir(onMain, () => mustAskReason("git push", c))).toContain("default branch");
+		expect(withCommandDir(onFeature, () => mustAskReason("git push", c))).toBeNull();
+	});
+
+	test("a config or alias change is seen by the very next check", () => {
+		const dir = repo("feature");
+		const c = { git: repoGitState(() => dir), pinnedLocalProvider: false };
+		expect(mustAskReason("git s origin main", c)).toBeNull();
+		expect(mustAskReason("git push", c)).toBeNull();
+		Bun.spawnSync(["git", "-C", dir, "config", "alias.s", "push"]);
+		Bun.spawnSync(["git", "-C", dir, "config", "push.default", "upstream"]);
+		Bun.spawnSync(["git", "-C", dir, "config", "branch.feature.merge", "refs/heads/main"]);
+		expect(mustAskReason("git s origin main", c)).toContain("default branch");
+		expect(mustAskReason("git push", c)).toContain("default branch");
 	});
 });
 

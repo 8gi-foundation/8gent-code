@@ -10,7 +10,11 @@
  *   push routed there by configuration (push.default, the branch upstream,
  *   remote.<name>.push), a git alias that expands to push, and targets this
  *   check cannot resolve with confidence (globs, partial ref names, shell
- *   variables, configuration set on the command line or in the environment);
+ *   variables, configuration set on the command line or in the environment,
+ *   another git dir, work tree, HOME or config location, a shell alias that
+ *   runs git or takes arguments, and a git config change earlier on the same
+ *   line). Repository state is read fresh for every check, from the working
+ *   directory the command runs in (see withCommandDir);
  * - a network command that sends data: a request body, a form or file upload,
  *   a non-GET method, a write through `gh issue` / `gh pr`, or output
  *   redirected to a network socket;
@@ -31,7 +35,9 @@
  * so that changing it is a deliberate decision, not a side effect.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
+import * as os from "node:os";
 import * as path from "node:path";
 import { splitPipeline, tokenize } from "./src/workspace-boundary";
 
@@ -354,8 +360,36 @@ function branchName(ref: string): string {
 export interface PushCheckOptions {
 	/** The line does not show every argument (xargs, find -exec {}). */
 	appendsArgs?: boolean;
+	/** Directory the command runs in, relative to the git state's base; undefined: the base. */
+	dir?: string;
+	/**
+	 * The repository or git configuration this command sees cannot be known
+	 * from here (another git dir, HOME, a config change earlier on the line).
+	 * A push, or anything that could be an alias, fails closed.
+	 */
+	unknownRepo?: boolean;
 	depth?: number;
 }
+
+/**
+ * Git commands that are built in. Git never lets an alias shadow one, so a
+ * built-in other than push can never push.
+ */
+const GIT_BUILTINS = new Set(
+	(
+		"add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore " +
+		"check-ref-format checkout cherry cherry-pick clean clone commit commit-graph commit-tree config " +
+		"count-objects describe diff diff-files diff-index diff-tree difftool fetch for-each-ref " +
+		"format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree merge merge-base " +
+		"mergetool mv notes pull range-diff rebase reflog remote repack replace rerere reset restore " +
+		"rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule " +
+		"switch symbolic-ref tag update-index update-ref var verify-commit version whatchanged worktree " +
+		"write-tree"
+	).split(" "),
+);
+
+/** A git option that points git at another repository or work tree. */
+const GIT_REPO_REDIRECT = /^--(git-dir|work-tree)(=|$)/;
 
 /** Aliases that can reach `push`, directly or through other aliases. */
 function pushCapableAliases(aliases: Record<string, string>): Set<string> {
@@ -391,11 +425,17 @@ export function pushTargetsDefaultBranch(
 	if (path.basename(argv[0] ?? "") !== "git") return false;
 	if (depth > 5) return true;
 	let i = 1;
-	let dir: string | undefined;
+	let dir = opts.dir;
+	let unknownRepo = !!opts.unknownRepo;
 	let routedByCommandLine = false;
 	while (i < argv.length && argv[i].startsWith("-")) {
 		const a = argv[i];
-		if (a === "-C") dir = argv[i + 1];
+		if (a === "-C") {
+			const to = argv[i + 1] ?? "";
+			if (!to || SHELL_EXPANSION.test(to) || to.startsWith("~")) unknownRepo = true;
+			else dir = path.isAbsolute(to) ? to : path.join(dir ?? ".", to);
+		}
+		if (GIT_REPO_REDIRECT.test(a)) unknownRepo = true;
 		let key: string | null = null;
 		if (a === "-c" || a === "--config-env") key = configKey(argv[i + 1] ?? "");
 		else if (a.startsWith("--config-env=")) key = configKey(a.slice("--config-env=".length));
@@ -410,18 +450,25 @@ export function pushTargetsDefaultBranch(
 	if (sub === undefined) return false;
 
 	if (sub !== "push") {
+		if (GIT_BUILTINS.has(sub)) return false;
+		// Not a built-in: possibly an alias, read from a repository we cannot see.
+		if (unknownRepo) return true;
 		const aliases = git.aliases(dir);
 		const expansion = aliases[sub.toLowerCase()];
 		if (expansion === undefined) return false;
 		if (expansion.trimStart().startsWith("!")) {
-			// A shell alias: fail closed when it can reach push at all.
-			return pushCapableAliases(aliases).has(sub.toLowerCase());
+			// A shell alias asks when it runs git, is given arguments, or can reach push.
+			return (
+				/\bgit\b/.test(expansion) ||
+				i + 1 < argv.length ||
+				pushCapableAliases(aliases).has(sub.toLowerCase())
+			);
 		}
 		const expanded = [...argv.slice(0, i), ...tokenize(expansion), ...argv.slice(i + 1)];
-		return pushTargetsDefaultBranch(expanded, git, { ...opts, depth: depth + 1 });
+		return pushTargetsDefaultBranch(expanded, git, { ...opts, dir, unknownRepo, depth: depth + 1 });
 	}
 
-	if (routedByCommandLine || opts.appendsArgs) return true;
+	if (routedByCommandLine || unknownRepo || opts.appendsArgs) return true;
 
 	const positionals: string[] = [];
 	let tagsOnly = false;
@@ -695,13 +742,43 @@ export function isLoopbackOnlyFetch(argv: string[]): boolean {
 // ── the decision ──────────────────────────────────────────────────────────
 
 const PUSH_REASON = "it can push to the default branch";
-const GIT_CONFIG_ENV = /\bGIT_CONFIG\w*=/;
+
+/** Environment that changes which repository or git configuration git reads. */
+const GIT_ENV_ASSIGNMENT = /^(GIT_\w+|HOME|XDG_CONFIG_HOME)=/;
+
+/** What earlier segments of one command line did to the state git will see. */
+interface LineState {
+	/** Directory after any `cd`, relative to the git state's base. */
+	dir?: string;
+	/** An earlier segment made the repository or its configuration unknowable. */
+	unknownRepo: boolean;
+}
+
+/** Whether this git argv writes configuration a later push or alias would read. */
+function writesGitConfig(argv: string[]): boolean {
+	if (path.basename(argv[0] ?? "") !== "git") return false;
+	let i = 1;
+	while (i < argv.length && argv[i].startsWith("-"))
+		i += GIT_GLOBAL_WITH_VALUE.has(argv[i]) ? 2 : 1;
+	const sub = argv[i];
+	const rest = argv.slice(i + 1);
+	if (sub === "config") {
+		const reads = /^(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|get|list)$/;
+		return !rest.some((a) => reads.test(a));
+	}
+	if (sub === "remote") return rest.length > 0 && !/^(-v|--verbose|show|get-url)$/.test(rest[0]);
+	if (sub === "branch" || sub === "checkout" || sub === "switch" || sub === "worktree") {
+		return rest.some((a) => /^(-u|-t|--track|--set-upstream-to|--set-upstream)(=|$)/.test(a));
+	}
+	return false;
+}
 
 /** Why one command (a single segment's words) must be approved, or null. */
 function argvReason(
 	raw: string[],
 	ctx: CommandPolicyContext,
 	depth: number,
+	line: LineState,
 	appendsArgs = false,
 ): string | null {
 	const unwrapped = stripPrefix(raw);
@@ -710,10 +787,22 @@ function argvReason(
 	if (argv.length === 0) return null;
 	const moreArgs = appendsArgs || unwrapped.appendsArgs;
 
-	// Git configuration from the environment can reroute a push or define an alias.
-	if (path.basename(argv[0]) === "git" && raw.some((t) => GIT_CONFIG_ENV.test(t)))
+	// Prefixes that point git at another repository or configuration, or run it
+	// as another user, make the repository state unknowable from here.
+	const prefix = raw.slice(0, raw.length - argv.length);
+	const unknownRepo =
+		line.unknownRepo ||
+		prefix.some(
+			(t, k) =>
+				GIT_ENV_ASSIGNMENT.test(t) ||
+				path.basename(t) === "sudo" ||
+				(path.basename(t) === "env" && (prefix[k + 1] ?? "").startsWith("-")),
+		);
+	if (
+		pushTargetsDefaultBranch(argv, ctx.git, { appendsArgs: moreArgs, dir: line.dir, unknownRepo })
+	) {
 		return PUSH_REASON;
-	if (pushTargetsDefaultBranch(argv, ctx.git, { appendsArgs: moreArgs })) return PUSH_REASON;
+	}
 
 	const use = networkUse(argv);
 	// Arguments the line does not show could carry a request body.
@@ -725,11 +814,56 @@ function argvReason(
 	if (depth < 3) {
 		for (const payload of findPayloads(argv)) {
 			if (payload.length === 0) continue;
-			const inner = argvReason(payload, ctx, depth + 1, moreArgs || payload.includes("{}"));
+			const inner = argvReason(payload, ctx, depth + 1, line, moreArgs || payload.includes("{}"));
 			if (inner) return inner;
 		}
 	}
 	return null;
+}
+
+/** Carry what this segment does to the state later segments' git commands see. */
+function advanceLine(line: LineState, raw: string[]): void {
+	const first = raw[0] ?? "";
+	if (first === "cd") {
+		const to = raw[1];
+		if (to === undefined) line.dir = os.homedir();
+		else if (to === "-" || SHELL_EXPANSION.test(to)) line.unknownRepo = true;
+		else {
+			const target = to.startsWith("~") ? path.join(os.homedir(), to.slice(1)) : to;
+			line.dir = path.isAbsolute(target) ? target : path.join(line.dir ?? ".", target);
+		}
+		return;
+	}
+	if (first === "pushd" || first === "popd" || first.startsWith("(")) {
+		line.unknownRepo = true;
+		return;
+	}
+	// export / plain assignments of git's environment reach later commands.
+	if (
+		raw.every(
+			(t) => /^[A-Za-z_]\w*=/.test(t) || t === "export" || t === "unset" || t.startsWith("-"),
+		)
+	) {
+		if (raw.some((t) => GIT_ENV_ASSIGNMENT.test(t) || /^(GIT_\w+|HOME|XDG_CONFIG_HOME)$/.test(t))) {
+			line.unknownRepo = true;
+		}
+		return;
+	}
+	if (
+		raw.some(
+			(t) =>
+				/^(export|unset)$/.test(t) &&
+				raw.some((u) => /^(GIT_\w+|HOME|XDG_CONFIG_HOME)(=|$)/.test(u)),
+		)
+	) {
+		line.unknownRepo = true;
+	}
+	const unwrapped = stripPrefix(raw);
+	if (!unwrapped || writesGitConfig(unwrapped.argv)) line.unknownRepo = true;
+	// Writing a git config file directly.
+	if (raw.some((t) => /(^|\/)\.git\/config$|(^|\/)\.gitconfig$|(^|\/)git\/config$/.test(t))) {
+		line.unknownRepo = true;
+	}
 }
 
 /**
@@ -740,12 +874,9 @@ export function mustAskReason(
 	command: string,
 	ctx: CommandPolicyContext,
 	depth = 0,
+	line: LineState = { unknownRepo: false },
 ): string | null {
 	if (/\/dev\/(tcp|udp)\//i.test(command)) return "it redirects data to a network socket";
-	// GIT_CONFIG_* exported earlier on the line reaches a later git command.
-	if (GIT_CONFIG_ENV.test(command) && /\bgit\b/.test(command.replace(/\bGIT_CONFIG\w*=\S*/g, ""))) {
-		return PUSH_REASON;
-	}
 
 	for (const segment of commandSegments(command)) {
 		const raw = tokenize(segment);
@@ -753,13 +884,14 @@ export function mustAskReason(
 		if (depth < 3) {
 			for (const t of raw) {
 				if (/\s/.test(t)) {
-					const inner = mustAskReason(t, ctx, depth + 1);
+					const inner = mustAskReason(t, ctx, depth + 1, { ...line });
 					if (inner) return inner;
 				}
 			}
 		}
-		const reason = argvReason(raw, ctx, depth);
+		const reason = argvReason(raw, ctx, depth, line);
 		if (reason) return reason;
+		advanceLine(line, raw);
 	}
 	return null;
 }
@@ -786,65 +918,62 @@ function git(dir: string, args: string[]): string | null {
 	}
 }
 
-const CACHE_MS = 5000;
+const _commandDir = new AsyncLocalStorage<string>();
+
+/** The working directory of the command being checked, when a caller bound one. */
+export function commandDir(): string | undefined {
+	return _commandDir.getStore();
+}
+
+/**
+ * Check (and run) a command as running in `dir`: the git state is read from
+ * there, not from the process directory. Each tool binds its own working
+ * directory, so a tab or worktree is judged against its own repository.
+ */
+export function withCommandDir<T>(dir: string, fn: () => T): T {
+	return _commandDir.run(dir, fn);
+}
 
 /**
  * Git state read from the repository: the current branch, main, master and
- * origin's HEAD as the default branches, config values and aliases. Cached per
- * directory for a few seconds, since one command is checked several times.
+ * origin's HEAD as the default branches, config values and aliases. Read
+ * fresh on every call, never cached across commands: a config or alias change
+ * followed by a push must be judged against the state the push will see.
+ * The base directory is the bound command directory, else the workspace root,
+ * else the process directory.
  */
 export function repoGitState(
-	baseDir: () => string = () => process.env.EIGHT_WORKSPACE_ROOT || process.cwd(),
+	baseDir: () => string = () => commandDir() || process.env.EIGHT_WORKSPACE_ROOT || process.cwd(),
 ): GitState {
-	const cache = new Map<string, { at: number; value: unknown }>();
-	const cached = <T>(key: string, load: () => T): T => {
-		const hit = cache.get(key);
-		if (hit && Date.now() - hit.at < CACHE_MS) return hit.value as T;
-		const value = load();
-		cache.set(key, { at: Date.now(), value });
-		return value;
-	};
 	const resolve = (dir?: string) => path.resolve(baseDir(), dir ?? ".");
 	return {
 		currentBranch: (dir) => {
-			const d = resolve(dir);
-			return cached(`branch\0${d}`, () => {
-				const current = git(d, ["rev-parse", "--abbrev-ref", "HEAD"]);
-				return current && current !== "HEAD" ? current : null;
-			});
+			const current = git(resolve(dir), ["rev-parse", "--abbrev-ref", "HEAD"]);
+			return current && current !== "HEAD" ? current : null;
 		},
 		defaultBranches: (dir) => {
-			const d = resolve(dir);
-			return cached(`defaults\0${d}`, () => {
-				const originHead = git(d, [
-					"symbolic-ref",
-					"--quiet",
-					"--short",
-					"refs/remotes/origin/HEAD",
-				]);
-				const defaults = ["main", "master"];
-				if (originHead) defaults.push(originHead.replace(/^origin\//, ""));
-				return defaults;
-			});
+			const originHead = git(resolve(dir), [
+				"symbolic-ref",
+				"--quiet",
+				"--short",
+				"refs/remotes/origin/HEAD",
+			]);
+			const defaults = ["main", "master"];
+			if (originHead) defaults.push(originHead.replace(/^origin\//, ""));
+			return defaults;
 		},
 		config: (key, dir) => {
-			const d = resolve(dir);
-			return cached(`config\0${d}\0${key}`, () => {
-				const out = git(d, ["config", "--get-all", key]);
-				return out ? out.split("\n") : [];
-			});
+			const out = git(resolve(dir), ["config", "--get-all", key]);
+			return out ? out.split("\n") : [];
 		},
 		aliases: (dir) => {
-			const d = resolve(dir);
-			return cached(`aliases\0${d}`, () => {
-				const out = git(d, ["config", "--get-regexp", "^alias\\."]);
-				const aliases: Record<string, string> = {};
-				for (const line of out ? out.split("\n") : []) {
-					const m = /^alias\.(\S+)\s?(.*)$/.exec(line);
-					if (m) aliases[m[1].toLowerCase()] = m[2];
-				}
-				return aliases;
-			});
+			const out = git(resolve(dir), ["config", "--get-regexp", "^alias\\."]);
+			const aliases: Record<string, string> = {};
+			for (const line of out ? out.split("\n") : []) {
+				const m = /^alias\.(\S+)\s?(.*)$/.exec(line);
+				if (m) aliases[m[1].toLowerCase()] = m[2];
+			}
+			return aliases;
 		},
 	};
 }
