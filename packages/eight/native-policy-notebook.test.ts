@@ -131,4 +131,50 @@ describe("notebook write tools (#3760)", () => {
 			expect(fs.readFileSync(target, "utf8")).toBe(before);
 		});
 	}
+	describe("symlinks inside the root", () => {
+		for (const [name, mk] of writes) {
+			test(`native and text-path ${name} refuse a symlinked notebook`, async () => {
+				const target = path.join(outside, "ln.ipynb");
+				fs.writeFileSync(target, nb());
+				fs.symlinkSync(target, path.join(ws, "ln.ipynb"));
+				const before = fs.readFileSync(target, "utf8");
+				const nat = await native(name, mk("ln.ipynb"));
+				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("ln.ipynb")).catch((e) => String(e));
+				expect(nat).toContain("symlink");
+				expect(String(txt)).toContain("symlink");
+				expect(fs.readFileSync(target, "utf8")).toBe(before);
+			});
+
+			test(`native and text-path ${name} treat a link that stays inside the root alike`, async () => {
+				const real = path.join(ws, "real.ipynb");
+				fs.writeFileSync(real, nb());
+				fs.symlinkSync(real, path.join(ws, "alias.ipynb"));
+				const nat = await native(name, mk("alias.ipynb"));
+				fs.writeFileSync(real, nb());
+				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("alias.ipynb")).catch((e) => String(e));
+				expect(nat.includes("success")).toBe(String(txt).includes("success"));
+			});
+
+			test(`native and text-path ${name} refuse a dangling link pointing outside`, async () => {
+				const target = path.join(outside, "missing.ipynb");
+				fs.symlinkSync(target, path.join(ws, "dangling.ipynb"));
+				const nat = await native(name, mk("dangling.ipynb"));
+				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("dangling.ipynb")).catch((e) => String(e));
+				expect(nat).toMatch(/symlink|outside/);
+				expect(String(txt)).toMatch(/symlink|outside/);
+				expect(fs.existsSync(target)).toBe(false);
+			});
+
+			test(`native and text-path ${name} refuse a symlinked parent directory`, async () => {
+				fs.writeFileSync(path.join(outside, "pd.ipynb"), nb());
+				fs.symlinkSync(outside, path.join(ws, "linkdir"));
+				const before = fs.readFileSync(path.join(outside, "pd.ipynb"), "utf8");
+				const nat = await native(name, mk("linkdir/pd.ipynb"));
+				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("linkdir/pd.ipynb")).catch((e) => String(e));
+				expect(nat).toContain("outside");
+				expect(String(txt)).toContain("outside");
+				expect(fs.readFileSync(path.join(outside, "pd.ipynb"), "utf8")).toBe(before);
+			});
+		}
+	});
 });

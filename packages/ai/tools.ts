@@ -19,6 +19,7 @@ import {
 	OFFICE_TOOLS,
 	OFFICE_TOOL_DESCRIPTIONS,
 	type OfficeToolName,
+	confineWrite,
 	resolveOfficeOut,
 	safePath,
 } from "../eight/tools";
@@ -285,7 +286,12 @@ function confinedPath(
 	}
 	try {
 		return {
-			path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write"),
+			// Writes also check the real parent and refuse a link at the final component,
+			// as the text-tool path does (#3760).
+			path:
+				outcome === "read"
+					? safePath(p, getToolContext().workingDirectory, "read")
+					: confineWrite(p, getToolContext().workingDirectory),
 		};
 	} catch (err) {
 		return {
