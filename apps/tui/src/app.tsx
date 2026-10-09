@@ -277,7 +277,8 @@ async function initAuthSystem() {
 }
 
 // The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
-import { isInfiniteMode } from "../../../packages/permissions/index.js";
+import { getPermissionManager, isInfiniteMode } from "../../../packages/permissions/index.js";
+import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 import {
 	type PermissionMode,
 	type PermissionModeHolder,
@@ -1351,6 +1352,12 @@ export function App({
 	// back to the orchestrator's ollama default, routing the turn to the wrong
 	// engine). Cleared once the user explicitly switches provider/tab.
 	const cliProviderRequestedRef = useRef(normalizeProviderId(cliProvider));
+	// A launch --provider naming a local provider pins it: every network command
+	// then asks before it runs (#3748).
+	useEffect(() => {
+		const pinned = cliProviderRequestedRef.current;
+		if (pinned) getPermissionManager().setPinnedLocalProvider(LOCAL_PROVIDERS.has(pinned));
+	}, []);
 	// The tab that is active at launch. A CLI --provider/--model override pins
 	// THIS tab only; switching to or opening other tabs uses their role defaults.
 	const cliPinRef = useRef<CliTabPin | null>(null);
