@@ -24,6 +24,7 @@ import {
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
 import { hostedAllowed } from "../providers/failover";
+import { currentProviderPin } from "./provider-pin";
 
 export const SPAWN_AGENT_DESCRIPTION =
 	"[SHELL] Starts a background worker on task and returns an agentId to poll; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='8gent' (default) for coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. Omit model to run the agent on this session's model.";
@@ -167,6 +168,13 @@ export async function spawnAgentTool(
 		if (child && effectiveRuntime === "claude") {
 			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
 			if (refusal) return refusal;
+		}
+
+		// A pinned session never starts a CLI child on another provider (#3762).
+		// "shell" is not a model provider; only "claude" can differ from the pin.
+		const pin = currentProviderPin();
+		if (pin && effectiveRuntime === "claude" && pin.runtime !== "claude") {
+			return `Not started: this session is pinned to ${pin.runtime}, so it will not start a claude CLI agent. Use the 8gent runtime to stay on ${pin.runtime}.`;
 		}
 
 		// CLI runtimes: claude and shell

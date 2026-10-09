@@ -11,6 +11,7 @@
 import { RoleProviderUnavailableError, createClientForRole } from "../eight/clients";
 import type { AgentConfig } from "../eight/types";
 import { type ProviderName, getProviderManager } from "../providers";
+import { currentProviderPin } from "./provider-pin";
 import { type RoleName, loadRoleConfig } from "./role-config";
 import type { DispatchedTask } from "./task-dispatcher";
 import { globalDispatcher } from "./task-dispatcher";
@@ -67,8 +68,9 @@ export async function runClaimedTask(
 	// Validate provider up front. This throws RoleProviderUnavailableError
 	// with a clear message if the role's provider is disabled on this host,
 	// letting the caller surface an install wizard.
+	// Under a pin the role's own provider is not used, so its availability is moot.
 	try {
-		createClientForRole(role);
+		if (!currentProviderPin()) createClientForRole(role);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		globalDispatcher.fail(task.id, msg);
@@ -83,19 +85,27 @@ export async function runClaimedTask(
 		const { Agent } = await import("../eight/agent");
 		const pm = getProviderManager();
 		const apiKey = pm.getApiKey(assignment.provider) ?? undefined;
-		const agentConfig: AgentConfig = {
-			runtime: runtimeForProvider(assignment.provider),
-			model: assignment.model,
-			apiKey,
-		};
+		// A pinned caller's role task runs on its provider and model, pinned (#3762).
+		const pin = currentProviderPin();
+		const agentConfig: AgentConfig = pin
+			? {
+					runtime: pin.runtime as AgentConfig["runtime"],
+					model: pin.model ?? assignment.model,
+					providerPinned: true,
+				}
+			: {
+					runtime: runtimeForProvider(assignment.provider),
+					model: assignment.model,
+					apiKey,
+				};
 		const agent = new Agent(agentConfig);
 		const output = await agent.chat(task.title);
 		globalDispatcher.complete(task.id, output);
 		return {
 			taskId: task.id,
 			role,
-			provider: assignment.provider,
-			model: assignment.model,
+			provider: pin ? pin.runtime : assignment.provider,
+			model: agentConfig.model,
 			output,
 		};
 	} catch (err) {
