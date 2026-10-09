@@ -15,7 +15,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
-import { safePath } from "../eight/tools";
+import { confineWrite, safePath } from "../eight/tools";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
@@ -273,7 +273,12 @@ function confinedPath(
 	}
 	try {
 		return {
-			path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write"),
+			// Writes also check the real parent and refuse a link at the final component,
+			// as the text-tool path does (#3760).
+			path:
+				outcome === "read"
+					? safePath(p, getToolContext().workingDirectory, "read")
+					: confineWrite(p, getToolContext().workingDirectory),
 		};
 	} catch (err) {
 		return {
