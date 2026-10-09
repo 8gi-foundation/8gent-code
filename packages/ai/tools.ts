@@ -1215,6 +1215,9 @@ const backgroundStart = tool({
 		timeout: z.number().optional().describe("Timeout in milliseconds"),
 	}),
 	execute: async ({ command, timeout }) => {
+		// Same sanitizer as run_command, before anything asks a person (#3763).
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const { systemOneGate } = await import("../permissions/system-one-gate");
 		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
