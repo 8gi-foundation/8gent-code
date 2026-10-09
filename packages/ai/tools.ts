@@ -30,7 +30,8 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import { applyEdit, blockedToolMessage, gateWriteTool } from "../permissions/write-content-gate";
+import { ToolG8 } from "../permissions/toolg8";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -215,9 +216,8 @@ function resolvePath(p: string): string {
 /**
  * The path native write_file or edit_file may touch (#3747): inside the
  * workspace root, by safePath (traversal, symlink escape, credential paths).
- * Returns the path, or the refusal to hand back. Only these two native tools
- * use it: native read_file (#3759), run_command and the notebook tools
- * (#3760) are not covered by this change.
+ * Returns the path, or the refusal to hand back. The notebook write tools use
+ * it too (#3760). Native read_file is covered separately (#3759).
  */
 function confinedWritePath(p: string): { path: string } | { refused: string } {
 	try {
@@ -225,6 +225,22 @@ function confinedWritePath(p: string): { path: string } | { refused: string } {
 	} catch (err) {
 		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
 	}
+}
+
+/**
+ * Native run_command gets the policy decision the text-tool path gets (#3760):
+ * the same ToolG8 gate, with the command and the working directory it runs in,
+ * so the workspace boundary, the push and secret rules and the per-segment
+ * bash check apply here too. Returns the refusal to hand back, or null.
+ */
+function gateCommand(command: string): string | null {
+	const ctx = getToolContext();
+	const result = ToolG8.instance().gate(ctx.agentId ?? "primary", "run_command", {
+		command,
+		cwd: ctx.workingDirectory,
+	});
+	if (result.allowed) return null;
+	return blockedToolMessage("run_command", false, undefined, result.reason, result.alternative);
 }
 
 // ============================================
@@ -630,6 +646,8 @@ const runCommand = tool({
 		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+		const refused = gateCommand(command);
+		if (refused) return refused;
 		const startedAt = Date.now();
 		const output = await runShellCommand(command);
 		// Report images the command drew, and any cut off at an edge (#3580).
@@ -970,8 +988,10 @@ const notebookEditCell = tool({
 	execute: async ({ path: notebookPath, cellIndex, newSource }) => {
 		const blocked = gateWrite("notebook_edit_cell", { path: notebookPath, newSource });
 		if (blocked) return blocked;
+		const target = confinedWritePath(notebookPath);
+		if ("refused" in target) return target.refused;
 		const { editCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
+		const absolutePath = target.path;
 		try {
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
@@ -992,8 +1012,10 @@ const notebookInsertCell = tool({
 	execute: async ({ path: notebookPath, afterIndex, cellType, source }) => {
 		const blocked = gateWrite("notebook_insert_cell", { path: notebookPath, source });
 		if (blocked) return blocked;
+		const target = confinedWritePath(notebookPath);
+		if ("refused" in target) return target.refused;
 		const { insertCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
+		const absolutePath = target.path;
 		try {
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
@@ -1010,8 +1032,13 @@ const notebookDeleteCell = tool({
 		cellIndex: z.number().describe("Cell index to delete"),
 	}),
 	execute: async ({ path: notebookPath, cellIndex }) => {
+		// Deleting a cell rewrites the notebook, so it is gated as a write like edit and insert (#3760).
+		const blocked = gateWrite("notebook_delete_cell", { path: notebookPath });
+		if (blocked) return blocked;
+		const target = confinedWritePath(notebookPath);
+		if ("refused" in target) return target.refused;
 		const { deleteCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
+		const absolutePath = target.path;
 		try {
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
