@@ -67,10 +67,10 @@ describe("design system catalogue", () => {
 		expect(Object.keys(CATALOGUE).every((n) => INDEX_NAMES.includes(n))).toBe(true);
 	});
 
-	test("real count: index minus exclusions (36 of 54 today)", () => {
+	test("real count: index minus exclusions (34 of 54 today)", () => {
 		expect(DESIGN_SYSTEMS.length).toBe(INDEX_NAMES.length - EXCLUDED_SOURCES.size);
 		expect(INDEX_NAMES.length).toBe(54);
-		expect(DESIGN_SYSTEMS.length).toBe(36);
+		expect(DESIGN_SYSTEMS.length).toBe(34);
 	});
 
 	test("ids are the stable index names and labels are the hand-written ones", () => {
@@ -89,16 +89,15 @@ describe("design system catalogue", () => {
 		}
 	});
 
-	test("no two offered systems produce byte-identical palettes", () => {
-		const seen = new Map<string, string>();
-		for (const d of DESIGN_SYSTEMS) {
-			const key = JSON.stringify([
-				designSystemPalette(d.id, "#0A0908"),
-				designSystemPalette(d.id, "#FAF7F4"),
-			]);
-			const dup = seen.get(key);
-			if (dup) throw new Error(`${d.id} renders the same as ${dup}`);
-			seen.set(key, d.id);
+	test("no two offered systems render byte-identical on any one background", () => {
+		for (const bg of ["#0A0908", "#FAF7F4", "#000000", "#ffffff"]) {
+			const seen = new Map<string, string>();
+			for (const d of DESIGN_SYSTEMS) {
+				const key = JSON.stringify(designSystemPalette(d.id, bg));
+				const dup = seen.get(key);
+				if (dup) throw new Error(`${d.id} renders the same as ${dup} on ${bg}`);
+				seen.set(key, d.id);
+			}
 		}
 	});
 });

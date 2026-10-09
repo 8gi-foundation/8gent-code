@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import {
 	DA1_QUERY,
+	MAX_HELD_REPLY,
 	OSC11_QUERY,
 	ReplyFilter,
 	installLateReplyFilter,
@@ -287,5 +288,45 @@ describe("late and split replies never reach the prompt", () => {
 			"#000000",
 		);
 		expect(stdin.unshifted).toEqual(["\u00e9"]);
+	});
+
+	test("a held fragment past the cap is released as text, not held forever", () => {
+		const f = new ReplyFilter();
+		const long = `${ESC}]${"a".repeat(MAX_HELD_REPLY + 4)}`;
+		expect(f.push(long)).toBe(long);
+		expect(f.pending).toBe("");
+	});
+
+	test("typed key during the probe, reply split across the timeout: Ink gets only x, then q", async () => {
+		// A tty-like stdin: data events while the probe listens, a read queue after.
+		class ReadableFake extends FakeStdin {
+			queue: Buffer[] = [];
+			override unshift(chunk: Buffer | string) {
+				super.unshift(chunk);
+				this.queue.unshift(Buffer.from(chunk));
+			}
+			read() {
+				return this.queue.shift() ?? null;
+			}
+		}
+		const stdin = new ReadableFake();
+		const stdout = fakeStdout(() =>
+			queueMicrotask(() => {
+				stdin.emit("data", Buffer.from("x"));
+				stdin.emit("data", Buffer.from(`${ESC}]11;rgb:00`));
+			}),
+		);
+		const hex = await probeTerminalBackground({
+			stdin: asStdin(stdin),
+			stdout,
+			env: {},
+			timeoutMs: 30,
+		});
+		expect(hex).toBeNull();
+		stdin.queue.push(Buffer.from(`00/0000/0000${BEL}`), Buffer.from("q"));
+		const got: string[] = [];
+		for (let v = stdin.read(); v !== null; v = stdin.read()) got.push(v.toString());
+		expect(got.join("")).toBe("xq");
+		expect(got[0]).toBe("x");
 	});
 });

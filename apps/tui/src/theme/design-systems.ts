@@ -96,6 +96,8 @@ export const EXCLUDED_SOURCES: ReadonlyMap<string, string> = new Map([
 	].map((n): [string, string] => [n, "named after a real company, product or game"]),
 	["violet-bloom", "identity is a banned hue (violet)"],
 	["amethyst-haze", "identity is a banned hue (purple)"],
+	["kinetic-editorial", "renders identical to Modern Minimal on dark terminals"],
+	["perpetuity", "renders identical to Modern Minimal on dark terminals"],
 ]);
 
 /**
@@ -117,7 +119,6 @@ export const CATALOGUE: Readonly<Record<string, string>> = {
 	"elegant-luxury": "Elegant Luxury",
 	"entangled-photons": "Entangled Photons",
 	"field-guide": "Field Guide",
-	"kinetic-editorial": "Kinetic Editorial",
 	"kodama-grove": "Kodama Grove",
 	"midnight-bloom": "Midnight Bloom",
 	"mocha-mousse": "Mocha Mousse",
@@ -128,7 +129,6 @@ export const CATALOGUE: Readonly<Record<string, string>> = {
 	notebook: "Notebook",
 	"ocean-breeze": "Ocean Breeze",
 	"pastel-dreams": "Pastel Dreams",
-	perpetuity: "Perpetuity",
 	"quantum-rose": "Quantum Rose",
 	research: "Research",
 	"retro-arcade": "Retro Arcade",

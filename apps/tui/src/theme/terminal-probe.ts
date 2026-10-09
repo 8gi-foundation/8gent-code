@@ -85,6 +85,9 @@ export function splitTrailingPartial(data: string): [clean: string, partial: str
 	return [data, ""];
 }
 
+/** A held fragment longer than this is not a reply; it is released as typed text. */
+export const MAX_HELD_REPLY = 64;
+
 /** Strips complete replies from a stream of text and holds back a partial one. */
 export class ReplyFilter {
 	private held: string;
@@ -93,6 +96,10 @@ export class ReplyFilter {
 	}
 	push(chunk: string): string {
 		const [clean, partial] = splitTrailingPartial(stripReplies(this.held + chunk));
+		if (partial.length > MAX_HELD_REPLY) {
+			this.held = "";
+			return clean + partial;
+		}
 		this.held = partial;
 		return clean;
 	}
@@ -108,12 +115,17 @@ type ReadableLike = { read?: (size?: number) => unknown };
  * Wrap stdin.read for `windowMs` so replies that arrive late or split never
  * reach Ink. After the window it is a pass-through and anything still held
  * (by construction a reply fragment) is dropped, never delivered.
+ *
+ * `typed` is the text the probe put back on stdin (keys pressed while it
+ * waited). It is read first and delivered ahead of the filter, so a reply
+ * fragment held from the probe can never swallow it.
  */
 export function installLateReplyFilter(
 	stdin: ReadableLike,
 	held: string,
 	windowMs = LATE_REPLY_WINDOW_MS,
 	now: () => number = Date.now,
+	typed = "",
 ): void {
 	if (typeof stdin.read !== "function") return;
 	const orig = stdin.read.bind(stdin);
@@ -121,6 +133,7 @@ export function installLateReplyFilter(
 	const decoder = new StringDecoder("utf8");
 	const until = now() + windowMs;
 	let open = true;
+	let bypass = typed.length;
 	stdin.read = (size?: number) => {
 		if (open && now() > until) {
 			open = false;
@@ -138,7 +151,10 @@ export function installLateReplyFilter(
 			if (v === null || v === undefined) return v;
 			const str = typeof v === "string" ? v : Buffer.isBuffer(v) ? decoder.write(v) : null;
 			if (str === null) return v;
-			const out = filter.push(str);
+			const pass = str.slice(0, bypass);
+			bypass -= pass.length;
+			const rest = str.slice(pass.length);
+			const out = pass + (rest ? filter.push(rest) : "");
 			if (out) return typeof v === "string" ? out : Buffer.from(out, "utf8");
 		}
 	};
@@ -198,7 +214,16 @@ export function probeTerminalBackground(opts: ProbeOptions = {}): Promise<string
 			}
 			const [clean, partial] = splitTrailingPartial(stripReplies(buf));
 			if (clean && typeof stdin.unshift === "function") stdin.unshift(Buffer.from(clean, "utf8"));
-			if (lateFilterMs > 0) installLateReplyFilter(stdin as ReadableLike, partial, lateFilterMs);
+			const unshifted = Boolean(clean) && typeof stdin.unshift === "function";
+			if (lateFilterMs > 0) {
+				installLateReplyFilter(
+					stdin as ReadableLike,
+					partial,
+					lateFilterMs,
+					Date.now,
+					unshifted ? clean : "",
+				);
+			}
 			resolve(hex);
 		};
 
