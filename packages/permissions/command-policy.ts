@@ -29,10 +29,10 @@
  * command. A wrapper whose options cannot be read with confidence fails
  * closed: the command asks.
  *
- * Infinite mode does not apply these checks; decision pending. Its fast path
- * in PermissionManager (requestPermission and checkPermission) returns before
- * isDangerous, so only the always-blocked set applies there. A test pins this
- * so that changing it is a deliberate decision, not a side effect.
+ * Infinite mode applies these checks too (#3765). Everything else still runs
+ * there without a prompt, but a command this module marks as ask-every-time
+ * prompts when a terminal is attached (Enter means No) and is refused with the
+ * same plain reason when there is none, exactly as in Ask mode.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
