@@ -8,6 +8,7 @@ import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { wrapRunCommand } from "../permissions/run-command-sandbox";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
 // ============================================
 // Types
@@ -76,6 +77,9 @@ export class BackgroundTaskManager {
 			timeout?: number;
 		} = {},
 	): string {
+		// Same sanitizer as run_command: a background task is a shell command too (#3763).
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) throw new Error(`[BLOCKED] ${validation.reason}`);
 		const id = this.generateTaskId();
 		const workingDirectory = options.workingDirectory || this.defaultWorkingDirectory;
 
