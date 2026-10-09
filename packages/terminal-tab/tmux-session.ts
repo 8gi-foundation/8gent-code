@@ -13,7 +13,7 @@
  *      learn what the CLI said.
  *   3. osascript opens a Terminal.app window running `tmux attach -t
  *      <id>` so the human can also see / interact.
- *   4. `tmux send-keys -t <id> "TEXT" Enter` injects prompts on
+ *   4. `tmux send-keys -t <id> -l -- "TEXT"` then `send-keys Enter` injects prompts on
  *      demand. No Accessibility permission, no AppleScript voodoo.
  *
  * Pure command-builders are exported so the unit tests don't need
@@ -100,14 +100,21 @@ export interface BuildSendKeysOpts {
 	appendEnter?: boolean;
 }
 
-export function buildSendKeysArgs(
-	sessionId: string,
-	text: string,
-	opts: BuildSendKeysOpts = {},
-): string[] {
-	const out = ["send-keys", "-t", sessionId, text];
-	if (opts.appendEnter !== false) out.push("Enter");
-	return out;
+/**
+ * Argv for typing `text` into a pane. `-l` sends it literally, so text that
+ * happens to spell a tmux key name (BSpace, C-u, Up, Enter...) is typed as
+ * characters and never acts as a key. `--` stops a leading dash being read
+ * as a flag. Enter is a separate call (buildEnterKeyArgs): after `-l` every
+ * argument is literal, and a trailing `;` in text must never be read by tmux
+ * as a command separator, so the two are never chained into one argv.
+ */
+export function buildSendKeysArgs(sessionId: string, text: string): string[] {
+	return ["send-keys", "-t", sessionId, "-l", "--", text];
+}
+
+/** Argv for pressing the Enter key (a key name, so no `-l`). */
+export function buildEnterKeyArgs(sessionId: string): string[] {
+	return ["send-keys", "-t", sessionId, "Enter"];
 }
 
 export function buildPipePaneArgs(sessionId: string, logPath: string): string[] {
@@ -217,8 +224,8 @@ export async function sendKeys(
 	text: string,
 	opts: BuildSendKeysOpts = {},
 ): Promise<void> {
-	const args = buildSendKeysArgs(sessionId, text, opts);
-	await execFileAsync("tmux", args);
+	if (text.length > 0) await execFileAsync("tmux", buildSendKeysArgs(sessionId, text));
+	if (opts.appendEnter !== false) await execFileAsync("tmux", buildEnterKeyArgs(sessionId));
 }
 
 export async function hasSession(sessionId: string): Promise<boolean> {

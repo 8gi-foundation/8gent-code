@@ -133,6 +133,46 @@ describe("with no terminal attached", () => {
 		expect(await send("main")).toContain("[PERMISSION DENIED]");
 	});
 
+	test("pending input clears once submitted, so a later line is judged alone", async () => {
+		await executeTermTool("term_send", { sessionId: "s1", text: "git push origin ", appendEnter: false });
+		// Submitted with Enter (a feature branch is allowed): pending is cleared.
+		expect(await send("feature")).toContain('"ok":true');
+		// Nothing is pending now: "main" alone is ordinary input.
+		expect(await send("main")).toContain('"ok":true');
+	});
+
+	test("a newline inside the text submits, so only the text after it stays pending", async () => {
+		const first = await executeTermTool("term_send", {
+			sessionId: "s1",
+			text: "echo a\ngit push origin ",
+			appendEnter: false,
+		});
+		expect(first).toContain('"ok":true');
+		expect(await send("main")).toContain("[PERMISSION DENIED]");
+		await executeTermTool("term_send", { sessionId: "s1", text: "echo b\n", appendEnter: false });
+		expect(await send("main")).toContain('"ok":true');
+	});
+
+	test("a denied send leaves the pending line as it was", async () => {
+		await executeTermTool("term_send", { sessionId: "s1", text: "git push origin ", appendEnter: false });
+		expect(await executeTermTool("term_send", { sessionId: "s1", text: "$(x)", appendEnter: false })).toContain("[PERMISSION DENIED]");
+		expect(await send("main")).toContain("[PERMISSION DENIED]");
+	});
+
+	test("control characters need a person and are refused with no terminal", async () => {
+		for (const text of ["\x15", "echo hi\x17", "\x1b[A", "\x7f"]) {
+			expect(await send(text)).toContain("[PERMISSION DENIED]");
+		}
+		expect(sent).toEqual([]);
+	});
+
+	test("key-name text is ordinary text for the gate and is passed on unchanged", async () => {
+		for (const text of ["BSpace", "C-u", "Up"]) {
+			expect(await send(text)).toContain('"ok":true');
+		}
+		expect(sent).toEqual(["BSpace", "C-u", "Up"]);
+	});
+
 	test("ordinary input still flows", async () => {
 		expect(await send("git status")).toContain('"ok":true');
 		expect(sent).toEqual(["git status"]);

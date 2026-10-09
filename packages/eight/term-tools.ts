@@ -86,7 +86,7 @@ function shellQuote(token: string): string {
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
 async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
-	const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
 	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
 
 	for (const line of lines) {
@@ -307,8 +307,11 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 	const line = (pendingInput.get(sessionId) ?? "") + text;
 	const denied = await gateInput("term_send", line);
 	if (denied) return denied;
+	// A submit (Enter, or a newline inside the text) clears what was pending;
+	// without one, only the text after the last newline is still on the line.
+	const tail = line.slice(Math.max(line.lastIndexOf("\n"), line.lastIndexOf("\r")) + 1);
 	if (appendEnter) pendingInput.delete(sessionId);
-	else pendingInput.set(sessionId, line);
+	else pendingInput.set(sessionId, tail);
 	await sendTmuxKeys(sessionId, text, { appendEnter });
 	return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
 }
