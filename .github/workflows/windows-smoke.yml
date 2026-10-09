@@ -77,6 +77,15 @@ jobs:
           .\dist\bin\8gent-windows-x64.exe --version
           .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
 
+      - name: Compiled binary finds the TUI bundle next to it
+        shell: pwsh
+        run: |
+          Copy-Item dist\tui.js dist\bin\tui.js
+          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "tui","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput exe-tui.out -RedirectStandardError exe-tui.err -RedirectStandardInput NUL
+          if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
+          Get-Content exe-tui.out, exe-tui.err -ErrorAction SilentlyContinue | Select-Object -First 30
+          if ((Get-Content exe-tui.out, exe-tui.err -Raw -ErrorAction SilentlyContinue) -match "TUI entry not found|Could not start the TUI") { throw "compiled binary could not start the TUI" }
+
       - name: Hash the binary
         shell: pwsh
         run: |
@@ -93,4 +102,5 @@ jobs:
           path: |
             dist/bin/8gent-windows-x64.exe
             dist/bin/8gent-windows-x64.exe.sha256
+            dist/bin/tui.js
           retention-days: 14
