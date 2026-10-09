@@ -209,7 +209,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
-import { createProgramStatusEmitter, deriveProgramState } from "./lib/program-status.js";
+import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
@@ -1728,7 +1728,15 @@ export function App({
 			}),
 		);
 	}, [isProcessing, approvalPending, messages]);
-	useEffect(() => () => programStatus.current?.clear(), []);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		const emitter = programStatus.current;
+		const uninstall = installProgramStatusCleanup(emitter);
+		return () => {
+			uninstall();
+			emitter.clear();
+		};
+	}, []);
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);

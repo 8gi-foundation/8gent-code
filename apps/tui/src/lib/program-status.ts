@@ -55,3 +55,37 @@ export function createProgramStatusEmitter(
 	};
 	return { set: emit, clear: () => emit("clear") };
 }
+
+type SignalProc = {
+	pid: number;
+	on(ev: string, fn: () => void): unknown;
+	removeListener(ev: string, fn: () => void): unknown;
+	listenerCount(ev: string): number;
+	kill(pid: number, sig: string): unknown;
+};
+
+/**
+ * Clear the status on process exit, SIGINT and SIGTERM so a kill or Ctrl+C
+ * does not leave the tab on "working". A signal listener suppresses Node's
+ * default exit, so after clearing we drop our listener and re-raise the
+ * signal unless another handler is still registered. Returns an uninstaller.
+ */
+export function installProgramStatusCleanup(
+	emitter: { clear: () => void },
+	proc: SignalProc = process as unknown as SignalProc,
+): () => void {
+	const onExit = () => emitter.clear();
+	const handlers: Array<[string, () => void]> = [["exit", onExit]];
+	for (const sig of ["SIGINT", "SIGTERM"]) {
+		const h = () => {
+			emitter.clear();
+			proc.removeListener(sig, h);
+			if (proc.listenerCount(sig) === 0) proc.kill(proc.pid, sig);
+		};
+		handlers.push([sig, h]);
+	}
+	for (const [ev, fn] of handlers) proc.on(ev, fn);
+	return () => {
+		for (const [ev, fn] of handlers) proc.removeListener(ev, fn);
+	};
+}
