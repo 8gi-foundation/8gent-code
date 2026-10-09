@@ -63,14 +63,20 @@ export function createModel(config: ProviderConfig): LanguageModel {
 	}
 	const baseURL = config.baseURL || defaultBaseUrl(config.name);
 	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
+	const apiKey = config.apiKey || getApiKeyFromEnv(config.name);
 
 	const provider = createOpenAICompatible({
 		name: config.name,
 		baseURL,
-		apiKey: config.apiKey || getApiKeyFromEnv(config.name),
+		apiKey,
 		// Every generation request goes through modelFetch: Bun's hidden 300 s
 		// fetch cap is off and EIGHT_TURN_TIMEOUT_MS bounds the step instead.
-		fetch: modelFetchAsFetch,
+		// A hosted provider with no key gets no request at all (#3746): the
+		// refusal fires at send time, so a failover loop records it as this
+		// provider's error and nothing leaves the machine.
+		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
+			? refuseWithoutKey(config.name, baseURL)
+			: modelFetchAsFetch,
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"
@@ -102,6 +108,41 @@ export function createModel(config: ProviderConfig): LanguageModel {
 	});
 
 	return provider(config.model);
+}
+
+/** Providers that run on the user's machine or LAN and take no key. */
+const KEYLESS_PROVIDERS = new Set<string>(["ollama", "lmstudio", "apfel", "llama-server"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * True when a request would go to a hosted endpoint with no API key (#3746).
+ * Keyless local providers and loopback endpoints never count as hosted.
+ */
+export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
+	if (apiKey) return false;
+	if (KEYLESS_PROVIDERS.has(name)) return false;
+	let host: string;
+	try {
+		host = new URL(baseURL ?? "").hostname;
+	} catch {
+		return false; // no usable endpoint: nothing could be sent anyway
+	}
+	return !LOOPBACK_HOSTS.has(host);
+}
+
+/** The key's env var name, for the refusal message. */
+function keyEnvName(name: string): string {
+	return `${name.replace(/[^a-z0-9]/gi, "_").toUpperCase()}_API_KEY`;
+}
+
+/** A fetch that never sends: it rejects with a plain message naming the missing key (#3746). */
+function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
+	const host = new URL(baseURL).hostname;
+	return (async () => {
+		throw new Error(
+			`No API key for ${name}, so nothing was sent to ${host}. Set ${keyEnvName(name)} to use it, or pick a local provider.`,
+		);
+	}) as unknown as typeof fetch;
 }
 
 /**

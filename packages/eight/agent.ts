@@ -83,7 +83,11 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
-import { providerConfigForStep } from "./failover-provider-config";
+import {
+	mayMoveToProvider,
+	pinnedProviderError,
+	providerConfigForStep,
+} from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
@@ -1060,7 +1064,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					model: providerModel,
 					prefer: readPinnedActiveModel(),
 				});
-				if (resolution.switched) {
+				if (
+					resolution.switched &&
+					mayMoveToProvider(this.config.providerPinned, providerName, resolution.provider)
+				) {
 					console.log(`[honesty] ${resolution.reason}`);
 					effectiveProvider = resolution.provider;
 					effectiveModel = resolution.model;
@@ -2192,8 +2199,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							// candidates. Non-fatal if the chain has no siblings.
 							const sibling = failover.resolve(currentEntry.model, channel);
 							if (
-								sibling.model !== currentEntry.model ||
-								sibling.provider !== currentEntry.provider
+								(sibling.model !== currentEntry.model ||
+									sibling.provider !== currentEntry.provider) &&
+								mayMoveToProvider(
+									this.config.providerPinned,
+									currentEntry.provider,
+									sibling.provider,
+								)
 							) {
 								candidates.push({
 									provider: sibling.provider,
@@ -2292,6 +2304,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
+						// A provider the user named is never left for another (#3746).
+						if (
+							!mayMoveToProvider(this.config.providerPinned, currentEntry.provider, next.provider)
+						) {
+							break outer;
+						}
 						currentEntry = next;
 						break; // exit inner attempt loop, outer reuses new currentEntry
 					}
@@ -2301,6 +2319,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.abortController = null;
 
 			if (!resolved) {
+				const last = errors[errors.length - 1];
+				if (this.config.providerPinned && last) {
+					throw pinnedProviderError(last.provider, last.model, last.error);
+				}
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
 				throw new Error(
 					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,

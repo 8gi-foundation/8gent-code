@@ -2661,6 +2661,11 @@ export function App({
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
 					apiKey: sessionApiKey(runtime),
+					// A launch --provider names the provider: while the tab is on it, a
+					// provider error ends the turn instead of moving to another (#3746).
+					providerPinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
