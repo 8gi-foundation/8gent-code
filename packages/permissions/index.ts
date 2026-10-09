@@ -933,8 +933,11 @@ export class PermissionManager {
 			timestamp: new Date(),
 		};
 
-		// INFINITE MODE: Bypass most permission checks, but block catastrophic commands
-		if (this.isInfiniteMode()) {
+		// INFINITE MODE: Bypass most permission checks, but block catastrophic
+		// commands, and ask a person for the ask-every-time list (#3765).
+		const infinite = this.isInfiniteMode();
+		const infiniteAsk = infinite && command ? this.mustAskReason(command) : null;
+		if (infinite && !infiniteAsk) {
 			if (command) {
 				const blockCheck = this.isAlwaysBlocked(command);
 				if (blockCheck.blocked) {
@@ -990,6 +993,15 @@ export class PermissionManager {
 		);
 		request.approved = approved;
 		this.log.requests.push(request);
+		if (infiniteAsk) {
+			this.auditInfiniteMode(
+				command || "",
+				action,
+				details,
+				!approved,
+				approved ? `approved by a person: ${infiniteAsk}` : `refused: ${infiniteAsk}`,
+			);
+		}
 
 		if (approved) {
 			this.log.approvedCount++;
@@ -1098,13 +1110,15 @@ export class PermissionManager {
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
 	checkPermission(command: string): "allowed" | "denied" | "ask" {
-		// INFINITE MODE: Allow everything except always-blocked commands
+		// INFINITE MODE: Allow everything except always-blocked commands, and
+		// ask for the ask-every-time list (#3765).
 		if (this.isInfiniteMode()) {
 			if (command) {
 				const blockCheck = this.isAlwaysBlocked(command);
 				if (blockCheck.blocked) {
 					return "denied";
 				}
+				if (this.mustAskReason(command)) return "ask";
 			}
 			return "allowed";
 		}
