@@ -254,6 +254,8 @@ export const FOOTER_HINTS = [
  * ^D hands the DJ deck the keyboard, and only while a track is loaded; with
  * nothing loaded it does nothing, so the cap shows only then, after perm.
  */
+/** The cap that quits; its gaps stay dead. */
+const QUIT_CAP = "^C";
 export const DJ_HINT = "^D DJ";
 /** Columns kept between the last status segment and the first hint. */
 const HINTS_MARGIN = 3;
@@ -344,7 +346,14 @@ export function footerClickSpans(
 		const w = hintWidth(h);
 		const bytes = keyBytes(splitHint(h).cap);
 		if (bytes)
-			hintSpans.push({ id: `footer:hint:${h}`, dx: hx, w, action: () => injectKeys(bytes) });
+			hintSpans.push({
+				id: `footer:hint:${h}`,
+				dx: hx,
+				w,
+				// Quit exits with no confirm: a near-miss must never reach it.
+				tight: splitHint(h).cap === QUIT_CAP,
+				action: () => injectKeys(bytes),
+			});
 		hx += w;
 	});
 	return { segments: segSpans, hints: hintSpans };

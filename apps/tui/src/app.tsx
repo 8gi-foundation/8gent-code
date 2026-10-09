@@ -1972,8 +1972,10 @@ export function App({
 
 		// Toggle animations with Ctrl+A
 		if (key.ctrl && input === "a") {
-			setShowAnimations(!showAnimations);
-			flashNotice(showAnimations ? "motion off" : "motion on");
+			setShowAnimations((prev) => {
+				flashNotice(prev ? "motion off" : "motion on");
+				return !prev;
+			});
 		}
 
 		// Toggle sound with Ctrl+S
@@ -1982,9 +1984,9 @@ export function App({
 				const next = !prev;
 				soundManager.setEnabled(next);
 				if (next) playSound("success");
+				flashNotice(next ? "sound on" : "sound off");
 				return next;
 			});
-			flashNotice(soundEnabled ? "sound off" : "sound on");
 		}
 
 		// Toggle kanban with Ctrl+K (overlay, not a tab)

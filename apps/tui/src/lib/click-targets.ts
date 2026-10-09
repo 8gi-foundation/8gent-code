@@ -203,6 +203,8 @@ export interface ClickSpan {
 	dy?: number;
 	w: number;
 	h?: number;
+	/** A span whose neighbours never claim the gaps beside it: a miss must not fire it (quit). */
+	tight?: boolean;
 	action: () => void;
 }
 
@@ -268,7 +270,7 @@ export function closeGaps(spans: ClickSpan[], maxGap = MAX_SHARED_GAP): ClickSpa
 			const gap = b.dx - (a.dx + a.w);
 			if (gap < 0) {
 				a.w = Math.max(0, b.dx - a.dx);
-			} else if (gap > 0 && gap <= maxGap) {
+			} else if (gap > 0 && gap <= maxGap && !a.tight && !b.tight) {
 				const left = Math.floor(gap / 2);
 				const right = gap - left;
 				a.w += left;

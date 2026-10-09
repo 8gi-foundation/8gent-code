@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { APPROVAL_KEYS } from "../components/InlineApprovalPrompt.js";
 import { keyCapSpans } from "../components/KeyCap.js";
+import { FOOTER_HINTS, footerClickSpans } from "../components/StatusFooter.js";
 import { cellSpans } from "../components/TabBar.js";
 import { type ClickSpan, clearTargets, closeGaps, hitTest, placeSpans } from "./click-targets.js";
 
@@ -215,5 +216,27 @@ describe("placeSpans", () => {
 	test("a span wholly outside its box registers nothing", () => {
 		register([span("a", 0, 4), span("b", 12, 4)], 0, 0, 10);
 		expect(at(13)).toBeNull();
+	});
+});
+
+describe("quit cap is tight (8SO hardening)", () => {
+	test("the gap beside [^C] quit belongs to nobody; ^S keeps only its own cells", () => {
+		const { hints } = footerClickSpans([], FOOTER_HINTS, false);
+		const quit = hints.find((h) => h.id.endsWith("^C quit")) as ClickSpan;
+		const sound = hints.find((h) => h.id.endsWith("^S sound")) as ClickSpan;
+		expect(quit.tight).toBe(true);
+		placeSpans({ x: 0, y: 0, w: 300, h: 1 }, hints, 0);
+		const gapStart = sound.dx + sound.w;
+		for (let x = gapStart; x < quit.dx; x++) expect(at(x)).toBeNull();
+		expect(at(quit.dx)).toBe(quit.id);
+		expect(at(quit.dx + quit.w - 1)).toBe(quit.id);
+		expect(at(quit.dx - 1)).toBeNull();
+		expect(at(quit.dx + quit.w)).toBeNull();
+	});
+	test("other neighbouring caps still share their gaps", () => {
+		const { hints } = footerClickSpans([], FOOTER_HINTS, false);
+		const a = hints.find((h) => h.id.endsWith("^A anim")) as ClickSpan;
+		placeSpans({ x: 0, y: 0, w: 300, h: 1 }, hints, 0);
+		expect(at(a.dx + a.w)).not.toBeNull();
 	});
 });
