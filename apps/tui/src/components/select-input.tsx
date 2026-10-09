@@ -40,6 +40,8 @@ export interface SelectOption<T = string> {
 	description?: string;
 	disabled?: boolean;
 	icon?: string;
+	/** Hex colours drawn as a preview row before the label (theme picker). */
+	swatches?: string[];
 }
 
 export interface SelectInputProps<T = string> {
@@ -218,6 +220,18 @@ export function SelectInput<T = string>({
 								</AppText>
 							)}
 
+							{/* Colour preview: background-coloured cells after the label */}
+							{option.swatches?.length ? (
+								<AppText>
+									{"  "}
+									{option.swatches.map((hex, i) => (
+										<AppText key={`${hex}-${i}`} backgroundColor={hex}>
+											{"  "}
+										</AppText>
+									))}
+								</AppText>
+							) : null}
+
 							{/* Disabled indicator */}
 							{isDisabled && <MutedText> (unavailable)</MutedText>}
 						</Inline>
@@ -250,7 +264,9 @@ export function SelectInput<T = string>({
 
 			{/* Help text */}
 			<Box marginTop={1}>
-				<MutedText>[↑↓] Navigate [Enter] Select [Esc] Cancel</MutedText>
+				<MutedText>
+					[↑↓] Navigate [Enter] Select [Esc] Cancel{searchable ? " [type] Filter" : ""}
+				</MutedText>
 			</Box>
 		</Card>
 	);

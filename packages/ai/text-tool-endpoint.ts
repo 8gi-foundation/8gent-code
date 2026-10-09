@@ -26,6 +26,7 @@ import {
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 import { resolveStreamIdleMs } from "../eight/turn-timeout";
+import { isKnownVisionModel } from "../eight/vision-router";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
 import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
@@ -145,7 +146,25 @@ export function outputCapMessage(label: string, maxTokens: number): string {
 type ChatMessage = {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string;
+	/** Data URLs the model should see with this message (#3641). */
+	images?: string[];
 };
+
+/**
+ * One message as the OpenAI-compatible endpoint takes it. Text stays a plain
+ * string; a message with images becomes the array form, one `image_url` part
+ * per image, which Ollama and LM Studio accept for vision models (#3641).
+ */
+export function toWireMessage(m: ChatMessage): { role: ChatMessage["role"]; content: unknown } {
+	if (!m.images || m.images.length === 0) return { role: m.role, content: m.content };
+	return {
+		role: m.role,
+		content: [
+			{ type: "text", text: m.content },
+			...m.images.map((url) => ({ type: "image_url", image_url: { url } })),
+		],
+	};
+}
 
 /** Real token usage reported by the endpoint for one completion. */
 export type TextToolUsage = {
@@ -473,6 +492,60 @@ function lookupQwenVariant(
 	return pending;
 }
 
+// Per root+model cache of the vision capability (one /api/show per model per
+// process). A failed lookup is not cached, so a server that was down retries.
+const visionCache = new Map<string, Promise<boolean | null>>();
+
+/** Test hook: forget cached vision lookups. */
+export function _resetVisionCache(): void {
+	visionCache.clear();
+}
+
+/**
+ * Can the model on this text-tool endpoint see images (#3641)? Ollama says so
+ * itself: /api/show lists "vision" in `capabilities` (measured 2026-10-08:
+ * qwen3.5:9b and qwen2.5vl:7b carry it, 8j:latest does not). Other local
+ * servers have no such endpoint, so the model name decides, through the same
+ * family list the vision router uses. False whenever nothing can be known: a
+ * text-only model is never sent pixels it would reject or ignore.
+ */
+export function modelSupportsVision(opts: {
+	provider: string;
+	model: string;
+	baseUrl?: string;
+	signal?: AbortSignal;
+}): Promise<boolean> {
+	if (opts.provider !== "ollama") return Promise.resolve(isKnownVisionModel(opts.model));
+	const root = ollamaRootFromEndpoint(resolveTextToolEndpoint(opts.provider, opts.baseUrl));
+	const key = `${root}\n${opts.model}`;
+	const cached = visionCache.get(key);
+	if (cached) return cached.then((v) => v === true);
+	const pending = (async (): Promise<boolean | null> => {
+		try {
+			const res = await modelFetch(
+				`${root}/api/show`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ model: opts.model }),
+					signal: opts.signal,
+				},
+				{ timeoutMs: 15_000, label: `ollama/${opts.model} show` },
+			);
+			if (!res.ok) return null;
+			const data = (await res.json()) as { capabilities?: unknown };
+			return Array.isArray(data?.capabilities) && data.capabilities.includes("vision");
+		} catch {
+			return null;
+		}
+	})();
+	visionCache.set(key, pending);
+	pending.then((v) => {
+		if (v === null) visionCache.delete(key);
+	});
+	return pending.then((v) => v === true);
+}
+
 /** Cap on one streamed reply body. A few MB is far above any real model step (#3671). */
 export const MAX_STREAMED_REPLY_BYTES = 8 * 1024 * 1024;
 /** Cap on one line of a streamed body (one SSE frame or one JSON object). */
@@ -722,6 +795,13 @@ export function buildTextToolCall(opts: {
 	 */
 	tools?: ToolSpec[];
 	/**
+	 * Send each declared tool's description (default true). False declares name
+	 * and parameters only: the parser needs only those to keep a native call,
+	 * and the text protocol in the system prompt already describes every tool,
+	 * so a headless run does not pay for the descriptions twice per call.
+	 */
+	declareDescriptions?: boolean;
+	/**
 	 * Output token budget per model step. Default: resolveMaxOutputTokens(), so
 	 * EIGHT_MAX_OUTPUT_TOKENS governs (#3074).
 	 */
@@ -755,7 +835,10 @@ export function buildTextToolCall(opts: {
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",
-		function: { name: t.name, description: t.description, parameters: t.parameters },
+		function:
+			opts.declareDescriptions === false
+				? { name: t.name, parameters: t.parameters }
+				: { name: t.name, description: t.description, parameters: t.parameters },
 	}));
 
 	const post = (messages: ChatMessage[], withTools: boolean) =>
@@ -766,7 +849,7 @@ export function buildTextToolCall(opts: {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					model: opts.model,
-					messages,
+					messages: messages.map(toWireMessage),
 					temperature,
 					max_tokens: maxTokens,
 					stream: streamed,

@@ -27,6 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
+import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -107,10 +108,11 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
@@ -128,6 +130,8 @@ import {
 	PERMISSION_MODE_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
 	checkAgentTool,
 	listAgentsTool,
 	spawnAgentTool,
@@ -150,7 +154,7 @@ import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
 import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
-import { describeImage, readImage } from "../tools/image";
+import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
@@ -170,6 +174,66 @@ import { formatCommandOutput } from "./command-output";
 import { formatEditNotFound } from "./edit-hint";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
+import { type VisionRouterResult, findVisionModel } from "./vision-router";
+
+/**
+ * Replay class per tool (#3653), used when a crashed session resumes with a
+ * tool call that was still running (EIGHT_RESUME_ON_BOOT=1).
+ *  - "replay": a checked local read with no side effect; safe to run again.
+ *  - "never":  writes, shell, git changes, messages, network and desktop
+ *              actions; it may already have happened, so it is never rerun.
+ *  - "ask":    anything not listed (the default); not rerun either, the
+ *              model is told to check with the user first.
+ */
+export type ReplayClass = "replay" | "never" | "ask";
+
+/**
+ * Only reads with no side effect that pass the same path and policy checks
+ * as a live call: read_file (safePath + ToolG8 read_file) and git_log (no
+ * repo-configured helpers run). Language-server tools can start a server that
+ * runs project code; git status/diff can run fsmonitor, external diff and
+ * textconv helpers; the PDF, notebook, outline and listing readers take paths
+ * without the full checks. Those stay "ask" (#3653 review).
+ */
+const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
+
+const NEVER_REPLAY_TOOLS = new Set([
+	"write_file",
+	"edit_file",
+	"run_command",
+	"git_checkout",
+	"git_create_branch",
+	"git_add",
+	"git_commit",
+	"git_push",
+	"gh_pr_create",
+	"gh_issue_create",
+	"post_message",
+	"spawn_agent",
+	"speak",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"web_search",
+	"web_fetch",
+	"vercel_deploy",
+	"vercel_set_env",
+	"mcp_call_tool",
+	"background_start",
+	"remember",
+	"enable_infinite_mode",
+	"run_computer_task",
+]);
+
+/** Prefixes whose tools act on the desktop or a browser: never replayed. */
+const NEVER_REPLAY_PREFIXES = ["desktop_", "browser_"];
+
+export function toolReplayClass(toolName: string): ReplayClass {
+	if (REPLAY_SAFE_TOOLS.has(toolName)) return "replay";
+	if (NEVER_REPLAY_TOOLS.has(toolName)) return "never";
+	if (NEVER_REPLAY_PREFIXES.some((p) => toolName.startsWith(p))) return "never";
+	return "ask";
+}
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -415,6 +479,51 @@ export function numberLines(lines: string[], first: number): string {
 	return lines.map((line, i) => `${String(first + i).padStart(6)}\t${line}`).join("\n");
 }
 
+const DIFF_FILE = /\.(diff|patch)$/i;
+const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * A unified diff with the patched file's line numbers in the gutter. The cat -n
+ * numbers of a .diff are rows of the diff, and a reviewer cited them as source
+ * lines (store.test.ts:75, a 12-line file). Added and context rows get their
+ * line in the patched file; headers and removed rows get none. Null when the
+ * text has no hunk, so a stray .patch file keeps the plain gutter.
+ */
+export function numberDiffLines(lines: string[]): string | null {
+	let oldLeft = 0;
+	let newLeft = 0;
+	let next = 0;
+	let hunks = 0;
+	const blank = " ".repeat(6);
+	const rows = lines.map((line) => {
+		const h = oldLeft <= 0 && newLeft <= 0 ? HUNK.exec(line) : null;
+		if (h) {
+			hunks++;
+			oldLeft = h[1] === undefined ? 1 : Number(h[1]);
+			newLeft = h[3] === undefined ? 1 : Number(h[3]);
+			next = Number(h[2]);
+			return `${blank}\t${line}`;
+		}
+		if (oldLeft <= 0 && newLeft <= 0) return `${blank}\t${line}`;
+		const c = line[0];
+		if (c === "-") {
+			oldLeft--;
+			return `${blank}\t${line}`;
+		}
+		if (c === "\\") return `${blank}\t${line}`;
+		if (c === "+") newLeft--;
+		else {
+			oldLeft--;
+			newLeft--;
+		}
+		return `${String(next++).padStart(6)}\t${line}`;
+	});
+	if (hunks === 0) return null;
+	const note =
+		"[Unified diff. The numbers are line numbers in the patched file, blank on headers and removed lines. Cite those with the file named after +++, never a row of this diff.]";
+	return `${note}\n${rows.join("\n")}`;
+}
+
 /** True when every non-empty line of `text` starts with a read_file gutter. */
 export function hasLineNumberGutter(text: string): boolean {
 	const rows = text.split("\n").filter((l) => l.trim() !== "");
@@ -546,6 +655,15 @@ export class ToolExecutor {
 	private permission: PermissionModeHolder | undefined;
 	/** Keys the post_message session limit (#3595); a real session id when one was given. */
 	private postSession: string;
+	/**
+	 * Can the model driving this executor see images (#3641)? Asked when
+	 * read_image runs, never before, so a turn that reads no image costs no
+	 * probe. True: read_image attaches the pixels for the model. False (the
+	 * default): read_image returns metadata, as it always did.
+	 */
+	private visionCapable: () => Promise<boolean>;
+	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
+	private resolveVisionModel: () => Promise<VisionRouterResult>;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -556,11 +674,16 @@ export class ToolExecutor {
 			allowedPaths?: string[];
 			openOnWrite?: boolean;
 			permission?: PermissionModeHolder;
+			visionCapable?: () => Promise<boolean>;
+			resolveVisionModel?: () => Promise<VisionRouterResult>;
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
 		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
+		this.visionCapable = options.visionCapable ?? (async () => false);
+		this.resolveVisionModel =
+			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
@@ -914,12 +1037,11 @@ export class ToolExecutor {
 							runtime: {
 								type: "string",
 								enum: ["8gent", "claude", "shell"],
-								description: "Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)",
+								description: SPAWN_RUNTIME_DESCRIPTION,
 							},
 							model: {
 								type: "string",
-								description:
-									"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
+								description: SPAWN_MODEL_DESCRIPTION,
 							},
 							timeout: {
 								type: "number",
@@ -1015,6 +1137,40 @@ export class ToolExecutor {
 							out: { type: "string", description: "Output .wav path inside the working directory" },
 						},
 						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "read_image",
+					description:
+						"[FILE] Reads an image file (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
+					parameters: {
+						type: "object",
+						properties: {
+							path: { type: "string", description: "Path to the image file" },
+						},
+						required: ["path"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "describe_image",
+					description:
+						"[FILE] Describes an image file in words using a local vision model. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
+					parameters: {
+						type: "object",
+						properties: {
+							path: { type: "string", description: "Path to the image file" },
+							prompt: {
+								type: "string",
+								description: "What to look for or ask about the image (optional)",
+							},
+						},
+						required: ["path"],
 					},
 				},
 			},
@@ -1530,6 +1686,9 @@ export class ToolExecutor {
 	 */
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
+		// Image tools read a file the model names, so they take the read gate too.
+		read_image: "read_file",
+		describe_image: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
 		edit_file: "write_file",
@@ -1591,6 +1750,12 @@ export class ToolExecutor {
 		// Tool-output injection filter (#3551), off unless EIGHT_OUTPUT_FILTER=1.
 		// Runs on the scrubbed text so no secret reaches the judge.
 		const filtered = await filterToolOutput(toolName, result.scrubbed);
+		// A read_image result that carries an image is never chipped: the chip keeps a 1KB
+		// preview, which cuts the base64 mid-stream, and the model endpoint then
+		// rejects the image with a 400 (pilot 2026-10-09_115409). The attachment
+		// is already downscaled, and the loop strips the pixels from the text it
+		// keeps, so nothing large reaches the context.
+		if (toolName === IMAGE_ATTACHMENT_TOOL && hasImageAttachmentLine(filtered)) return filtered;
 		return this.artifactStore.persistAndReplace(filtered, toolName);
 	}
 
@@ -2403,6 +2568,10 @@ export class ToolExecutor {
 			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
+		if (DIFF_FILE.test(absolutePath)) {
+			const diff = numberDiffLines(lines);
+			if (diff !== null) return diff;
+		}
 		return numberLines(lines, 1);
 	}
 
@@ -2560,11 +2729,18 @@ export class ToolExecutor {
 				this.runCommand(command, timeoutSec, env),
 			);
 		}
+		// Judge git state against the directory this command runs in (#3748).
+		if (commandDir() !== this.workingDirectory) {
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec));
+		}
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen
 		// at process start, so an edit that slips past this cannot take effect.
 		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
+		if (commandTouchesAuditFiles(command))
+			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
 		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
 		// bump only; the boundary is seatbelting run_command (#3612).
 		if (touchesBrowserSecrets(command))
@@ -2742,11 +2918,37 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleReadImage(imagePath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(imagePath)
-			? imagePath
-			: path.join(this.workingDirectory, imagePath);
+		// The same path guard as read_file: workspace containment, credential
+		// and device paths, symlink escapes. It runs before any existence check,
+		// so a refused path reads the same whether or not the file is there.
+		let absolutePath: string;
+		try {
+			absolutePath = safePath(imagePath, this.workingDirectory);
+		} catch (err) {
+			return `Error reading image: ${err instanceof Error ? err.message : String(err)}`;
+		}
 
 		try {
+			// A model that can see gets the pixels (#3641): downscaled to fit
+			// 1024x1024 so a Retina screenshot does not swamp its context, and
+			// attached to the next message by the text-tool loop. The text part
+			// is the metadata the model always had.
+			if (await this.visionCapable()) {
+				const shown = await resizeImage(absolutePath, 1024, 1024);
+				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
+				const text = JSON.stringify(
+					{
+						path: shown.path,
+						width: shown.width,
+						height: shown.height,
+						format: shown.format,
+						attached: "The image is attached to this message for you to look at.",
+					},
+					null,
+					2,
+				);
+				return imageAttachmentResult(text, mimeType, shown.base64);
+			}
 			const imageInfo = await readImage(absolutePath);
 			return JSON.stringify(
 				{
@@ -2769,15 +2971,31 @@ export class ToolExecutor {
 	}
 
 	private async handleDescribeImage(imagePath: string, prompt?: string): Promise<string> {
-		const absolutePath = path.isAbsolute(imagePath)
-			? imagePath
-			: path.join(this.workingDirectory, imagePath);
+		// Same guard as read_image, and before the vision router is consulted.
+		let absolutePath: string;
+		try {
+			absolutePath = safePath(imagePath, this.workingDirectory);
+		} catch (err) {
+			return `Error describing image: ${err instanceof Error ? err.message : String(err)}`;
+		}
 
 		try {
+			// The vision router picks the model (#3642): whatever vision model is
+			// installed locally, never a fixed "llava". describeImage speaks to
+			// Ollama only, so a cloud-only result is reported as nothing local,
+			// with the router's own install hint.
+			const found = await this.resolveVisionModel();
+			const local = found.found && found.model?.provider === "ollama" ? found.model : null;
+			if (!local) {
+				const hint =
+					found.error ??
+					"No local vision model found. Pull one: `ollama pull qwen2.5vl` or `ollama pull llava`.";
+				return `Error describing image: no local vision model is available. ${hint}`;
+			}
 			const description = await describeImage(
 				absolutePath,
 				prompt || "Describe this image in detail.",
-				"llava",
+				local.model,
 			);
 			return JSON.stringify(
 				{
