@@ -479,6 +479,51 @@ export function numberLines(lines: string[], first: number): string {
 	return lines.map((line, i) => `${String(first + i).padStart(6)}\t${line}`).join("\n");
 }
 
+const DIFF_FILE = /\.(diff|patch)$/i;
+const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * A unified diff with the patched file's line numbers in the gutter. The cat -n
+ * numbers of a .diff are rows of the diff, and a reviewer cited them as source
+ * lines (store.test.ts:75, a 12-line file). Added and context rows get their
+ * line in the patched file; headers and removed rows get none. Null when the
+ * text has no hunk, so a stray .patch file keeps the plain gutter.
+ */
+export function numberDiffLines(lines: string[]): string | null {
+	let oldLeft = 0;
+	let newLeft = 0;
+	let next = 0;
+	let hunks = 0;
+	const blank = " ".repeat(6);
+	const rows = lines.map((line) => {
+		const h = oldLeft <= 0 && newLeft <= 0 ? HUNK.exec(line) : null;
+		if (h) {
+			hunks++;
+			oldLeft = h[1] === undefined ? 1 : Number(h[1]);
+			newLeft = h[3] === undefined ? 1 : Number(h[3]);
+			next = Number(h[2]);
+			return `${blank}\t${line}`;
+		}
+		if (oldLeft <= 0 && newLeft <= 0) return `${blank}\t${line}`;
+		const c = line[0];
+		if (c === "-") {
+			oldLeft--;
+			return `${blank}\t${line}`;
+		}
+		if (c === "\\") return `${blank}\t${line}`;
+		if (c === "+") newLeft--;
+		else {
+			oldLeft--;
+			newLeft--;
+		}
+		return `${String(next++).padStart(6)}\t${line}`;
+	});
+	if (hunks === 0) return null;
+	const note =
+		"[Unified diff. The numbers are line numbers in the patched file, blank on headers and removed lines. Cite those with the file named after +++, never a row of this diff.]";
+	return `${note}\n${rows.join("\n")}`;
+}
+
 /** True when every non-empty line of `text` starts with a read_file gutter. */
 export function hasLineNumberGutter(text: string): boolean {
 	const rows = text.split("\n").filter((l) => l.trim() !== "");
@@ -2523,6 +2568,10 @@ export class ToolExecutor {
 			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
+		if (DIFF_FILE.test(absolutePath)) {
+			const diff = numberDiffLines(lines);
+			if (diff !== null) return diff;
+		}
 		return numberLines(lines, 1);
 	}
 
