@@ -16,6 +16,7 @@ import {
 	blockedForProfile,
 	browserProfileWarning,
 	touchesBrowserSecrets,
+	_setResolverForTest,
 	createEightBrowser,
 	localBrowserTools,
 	validateBrowserAction,
@@ -153,6 +154,9 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 	return { call, calls, closed, state: () => ({ page, saved, checked }) };
 }
 
+// Destination checks resolve names; keep every test off the real network.
+_setResolverForTest(async () => [{ address: "93.184.216.34", family: 4 }]);
+
 describe("validateBrowserAction (CUA action spec)", () => {
 	test("accepts the closed vocabulary and rejects the rest", () => {
 		expect(validateBrowserAction({ action: "left_click", index: 2 }).ok).toBe(true);
@@ -172,7 +176,7 @@ describe("validateBrowserAction (CUA action spec)", () => {
 describe("8gent Browser driver", () => {
 	test("signs in and flips the toggle with every step verified", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		const opened = await b.open("http://127.0.0.1:5/");
 		expect(opened).toContain('"tab":"t1"');
 		const asked: string[] = [];
@@ -211,7 +215,7 @@ describe("8gent Browser driver", () => {
 
 	test("dry run refuses the whole plan before acting when a target is out of range", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const res = JSON.parse(
 			await b.run([
@@ -226,7 +230,7 @@ describe("8gent Browser driver", () => {
 
 	test("sensitive clicks go to the approval gate: by index, by selector, and by aria-label", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const yes = async () => true;
 		await b.run([{ action: "left_click", index: 2 }], undefined, yes);
@@ -264,7 +268,7 @@ describe("8gent Browser driver", () => {
 
 	test("closeAll closes every tab it opened", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		await b.closeAll();
 		expect(site.closed).toEqual(["t1"]);
@@ -273,7 +277,7 @@ describe("8gent Browser driver", () => {
 
 	test("verify-after-act retries a type that did not land, then stops the plan", async () => {
 		const site = fakeSite({ dropTyping: true });
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const res = JSON.parse(
 			await b.run([
@@ -287,13 +291,13 @@ describe("8gent Browser driver", () => {
 	});
 
 	test("only drives tabs it opened", async () => {
-		const b = createEightBrowser(fakeSite().call, { settleMs: 0 });
+		const b = createEightBrowser(fakeSite().call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		expect(await b.state("someone-elses-tab")).toMatch(/not opened by 8gent/);
 	});
 
 	test("a type verifies against 8gent Browser's clipped text, not the raw string", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const long = `  two  spaces ${"x".repeat(200)}`;
 		const res = JSON.parse(
@@ -303,7 +307,7 @@ describe("8gent Browser driver", () => {
 	});
 
 	test("screenshot writes the tab's PNG to the requested path", async () => {
-		const b = createEightBrowser(fakeSite().call, { settleMs: 0 });
+		const b = createEightBrowser(fakeSite().call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const out = join(mkdtempSync(join(tmpdir(), "8b-shot-")), "s.png");
 		expect(await b.screenshot(out)).toBe(out);
@@ -315,6 +319,7 @@ describe("8gent Browser driver", () => {
 describe("state rendering", () => {
 	test("password fields are always masked, even when the agent did not type them", async () => {
 		const b = createEightBrowser(fakeSite({ prefilledPassword: "autofilled-pw" }).call, {
+			allowLoopback: ["127.0.0.1:5"],
 			settleMs: 0,
 		});
 		const out = await b.open("http://127.0.0.1:5/");
@@ -324,7 +329,7 @@ describe("state rendering", () => {
 
 	test("typed values are never echoed back through the element list", async () => {
 		const site = fakeSite();
-		const b = createEightBrowser(site.call, { settleMs: 0 });
+		const b = createEightBrowser(site.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const out = await b.run([
 			{ action: "type", selector: "input[type=password]", text: "s3cret-pass" },
@@ -369,10 +374,13 @@ describe("state rendering", () => {
 				],
 			};
 		};
-		const out = await createEightBrowser(call, { settleMs: 0 }).open("http://127.0.0.1:5/");
+		const out = await createEightBrowser(call, {
+			settleMs: 0,
+			allowLoopback: ["127.0.0.1:5"],
+		}).open("http://127.0.0.1:5/");
 		expect(out).not.toContain("csrf-secret-value");
 		expect(JSON.parse(out).elements).toEqual(["[0] input", "[2] button Sign in"]);
-		const b2 = createEightBrowser(call, { settleMs: 0 });
+		const b2 = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b2.open("http://127.0.0.1:5/");
 		expect(JSON.parse(await b2.run([{ action: "left_click", index: 1 }])).error).toMatch(/hidden/);
 		expect(
@@ -1119,4 +1127,82 @@ describe("blockedForProfile: trailing dots and IPv6-embedded IPv4", () => {
 		test(`refuses ${rest}`, () => expect(blockedForProfile(at("http", rest))).toMatch(/private/));
 	test("public names with a trailing dot pass", () =>
 		expect(blockedForProfile(at("https", "example.com./"))).toBeNull());
+});
+
+describe("browser destinations go through the net guard in every profile (#3603)", () => {
+	const at = (scheme: string, rest: string) => `${scheme}:/` + `/${rest}`;
+	const publicDns = async () => [{ address: "93.184.216.34", family: 4 as const }];
+	test("browser_open refuses metadata, LAN and unlisted loopback before calling the browser", async () => {
+		for (const u of [
+			at("http", "169.254.169.254/latest/meta-data/"),
+			at("http", "192.168.1.1/"),
+			at("http", "10.0.0.5/"),
+			at("http", "127.0.0.1:9999/"),
+			at("http", "localhost:5/"),
+			at("http", "metadata.google.internal/"),
+		]) {
+			const site = nextSite();
+			const b = createEightBrowser(site.call, {
+				settleMs: 0,
+				allowLoopback: ["127.0.0.1:5"],
+				resolve: publicDns,
+			});
+			expect(await b.open(u)).toMatch(/browser_open failed: .*Refused/);
+			expect(site.calls).not.toContain("tab.open");
+		}
+	});
+	test("a name that resolves to a private address is refused", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			resolve: async () => [{ address: "192.168.1.1", family: 4 as const }],
+		});
+		expect(await b.open(at("https", "rebind.example.com/"))).toMatch(/Refused/);
+		expect(site.calls).not.toContain("tab.open");
+	});
+	test("the allowlisted loopback host:port still opens; a public host opens", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			allowLoopback: ["127.0.0.1:5"],
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5/"))).not.toMatch(/failed/);
+		expect(site.calls).toContain("tab.open");
+		expect(await b.open(at("https", "example.com/"))).not.toMatch(/failed/);
+	});
+	test("an open step in browser_task is checked too", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			allowLoopback: ["127.0.0.1:5"],
+			resolve: publicDns,
+		});
+		await b.open(at("http", "127.0.0.1:5/"));
+		const out = JSON.parse(await b.run([{ action: "open", url: at("http", "169.254.169.254/") }]));
+		expect(out.ok).toBe(false);
+		expect(out.error).toMatch(/Refused/);
+		expect(site.calls).not.toContain("nav.go");
+	});
+	test("a named profile ignores the loopback allowlist", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			allowLoopback: ["127.0.0.1:5"],
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5/"))).toMatch(/failed/);
+		expect(site.calls).not.toContain("tab.open");
+	});
+	test("allowLoopback entries that are not loopback are ignored", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			allowLoopback: ["192.168.1.1:80", "169.254.169.254:80"],
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "192.168.1.1:80/"))).toMatch(/Refused/);
+		expect(await b.open(at("http", "169.254.169.254:80/"))).toMatch(/Refused/);
+	});
 });
