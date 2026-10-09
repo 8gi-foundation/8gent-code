@@ -40,6 +40,8 @@ export interface SelectOption<T = string> {
 	description?: string;
 	disabled?: boolean;
 	icon?: string;
+	/** Hex colours drawn as a preview row before the label (theme picker). */
+	swatches?: string[];
 }
 
 export interface SelectInputProps<T = string> {
@@ -208,6 +210,17 @@ export function SelectInput<T = string>({
 
 							{/* Icon if present (omit placeholder spaces — they still rendered a column) */}
 							{option.icon ? <AppText dimColor={isDisabled}>{option.icon} </AppText> : null}
+
+							{/* Colour preview row */}
+							{option.swatches?.length ? (
+								<AppText>
+									{option.swatches.map((hex, i) => (
+										<AppText key={`${hex}-${i}`} color={hex}>
+											{"\u2588\u2588"}
+										</AppText>
+									))}{" "}
+								</AppText>
+							) : null}
 
 							{/* Label */}
 							{isDisabled ? (
