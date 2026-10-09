@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	buildPipePaneArgs,
+	buildEnterKeyArgs,
 	buildSendKeysArgs,
 	buildTmuxNewSessionArgs,
 	hasSession,
@@ -74,14 +75,34 @@ describe("buildTmuxNewSessionArgs", () => {
 });
 
 describe("buildSendKeysArgs", () => {
-	it("appends Enter at the end of the keys", () => {
-		const args = buildSendKeysArgs("term-x", "hello world");
-		expect(args).toEqual(["send-keys", "-t", "term-x", "hello world", "Enter"]);
+	it("types the text literally with -l and a -- guard", () => {
+		expect(buildSendKeysArgs("term-x", "hello world")).toEqual([
+			"send-keys",
+			"-t",
+			"term-x",
+			"-l",
+			"--",
+			"hello world",
+		]);
 	});
 
-	it("supports raw mode that does not append Enter", () => {
-		const args = buildSendKeysArgs("term-x", "hello", { appendEnter: false });
-		expect(args).toEqual(["send-keys", "-t", "term-x", "hello"]);
+	it("keeps key-name text as one literal argument, never a key", () => {
+		for (const text of ["BSpace", "C-u", "C-w", "Up", "Escape", "Enter", "C-m", "-l", "echo hi;"]) {
+			const args = buildSendKeysArgs("term-x", text);
+			expect(args.slice(0, 5)).toEqual(["send-keys", "-t", "term-x", "-l", "--"]);
+			expect(args).toHaveLength(6);
+			expect(args[5]).toBe(text);
+		}
+	});
+
+	it("never carries Enter in the literal call", () => {
+		expect(buildSendKeysArgs("term-x", "x")).not.toContain("Enter");
+	});
+});
+
+describe("buildEnterKeyArgs", () => {
+	it("presses Enter as a key, in its own call", () => {
+		expect(buildEnterKeyArgs("term-x")).toEqual(["send-keys", "-t", "term-x", "Enter"]);
 	});
 });
 
@@ -147,6 +168,27 @@ afterAll(() => {
 });
 
 describe("spawnTmuxSession — live", () => {
+	it.if(live)(
+		"text spelling a key name is typed literally, not pressed",
+		async () => {
+			const handle = await spawnTmuxSession({
+				command: "/bin/sh",
+				args: ["-i"],
+				cwd: process.cwd(),
+			});
+			liveSessions.push(handle.sessionId);
+			await sendKeys(handle.sessionId, "echo KEYNAME-C-u-BSpace-Up", { appendEnter: false });
+			await sendKeys(handle.sessionId, "", { appendEnter: false });
+			await sendKeys(handle.sessionId, "C-u", { appendEnter: false });
+			await new Promise((r) => setTimeout(r, 600));
+			const concat = readSessionLog(handle.logPath, 0).lines.join("\n");
+			expect(concat).toContain("echo KEYNAME-C-u-BSpace-Up");
+			expect(concat).toContain("C-u");
+			await killTmuxSession(handle.sessionId);
+		},
+		8000,
+	);
+
 	it.if(live)(
 		"spawns a real tmux session, captures pipe-pane output, send-keys works, kill-session ends it",
 		async () => {
