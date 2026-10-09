@@ -160,7 +160,7 @@ describe("with no terminal attached", () => {
 	});
 
 	test("control characters need a person and are refused with no terminal", async () => {
-		for (const text of ["\x15", "echo hi\x17", "\x1b[A", "\x7f"]) {
+		for (const text of ["\x15", "echo hi\x17", "\x1b[A", "\x7f", "\t", "git pu\tsh origin main"]) {
 			expect(await send(text)).toContain("[PERMISSION DENIED]");
 		}
 		expect(sent).toEqual([]);
