@@ -44,8 +44,12 @@ async function getJson(
 ): Promise<unknown> {
 	try {
 		const timeout = AbortSignal.timeout(timeoutMs);
-		const res = await fetchImpl(url, { ...init, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-		return res.ok ? await res.json() : null;
+		const res = await fetchImpl(url, { ...init, redirect: "error", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+		if (!res.ok) return null;
+		// Hardening (8SO): refuse oversized bodies (1 MiB cap on a declared length).
+		const declared = Number(res.headers?.get?.("content-length") ?? 0);
+		if (declared > 1_048_576) return null;
+		return await res.json();
 	} catch {
 		return null;
 	}
