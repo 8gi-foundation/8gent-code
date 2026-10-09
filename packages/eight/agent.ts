@@ -60,7 +60,8 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { stripDoneMarker } from "../ai/text-tool-loop";
+import { splitImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -268,6 +269,12 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	/**
+	 * An image attached to the current turn's prompt, as a data URL, when the
+	 * model can see it itself (#3641). The text-tool turn puts it on the user
+	 * message and clears it. Null when the VisionInterpreter describes instead.
+	 */
+	private turnImage: string | null = null;
 	// TurnJournal (#2470): per-turn replayable record for debug + audit.
 	private turnJournal: TurnJournal;
 	private turnIndex = 0;
@@ -298,6 +305,8 @@ export class Agent {
 				allowedPaths: config.allowedPaths,
 				openOnWrite: config.openOnWrite ?? true,
 				permission: config.permission,
+				// read_image attaches pixels only for a model that can see (#3641).
+				visionCapable: () => this.modelSees(),
 			},
 		);
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
@@ -731,6 +740,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * Returns the final assistant text in the exact shape Agent.chat() normally
 	 * returns (flavored prose), so app.tsx and agent-pool.ts render it unchanged.
 	 */
+	/**
+	 * Can this agent's own model see images (#3641)? Only the text-tool path
+	 * attaches them natively, so the native AI SDK path answers no. The Ollama
+	 * answer comes from /api/show, cached per endpoint and model.
+	 */
+	private modelSees(): Promise<boolean> {
+		const scoped = (this.config.allowedPaths?.length ?? 0) > 0;
+		if (!shouldUseTextTools(this.config.runtime, scoped)) return Promise.resolve(false);
+		return modelSupportsVision({
+			provider: this.config.runtime,
+			model: this.config.model,
+			baseUrl: this.config.baseUrl,
+		});
+	}
+
 	private async runTextToolChat(opts: {
 		providerName: string;
 		providerModel: string;
@@ -808,24 +832,31 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					step,
 				);
 
+				// `result` is what the loop gets, attachment included; `shown` is the
+				// text part, and the only thing the ledger, the session file, the
+				// error check and the events ever see (#3641). Pixels are for the
+				// model, not for bookkeeping.
 				let result = "";
+				let shown = "";
 				let success = true;
 				try {
 					result = await this.executor.execute(toolName, args);
+					shown = splitImageAttachment(result).text;
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
 					// for event + session bookkeeping.
-					success = !isErrorToolResult(result);
+					success = !isErrorToolResult(shown);
 				} catch (err) {
 					success = false;
 					result = `Error running tool "${toolName}": ${err instanceof Error ? err.message : String(err)}`;
+					shown = result;
 				}
 
 				const durationMs = Date.now() - startedAt;
 
 				// Honesty ledger (issue #2747): record the REAL outcome so the final
 				// reply can be gated against what actually happened.
-				this.turnToolLedger.push({ name: toolName, args, success, result: result.slice(0, 500) });
+				this.turnToolLedger.push({ name: toolName, args, success, result: shown.slice(0, 500) });
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				// A call refused before it ran does not spend the global budget (#3409).
@@ -841,7 +872,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					this.sessionWriter.writeToolResult(
 						toolCallId,
 						true,
-						result.slice(0, 2000),
+						shown.slice(0, 2000),
 						durationMs,
 						toolName,
 						step,
@@ -851,12 +882,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					} else if (toolName === "edit_file" && typeof toolPath === "string") {
 						this.sessionWriter.trackFileModified(toolPath);
 					}
-					if (toolName === "git_commit" && result.includes("[")) {
-						const commitHash = extractCommitHash(result);
+					if (toolName === "git_commit" && shown.includes("[")) {
+						const commitHash = extractCommitHash(shown);
 						if (commitHash) this.sessionWriter.trackGitCommit(commitHash);
 					}
 				} else {
-					this.sessionWriter.writeToolError(toolCallId, toolName, result, step);
+					this.sessionWriter.writeToolError(toolCallId, toolName, shown, step);
 				}
 
 				this.events.onToolEnd?.({
@@ -866,7 +897,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					success,
 					durationMs,
 					stepNumber: step,
-					resultPreview: result.slice(0, 200),
+					resultPreview: shown.slice(0, 200),
 				});
 
 				return result;
@@ -876,15 +907,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Conversation: the in-place system instructions plus the non-system
 		// history (runTextToolAgent injects the tool protocol into the system
 		// message itself). Matches the native path's message assembly.
-		const history = this.messageHistory
-			.filter((m) => m.role !== "system")
-			.map((m) => ({
-				role: m.role as "user" | "assistant",
-				content: m.content,
-			}));
+		const history: Array<{ role: "user" | "assistant"; content: string; images?: string[] }> =
+			this.messageHistory
+				.filter((m) => m.role !== "system")
+				.map((m) => ({
+					role: m.role as "user" | "assistant",
+					content: m.content as string,
+				}));
+		// The prompt's image rides on this turn's user message, for this turn
+		// only (#3641): the stored history stays text, so later turns do not
+		// resend the pixels. The prompt is found by its text: harness notes
+		// (planning, prefetched context) follow it in the history as user
+		// messages too, and the image belongs with the words, not the note.
+		if (this.turnImage) {
+			const image = this.turnImage;
+			this.turnImage = null;
+			let target = -1;
+			for (let i = history.length - 1; i >= 0; i--) {
+				if (history[i].role !== "user") continue;
+				if (target < 0) target = i;
+				if (history[i].content === textForAgent) {
+					target = i;
+					break;
+				}
+			}
+			if (target >= 0) history[target] = { ...history[target], images: [image] };
+		}
 		const messages: Array<{
 			role: "system" | "user" | "assistant" | "tool";
 			content: string;
+			images?: string[];
 		}> = instructions ? [{ role: "system", content: instructions }, ...history] : [...history];
 
 		// One agentic turn against a given local provider/model. The raw call hits
@@ -1248,7 +1300,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Vision result gets injected as a harness note when ready (#3260).
 		let visionId: string | null = null;
 
-		if (imageBase64) {
+		// A model that can see gets the image itself (#3641): on the text-tool
+		// path it goes out on this turn's user message in the provider's native
+		// image field, and no side model describes it. Anything else keeps the
+		// VisionInterpreter below.
+		if (imageBase64 && (await this.modelSees())) {
+			this.turnImage = `data:${imageMimeType || "image/png"};base64,${imageBase64}`;
+			this.config.events?.onStepFinish?.({
+				text: `Image attached for ${this.config.model} to look at.`,
+				stepNumber: 0,
+				toolCalls: [],
+				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+				finishReason: "other",
+			});
+		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
 				onResult: (_id, result) => {
@@ -1408,6 +1473,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
+			// Sight (#3641): a model that can see gets the pixels through
+			// read_image; one that cannot gets a description through describe_image.
+			"read_image",
+			"describe_image",
 			// A spawned sub-agent has one task and no plan to report (#3583).
 			...localPlanTools(this.agentDepth),
 			"git_status",

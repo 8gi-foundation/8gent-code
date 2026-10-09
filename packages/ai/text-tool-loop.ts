@@ -431,6 +431,35 @@ export function blockedStopNote(reasons: string[]): string {
 }
 
 /**
+ * A tool result that carries an image for the model to see (#3641). Tools
+ * return strings, so the pixels travel as a marked line after the text; the
+ * loop strips the line and puts the image on the next message's `images`.
+ * Only a vision-capable model's executor emits this (see ToolExecutor's
+ * `visionCapable` option); a text-only model keeps getting metadata.
+ */
+export const IMAGE_ATTACHMENT_MARKER = "[image-attachment]";
+
+export function imageAttachmentResult(text: string, mimeType: string, base64: string): string {
+	return `${text}\n${IMAGE_ATTACHMENT_MARKER} data:${mimeType};base64,${base64}`;
+}
+
+/** Split a tool result into its text and the images it attached, if any. */
+export function splitImageAttachment(result: string): { text: string; images: string[] } {
+	if (!result.includes(IMAGE_ATTACHMENT_MARKER)) return { text: result, images: [] };
+	const images: string[] = [];
+	const lines: string[] = [];
+	for (const line of result.split("\n")) {
+		if (line.startsWith(IMAGE_ATTACHMENT_MARKER)) {
+			const url = line.slice(IMAGE_ATTACHMENT_MARKER.length).trim();
+			if (url.startsWith("data:")) images.push(url);
+			continue;
+		}
+		lines.push(line);
+	}
+	return { text: lines.join("\n").trimEnd(), images };
+}
+
+/**
  * The result for a call to a tool that is not registered this turn. Names the
  * tools that are, so the model can pick one or say it cannot do the step
  * (#3091: qwen3.8 kept calling spawn_agent, which the local tool set lacks).
@@ -807,6 +836,7 @@ export async function runTextToolAgent(
 		let ranWork = false;
 		let roundHadSuccess = false;
 		const roundBlockReasons: string[] = [];
+		const roundImages: string[] = [];
 		const calls = turn.toolCalls;
 		let abortedAt = -1;
 		for (let k = 0; k < calls.length; k++) {
@@ -829,7 +859,12 @@ export async function runTextToolAgent(
 				}
 				continue;
 			}
-			const result = await executeTool(opts.tools, tc.name, tc.arguments);
+			// An image a tool attached rides on the follow-up message, never in
+			// the text the log and the result block keep (#3641).
+			const { text: result, images } = splitImageAttachment(
+				await executeTool(opts.tools, tc.name, tc.arguments),
+			);
+			roundImages.push(...images);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
 			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
 			if (!isPlanUpdate) {
@@ -900,6 +935,7 @@ export async function runTextToolAgent(
 					"",
 					FOLLOW_UP_INSTRUCTION,
 				].join("\n"),
+				...(roundImages.length > 0 ? { images: roundImages } : {}),
 			},
 		];
 	}
