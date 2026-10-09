@@ -13,10 +13,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
-import { withChildGuidance } from "./child-guidance";
+import type { AgentConfig as EightAgentConfig } from "../eight/types";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { hostedAllowed, isHostedProvider } from "../providers/failover";
-import type { AgentConfig as EightAgentConfig } from "../eight/types";
+import { withChildGuidance } from "./child-guidance";
+import { currentProviderPin, inheritedProviderFields } from "./provider-pin";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
@@ -194,6 +195,12 @@ export interface AgentConfig {
 	allowedPaths?: string[];
 	/** Its permission mode, clamped to and linked with its parent's (#3170); undefined = none. */
 	permission?: PermissionModeHolder;
+	/**
+	 * Set only when its spawner was pinned to a provider the user named (#3762):
+	 * the child runs on that runtime, pinned, and never fails over.
+	 */
+	runtime?: string;
+	providerPinned?: boolean;
 	/** Its depth: its spawner's depth + 1, set by the pool, never by the caller (#3331). */
 	depth: number;
 }
@@ -269,7 +276,10 @@ export class AgentPool extends EventEmitter {
 		// The child runs where its parent runs (#3710). A named model keeps the
 		// parent's provider and endpoint; a named runtime brings its own.
 		const parent = currentParentSession() ?? localDefaultRuntime();
-		const runtime = config?.runtime || parent.runtime;
+		// A pinned spawner's provider rides to the child, captured here: a queued
+		// child starts later, outside the spawner's context (#3762).
+		const inherited = inheritedProviderFields(currentProviderPin(), config?.model);
+		const runtime = inherited.runtime ?? (config?.runtime || parent.runtime);
 		const sameRuntime = runtime === parent.runtime;
 		const model = config?.model || (sameRuntime ? parent.model : "");
 		if (!model) throw new Error(`No model given for a child on runtime "${runtime}"`);
@@ -284,6 +294,7 @@ export class AgentPool extends EventEmitter {
 			model,
 			runtime,
 			...(baseUrl ? { baseUrl } : {}),
+			...(inherited.providerPinned ? { providerPinned: true } : {}),
 			systemPrompt: config?.systemPrompt,
 			maxTurns: config?.maxTurns || 20,
 			workingDirectory: config?.workingDirectory || process.cwd(),
@@ -356,6 +367,7 @@ export class AgentPool extends EventEmitter {
 				model: spawnedAgent.config.model,
 				runtime: spawnedAgent.config.runtime as AgentRuntimeName,
 				baseUrl: spawnedAgent.config.baseUrl,
+				...(spawnedAgent.config.providerPinned ? { providerPinned: true } : {}),
 				systemPrompt: spawnedAgent.config.systemPrompt,
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
