@@ -14,14 +14,23 @@
  * Entries are validated on read: anything that is not the expected shape,
  * or whose checkpoint id is not a plain id, is logged and dropped.
  *
- * Restore only puts the message history back. No tool call is run again:
- * whatever happened after the last checkpoint (up to EIGHT_CHECKPOINT_EVERY
- * tool calls) is lost, and the session waits for the user's next message.
+ * Restore only puts the message history back. Whatever happened after the
+ * last checkpoint (up to EIGHT_CHECKPOINT_EVERY tool calls) is lost, and the
+ * session waits for the user's next message.
+ *
+ * Tool calls that were running when the daemon died (#3653) are journaled as
+ * they start and dropped as they end. On boot, settleInterruptedToolCalls
+ * re-runs only those whose replay class is "replay" (local reads). Every
+ * other call is NOT run again: the model gets a harness note saying it was
+ * not replayed and needs confirmation, so a write, command, push or message
+ * is never silently repeated.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { scrub as scrubSecrets } from "../eight/secret-scanner";
+import { toolReplayClass } from "../eight/tools";
 import type { SessionOverrides } from "./agent-pool";
 
 export interface JournalEntry {
@@ -33,6 +42,42 @@ export interface JournalEntry {
 	createdAt: number;
 	/** createSession overrides, so scope/model/persona survive a restart. */
 	overrides?: SessionOverrides;
+	/** Tool calls started and not yet ended (#3653). */
+	inFlight?: InFlightToolCall[];
+}
+
+export interface InFlightToolCall {
+	id: string;
+	tool: string;
+	/** Full args for a replayable call; a short summary for any other. */
+	args: Record<string, unknown>;
+	startedAt: number;
+}
+
+/** Longest string arg kept on disk for a call that is never replayed. */
+const ARG_SUMMARY_CHARS = 200;
+
+/**
+ * What is journaled for a call. A replayable read keeps its args so it can be
+ * re-run. Any other call keeps only short primitive values, secrets scrubbed
+ * before truncation: enough for the model to see what it was, without file
+ * contents, long commands or tokens on disk.
+ */
+export function journalArgs(tool: string, args: Record<string, unknown>): Record<string, unknown> {
+	if (toolReplayClass(tool) === "replay") return args;
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(args)) {
+		if (typeof v === "string") {
+			const clean = scrubSecrets(v).scrubbed;
+			out[k] =
+				clean.length > ARG_SUMMARY_CHARS
+					? `${clean.slice(0, ARG_SUMMARY_CHARS)}... (${clean.length} chars)`
+					: clean;
+		} else if (typeof v === "number" || typeof v === "boolean") {
+			out[k] = v;
+		}
+	}
+	return out;
 }
 
 /** Time-travel ids are joined into checkpoint paths, so only plain ids pass. */
@@ -56,6 +101,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function isValidInFlight(v: unknown): v is InFlightToolCall {
+	return (
+		isPlainObject(v) &&
+		isPlainKey(v.id) &&
+		isPlainKey(v.tool) &&
+		isPlainObject(v.args) &&
+		typeof v.startedAt === "number"
+	);
+}
+
 /** True when `v` has the JournalEntry shape and safe ids. */
 export function isValidJournalEntry(v: unknown): v is JournalEntry {
 	if (!isPlainObject(v)) return false;
@@ -65,7 +120,8 @@ export function isValidJournalEntry(v: unknown): v is JournalEntry {
 		isSafeTtId(v.ttSessionId) &&
 		typeof v.createdAt === "number" &&
 		Number.isFinite(v.createdAt) &&
-		(v.overrides === undefined || isPlainObject(v.overrides))
+		(v.overrides === undefined || isPlainObject(v.overrides)) &&
+		(v.inFlight === undefined || Array.isArray(v.inFlight))
 	);
 }
 
@@ -90,8 +146,11 @@ export class SessionJournal {
 			if (!Array.isArray(parsed?.sessions)) return [];
 			const valid: JournalEntry[] = [];
 			for (const e of parsed.sessions as unknown[]) {
-				if (isValidJournalEntry(e)) valid.push(e);
-				else
+				if (isValidJournalEntry(e)) {
+					// A malformed call is dropped; the session entry is kept.
+					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight);
+					valid.push(e);
+				} else
 					console.error(`[session-journal] dropping malformed journal entry in ${this.filePath}`);
 			}
 			return valid;
@@ -105,6 +164,37 @@ export class SessionJournal {
 	upsert(entry: JournalEntry): void {
 		const sessions = this.read().filter((e) => e.sessionId !== entry.sessionId);
 		sessions.push(entry);
+		this.write(sessions);
+	}
+
+	/** Record a tool call as running. No-op for a session not journaled. */
+	markToolStart(sessionId: string, call: InFlightToolCall): void {
+		this.updateInFlight(sessionId, (calls) => [
+			...calls.filter((c) => c.id !== call.id),
+			{ ...call, args: journalArgs(call.tool, call.args) },
+		]);
+	}
+
+	markToolEnd(sessionId: string, callId: string): void {
+		this.updateInFlight(sessionId, (calls) => calls.filter((c) => c.id !== callId));
+	}
+
+	clearInFlight(sessionId: string): void {
+		this.updateInFlight(sessionId, () => []);
+	}
+
+	private updateInFlight(
+		sessionId: string,
+		fn: (calls: InFlightToolCall[]) => InFlightToolCall[],
+	): void {
+		const sessions = this.read();
+		const entry = sessions.find((e) => e.sessionId === sessionId);
+		if (!entry) return;
+		const before = entry.inFlight ?? [];
+		const after = fn(before);
+		if (before.length === 0 && after.length === 0) return;
+		if (after.length > 0) entry.inFlight = after;
+		else delete entry.inFlight;
 		this.write(sessions);
 	}
 
@@ -228,6 +318,90 @@ export function resumeJournaledSessions(
 			result.checkpointId
 				? `[resume] ${entry.sessionId} (channel=${entry.channel}) restored from ${result.checkpointId} at ${result.toolCallCount} tool calls, ${result.messageCount} messages; later work is not replayed`
 				: `[resume] ${entry.sessionId} (channel=${entry.channel}) recreated with no checkpoint`,
+		);
+		results.push(result);
+	}
+	return results;
+}
+
+/** The slice of AgentPool settling interrupted tool calls needs. */
+export interface SettlePool {
+	getAgent(sessionId: string): {
+		runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string>;
+		addHarnessNote(body: string): void;
+	} | null;
+}
+
+export interface SettleResult {
+	sessionId: string;
+	/** Call ids re-run because they were reads. */
+	replayed: string[];
+	/** Call ids not run again; the model was told to confirm them. */
+	notReplayed: string[];
+}
+
+/** Longest re-run result put into the note. */
+const REPLAY_RESULT_CHARS = 8000;
+
+/** Scrubbed: the args come from disk and may predate scrubbing. */
+function describeCall(call: InFlightToolCall): string {
+	return scrubSecrets(`${call.tool} ${JSON.stringify(call.args)}`).scrubbed;
+}
+
+/**
+ * Run after resumeJournaledSessions (#3653). For each resumed session that
+ * had tool calls running when the daemon died: re-run the reads, never the
+ * rest, and tell the model which is which in one harness note. The journal's
+ * in-flight list is cleared once the note is in, so a second crash does not
+ * report the same calls again. A crash before that re-runs only the reads.
+ */
+export async function settleInterruptedToolCalls(
+	journal: SessionJournal,
+	pool: SettlePool,
+): Promise<SettleResult[]> {
+	const results: SettleResult[] = [];
+	for (const entry of journal.read()) {
+		const calls = entry.inFlight ?? [];
+		if (calls.length === 0) continue;
+		const agent = pool.getAgent(entry.sessionId);
+		if (!agent) continue;
+		const result: SettleResult = { sessionId: entry.sessionId, replayed: [], notReplayed: [] };
+		const lines: string[] = [
+			"[resume] The daemon stopped while these tool calls were running. It has restarted.",
+		];
+		for (const call of [...calls].sort((a, b) => a.startedAt - b.startedAt)) {
+			const cls = toolReplayClass(call.tool);
+			if (cls === "replay") {
+				let output: string;
+				try {
+					output = await agent.runToolForResume(call.tool, call.args);
+				} catch (err) {
+					output = `[error] ${String(err)}`;
+				}
+				if (output.length > REPLAY_RESULT_CHARS) {
+					output = `${output.slice(0, REPLAY_RESULT_CHARS)}\n... (truncated)`;
+				}
+				lines.push(`- ${describeCall(call)}: re-run (read only, safe to replay). Result:\n${output}`);
+				result.replayed.push(call.id);
+			} else {
+				const why =
+					cls === "never"
+						? "It changes something (file, shell, git, network or a message)"
+						: "Its replay class is unknown";
+				lines.push(
+					`- ${describeCall(call)}: not replayed, needs confirmation. ${why}, and it may or may not have taken effect. Check the current state and ask the user before doing it again.`,
+				);
+				result.notReplayed.push(call.id);
+			}
+		}
+		agent.addHarnessNote(lines.join("\n"));
+		try {
+			journal.clearInFlight(entry.sessionId);
+		} catch (err) {
+			console.error(`[resume] ${entry.sessionId}: could not clear in-flight calls: ${String(err)}`);
+		}
+		console.log(
+			`[resume] ${entry.sessionId}: ${result.replayed.length} interrupted read(s) re-run, ${result.notReplayed.length} call(s) not replayed, model told to confirm`,
 		);
 		results.push(result);
 	}

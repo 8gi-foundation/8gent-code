@@ -11,10 +11,14 @@ import * as path from "node:path";
 import {
 	clearIndex,
 	ensureIndexed,
+	getFileOutline,
+	getFileTree,
 	getFreshFileOutline,
 	indexFolder,
+	normalizeRelPath,
 	refreshIndex,
 	refreshIndexAsync,
+	relativePosix,
 	searchSymbols,
 } from "./index";
 import { camelTokens, matchTier } from "./rank";
@@ -349,6 +353,33 @@ describe("indexFolder", () => {
 			expect(searchSymbols(index.id, "py_only")).toEqual([]);
 			clearIndex(index.id);
 		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("repo-relative paths are forward-slash on every OS (#3662)", () => {
+	test("normalizeRelPath turns backslash and ./ forms into the canonical form", () => {
+		expect(normalizeRelPath("src\\limits\\rate-limiter.ts")).toBe("src/limits/rate-limiter.ts");
+		expect(normalizeRelPath(".\\src\\a.ts")).toBe("src/a.ts");
+		expect(normalizeRelPath("./src/a.ts")).toBe("src/a.ts");
+		expect(normalizeRelPath("src/a.ts")).toBe("src/a.ts");
+	});
+
+	test("relativePosix and the index accept a backslash path for a nested file", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "astidx-posix-"));
+		try {
+			fs.mkdirSync(path.join(dir, "sub"));
+			fs.writeFileSync(path.join(dir, "sub", "n.ts"), "export function nested() {}\n");
+			expect(relativePosix(dir, path.join(dir, "sub", "n.ts"))).toBe("sub/n.ts");
+			const idx = await ensureIndexed(dir);
+			expect(getFileTree(idx.id)).toEqual(["sub/n.ts"]);
+			expect(getFileOutline(idx.id, "sub\\n.ts")?.symbols.map((s) => s.name)).toEqual(["nested"]);
+			expect(getFreshFileOutline(idx.id, "sub\\n.ts")?.symbols.map((s) => s.name)).toEqual([
+				"nested",
+			]);
+		} finally {
+			clearIndex(dir);
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});

@@ -90,6 +90,7 @@ import {
 } from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import { type PlanItem, parsePlan } from "./update-plan";
+import { UselessStreak } from "./useless-streak";
 import type { ToolSpec } from "./text-tools";
 
 export type TextTool = {
@@ -132,6 +133,13 @@ export interface TextToolAgentOptions {
 	 * recap. In both modes the check itself is sent the same way.
 	 */
 	keepAnswerFirst?: boolean;
+	/**
+	 * Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK). After
+	 * this many useless tool results in a row (see useless-streak.ts), the next
+	 * model turn gets a harness note and no tools, and its reply ends the turn.
+	 * 0 or unset: off.
+	 */
+	uselessStreak?: number;
 }
 
 export interface TextToolAgentResult {
@@ -431,6 +439,55 @@ export function blockedStopNote(reasons: string[]): string {
 }
 
 /**
+ * A tool result that carries an image for the model to see (#3641). Tools
+ * return strings, so the pixels travel as a marked line after the text; the
+ * loop strips the line and puts the image on the next message's `images`.
+ * Only a vision-capable model's executor emits this (see ToolExecutor's
+ * `visionCapable` option); a text-only model keeps getting metadata.
+ */
+export const IMAGE_ATTACHMENT_MARKER = "[image-attachment]";
+
+export function imageAttachmentResult(text: string, mimeType: string, base64: string): string {
+	return `${text}\n${IMAGE_ATTACHMENT_MARKER} data:${mimeType};base64,${base64}`;
+}
+
+/** The only tool whose result may carry an image attachment. */
+export const IMAGE_ATTACHMENT_TOOL = "read_image";
+
+/** True when a result has a line that splitImageAttachment would treat as an image. */
+export function hasImageAttachmentLine(result: string): boolean {
+	return result.split("\n").some((l) => l.startsWith(`${IMAGE_ATTACHMENT_MARKER} data:`));
+}
+
+/**
+ * splitImageAttachment, but only for the tool that produces attachments:
+ * a result from any other tool is plain text and never becomes image input.
+ */
+export function splitToolImageAttachment(
+	toolName: string,
+	result: string,
+): { text: string; images: string[] } {
+	if (toolName !== IMAGE_ATTACHMENT_TOOL) return { text: result, images: [] };
+	return splitImageAttachment(result);
+}
+
+/** Split a tool result into its text and the images it attached, if any. */
+export function splitImageAttachment(result: string): { text: string; images: string[] } {
+	if (!result.includes(IMAGE_ATTACHMENT_MARKER)) return { text: result, images: [] };
+	const images: string[] = [];
+	const lines: string[] = [];
+	for (const line of result.split("\n")) {
+		if (line.startsWith(IMAGE_ATTACHMENT_MARKER)) {
+			const url = line.slice(IMAGE_ATTACHMENT_MARKER.length).trim();
+			if (url.startsWith("data:")) images.push(url);
+			continue;
+		}
+		lines.push(line);
+	}
+	return { text: lines.join("\n").trimEnd(), images };
+}
+
+/**
  * The result for a call to a tool that is not registered this turn. Names the
  * tools that are, so the model can pick one or say it cannot do the step
  * (#3091: qwen3.8 kept calling spawn_agent, which the local tool set lacks).
@@ -542,6 +599,9 @@ export async function runTextToolAgent(
 	const maxRounds = opts.maxRounds ?? 6;
 	const specs = opts.tools.map((t) => t.spec);
 	const toolLog: TextToolLogEntry[] = [];
+	const streak = new UselessStreak(opts.uselessStreak ?? 0);
+	// Set once the streak trips: the next round runs with no tools and ends the turn.
+	let answerOnly = false;
 
 	// Local working copy of the conversation; runTextToolTurn never mutates it,
 	// so we own the growth here.
@@ -624,7 +684,7 @@ export async function runTextToolAgent(
 		}
 		const turn = await runTextToolTurn({
 			messages,
-			tools: specs,
+			tools: answerOnly ? [] : specs,
 			call: opts.call,
 		});
 		// Strip repetition degeneration before the reply is judged, fed back to
@@ -633,6 +693,9 @@ export async function runTextToolAgent(
 		const degen = cleanDegenerateReply(turn.content);
 		const replyText = degen.clean;
 		lastContent = replyText;
+		// Answer-only turn (#3613): whatever it said is the answer. A tool call
+		// in it is not run; the tools were withheld on purpose.
+		if (answerOnly) return finish(finalContent(replyText), round);
 
 		// A reply that stopped inside a tool_call block (output token limit) is
 		// neither a final answer nor a runnable call. Tell the model exactly what
@@ -814,6 +877,7 @@ export async function runTextToolAgent(
 		let ranWork = false;
 		let roundHadSuccess = false;
 		const roundBlockReasons: string[] = [];
+		const roundImages: string[] = [];
 		const calls = turn.toolCalls;
 		let abortedAt = -1;
 		for (let k = 0; k < calls.length; k++) {
@@ -836,11 +900,18 @@ export async function runTextToolAgent(
 				}
 				continue;
 			}
-			const result = await executeTool(opts.tools, tc.name, tc.arguments);
+			// An image a tool attached rides on the follow-up message, never in
+			// the text the log and the result block keep (#3641).
+			const { text: result, images } = splitToolImageAttachment(
+				tc.name,
+				await executeTool(opts.tools, tc.name, tc.arguments),
+			);
+			roundImages.push(...images);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
 			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
 			if (!isPlanUpdate) {
 				ranWork = true;
+				streak.record(tc.name, tc.arguments, result);
 				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
 				// progress, exactly like an "Error..." result.
 				if (!isRefusedToolResult(result)) {
@@ -897,6 +968,7 @@ export async function runTextToolAgent(
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
 		if (cutOffNote) resultParts.push(cutOffNote);
+		if (streak.tripped() && round < maxRounds) answerOnly = true;
 		messages = [
 			...messages,
 			{ role: "assistant", content: replyText },
@@ -905,8 +977,9 @@ export async function runTextToolAgent(
 				content: [
 					...resultParts,
 					"",
-					FOLLOW_UP_INSTRUCTION,
+					answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION,
 				].join("\n"),
+				...(roundImages.length > 0 ? { images: roundImages } : {}),
 			},
 		];
 	}

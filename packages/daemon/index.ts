@@ -50,7 +50,12 @@ import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
-import { SessionJournal, resumeJournaledSessions, resumeOnBootEnabled } from "./session-journal";
+import {
+	SessionJournal,
+	resumeJournaledSessions,
+	resumeOnBootEnabled,
+	settleInterruptedToolCalls,
+} from "./session-journal";
 import type { DaemonChannel } from "./types";
 import { installFlowTap } from "../telemetry/flow-stream";
 
@@ -251,13 +256,15 @@ export async function main(): Promise<void> {
 
 	// Create the agent pool - manages Agent instances per session.
 	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
-	// them back from their newest checkpoint after a crash or power cut. Only
-	// history is restored; no tool call is run again.
+	// them back from their newest checkpoint after a crash or power cut. A tool
+	// call that was running at the crash is re-run only if it is a read; any
+	// other is reported to the model as not replayed (#3653).
 	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
 	pool = new AgentPool(poolConfig, journal ? { journal } : {});
 	if (journal) {
 		const t0 = Date.now();
 		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
+		await settleInterruptedToolCalls(journal, pool);
 		console.log(
 			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms`,
 		);

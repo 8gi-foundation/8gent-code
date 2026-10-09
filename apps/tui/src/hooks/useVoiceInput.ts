@@ -27,6 +27,13 @@ export interface UseVoiceInputOptions {
 	onError?: (code: VoiceErrorCode, message: string) => void;
 	/** Callback for model download progress */
 	onDownloadProgress?: (model: WhisperModelName, percent: number) => void;
+	/**
+	 * Opt-in (EIGHT_VOICE_DECIDE=1, #3688): called when a spoken command was
+	 * matched straight from audio with no transcript. It only names the
+	 * intent; the caller acts on it through the normal TUI path. Without
+	 * this callback the router is not installed and Whisper runs as before.
+	 */
+	onIntent?: (intent: { choice: string; confidence: number; backend: string }) => void;
 }
 
 export interface UseVoiceInputReturn {
@@ -93,7 +100,14 @@ export interface UseVoiceInputReturn {
  * ```
  */
 export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
-	const { config = {}, active = true, onTranscript, onError, onDownloadProgress } = options;
+	const {
+		config = {},
+		active = true,
+		onTranscript,
+		onError,
+		onDownloadProgress,
+		onIntent,
+	} = options;
 
 	// Create engine once, update config via ref
 	const engineRef = useRef<VoiceEngine | null>(null);
@@ -239,6 +253,37 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 			})
 			.catch(() => setIsAvailable(false));
 	}, [engine]);
+
+	// Opt-in audio-first router (EIGHT_VOICE_DECIDE=1). Default off. Any
+	// failure, low confidence, or missing weights falls back to Whisper.
+	const onIntentRef = useRef(onIntent);
+	onIntentRef.current = onIntent;
+	const hasIntentHandler = Boolean(onIntent);
+	useEffect(() => {
+		if (!hasIntentHandler || process.env.EIGHT_VOICE_DECIDE !== "1") return;
+		let cancelled = false;
+		import("../../../../packages/decide/backends/neudecide")
+			.then(({ NeuDecideBackend, VOICE_DECIDE_CANDIDATES, routeVoiceAudio }) => {
+				if (cancelled) return;
+				const backend = new NeuDecideBackend();
+				engine.setAudioRouter(async (wavPath) => {
+					const audio = new Uint8Array(await Bun.file(wavPath).arrayBuffer());
+					const route = await routeVoiceAudio(backend, audio, VOICE_DECIDE_CANDIDATES);
+					if (!route.routed || !onIntentRef.current) return false;
+					onIntentRef.current({
+						choice: route.choice,
+						confidence: route.confidence,
+						backend: route.backend,
+					});
+					return true;
+				});
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+			engine.setAudioRouter(null);
+		};
+	}, [engine, hasIntentHandler]);
 
 	// Cleanup on unmount
 	useEffect(() => {

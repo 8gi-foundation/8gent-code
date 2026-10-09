@@ -53,7 +53,7 @@ describe("ModelFailover.nextHop", () => {
 	});
 
 	test("skips entries already down and is null when none are left", () => {
-		const fo = new ModelFailover(chains);
+		const fo = new ModelFailover(chains, { allowHosted: true });
 		fo.markDown("MiniMax-M2.7", "apfel");
 		expect(fo.nextHop("ornith-1.0-9b", "lmstudio")?.provider).toBe("openrouter");
 		fo.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
