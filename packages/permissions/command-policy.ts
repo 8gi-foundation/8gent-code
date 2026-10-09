@@ -1028,6 +1028,41 @@ export function mustAskReason(
 	return null;
 }
 
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "eval"]);
+
+/**
+ * Every command a line runs, as argv: each segment with its prefixes and
+ * wrappers removed, plus the commands inside a quoted `sh -c "..."` word and
+ * a `find -exec` payload (#3768). A wrapper whose options cannot be read
+ * yields every suffix of its words, so no command can hide behind it.
+ */
+export function commandArgvs(command: string, depth = 0): string[][] {
+	const out: string[][] = [];
+	for (const segment of commandSegments(command)) {
+		const raw = tokenize(segment);
+		const unwrapped = stripPrefix(raw);
+		if (!unwrapped) {
+			for (let i = 0; i < raw.length; i++) out.push(raw.slice(i));
+			continue;
+		}
+		if (unwrapped.argv.length === 0) continue;
+		out.push(unwrapped.argv);
+		// A quoted word is a command line of its own only for a shell; for
+		// echo or grep it is text.
+		if (depth < 3 && SHELLS.has(path.basename(unwrapped.argv[0]))) {
+			for (const t of unwrapped.argv.slice(1)) {
+				if (/\s/.test(t)) out.push(...commandArgvs(t, depth + 1));
+			}
+		}
+		if (depth < 3) {
+			for (const payload of findPayloads(unwrapped.argv)) {
+				if (payload.length > 0) out.push(...commandArgvs(payload.join(" "), depth + 1));
+			}
+		}
+	}
+	return out;
+}
+
 /**
  * Whether every segment of a command line passes `isSafe` (#3748). A `cd`
  * segment only moves the shell; its target is checked by the workspace

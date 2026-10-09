@@ -14,6 +14,7 @@ import * as readline from "node:readline";
 import {
 	type GitState,
 	allowListIsLocalOnly,
+	commandArgvs,
 	everySegmentSafe,
 	mustAskReason,
 	repoGitState,
@@ -650,26 +651,19 @@ export class PermissionManager {
 		blocked: boolean;
 		reason?: string;
 	} {
-		const parsed = parseCommand(command);
-		const cmd = parsed.command.toLowerCase();
-		const argsLower = parsed.args.map((a) => a.toLowerCase());
-
-		for (const rule of ALWAYS_BLOCKED_COMMANDS) {
-			if (cmd !== rule.command && !cmd.endsWith(`/${rule.command}`)) continue;
-
-			// If rule has no args, just matching the command is enough
-			if (rule.args.length === 0) {
-				return { blocked: true, reason: rule.description };
-			}
-
-			// Check if all rule args appear in the command args
-			const allArgsPresent = rule.args.every((ruleArg) =>
-				argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase())),
-			);
-
-			if (allArgsPresent) {
-				return { blocked: true, reason: rule.description };
-			}
+		// Every command on the line counts, not only the first (#3768): the
+		// same segment splitting and wrapper handling as the ask-every-time list.
+		for (const argv of commandArgvs(command)) {
+			const cmd = (argv[0] ?? "").toLowerCase();
+			const argsLower = argv.slice(1).map((a) => a.toLowerCase());
+			const rule = ALWAYS_BLOCKED_COMMANDS.find((r) => {
+				if (cmd !== r.command && !cmd.endsWith(`/${r.command}`)) return false;
+				// A rule with no args matches on the command alone.
+				return r.args.every((ruleArg) =>
+					argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase())),
+				);
+			});
+			if (rule) return { blocked: true, reason: rule.description };
 		}
 
 		// Also block fork bombs by content
@@ -938,20 +932,23 @@ export class PermissionManager {
 		// The always-blocked check runs first, so a line that is both always
 		// blocked and ask-every-time is refused here and never offered.
 		const infinite = this.isInfiniteMode();
-		if (infinite && command) {
+		if (command) {
+			// Refused in every mode (ask, auto, run, Infinite), never offered (#3768).
 			const blockCheck = this.isAlwaysBlocked(command);
 			if (blockCheck.blocked) {
-				this.auditInfiniteMode(
-					command,
-					action,
-					details,
-					true,
-					`BLOCKED even in infinite mode: ${blockCheck.reason}`,
-				);
+				if (infinite) {
+					this.auditInfiniteMode(
+						command,
+						action,
+						details,
+						true,
+						`BLOCKED even in infinite mode: ${blockCheck.reason}`,
+					);
+				}
 				request.approved = false;
 				this.log.requests.push(request);
 				this.log.deniedCount++;
-				console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
+				console.log(`\x1b[31m[BLOCKED] ${command} - ${blockCheck.reason}\x1b[0m`);
 				return false;
 			}
 		}
@@ -1113,14 +1110,11 @@ export class PermissionManager {
 	checkPermission(command: string): "allowed" | "denied" | "ask" {
 		// INFINITE MODE: Allow everything except always-blocked commands, and
 		// ask for the ask-every-time list (#3765).
+		// An always-blocked command anywhere on the line is denied in every mode (#3768).
+		if (command && this.isAlwaysBlocked(command).blocked) return "denied";
+
 		if (this.isInfiniteMode()) {
-			if (command) {
-				const blockCheck = this.isAlwaysBlocked(command);
-				if (blockCheck.blocked) {
-					return "denied";
-				}
-				if (this.mustAskReason(command)) return "ask";
-			}
+			if (command && this.mustAskReason(command)) return "ask";
 			return "allowed";
 		}
 
