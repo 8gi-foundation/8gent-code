@@ -20,6 +20,7 @@
  * with this shape, the chosen shape is logged to stderr so the downstream
  * parser can be adjusted without a round-trip to the agent loop.
  */
+import { resolve as resolvePath } from "node:path";
 import type { AgentEventCallbacks } from "./types";
 
 export interface RunOptions {
@@ -32,6 +33,11 @@ export interface RunOptions {
 	maxTurns?: number;
 	/** An image file to attach to the prompt (#3641); one per run. */
 	image?: string;
+	/**
+	 * Keep file and command paths inside the working directory (#3747). On by
+	 * default; `--no-workspace-boundary` turns it off.
+	 */
+	workspaceBoundary: boolean;
 }
 
 /**
@@ -47,6 +53,8 @@ export interface RunOptions {
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
  *                                downscaled to fit 1024x1024; inside the working directory)
+ *   --no-workspace-boundary      let file and command paths leave the working directory
+ *                                (by default the run's workspace root is its working directory)
  *   <prompt tokens...>           everything positional, joined with spaces
  *
  * --image limits (v1, #3641): one image per run; it reaches the model only
@@ -66,6 +74,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let cwd: string | undefined;
 	let maxTurns: number | undefined;
 	let image: string | undefined;
+	let workspaceBoundary = true;
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
@@ -148,6 +157,10 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			image = a.slice("--image=".length);
 			continue;
 		}
+		if (a === "--no-workspace-boundary") {
+			workspaceBoundary = false;
+			continue;
+		}
 		// Any other flag is ignored silently so Orchestra can pass extras
 		if (a.startsWith("-")) continue;
 		positional.push(a);
@@ -162,7 +175,24 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		cwd,
 		maxTurns,
 		image,
+		workspaceBoundary,
 	};
+}
+
+/**
+ * The workspace root a run sets (#3747): its working directory, so the policy
+ * engine's workspace boundary (EIGHT_WORKSPACE_ROOT) applies to every file and
+ * command path. A root already in the environment is kept. Undefined means
+ * set nothing: the root is already set, or the run opted out.
+ */
+export function runWorkspaceRoot(
+	opts: Pick<RunOptions, "cwd" | "workspaceBoundary">,
+	env: Record<string, string | undefined> = process.env,
+	cwd: string = process.cwd(),
+): string | undefined {
+	if (!opts.workspaceBoundary) return undefined;
+	if (env.EIGHT_WORKSPACE_ROOT) return undefined;
+	return resolvePath(cwd, opts.cwd || ".");
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -427,6 +457,12 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		console.info = console.log;
 	}
 
+	// The run's working directory is its workspace root (#3747), for the run
+	// only: an in-process caller gets its environment back afterwards.
+	const workspaceRoot = runWorkspaceRoot(opts);
+	const priorWorkspaceRoot = process.env.EIGHT_WORKSPACE_ROOT;
+	if (workspaceRoot) process.env.EIGHT_WORKSPACE_ROOT = workspaceRoot;
+
 	let exitCode = 0;
 	try {
 		// --image: the file is read before the agent exists, so a bad path is a
@@ -498,6 +534,10 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		if (isStreamJson) {
 			console.log = originalConsoleLog;
 			console.info = originalConsoleInfo;
+		}
+		if (workspaceRoot) {
+			if (priorWorkspaceRoot === undefined) delete process.env.EIGHT_WORKSPACE_ROOT;
+			else process.env.EIGHT_WORKSPACE_ROOT = priorWorkspaceRoot;
 		}
 	}
 
