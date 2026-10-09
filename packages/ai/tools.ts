@@ -217,6 +217,9 @@ function resolvePath(p: string): string {
  * read_file; run_command and the notebook tools (#3760) are not covered.
  */
 function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
+	if (p.includes("\0")) {
+		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
+	}
 	try {
 		return { path: safePath(p, getToolContext().workingDirectory) };
 	} catch (err) {

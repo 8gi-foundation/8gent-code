@@ -229,9 +229,9 @@ export function safePath(userPath: string, workingDirectory: string): string {
  * only when that target is inside the real workspace. Returns the path to use.
  */
 function assertNoSymlinkEscape(target: string, base: string, userPath: string): string {
-	const escape = (real?: string) =>
+	const escape = () =>
 		new Error(
-			`Path escapes workspace via symlink: "${userPath}"${real ? ` resolves to ${real}` : ""}, outside ${base}. ` +
+			`Path escapes workspace via symlink: "${userPath}" points outside ${base}. ` +
 				"Files can only be read or written inside the workspace.",
 		);
 	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
@@ -272,9 +272,9 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 						"Create or write that real path directly.",
 				);
 			}
-			throw escape(dest || undefined);
+			throw escape();
 		}
-		if (!inside(real, realBase)) throw escape(real);
+		if (!inside(real, realBase)) throw escape();
 		return real;
 	}
 
@@ -294,7 +294,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		}
 		throw escape();
 	}
-	if (!inside(realAncestor, realBase)) throw escape(realAncestor);
+	if (!inside(realAncestor, realBase)) throw escape();
 	return target;
 }
 
