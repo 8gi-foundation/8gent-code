@@ -24,6 +24,11 @@ Canonical brand reference for all 8gent ecosystem repositories. Mutable by maint
 
 Warm only. No cool grays, no blue-grays. Banned hues: 270-350 (purple, pink, violet, magenta).
 
+**Scope of the hue ban.** The ban applies to colours we author: brand surfaces, default themes, generated graphics and video, and any colour an agent or model picks. It does not apply to:
+
+- **Colours a person chooses.** Users pick their own colours and themes, including any hue in the banned range. Never block, filter or override their choice.
+- **Clinical conventions.** Established colour codes that people rely on stay as they are. Example: the Modified Fitzgerald Key colours on the 8gent Jr talker grid (question cards near hue 291, descriptor cards near hue 340), which children carry between AAC systems.
+
 ### Accent
 
 | Token | Hex | Usage |
