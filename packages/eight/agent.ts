@@ -60,7 +60,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { splitImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import { splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
@@ -83,7 +83,11 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
-import { providerConfigForStep } from "./failover-provider-config";
+import {
+	mayMoveToProvider,
+	pinnedProviderError,
+	providerConfigForStep,
+} from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
@@ -841,7 +845,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let success = true;
 				try {
 					result = await this.executor.execute(toolName, args);
-					shown = splitImageAttachment(result).text;
+					shown = splitToolImageAttachment(toolName, result).text;
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
 					// for event + session bookkeeping.
@@ -1060,7 +1064,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					model: providerModel,
 					prefer: readPinnedActiveModel(),
 				});
-				if (resolution.switched) {
+				if (
+					resolution.switched &&
+					mayMoveToProvider(this.config.providerPinned, providerName, resolution.provider)
+				) {
 					console.log(`[honesty] ${resolution.reason}`);
 					effectiveProvider = resolution.provider;
 					effectiveModel = resolution.model;
@@ -1109,6 +1116,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				provider: effectiveProvider,
 				model: effectiveModel,
 				run: runTurn,
+				// A named provider stays put: reroute only within it (#3746).
+				pinned: this.config.providerPinned,
+				pinnedMessage: (model, error) => pinnedProviderError(effectiveProvider, model, error).message,
 				onReroute: (missing, chosen) => {
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
@@ -2192,8 +2202,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							// candidates. Non-fatal if the chain has no siblings.
 							const sibling = failover.resolve(currentEntry.model, channel);
 							if (
-								sibling.model !== currentEntry.model ||
-								sibling.provider !== currentEntry.provider
+								(sibling.model !== currentEntry.model ||
+									sibling.provider !== currentEntry.provider) &&
+								mayMoveToProvider(
+									this.config.providerPinned,
+									currentEntry.provider,
+									sibling.provider,
+								)
 							) {
 								candidates.push({
 									provider: sibling.provider,
@@ -2292,6 +2307,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
+						// A provider the user named is never left for another (#3746).
+						if (
+							!mayMoveToProvider(this.config.providerPinned, currentEntry.provider, next.provider)
+						) {
+							break outer;
+						}
 						currentEntry = next;
 						break; // exit inner attempt loop, outer reuses new currentEntry
 					}
@@ -2301,6 +2322,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.abortController = null;
 
 			if (!resolved) {
+				const last = errors[errors.length - 1];
+				if (this.config.providerPinned && last) {
+					throw pinnedProviderError(last.provider, last.model, last.error);
+				}
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
 				throw new Error(
 					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,

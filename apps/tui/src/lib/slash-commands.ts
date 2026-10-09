@@ -116,8 +116,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "theme",
 		aliases: ["t"],
-		description: "Set TUI theme (light / dark / auto)",
-		usage: "/theme [light|dark|auto]",
+		description: "Pick a TUI theme from the design systems, or set light / dark / auto",
+		usage: "/theme [name|default|status|light|dark|auto]",
 	},
 	{
 		name: "language",

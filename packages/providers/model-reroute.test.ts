@@ -240,3 +240,64 @@ describe("chooseRerouteModel with tool capability (Law 2)", () => {
 		expect(chosen?.model).toBe("ornith-1.0-9b");
 	});
 });
+
+describe("callLocalModelWithReroute with a pinned provider (#3746)", () => {
+	// Installed on other local providers only: a reroute would leave ollama.
+	const ELSEWHERE: InstalledModel[] = [
+		{ provider: "lmstudio", model: "lm-model", score: 9 },
+		{ provider: "apple-foundation", model: "apple-foundationmodel", score: 3 },
+	];
+
+	it("never reroutes to another provider; ends with the pinned message", async () => {
+		const calls: string[] = [];
+		const rerouted: string[] = [];
+		const outcome = await callLocalModelWithReroute({
+			provider: "ollama",
+			model: "qwen3.6:27b",
+			run: async (provider, model) => {
+				calls.push(`${provider}/${model}`);
+				throw new Error(INCIDENT_404);
+			},
+			detect: async () => ELSEWHERE,
+			hasCloudKey: () => false,
+			pinned: true,
+			pinnedMessage: (model, error) => `PINNED ${model}: ${error}`,
+			onReroute: (_m, chosen) => rerouted.push(chosen.provider),
+		});
+		expect(calls).toEqual(["ollama/qwen3.6:27b"]);
+		expect(rerouted).toEqual([]);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) expect(outcome.message).toBe(`PINNED qwen3.6:27b: ${INCIDENT_404}`);
+	});
+
+	it("still reroutes within the pinned provider", async () => {
+		const outcome = await callLocalModelWithReroute({
+			provider: "ollama",
+			model: "qwen3.6:27b",
+			run: async (_provider, model) => {
+				if (model === "qwen3.6:27b") throw new Error(INCIDENT_404);
+				return `answer from ${model}`;
+			},
+			detect: async () => [...ELSEWHERE, ...INSTALLED],
+			hasCloudKey: () => false,
+			pinned: true,
+		});
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) expect(outcome.usedProvider).toBe("ollama");
+	});
+
+	it("un-pinned keeps today's reroute to another local provider", async () => {
+		const outcome = await callLocalModelWithReroute({
+			provider: "ollama",
+			model: "qwen3.6:27b",
+			run: async (_provider, model) => {
+				if (model === "qwen3.6:27b") throw new Error(INCIDENT_404);
+				return `answer from ${model}`;
+			},
+			detect: async () => ELSEWHERE,
+			hasCloudKey: () => false,
+		});
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) expect(outcome.usedProvider).toBe("lmstudio");
+	});
+});

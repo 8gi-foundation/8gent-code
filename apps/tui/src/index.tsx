@@ -22,6 +22,8 @@ import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";
+import { applyTerminalBackground } from "./theme.js";
+import { probeTerminalBackground } from "./theme/terminal-probe.js";
 
 const argv = process.argv.slice(2);
 const parsed = parseTuiArgv(argv);
@@ -40,6 +42,12 @@ if (hasInfiniteFlag) {
 
 const command = parsed.positional[0] || "repl";
 const passthroughArgs = parsed.positional.slice(1);
+
+// Ask the terminal for its real background (OSC 11, #3754) before anything
+// reads stdin, then fit the palette to it. Returns at once with no TTY (CI,
+// pilots, pipes) and gives up after 100 ms on a terminal that never answers.
+const terminalBg = await probeTerminalBackground();
+if (terminalBg) applyTerminalBackground(terminalBg);
 
 // Clear screen + home cursor so Ink's first frame paints at row 1.
 // Without this, any stdout writes that happened during module load (eg

@@ -27,7 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
-import { imageAttachmentResult } from "../ai/text-tool-loop";
+import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -108,7 +108,7 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
@@ -1645,6 +1645,12 @@ export class ToolExecutor {
 		// Tool-output injection filter (#3551), off unless EIGHT_OUTPUT_FILTER=1.
 		// Runs on the scrubbed text so no secret reaches the judge.
 		const filtered = await filterToolOutput(toolName, result.scrubbed);
+		// A read_image result that carries an image is never chipped: the chip keeps a 1KB
+		// preview, which cuts the base64 mid-stream, and the model endpoint then
+		// rejects the image with a 400 (pilot 2026-10-09_115409). The attachment
+		// is already downscaled, and the loop strips the pixels from the text it
+		// keeps, so nothing large reaches the context.
+		if (toolName === IMAGE_ATTACHMENT_TOOL && hasImageAttachmentLine(filtered)) return filtered;
 		return this.artifactStore.persistAndReplace(filtered, toolName);
 	}
 
@@ -2616,6 +2622,9 @@ export class ToolExecutor {
 		// at process start, so an edit that slips past this cannot take effect.
 		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
+		if (commandTouchesAuditFiles(command))
+			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
 		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
 		// bump only; the boundary is seatbelting run_command (#3612).
 		if (touchesBrowserSecrets(command))

@@ -117,6 +117,14 @@ export interface AgentConfig {
 		| "deepseek";
 	/** Channel hint for failover routing. "computer" enables the computer-use chain. */
 	channel?: "text" | "computer";
+	/**
+	 * The user named this provider explicitly (a `--provider` flag, or a host
+	 * config that pins it) (#3746). A provider error then ends the turn with a
+	 * plain message instead of moving to another provider: the failover chain,
+	 * the hedge sibling and the tool-capability reroute all stay on this
+	 * provider. Unset: the adaptive router, as before.
+	 */
+	providerPinned?: boolean;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory?: string;

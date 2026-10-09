@@ -14,7 +14,14 @@
  */
 
 import { Box, type DOMElement, useApp, useInput } from "ink";
-import { t } from "./theme.js";
+import {
+	applyDesignSystem,
+	t,
+	type ThemeChoice,
+	themeChoices,
+	themeStatus,
+} from "./theme.js";
+import { findDesignSystem, saveDesignSystemChoice } from "./theme/design-systems.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -677,7 +684,8 @@ type ViewMode =
 	| "design"
 	| "history"
 	| "music"
-	| "message-viewer";
+	| "message-viewer"
+	| "theme-select";
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
@@ -1891,6 +1899,9 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [designIntro, setDesignIntro] = useState<string>("");
+	// Rows for the /theme picker, computed when it opens (#3754).
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
+	const [themeRows, setThemeRows] = useState<ThemeChoice[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(null);
@@ -2584,6 +2595,10 @@ export function App({
 				const decision = await readinessCacheRef.current({
 					provider: currentProvider,
 					model: currentModel,
+					// A launch --provider is never swapped for another provider (#3746).
+					pinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 				});
 				if (cancelled) return;
 				if (decision.kind !== "none") setUnreachableNote(null);
@@ -2668,6 +2683,11 @@ export function App({
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
 					apiKey: sessionApiKey(runtime),
+					// A launch --provider names the provider: while the tab is on it, a
+					// provider error ends the turn instead of moving to another (#3746).
+					providerPinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
@@ -4478,25 +4498,43 @@ export function App({
 				}
 
 				case "theme": {
-					// /theme           → show current resolved mode + how it was chosen
-					// /theme light     → persist light in ~/.8gent/config.json
-					// /theme dark      → persist dark
-					// /theme auto      → clear setting, defer to terminal/COLORFGBG
+					// /theme           -> picker: the 8gent theme or an indexed design system (#3754)
+					// /theme <id>      -> use that design system (saved to ~/.8gent/config.json)
+					// /theme default   -> back to the stock 8gent theme
+					// /theme status    -> what the palette is fitted to
+					// /theme light|dark|auto -> persist the light/dark mode, as before
 					const fs = await import("node:fs");
 					const path = await import("node:path");
 					const home = process.env.HOME ?? "";
 					const cfgPath = path.join(home, ".8gent", "config.json");
 					const choice = (args[0] ?? "").toLowerCase();
-					if (!choice) {
-						const themeMod = await import("./theme.js");
+					if (!choice || choice === "list" || choice === "pick") {
+						setThemeRows(themeChoices());
+						setViewMode("theme-select");
+						break;
+					}
+					if (choice === "status") {
+						const st = themeStatus();
+						const ds = st.designSystem ? findDesignSystem(st.designSystem) : undefined;
 						addSystemMessage(
-							`Theme: ${themeMod.theme.mode}. Set with /theme [light|dark|auto]. Restart the TUI for the change to take effect.`,
+							`Theme: ${ds?.label ?? "8gent"}, ${st.mode} mode, fitted to ${st.bg} (${st.bgSource === "terminal" ? "reported by the terminal" : "assumed, the terminal did not report one"}).`,
 						);
+						break;
+					}
+					if (choice === "default" || choice === "8gent" || findDesignSystem(choice)) {
+						const id = choice === "default" || choice === "8gent" ? null : choice;
+						try {
+							saveDesignSystemChoice(id, cfgPath);
+							applyDesignSystem(id);
+							addSystemMessage(`Theme set to ${id ? findDesignSystem(id)?.label : "8gent"}.`);
+						} catch (err) {
+							addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
+						}
 						break;
 					}
 					if (choice !== "light" && choice !== "dark" && choice !== "auto") {
 						addSystemMessage(
-							"Theme must be light, dark, or auto. Example: /theme light",
+							"Unknown theme. Run /theme to pick from the list, or /theme light | dark | auto.",
 						);
 						break;
 					}
@@ -5896,6 +5934,40 @@ export function App({
 						provider={currentProvider}
 					/>
 				);
+
+			case "theme-select": {
+				const current = themeStatus().designSystem ?? "default";
+				return (
+					<SelectInput
+						title={`Theme (${themeRows.length - 1} design systems)`}
+						options={themeRows.map((r) => ({
+							label: r.label,
+							value: r.value,
+							description: r.description,
+							swatches: r.swatches,
+						}))}
+						initialIndex={Math.max(
+							0,
+							themeRows.findIndex((r) => r.value === current),
+						)}
+						maxVisible={10}
+						onSelect={(value) => {
+							const id = value === "default" ? null : value;
+							try {
+								saveDesignSystemChoice(id);
+								applyDesignSystem(id);
+								addSystemMessage(
+									`Theme set to ${themeRows.find((r) => r.value === value)?.label ?? value}.`,
+								);
+							} catch (err) {
+								addSystemMessage(`Could not save the theme: ${(err as Error).message}`);
+							}
+							setViewMode("chat");
+						}}
+						onCancel={() => setViewMode("chat")}
+					/>
+				);
+			}
 
 			case "provider-select":
 				return (

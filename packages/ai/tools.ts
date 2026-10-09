@@ -42,6 +42,7 @@ import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-pla
 import { withImagesWritten } from "./image-shape";
 import { writeShapeLine } from "./write-shape";
 import { writeScopeLine } from "./write-scope";
+import { safePath } from "../eight/tools";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -207,6 +208,21 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 
 function resolvePath(p: string): string {
 	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
+}
+
+/**
+ * The path native write_file or edit_file may touch (#3747): inside the
+ * workspace root, by safePath (traversal, symlink escape, credential paths).
+ * Returns the path, or the refusal to hand back. Only these two native tools
+ * use it: native read_file (#3759), run_command and the notebook tools
+ * (#3760) are not covered by this change.
+ */
+function confinedWritePath(p: string): { path: string } | { refused: string } {
+	try {
+		return { path: safePath(p, getToolContext().workingDirectory) };
+	} catch (err) {
+		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
+	}
 }
 
 // ============================================
@@ -397,7 +413,9 @@ const writeFile = tool({
 	execute: async ({ path: filePath, content }) => {
 		const blocked = gateWrite("write_file", { path: filePath, content });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		const wasNew = pathAbsent(absolutePath);
@@ -428,7 +446,9 @@ const editFile = tool({
 		if (noAnchor) return noAnchor;
 		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		const edited = applyEdit(content, oldText, newText);
