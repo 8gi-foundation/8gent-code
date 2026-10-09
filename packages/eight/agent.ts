@@ -60,7 +60,7 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { splitImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import { splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
@@ -841,7 +841,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let success = true;
 				try {
 					result = await this.executor.execute(toolName, args);
-					shown = splitImageAttachment(result).text;
+					shown = splitToolImageAttachment(toolName, result).text;
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
 					// for event + session bookkeeping.

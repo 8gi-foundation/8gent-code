@@ -27,7 +27,7 @@ import {
 	locate as astLocate,
 } from "../ast-index/locate";
 import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
-import { IMAGE_ATTACHMENT_MARKER, imageAttachmentResult } from "../ai/text-tool-loop";
+import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { writeShapeLine } from "../ai/write-shape";
@@ -1644,12 +1644,12 @@ export class ToolExecutor {
 		// Tool-output injection filter (#3551), off unless EIGHT_OUTPUT_FILTER=1.
 		// Runs on the scrubbed text so no secret reaches the judge.
 		const filtered = await filterToolOutput(toolName, result.scrubbed);
-		// A result that carries an image is never chipped: the chip keeps a 1KB
+		// A read_image result that carries an image is never chipped: the chip keeps a 1KB
 		// preview, which cuts the base64 mid-stream, and the model endpoint then
 		// rejects the image with a 400 (pilot 2026-10-09_115409). The attachment
 		// is already downscaled, and the loop strips the pixels from the text it
 		// keeps, so nothing large reaches the context.
-		if (filtered.includes(IMAGE_ATTACHMENT_MARKER)) return filtered;
+		if (toolName === IMAGE_ATTACHMENT_TOOL && hasImageAttachmentLine(filtered)) return filtered;
 		return this.artifactStore.persistAndReplace(filtered, toolName);
 	}
 

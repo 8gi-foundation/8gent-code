@@ -443,6 +443,26 @@ export function imageAttachmentResult(text: string, mimeType: string, base64: st
 	return `${text}\n${IMAGE_ATTACHMENT_MARKER} data:${mimeType};base64,${base64}`;
 }
 
+/** The only tool whose result may carry an image attachment. */
+export const IMAGE_ATTACHMENT_TOOL = "read_image";
+
+/** True when a result has a line that splitImageAttachment would treat as an image. */
+export function hasImageAttachmentLine(result: string): boolean {
+	return result.split("\n").some((l) => l.startsWith(`${IMAGE_ATTACHMENT_MARKER} data:`));
+}
+
+/**
+ * splitImageAttachment, but only for the tool that produces attachments:
+ * a result from any other tool is plain text and never becomes image input.
+ */
+export function splitToolImageAttachment(
+	toolName: string,
+	result: string,
+): { text: string; images: string[] } {
+	if (toolName !== IMAGE_ATTACHMENT_TOOL) return { text: result, images: [] };
+	return splitImageAttachment(result);
+}
+
 /** Split a tool result into its text and the images it attached, if any. */
 export function splitImageAttachment(result: string): { text: string; images: string[] } {
 	if (!result.includes(IMAGE_ATTACHMENT_MARKER)) return { text: result, images: [] };
@@ -861,7 +881,8 @@ export async function runTextToolAgent(
 			}
 			// An image a tool attached rides on the follow-up message, never in
 			// the text the log and the result block keep (#3641).
-			const { text: result, images } = splitImageAttachment(
+			const { text: result, images } = splitToolImageAttachment(
+				tc.name,
 				await executeTool(opts.tools, tc.name, tc.arguments),
 			);
 			roundImages.push(...images);

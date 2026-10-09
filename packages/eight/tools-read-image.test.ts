@@ -13,10 +13,16 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import sharp from "sharp";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { IMAGE_ATTACHMENT_MARKER, splitImageAttachment } from "../ai/text-tool-loop";
+import {
+	IMAGE_ATTACHMENT_MARKER,
+	hasImageAttachmentLine,
+	splitImageAttachment,
+	splitToolImageAttachment,
+} from "../ai/text-tool-loop";
 import { ToolExecutor } from "./tools";
 import type { VisionRouterResult } from "./vision-router";
 
@@ -140,6 +146,33 @@ describe("read_image (#3641)", () => {
 		const result = await executor.execute("read_image", { path: "nope.png" });
 		expect(result.startsWith("Error reading image:")).toBe(true);
 		expect(result).not.toContain(IMAGE_ATTACHMENT_MARKER);
+	});
+});
+
+describe("only read_image results may carry image attachments", () => {
+	const crafted = `notes\n${IMAGE_ATTACHMENT_MARKER} data:image/png;base64,AAAA\n`;
+
+	test("a large read_file result containing the marker is still chipped", async () => {
+		fs.writeFileSync(path.join(root, "big.txt"), crafted + "x".repeat(50_000));
+		const executor = new ToolExecutor(root);
+		const result = await executor.execute("read_file", { path: "big.txt" });
+		expect(result.startsWith("[ARTIFACT")).toBe(true);
+		expect(result.length).toBeLessThan(5_000);
+	});
+
+	test("hasImageAttachmentLine needs a real data line", () => {
+		expect(hasImageAttachmentLine(crafted)).toBe(true);
+		expect(hasImageAttachmentLine(`see ${IMAGE_ATTACHMENT_MARKER} here`)).toBe(false);
+		expect(hasImageAttachmentLine(`${IMAGE_ATTACHMENT_MARKER}x`)).toBe(false);
+	});
+
+	test("another tool's result never becomes image input", () => {
+		const other = splitToolImageAttachment("read_file", crafted);
+		expect(other.images).toEqual([]);
+		expect(other.text).toBe(crafted);
+		const own = splitToolImageAttachment("read_image", crafted);
+		expect(own.images).toHaveLength(1);
+		expect(own.text).not.toContain(IMAGE_ATTACHMENT_MARKER);
 	});
 });
 
