@@ -58,7 +58,14 @@ interface LiveFocalStripProps {
 	 *  Shown dim after the route as "(asked ...)" (#3102). */
 	routeAsked?: string;
 	tokens: string;
-	contextPct: number;
+	/** Share of the model's real window in use. Null when there is no
+	 *  percent to show: see `contextState` (#3321). */
+	contextPct: number | null;
+	/** Why there is no percent, or where the window came from. `server`
+	 *  marks the bar with ~ (reported by the local server, not provider
+	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
+	 *  first reply is measured. */
+	contextState?: "provider" | "server" | "unknown" | "fresh";
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
@@ -87,12 +94,24 @@ export function meter(percent: number, width = 10): string {
 	return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
+/** The ctx slot, always METER_CELLS wide so the strip layout is unchanged.
+ *  Never a bar without a real window behind it (#3321). */
+export function contextMeterText(
+	pct: number | null,
+	state: "provider" | "server" | "unknown" | "fresh",
+): string {
+	if (state === "unknown") return "? unknown".padEnd(METER_CELLS);
+	if (state === "fresh" || pct === null) return "--".padEnd(METER_CELLS);
+	return state === "server" ? `${meter(pct, METER_CELLS - 1)}~` : meter(pct, METER_CELLS);
+}
+
 export function LiveFocalStrip({
 	activeStep,
 	route,
 	routeAsked,
 	tokens,
 	contextPct,
+	contextState = "provider",
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
@@ -175,7 +194,7 @@ export function LiveFocalStrip({
 				{fit.meter ? (
 					<>
 						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
-						<Text color={t.steel}>{meter(contextPct, METER_CELLS)}</Text>
+						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
 					</>
 				) : null}
 				{tokens ? <Text color={t.textTertiary}> {tokens}</Text> : null}
