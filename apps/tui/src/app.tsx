@@ -216,6 +216,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
@@ -1726,6 +1727,31 @@ export function App({
 		}
 
 	}, [isProcessing, soundEnabled]);
+
+	// OSC 7501 program status: tell the host terminal working / blocked / done /
+	// error / idle. TTY-only, off with EIGHT_NO_PROGRAM_STATUS=1 (lib/program-status.ts).
+	const programStatus = useRef<ReturnType<typeof createProgramStatusEmitter> | null>(null);
+	const hasRunTurnRef = useRef(false);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		if (isProcessing) hasRunTurnRef.current = true;
+		programStatus.current.set(
+			deriveProgramState({
+				isProcessing,
+				approvalPending: approvalPending !== null,
+				lastTurn: hasRunTurnRef.current ? (turnEndedInError(messages) ? "error" : "ok") : null,
+			}),
+		);
+	}, [isProcessing, approvalPending, messages]);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		const emitter = programStatus.current;
+		const uninstall = installProgramStatusCleanup(emitter);
+		return () => {
+			uninstall();
+			emitter.clear();
+		};
+	}, []);
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
