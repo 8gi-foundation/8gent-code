@@ -2580,3 +2580,15 @@ describe("image attachments on tool results (#3641)", () => {
 		expect(seen[1].every((m) => !("images" in m))).toBe(true);
 	});
 });
+
+describe("unknownToolResult for a withheld browser tool (#3785)", () => {
+	test("a browser_* call that is not offered is told why and how to get it", () => {
+		const r = unknownToolResult("browser_open", ["read_file"]);
+		expect(r).toMatch(/^Error/);
+		expect(r).toMatch(/EIGHT_BROWSER_PROFILE/);
+		expect(r).toMatch(/Available tools: read_file/);
+	});
+	test("other unknown tools get no browser note", () => {
+		expect(unknownToolResult("spawn_agent", ["read_file"])).not.toMatch(/EIGHT_BROWSER_PROFILE/);
+	});
+});

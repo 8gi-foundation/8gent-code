@@ -259,6 +259,21 @@ export function localBrowserTools(env: Env = process.env): string[] {
 		: [];
 }
 
+/**
+ * Why the browser tools are not in a local session, or null when they are offered (#3785). Shown in the
+ * local tool catalog and in the result of a browser_* call that is not registered, so a model that was
+ * told to use "the browser" learns the reason and the way to get it instead of rediscovering each gate.
+ */
+export function browserWithheldNote(env: Env = process.env): string | null {
+	if (localBrowserTools(env).length > 0) return null;
+	return (
+		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
+		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
+		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
+		"into password fields, so for a local web app use run_command with curl."
+	);
+}
+
 /** Where to connect: a named profile's own token and published port, else the default token and port. */
 function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
 	port: number;
