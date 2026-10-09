@@ -24,12 +24,13 @@
  *     in the band snaps to the nearest legal OKLCH hue (design-compose
  *     LEGAL_HUES), and every output is re-checked on its rendered hue.
  *
- * Naming: systems named after a real company or product are never shown by
- * that name. They get a neutral label built from their style and primary hue,
- * so a public product carries no third-party mark. See NEUTRAL_LABEL_SOURCES.
+ * Catalogue: ids are the index names and labels are written by hand in
+ * CATALOGUE, so a saved choice survives an index regeneration. Systems named
+ * after a real company, product or game, and systems whose identity is a
+ * banned colour, are left out entirely (EXCLUDED_SOURCES, 8DO/8SO, #3764).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	BANNED_HUE_MAX,
@@ -58,44 +59,99 @@ interface IndexEntry {
 }
 
 export interface TuiDesignSystem {
-	/** What the user types and what config.json stores. Never a brand name. */
+	/** What the user types and what config.json stores: the index name. */
 	id: string;
-	/** What the picker shows. Never a brand name. */
+	/** What the picker shows, from CATALOGUE. */
 	label: string;
 	mood: string;
 	style: string;
 	/** Preview row: background, primary, accent, from the index. */
 	swatches: string[];
-	/** The index entry name. Internal only, never rendered. */
+	/** The index entry name (same as id). */
 	source: string;
 }
 
 /**
- * Index entries named after a real company, product or game. Their names are
- * third-party marks, so the TUI shows a neutral label instead. Listed in the
- * PR for 8DO and 8SO to decide whether they ship at all.
+ * Index entries the TUI does not offer, with the reason. Kept only as an
+ * exclusion set; none of these names is ever rendered.
  */
-export const NEUTRAL_LABEL_SOURCES: ReadonlySet<string> = new Set([
-	"adidas",
-	"apple",
-	"chatgpt",
-	"claude",
-	"cursor",
-	"doom-64",
-	"e2b",
-	"fynt",
-	"google",
-	"microsoft",
-	"miro",
-	"nike",
-	"notion",
-	"t3-chat",
-	"teenage-engineering",
-	"vercel",
+export const EXCLUDED_SOURCES: ReadonlyMap<string, string> = new Map([
+	...[
+		"adidas",
+		"apple",
+		"chatgpt",
+		"claude",
+		"cursor",
+		"doom-64",
+		"e2b",
+		"fynt",
+		"google",
+		"microsoft",
+		"miro",
+		"nike",
+		"notion",
+		"t3-chat",
+		"teenage-engineering",
+		"vercel",
+	].map((n): [string, string] => [n, "named after a real company, product or game"]),
+	["violet-bloom", "identity is a banned hue (violet)"],
+	["amethyst-haze", "identity is a banned hue (purple)"],
 ]);
 
+/**
+ * Every offered system: index name (also the stable id) to its picker label.
+ * Hand-written on purpose. A new index entry must be added here or to
+ * EXCLUDED_SOURCES, and the catalogue test fails until it is.
+ */
+export const CATALOGUE: Readonly<Record<string, string>> = {
+	"amber-minimal": "Amber Minimal",
+	base: "Base",
+	"bold-tech": "Bold Tech",
+	caffeine: "Caffeine",
+	candyland: "Candyland",
+	claymorphism: "Claymorphism",
+	"clean-slate": "Clean Slate",
+	"cosmic-night": "Cosmic Night",
+	cyberpunk: "Cyberpunk",
+	denim: "Denim",
+	"elegant-luxury": "Elegant Luxury",
+	"entangled-photons": "Entangled Photons",
+	"field-guide": "Field Guide",
+	"kinetic-editorial": "Kinetic Editorial",
+	"kodama-grove": "Kodama Grove",
+	"midnight-bloom": "Midnight Bloom",
+	"mocha-mousse": "Mocha Mousse",
+	"modern-minimal": "Modern Minimal",
+	nature: "Nature",
+	"neo-brutalism": "Neo Brutalism",
+	"northern-lights": "Northern Lights",
+	notebook: "Notebook",
+	"ocean-breeze": "Ocean Breeze",
+	"pastel-dreams": "Pastel Dreams",
+	perpetuity: "Perpetuity",
+	"quantum-rose": "Quantum Rose",
+	research: "Research",
+	"retro-arcade": "Retro Arcade",
+	"sage-garden": "Sage Garden",
+	"soft-pop": "Soft Pop",
+	"solar-dusk": "Solar Dusk",
+	"starry-night": "Starry Night",
+	"sunset-horizon": "Sunset Horizon",
+	tao: "Tao",
+	utilitarian: "Utilitarian",
+	"vintage-paper": "Vintage Paper",
+};
+
 /** Ids the /theme command already uses for other things. */
-const RESERVED_IDS = new Set(["light", "dark", "auto", "default", "8gent", "list", "pick"]);
+export const RESERVED_IDS: ReadonlySet<string> = new Set([
+	"light",
+	"dark",
+	"auto",
+	"default",
+	"8gent",
+	"list",
+	"pick",
+]);
 
 export const CANONICAL_BG = { dark: "#0A0908", light: "#FAF7F4" } as const;
 
@@ -146,15 +202,35 @@ function circularDistance(a: number, b: number): number {
 	return d > 180 ? 360 - d : d;
 }
 
-/** Snap an OKLCH hue to the nearest hue that never renders in the banned band. */
+/**
+ * Perceptual gate (8DO, #3764): an OKLCH hue in 280-350 with visible chroma
+ * reads as violet, purple or pink even where its rendered HSL hue sits just
+ * outside BRAND.md's 270-350. Applied to every palette role, text included.
+ */
+export const PERCEPTUAL_BAN = { min: 280, max: 350, minChroma: 0.04 } as const;
+
+export function perceptuallyBanned(hex: string): boolean {
+	const o = oklchOf(hex);
+	return o.c >= PERCEPTUAL_BAN.minChroma && o.h >= PERCEPTUAL_BAN.min && o.h <= PERCEPTUAL_BAN.max;
+}
+
+function banned(hex: string): boolean {
+	return isBannedRender(hex) || perceptuallyBanned(hex);
+}
+
+// design-compose's always-legal hues, minus the perceptual band.
+const SAFE_HUES = LEGAL_HUES.filter((h) => h < PERCEPTUAL_BAN.min || h > PERCEPTUAL_BAN.max);
+
+/** Snap an OKLCH hue to the nearest hue that is legal both rendered and perceptually. */
 function legalHue(h: number): number {
-	let best = LEGAL_HUES[0] ?? 0;
-	for (const cand of LEGAL_HUES) {
+	let best = SAFE_HUES[0] ?? 0;
+	for (const cand of SAFE_HUES) {
 		if (circularDistance(cand, h) < circularDistance(best, h)) best = cand;
 	}
-	// LEGAL_HUES is sampled every 5 degrees; a hue within half a step of a
-	// legal sample sits between legal samples and is kept as it is.
-	return circularDistance(best, h) <= 2.5 ? h : best;
+	// SAFE_HUES is sampled every 5 degrees; a hue within half a step of a safe
+	// sample, and outside the perceptual band, is kept as it is.
+	const inBand = h >= PERCEPTUAL_BAN.min && h <= PERCEPTUAL_BAN.max;
+	return !inBand && circularDistance(best, h) <= 2.5 ? h : best;
 }
 
 function oklchOf(hex: string): Oklch {
@@ -172,7 +248,7 @@ export function ensureContrast(hex: string, bgHex: string, target: number): stri
 	const bg = fromHex(bgHex);
 	const lightBg = isLightBackground(bgHex);
 	const src = oklchOf(hex);
-	const srcBanned = isBannedRender(hex);
+	const srcBanned = banned(hex);
 	const sameSide = lightBg ? src.l < rgbToOklch(bg).l : src.l > rgbToOklch(bg).l;
 	if (!srcBanned && sameSide && contrastRatio(fromHex(hex), bg) >= target) return hex;
 
@@ -180,7 +256,7 @@ export function ensureContrast(hex: string, bgHex: string, target: number): stri
 	const direction = lightBg ? "darker" : "lighter";
 	for (const chroma of [src.c, src.c / 2, 0]) {
 		const solved = solveLegibleHex(hue, () => chroma, bg, target, direction);
-		if (solved && !isBannedRender(solved.hex)) return solved.hex;
+		if (solved && !banned(solved.hex)) return solved.hex;
 	}
 	return lightBg ? "#000000" : "#ffffff";
 }
@@ -198,7 +274,7 @@ function tintNear(hex: string, bgHex: string, ratio: number, maxChroma = 0.04): 
 	const direction = isLightBackground(bgHex) ? "darker" : "lighter";
 	const solved = solveLegibleHex(hue, () => chroma, bg, ratio, direction);
 	const out = solved?.hex ?? toHex(gamutMap({ l: rgbToOklch(bg).l, c: 0, h: 0 }));
-	return isBannedRender(out) ? toHex(gamutMap({ ...oklchOf(out), c: 0 })) : out;
+	return banned(out) ? toHex(gamutMap({ ...oklchOf(out), c: 0 })) : out;
 }
 
 function chromatic(hex: string | undefined): hex is string {
@@ -287,64 +363,13 @@ export function paletteFromEntry(entry: IndexEntry, bgHex: string): Palette {
 
 const ENTRIES = index as IndexEntry[];
 
-function titleCase(s: string): string {
-	return s
-		.split(/[-\s]+/)
-		.filter(Boolean)
-		.map((w) => w[0].toUpperCase() + w.slice(1))
-		.join(" ");
-}
-
-/** A plain colour word for a hex, from its rendered hue. */
-export function hueWord(hex: string): string {
-	const h = renderedHue(fromHex(hex));
-	if (h === null) return "Mono";
-	if (h < 15 || h >= 345) return "Red";
-	if (h < 40) return "Orange";
-	if (h < 55) return "Amber";
-	if (h < 70) return "Yellow";
-	if (h < 160) return "Green";
-	if (h < 185) return "Teal";
-	if (h < 200) return "Cyan";
-	if (h < 250) return "Blue";
-	return "Indigo";
-}
-
-function slug(s: string): string {
-	return s
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "");
-}
-
 function buildCatalogue(): TuiDesignSystem[] {
 	const out: TuiDesignSystem[] = [];
-	const labels = new Set<string>();
-	const ids = new Set<string>(RESERVED_IDS);
-	// Real names first, so a neutral label can never take a real name's slot.
-	const ordered = [...ENTRIES].sort(
-		(a, b) => Number(NEUTRAL_LABEL_SOURCES.has(a.name)) - Number(NEUTRAL_LABEL_SOURCES.has(b.name)),
-	);
-	for (const e of ordered) {
-		let label: string;
-		if (!NEUTRAL_LABEL_SOURCES.has(e.name)) {
-			label = titleCase(e.name);
-		} else {
-			const c = e.colors;
-			const lead = chromatic(c.primary) ? c.primary : c.accent;
-			const base = `${titleCase(e.style)} ${hueWord(lead)}`;
-			const second =
-				chromatic(c.accent) && hueWord(c.accent) !== hueWord(lead) ? ` ${hueWord(c.accent)}` : "";
-			const candidates = [base, `${base}${second}`, `${base}${second} ${titleCase(e.mood)}`];
-			label = candidates.find((l) => !labels.has(l)) ?? candidates[2];
-			for (let n = 2; labels.has(label); n++) label = `${candidates[2]} ${n}`;
-		}
-		let id = NEUTRAL_LABEL_SOURCES.has(e.name) ? slug(label) : e.name;
-		for (let n = 2; ids.has(id); n++) id = `${slug(label)}-${n}`;
-		labels.add(label);
-		ids.add(id);
+	for (const e of ENTRIES) {
+		const label = CATALOGUE[e.name];
+		if (!label || EXCLUDED_SOURCES.has(e.name) || RESERVED_IDS.has(e.name)) continue;
 		out.push({
-			id,
+			id: e.name,
 			label,
 			mood: e.mood,
 			style: e.style,
@@ -377,29 +402,50 @@ export function configPath(home = process.env.HOME ?? ""): string {
 	return join(home, ".8gent", "config.json");
 }
 
+/**
+ * Read config.json. A missing file is an empty config. A file that is not a
+ * JSON object (malformed, an array, a string) throws, so nothing ever turns a
+ * broken config into {} and writes that back over the user's settings.
+ */
 function readConfig(path: string): Record<string, unknown> {
+	if (!existsSync(path)) return {};
+	const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+		throw new Error(`${path} is not a JSON object`);
+	}
+	return raw as Record<string, unknown>;
+}
+
+/** The saved design system id, or null for the stock 8gent theme (or an unreadable config). */
+export function readDesignSystemChoice(path = configPath()): string | null {
 	try {
-		if (!existsSync(path)) return {};
-		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+		const v = readConfig(path).designSystem;
+		return typeof v === "string" && findDesignSystem(v) ? v : null;
 	} catch {
-		return {};
+		return null;
 	}
 }
 
-/** The saved design system id, or null for the stock 8gent theme. */
-export function readDesignSystemChoice(path = configPath()): string | null {
-	const v = readConfig(path).designSystem;
-	return typeof v === "string" && findDesignSystem(v) ? v : null;
-}
-
-/** Save a choice (null clears it back to the 8gent theme). Keeps every other key. */
+/**
+ * Save a choice (null clears it back to the 8gent theme), keeping every other
+ * key. Refuses to write over a config it cannot parse. Writes a sibling temp
+ * file and renames it over the original, so a crash never leaves half a file.
+ */
 export function saveDesignSystemChoice(id: string | null, path = configPath()): void {
 	if (id !== null && !findDesignSystem(id)) throw new Error(`Unknown design system: ${id}`);
-	const raw = readConfig(path);
+	let raw: Record<string, unknown>;
+	try {
+		raw = readConfig(path);
+	} catch (err) {
+		throw new Error(
+			`Not changing ${path}: it is not valid JSON (${(err as Error).message}). Fix or remove it first.`,
+		);
+	}
 	if (id === null)
 		raw.designSystem = undefined; // JSON.stringify drops it
 	else raw.designSystem = id;
 	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`);
+	const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+	writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`);
+	renameSync(tmp, path);
 }

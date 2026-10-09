@@ -211,17 +211,6 @@ export function SelectInput<T = string>({
 							{/* Icon if present (omit placeholder spaces — they still rendered a column) */}
 							{option.icon ? <AppText dimColor={isDisabled}>{option.icon} </AppText> : null}
 
-							{/* Colour preview row */}
-							{option.swatches?.length ? (
-								<AppText>
-									{option.swatches.map((hex, i) => (
-										<AppText key={`${hex}-${i}`} color={hex}>
-											{"\u2588\u2588"}
-										</AppText>
-									))}{" "}
-								</AppText>
-							) : null}
-
 							{/* Label */}
 							{isDisabled ? (
 								<MutedText>{option.label}</MutedText>
@@ -230,6 +219,18 @@ export function SelectInput<T = string>({
 									{option.label}
 								</AppText>
 							)}
+
+							{/* Colour preview: background-coloured cells after the label */}
+							{option.swatches?.length ? (
+								<AppText>
+									{"  "}
+									{option.swatches.map((hex, i) => (
+										<AppText key={`${hex}-${i}`} backgroundColor={hex}>
+											{"  "}
+										</AppText>
+									))}
+								</AppText>
+							) : null}
 
 							{/* Disabled indicator */}
 							{isDisabled && <MutedText> (unavailable)</MutedText>}
@@ -263,7 +264,9 @@ export function SelectInput<T = string>({
 
 			{/* Help text */}
 			<Box marginTop={1}>
-				<MutedText>[↑↓] Navigate [Enter] Select [Esc] Cancel</MutedText>
+				<MutedText>
+					[↑↓] Navigate [Enter] Select [Esc] Cancel{searchable ? " [type] Filter" : ""}
+				</MutedText>
 			</Box>
 		</Card>
 	);

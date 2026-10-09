@@ -9,8 +9,11 @@ import { EventEmitter } from "node:events";
 import {
 	DA1_QUERY,
 	OSC11_QUERY,
+	ReplyFilter,
+	installLateReplyFilter,
 	parseOsc11Hex,
 	probeTerminalBackground,
+	splitTrailingPartial,
 	stripReplies,
 } from "../theme/terminal-probe.js";
 
@@ -185,5 +188,104 @@ describe("probeTerminalBackground", () => {
 			await probeTerminalBackground({ stdin: asStdin(stdin), stdout, env: { EIGHT_OSC11: "0" } }),
 		).toBeNull();
 		expect(stdout.writes).toEqual([]);
+	});
+});
+
+describe("late and split replies never reach the prompt", () => {
+	test("splitTrailingPartial holds an unterminated OSC or DA1 reply, never a lone Esc or an arrow key", () => {
+		expect(splitTrailingPartial(`ab${ESC}]11;rgb:28`)).toEqual(["ab", `${ESC}]11;rgb:28`]);
+		expect(splitTrailingPartial(`ab${ESC}]11;rgb:0/0/0${ESC}`)).toEqual([
+			"ab",
+			`${ESC}]11;rgb:0/0/0${ESC}`,
+		]);
+		expect(splitTrailingPartial(`ab${ESC}[?62;2`)).toEqual(["ab", `${ESC}[?62;2`]);
+		expect(splitTrailingPartial(`ab${ESC}`)).toEqual([`ab${ESC}`, ""]);
+		expect(splitTrailingPartial(`ab${ESC}[A`)).toEqual([`ab${ESC}[A`, ""]);
+	});
+
+	test("ReplyFilter strips a reply split across three chunks and passes the keys around it", () => {
+		const f = new ReplyFilter();
+		expect(f.push(`h${ESC}]11;rg`)).toBe("h");
+		expect(f.push("b:2828/2828/")).toBe("");
+		expect(f.push(`2828${ST}i${ESC}[?6`)).toBe("i");
+		expect(f.push("2;22c!")).toBe("!");
+		expect(f.pending).toBe("");
+	});
+
+	/** A stdin whose read() hands out queued chunks, like a paused tty. */
+	function queuedStdin(chunks: Array<Buffer | string>) {
+		return {
+			read: (_size?: number) => (chunks.length ? (chunks.shift() as Buffer | string) : null),
+		};
+	}
+	function drain(s: { read?: (n?: number) => unknown }): string {
+		let out = "";
+		for (let v = s.read?.(); v !== null && v !== undefined; v = s.read?.()) out += v.toString();
+		return out;
+	}
+
+	test("a reply arriving after the probe is stripped from what Ink reads", () => {
+		const s = queuedStdin([
+			Buffer.from(`${ESC}]11;rgb:ffff/ffff/ffff${BEL}`),
+			Buffer.from(`${ESC}[?1;2c`),
+			Buffer.from("y"),
+		]);
+		installLateReplyFilter(s, "", 1000);
+		expect(drain(s)).toBe("y");
+	});
+
+	test("a partial left over from the probe is completed and dropped, not delivered", () => {
+		const s = queuedStdin([Buffer.from(`fff/ffff${BEL}`), Buffer.from("k")]);
+		installLateReplyFilter(s, `${ESC}]11;rgb:ffff/`, 1000);
+		expect(drain(s)).toBe("k");
+	});
+
+	test("a partial still held when the window closes is dropped, never put back", () => {
+		let clock = 0;
+		const queue: Array<Buffer | string> = [Buffer.from(`${ESC}]11;rgb:00`)];
+		const s = queuedStdin(queue);
+		installLateReplyFilter(s, "", 100, () => clock);
+		expect(drain(s)).toBe("");
+		clock = 500;
+		queue.push(Buffer.from("z"));
+		expect(drain(s)).toBe("z");
+	});
+
+	test("a multi-byte key split across reads survives the filter", () => {
+		const eacute = Buffer.from("\u00e9");
+		const s = queuedStdin([eacute.subarray(0, 1), eacute.subarray(1)]);
+		installLateReplyFilter(s, "", 1000);
+		expect(drain(s)).toBe("\u00e9");
+	});
+
+	test("the probe never unshifts a partial reply, only the keys around it", async () => {
+		const stdin = new FakeStdin();
+		const stdout = fakeStdout(() => queueMicrotask(() => stdin.emit("data", `q${ESC}]11;rgb:28`)));
+		const hex = await probeTerminalBackground({
+			stdin: asStdin(stdin),
+			stdout,
+			env: {},
+			timeoutMs: 30,
+		});
+		expect(hex).toBeNull();
+		expect(stdin.unshifted).toEqual(["q"]);
+	});
+
+	test("a multi-byte key typed during the probe is decoded whole", async () => {
+		const stdin = new FakeStdin();
+		const bytes = Buffer.from("\u00e9");
+		const stdout = fakeStdout(() =>
+			queueMicrotask(() => {
+				stdin.emit("data", bytes.subarray(0, 1));
+				stdin.emit(
+					"data",
+					Buffer.concat([bytes.subarray(1), Buffer.from(`${ESC}]11;rgb:0/0/0${BEL}`)]),
+				);
+			}),
+		);
+		expect(await probeTerminalBackground({ stdin: asStdin(stdin), stdout, env: {} })).toBe(
+			"#000000",
+		);
+		expect(stdin.unshifted).toEqual(["\u00e9"]);
 	});
 });

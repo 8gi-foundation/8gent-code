@@ -1,12 +1,13 @@
 /**
  * Design systems as TUI themes (#3754). Every indexed system, mapped onto the
  * TUI palette, must keep every text tone at WCAG AA (4.5:1) against light and
- * dark terminal backgrounds, never render a banned hue (270-350), and never
- * show a company name. The choice must persist in ~/.8gent/config.json.
+ * dark terminal backgrounds, never land in a banned hue (rendered 270-350, or
+ * OKLCH 280-350 with visible chroma) on any role, and never offer a system
+ * named after a company. The choice must persist in ~/.8gent/config.json.
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fromHex, renderedHue } from "../../../../packages/design-compose/index.js";
@@ -14,14 +15,17 @@ import index from "../../../../packages/design-systems/deck-themes/index.json" w
 	type: "json",
 };
 import { palettes, themeChoices } from "../theme.js";
+import type { Palette } from "../theme.js";
 import {
+	CATALOGUE,
 	DESIGN_SYSTEMS,
-	NEUTRAL_LABEL_SOURCES,
+	EXCLUDED_SOURCES,
 	TEXT_ROLES,
 	contrastHex,
 	designSystemPalette,
 	fitPaletteToBackground,
 	isLightBackground,
+	perceptuallyBanned,
 	readDesignSystemChoice,
 	saveDesignSystemChoice,
 } from "../theme/design-systems.js";
@@ -41,43 +45,60 @@ const BACKGROUNDS: Record<string, string> = {
 	"mid grey": "#777777",
 };
 
-const CHROMATIC_ROLES = [
-	"orange",
-	"orangeAlt",
-	"orangeDim",
-	"teal",
-	"steel",
-	"steelDim",
-	"red",
-	"green",
-	"frame",
-	"border",
-	"cardBorder",
-] as const;
-
 function banned(hex: string): boolean {
 	const h = renderedHue(fromHex(hex));
-	return h !== null && h >= 270 && h <= 350;
+	return (h !== null && h >= 270 && h <= 350) || perceptuallyBanned(hex);
 }
 
+/** Every role except bg (the terminal's own colour, which we do not choose). */
+function hueFailures(name: string, p: Palette): string[] {
+	return (Object.keys(p) as (keyof Palette)[])
+		.filter((k) => k !== "bg" && banned(p[k]))
+		.map((k) => `${name} ${k} ${p[k]} is in a banned hue`);
+}
+
+const INDEX_NAMES = (index as Array<{ name: string }>).map((e) => e.name);
+
 describe("design system catalogue", () => {
-	test("covers every entry in the design-systems index, no more, no fewer", () => {
-		expect(DESIGN_SYSTEMS.length).toBe((index as unknown[]).length);
-		expect(new Set(DESIGN_SYSTEMS.map((d) => d.source)).size).toBe(DESIGN_SYSTEMS.length);
+	test("every index entry is either offered or excluded with a reason, never both", () => {
+		for (const n of INDEX_NAMES) {
+			expect(Boolean(CATALOGUE[n]) !== EXCLUDED_SOURCES.has(n)).toBe(true);
+		}
+		expect(Object.keys(CATALOGUE).every((n) => INDEX_NAMES.includes(n))).toBe(true);
 	});
 
-	test("ids and labels are unique", () => {
-		expect(new Set(DESIGN_SYSTEMS.map((d) => d.id)).size).toBe(DESIGN_SYSTEMS.length);
+	test("real count: index minus exclusions (36 of 54 today)", () => {
+		expect(DESIGN_SYSTEMS.length).toBe(INDEX_NAMES.length - EXCLUDED_SOURCES.size);
+		expect(INDEX_NAMES.length).toBe(54);
+		expect(DESIGN_SYSTEMS.length).toBe(36);
+	});
+
+	test("ids are the stable index names and labels are the hand-written ones", () => {
+		for (const d of DESIGN_SYSTEMS) {
+			expect(d.id).toBe(d.source);
+			expect(d.label).toBe(CATALOGUE[d.id] as string);
+		}
 		expect(new Set(DESIGN_SYSTEMS.map((d) => d.label)).size).toBe(DESIGN_SYSTEMS.length);
 	});
 
-	test("no company or product name is user-facing", () => {
-		const marks = [...NEUTRAL_LABEL_SOURCES].flatMap((n) => [n, n.replace(/-/g, " ")]);
+	test("no excluded name (company, product, game, banned-hue identity) is offered", () => {
+		const offered = DESIGN_SYSTEMS.map((d) => `${d.id} ${d.label}`.toLowerCase()).join("\n");
+		for (const n of EXCLUDED_SOURCES.keys()) {
+			expect(offered.includes(n)).toBe(false);
+			expect(offered.includes(n.replace(/-/g, " "))).toBe(false);
+		}
+	});
+
+	test("no two offered systems produce byte-identical palettes", () => {
+		const seen = new Map<string, string>();
 		for (const d of DESIGN_SYSTEMS) {
-			for (const m of marks) {
-				expect(d.id.toLowerCase().includes(m)).toBe(false);
-				expect(d.label.toLowerCase().includes(m)).toBe(false);
-			}
+			const key = JSON.stringify([
+				designSystemPalette(d.id, "#0A0908"),
+				designSystemPalette(d.id, "#FAF7F4"),
+			]);
+			const dup = seen.get(key);
+			if (dup) throw new Error(`${d.id} renders the same as ${dup}`);
+			seen.set(key, d.id);
 		}
 	});
 });
@@ -97,9 +118,7 @@ describe("every mapped theme passes AA on light and dark terminals", () => {
 				if (chip < 4.5) failures.push(`${d.id} code chip ${chip.toFixed(2)}:1`);
 				const frame = contrastHex(p.frame, bg);
 				if (frame < 3) failures.push(`${d.id} frame ${frame.toFixed(2)}:1`);
-				for (const role of CHROMATIC_ROLES) {
-					if (banned(p[role])) failures.push(`${d.id} ${role} ${p[role]} renders in 270-350`);
-				}
+				failures.push(...hueFailures(d.id, p));
 			}
 			expect(failures).toEqual([]);
 		});
@@ -109,7 +128,8 @@ describe("every mapped theme passes AA on light and dark terminals", () => {
 		const failures: string[] = [];
 		for (const entry of index as Array<{ name: string; colors: { background: string } }>) {
 			const d = DESIGN_SYSTEMS.find((x) => x.source === entry.name);
-			if (!d) throw new Error(`missing ${entry.name}`);
+			if (!d) continue; // excluded
+
 			const bg = entry.colors.background;
 			const p = designSystemPalette(d.id, bg);
 			if (!p) throw new Error(`no palette for ${d.id}`);
@@ -139,6 +159,7 @@ describe("stock 8gent palette fitted to a reported background", () => {
 			const p = fitPaletteToBackground({ ...base }, bg);
 			for (const role of TEXT_ROLES) expect(contrastHex(p[role], bg)).toBeGreaterThanOrEqual(4.5);
 			expect(contrastHex(p.textPrimary, p.border)).toBeGreaterThanOrEqual(4.5);
+			expect(hueFailures("8gent", p)).toEqual([]);
 		});
 	}
 
@@ -164,6 +185,7 @@ describe("picker", () => {
 		const rows = themeChoices();
 		expect(rows[0]?.value).toBe("default");
 		expect(rows.length).toBe(DESIGN_SYSTEMS.length + 1);
+		expect(rows.find((r) => r.value === "bold-tech")?.description).toBe("tech");
 		for (const r of rows) {
 			expect(r.swatches.length).toBe(4);
 			for (const s of r.swatches) expect(s).toMatch(/^#[0-9a-fA-F]{6}$/);
@@ -191,6 +213,21 @@ describe("picker", () => {
 		saveDesignSystemChoice(null, cfg);
 		expect(readDesignSystemChoice(cfg)).toBeNull();
 		expect(JSON.parse(readFileSync(cfg, "utf-8"))).toEqual({ theme: "dark", mouse: "off" });
+	});
+
+	test("a malformed or non-object config is never overwritten, and writes leave no temp file", () => {
+		const dir = tempDir();
+		const cfg = join(dir, "config.json");
+		const pick = DESIGN_SYSTEMS[0]?.id as string;
+		for (const bad of ["{ not json", "[1, 2]", '"a string"']) {
+			writeFileSync(cfg, bad);
+			expect(() => saveDesignSystemChoice(pick, cfg)).toThrow(/Not changing/);
+			expect(readFileSync(cfg, "utf-8")).toBe(bad);
+			expect(readDesignSystemChoice(cfg)).toBeNull();
+		}
+		writeFileSync(cfg, "{}");
+		saveDesignSystemChoice(pick, cfg);
+		expect(readdirSync(dir)).toEqual(["config.json"]);
 	});
 
 	test("an unknown id is refused, and a stale id in config reads as the 8gent theme", () => {

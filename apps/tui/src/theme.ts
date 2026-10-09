@@ -276,7 +276,7 @@ export function themeChoices(): ThemeChoice[] {
 	for (const ds of DESIGN_SYSTEMS) {
 		const p = designSystemPalette(ds.id, state.bg);
 		if (!p) continue;
-		rows.push({ value: ds.id, label: ds.label, description: `${ds.mood}, ${ds.style}`, swatches: swatch(p) });
+		rows.push({ value: ds.id, label: ds.label, description: ds.mood === ds.style ? ds.mood : `${ds.mood}, ${ds.style}`, swatches: swatch(p) });
 	}
 	return rows;
 }
