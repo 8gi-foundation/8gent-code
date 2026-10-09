@@ -27,6 +27,6 @@ describe("withChildGuidance (#3784)", () => {
 	});
 
 	test("has no em dash", () => {
-		expect(withChildGuidance("t")).not.toContain("—");
+		expect(withChildGuidance("t")).not.toContain("\u2014");
 	});
 });

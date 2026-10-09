@@ -5,7 +5,7 @@
  * several single-session steps. In pilot run 2026-10-08_211356 the 8TO child
  * read one file three times and ran `mkdir -p notes` twice, and the run ended
  * before it wrote its note, the last thing it did. The rules cost a few lines
- * of prompt and remove the steps that were measured as waste.
+ * of prompt and aim to remove steps observed as waste in one run (unmeasured mitigation).
  */
 
 export const CHILD_GUIDANCE_MARKER = "[Efficiency rules for this task]";
