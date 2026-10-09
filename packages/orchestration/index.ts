@@ -14,6 +14,7 @@ import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
+import { currentProviderPin, inheritedProviderFields } from "./provider-pin";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
@@ -140,6 +141,12 @@ export interface AgentConfig {
 	allowedPaths?: string[];
 	/** Its permission mode, clamped to and linked with its parent's (#3170); undefined = none. */
 	permission?: PermissionModeHolder;
+	/**
+	 * Set only when its spawner was pinned to a provider the user named (#3762):
+	 * the child runs on that runtime, pinned, and never fails over.
+	 */
+	runtime?: string;
+	providerPinned?: boolean;
 	/** Its depth: its spawner's depth + 1, set by the pool, never by the caller (#3331). */
 	depth: number;
 }
@@ -215,9 +222,13 @@ export class AgentPool extends EventEmitter {
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 
+		// A pinned spawner's provider rides to the child, captured here: a queued
+		// child starts later, outside the spawner's context (#3762).
+		const inherited = inheritedProviderFields(currentProviderPin(), config?.model);
 		const agentConfig: AgentConfig = {
 			id: agentId,
-			model: config?.model || "glm-4.7-flash:latest",
+			model: config?.model || inherited.model || "glm-4.7-flash:latest",
+			...(inherited.runtime ? { runtime: inherited.runtime, providerPinned: true } : {}),
 			systemPrompt: config?.systemPrompt,
 			maxTurns: config?.maxTurns || 20,
 			workingDirectory: config?.workingDirectory || process.cwd(),
@@ -288,7 +299,8 @@ export class AgentPool extends EventEmitter {
 
 			const agent = new Agent({
 				model: spawnedAgent.config.model,
-				runtime: "ollama",
+				runtime: (spawnedAgent.config.runtime ?? "ollama") as "ollama",
+				...(spawnedAgent.config.providerPinned ? { providerPinned: true } : {}),
 				systemPrompt: spawnedAgent.config.systemPrompt,
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
