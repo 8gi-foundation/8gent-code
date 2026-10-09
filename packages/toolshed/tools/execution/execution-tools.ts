@@ -7,6 +7,7 @@
 import { execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { sanitizeShellCommand } from "../../../permissions/shell-sanitizer";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -36,6 +37,15 @@ registerTool(
 			command: string;
 			timeout?: number;
 		};
+		// Same sanitizer as the agent's run_command: one guard for every shell path (#3763).
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) {
+			return {
+				exitCode: 1,
+				stdout: "",
+				stderr: `[BLOCKED] ${validation.reason}. Command: ${command}`,
+			};
+		}
 		try {
 			const stdout = execSync(command, {
 				cwd: ctx.workingDirectory,
