@@ -11,6 +11,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import {
+	type GitState,
+	allowListIsLocalOnly,
+	everySegmentSafe,
+	mustAskReason,
+	repoGitState,
+} from "./command-policy";
 import { currentPermissionMode } from "./permission-mode.js";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
@@ -556,6 +563,10 @@ export class PermissionManager {
 	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
+	/** The user pinned a local provider: every network command asks (#3748). */
+	private pinnedLocalProvider = false;
+	/** Where the default-branch push check reads branches from (#3748). */
+	private gitState: GitState = repoGitState();
 
 	constructor(configPath?: string) {
 		const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
@@ -799,7 +810,35 @@ export class PermissionManager {
 			}
 		}
 
+		// A person approves these every time (#3748): treating them as dangerous
+		// keeps them off the safe list, --yes and guarded mode's card skip, and
+		// refused when no terminal is attached.
+		if (this.mustAskReason(normalizedCmd)) return true;
+
 		return false;
+	}
+
+	/**
+	 * Why a person must approve this command every time, or null (#3748): a
+	 * push to the default branch, a network command that sends data, or any
+	 * network command while a local provider is pinned.
+	 */
+	mustAskReason(command: string): string | null {
+		return mustAskReason(command, {
+			git: this.gitState,
+			pinnedLocalProvider:
+				this.pinnedLocalProvider || allowListIsLocalOnly(process.env.EIGHT_PROVIDERS_ALLOW),
+		});
+	}
+
+	/** The user pinned a local provider (e.g. `--provider ollama`) (#3748). */
+	setPinnedLocalProvider(pinned: boolean): void {
+		this.pinnedLocalProvider = pinned;
+	}
+
+	/** Replace where branch names are read from. For tests. */
+	setGitState(state: GitState): void {
+		this.gitState = state;
 	}
 
 	/**
@@ -818,21 +857,16 @@ export class PermissionManager {
 			return true;
 		}
 
-		// Check user-defined allowed patterns
-		for (const pattern of this.config.allowedPatterns) {
-			if (this.matchPattern(normalizedCmd, pattern)) {
-				return true;
-			}
-		}
-
-		// Check safe patterns (auto-approve)
-		for (const safe of SAFE_PATTERNS) {
-			if (normalizedCmd.startsWith(safe.toLowerCase())) {
-				return true;
-			}
-		}
-
-		return false;
+		// Safe prefixes and the user's allowed patterns approve a line only when
+		// EVERY segment of it matches one (#3748): `cat x | <anything>` no longer
+		// rides on its first word, and a `cat *` pattern covers one command, not
+		// whatever is chained after it.
+		return everySegmentSafe(
+			normalizedCmd,
+			(segment) =>
+				SAFE_PATTERNS.some((safe) => segment.startsWith(safe.toLowerCase())) ||
+				this.config.allowedPatterns.some((pattern) => this.matchPattern(segment, pattern)),
+		);
 	}
 
 	/**
@@ -899,26 +933,30 @@ export class PermissionManager {
 			timestamp: new Date(),
 		};
 
-		// INFINITE MODE: Bypass most permission checks, but block catastrophic commands
-		if (this.isInfiniteMode()) {
-			if (command) {
-				const blockCheck = this.isAlwaysBlocked(command);
-				if (blockCheck.blocked) {
-					this.auditInfiniteMode(
-						command,
-						action,
-						details,
-						true,
-						`BLOCKED even in infinite mode: ${blockCheck.reason}`,
-					);
-					request.approved = false;
-					this.log.requests.push(request);
-					this.log.deniedCount++;
-					console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
-					return false;
-				}
+		// INFINITE MODE: Bypass most permission checks, but block catastrophic
+		// commands, and ask a person for the ask-every-time list (#3765).
+		// The always-blocked check runs first, so a line that is both always
+		// blocked and ask-every-time is refused here and never offered.
+		const infinite = this.isInfiniteMode();
+		if (infinite && command) {
+			const blockCheck = this.isAlwaysBlocked(command);
+			if (blockCheck.blocked) {
+				this.auditInfiniteMode(
+					command,
+					action,
+					details,
+					true,
+					`BLOCKED even in infinite mode: ${blockCheck.reason}`,
+				);
+				request.approved = false;
+				this.log.requests.push(request);
+				this.log.deniedCount++;
+				console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
+				return false;
 			}
-
+		}
+		const infiniteAsk = infinite && command ? this.mustAskReason(command) : null;
+		if (infinite && !infiniteAsk) {
 			// Audit and approve
 			this.auditInfiniteMode(command || "", action, details, false);
 			request.approved = true;
@@ -946,10 +984,25 @@ export class PermissionManager {
 			return true;
 		}
 
-		// Interactive prompt
-		const approved = await this.promptUser(action, details, command, opts.defaultNo);
+		// Interactive prompt. For a command a person approves every time, Enter
+		// means No (#3748).
+		const approved = await this.promptUser(
+			action,
+			details,
+			command,
+			opts.defaultNo || (command ? this.mustAskReason(command) !== null : false),
+		);
 		request.approved = approved;
 		this.log.requests.push(request);
+		if (infiniteAsk) {
+			this.auditInfiniteMode(
+				command || "",
+				action,
+				details,
+				!approved,
+				approved ? `approved by a person: ${infiniteAsk}` : `refused: ${infiniteAsk}`,
+			);
+		}
 
 		if (approved) {
 			this.log.approvedCount++;
@@ -974,19 +1027,6 @@ export class PermissionManager {
 	}
 
 	/**
-	 * Check if a command pushes to main/master (always blocked even in headless)
-	 */
-	private isPushToMain(command: string): boolean {
-		const cmd = command.toLowerCase().trim();
-		return (
-			/git\s+push\s+.*\b(main|master)\b/.test(cmd) ||
-			(cmd.includes("git push") &&
-				!cmd.includes("-u") &&
-				!/\b(feat|fix|feature|hotfix|release|chore)\b/.test(cmd))
-		);
-	}
-
-	/**
 	 * Prompt user for permission (Y/n)
 	 * In headless mode: auto-approve safe commands, deny dangerous ones
 	 */
@@ -998,11 +1038,14 @@ export class PermissionManager {
 	): Promise<boolean> {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
-			if (defaultNo) return false;
-			if (command && this.isPushToMain(command)) {
-				console.log(`[permissions] DENIED (headless, push to main): ${command}`);
+			// A person approves these every time; with no terminal there is no
+			// one to ask, so they are refused, never offered elsewhere (#3748).
+			const mustAsk = command ? this.mustAskReason(command) : null;
+			if (mustAsk) {
+				console.log(`[permissions] DENIED (no terminal to ask; ${mustAsk}): ${command}`);
 				return false;
 			}
+			if (defaultNo) return false;
 			if (command && this.isDangerous(command)) {
 				// A channel with a human behind it asks; push to main never gets this far.
 				const scope = _channelApprover.getStore();
@@ -1041,9 +1084,12 @@ export class PermissionManager {
 			let prompt = "\n\x1b[33m[PERMISSION REQUIRED]\x1b[0m\n";
 			prompt += `Action: ${action}\n`;
 			prompt += `Details: ${details}\n`;
+			const mustAsk = command ? this.mustAskReason(command) : null;
 			if (command) {
 				prompt += `Command: \x1b[36m${command}\x1b[0m\n`;
-				if (this.isDangerous(command)) {
+				if (mustAsk) {
+					prompt += `\x1b[33m[ASKS EVERY TIME]\x1b[0m This command needs your approval because ${mustAsk}.\n`;
+				} else if (this.isDangerous(command)) {
 					prompt +=
 						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
 				}
@@ -1065,13 +1111,15 @@ export class PermissionManager {
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
 	checkPermission(command: string): "allowed" | "denied" | "ask" {
-		// INFINITE MODE: Allow everything except always-blocked commands
+		// INFINITE MODE: Allow everything except always-blocked commands, and
+		// ask for the ask-every-time list (#3765).
 		if (this.isInfiniteMode()) {
 			if (command) {
 				const blockCheck = this.isAlwaysBlocked(command);
 				if (blockCheck.blocked) {
 					return "denied";
 				}
+				if (this.mustAskReason(command)) return "ask";
 			}
 			return "allowed";
 		}

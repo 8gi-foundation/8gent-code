@@ -23,6 +23,9 @@ import {
 	stripDoneMarker,
 	openPlanSteps,
 	planCheckMessage,
+	IMAGE_ATTACHMENT_MARKER,
+	imageAttachmentResult,
+	splitImageAttachment,
 	type TextTool,
 } from "./text-tool-loop";
 import type { TextToolMessage } from "./text-tool-client";
@@ -2495,5 +2498,85 @@ describe("runTextToolAgent - the completion check keeps the answer first (#3638,
 		}
 		expect(seen[0]).toEqual(seen[1]);
 		expect(seen[0].filter((m) => m === COMPLETION_CHECK_MESSAGE)).toHaveLength(1);
+	});
+});
+
+// #3641: a tool result that carries an image puts the pixels on the next
+// message's `images`, never in the text the model, the log or the result
+// block see. The headless baseline could not measure any screen task because
+// read_image returned metadata only.
+describe("image attachments on tool results (#3641)", () => {
+	const PNG = "iVBORw0KGgo=";
+	const READ_IMAGE_TOOL: TextTool = {
+		spec: {
+			name: "read_image",
+			description: "Read an image",
+			parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+		},
+		run: async () => imageAttachmentResult('{"width": 64, "height": 48}', "image/png", PNG),
+	};
+
+	test("splitImageAttachment: text stays, the data URL comes out, plain results are untouched", () => {
+		const split = splitImageAttachment(imageAttachmentResult("meta", "image/png", PNG));
+		expect(split.text).toBe("meta");
+		expect(split.images).toEqual([`data:image/png;base64,${PNG}`]);
+		expect(splitImageAttachment("just text")).toEqual({ text: "just text", images: [] });
+		// A marker without a data URL attaches nothing and is dropped from the text.
+		expect(splitImageAttachment(`x\n${IMAGE_ATTACHMENT_MARKER} nope`)).toEqual({ text: "x", images: [] });
+	});
+
+	test("the image rides on the follow-up user message; text, log and result block carry no pixels", async () => {
+		const seen: TextToolMessage[][] = [];
+		let turn = 0;
+		const call = async (messages: TextToolMessage[]): Promise<string> => {
+			seen.push(messages);
+			turn++;
+			if (turn === 1) {
+				return ["```tool_call", '{"name": "read_image", "arguments": {"path": "shot.png"}}', "```"].join("\n");
+			}
+			return "DONE: Click the Save button.";
+		};
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "The screenshot is shot.png. Where do I click?" }],
+			tools: [READ_IMAGE_TOOL],
+			call,
+		});
+
+		expect(result.content).toBe("Click the Save button.");
+		// The log keeps the metadata, not the marker or the base64.
+		expect(result.toolLog).toHaveLength(1);
+		expect(result.toolLog[0].result).toBe('{"width": 64, "height": 48}');
+		expect(result.toolLog[0].result).not.toContain(IMAGE_ATTACHMENT_MARKER);
+
+		// The second request: the tool-result user message has the image on
+		// `images` and the metadata in its text.
+		const followUp = seen[1].filter((m) => m.role === "user").at(-1);
+		expect(followUp?.images).toEqual([`data:image/png;base64,${PNG}`]);
+		expect(followUp?.content).toContain("Tool read_image returned:");
+		expect(followUp?.content).toContain('{"width": 64, "height": 48}');
+		expect(followUp?.content).not.toContain(IMAGE_ATTACHMENT_MARKER);
+		expect(followUp?.content).not.toContain(PNG);
+		// No other message grew an image.
+		expect(seen[1].filter((m) => m.images).length).toBe(1);
+	});
+
+	test("a text-only tool result adds no images field at all", async () => {
+		const seen: TextToolMessage[][] = [];
+		let turn = 0;
+		const call = async (messages: TextToolMessage[]): Promise<string> => {
+			seen.push(messages);
+			turn++;
+			if (turn === 1) {
+				return ["```tool_call", '{"name": "read_file", "arguments": {"path": "a.txt"}}', "```"].join("\n");
+			}
+			return "DONE: 4242.";
+		};
+		await runTextToolAgent({
+			messages: [{ role: "user", content: "What is the secret?" }],
+			tools: [READ_FILE_TOOL],
+			call,
+		});
+		expect(seen[1].every((m) => !("images" in m))).toBe(true);
 	});
 });

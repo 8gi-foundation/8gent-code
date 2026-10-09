@@ -14,6 +14,8 @@ import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
+import { hostedAllowed, isHostedProvider } from "../providers/failover";
+import type { AgentConfig as EightAgentConfig } from "../eight/types";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
@@ -109,8 +111,55 @@ export class AgentDepthError extends Error {
 export const AGENT_DEPTH_EXIT_CODE = 77;
 
 // ============================================
+// Parent session (#3710)
+// ============================================
+
+/** Where an agent's model runs: what a child inherits from the session that spawns it. */
+export interface ChildRuntime {
+	runtime: string;
+	model: string;
+	baseUrl?: string;
+}
+
+/** The provider of the agent whose turn is in flight, read when a child is spawned. */
+const _parentSession = new AsyncLocalStorage<() => ChildRuntime>();
+
+/**
+ * Run fn as a session whose children inherit `get()`. A getter, not a value,
+ * so a child spawned after a reroute or a /model switch gets the model the
+ * parent is on now. Agent.chat binds it around each turn.
+ */
+export function runAsParentSession<T>(get: () => ChildRuntime, fn: () => T): T {
+	return _parentSession.run(get, fn);
+}
+
+/** The spawning session's provider, model and baseUrl; undefined outside any session. */
+export function currentParentSession(): ChildRuntime | undefined {
+	const get = _parentSession.getStore();
+	if (!get) return undefined;
+	const { runtime, model, baseUrl } = get();
+	return { runtime, model, ...(baseUrl ? { baseUrl } : {}) };
+}
+
+/**
+ * The provider a child runs on when no session spawned it (a /spawn from the
+ * REPL, a direct pool call): the same local default the `8gent` CLI uses.
+ */
+function localDefaultRuntime(): ChildRuntime {
+	return { runtime: "ollama", model: process.env.EIGHT_MODEL?.trim() || "eight-1.0-q3:14b" };
+}
+
+/** Null when a child may run on `runtime`; otherwise why not. */
+export function hostedChildRefusal(runtime: string, model: string): string | null {
+	if (!isHostedProvider(runtime) || hostedAllowed()) return null;
+	return `[HOSTED BLOCKED] spawn_agent did NOT run: the child would use the hosted provider "${runtime}" (model "${model}"). Hosted providers are off unless the user sets EIGHT_ALLOW_HOSTED=1. Omit model to run the child on this session's model.`;
+}
+
+// ============================================
 // Types
 // ============================================
+
+type AgentRuntimeName = EightAgentConfig["runtime"];
 
 export type AgentStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
@@ -132,6 +181,10 @@ export interface AgentTask {
 export interface AgentConfig {
 	id: string;
 	model: string;
+	/** Its provider: the spawning session's unless the caller names one (#3710). */
+	runtime: string;
+	/** Its endpoint: the spawning session's when the provider is inherited. */
+	baseUrl?: string;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory: string;
@@ -212,12 +265,24 @@ export class AgentPool extends EventEmitter {
 		const refusal = agentDepthRefusal();
 		if (refusal) throw new Error(refusal);
 		const depth = currentAgentDepth() + 1;
+		// The child runs where its parent runs (#3710). A named model keeps the
+		// parent's provider and endpoint; a named runtime brings its own.
+		const parent = currentParentSession() ?? localDefaultRuntime();
+		const runtime = config?.runtime || parent.runtime;
+		const sameRuntime = runtime === parent.runtime;
+		const model = config?.model || (sameRuntime ? parent.model : "");
+		if (!model) throw new Error(`No model given for a child on runtime "${runtime}"`);
+		const hosted = hostedChildRefusal(runtime, model);
+		if (hosted) throw new Error(hosted);
+		const baseUrl = config?.baseUrl ?? (sameRuntime ? parent.baseUrl : undefined);
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 
 		const agentConfig: AgentConfig = {
 			id: agentId,
-			model: config?.model || "glm-4.7-flash:latest",
+			model,
+			runtime,
+			...(baseUrl ? { baseUrl } : {}),
 			systemPrompt: config?.systemPrompt,
 			maxTurns: config?.maxTurns || 20,
 			workingDirectory: config?.workingDirectory || process.cwd(),
@@ -288,7 +353,8 @@ export class AgentPool extends EventEmitter {
 
 			const agent = new Agent({
 				model: spawnedAgent.config.model,
-				runtime: "ollama",
+				runtime: spawnedAgent.config.runtime as AgentRuntimeName,
+				baseUrl: spawnedAgent.config.baseUrl,
 				systemPrompt: spawnedAgent.config.systemPrompt,
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
@@ -307,9 +373,10 @@ export class AgentPool extends EventEmitter {
 				},
 			});
 
-			// Check if Ollama is available
 			if (!(await agent.isReady())) {
-				throw new Error("Ollama is not running");
+				throw new Error(
+					`${spawnedAgent.config.runtime} is not reachable for model ${spawnedAgent.config.model}`,
+				);
 			}
 
 			// Execute the task

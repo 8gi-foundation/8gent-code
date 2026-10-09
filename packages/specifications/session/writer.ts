@@ -29,7 +29,10 @@ import type {
 	ToolCall,
 } from "./index.js";
 
-const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
+// Resolved at call time: Bun's os.homedir() ignores a runtime HOME change (#3678).
+function defaultSessionsDir(): string {
+	return path.join(process.env.HOME || os.homedir(), ".8gent", "sessions");
+}
 
 export class SessionWriter {
 	private filePath: string;
@@ -57,7 +60,7 @@ export class SessionWriter {
 		this.sessionId = sessionId;
 		this.startTime = Date.now();
 
-		const dir = sessionsDir || SESSIONS_DIR;
+		const dir = sessionsDir || defaultSessionsDir();
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}

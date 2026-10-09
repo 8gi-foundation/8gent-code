@@ -14,7 +14,14 @@
  */
 
 import { Box, type DOMElement, useApp, useInput } from "ink";
-import { t } from "./theme.js";
+import {
+	applyDesignSystem,
+	t,
+	type ThemeChoice,
+	themeChoices,
+	themeStatus,
+} from "./theme.js";
+import { findDesignSystem, saveDesignSystemChoice } from "./theme/design-systems.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -209,6 +216,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
@@ -277,7 +285,8 @@ async function initAuthSystem() {
 }
 
 // The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
-import { isInfiniteMode } from "../../../packages/permissions/index.js";
+import { getPermissionManager, isInfiniteMode } from "../../../packages/permissions/index.js";
+import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 import {
 	type PermissionMode,
 	type PermissionModeHolder,
@@ -676,7 +685,8 @@ type ViewMode =
 	| "design"
 	| "history"
 	| "music"
-	| "message-viewer";
+	| "message-viewer"
+	| "theme-select";
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
@@ -1351,6 +1361,12 @@ export function App({
 	// back to the orchestrator's ollama default, routing the turn to the wrong
 	// engine). Cleared once the user explicitly switches provider/tab.
 	const cliProviderRequestedRef = useRef(normalizeProviderId(cliProvider));
+	// A launch --provider naming a local provider pins it: every network command
+	// then asks before it runs (#3748).
+	useEffect(() => {
+		const pinned = cliProviderRequestedRef.current;
+		if (pinned) getPermissionManager().setPinnedLocalProvider(LOCAL_PROVIDERS.has(pinned));
+	}, []);
 	// The tab that is active at launch. A CLI --provider/--model override pins
 	// THIS tab only; switching to or opening other tabs uses their role defaults.
 	const cliPinRef = useRef<CliTabPin | null>(null);
@@ -1712,6 +1728,31 @@ export function App({
 
 	}, [isProcessing, soundEnabled]);
 
+	// OSC 7501 program status: tell the host terminal working / blocked / done /
+	// error / idle. TTY-only, off with EIGHT_NO_PROGRAM_STATUS=1 (lib/program-status.ts).
+	const programStatus = useRef<ReturnType<typeof createProgramStatusEmitter> | null>(null);
+	const hasRunTurnRef = useRef(false);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		if (isProcessing) hasRunTurnRef.current = true;
+		programStatus.current.set(
+			deriveProgramState({
+				isProcessing,
+				approvalPending: approvalPending !== null,
+				lastTurn: hasRunTurnRef.current ? (turnEndedInError(messages) ? "error" : "ok") : null,
+			}),
+		);
+	}, [isProcessing, approvalPending, messages]);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		const emitter = programStatus.current;
+		const uninstall = installProgramStatusCleanup(emitter);
+		return () => {
+			uninstall();
+			emitter.clear();
+		};
+	}, []);
+
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
@@ -1884,6 +1925,9 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [designIntro, setDesignIntro] = useState<string>("");
+	// Rows for the /theme picker, computed when it opens (#3754).
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
+	const [themeRows, setThemeRows] = useState<ThemeChoice[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(null);
@@ -2577,6 +2621,10 @@ export function App({
 				const decision = await readinessCacheRef.current({
 					provider: currentProvider,
 					model: currentModel,
+					// A launch --provider is never swapped for another provider (#3746).
+					pinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 				});
 				if (cancelled) return;
 				if (decision.kind !== "none") setUnreachableNote(null);
@@ -2661,6 +2709,11 @@ export function App({
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
 					apiKey: sessionApiKey(runtime),
+					// A launch --provider names the provider: while the tab is on it, a
+					// provider error ends the turn instead of moving to another (#3746).
+					providerPinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
@@ -4471,25 +4524,43 @@ export function App({
 				}
 
 				case "theme": {
-					// /theme           → show current resolved mode + how it was chosen
-					// /theme light     → persist light in ~/.8gent/config.json
-					// /theme dark      → persist dark
-					// /theme auto      → clear setting, defer to terminal/COLORFGBG
+					// /theme           -> picker: the 8gent theme or an indexed design system (#3754)
+					// /theme <id>      -> use that design system (saved to ~/.8gent/config.json)
+					// /theme default   -> back to the stock 8gent theme
+					// /theme status    -> what the palette is fitted to
+					// /theme light|dark|auto -> persist the light/dark mode, as before
 					const fs = await import("node:fs");
 					const path = await import("node:path");
 					const home = process.env.HOME ?? "";
 					const cfgPath = path.join(home, ".8gent", "config.json");
 					const choice = (args[0] ?? "").toLowerCase();
-					if (!choice) {
-						const themeMod = await import("./theme.js");
+					if (!choice || choice === "list" || choice === "pick") {
+						setThemeRows(themeChoices());
+						setViewMode("theme-select");
+						break;
+					}
+					if (choice === "status") {
+						const st = themeStatus();
+						const ds = st.designSystem ? findDesignSystem(st.designSystem) : undefined;
 						addSystemMessage(
-							`Theme: ${themeMod.theme.mode}. Set with /theme [light|dark|auto]. Restart the TUI for the change to take effect.`,
+							`Theme: ${ds?.label ?? "8gent"}, ${st.mode} mode, fitted to ${st.bg} (${st.bgSource === "terminal" ? "reported by the terminal" : "assumed, the terminal did not report one"}).`,
 						);
+						break;
+					}
+					if (choice === "default" || choice === "8gent" || findDesignSystem(choice)) {
+						const id = choice === "default" || choice === "8gent" ? null : choice;
+						try {
+							saveDesignSystemChoice(id, cfgPath);
+							applyDesignSystem(id);
+							addSystemMessage(`Theme set to ${id ? findDesignSystem(id)?.label : "8gent"}.`);
+						} catch (err) {
+							addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
+						}
 						break;
 					}
 					if (choice !== "light" && choice !== "dark" && choice !== "auto") {
 						addSystemMessage(
-							"Theme must be light, dark, or auto. Example: /theme light",
+							"Unknown theme. Run /theme to pick from the list, or /theme light | dark | auto.",
 						);
 						break;
 					}
@@ -5041,6 +5112,54 @@ export function App({
 					// Handle /vision command
 					else if (command === ("vision" as any)) {
 						handleVisionCommand(args);
+					}
+					// Handle /toolshed command: skill registry list | search | stats
+					else if ((command as string) === "toolshed") {
+						const sub = args[0] || "stats";
+						import("../../../packages/toolshed/skill-registry.js")
+							.then(({ getSkillRegistry }) => {
+								const registry = getSkillRegistry();
+								if (sub === "stats") {
+									const st = registry.getStats();
+									addSystemMessage(
+										`Toolshed: ${st.skillCount} skills, ${st.capabilities} capabilities, ~${st.totalTokens} tokens (avg ${st.avgTokensPerSkill}).`,
+									);
+								} else if (sub === "list" || sub === "search") {
+									const pattern = sub === "search" ? args.slice(1).join(" ") : "";
+									if (sub === "search" && !pattern) {
+										addSystemMessage("Usage: /toolshed search <pattern>");
+										return;
+									}
+									const found = registry.search(pattern || ".");
+									addSystemMessage(
+										found.length === 0
+											? "Toolshed: no skills match."
+											: `Toolshed: ${found.length} skills\n${found
+													.slice(0, 40)
+													.map((k) => `  ${k.name}  ${k.description}`)
+													.join("\n")}`,
+									);
+								} else {
+									addSystemMessage("Usage: /toolshed [list|search <pattern>|stats]");
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`Toolshed: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
+					// Handle /quarantine command: skill quarantine manager (no add from the TUI)
+					else if ((command as string) === "quarantine") {
+						Promise.all([
+							import("../../../packages/quarantine/index.js"),
+							import("./lib/quarantine-command.js"),
+						])
+							.then(([{ getQuarantineManager }, { runQuarantineCommand }]) =>
+								runQuarantineCommand(getQuarantineManager() as never, args),
+							)
+							.then((msg) => addSystemMessage(msg))
+							.catch((e) =>
+								addSystemMessage(`Quarantine: ${e instanceof Error ? e.message : String(e)}`),
+							);
 					}
 					// Workspace tab commands
 					else if (command === ("notes" as any)) {
@@ -5889,6 +6008,40 @@ export function App({
 						provider={currentProvider}
 					/>
 				);
+
+			case "theme-select": {
+				const current = themeStatus().designSystem ?? "default";
+				return (
+					<SelectInput
+						title={`Theme (${themeRows.length - 1} design systems)`}
+						options={themeRows.map((r) => ({
+							label: r.label,
+							value: r.value,
+							description: r.description,
+							swatches: r.swatches,
+						}))}
+						initialIndex={Math.max(
+							0,
+							themeRows.findIndex((r) => r.value === current),
+						)}
+						maxVisible={10}
+						onSelect={(value) => {
+							const id = value === "default" ? null : value;
+							try {
+								saveDesignSystemChoice(id);
+								applyDesignSystem(id);
+								addSystemMessage(
+									`Theme set to ${themeRows.find((r) => r.value === value)?.label ?? value}.`,
+								);
+							} catch (err) {
+								addSystemMessage(`Could not save the theme: ${(err as Error).message}`);
+							}
+							setViewMode("chat");
+						}}
+						onCancel={() => setViewMode("chat")}
+					/>
+				);
+			}
 
 			case "provider-select":
 				return (

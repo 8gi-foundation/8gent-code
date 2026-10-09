@@ -347,3 +347,209 @@ process.kill(process.pid, "SIGKILL");
 		expect(pool.getSessionInfo("s_crash")!.channel).toBe("telegram");
 	}, 60_000);
 });
+
+/**
+ * #3653: a tool call that was running when the daemon died is not blindly
+ * replayed on resume. Reads are re-run; writes, shell, git and network calls
+ * are reported to the model as "not replayed, needs confirmation".
+ */
+describe("replay class", () => {
+	test("reads replay, side effects never do, anything unknown asks", async () => {
+		const { toolReplayClass } = await import("../eight/tools");
+		for (const t of ["read_file", "git_log"]) {
+			expect(toolReplayClass(t)).toBe("replay");
+		}
+		for (const t of [
+			"write_file",
+			"edit_file",
+			"run_command",
+			"git_commit",
+			"git_push",
+			"gh_pr_create",
+			"post_message",
+			"web_fetch",
+			"vercel_deploy",
+		]) {
+			expect(toolReplayClass(t)).toBe("never");
+		}
+		expect(toolReplayClass("some_new_tool")).toBe("ask");
+	});
+});
+
+describe("interrupted tool calls on resume", () => {
+	test("pool journals a running tool call and drops it when it ends", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_tools", "api");
+		const events = (pool.getAgent("s_tools") as any).events;
+		events.onToolStart({ toolName: "read_file", toolCallId: "c1", args: { path: "a.txt" } });
+		events.onToolStart({
+			toolName: "write_file",
+			toolCallId: "c2",
+			args: { path: "b.txt", content: "x".repeat(5000) },
+		});
+		const inFlight = journal.read()[0].inFlight!;
+		expect(inFlight.map((c) => c.id)).toEqual(["c1", "c2"]);
+		expect(inFlight[0].args).toEqual({ path: "a.txt" });
+		// A call that will never be replayed keeps only a short summary on disk.
+		expect(String(inFlight[1].args.content).length).toBeLessThan(300);
+		events.onToolEnd({
+			toolName: "read_file",
+			toolCallId: "c1",
+			args: {},
+			success: true,
+			durationMs: 1,
+		});
+		expect(journal.read()[0].inFlight!.map((c) => c.id)).toEqual(["c2"]);
+	});
+
+	test("an unfinished read is re-run and an unfinished write is marked, not replayed", async () => {
+		fs.writeFileSync(path.join(root, "notes-3653.txt"), "replay me 3653\n");
+		const outFile = path.join(root, "out-3653.txt");
+		fs.rmSync(outFile, { force: true });
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_mid_tool",
+			channel: "api",
+			ttSessionId: "session_mid_tool",
+			createdAt: 1,
+			inFlight: [
+				{ id: "w1", tool: "write_file", args: { path: "out-3653.txt" }, startedAt: 2 },
+				{ id: "r1", tool: "read_file", args: { path: "notes-3653.txt" }, startedAt: 3 },
+			],
+		});
+		const store = new TimeTravelStore({ dataDir: ttDir });
+		store.save("session_mid_tool", [{ role: "user", content: "write the notes" }], {
+			reason: "interval",
+			toolCallCount: 2,
+		});
+
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, store);
+		const [settled] = await mod.settleInterruptedToolCalls(journal, pool);
+
+		expect(settled.sessionId).toBe("s_mid_tool");
+		expect(settled.replayed).toEqual(["r1"]);
+		expect(settled.notReplayed).toEqual(["w1"]);
+		expect(fs.existsSync(outFile)).toBe(false);
+
+		const history = pool.getAgent("s_mid_tool")!.getMessageHistory();
+		const note = history[history.length - 1];
+		expect(note.role).toBe("user");
+		expect(note.content).toContain("replay me 3653");
+		expect(note.content).toContain("write_file");
+		expect(note.content).toContain("not replayed, needs confirmation");
+		expect(note.content).toContain("out-3653.txt");
+
+		// Settled: a second crash does not report or run them again.
+		expect(journal.read()[0].inFlight ?? []).toEqual([]);
+		expect(await mod.settleInterruptedToolCalls(journal, pool)).toEqual([]);
+	});
+
+	test("malformed in-flight calls are dropped, the session entry is kept", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{
+						sessionId: "s_bad_calls",
+						channel: "api",
+						ttSessionId: "session_bad_calls",
+						createdAt: 1,
+						inFlight: [{ id: "ok", tool: "read_file", args: {}, startedAt: 1 }, { id: 5 }, "x"],
+					},
+				],
+			}),
+		);
+		const [entry] = new mod.SessionJournal(journalPath).read();
+		expect(entry.sessionId).toBe("s_bad_calls");
+		expect(entry.inFlight!.map((c) => c.id)).toEqual(["ok"]);
+	});
+});
+
+/**
+ * 8SO review of #3698: the replay set holds only reads that have no side
+ * effects and pass the standard path and policy checks, and journal text is
+ * scrubbed of secrets.
+ */
+describe("replay set review (#3653)", () => {
+	test("language-server tools are not replayed: starting a server can run project code", async () => {
+		const { toolReplayClass } = await import("../eight/tools");
+		for (const t of [
+			"lsp_goto_definition",
+			"lsp_find_references",
+			"lsp_hover",
+			"lsp_document_symbols",
+			"lsp_diagnostics",
+		]) {
+			expect(toolReplayClass(t)).toBe("ask");
+		}
+	});
+
+	test("git status and diff are not replayed (repo config can run helpers); git log is", async () => {
+		const { toolReplayClass } = await import("../eight/tools");
+		expect(toolReplayClass("git_status")).toBe("ask");
+		expect(toolReplayClass("git_diff")).toBe("ask");
+		expect(toolReplayClass("git_log")).toBe("replay");
+	});
+
+	test("only reads with the standard path checks replay, and a replayed read is confined", async () => {
+		const { toolReplayClass } = await import("../eight/tools");
+		for (const t of ["read_pdf", "read_pdf_page", "search_pdf", "read_notebook", "list_files"]) {
+			expect(toolReplayClass(t)).toBe("ask");
+		}
+		// Args come from disk on resume: a read outside the working directory
+		// is refused the same way a live call is.
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "outside3653-"));
+		const secretFile = path.join(outside, "private.txt");
+		fs.writeFileSync(secretFile, "outside marker 3653\n");
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_escape",
+			channel: "api",
+			ttSessionId: "session_escape",
+			createdAt: 1,
+			inFlight: [{ id: "r9", tool: "read_file", args: { path: secretFile }, startedAt: 1 }],
+		});
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		await mod.settleInterruptedToolCalls(journal, pool);
+		const history = pool.getAgent("s_escape")!.getMessageHistory();
+		expect(history[history.length - 1].content).not.toContain("outside marker 3653");
+		fs.rmSync(outside, { recursive: true, force: true });
+	});
+
+	test("journal summaries and the harness note are scrubbed of secrets", async () => {
+		const token = `ghp_${"a1B2c3D4e5".repeat(3)}abcdef`;
+		expect(token.length).toBe(40);
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_secret", "api");
+		const events = (pool.getAgent("s_secret") as any).events;
+		events.onToolStart({
+			toolName: "run_command",
+			toolCallId: "c9",
+			args: { command: `curl -H "Authorization: Bearer ${token}" https://api.github.com` },
+		});
+		expect(fs.readFileSync(journalPath, "utf8")).not.toContain(token);
+
+		// A journal written by an older build (or by hand) still never shows
+		// the secret to the model.
+		journal.upsert({
+			sessionId: "s_secret2",
+			channel: "api",
+			ttSessionId: "session_secret2",
+			createdAt: 1,
+			inFlight: [{ id: "w9", tool: "write_file", args: { path: ".env", content: `TOKEN=${token}` }, startedAt: 1 }],
+		});
+		const after = newPool(journal);
+		mod.resumeJournaledSessions(journal, after, new TimeTravelStore({ dataDir: ttDir }));
+		await mod.settleInterruptedToolCalls(journal, after);
+		const history = after.getAgent("s_secret2")!.getMessageHistory();
+		const note = history[history.length - 1].content;
+		expect(note).toContain("not replayed, needs confirmation");
+		expect(note).not.toContain(token);
+	});
+});
