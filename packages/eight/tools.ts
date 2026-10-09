@@ -107,7 +107,7 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
@@ -2558,6 +2558,9 @@ export class ToolExecutor {
 		// at process start, so an edit that slips past this cannot take effect.
 		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
 			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
+		if (commandTouchesAuditFiles(command))
+			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
 		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
 		// bump only; the boundary is seatbelting run_command (#3612).
 		if (touchesBrowserSecrets(command))

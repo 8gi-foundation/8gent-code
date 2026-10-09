@@ -16,7 +16,7 @@ import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
-import { validatePath } from "./path-guard.js";
+import { commandTouchesAuditFiles, validatePath } from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -494,6 +494,14 @@ const PATH_GUARDED_ACTIONS = new Set<string>([
 ]);
 
 function pathGuardGate(action: string, context: PolicyContext): PolicyDecision | null {
+	// Shell commands cannot be path-checked; refuse ones that name agent audit files (#3735).
+	if (action === "run_command") {
+		const command = typeof context.command === "string" ? context.command : "";
+		if (command && commandTouchesAuditFiles(command)) {
+			return { allowed: false, reason: "[path-guard] protected audit file named in command" };
+		}
+		return null;
+	}
 	if (!PATH_GUARDED_ACTIONS.has(action)) return null;
 	const filePath = typeof context.path === "string" ? context.path : "";
 	if (!filePath) return null;
