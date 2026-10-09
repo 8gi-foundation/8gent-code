@@ -8,6 +8,7 @@
  * full AI SDK data (finishReason, reasoning, detailed token usage, etc.)
  */
 
+import { getModeManager } from "./modes";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -777,6 +778,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * Returns the final assistant text in the exact shape Agent.chat() normally
 	 * returns (flavored prose), so app.tsx and agent-pool.ts render it unchanged.
 	 */
+
+	/**
+	 * The active mode's tool restrictions (#3389). Offered tools are narrowed to
+	 * the mode's set, and a call to a withheld tool is refused even when the
+	 * model emits it anyway.
+	 */
+	private modeFilter<T>(tools: Record<string, T>): Record<string, T> {
+		const mm = getModeManager();
+		return Object.fromEntries(Object.entries(tools).filter(([name]) => mm.isToolAllowed(name)));
+	}
+
+	private modeRefusal(toolName: string): string | null {
+		const mm = getModeManager();
+		if (mm.isToolAllowed(toolName)) return null;
+		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
+	}
 	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
@@ -877,6 +894,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let shown = "";
 				let success = true;
 				try {
+					const refusal = this.modeRefusal(toolName);
+					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
 					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
 					// The executor returns an error STRING rather than throwing for most
@@ -1678,12 +1697,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"search_symbols",
 			"recall",
 		]);
-		const effectiveTools =
+		const scopedTools =
 			this.config.agentScope === "__table__"
 				? Object.fromEntries(
 						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
 					)
 				: providerTools;
+		// The active mode narrows what is offered (#3389).
+		const effectiveTools = this.modeFilter(scopedTools);
 
 		// The SAME positive scope, for the text-tool path. Every Table officer on
 		// lmstudio/ollama goes through runTextToolChat, which was handed the raw
@@ -1693,8 +1714,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// run_command, git_commit and web_search as available, and the loop would
 		// have executed them (ToolG8's __table__ rules were the only thing left
 		// standing). Officers "hallucinating tool names" were reading a catalog.
-		const textToolAllowlist =
-			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools;
+		const textToolAllowlist = (
+			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools
+		).filter((name) => getModeManager().isToolAllowed(name));
 
 		// ── Populate runtime params for self-awareness tools ──────────
 		Object.assign(this.runtimeParams, {
@@ -1772,6 +1794,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			tools: effectiveTools,
 
 			onToolCallStart: async (event) => {
+				const modeRefusal = this.modeRefusal(event.toolName);
+				if (modeRefusal) throw new Error(modeRefusal);
 				await this.hookManager.executeHooks("beforeTool", {
 					sessionId: this.sessionId,
 					tool: event.toolName,
@@ -3126,6 +3150,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * only uses it for tools whose replay class is "replay".
 	 */
 	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		const refusal = this.modeRefusal(toolName);
+		if (refusal) return Promise.resolve(refusal);
 		return this.executor.execute(toolName, args);
 	}
 
@@ -3242,7 +3268,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (decision.strategy === "none" || decision.confidence <= 0.6) return;
 
 		const dispatch = mapStrategyToTool(decision);
-		if (!dispatch) return;
+		if (!dispatch || this.modeRefusal(dispatch.tool)) return;
 
 		try {
 			const result = await this.executor.execute(dispatch.tool, dispatch.args);
