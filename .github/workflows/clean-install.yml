@@ -14,6 +14,8 @@
 #                        start other workflows (#3658), so `release: published`
 #                        alone would never fire for our own releases.
 #                        workflow_run does. Runs only when Release ran on a v* tag.
+#                        It only fires once release.yml can run at all: today it
+#                        targets ubuntu-latest, which this org cannot use (#3658).
 #   workflow_dispatch    any version, `latest`, or a tarball URL.
 #   pull_request         only when the check itself changes; checks npm latest.
 #
@@ -82,6 +84,9 @@ jobs:
             git checkout -f HEAD -- .
             echo "::warning::Workspace had core.sparseCheckout=true; turned off and restored the full tree."
           fi
+          # .github/docker/linux-ci/Dockerfile belongs to linux-docker.yml (Linux (Docker)),
+          # the job that broke when this workspace was left sparse. Its presence is the proof
+          # that the full tree is back.
           test -f .github/docker/linux-ci/Dockerfile || { echo "::error::workspace tree is incomplete"; exit 1; }
 
       - name: Which release
