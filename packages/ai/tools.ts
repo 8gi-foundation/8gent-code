@@ -211,18 +211,21 @@ function resolvePath(p: string): string {
 }
 
 /**
- * The path native write_file or edit_file may touch (#3747): inside the
- * workspace root, by safePath (traversal, symlink escape, credential paths).
- * Returns the path, or the refusal to hand back. Only these two native tools
- * use it: native read_file (#3759), run_command and the notebook tools
- * (#3760) are not covered by this change.
+ * The path a native file tool may touch (#3747, #3759): inside the workspace
+ * root, by safePath (traversal, symlink escape, credential paths). Returns the
+ * path, or the refusal to hand back. Used by native write_file, edit_file and
+ * read_file; run_command and the notebook tools (#3760) are not covered.
  */
-function confinedWritePath(p: string): { path: string } | { refused: string } {
+function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
 	try {
 		return { path: safePath(p, getToolContext().workingDirectory) };
 	} catch (err) {
-		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
+		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
 	}
+}
+
+function confinedWritePath(p: string): { path: string } | { refused: string } {
+	return confinedPath(p, "written");
 }
 
 // ============================================
@@ -392,7 +395,9 @@ const readFile = tool({
 		path: z.string().describe("Path to the file to read"),
 	}),
 	execute: async ({ path: filePath }) => {
-		const absolutePath = resolvePath(filePath);
+		const target = confinedPath(filePath, "read");
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
