@@ -75,7 +75,7 @@ import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
-import { browserProfileWarning, localBrowserTools } from "../tools/eight-browser";
+import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
 
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -1739,7 +1739,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const textResult = await this.runTextToolChat({
 				providerName,
 				providerModel: providerConfig.model,
-				instructions: effectiveInstructions,
+				// A withheld browser says so up front (#3785); a __table__ session has no browser by design.
+				instructions:
+					this.config.agentScope === "__table__"
+						? effectiveInstructions
+						: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
