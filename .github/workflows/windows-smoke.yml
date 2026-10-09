@@ -1,0 +1,96 @@
+# windows-smoke.yml - Prove 8gent-code installs and starts on Windows from a
+# shallow clone, the same path a Windows user takes: bun install, then run from
+# source. No model is contacted anywhere in this job.
+#
+# It also compiles the standalone Windows binary (bun-windows-x64) and uploads
+# it as a workflow artifact with its sha256, so a Windows user without Bun can
+# be handed a single .exe. This workflow never creates a release or a tag.
+
+name: Windows Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-smoke.yml"
+      - "bin/**"
+      - "scripts/**"
+      - "packages/**"
+      - "apps/tui/**"
+      - "package.json"
+      - "bun.lock"
+      - ".gitattributes"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (source + binary)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # No-model run: point the local-model decider at a closed port.
+      EIGHT_DECIDE_OLLAMA_HOST: http://127.0.0.1:9
+      CI: "true"
+    steps:
+      - name: Shallow checkout (what a Windows user clones)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Version
+        run: bun bin/8gent.ts --version
+
+      - name: Doctor
+        run: bun bin/8gent.ts doctor
+
+      - name: Headless smoke (JSON-RPC tools.list, no model)
+        shell: bash
+        run: |
+          out=$(printf '{"jsonrpc":"2.0","id":1,"method":"tools.list"}\n' | bun bin/8gent.ts --rpc)
+          echo "$out"
+          echo "$out" | grep -q '"result"' || { echo "::error::tools.list returned no result"; exit 1; }
+
+      - name: TUI bundle builds (module graph resolves on Windows)
+        run: bun scripts/build-bundles.ts --tui
+
+      - name: Compile standalone Windows binary
+        run: bun run scripts/build-binaries.ts --only=bun-windows-x64
+
+      - name: Run the compiled binary
+        shell: pwsh
+        run: |
+          .\dist\bin\8gent-windows-x64.exe --version
+          .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
+
+      - name: Hash the binary
+        shell: pwsh
+        run: |
+          $f = Get-Item .\dist\bin\8gent-windows-x64.exe
+          $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+          "$h  $($f.Name)" | Tee-Object -FilePath .\dist\bin\8gent-windows-x64.exe.sha256
+          "size_bytes=$($f.Length)"
+          "### Windows binary`nsize: $([math]::Round($f.Length/1MB,1)) MB`nsha256: $h" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 8gent-windows-x64
+          path: |
+            dist/bin/8gent-windows-x64.exe
+            dist/bin/8gent-windows-x64.exe.sha256
+          retention-days: 14
