@@ -108,7 +108,7 @@ import {
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
-import { VisionInterpreter } from "./vision-interpreter";
+import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -1355,6 +1355,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// The main agent stays on its text model — never switches.
 		// Vision result gets injected as a harness note when ready (#3260).
 		let visionId: string | null = null;
+		let visionFailed = false;
 
 		// A model that can see gets the image itself (#3641): on the text-tool
 		// path it goes out on this turn's user message in the provider's native
@@ -1372,6 +1373,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
+				onError: (_id, message) => {
+					visionFailed = true;
+					this.config.events?.onStepFinish?.({
+						text: `Image could not be interpreted, continuing without it. (${oneLineError(message)})`,
+						stepNumber: 0,
+						toolCalls: [],
+						usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+						finishReason: "other",
+					});
+					// Without this the agent waits on a description that never comes and
+					// spends the turn probing the image with scripts (#3715).
+					this.messageHistory.push({
+						role: "user",
+						content: harnessNote(
+							`[Vision Unavailable] The attached image could not be interpreted (${oneLineError(message)}). Do not wait for it or try to decode the image with scripts. Work from the text of the request, state plainly what you could not see, and write the deliverable anyway.`,
+						),
+					});
+				},
 				onResult: (_id, result) => {
 					// Inject vision description as a harness note: a second system
 					// message would be dropped before the model call (#3260).
@@ -1392,13 +1411,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Fire and forget — runs in parallel while main agent works
 			visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
 
-			this.config.events?.onStepFinish?.({
-				text: "Image attached — vision interpreter running in the background.",
-				stepNumber: 0,
-				toolCalls: [],
-				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-				finishReason: "other",
-			});
+			if (!visionFailed) {
+				this.config.events?.onStepFinish?.({
+					text: "Image attached — vision interpreter running in the background.",
+					stepNumber: 0,
+					toolCalls: [],
+					usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+					finishReason: "other",
+				});
+			}
 		}
 
 		// ── Proactive Questioning Gate ─────────────────────────────────
