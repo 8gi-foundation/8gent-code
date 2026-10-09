@@ -68,6 +68,18 @@ jobs:
       - name: TUI bundle builds (module graph resolves on Windows)
         run: bun scripts/build-bundles.ts --tui
 
+      - name: TUI entry reachable from source (no TTY, no model, 20s cap)
+        shell: pwsh
+        run: |
+          New-Item empty-stdin.txt -ItemType File -Force | Out-Null
+          $p = Start-Process bun -ArgumentList "run","apps/tui/src/index.tsx","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput tui-src.out -RedirectStandardError tui-src.err -RedirectStandardInput empty-stdin.txt
+          if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
+          Get-Content tui-src.out, tui-src.err -ErrorAction SilentlyContinue | Select-Object -First 30
+          if ((Get-Content tui-src.out, tui-src.err -Raw -ErrorAction SilentlyContinue) -match "Cannot find module|ENOENT|EINVAL|is not recognized") { throw "TUI source launch hit a module or path error" }
+
+      - name: Windows path-safety tests
+        run: bun test tests/windows
+
       - name: Compile standalone Windows binary
         run: bun run scripts/build-binaries.ts --only=bun-windows-x64
 
@@ -81,7 +93,8 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item dist\tui.js dist\bin\tui.js
-          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "tui","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput exe-tui.out -RedirectStandardError exe-tui.err -RedirectStandardInput NUL
+          New-Item empty-stdin.txt -ItemType File -Force | Out-Null
+          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "tui","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput exe-tui.out -RedirectStandardError exe-tui.err -RedirectStandardInput empty-stdin.txt
           if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
           Get-Content exe-tui.out, exe-tui.err -ErrorAction SilentlyContinue | Select-Object -First 30
           if ((Get-Content exe-tui.out, exe-tui.err -Raw -ErrorAction SilentlyContinue) -match "TUI entry not found|Could not start the TUI") { throw "compiled binary could not start the TUI" }
