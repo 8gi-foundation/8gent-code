@@ -45,7 +45,7 @@ import {
 } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
-import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
+import { capabilityToolMode, knownContextWindow, ollamaContextWindowLookup } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -105,6 +105,7 @@ import {
 	type Summarizer,
 	type AgentState as TwoStageAgentState,
 	TwoStageCompactor,
+	estimateMessageTokens,
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
@@ -289,6 +290,11 @@ export class Agent {
 	private twoStageCheckpoints: CheckpointEntry[] = [];
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
+	/** #3643: pending one-shot read of the Ollama server's real context window. */
+	private serverContextWindow: { baseUrl: string; model: string; engine: ProactiveCompression } | null =
+		null;
+	/** Injectable for tests; the real lookup reads /api/ps and /api/show. */
+	private contextWindowLookup: typeof ollamaContextWindowLookup = ollamaContextWindowLookup;
 	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
 	// Lazily constructed so sessions that never call a tool pay nothing.
 	private timeTravelStore: TimeTravelStore | null = null;
@@ -376,11 +382,21 @@ export class Agent {
 		// compaction instead of the hardcoded 32k. A large-context cloud model
 		// (e.g. anthropic 200k) compacts far later; a small local model compacts
 		// sooner. Falls back to the conservative floor for unknown providers.
-		const compactionContextWindow = knownContextWindow(
-			getProviderManager().getProvider(config.runtime as ProviderRegistryName),
-		);
+		const activeProvider = getProviderManager().getProvider(config.runtime as ProviderRegistryName);
+		const compactionContextWindow = knownContextWindow(activeProvider);
 		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 		this.compactionContextWindow = compactionContextWindow;
+		// #3643: for an Ollama-served model the 32768 above is only a fallback.
+		// The real window is read from the server once, lazily, the first time
+		// the history nears the fallback's compaction line (see
+		// readServerContextWindow), so short sessions never pay for it.
+		if (activeProvider?.name === "ollama" || activeProvider?.name === "8gent") {
+			this.serverContextWindow = {
+				baseUrl: config.baseUrl || activeProvider.baseUrl,
+				model: config.model || activeProvider.defaultModel,
+				engine: this.compaction,
+			};
+		}
 
 		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
 		// rather than replacing it: the legacy single-threshold engine still
@@ -2601,6 +2617,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
 
+			await this.readServerContextWindow();
+
 			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
 			// Monitors token pressure and escalates through 4 stages:
 			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
@@ -2896,6 +2914,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	getSessionEvidence(): Evidence[] {
 		return this.sessionEvidence;
+	}
+
+	/**
+	 * #3643: the first time the history reaches the two-stage checkpoint line
+	 * (65 percent) of the 32768 fallback, read the Ollama server's real context
+	 * window once and resize both compactors to it, so a long document is not
+	 * summarised away while the model still has room. Skipped when the
+	 * compactor was replaced after construction. Unreadable: keep the fallback.
+	 */
+	private async readServerContextWindow(): Promise<void> {
+		const pending = this.serverContextWindow;
+		if (!pending) return;
+		if (this.compaction !== pending.engine) {
+			this.serverContextWindow = null;
+			return;
+		}
+		const used = estimateMessageTokens(this.messageHistory);
+		if (used < this.compactionContextWindow * 0.65) return;
+		this.serverContextWindow = null;
+		const window = await this.contextWindowLookup({ baseUrl: pending.baseUrl, model: pending.model }).catch(
+			() => null,
+		);
+		if (!window) {
+			console.error(
+				`  [COMPRESSION] could not read the context window for ${pending.model}; using ${this.compactionContextWindow}`,
+			);
+			return;
+		}
+		this.compaction = new ProactiveCompression({ contextWindow: window });
+		this.compactionContextWindow = window;
 	}
 
 	/**

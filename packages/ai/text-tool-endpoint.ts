@@ -25,7 +25,7 @@ import {
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
-import { resolveStreamIdleMs } from "../eight/turn-timeout";
+import { resolveFirstTokenMs, resolveStreamIdleMs, resolveTurnTimeoutMs } from "../eight/turn-timeout";
 import { isKnownVisionModel } from "../eight/vision-router";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
@@ -825,6 +825,17 @@ export function buildTextToolCall(opts: {
 		...(streamed ? { idleMs } : {}),
 		...(opts.timers ? { timers: opts.timers } : {}),
 	};
+	// #3643: the runtime sends nothing while it prefills the prompt, so the
+	// wait for the first byte gets a budget sized from this request's prompt
+	// (resolveFirstTokenMs), not the idle gap. Without it a long document died
+	// on its first call at exactly the idle gap.
+	const ceilingMs = opts.timeoutMs ?? resolveTurnTimeoutMs();
+	const limitsFor = (promptChars: number) =>
+		idleMs == null
+			? limits
+			: { ...limits, firstByteMs: resolveFirstTokenMs({ idleMs, promptChars, ceilingMs }) };
+	const charsOf = (messages: ChatMessage[]) =>
+		messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
 	// A server that answers `stream: true` with one JSON document (some
 	// OpenAI-compatible runtimes, every non-streamed fixture) is read as JSON;
 	// only an event stream goes through the SSE reader.
@@ -859,7 +870,7 @@ export function buildTextToolCall(opts: {
 				}),
 				signal: opts.signal,
 			},
-			{ ...limits, label },
+			{ ...limitsFor(charsOf(messages)), label },
 		);
 
 	type Attempt =
@@ -947,7 +958,7 @@ export function buildTextToolCall(opts: {
 				}),
 				signal: opts.signal,
 			},
-			{ ...limits, label: `${label} (raw)` },
+			{ ...limitsFor(charsOf(messages)), label: `${label} (raw)` },
 		);
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");

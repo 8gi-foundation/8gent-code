@@ -565,6 +565,68 @@ export const defaultContextWindowLookup: ContextWindowLookup = async ({ baseUrl,
 };
 
 /**
+ * Ollama context window for `model` (#3643), read from the server instead of
+ * assuming the 32768 fallback. In order of truth:
+ *  1. /api/ps `context_length` when the model is loaded - the window the
+ *     runner actually has, which is what truncates;
+ *  2. a `num_ctx` line in the Modelfile parameters (/api/show);
+ *  3. the model's `<arch>.context_length` from /api/show `model_info`.
+ * Returns null when none can be read, so the caller keeps its fallback. Any
+ * base form works (host, `/v1`, full `/v1/chat/completions`). `fetchImpl` is
+ * injected for tests.
+ */
+export async function ollamaContextWindowLookup(
+	args: { baseUrl: string; model: string },
+	fetchImpl: typeof fetch = fetch,
+): Promise<number | null> {
+	if (!args.baseUrl || !args.model) return null;
+	const root = args.baseUrl
+		.trim()
+		.replace(/\/+$/, "")
+		.replace(/\/chat\/completions$/, "")
+		.replace(/\/v1$/, "");
+	const positive = (v: unknown): number | null =>
+		typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
+	const getJson = async (path: string, init?: RequestInit): Promise<unknown> => {
+		try {
+			const res = await fetchImpl(`${root}${path}`, {
+				...init,
+				signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+			});
+			return res.ok ? await res.json() : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const ps = (await getJson("/api/ps")) as {
+		models?: { name?: string; model?: string; context_length?: unknown }[];
+	} | null;
+	const loaded = ps?.models?.find((m) => m.name === args.model || m.model === args.model);
+	const loadedCtx = positive(loaded?.context_length);
+	if (loadedCtx) return loadedCtx;
+
+	const show = (await getJson("/api/show", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ model: args.model }),
+	})) as { parameters?: unknown; model_info?: Record<string, unknown> } | null;
+	if (!show) return null;
+	if (typeof show.parameters === "string") {
+		const m = show.parameters.match(/^\s*num_ctx\s+(\d+)\s*$/m);
+		const n = m ? positive(Number(m[1])) : null;
+		if (n) return n;
+	}
+	for (const [key, value] of Object.entries(show.model_info ?? {})) {
+		if (key.endsWith(".context_length")) {
+			const n = positive(value);
+			if (n) return n;
+		}
+	}
+	return null;
+}
+
+/**
  * Resolve the full capability profile for a provider. Flags are the floor; the
  * probe only downgrades. Fully deterministic when `probe`/`contextLookup` are
  * injected (tests pass mocks; production passes the network defaults).
