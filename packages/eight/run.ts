@@ -521,15 +521,45 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			headless: true,
 		});
 
-		const finalText = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
+		const workDir = opts.cwd || process.cwd();
+		const { baselineCheck, finishWithProjectCheck, projectFingerprint, verdictNotice } =
+			await import("./done-gate");
+		const run = (command: string, timeoutSec: number, env: Record<string, string | undefined>) =>
+			agent.runGatedCommand(command, timeoutSec, env);
+		// Done gate: the project's check before and after the run. A run that made
+		// it worse goes back to the model, then fails loud (packages/eight/done-gate.ts).
+		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
+		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
+		const before = projectFingerprint(workDir);
+		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
+		const check = await finishWithProjectCheck({
+			baseline,
+			changed: projectFingerprint(workDir) !== before,
+			finalText: answer,
+			run,
+			chat: (message) => agent.chat(message),
+		});
+		const notice = verdictNotice(check);
+		const finalText = notice ? `${check.finalText}\n\n${notice}` : check.finalText;
+		const projectCheck = {
+			status: check.status,
+			command: check.command ?? null,
+			fix_rounds: check.fixRounds,
+			detail: check.detail ?? null,
+			notice,
+		};
+		if (check.status === "fail") exitCode = 1;
+		if (notice) process.stderr.write(`${notice}\n`);
 
 		if (isStreamJson) {
 			emit({
 				type: "result",
-				subtype: "ok",
+				subtype: check.status === "fail" ? "error" : "ok",
 				session_id: sessionId,
 				ended_at: new Date().toISOString(),
 				final_text: finalText,
+				project_check: projectCheck,
+				...(check.status === "fail" ? { error: check.detail } : {}),
 			});
 		} else {
 			process.stdout.write(`${finalText}\n`);
