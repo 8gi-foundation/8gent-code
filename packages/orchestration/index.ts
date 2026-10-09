@@ -360,7 +360,10 @@ export class AgentPool extends EventEmitter {
 				}
 			}
 
-			if (spawnedAgent.status === "cancelled") return;
+			// Read through a function: cancel() can flip status during the awaits above,
+			// which the compiler's narrowing from the earlier loop guard cannot see.
+			const wasCancelled = (): boolean => spawnedAgent.status === "cancelled";
+			if (wasCancelled()) return;
 			spawnedAgent.status = "completed";
 			spawnedAgent.task.status = "completed";
 			spawnedAgent.task.result = result;
