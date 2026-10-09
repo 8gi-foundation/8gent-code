@@ -2731,7 +2731,7 @@ export class ToolExecutor {
 		}
 		// Judge git state against the directory this command runs in (#3748).
 		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec));
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
 		}
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen
