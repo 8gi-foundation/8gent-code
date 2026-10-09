@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -12,12 +12,12 @@ import {
 import {
 	type BrowserCall,
 	_setProfileHomeForTest,
-	browserProfile,
 	blockedForProfile,
+	browserProfile,
 	browserProfileWarning,
-	touchesBrowserSecrets,
 	createEightBrowser,
 	localBrowserTools,
+	touchesBrowserSecrets,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
@@ -1119,4 +1119,99 @@ describe("blockedForProfile: trailing dots and IPv6-embedded IPv4", () => {
 		test(`refuses ${rest}`, () => expect(blockedForProfile(at("http", rest))).toMatch(/private/));
 	test("public names with a trailing dot pass", () =>
 		expect(blockedForProfile(at("https", "example.com./"))).toBeNull());
+});
+
+describe("secret placeholders: the model never holds the value (#3604)", () => {
+	const SECRET = "s3cr3t-Value-42";
+	const OTHER = "other-secret-77";
+	const dir = mkdtempSync(join(tmpdir(), "browser-secrets-"));
+	const file = join(dir, "secrets.json");
+	const write = (mode: number) => {
+		writeFileSync(
+			file,
+			JSON.stringify({
+				APP_PW: { value: SECRET, hosts: ["127.0.0.1"] },
+				OTHER_PW: { value: OTHER, hosts: ["example.com"] },
+				NO_HOSTS: { value: "nohost-secret" },
+			}),
+		);
+		chmodSync(file, mode);
+	};
+	const mk = (call: BrowserCall, secretsFile: string | undefined = file) =>
+		createEightBrowser(call, { settleMs: 0, secretsFile });
+	const typeStep = (text: string) => [{ action: "type", selector: "input[name=username]", text }];
+	const open = async (b: ReturnType<typeof createEightBrowser>) => b.open("http://127.0.0.1:5/");
+	const sent = (calls: Array<{ cmd: string; args: Record<string, unknown> }>) =>
+		calls.filter((c) => c.cmd === "page.type").map((c) => c.args.text);
+
+	test("the page receives the real value; no output carries it", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		const out = await b.run(typeStep("{{secret:APP_PW}}"));
+		expect(JSON.parse(out).ok).toBe(true);
+		expect(sent(site.calls)).toEqual([SECRET]);
+		expect(out).not.toContain(SECRET);
+		expect(await b.state()).not.toContain(SECRET);
+	});
+
+	test("a page reply that echoes the value is scrubbed from the result", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const echo: BrowserCall = async (cmd, args) =>
+			cmd === "page.type"
+				? { ok: false, error: `rejected input ${String(args?.text)}` }
+				: site.call(cmd, args);
+		const b = mk(echo);
+		await open(b);
+		const out = await b.run(typeStep("{{secret:APP_PW}}"));
+		expect(out).not.toContain(SECRET);
+	});
+
+	test("refused with nothing typed: wrong host, unknown name, no host list, no file, loose file mode", async () => {
+		for (const [label, text, setup] of [
+			["wrong host", "{{secret:OTHER_PW}}", () => write(0o600)],
+			["unknown name", "{{secret:NOPE}}", () => write(0o600)],
+			["no host list", "{{secret:NO_HOSTS}}", () => write(0o600)],
+			["loose mode", "{{secret:APP_PW}}", () => write(0o644)],
+		] as const) {
+			setup();
+			const site = fakeSite();
+			const b = mk(site.call);
+			await open(b);
+			const out = await b.run(typeStep(text));
+			expect(JSON.parse(out).ok, label).toBe(false);
+			expect(sent(site.calls), label).toEqual([]);
+			for (const v of [SECRET, OTHER, "nohost-secret"]) expect(out, label).not.toContain(v);
+		}
+		const site = fakeSite();
+		const b = mk(site.call, "");
+		await open(b);
+		expect(JSON.parse(await b.run(typeStep("{{secret:APP_PW}}"))).ok).toBe(false);
+		expect(sent(site.calls)).toEqual([]);
+	});
+
+	test("a plan with a refused placeholder types nothing, not even earlier steps", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		const out = await b.run([
+			{ action: "type", selector: "input[name=username]", text: "alice" },
+			{ action: "type", selector: "input[name=username]", text: "{{secret:OTHER_PW}}" },
+		]);
+		expect(JSON.parse(out).ok).toBe(false);
+		expect(sent(site.calls)).toEqual([]);
+	});
+
+	test("text without a placeholder is typed as given", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		await b.run(typeStep("alice {{not-a-secret}}"));
+		expect(sent(site.calls)).toEqual(["alice {{not-a-secret}}"]);
+		rmSync(dir, { recursive: true, force: true });
+	});
 });

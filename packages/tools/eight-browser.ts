@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -145,6 +145,60 @@ export function blockedForProfile(url: string): string | null {
 		}
 	}
 	return null;
+}
+
+// ── Secret placeholders (#3604) ──────────────────────────────────────────────
+// The model writes {{secret:NAME}} in type.text. The driver swaps in the real value at act time,
+// from a local file the person controls, so the value never sits in the model context, the
+// transcript or the provider request. Each secret lists the hosts it may be typed on (a secret
+// is never typed into a page the model steered somewhere else), and the file must be private
+// to the user. Output, errors and the page read-back are scrubbed of every resolved value.
+
+const PLACEHOLDER = /\{\{secret:([A-Za-z][A-Za-z0-9_]{0,63})\}\}/g;
+
+export const hasSecretPlaceholder = (text: string): boolean => {
+	PLACEHOLDER.lastIndex = 0;
+	return PLACEHOLDER.test(text);
+};
+
+/** Secrets file: { "NAME": { "value": "...", "hosts": ["app.example.com"] } }, mode 0600. */
+export function resolveSecretText(
+	text: string,
+	pageUrl: string,
+	file: string | undefined = process.env.EIGHT_BROWSER_SECRETS_FILE,
+): { ok: true; text: string; values: Map<string, string> } | { ok: false; error: string } {
+	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
+	let table: Record<string, { value?: unknown; hosts?: unknown }>;
+	try {
+		if (statSync(file).mode & 0o077)
+			return { ok: false, error: "the secrets file must not be readable by group or others" };
+		table = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		return { ok: false, error: "the secrets file could not be read" };
+	}
+	let host = "";
+	try {
+		host = new URL(pageUrl).hostname.toLowerCase();
+	} catch {}
+	const values = new Map<string, string>();
+	let failure: string | null = null;
+	const out = text.replace(PLACEHOLDER, (_m, name: string) => {
+		const e = Object.hasOwn(table ?? {}, name) ? table[name] : undefined;
+		if (!e || typeof e.value !== "string" || e.value === "") {
+			failure ??= `secret ${name} is not available`;
+			return "";
+		}
+		if (!Array.isArray(e.hosts) || !e.hosts.some((h) => String(h).toLowerCase() === host)) {
+			failure ??= `secret ${name} is not allowed on this page`;
+			return "";
+		}
+		values.set(`{{secret:${name}}}`, e.value);
+		return e.value;
+	});
+	if (failure) return { ok: false, error: failure };
+	if (out.length > LIMITS.maxTypeLength)
+		return { ok: false, error: `type.text > ${LIMITS.maxTypeLength} chars after resolving` };
+	return { ok: true, text: out, values };
 }
 
 export function validateBrowserAction(
@@ -514,7 +568,12 @@ const SECRET_FIELDS = [
 export function createEightBrowser(
 	call: BrowserCall = wsCall,
 	/** isolated: a named profile (#3622). No typing into secret fields, no private hosts. */
-	opts: { settleMs?: number; isolated?: boolean | (() => boolean) } = {},
+	opts: {
+		settleMs?: number;
+		isolated?: boolean | (() => boolean);
+		/** Secrets file for {{secret:NAME}} placeholders (default EIGHT_BROWSER_SECRETS_FILE; "" disables). */
+		secretsFile?: string;
+	} = {},
 ) {
 	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
 	const settle = opts.settleMs ?? 400;
@@ -530,6 +589,12 @@ export function createEightBrowser(
 		return r.elements.length > 0;
 	};
 	const owned = new Set<string>();
+	const resolvedSecrets = new Map<string, string>(); // real value -> placeholder, for scrubbing output
+	const scrub = (text: string): string => {
+		let out = text;
+		for (const [value, placeholder] of resolvedSecrets) out = out.split(value).join(placeholder);
+		return out;
+	};
 	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -576,15 +641,17 @@ export function createEightBrowser(
 		return id;
 	};
 	const render = (tab: string, o: Awaited<ReturnType<typeof observe>>) =>
-		JSON.stringify({
-			tab,
-			url: o.url,
-			title: o.title,
-			elements: o.els
-				.filter((e) => !e.hidden)
-				.map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()),
-			text: o.text.slice(0, 3_000),
-		});
+		scrub(
+			JSON.stringify({
+				tab,
+				url: o.url,
+				title: o.title,
+				elements: o.els
+					.filter((e) => !e.hidden)
+					.map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()),
+				text: o.text.slice(0, 3_000),
+			}),
+		);
 	const shown = (e: El) =>
 		e.secret ? "(password field)" : typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text;
 	const indexGuard = (els: El[], index?: number): string | null => {
@@ -653,6 +720,10 @@ export function createEightBrowser(
 	}
 
 	async function run(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
+		return scrub(await runSteps(raw, tabId, approve));
+	}
+
+	async function runSteps(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
 		const fail = (error: string, steps: unknown[] = []) =>
 			JSON.stringify({ ok: false, error, steps });
 		let id: string;
@@ -669,6 +740,10 @@ export function createEightBrowser(
 		for (const [i, r] of raw.entries()) {
 			const v = validateBrowserAction(r, { isolated: isolated() });
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
+			if (v.action.action === "type" && hasSecretPlaceholder(v.action.text)) {
+				const r = resolveSecretText(v.action.text, before.url, opts.secretsFile);
+				if (!r.ok) return fail(`dry run: step ${i}: ${r.error}`);
+			}
 			plan.push(v.action);
 		}
 		const refuseSecret = (i: number, sel: string) =>
@@ -695,14 +770,22 @@ export function createEightBrowser(
 				if (isolated() && (await secretField(id, a.selector))) return refuseSecret(i, a.selector);
 				row.selector = a.selector;
 				row.text_len = a.text.length;
-				if (a.text) typed.add(clipped(a.text));
+				let text = a.text;
+				if (hasSecretPlaceholder(a.text)) {
+					// Resolved now, against the page as it is now: an earlier step may have moved it.
+					const r = resolveSecretText(a.text, before.url, opts.secretsFile);
+					if (!r.ok) return fail(`step ${i}: ${r.error}`, steps);
+					text = r.text;
+					for (const [placeholder, value] of r.values) resolvedSecrets.set(value, placeholder);
+				}
+				if (text) typed.add(clipped(text));
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
-					const r = await call("page.type", { tabId: id, selector: a.selector, text: a.text });
+					const r = await call("page.type", { tabId: id, selector: a.selector, text });
 					if (r?.ok === false) row.error = r.error;
 					const got = (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]
 						?.text;
-					row.verified = got === clipped(a.text);
+					row.verified = got === clipped(text);
 					if (row.verified) break;
 				}
 				row.ok = row.verified;
