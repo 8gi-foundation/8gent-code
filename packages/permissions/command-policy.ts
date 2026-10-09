@@ -41,9 +41,23 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { splitPipeline, tokenize } from "./src/workspace-boundary";
 
-/** What the push check needs to know about the repository. */
+/**
+ * Git could not be read (an error exit or a timeout). Distinct from a detached
+ * HEAD or an unset key: a push check that meets it fails closed and asks.
+ */
+export class GitStateUnreadable extends Error {
+	constructor(what: string) {
+		super(`git state could not be read: ${what}`);
+		this.name = "GitStateUnreadable";
+	}
+}
+
+/**
+ * What the push check needs to know about the repository. Every method throws
+ * GitStateUnreadable when git cannot be read.
+ */
 export interface GitState {
-	/** The checked-out branch, or null when unknown or detached. */
+	/** The checked-out branch, or null when HEAD is detached. */
 	currentBranch(dir?: string): string | null;
 	/** Branch names that count as the default branch. */
 	defaultBranches(dir?: string): string[];
@@ -421,6 +435,16 @@ export function pushTargetsDefaultBranch(
 	git: GitState,
 	opts: PushCheckOptions = {},
 ): boolean {
+	try {
+		return pushCheck(argv, git, opts);
+	} catch (err) {
+		// The repository could not be read: a push we cannot resolve asks.
+		if (err instanceof GitStateUnreadable) return true;
+		throw err;
+	}
+}
+
+function pushCheck(argv: string[], git: GitState, opts: PushCheckOptions): boolean {
 	const depth = opts.depth ?? 0;
 	if (path.basename(argv[0] ?? "") !== "git") return false;
 	if (depth > 5) return true;
@@ -449,6 +473,18 @@ export function pushTargetsDefaultBranch(
 	const sub = argv[i];
 	if (sub === undefined) return false;
 
+	// Push plumbing and `subtree push` update a remote branch too.
+	if (sub === "send-pack" || sub === "subtree") {
+		if (
+			sub === "subtree" &&
+			firstPositional(argv.slice(i + 1), SUBTREE_OPTS_WITH_VALUE) !== "push"
+		) {
+			return false;
+		}
+		if (routedByCommandLine || unknownRepo || opts.appendsArgs) return true;
+		return plumbingPushTargetsDefault(sub, argv.slice(i + 1), git, dir);
+	}
+
 	if (sub !== "push") {
 		if (GIT_BUILTINS.has(sub)) return false;
 		// Not a built-in: possibly an alias, read from a repository we cannot see.
@@ -465,7 +501,7 @@ export function pushTargetsDefaultBranch(
 			);
 		}
 		const expanded = [...argv.slice(0, i), ...tokenize(expansion), ...argv.slice(i + 1)];
-		return pushTargetsDefaultBranch(expanded, git, { ...opts, dir, unknownRepo, depth: depth + 1 });
+		return pushCheck(expanded, git, { ...opts, dir, unknownRepo, depth: depth + 1 });
 	}
 
 	if (routedByCommandLine || unknownRepo || opts.appendsArgs) return true;
@@ -500,22 +536,89 @@ export function pushTargetsDefaultBranch(
 		return dests === "any" || dests.some(isDefault);
 	}
 
-	return refspecs.some((spec) => {
-		if (spec.startsWith("^")) return false; // a negative refspec only excludes
-		const s = spec.replace(/^\+/, "");
-		if (s.includes("*") || s === ":") return true;
-		const colon = s.indexOf(":");
-		if (colon >= 0) {
-			const dst = s.slice(colon + 1);
-			if (dst === "HEAD" || dst === "@") return isDefault(current);
-			return isDefault(dst);
+	return refspecs.some((spec) => refspecTargetsDefault(spec, isDefault, git, dir, configured));
+}
+
+/** Whether one refspec can update a default branch. */
+function refspecTargetsDefault(
+	spec: string,
+	isDefault: (b: string | null) => boolean,
+	git: GitState,
+	dir: string | undefined,
+	configured: string[],
+): boolean {
+	if (spec.startsWith("^")) return false; // a negative refspec only excludes
+	const s = spec.replace(/^\+/, "");
+	if (s.includes("*") || s === ":" || SHELL_EXPANSION.test(s)) return true;
+	const self = (r: string) => (r === "HEAD" || r === "@" ? git.currentBranch(dir) : r);
+	const colon = s.indexOf(":");
+	if (colon >= 0) return isDefault(self(s.slice(colon + 1)));
+	// A source with no destination: the same name, unless remote.<name>.push maps it.
+	const src = self(s);
+	if (isDefault(src)) return true;
+	const mapped = mappedDestinations(configured, src, git.currentBranch(dir));
+	return mapped === "any" || mapped.some(isDefault);
+}
+
+const SEND_PACK_OPTS_WITH_VALUE = new Set([
+	"--receive-pack",
+	"--exec",
+	"--signed",
+	"--push-option",
+]);
+const SUBTREE_OPTS_WITH_VALUE = new Set([
+	"-P",
+	"--prefix",
+	"-m",
+	"--message",
+	"--annotate",
+	"-b",
+	"--branch",
+	"--onto",
+]);
+
+/** The first word that is not an option or an option's value. */
+function firstPositional(args: string[], withValue: Set<string>): string | undefined {
+	for (let j = 0; j < args.length; j++) {
+		if (withValue.has(args[j])) {
+			j++;
+			continue;
 		}
-		// A source with no destination: the same name, unless remote.<name>.push maps it.
-		const src = s === "HEAD" || s === "@" ? current : s;
-		if (isDefault(src)) return true;
-		const mapped = mappedDestinations(configured, src, current);
-		return mapped === "any" || mapped.some(isDefault);
-	});
+		if (!args[j].startsWith("-")) return args[j];
+	}
+	return undefined;
+}
+
+/**
+ * `git send-pack <remote> [<ref>...]` and `git subtree push <remote> <ref>`.
+ * No ref, or anything this check cannot read, fails closed.
+ */
+function plumbingPushTargetsDefault(
+	sub: string,
+	args: string[],
+	git: GitState,
+	dir: string | undefined,
+): boolean {
+	const withValue = sub === "send-pack" ? SEND_PACK_OPTS_WITH_VALUE : SUBTREE_OPTS_WITH_VALUE;
+	const positionals: string[] = [];
+	for (let j = 0; j < args.length; j++) {
+		const a = args[j];
+		if (a === "--all" || a === "--mirror" || a === "--stdin") return true;
+		if (withValue.has(a)) {
+			j++;
+			continue;
+		}
+		if (a.startsWith("-")) continue;
+		positionals.push(a);
+	}
+	if (sub === "subtree") positionals.shift(); // "push"
+	const refs = positionals.slice(1);
+	if (refs.length === 0 || positionals.some((p) => SHELL_EXPANSION.test(p))) return true;
+	const defaults = new Set(git.defaultBranches(dir).map((b) => b.toLowerCase()));
+	const isDefault = (b: string | null) => !!b && defaults.has(branchName(b).toLowerCase());
+	// subtree push names only the remote branch to update.
+	if (sub === "subtree") return refs.length !== 1 || isDefault(refs[0]) || /[*:]/.test(refs[0]);
+	return refs.some((r) => refspecTargetsDefault(r, isDefault, git, dir, []));
 }
 
 /** The remote a `git push` with no remote argument uses. */
@@ -821,20 +924,49 @@ function argvReason(
 	return null;
 }
 
+/**
+ * Commands that can change the shell's directory without a visible plain
+ * `cd`. `builtin cd` and `command cd` are caught by the cd word itself.
+ */
+const MAY_CHANGE_DIR = new Set(["eval", "source", ".", "pushd", "popd"]);
+/** A word that, inside a quoted or compound command, changes directory. */
+const CD_WORD = /(^|[\s;&|({`])(cd|pushd|popd)(\s|$|[;&|)}])/;
+
+/**
+ * The directory a plain `cd <literal path>` moves to, or null when the
+ * segment is not one (options, more words, expansions, CDPATH lookups).
+ */
+function plainCdTarget(raw: string[], dir: string | undefined): string | null {
+	if (raw[0] !== "cd" || raw.length > 2) return null;
+	const to = raw[1];
+	if (to === undefined) return os.homedir();
+	if (to.startsWith("-") || SHELL_EXPANSION.test(to)) return null;
+	const explicit = /^(\/|\.\/|\.\.\/|\.$|\.\.$|~)/.test(to);
+	// A bare relative name is looked up through CDPATH when one is set.
+	if (!explicit && process.env.CDPATH) return null;
+	const target = to.startsWith("~") ? path.join(os.homedir(), to.slice(1)) : to;
+	return path.isAbsolute(target) ? target : path.join(dir ?? ".", target);
+}
+
 /** Carry what this segment does to the state later segments' git commands see. */
 function advanceLine(line: LineState, raw: string[]): void {
 	const first = raw[0] ?? "";
-	if (first === "cd") {
-		const to = raw[1];
-		if (to === undefined) line.dir = os.homedir();
-		else if (to === "-" || SHELL_EXPANSION.test(to)) line.unknownRepo = true;
-		else {
-			const target = to.startsWith("~") ? path.join(os.homedir(), to.slice(1)) : to;
-			line.dir = path.isAbsolute(target) ? target : path.join(line.dir ?? ".", target);
-		}
+	if (raw.some((t) => /CDPATH/.test(t))) {
+		line.unknownRepo = true;
 		return;
 	}
-	if (first === "pushd" || first === "popd" || first.startsWith("(")) {
+	if (first === "cd") {
+		const target = plainCdTarget(raw, line.dir);
+		if (target === null) line.unknownRepo = true;
+		else line.dir = target;
+		return;
+	}
+	// Anything else that could move the shell: the repository is unknown from here.
+	if (
+		MAY_CHANGE_DIR.has(first) ||
+		/^[({]/.test(first) ||
+		raw.some((t) => t === "cd" || t === "pushd" || t === "popd" || CD_WORD.test(t))
+	) {
 		line.unknownRepo = true;
 		return;
 	}
@@ -909,13 +1041,21 @@ export function everySegmentSafe(command: string, isSafe: (segment: string) => b
 
 // ── git state from the repository ─────────────────────────────────────────
 
-function git(dir: string, args: string[]): string | null {
+/**
+ * Run a read-only git command. Returns its output, or null for the exit codes
+ * in `absent` (an unset key, a detached HEAD); throws GitStateUnreadable for any
+ * other failure, including a timeout.
+ */
+function git(dir: string, args: string[], absent: number[] = []): string | null {
+	let r: ReturnType<typeof spawnSync>;
 	try {
-		const r = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", timeout: 2000 });
-		return r.status === 0 ? r.stdout.trim() : null;
+		r = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", timeout: 2000 });
 	} catch {
-		return null;
+		throw new GitStateUnreadable(args.join(" "));
 	}
+	if (r.status === 0) return String(r.stdout).trim();
+	if (r.status !== null && absent.includes(r.status)) return null;
+	throw new GitStateUnreadable(args.join(" "));
 }
 
 const _commandDir = new AsyncLocalStorage<string>();
@@ -947,27 +1087,32 @@ export function repoGitState(
 ): GitState {
 	const resolve = (dir?: string) => path.resolve(baseDir(), dir ?? ".");
 	return {
-		currentBranch: (dir) => {
-			const current = git(resolve(dir), ["rev-parse", "--abbrev-ref", "HEAD"]);
-			return current && current !== "HEAD" ? current : null;
-		},
+		// Exit 1 from symbolic-ref is a detached HEAD; anything else is unreadable.
+		currentBranch: (dir) =>
+			git(resolve(dir), ["symbolic-ref", "--quiet", "--short", "HEAD"], [1]) || null,
 		defaultBranches: (dir) => {
-			const originHead = git(resolve(dir), [
-				"symbolic-ref",
-				"--quiet",
-				"--short",
-				"refs/remotes/origin/HEAD",
-			]);
+			let originHead: string | null = null;
+			try {
+				originHead = git(
+					resolve(dir),
+					["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+					[1],
+				);
+			} catch {
+				// main and master still count; the reads that decide the push fail closed.
+			}
 			const defaults = ["main", "master"];
 			if (originHead) defaults.push(originHead.replace(/^origin\//, ""));
 			return defaults;
 		},
 		config: (key, dir) => {
-			const out = git(resolve(dir), ["config", "--get-all", key]);
+			// Exit 1: the key is not set.
+			const out = git(resolve(dir), ["config", "--get-all", key], [1]);
 			return out ? out.split("\n") : [];
 		},
 		aliases: (dir) => {
-			const out = git(resolve(dir), ["config", "--get-regexp", "^alias\\."]);
+			// Exit 1: no aliases.
+			const out = git(resolve(dir), ["config", "--get-regexp", "^alias\\."], [1]);
 			const aliases: Record<string, string> = {};
 			for (const line of out ? out.split("\n") : []) {
 				const m = /^alias\.(\S+)\s?(.*)$/.exec(line);

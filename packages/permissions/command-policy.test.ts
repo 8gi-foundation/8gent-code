@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
 	type GitState,
+	GitStateUnreadable,
 	allowListIsLocalOnly,
 	everySegmentSafe,
 	isLoopbackOnlyFetch,
@@ -631,6 +632,136 @@ describe("repoGitState", () => {
 		Bun.spawnSync(["git", "-C", dir, "config", "branch.feature.merge", "refs/heads/main"]);
 		expect(mustAskReason("git s origin main", c)).toContain("default branch");
 		expect(mustAskReason("git push", c)).toContain("default branch");
+	});
+});
+
+describe("git state that cannot be read", () => {
+	/** A GitState whose listed reads fail the way an unreadable repository does. */
+	function failing(...reads: (keyof GitState)[]): GitState {
+		const base = gitOn("feature");
+		const fail = (what: string) => () => {
+			throw new GitStateUnreadable(what);
+		};
+		return {
+			currentBranch: reads.includes("currentBranch") ? fail("branch") : base.currentBranch,
+			defaultBranches: base.defaultBranches,
+			config: reads.includes("config") ? fail("config") : base.config,
+			aliases: reads.includes("aliases") ? fail("aliases") : base.aliases,
+		};
+	}
+
+	test("a bare push or a HEAD push asks when the branch cannot be read", () => {
+		const g = failing("currentBranch");
+		expect(pushTargetsDefaultBranch(argv("git push"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin HEAD"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git push origin HEAD:feature"), g)).toBe(true);
+	});
+
+	test("a push asks when its routing configuration cannot be read", () => {
+		expect(pushTargetsDefaultBranch(argv("git push"), failing("config"))).toBe(true);
+	});
+
+	test("a subcommand that could be an alias asks when aliases cannot be read; a built-in does not", () => {
+		const g = failing("aliases");
+		expect(pushTargetsDefaultBranch(argv("git sync"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git status"), g)).toBe(false);
+	});
+
+	test("a detached HEAD is not the same as unreadable: a bare push from it does not ask", () => {
+		expect(pushTargetsDefaultBranch(argv("git push"), gitOn(null))).toBe(false);
+	});
+
+	test("a directory git cannot open asks for a push, through the real git reader", () => {
+		const notARepo = tempDir("cmd-policy-norepo-");
+		const c = { git: repoGitState(() => notARepo), pinnedLocalProvider: false };
+		expect(mustAskReason("git push", c)).toContain("default branch");
+		expect(mustAskReason("git push origin HEAD", c)).toContain("default branch");
+		expect(mustAskReason("git status", c)).toBeNull();
+	});
+});
+
+describe("directory changes the line tracker cannot follow", () => {
+	const c = () => ({ git: gitOn("feature"), pinnedLocalProvider: false });
+
+	test("cd given an option, or a target it cannot read, makes a later push ask", () => {
+		for (const cd of ["cd -P other", "cd -L other", "cd -- other", "cd -", "cd $DIR", "cd a b"]) {
+			expect(mustAskReason(`${cd}\ngit push`, c())).toContain("default branch");
+		}
+	});
+
+	test("other ways of changing directory make a later push or possible alias ask", () => {
+		for (const first of [
+			"builtin cd other",
+			"command cd other",
+			"eval 'cd other'",
+			"source env.sh",
+			". env.sh",
+			"pushd other",
+			"popd",
+			"CDPATH=/x cd other",
+			"f() { cd other; }",
+			"(cd other)",
+		]) {
+			expect(mustAskReason(`${first}\ngit push`, c())).toContain("default branch");
+			expect(mustAskReason(`${first}\ngit sync`, c())).toContain("default branch");
+		}
+	});
+
+	test("a plain cd to a literal path is followed, and a built-in after any cd is unaffected", () => {
+		expect(mustAskReason("cd ./sub && git push", c())).toBeNull();
+		expect(mustAskReason("cd /abs/path\ngit push", c())).toBeNull();
+		expect(mustAskReason("eval 'cd other'\ngit status", c())).toBeNull();
+	});
+
+	test("a bare relative cd while CDPATH is set is not followed", () => {
+		const saved = process.env.CDPATH;
+		process.env.CDPATH = "/somewhere";
+		try {
+			expect(mustAskReason("cd sub && git push", c())).toContain("default branch");
+			expect(mustAskReason("cd ./sub && git push", c())).toBeNull();
+		} finally {
+			if (saved === undefined) delete process.env.CDPATH;
+			else process.env.CDPATH = saved;
+		}
+	});
+});
+
+describe("push plumbing and subtree push", () => {
+	const g = gitOn("feature");
+	test("send-pack is judged like a push", () => {
+		expect(pushTargetsDefaultBranch(argv("git send-pack origin main"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git send-pack origin feature:heads/main"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git send-pack origin feature"), g)).toBe(false);
+	});
+
+	test("send-pack with no ref, every ref or refs from stdin fails closed", () => {
+		expect(pushTargetsDefaultBranch(argv("git send-pack origin"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git send-pack --all origin"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git send-pack --stdin origin"), g)).toBe(true);
+	});
+
+	test("subtree push to the default branch asks; to another branch it does not", () => {
+		expect(pushTargetsDefaultBranch(argv("git subtree push --prefix=lib origin main"), g)).toBe(
+			true,
+		);
+		expect(pushTargetsDefaultBranch(argv("git subtree push -P lib origin heads/main"), g)).toBe(
+			true,
+		);
+		expect(pushTargetsDefaultBranch(argv("git subtree push -P lib origin feature"), g)).toBe(false);
+	});
+
+	test("subtree push without a branch fails closed; other subtree commands are not pushes", () => {
+		expect(pushTargetsDefaultBranch(argv("git subtree push -P lib origin"), g)).toBe(true);
+		expect(pushTargetsDefaultBranch(argv("git subtree split -P lib"), g)).toBe(false);
+	});
+
+	test("through the decision, wrapped or routed", () => {
+		expect(mustAskReason("timeout 30 git send-pack origin main", ctx())).toContain(
+			"default branch",
+		);
+		expect(
+			mustAskReason("git -c remote.origin.push=x subtree push -P lib origin feature", ctx()),
+		).toContain("default branch");
 	});
 });
 
