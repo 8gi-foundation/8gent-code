@@ -362,6 +362,19 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 	if (!provider) {
 		provider = (await isOllamaUp()) ? "ollama" : "openrouter";
 	}
+	// --provider naming a local provider pins it: every network command asks
+	// before it runs, and is refused with no terminal (#3748).
+	if (opts.provider) {
+		try {
+			const [perms, policy] = await Promise.all([
+				import("../permissions"),
+				import("../permissions/command-policy"),
+			]);
+			perms.getPermissionManager().setPinnedLocalProvider(policy.LOCAL_PROVIDERS.has(provider));
+		} catch (err) {
+			process.stderr.write(`[run] warn: could not apply the pinned provider to permissions: ${String(err)}\n`);
+		}
+	}
 	let model = opts.model;
 	if (!model) {
 		if (provider === "ollama") {

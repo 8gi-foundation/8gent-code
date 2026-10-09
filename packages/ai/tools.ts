@@ -25,6 +25,7 @@ import {
 } from "../orchestration/delegation-tools";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
@@ -1271,6 +1272,9 @@ const backgroundOutput = tool({
 // ============================================
 
 async function runShellCommand(command: string): Promise<string> {
+	// Judge git state against the directory this command runs in (#3748).
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");
 

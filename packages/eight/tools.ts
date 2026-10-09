@@ -112,6 +112,7 @@ import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissi
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
@@ -2611,6 +2612,10 @@ export class ToolExecutor {
 	async runCommand(command: string, timeoutSec?: number): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
+		}
+		// Judge git state against the directory this command runs in (#3748).
+		if (commandDir() !== this.workingDirectory) {
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec));
 		}
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen

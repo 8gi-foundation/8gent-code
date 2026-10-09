@@ -53,37 +53,41 @@ async function gateShellChild(
 	cwd: string,
 	holder: PermissionModeHolder,
 ): Promise<string | null> {
-	return runWithPermissionHolder(holder, async () => {
-		const mode = currentPermissionMode();
-		if (mode === "plan") {
-			const refusal = await planModeRefusal("run_command", { command });
-			if (refusal) return refusal;
-		}
-		const { getPermissionManager, isCommandDangerous } = await import("../permissions");
-		const pm = getPermissionManager();
-		const check = pm.checkPermission(command);
-		if (check === "denied")
-			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
-		const { systemOneGate } = await import("../permissions/system-one-gate");
-		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
-		if (!systemOne.run) return systemOne.message as string;
-		const dangerous = isCommandDangerous(command);
-		if (
-			check === "ask" &&
-			systemOne.humanApproved !== true &&
-			!guardedSkipsCard(mode, systemOne, dangerous)
-		) {
-			const allowed = await pm.requestPermission(
-				"Spawn Shell Agent",
-				dangerous
-					? "This command may modify system files or cause data loss."
-					: "The agent wants to run a shell command as a background agent.",
-				command,
-			);
-			if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
-		}
-		return null;
-	});
+	// Judge git state against the directory the child runs in (#3748).
+	const { withCommandDir } = await import("../permissions/command-policy");
+	return withCommandDir(cwd, () =>
+		runWithPermissionHolder(holder, async () => {
+			const mode = currentPermissionMode();
+			if (mode === "plan") {
+				const refusal = await planModeRefusal("run_command", { command });
+				if (refusal) return refusal;
+			}
+			const { getPermissionManager, isCommandDangerous } = await import("../permissions");
+			const pm = getPermissionManager();
+			const check = pm.checkPermission(command);
+			if (check === "denied")
+				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
+			const { systemOneGate } = await import("../permissions/system-one-gate");
+			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
+			if (!systemOne.run) return systemOne.message as string;
+			const dangerous = isCommandDangerous(command);
+			if (
+				check === "ask" &&
+				systemOne.humanApproved !== true &&
+				!guardedSkipsCard(mode, systemOne, dangerous)
+			) {
+				const allowed = await pm.requestPermission(
+					"Spawn Shell Agent",
+					dangerous
+						? "This command may modify system files or cause data loss."
+						: "The agent wants to run a shell command as a background agent.",
+					command,
+				);
+				if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
+			}
+			return null;
+		}),
+	);
 }
 
 export const CHECK_AGENT_DESCRIPTION =
