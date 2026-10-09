@@ -222,3 +222,24 @@ describe("contextMeterText: the HUD slot", () => {
 		expect(contextMeterText(null, "fresh")).toBe("--        ");
 	});
 });
+
+describe("resolver hardening (8SO)", () => {
+	test("requests refuse redirects", async () => {
+		let seen: RequestInit | undefined;
+		const fetchImpl = (async (_u: string, init?: RequestInit) => {
+			seen = init;
+			return { ok: true, json: async () => ({ data: [] }) };
+		}) as unknown as typeof fetch;
+		await resolveContextWindow({ provider: "openrouter", model: "x/y:free", fetchImpl });
+		expect(seen?.redirect).toBe("error");
+	});
+	test("oversized declared body is unknown, not parsed", async () => {
+		const fetchImpl = (async () => ({
+			ok: true,
+			headers: new Headers({ "content-length": String(5 * 1024 * 1024) }),
+			json: async () => ({ data: [{ id: "x/y:free", context_length: 4096 }] }),
+		})) as unknown as typeof fetch;
+		const w = await resolveContextWindow({ provider: "openrouter", model: "x/y:free", fetchImpl });
+		expect(w).toEqual(UNKNOWN_WINDOW);
+	});
+});
