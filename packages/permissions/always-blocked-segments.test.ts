@@ -33,6 +33,9 @@ function manager(): PermissionManager {
 // The destructive part is assembled so no line of this file is itself one.
 const WIPE = ["rm", "-rf", "/"].join(" ");
 const PERMS = ["chmod", "-R", "000", "/"].join(" ");
+const WIPE_STAR = ["rm", "-rf", "/*"].join(" ");
+const CHOWN_ROOT = ["chown", "-R", "me:me", "/"].join(" ");
+const DISK = ["dd", "if=/dev/zero", "of=/dev/disk2"].join(" ");
 
 const BLOCKED_LINES = [
 	WIPE,
@@ -49,6 +52,52 @@ const BLOCKED_LINES = [
 	`sh -c 'ls && ${WIPE}'`,
 	`ls && /bin/${WIPE}`,
 	"ls && dd if=/dev/zero of=/dev/sda",
+	// exact-target spellings
+	"rm -fr /",
+	"rm -r -f /",
+	"rm --recursive --force /",
+	`rm -rf "/"`,
+	"rm -rf //",
+	WIPE_STAR,
+	CHOWN_ROOT,
+	"chown -R me:me /etc",
+	"chown -R me /usr",
+	"chown -R me /System",
+	"chmod -R 755 /",
+	DISK,
+	"mkfs.ext4 /dev/sda1",
+	// command substitution, subshells, groups, bodies
+	`echo $(${WIPE})`,
+	`echo "$(${WIPE})"`,
+	`echo \`${WIPE}\``,
+	`(${WIPE})`,
+	`(cd /tmp; ${WIPE})`,
+	`{ ${WIPE}; }`,
+	`if true; then ${WIPE}; fi`,
+	`for x in a b; do ${WIPE}; done`,
+	`while true; do ${WIPE}; done`,
+	`diff <(${WIPE}) /dev/null`,
+	// text piped into a shell is executed
+	`echo '${WIPE}' | sh`,
+	`echo '${WIPE}' | bash`,
+	`printf '%s' '${WIPE}' | sudo zsh`,
+	// backslash-newline continuation
+	"rm \\\n -rf /",
+	"echo ok && rm -rf \\\n/",
+	// wrappers
+	`busybox ${WIPE}`,
+	`doas ${WIPE}`,
+	`su -c '${WIPE}'`,
+	`su root -c "${WIPE}"`,
+	`ssh host ${WIPE}`,
+	`ssh host '${WIPE}'`,
+	`parallel ${WIPE} ::: x`,
+	`watch -n 1 '${WIPE}'`,
+	`watch ${WIPE}`,
+	`setsid ${WIPE}`,
+	`flock /tmp/lock ${WIPE}`,
+	`flock /tmp/lock -c '${WIPE}'`,
+	`eval ${WIPE}`,
 ];
 
 const ORDINARY_LINES = [
@@ -59,6 +108,29 @@ const ORDINARY_LINES = [
 	"git log --oneline\ngit diff --stat",
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
+	"rm -rf /tmp/build",
+	"rm -rf /Users/x/proj/dist",
+	"rm -rf ./dist node_modules",
+	"rm -r -f /var/tmp/cache",
+	"chown -R me:me ./dir",
+	"chown -R me:me /Users/x/proj",
+	"chown me:me /etc/hosts",
+	"chmod -R 755 ./scripts",
+	"chmod 644 /etc/hosts",
+	"dd if=a.img of=b.img",
+	"dd if=/dev/zero of=/tmp/file bs=1m count=1",
+	"mkfs.ext4 disk.img",
+	"echo $(date) && ls",
+	"(cd packages && ls)",
+	"{ echo a; echo b; }",
+	"for f in a b; do echo $f; done",
+	"if true; then echo yes; fi",
+	"echo hello | sh",
+	"cat notes.txt | bash",
+	"ssh host ls -la",
+	"busybox ls",
+	"flock /tmp/lock git status",
+	"echo ok \\\n && ls",
 ];
 
 describe("always-blocked segments (#3768)", () => {
@@ -139,6 +211,31 @@ describe("always-blocked segments (#3768)", () => {
 		} finally {
 			console.log = log;
 			pm.disableInfiniteMode();
+		}
+	});
+
+	test("every mode audits its refusals", async () => {
+		const log = console.log;
+		console.log = () => {};
+		try {
+			(process.stdin as { isTTY?: boolean }).isTTY = true;
+			const ask = manager();
+			await ask.requestPermission("Execute Shell Command", "d", WIPE);
+			const auto = manager();
+			auto.setAutoApprove(true);
+			await auto.requestPermission("Execute Shell Command", "d", `ls && ${WIPE}`);
+			process.env.EIGHT_HEADLESS = "1";
+			const run = manager();
+			await run.requestPermission("Execute Shell Command", "d", `echo $(${WIPE})`);
+			const modes = [ask, auto, run].map((pm) => {
+				const entries = pm.getInfiniteModeAuditLog();
+				expect(entries.length).toBe(1);
+				expect(entries[0].blocked).toBe(true);
+				return entries[0].mode;
+			});
+			expect(modes).toEqual(["ask", "auto", "run"]);
+		} finally {
+			console.log = log;
 		}
 	});
 

@@ -11,10 +11,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { blockedReason, commandArgvs } from "./always-blocked";
 import {
 	type GitState,
 	allowListIsLocalOnly,
-	commandArgvs,
 	everySegmentSafe,
 	mustAskReason,
 	repoGitState,
@@ -107,6 +107,8 @@ export interface InfiniteModeAuditEntry {
 	details: string;
 	blocked: boolean;
 	reason?: string;
+	/** The mode the call ran in; absent means infinite. */
+	mode?: string;
 }
 
 // ============================================
@@ -154,8 +156,13 @@ export const ALWAYS_BLOCKED_COMMANDS: Array<{
 	},
 	{
 		command: "chown",
-		args: ["-R"],
-		description: "recursive ownership change (check target)",
+		args: ["-R", "me:me", "/"],
+		description: "recursive ownership change of root",
+	},
+	{
+		command: "chown",
+		args: ["-R", "me:me", "/etc"],
+		description: "recursive ownership change of a system directory",
 	},
 	{
 		command: "dd",
@@ -168,6 +175,7 @@ export const ALWAYS_BLOCKED_COMMANDS: Array<{
 		description: "overwrite primary nvme",
 	},
 	{ command: "mkfs", args: ["/dev/sda"], description: "format primary disk" },
+	{ command: "mkfs.ext4", args: ["/dev/sda"], description: "format primary disk" },
 	{ command: ":(){ :|:& };:", args: [], description: "fork bomb" },
 ];
 
@@ -654,16 +662,8 @@ export class PermissionManager {
 		// Every command on the line counts, not only the first (#3768): the
 		// same segment splitting and wrapper handling as the ask-every-time list.
 		for (const argv of commandArgvs(command)) {
-			const cmd = (argv[0] ?? "").toLowerCase();
-			const argsLower = argv.slice(1).map((a) => a.toLowerCase());
-			const rule = ALWAYS_BLOCKED_COMMANDS.find((r) => {
-				if (cmd !== r.command && !cmd.endsWith(`/${r.command}`)) return false;
-				// A rule with no args matches on the command alone.
-				return r.args.every((ruleArg) =>
-					argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase())),
-				);
-			});
-			if (rule) return { blocked: true, reason: rule.description };
+			const reason = blockedReason(argv);
+			if (reason) return { blocked: true, reason };
 		}
 
 		// Also block fork bombs by content
@@ -674,8 +674,16 @@ export class PermissionManager {
 		return { blocked: false };
 	}
 
+	/** The mode label an always-blocked refusal is audited under outside Infinite. */
+	private refusalMode(): string {
+		const perCall = currentPermissionMode();
+		if (perCall) return perCall;
+		if (this.config.autoApprove) return "auto";
+		return process.env.EIGHT_HEADLESS ? "run" : "ask";
+	}
+
 	/**
-	 * Log an action during infinite mode.
+	 * Log an action during infinite mode, or an always-blocked refusal in any mode.
 	 */
 	private auditInfiniteMode(
 		command: string,
@@ -683,6 +691,7 @@ export class PermissionManager {
 		details: string,
 		blocked: boolean,
 		reason?: string,
+		mode = "infinite",
 	): void {
 		const entry: InfiniteModeAuditEntry = {
 			timestamp: new Date(),
@@ -691,6 +700,7 @@ export class PermissionManager {
 			details,
 			blocked,
 			reason,
+			mode,
 		};
 		this.infiniteModeAuditLog.push(entry);
 
@@ -699,7 +709,7 @@ export class PermissionManager {
 			const logLine = `${JSON.stringify({
 				...entry,
 				timestamp: entry.timestamp.toISOString(),
-				mode: "infinite",
+				mode,
 			})}\n`;
 
 			try {
@@ -936,15 +946,16 @@ export class PermissionManager {
 			// Refused in every mode (ask, auto, run, Infinite), never offered (#3768).
 			const blockCheck = this.isAlwaysBlocked(command);
 			if (blockCheck.blocked) {
-				if (infinite) {
-					this.auditInfiniteMode(
-						command,
-						action,
-						details,
-						true,
-						`BLOCKED even in infinite mode: ${blockCheck.reason}`,
-					);
-				}
+				this.auditInfiniteMode(
+					command,
+					action,
+					details,
+					true,
+					infinite
+						? `BLOCKED even in infinite mode: ${blockCheck.reason}`
+						: `BLOCKED in every mode: ${blockCheck.reason}`,
+					infinite ? "infinite" : this.refusalMode(),
+				);
 				request.approved = false;
 				this.log.requests.push(request);
 				this.log.deniedCount++;
