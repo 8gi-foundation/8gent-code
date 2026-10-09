@@ -45,7 +45,7 @@ import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-pla
 import { withImagesWritten } from "./image-shape";
 import { writeShapeLine } from "./write-shape";
 import { writeScopeLine } from "./write-scope";
-import { safePath } from "../eight/tools";
+import { confineWrite } from "../eight/tools";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -215,13 +215,14 @@ function resolvePath(p: string): string {
 
 /**
  * The path native write_file or edit_file may touch (#3747): inside the
- * workspace root, by safePath (traversal, symlink escape, credential paths).
- * Returns the path, or the refusal to hand back. The notebook write tools use
+ * workspace root, by confineWrite: safePath (traversal, credential paths) plus
+ * the real location of the parent and a refusal of a link at the final
+ * component, the same as the text-tool path (#3760). Returns the path, or the refusal to hand back. The notebook write tools use
  * it too (#3760). Native read_file is covered separately (#3759).
  */
 function confinedWritePath(p: string): { path: string } | { refused: string } {
 	try {
-		return { path: safePath(p, getToolContext().workingDirectory) };
+		return { path: confineWrite(p, getToolContext().workingDirectory) };
 	} catch (err) {
 		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
 	}
