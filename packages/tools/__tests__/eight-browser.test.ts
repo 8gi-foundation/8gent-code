@@ -12,13 +12,13 @@ import {
 import {
 	type BrowserCall,
 	_setProfileHomeForTest,
-	browserProfile,
-	blockedForProfile,
-	browserProfileWarning,
-	touchesBrowserSecrets,
 	_setResolverForTest,
+	blockedForProfile,
+	browserProfile,
+	browserProfileWarning,
 	createEightBrowser,
 	localBrowserTools,
+	touchesBrowserSecrets,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
