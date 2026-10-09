@@ -38,7 +38,8 @@ and the TUI starting up to the point where it needs a real terminal).
    ```
 
    `doctor` lists Ollama, mpv, yt-dlp and rg as missing on a fresh machine. All are optional.
-   "4 issue(s) found" on a clean Windows box is expected (CI shows exactly that).
+   On the GitHub Windows runner the real output ends with `4 issue(s) found.` (Ollama, mpv,
+   yt-dlp, rg). Yours will differ if you have installed any of them.
 
 5. Run it:
 
@@ -52,10 +53,9 @@ and the TUI starting up to the point where it needs a real terminal).
    function 8gent { bun run "$HOME\8gent-code\bin\8gent.ts" @args }
    ```
 
-6. A model. With no local model the first run walks you through setup. Two options: install
-   Ollama for Windows (https://ollama.com/download) and run `ollama pull qwen3.5`, or run
-   `8gent keys`, add `OPENROUTER_API_KEY`, then `/provider openrouter` and `/model auto:free`.
-   An OpenRouter key needs an OpenRouter account, not GitHub.
+6. A model. Local only: install Ollama for Windows (https://ollama.com/download), then
+   `ollama pull qwen3.5`. 8gent finds Ollama at `http://localhost:11434` by itself. With no
+   model running, the first run shows a card saying so.
 
 7. Update later:
 
@@ -92,9 +92,21 @@ bun run tui
 
 Update: `cd ~/8gent-code && git pull && bun install`.
 
-A model running in Ollama on the Windows side is reachable from WSL only if Ollama listens on
-the WSL network (set `OLLAMA_HOST=0.0.0.0` on Windows and point 8gent at the Windows host IP).
-The simpler route is to install Ollama inside WSL, or use the OpenRouter key above.
+Model: use Ollama, local only. Either install it inside WSL (`ollama pull qwen3.5` there; 8gent
+finds `localhost:11434`), or reuse the Ollama already running on Windows. For the second, on
+Windows set the user environment variable `OLLAMA_HOST=0.0.0.0` and restart Ollama, then in WSL
+point 8gent at the Windows host. 8gent reads `OLLAMA_BASE_URL`, then `OLLAMA_HOST`
+(`packages/eight/clients/ollama.ts`):
+
+```bash
+# default WSL2 (NAT): the Windows host is the default gateway
+export OLLAMA_BASE_URL="http://$(ip route show default | awk '{print $3}'):11434"
+curl "$OLLAMA_BASE_URL/api/tags"     # must list your models before you start 8gent
+```
+
+With WSL2 mirrored networking (`networkingMode=mirrored` in `.wslconfig`) `localhost:11434`
+already reaches Windows and no variable is needed. This was not run on a WSL machine; if the
+`curl` fails, fall back to Ollama inside WSL.
 
 ## C. Known gotchas
 
