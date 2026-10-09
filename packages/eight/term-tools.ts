@@ -56,7 +56,8 @@ const readOffsets = new Map<string, number>();
 /** Typed but not yet submitted, per session, so a later Enter is judged with it. */
 const pendingInput = new Map<string, string>();
 
-const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+// Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
+const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
 
 /** True when the line has quotes or shell constructs we cannot read for sure. */
 function unreadable(text: string): boolean {
