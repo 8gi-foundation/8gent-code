@@ -56,4 +56,28 @@ describe("native read_file confinement (#3759)", () => {
 		fs.writeFileSync(path.join(ws, "a.txt"), "hello inside");
 		expect(await nativeRead({ path: "a.txt" })).toBe("hello inside");
 	});
+
+	test("refuses a symlink inside the root that points outside, reads nothing, and does not name the target", async () => {
+		const { ws, outside } = setup();
+		const target = path.join(outside, "secret.txt");
+		fs.writeFileSync(target, "SYMLINK-SECRET-CONTENT");
+		fs.symlinkSync(target, path.join(ws, "link.txt"));
+		fs.symlinkSync(outside, path.join(ws, "linkdir"));
+		for (const p of ["link.txt", "linkdir/secret.txt"]) {
+			const out = await nativeRead({ path: p });
+			expect(out).toContain("symlink");
+			expect(out).toContain("Nothing was read");
+			expect(out).not.toContain("SYMLINK-SECRET-CONTENT");
+			expect(out).not.toContain(fs.realpathSync(outside));
+		}
+	});
+
+	test("a NUL byte in the path is refused plainly, not with a raw Node error", async () => {
+		const { ws } = setup();
+		fs.writeFileSync(path.join(ws, "a.txt"), "hello inside");
+		const out = await nativeRead({ path: "a.txt\0.png" });
+		expect(out).toContain("null byte");
+		expect(out).toContain("Nothing was read");
+		expect(out).not.toMatch(/ERR_INVALID_ARG|must be a string|\\0/);
+	});
 });
