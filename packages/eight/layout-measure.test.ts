@@ -61,7 +61,7 @@ describe("measureLayout (#3770)", () => {
 		expect(line).toContain("240");
 		expect(line).toContain("800");
 		expect(line.toLowerCase()).toContain("centered");
-		expect(line).not.toMatch(/—/);
+		expect(line).not.toMatch(/\u2014/);
 	});
 
 	test("a flat or unreadable image gives no line, never an error", async () => {
