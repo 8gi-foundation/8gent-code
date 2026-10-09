@@ -34,8 +34,8 @@ export interface RunOptions {
 	/** An image file to attach to the prompt (#3641); one per run. */
 	image?: string;
 	/**
-	 * Keep file and command paths inside the working directory (#3747). On by
-	 * default; `--no-workspace-boundary` turns it off.
+	 * Set EIGHT_WORKSPACE_ROOT to the run's working directory (#3747). On by
+	 * default; `--no-workspace-boundary` stops run mode setting it.
 	 */
 	workspaceBoundary: boolean;
 }
@@ -53,8 +53,9 @@ export interface RunOptions {
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
  *                                downscaled to fit 1024x1024; inside the working directory)
- *   --no-workspace-boundary      let file and command paths leave the working directory
- *                                (by default the run's workspace root is its working directory)
+ *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
+ *                                (by default run mode sets it to the working directory; native
+ *                                write_file and edit_file stay confined to the working directory either way)
  *   <prompt tokens...>           everything positional, joined with spaces
  *
  * --image limits (v1, #3641): one image per run; it reaches the model only
@@ -180,10 +181,12 @@ export function parseRunArgs(argv: string[]): RunOptions {
 }
 
 /**
- * The workspace root a run sets (#3747): its working directory, so the policy
- * engine's workspace boundary (EIGHT_WORKSPACE_ROOT) applies to every file and
- * command path. A root already in the environment is kept. Undefined means
- * set nothing: the root is already set, or the run opted out.
+ * The workspace root a run sets (#3747): its working directory, as
+ * EIGHT_WORKSPACE_ROOT, which the policy engine's workspace boundary reads
+ * for the actions it evaluates. It does not by itself confine every tool:
+ * native read_file (#3759), native run_command and the notebook tools (#3760)
+ * are not covered by this change. A root already in the environment is kept.
+ * Undefined means set nothing: the root is already set, or the run opted out.
  */
 export function runWorkspaceRoot(
 	opts: Pick<RunOptions, "cwd" | "workspaceBoundary">,

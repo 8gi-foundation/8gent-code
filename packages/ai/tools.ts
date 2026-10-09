@@ -210,9 +210,11 @@ function resolvePath(p: string): string {
 }
 
 /**
- * The path a write or edit may touch (#3747): inside the workspace root, by
- * the same check read_file and the text-tool path use (traversal, symlink
- * escape, credential paths). Returns the path, or the refusal to hand back.
+ * The path native write_file or edit_file may touch (#3747): inside the
+ * workspace root, by safePath (traversal, symlink escape, credential paths).
+ * Returns the path, or the refusal to hand back. Only these two native tools
+ * use it: native read_file (#3759), run_command and the notebook tools
+ * (#3760) are not covered by this change.
  */
 function confinedWritePath(p: string): { path: string } | { refused: string } {
 	try {
