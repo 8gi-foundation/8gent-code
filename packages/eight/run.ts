@@ -498,6 +498,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			workingDirectory: opts.cwd || process.cwd(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
+			// --provider names the provider: a provider error ends the run
+			// instead of moving to another one (#3746).
+			providerPinned: Boolean(opts.provider),
 			// The final text is read by programs, so a completion check answered
 			// with "DONE:" keeps the model's answer first (#3638).
 			keepAnswerFirst: true,
