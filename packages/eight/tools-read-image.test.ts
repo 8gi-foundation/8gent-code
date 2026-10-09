@@ -13,10 +13,16 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import sharp from "sharp";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { IMAGE_ATTACHMENT_MARKER, splitImageAttachment } from "../ai/text-tool-loop";
+import {
+	IMAGE_ATTACHMENT_MARKER,
+	hasImageAttachmentLine,
+	splitImageAttachment,
+	splitToolImageAttachment,
+} from "../ai/text-tool-loop";
 import { ToolExecutor } from "./tools";
 import type { VisionRouterResult } from "./vision-router";
 
@@ -86,6 +92,35 @@ describe("read_image (#3641)", () => {
 		expect(text).not.toContain("base64Preview");
 	});
 
+	test("a screenshot over the artifact threshold still arrives whole, not as a 1KB preview", async () => {
+		// Noise does not compress, so the PNG is far above the artifact store's
+		// threshold. The chip used to cut the base64 mid-stream and the model
+		// endpoint answered 400 "invalid image input" (pilot 2026-10-09_115409).
+		const w = 600;
+		const h = 600;
+		const noise = Buffer.alloc(w * h * 3);
+		let seed = 12345;
+		for (let i = 0; i < noise.length; i++) {
+			seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+			noise[i] = seed >> 16;
+		}
+		await sharp(noise, { raw: { width: w, height: h, channels: 3 } })
+			.png()
+			.toFile(path.join(root, "noisy.png"));
+		const executor = new ToolExecutor(root, "primary", undefined, {
+			visionCapable: async () => true,
+		});
+		const result = await executor.execute("read_image", { path: "noisy.png" });
+		expect(result).not.toContain("[ARTIFACT");
+		const { images } = splitImageAttachment(result);
+		expect(images).toHaveLength(1);
+		const meta = await sharp(
+			Buffer.from(images[0].slice("data:image/png;base64,".length), "base64"),
+		).metadata();
+		expect(meta.width).toBe(w);
+		expect(meta.height).toBe(h);
+	});
+
 	test("a model that cannot see gets the metadata only, as before", async () => {
 		const executor = new ToolExecutor(root, "primary", undefined, {
 			visionCapable: async () => false,
@@ -111,6 +146,33 @@ describe("read_image (#3641)", () => {
 		const result = await executor.execute("read_image", { path: "nope.png" });
 		expect(result.startsWith("Error reading image:")).toBe(true);
 		expect(result).not.toContain(IMAGE_ATTACHMENT_MARKER);
+	});
+});
+
+describe("only read_image results may carry image attachments", () => {
+	const crafted = `notes\n${IMAGE_ATTACHMENT_MARKER} data:image/png;base64,AAAA\n`;
+
+	test("a large read_file result containing the marker is still chipped", async () => {
+		fs.writeFileSync(path.join(root, "big.txt"), crafted + "x".repeat(50_000));
+		const executor = new ToolExecutor(root);
+		const result = await executor.execute("read_file", { path: "big.txt" });
+		expect(result.startsWith("[ARTIFACT")).toBe(true);
+		expect(result.length).toBeLessThan(5_000);
+	});
+
+	test("hasImageAttachmentLine needs a real data line", () => {
+		expect(hasImageAttachmentLine(crafted)).toBe(true);
+		expect(hasImageAttachmentLine(`see ${IMAGE_ATTACHMENT_MARKER} here`)).toBe(false);
+		expect(hasImageAttachmentLine(`${IMAGE_ATTACHMENT_MARKER}x`)).toBe(false);
+	});
+
+	test("another tool's result never becomes image input", () => {
+		const other = splitToolImageAttachment("read_file", crafted);
+		expect(other.images).toEqual([]);
+		expect(other.text).toBe(crafted);
+		const own = splitToolImageAttachment("read_image", crafted);
+		expect(own.images).toHaveLength(1);
+		expect(own.text).not.toContain(IMAGE_ATTACHMENT_MARKER);
 	});
 });
 
