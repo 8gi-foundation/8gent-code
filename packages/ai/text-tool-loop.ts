@@ -503,6 +503,8 @@ export function unknownToolResult(name: string, available: string[]): string {
  * answer at all (#3091: "" recorded as status ok, the TUI showed "No reply.").
  */
 export function emptyReplyStall(toolCalls: number): string {
+	// #3524: no tool work behind it, so nothing was done and nothing was said.
+	if (toolCalls === 0) return "the model returned an empty reply, so the turn is not finished";
 	const calls = toolCalls === 1 ? "1 tool call" : `${toolCalls} tool calls`;
 	return `the model ended the turn without an answer after ${calls}, so the task may be unfinished`;
 }
@@ -510,6 +512,11 @@ export function emptyReplyStall(toolCalls: number): string {
 /** The answer shown in place of an empty reply after tool work. */
 export function emptyReplyNote(toolCalls: number): string {
 	return `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
+}
+
+/** True when a turn's reply is the no-reply note: the turn is not done (#3524). */
+export function isEmptyReplyNote(reply: string): boolean {
+	return reply.startsWith("[harness] No reply:");
 }
 
 /**
@@ -655,7 +662,7 @@ export async function runTextToolAgent(
 		const content = cleanDegenerateReply(raw).clean;
 		// No answer after tool work is not a finished turn (#3091): say so in
 		// the answer and in `unverified`, whichever exit this is.
-		const empty = content.trim() === "" && toolLog.length > 0;
+		const empty = content.trim() === "";
 		const unfulfilled = claimsAgainstLog(content);
 		const unverified = [
 			...(empty ? [emptyReplyStall(toolLog.length)] : []),
@@ -754,9 +761,9 @@ export async function runTextToolAgent(
 			// reply after later tool rounds is taken at its word.
 			// A round whose tools all failed or were blocked is a stall trigger
 			// too (run 014230): the prose after it is not a final answer either.
-			// An empty reply after tool work is a stall too, whatever the round
-			// before it was (#3091): it is never the turn's answer.
-			const emptyAfterWork = replyText.trim() === "" && toolLog.length > 0;
+			// An empty reply is a stall too, whatever the round before it was
+			// (#3091, #3524): it is never the turn's answer, tool work or not.
+			const emptyAfterWork = replyText.trim() === "";
 			const freshStall =
 				(prevRoundHadSuccess || prevRoundAllRefused || emptyAfterWork) &&
 				!((checksSent > 0 || planCheckSent || finalCheckSent) && hasDoneMarker(replyText));
