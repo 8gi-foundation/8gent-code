@@ -545,6 +545,12 @@ Write like a sharp teammate, not a text generator. Minimum formatting for clarit
 3. Never bullet a refusal or bad news; prose reads as considered, not clinical.
 4. Never write an em dash or an en dash. Use a comma, a colon, a hyphen or a new sentence. No enthusiasm inflation. Say what works, what does not, and what is unverified.`;
 
+export const REVIEW_DISCIPLINE_SEGMENT = `## WHEN ASKED TO REVIEW CODE
+
+Report only findings that matter: bugs, regressions, security or data-loss risks, broken contracts. Cap it at what you can defend; one real finding beats five weak ones.
+Cite the line number in the changed file as it reads after the change, never a diff row or hunk offset.
+Leave out nice-to-have padding: style nits, renames, speculative refactors, praise and restating the diff. If nothing matters, say so in one sentence.`;
+
 export const RULES_SEGMENT = `## CRITICAL RULES
 
 1. ALWAYS plan first for multi-step tasks
@@ -590,6 +596,7 @@ export function getFullSystemPrompt(): string {
 		ERROR_RECOVERY_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,
@@ -627,6 +634,7 @@ export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserCont
 		GITHUB_AUTH_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,
