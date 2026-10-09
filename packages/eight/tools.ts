@@ -1695,6 +1695,8 @@ export class ToolExecutor {
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
 		notebook_insert_cell: "write_file",
+		// Deleting a cell rewrites the notebook: a write, like edit and insert (#3760).
+		notebook_delete_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
 		git_push: "git_push",
@@ -3160,9 +3162,8 @@ export class ToolExecutor {
 		cellIndex: number,
 		newSource: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+		// Inside the workspace root, by safePath (#3760).
+		const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 
 		try {
 			const result = await editCell(absolutePath, cellIndex, newSource);
@@ -3178,9 +3179,8 @@ export class ToolExecutor {
 		cellType: "code" | "markdown",
 		source: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+		// Inside the workspace root, by safePath (#3760).
+		const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 
 		try {
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
@@ -3191,9 +3191,8 @@ export class ToolExecutor {
 	}
 
 	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+		// Inside the workspace root, by safePath (#3760).
+		const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 
 		try {
 			const result = await deleteCell(absolutePath, cellIndex);
