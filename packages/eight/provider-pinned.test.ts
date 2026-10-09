@@ -217,6 +217,23 @@ describe("a named provider never falls back to another provider (#3746)", () => 
 			process.env.OPENROUTER_API_KEY = prev;
 		}
 	}, 30000);
+
+	test("a pinned child built from inherited fields never reaches the hosted provider (#3762)", async () => {
+		const { inheritedProviderFields } = await import("../orchestration/provider-pin");
+		const inherited = inheritedProviderFields({ runtime: "ollama", model: "pin-a" });
+		const start = seen.length;
+		const child = new Agent({
+			model: inherited.model as string,
+			runtime: inherited.runtime as "ollama",
+			providerPinned: inherited.providerPinned,
+			workingDirectory: repo,
+			baseUrl: `http://127.0.0.1:${sessionPort}`,
+		} as ConstructorParameters<typeof import("./agent").Agent>[0]);
+		const out = String(await child.chat("say done").catch((e: Error) => e.message));
+		const reqs = seen.slice(start);
+		expect(reqs.filter((r) => r.server === "openrouter")).toEqual([]);
+		expect(out).toContain("no other provider was tried");
+	}, 30000);
 });
 
 describe("hosted providers need a key before any request (#3746)", () => {

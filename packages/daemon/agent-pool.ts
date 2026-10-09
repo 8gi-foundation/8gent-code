@@ -244,7 +244,11 @@ export class AgentPool {
 		// precedence over the pool default before the gate is applied.
 		const isTableSession = channel === "table" || overrides?.agentScope === "__table__";
 		// A session started from inside a pinned agent's turn follows that agent's
-		// provider and stays pinned to it (#3762).
+		// provider and model and stays pinned to it (#3762). An explicit
+		// `overrides.runtime` is a deliberate per-session choice and wins: it is
+		// pinned only when it names the same runtime. A Table session forced to
+		// local is not on the pin's runtime, so it is neither pinned nor given
+		// the pin's model.
 		const pin = currentProviderPin();
 		let runtime: AgentConfig["runtime"] =
 			overrides?.runtime ?? (pin?.runtime as AgentConfig["runtime"] | undefined) ?? this.config.runtime;
@@ -263,12 +267,13 @@ export class AgentPool {
 
 		// Per-session backend routing: an override pins this session to a specific
 		// local model / endpoint / persona; otherwise the pool defaults apply.
-		const model = overrides?.model ?? this.config.model;
+		const onPin = pin !== undefined && runtime === pin.runtime;
+		const model = overrides?.model ?? (onPin ? pin.model : undefined) ?? this.config.model;
 
 		const agentConfig: AgentConfig = {
 			model,
 			runtime,
-			...(pin && runtime === pin.runtime ? { providerPinned: true } : {}),
+			...(onPin ? { providerPinned: true } : {}),
 			// Optional explicit endpoint (e.g. an officer's local backend port).
 			// createClient() ignores it for clients that don't speak HTTP.
 			baseUrl: overrides?.baseUrl,
