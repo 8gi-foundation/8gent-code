@@ -124,8 +124,14 @@ describe("#3524 headless run does not report a blank reply as success", () => {
 		const err: string[] = [];
 		const ow = process.stdout.write.bind(process.stdout);
 		const ew = process.stderr.write.bind(process.stderr);
-		process.stdout.write = ((c: unknown) => (out.push(String(c)), true)) as typeof process.stdout.write;
-		process.stderr.write = ((c: unknown) => (err.push(String(c)), true)) as typeof process.stderr.write;
+		process.stdout.write = ((c: unknown) => {
+			out.push(String(c));
+			return true;
+		}) as typeof process.stdout.write;
+		process.stderr.write = ((c: unknown) => {
+			err.push(String(c));
+			return true;
+		}) as typeof process.stderr.write;
 		let code: number;
 		try {
 			code = await runRunCommand([
