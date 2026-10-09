@@ -414,8 +414,9 @@ export async function readPipedStdin(hasPrompt = false): Promise<string> {
  * The workspace root a run sets (#3747): its working directory, as
  * EIGHT_WORKSPACE_ROOT, which the policy engine's workspace boundary reads
  * for the actions it evaluates. It does not by itself confine every tool:
- * native read_file (#3759), native run_command and the notebook tools (#3760)
- * are not covered by this change. A root already in the environment is kept.
+ * native read_file (#3759) is not covered by this change. Native run_command
+ * and the notebook write tools take the same policy decision and safePath
+ * confinement as the text-tool path (#3760). A root already in the environment is kept.
  * Undefined means set nothing: the root is already set, or the run opted out.
  */
 export function runWorkspaceRoot(
