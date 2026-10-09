@@ -58,14 +58,31 @@ jobs:
     runs-on: [self-hosted, 8gi, helm]
     timeout-minutes: 20
     steps:
-      # Only the script, from main (or the PR under test). Old tags predate it,
-      # and nothing else from the repo is needed: the container never sees it.
-      - name: Fetch the check script
+      # The script from main (or the PR under test): old tags predate it. The
+      # container never sees this checkout. A plain full checkout on purpose:
+      # this runner reuses one workspace across workflows, and a sparse
+      # checkout here left Linux (Docker) without its Dockerfile.
+      - name: Checkout (for the check script)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || github.event.repository.default_branch }}
-          sparse-checkout: scripts/clean-install-check.sh
-          sparse-checkout-cone-mode: false
+
+      # This runner shares one workspace across every workflow. An earlier
+      # version of this job used a sparse checkout, which left
+      # core.sparseCheckout=true in .git/config; actions/checkout's own
+      # `sparse-checkout disable` writes to config.worktree and then drops
+      # extensions.worktreeConfig, so the flag survived and later jobs got a
+      # one-file tree. Turn it off and re-materialise the tree if it is set.
+      - name: Workspace is not sparse
+        run: |
+          if [ "$(git config --local --bool core.sparseCheckout || echo false)" = true ] \
+             || git ls-files -t | grep -q '^S '; then
+            git config --local core.sparseCheckout false
+            git ls-files -z | xargs -0 git update-index --no-skip-worktree
+            git checkout -f HEAD -- .
+            echo "::warning::Workspace had core.sparseCheckout=true; turned off and restored the full tree."
+          fi
+          test -f .github/docker/linux-ci/Dockerfile || { echo "::error::workspace tree is incomplete"; exit 1; }
 
       - name: Which release
         id: target
