@@ -130,6 +130,8 @@ import {
 	PERMISSION_MODE_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
 	checkAgentTool,
 	listAgentsTool,
 	spawnAgentTool,
@@ -931,12 +933,11 @@ export class ToolExecutor {
 							runtime: {
 								type: "string",
 								enum: ["8gent", "claude", "shell"],
-								description: "Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)",
+								description: SPAWN_RUNTIME_DESCRIPTION,
 							},
 							model: {
 								type: "string",
-								description:
-									"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
+								description: SPAWN_MODEL_DESCRIPTION,
 							},
 							timeout: {
 								type: "number",

@@ -26,13 +26,23 @@ import {
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
-import { AgentDepthError, currentAgentDepth, processAgentDepthRefusal } from "../orchestration/index";
+import {
+	AgentDepthError,
+	currentAgentDepth,
+	processAgentDepthRefusal,
+	runAsParentSession,
+} from "../orchestration/index";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
-import { type FailoverEntry, ModelFailover } from "../providers/failover";
+import {
+	type FailoverChannel,
+	type FailoverEntry,
+	ModelFailover,
+	NoAllowedProviderError,
+} from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
 import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
@@ -1291,7 +1301,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.contextNoteMessages.push(message);
 	}
 
-	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+	/**
+	 * One turn. Children this turn spawns inherit this agent's provider, model
+	 * and baseUrl as they are when the child starts (#3710).
+	 */
+	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		return runAsParentSession(
+			() => ({
+				runtime: this.config.runtime,
+				model: this.config.model,
+				baseUrl: this.config.baseUrl,
+			}),
+			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+		);
+	}
+
+	private async runTurn(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+	): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
@@ -2200,7 +2229,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						if (hedge.enabled) {
 							// Add sibling free/local entries from the failover chain as extra
 							// candidates. Non-fatal if the chain has no siblings.
-							const sibling = failover.resolve(currentEntry.model, channel);
+							// No allowed sibling (hosted off, #3710): hedge on the current entry alone.
+							const sibling = tryResolve(failover, currentEntry, channel);
 							if (
 								(sibling.model !== currentEntry.model ||
 									sibling.provider !== currentEntry.provider) &&
@@ -2303,7 +2333,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							error: msg.slice(0, 200),
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
-						const next = failover.resolve(currentEntry.model, channel);
+						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
+						const next = tryResolve(failover, currentEntry, channel);
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
@@ -3216,6 +3247,24 @@ function readSettingsFileSync(): Settings | null {
 		return null;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * The failover chain's next entry, or `current` when no allowed provider can
+ * serve the model: with hosted providers off (#3710) or an allowlist set,
+ * resolve() throws rather than sending the turn to a provider nobody chose.
+ */
+function tryResolve(
+	failover: ModelFailover,
+	current: FailoverEntry,
+	channel: FailoverChannel,
+): FailoverEntry {
+	try {
+		return failover.resolve(current.model, channel);
+	} catch (err) {
+		if (err instanceof NoAllowedProviderError) return current;
+		throw err;
 	}
 }
 
