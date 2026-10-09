@@ -9,11 +9,11 @@
  * - Background agent execution with /spawn, /agents, /join commands
  */
 
-import { withChildGuidance } from "./child-guidance";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import { withChildGuidance } from "./child-guidance";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { hostedAllowed, isHostedProvider } from "../providers/failover";
 import type { AgentConfig as EightAgentConfig } from "../eight/types";
