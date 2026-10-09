@@ -27,6 +27,7 @@ import {
 	writeSessionToKG,
 } from "../memory/session-kg.js";
 import { AgentDepthError, currentAgentDepth, processAgentDepthRefusal } from "../orchestration/index";
+import { pinFromConfig, runWithProviderPin } from "../orchestration/provider-pin";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
@@ -1292,6 +1293,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		// Every agent this turn starts inherits a pinned parent's provider (#3762).
+		// An un-pinned agent binds nothing, so its children are as before.
+		return runWithProviderPin(pinFromConfig(this.config), () =>
+			this.runChat(userMessage, imageBase64, imageMimeType),
+		);
+	}
+
+	private async runChat(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+	): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];

@@ -9,6 +9,7 @@ import { Agent } from "../eight/agent";
 import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
+import { currentProviderPin } from "../orchestration/provider-pin";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import { bus } from "./events";
@@ -242,7 +243,11 @@ export class AgentPool {
 		// A per-session `overrides.runtime` (e.g. an officer's backend) takes
 		// precedence over the pool default before the gate is applied.
 		const isTableSession = channel === "table" || overrides?.agentScope === "__table__";
-		let runtime: AgentConfig["runtime"] = overrides?.runtime ?? this.config.runtime;
+		// A session started from inside a pinned agent's turn follows that agent's
+		// provider and stays pinned to it (#3762).
+		const pin = currentProviderPin();
+		let runtime: AgentConfig["runtime"] =
+			overrides?.runtime ?? (pin?.runtime as AgentConfig["runtime"] | undefined) ?? this.config.runtime;
 		if (isTableSession && !LOCAL_PROVIDERS.has(runtime)) {
 			if (process.env.EIGHT_TABLE_CONSENT_CLOUD === "1") {
 				console.warn(
@@ -263,6 +268,7 @@ export class AgentPool {
 		const agentConfig: AgentConfig = {
 			model,
 			runtime,
+			...(pin && runtime === pin.runtime ? { providerPinned: true } : {}),
 			// Optional explicit endpoint (e.g. an officer's local backend port).
 			// createClient() ignores it for clients that don't speak HTTP.
 			baseUrl: overrides?.baseUrl,
