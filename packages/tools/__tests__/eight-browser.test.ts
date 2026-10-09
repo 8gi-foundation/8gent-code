@@ -19,6 +19,7 @@ import {
 	createEightBrowser,
 	localBrowserTools,
 	touchesBrowserSecrets,
+	browserWithheldNote,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
@@ -641,6 +642,21 @@ describe("localBrowserTools (local sessions get a browser only with a named prof
 			"browser_task",
 			"browser_screenshot",
 		]);
+	});
+});
+
+describe("browserWithheldNote (a withheld browser says why and how to get it, #3785)", () => {
+	test("names the tools, the reason and EIGHT_BROWSER_PROFILE when none is configured", () => {
+		const note = browserWithheldNote({}) ?? "";
+		expect(note).toMatch(/browser_open/);
+		expect(note).toMatch(/not offered/);
+		expect(note).toMatch(/EIGHT_BROWSER_PROFILE/);
+		expect(note).toMatch(/loopback|private/);
+		expect(note).not.toContain("\u2014");
+	});
+	test("a bad profile name is still withheld; a valid one offers the tools so no note", () => {
+		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "../x" })).not.toBeNull();
+		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "eightgent" })).toBeNull();
 	});
 });
 
