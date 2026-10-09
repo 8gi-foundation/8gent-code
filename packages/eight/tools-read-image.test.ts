@@ -86,6 +86,35 @@ describe("read_image (#3641)", () => {
 		expect(text).not.toContain("base64Preview");
 	});
 
+	test("a screenshot over the artifact threshold still arrives whole, not as a 1KB preview", async () => {
+		// Noise does not compress, so the PNG is far above the artifact store's
+		// threshold. The chip used to cut the base64 mid-stream and the model
+		// endpoint answered 400 "invalid image input" (pilot 2026-10-09_115409).
+		const w = 600;
+		const h = 600;
+		const noise = Buffer.alloc(w * h * 3);
+		let seed = 12345;
+		for (let i = 0; i < noise.length; i++) {
+			seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+			noise[i] = seed >> 16;
+		}
+		await sharp(noise, { raw: { width: w, height: h, channels: 3 } })
+			.png()
+			.toFile(path.join(root, "noisy.png"));
+		const executor = new ToolExecutor(root, "primary", undefined, {
+			visionCapable: async () => true,
+		});
+		const result = await executor.execute("read_image", { path: "noisy.png" });
+		expect(result).not.toContain("[ARTIFACT");
+		const { images } = splitImageAttachment(result);
+		expect(images).toHaveLength(1);
+		const meta = await sharp(
+			Buffer.from(images[0].slice("data:image/png;base64,".length), "base64"),
+		).metadata();
+		expect(meta.width).toBe(w);
+		expect(meta.height).toBe(h);
+	});
+
 	test("a model that cannot see gets the metadata only, as before", async () => {
 		const executor = new ToolExecutor(root, "primary", undefined, {
 			visionCapable: async () => false,
