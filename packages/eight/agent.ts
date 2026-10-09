@@ -129,6 +129,13 @@ import {
 	voice as personalityVoice,
 } from "../personality/voice.js";
 import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
+import {
+	ObservationPacker,
+	ObservationStore,
+	observationPackEnabled,
+	readOutputTool,
+} from "./observation-pack";
+import { resolveHome } from "../core/home";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -245,6 +252,7 @@ export class Agent {
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	private hookManager: HookManager;
 	private sessionId: string;
+	private observations: ObservationStore | null = null;
 	private sessionStartTime: number;
 	private enableReporting = true;
 	private totalCost: number | null = null;
@@ -932,6 +940,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				return result;
 			},
 		}));
+		// Stale-output handles (#3477, EIGHT_OBSERVATION_PACK=1): old big tool
+		// results become a handle; read_output reads them back exactly.
+		const observations = observationPackEnabled() ? this.observationStore() : null;
+		if (observations) tools.push(readOutputTool(observations));
 
 		// Conversation: the in-place system instructions plus the non-system
 		// history (runTextToolAgent injects the tool protocol into the system
@@ -1033,13 +1045,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					});
 				},
 			});
-			const call = (msgs: Parameters<typeof rawCall>[0]) =>
-				withTurnTimeout(
-					() => rawCall(withStyleReminder(msgs, this.styleReminder)),
+			// One packer per attempt: it counts this attempt's model requests.
+			const packer = observations ? new ObservationPacker(observations) : null;
+			const call = (msgs: Parameters<typeof rawCall>[0]) => {
+				const sent = packer ? packer.pack(msgs) : msgs;
+				return withTurnTimeout(
+					() => rawCall(withStyleReminder(sent, this.styleReminder)),
 					attemptTimeoutMs,
 					() => this.abortController?.abort(),
 					`${provider}/${model} (text-tools)`,
 				);
+			};
 			return runTextToolAgent({
 				messages: turnMessages,
 				tools,
@@ -3094,6 +3110,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			`  [TIME_TRAVEL] forked from ${sourceSessionId}/${checkpointId} into ${this.sessionId} (${messages.length} messages)`,
 		);
 		return { meta, messages };
+	}
+
+	/** This session's packed tool outputs, saved under ~/.8gent/sessions/<session id> (#3477). */
+	private observationStore(): ObservationStore {
+		this.observations ??= new ObservationStore(
+			path.join(resolveHome(), ".8gent", "sessions", this.sessionId),
+		);
+		return this.observations;
 	}
 
 	/**
