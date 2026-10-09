@@ -10,7 +10,7 @@
  * real completion back.
  */
 
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -116,8 +116,11 @@ describe("PII gate applies to egress, not to on-device endpoints", () => {
 	/** Stand up a one-shot OpenAI-compatible server and capture what it receives. */
 	async function captureRequest(
 		baseUrlFor: (port: number) => string,
+		/** Hostname the client is pointed at that is served by the local listener, with no DNS. */
+		viaHost?: string,
 	): Promise<Record<string, unknown>> {
 		let received: Record<string, unknown> = {};
+		let fetchSpy: { mockRestore: () => void } | undefined;
 		const server = Bun.serve({
 			port: 0,
 			fetch: async (req) => {
@@ -129,12 +132,29 @@ describe("PII gate applies to egress, not to on-device endpoints", () => {
 		});
 		try {
 			const port = server.port ?? 0;
+			if (viaHost) {
+				// The client sees a non-loopback hostname; the request lands on the local listener.
+				// No external name is resolved, so this runs the same offline and in a sandbox (#3387).
+				const realFetch = globalThis.fetch;
+				fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((
+					input: RequestInfo | URL,
+					init?: RequestInit,
+				) => {
+					const url = new URL(input instanceof Request ? input.url : String(input));
+					if (url.hostname === viaHost) {
+						url.hostname = "127.0.0.1";
+						return realFetch(url.toString(), init);
+					}
+					return Promise.reject(new Error(`test blocks ${url.host}`));
+				}) as typeof fetch);
+			}
 			// A key, as a hosted endpoint needs one: with none, nothing is sent (#3746).
 			const client = new OpenRouterClient("test-model", "sk-test", baseUrlFor(port));
 			await client.chat([
 				{ role: "user", content: "My name is James Spalding, email james@example.com" },
 			]);
 		} finally {
+			fetchSpy?.mockRestore();
 			server.stop(true);
 		}
 		return received;
@@ -151,7 +171,11 @@ describe("PII gate applies to egress, not to on-device endpoints", () => {
 	test("a non-loopback baseUrl still goes through the anonymizer", async () => {
 		// Same server, reached by a name that is not loopback. isCloudProvider is
 		// deliberately strict, and that fail-safe direction must not regress.
-		const sent = JSON.stringify(await captureRequest((port) => `http://localtest.me:${port}/v1`));
+		const sent = JSON.stringify(
+			await captureRequest((port) => `http://egress.example.test:${port}/v1`, "egress.example.test"),
+		);
+		// The listener received a request (the capture is not empty) and it carries no raw email.
+		expect(sent).toContain("test-model");
 		expect(sent).not.toContain("james@example.com");
 	}, 15_000);
 });
