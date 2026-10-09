@@ -164,6 +164,7 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
+import { resolveUselessStreak } from "../ai/useless-streak";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
@@ -1050,6 +1051,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
 				finalCheck: () => verifyNudgeFor(this.turnToolLedger),
+				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
+				// off by default): N empty or error results in a row and the next
+				// round gets no tools, only a note to answer with what it has.
+				uselessStreak: resolveUselessStreak(),
 			});
 		};
 
