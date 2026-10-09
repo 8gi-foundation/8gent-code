@@ -982,6 +982,26 @@ describe("Infinite mode asks for the ask-every-time list (#3765)", () => {
 		);
 	});
 
+	test("with a terminal, a line that is always blocked and a default-branch push is refused unasked", async () => {
+		(process.stdin as { isTTY?: boolean }).isTTY = true;
+		const asked: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req.command ?? "");
+			return "approve";
+		});
+		const pm = manager();
+		pm.enableInfiniteMode();
+		const line = "chmod -R 000 / && git push origin main";
+		try {
+			expect(pm.mustAskReason(line)).not.toBeNull();
+			expect(await pm.requestPermission("Execute Shell Command", "d", line)).toBe(false);
+			expect(asked).toEqual([]);
+			expect(pm.getInfiniteModeAuditLog().map((e) => e.blocked)).toEqual([true]);
+		} finally {
+			pm.disableInfiniteMode();
+		}
+	});
+
 	test("ordinary commands never prompt", async () => {
 		(process.stdin as { isTTY?: boolean }).isTTY = true;
 		const asked: string[] = [];

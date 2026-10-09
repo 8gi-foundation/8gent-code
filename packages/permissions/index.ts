@@ -935,27 +935,28 @@ export class PermissionManager {
 
 		// INFINITE MODE: Bypass most permission checks, but block catastrophic
 		// commands, and ask a person for the ask-every-time list (#3765).
+		// The always-blocked check runs first, so a line that is both always
+		// blocked and ask-every-time is refused here and never offered.
 		const infinite = this.isInfiniteMode();
+		if (infinite && command) {
+			const blockCheck = this.isAlwaysBlocked(command);
+			if (blockCheck.blocked) {
+				this.auditInfiniteMode(
+					command,
+					action,
+					details,
+					true,
+					`BLOCKED even in infinite mode: ${blockCheck.reason}`,
+				);
+				request.approved = false;
+				this.log.requests.push(request);
+				this.log.deniedCount++;
+				console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
+				return false;
+			}
+		}
 		const infiniteAsk = infinite && command ? this.mustAskReason(command) : null;
 		if (infinite && !infiniteAsk) {
-			if (command) {
-				const blockCheck = this.isAlwaysBlocked(command);
-				if (blockCheck.blocked) {
-					this.auditInfiniteMode(
-						command,
-						action,
-						details,
-						true,
-						`BLOCKED even in infinite mode: ${blockCheck.reason}`,
-					);
-					request.approved = false;
-					this.log.requests.push(request);
-					this.log.deniedCount++;
-					console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
-					return false;
-				}
-			}
-
 			// Audit and approve
 			this.auditInfiniteMode(command || "", action, details, false);
 			request.approved = true;
