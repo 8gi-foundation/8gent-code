@@ -326,6 +326,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
 	);
+	if (!concise) lines.push("**Slides to video: loop over `slide*.png`, not `while read` on a text file (it drops a last line with no trailing newline). Before joining, confirm segment count equals slide count.**");
 
 	return lines.join("\n");
 }
