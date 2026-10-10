@@ -355,6 +355,39 @@ describe("cloneLocalIntoProject refuses", () => {
 		}
 	});
 
+	test("fails closed when the account home lookup is empty, missing or throws", () => {
+		for (const lookup of [
+			"",
+			null,
+			() => undefined,
+			() => {
+				throw new Error("no passwd entry");
+			},
+		]) {
+			_setPasswdHomeForTests(lookup);
+			try {
+				expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(false);
+			} finally {
+				_setPasswdHomeForTests(undefined);
+			}
+		}
+	});
+
+	test("the test hook is inert outside the test environment", () => {
+		const env = process.env.NODE_ENV;
+		expect(env).toBe("test");
+		Reflect.set(process.env, "NODE_ENV", "production");
+		try {
+			_setPasswdHomeForTests(container);
+		} finally {
+			Reflect.set(process.env, "NODE_ENV", env);
+		}
+		// Had the hook taken effect, the parent would count as the account home and be refused.
+		const real = realpathSync(container);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(true);
+		_setPasswdHomeForTests(undefined);
+	});
+
 	test("workspace parent is the account home", () => {
 		_setPasswdHomeForTests(container);
 		try {

@@ -124,15 +124,22 @@ function bareRepo(dir: string): boolean {
 	);
 }
 
-let passwdHomeOverride: string | undefined;
-/** Tests only: stand in for the account's home directory. */
-export function _setPasswdHomeForTests(h: string | undefined): void {
+type HomeLookup = string | null | (() => string | undefined);
+let passwdHomeOverride: HomeLookup | undefined;
+/** Tests only: stand in for the account's home lookup. Inert unless NODE_ENV is "test". */
+export function _setPasswdHomeForTests(h: HomeLookup | undefined): void {
+	if (process.env.NODE_ENV !== "test") return;
 	passwdHomeOverride = h;
 }
 
+/** The account's home directory, or undefined when it cannot be determined. */
 function accountHome(): string | undefined {
-	if (passwdHomeOverride !== undefined) return passwdHomeOverride;
 	try {
+		if (passwdHomeOverride !== undefined) {
+			const v =
+				typeof passwdHomeOverride === "function" ? passwdHomeOverride() : passwdHomeOverride;
+			return v ?? undefined;
+		}
 		return userInfo().homedir;
 	} catch {
 		return undefined;
@@ -167,7 +174,10 @@ function parentIsTooBroad(parent: string): boolean {
 	if (p === "/" || p === path.parse(parent).root.toLowerCase()) return true;
 	const prefix = p.endsWith("/") ? p : `${p}/`;
 	for (const h of homeForms(process.env.HOME)) if (h === p) return true;
-	for (const h of homeForms(accountHome())) if (h === p || h.startsWith(prefix)) return true;
+	// Fail closed: with no known account home the parent cannot be judged.
+	const account = accountHome();
+	if (!account) return true;
+	for (const h of homeForms(account)) if (h === p || h.startsWith(prefix)) return true;
 	return false;
 }
 
