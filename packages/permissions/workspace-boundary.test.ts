@@ -264,19 +264,23 @@ describe("legitimate workspace paths pass", () => {
 // Allow-prefix escape hatch
 // ============================================
 
+// "/usr/bin" has no drive letter on Windows; the workspace resolves it against its own drive, so the
+// prefix is spelled the same way (a no-op on POSIX).
+const USR_BIN = path.resolve(WORKSPACE, "/usr/bin");
+
 describe("allowedAbsolutePrefixes escape hatch", () => {
 	test("explicitly allowed prefix bypasses boundary", () => {
-		const result = checkCommandBoundary("cat /usr/bin/env", WORKSPACE, ["/usr/bin"]);
+		const result = checkCommandBoundary("cat /usr/bin/env", WORKSPACE, [USR_BIN]);
 		expect(result.allowed).toBe(true);
 	});
 
 	test("read_file under explicitly allowed prefix is permitted", () => {
-		const result = checkFilePathBoundary("/usr/bin/env", WORKSPACE, ["/usr/bin"]);
+		const result = checkFilePathBoundary("/usr/bin/env", WORKSPACE, [USR_BIN]);
 		expect(result.allowed).toBe(true);
 	});
 
 	test("non-allowlisted absolute path still rejected", () => {
-		const result = checkFilePathBoundary("/etc/passwd", WORKSPACE, ["/usr/bin"]);
+		const result = checkFilePathBoundary("/etc/passwd", WORKSPACE, [USR_BIN]);
 		expect(result.allowed).toBe(false);
 	});
 });
