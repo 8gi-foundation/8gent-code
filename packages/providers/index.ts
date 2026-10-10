@@ -21,6 +21,7 @@ import { modelFetch } from "../ai/model-fetch";
 import type { ThinkingLevel } from "../types/index.js";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
+import { readVaultKey, storeVaultKey } from "../secrets/key-vault";
 import { AuthRotator } from "./auth-rotation";
 import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import {
@@ -75,6 +76,13 @@ export interface ProviderConfig {
 	displayName: string;
 	baseUrl: string;
 	apiKeyEnv: string;
+	/**
+	 * Vault entry name for this provider's key (see packages/secrets/key-vault).
+	 * Defaults to `apiKeyEnv`. A declared provider with no env var names its
+	 * vault entry here.
+	 */
+	apiKeyRef?: string;
+	/** Plain-text key from providers.json. Still read, but resolves last. */
 	apiKey?: string;
 	defaultModel: string;
 	models: string[];
@@ -566,6 +574,8 @@ export class ProviderManager {
 	private settingsPath: string;
 	/** Providers declared in providers.json under a name we did not compile in. */
 	private declared: Record<string, ProviderConfig>;
+	private plainKeyProviders = new Set<string>();
+	private plainKeyWarned = new Set<string>();
 	readonly authRotator: AuthRotator;
 	readonly failover: ModelFailover;
 
@@ -635,7 +645,10 @@ export class ProviderManager {
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
-		fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2));
+		// 0600 on create AND on every write: writeFileSync's mode only applies to
+		// a new file, so an older, looser providers.json is tightened here.
+		fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), { mode: 0o600 });
+		fs.chmodSync(this.settingsPath, 0o600);
 	}
 
 	// ============================================
@@ -698,9 +711,7 @@ export class ProviderManager {
 			this.settings.providers[name] = {};
 		}
 		this.settings.providers[name].enabled = true;
-		if (apiKey) {
-			this.settings.providers[name].apiKey = apiKey;
-		}
+		if (apiKey) this.vaultKey(name, apiKey);
 		this.saveSettings();
 	}
 
@@ -712,11 +723,22 @@ export class ProviderManager {
 	}
 
 	setApiKey(name: ProviderName, apiKey: string): void {
-		if (!this.settings.providers[name]) {
-			this.settings.providers[name] = {};
-		}
-		this.settings.providers[name].apiKey = apiKey;
+		this.vaultKey(name, apiKey);
 		this.saveSettings();
+	}
+
+	/**
+	 * Store a key in the vault, never as `apiKey` text in providers.json. A
+	 * provider with no env var or ref gets a ref named after itself, so the
+	 * file only ever holds the ref name.
+	 */
+	private vaultKey(name: ProviderName, apiKey: string): void {
+		if (!this.settings.providers[name]) this.settings.providers[name] = {};
+		const entry = this.settings.providers[name];
+		const ref = this.getProvider(name).apiKeyRef || this.getProvider(name).apiKeyEnv || `provider-${name}`;
+		storeVaultKey(ref, apiKey);
+		if (!this.getProvider(name).apiKeyEnv && !entry.apiKeyRef) entry.apiKeyRef = ref;
+		delete entry.apiKey;
 	}
 
 	getApiKey(name: ProviderName): string | null {
@@ -724,14 +746,33 @@ export class ProviderManager {
 		const rotated = this.authRotator.getKey(name);
 		if (rotated) return rotated;
 
+		// Order: environment, then the key vault, then a plain `apiKey` value in
+		// providers.json (kept working, but flagged once so it can be moved).
 		const config = this.getProvider(name);
-		// Check saved key
-		if (config.apiKey) return config.apiKey;
-		// Then environment variable
 		if (config.apiKeyEnv && process.env[config.apiKeyEnv]) {
 			return process.env[config.apiKeyEnv] || null;
 		}
+		const ref = config.apiKeyRef || config.apiKeyEnv;
+		if (ref) {
+			const vaulted = readVaultKey(ref);
+			if (vaulted) return vaulted;
+		}
+		if (config.apiKey) {
+			this.plainKeyProviders.add(String(name));
+			return config.apiKey;
+		}
 		return null;
+	}
+
+	/**
+	 * Providers whose key came from plain text in providers.json since the last
+	 * call. Returned once, then cleared, so the TUI warns a single time.
+	 */
+	takePlainKeyWarnings(): string[] {
+		const fresh = [...this.plainKeyProviders].filter((n) => !this.plainKeyWarned.has(n));
+		for (const n of fresh) this.plainKeyWarned.add(n);
+		this.plainKeyProviders.clear();
+		return fresh;
 	}
 
 	listProviders(): ProviderConfig[] {
@@ -1063,9 +1104,9 @@ export class ProviderManager {
 		// Foundation HTTP). Set  or use /settings", which names no env var
 		// because there is not one to name. That is why 8EO was dead on apfel.
 		// Only demand a key from a provider that actually declares one.
-		if (!apiKey && provider.apiKeyEnv) {
+		if (!apiKey && (provider.apiKeyEnv || provider.apiKeyRef)) {
 			throw new Error(
-				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv} or use /settings`,
+				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv || provider.apiKeyRef} or use /keys`,
 			);
 		}
 
@@ -1168,9 +1209,9 @@ export class ProviderManager {
 		// A declared Anthropic-shaped endpoint may be a keyless local proxy, so
 		// only demand a key from a provider that declares an env var for one -
 		// the same rule the OpenAI-compatible path already applies.
-		if (!apiKey && provider.apiKeyEnv) {
+		if (!apiKey && (provider.apiKeyEnv || provider.apiKeyRef)) {
 			throw new Error(
-				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv} or use /settings`,
+				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv || provider.apiKeyRef} or use /keys`,
 			);
 		}
 

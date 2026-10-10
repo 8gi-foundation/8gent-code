@@ -9,6 +9,7 @@ export type SlashCommand =
 	| "status"
 	| "model"
 	| "provider"
+	| "keys"
 	| "voice"
 	| "theme"
 	| "infinite"
@@ -103,6 +104,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["pr"],
 		description: "Select LLM provider (↑↓ to scroll)",
 		usage: "/provider [name]",
+	},
+	{
+		name: "keys",
+		aliases: ["key"],
+		description: "Enter or remove provider API keys (masked, kept in the OS keychain)",
+		usage: "/keys",
 	},
 	{
 		name: "voice",

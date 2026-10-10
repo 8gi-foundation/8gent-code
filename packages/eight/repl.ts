@@ -611,14 +611,12 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			// Same rule as everywhere else: a provider that declares no key env
 			// var takes no key. Storing one for a keyless declared provider wrote
 			// a credential that is never sent and told the user it was saved.
-			if (!p.apiKeyEnv) {
+			if (!p.apiKeyEnv && !p.apiKeyRef) {
 				console.log(`\x1b[33m${p.displayName} doesn't need an API key (it's local)\x1b[0m`);
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				// Report where it actually went - the path is redirectable via
-				// EIGHT_DATA_DIR / EIGHT_PROVIDERS_SETTINGS_PATH.
-				console.log(`  Stored in ${pm.getSettingsPath()}`);
+				console.log("  Stored in the key vault (OS keychain when available), not in providers.json.");
 			}
 		}
 		return true;

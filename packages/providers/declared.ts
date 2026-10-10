@@ -61,6 +61,9 @@ export function normalizeDeclaredProvider(
 		// server with no auth. An empty apiKeyEnv is the DECLARATION that no key
 		// exists, which is what the OpenAI-compatible auth gate reads.
 		apiKeyEnv: typeof raw.apiKeyEnv === "string" ? raw.apiKeyEnv : "",
+		// Name of a key-vault entry (the `/keys` screen). Wins over nothing: env
+		// still comes first, and a plain `apiKey` is only the last resort.
+		apiKeyRef: typeof raw.apiKeyRef === "string" && raw.apiKeyRef ? raw.apiKeyRef : undefined,
 		apiKey: typeof raw.apiKey === "string" ? raw.apiKey : undefined,
 		// May be empty: `discoverModels()` fills it from the endpoint itself.
 		defaultModel: typeof raw.defaultModel === "string" ? raw.defaultModel : (models[0] ?? ""),
