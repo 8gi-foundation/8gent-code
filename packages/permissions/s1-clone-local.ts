@@ -44,7 +44,7 @@
 
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -124,30 +124,50 @@ function bareRepo(dir: string): boolean {
 	);
 }
 
-/** The workspace parent is a shared place: refuse `/`, $HOME and any ancestor of $HOME. */
+let passwdHomeOverride: string | undefined;
+/** Tests only: stand in for the account's home directory. */
+export function _setPasswdHomeForTests(h: string | undefined): void {
+	passwdHomeOverride = h;
+}
+
+function accountHome(): string | undefined {
+	if (passwdHomeOverride !== undefined) return passwdHomeOverride;
+	try {
+		return userInfo().homedir;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Lower-cased candidates for `h`: as written, and with its nearest existing ancestor resolved. */
+function homeForms(h: string | undefined): string[] {
+	if (!h) return [];
+	const out = [h.toLowerCase()];
+	let cur = h;
+	let rest = "";
+	for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
+		try {
+			out.push(path.join(realpathSync(cur), rest).toLowerCase());
+			break;
+		} catch {
+			rest = path.join(path.basename(cur), rest);
+			cur = path.dirname(cur);
+		}
+	}
+	return out;
+}
+
+/**
+ * The workspace parent is a shared place when it is `/`, equals $HOME, or equals
+ * or contains the account's own home directory (from the account database, so a
+ * session that points $HOME at a private directory does not change the answer).
+ */
 function parentIsTooBroad(parent: string): boolean {
 	const p = parent.toLowerCase();
 	if (p === "/" || p === path.parse(parent).root.toLowerCase()) return true;
-	const homes = new Set<string>();
-	const add = (h: string | undefined) => {
-		if (!h) return;
-		homes.add(h.toLowerCase());
-		// Resolve the nearest existing ancestor so /var and /private/var compare equal.
-		let cur = h;
-		let rest = "";
-		for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
-			try {
-				homes.add(path.join(realpathSync(cur), rest).toLowerCase());
-				break;
-			} catch {
-				rest = path.join(path.basename(cur), rest);
-				cur = path.dirname(cur);
-			}
-		}
-	};
-	add(process.env.HOME);
-	add(homedir());
-	for (const h of homes) if (h === p || h.startsWith(p.endsWith("/") ? p : `${p}/`)) return true;
+	const prefix = p.endsWith("/") ? p : `${p}/`;
+	for (const h of homeForms(process.env.HOME)) if (h === p) return true;
+	for (const h of homeForms(accountHome())) if (h === p || h.startsWith(prefix)) return true;
 	return false;
 }
 

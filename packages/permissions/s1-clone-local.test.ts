@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { cloneLocalIntoProject } from "./s1-clone-local";
+import { _setPasswdHomeForTests, cloneLocalIntoProject } from "./s1-clone-local";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -195,6 +195,43 @@ describe("cloneLocalIntoProject absolute sources", () => {
 	});
 });
 
+describe("cloneLocalIntoProject under a dot ancestor", () => {
+	let base: string;
+	let dws: string;
+	beforeEach(() => {
+		base = join(container, ".hidden", ".8gent", "runs");
+		dws = join(base, "work");
+		mkdirSync(dws, { recursive: true });
+		const cur = container;
+		container = base; // bare() clones relative to container
+		bare(join(base, "shared-notes.git"));
+		bare(join(base, ".dotsibling"));
+		container = cur;
+		workRepo(join(dws, "inner-repo"));
+		mkdirSync(join(dws, ".dotdir"));
+		workRepo(join(dws, ".dotdir", "r"));
+	});
+	test("relative sibling", () => {
+		expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", dws).ok).toBe(true);
+	});
+	test("absolute sibling, as written under the dot ancestor", () => {
+		const real = realpathSync(base);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, dws).ok).toBe(true);
+	});
+	test("dot sibling name is still refused", () => {
+		const real = realpathSync(base);
+		expect(cloneLocalIntoProject("git clone ../.dotsibling notes", dws).ok).toBe(false);
+		expect(cloneLocalIntoProject(`git clone ${real}/.dotsibling notes`, dws).ok).toBe(false);
+	});
+	test("in-workspace repo allowed, dot segments below the root refused", () => {
+		const real = realpathSync(dws);
+		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, dws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/.dotdir/r notes`, dws).ok).toBe(false);
+		expect(cloneLocalIntoProject("git clone .dotdir/r notes", dws).ok).toBe(false);
+		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo/.git notes`, dws).ok).toBe(false);
+	});
+});
+
 describe("cloneLocalIntoProject allows", () => {
 	for (const cmd of [
 		"git clone ../shared-notes.git notes",
@@ -309,13 +346,36 @@ describe("cloneLocalIntoProject refuses", () => {
 		}
 	});
 
-	test("workspace parent is an ancestor of $HOME", () => {
-		const h = process.env.HOME;
-		process.env.HOME = join(container, "some", "home");
+	test("workspace parent is an ancestor of the account home", () => {
+		_setPasswdHomeForTests(join(container, "some", "home"));
 		try {
 			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(false);
 		} finally {
+			_setPasswdHomeForTests(undefined);
+		}
+	});
+
+	test("workspace parent is the account home", () => {
+		_setPasswdHomeForTests(container);
+		try {
+			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(false);
+		} finally {
+			_setPasswdHomeForTests(undefined);
+		}
+	});
+
+	test("a private $HOME inside the parent does not make the parent broad", () => {
+		const h = process.env.HOME;
+		process.env.HOME = join(container, "home");
+		_setPasswdHomeForTests(join(outside, "account-home"));
+		try {
+			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(true);
+			expect(
+				cloneLocalIntoProject(`git clone ${realpathSync(container)}/shared-notes.git notes`, ws).ok,
+			).toBe(true);
+		} finally {
 			process.env.HOME = h;
+			_setPasswdHomeForTests(undefined);
 		}
 	});
 
