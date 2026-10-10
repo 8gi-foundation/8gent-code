@@ -115,6 +115,70 @@ const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
 
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
+/**
+ * `curl` GETs of this machine's own loopback address (#3714). Passes only when
+ * every URL is http(s) on 127.0.0.1, localhost or [::1] (never the Ollama port),
+ * every flag is on the list below, and output and cookie files are stdout,
+ * /dev/null or /tmp. No -w/--write-out, upload, @file, proxy, config or
+ * redirect-following; anything else goes to the judge. wget is not covered.
+ * POST bodies are already escalated by the rules.
+ */
+const LOOPBACK_URL = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
+const OLLAMA_PORT = "11434";
+const FETCH_FLAGS = {
+	bare: "sSiIfv",
+	valued: "ocbHmX",
+	longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
+	longValued: new Set(["--output", "--cookie-jar", "--cookie", "--header", "--max-time", "--connect-timeout"]),
+};
+
+function fetchTargetOk(v: string): boolean {
+	return v === "-" || (OK_TARGET.test(v) && !/(^|\/)\.\.(\/|$)/.test(v));
+}
+
+function fetchValueOk(bin: string, flag: string, v: string): string | null {
+	const f = flag.replace(/^-+/, "");
+	if (f === "o" || f === "output" || f === "c" || f === "cookie-jar")
+		return fetchTargetOk(v) ? null : `${bin} writes to ${v}`;
+	if (f === "b" || f === "cookie") return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
+	if (f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
+	if (f === "m" || f === "max-time" || f === "connect-timeout") return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
+	if (f === "X") return v === "GET" || v === "HEAD" ? null : `${bin} -X ${v}`;
+	return `${bin} flag ${flag}`;
+}
+
+function loopbackFetchOk(bin: string, args: string[]): string | null {
+	const spec = FETCH_FLAGS;
+	const urls: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i];
+		if (a.startsWith("--")) {
+			if (spec.longBare.has(a)) continue;
+			if (!spec.longValued.has(a) || i + 1 >= args.length) return `${bin} with ${a}, not a loopback-GET flag`;
+			const why = fetchValueOk(bin, a, args[++i]);
+			if (why) return why;
+		} else if (a.length > 1 && a.startsWith("-")) {
+			for (let j = 1; j < a.length; j++) {
+				const ch = a[j];
+				if (spec.bare.includes(ch)) continue;
+				if (!spec.valued.includes(ch)) return `${bin} with -${ch}, not a loopback-GET flag`;
+				const v = j + 1 < a.length ? a.slice(j + 1) : args[++i];
+				if (v === undefined) return `${bin} -${ch} has no value`;
+				const why = fetchValueOk(bin, `-${ch}`, v);
+				if (why) return why;
+				break;
+			}
+		} else urls.push(a);
+	}
+	if (urls.length === 0) return `${bin} with no URL`;
+	for (const u of urls) {
+		const m = LOOPBACK_URL.exec(u);
+		if (!m) return `${bin} reaches ${u}, not the loopback address`;
+		if (m[1] === OLLAMA_PORT) return `${bin} reaches the Ollama port`;
+	}
+	return null;
+}
+
 function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	const masked = maskQuotes(text);
 	let stripped = "";
@@ -140,6 +204,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (b === "cd") return null;
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
+	if (b === "curl") return loopbackFetchOk(b, args);
 	if (b === "git") return gitOk(args);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";

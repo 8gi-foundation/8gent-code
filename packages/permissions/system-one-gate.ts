@@ -601,6 +601,26 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain `mv` whose every endpoint is inside the workspace and that
+		// overwrites nothing (#3809). Needs the caller's working directory.
+		try {
+			const { moveInProject } = await import("./s1-mv-in-project");
+			const mv = moveInProject(command, cwd);
+			if (mv.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: mv.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";

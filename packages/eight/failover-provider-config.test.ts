@@ -48,6 +48,8 @@ const ENV: Record<string, string> = {
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TURN_TIMEOUT_MS: "20000",
 	OPENROUTER_API_KEY: OR_KEY,
+	// These walk chains into hosted providers, which are opt-in (#3710).
+	EIGHT_ALLOW_HOSTED: "1",
 };
 let home: string;
 let repo: string;

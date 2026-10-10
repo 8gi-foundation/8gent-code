@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { blockedReason, commandArgvs } from "./always-blocked";
 import {
 	type GitState,
 	allowListIsLocalOnly,
@@ -106,6 +107,8 @@ export interface InfiniteModeAuditEntry {
 	details: string;
 	blocked: boolean;
 	reason?: string;
+	/** The mode the call ran in; absent means infinite. */
+	mode?: string;
 }
 
 // ============================================
@@ -153,8 +156,13 @@ export const ALWAYS_BLOCKED_COMMANDS: Array<{
 	},
 	{
 		command: "chown",
-		args: ["-R"],
-		description: "recursive ownership change (check target)",
+		args: ["-R", "me:me", "/"],
+		description: "recursive ownership change of root",
+	},
+	{
+		command: "chown",
+		args: ["-R", "me:me", "/etc"],
+		description: "recursive ownership change of a system directory",
 	},
 	{
 		command: "dd",
@@ -167,6 +175,7 @@ export const ALWAYS_BLOCKED_COMMANDS: Array<{
 		description: "overwrite primary nvme",
 	},
 	{ command: "mkfs", args: ["/dev/sda"], description: "format primary disk" },
+	{ command: "mkfs.ext4", args: ["/dev/sda"], description: "format primary disk" },
 	{ command: ":(){ :|:& };:", args: [], description: "fork bomb" },
 ];
 
@@ -650,26 +659,11 @@ export class PermissionManager {
 		blocked: boolean;
 		reason?: string;
 	} {
-		const parsed = parseCommand(command);
-		const cmd = parsed.command.toLowerCase();
-		const argsLower = parsed.args.map((a) => a.toLowerCase());
-
-		for (const rule of ALWAYS_BLOCKED_COMMANDS) {
-			if (cmd !== rule.command && !cmd.endsWith(`/${rule.command}`)) continue;
-
-			// If rule has no args, just matching the command is enough
-			if (rule.args.length === 0) {
-				return { blocked: true, reason: rule.description };
-			}
-
-			// Check if all rule args appear in the command args
-			const allArgsPresent = rule.args.every((ruleArg) =>
-				argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase())),
-			);
-
-			if (allArgsPresent) {
-				return { blocked: true, reason: rule.description };
-			}
+		// Every command on the line counts, not only the first (#3768): the
+		// same segment splitting and wrapper handling as the ask-every-time list.
+		for (const argv of commandArgvs(command)) {
+			const reason = blockedReason(argv);
+			if (reason) return { blocked: true, reason };
 		}
 
 		// Also block fork bombs by content
@@ -680,8 +674,16 @@ export class PermissionManager {
 		return { blocked: false };
 	}
 
+	/** The mode label an always-blocked refusal is audited under outside Infinite. */
+	private refusalMode(): string {
+		const perCall = currentPermissionMode();
+		if (perCall) return perCall;
+		if (this.config.autoApprove) return "auto";
+		return process.env.EIGHT_HEADLESS ? "run" : "ask";
+	}
+
 	/**
-	 * Log an action during infinite mode.
+	 * Log an action during infinite mode, or an always-blocked refusal in any mode.
 	 */
 	private auditInfiniteMode(
 		command: string,
@@ -689,6 +691,7 @@ export class PermissionManager {
 		details: string,
 		blocked: boolean,
 		reason?: string,
+		mode = "infinite",
 	): void {
 		const entry: InfiniteModeAuditEntry = {
 			timestamp: new Date(),
@@ -697,6 +700,7 @@ export class PermissionManager {
 			details,
 			blocked,
 			reason,
+			mode,
 		};
 		this.infiniteModeAuditLog.push(entry);
 
@@ -705,7 +709,7 @@ export class PermissionManager {
 			const logLine = `${JSON.stringify({
 				...entry,
 				timestamp: entry.timestamp.toISOString(),
-				mode: "infinite",
+				mode,
 			})}\n`;
 
 			try {
@@ -959,7 +963,8 @@ export class PermissionManager {
 		// The always-blocked check runs first, so a line that is both always
 		// blocked and ask-every-time is refused here and never offered.
 		const infinite = this.isInfiniteMode();
-		if (infinite && command) {
+		if (command) {
+			// Refused in every mode (ask, auto, run, Infinite), never offered (#3768).
 			const blockCheck = this.isAlwaysBlocked(command);
 			if (blockCheck.blocked) {
 				this.auditInfiniteMode(
@@ -967,12 +972,15 @@ export class PermissionManager {
 					action,
 					details,
 					true,
-					`BLOCKED even in infinite mode: ${blockCheck.reason}`,
+					infinite
+						? `BLOCKED even in infinite mode: ${blockCheck.reason}`
+						: `BLOCKED in every mode: ${blockCheck.reason}`,
+					infinite ? "infinite" : this.refusalMode(),
 				);
 				request.approved = false;
 				this.log.requests.push(request);
 				this.log.deniedCount++;
-				console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
+				console.log(`\x1b[31m[BLOCKED] ${command} - ${blockCheck.reason}\x1b[0m`);
 				return false;
 			}
 		}
@@ -1134,14 +1142,11 @@ export class PermissionManager {
 	checkPermission(command: string): "allowed" | "denied" | "ask" {
 		// INFINITE MODE: Allow everything except always-blocked commands, and
 		// ask for the ask-every-time list (#3765).
+		// An always-blocked command anywhere on the line is denied in every mode (#3768).
+		if (command && this.isAlwaysBlocked(command).blocked) return "denied";
+
 		if (this.isInfiniteMode()) {
-			if (command) {
-				const blockCheck = this.isAlwaysBlocked(command);
-				if (blockCheck.blocked) {
-					return "denied";
-				}
-				if (this.mustAskReason(command)) return "ask";
-			}
+			if (command && this.mustAskReason(command)) return "ask";
 			return "allowed";
 		}
 
