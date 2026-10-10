@@ -5,6 +5,7 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
+import { telegramBridgeHealth } from "./bridge-health";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import { SPEAK_URL_RE, TableStore, handleTableAudioHttp, handleTableSpeakHttp, installTablePolicies } from "../table/index";
@@ -650,10 +651,12 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 
 			// Health check endpoint
 			if (url.pathname === "/health") {
+				const telegram = telegramBridgeHealth();
 				return Response.json({
 					status: "ok",
 					sessions: config.pool.size,
 					uptime: process.uptime(),
+					...(telegram ? { telegram } : {}),
 				});
 			}
 

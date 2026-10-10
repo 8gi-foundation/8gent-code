@@ -157,6 +157,17 @@ export interface AgentConfig {
 	 */
 	keepAnswerFirst?: boolean;
 	/**
+	 * Headless run (`8gent run`, packages/eight/run.ts): one prompt, no person
+	 * at the keyboard, often a local model where every prompt token is prefill
+	 * paid on each of many calls. On the local text-tool path the prompt leaves
+	 * out what only an interactive session uses (the category catalog of tools
+	 * this path does not offer, the personal-fact memory nudge) and declares the
+	 * tools to Ollama by name and parameters only, since the system prompt
+	 * already lists each one with its description. The tool set, the
+	 * parameters, and the tool-call rules are unchanged.
+	 */
+	headless?: boolean;
+	/**
 	 * Whether this agent runs unattended (autonomous engine, infinite mode,
 	 * heartbeat/improvement loops). When true, destructive tools are gated by the
 	 * maker-checker at the tool-execution chokepoint and require an approved

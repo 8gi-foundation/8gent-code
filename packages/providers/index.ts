@@ -1447,20 +1447,9 @@ export async function findBestFreeModel(
 		return { model: cachedFreeModel.model };
 	}
 
-	// Load API key from environment or .env file
-	let apiKey = process.env.OPENROUTER_API_KEY;
-	if (!apiKey) {
-		try {
-			const envPath = path.join(process.cwd(), ".env");
-			if (fs.existsSync(envPath)) {
-				const envContent = fs.readFileSync(envPath, "utf-8");
-				const match = envContent.match(/OPENROUTER_API_KEY=(\S+)/);
-				if (match) apiKey = match[1];
-			}
-		} catch {
-			// ignore .env read errors
-		}
-	}
+	// The key comes from the environment only. A ./.env in whatever folder the
+	// agent runs in is project data, not the user's provider config (#3710).
+	const apiKey = process.env.OPENROUTER_API_KEY;
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",

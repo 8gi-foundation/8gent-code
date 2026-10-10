@@ -17,7 +17,7 @@
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
 # are produced (they run, but trigger OS trust prompts). Windows Authenticode
 # signing needs signtool, which the helm runner does not have; see SIGNING.md.
-# The npm publish flow lives in release.yml and is unchanged.
+# The npm publish and the GitHub Release itself live in release.yml.
 
 name: Release Binaries
 
@@ -115,10 +115,22 @@ jobs:
           name: 8gent-binaries
           path: upload
 
+      # #3326: release.yml owns the release. It creates it as a draft with the
+      # npm tarball and SHA256SUMS and publishes it only once those are on it.
+      # This job only adds the installers to that release (draft or published),
+      # and never creates one, so it cannot publish an empty or duplicate release.
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: upload/*
-          fail_on_unmatched_files: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          for i in $(seq 1 60); do
+            gh release view "$TAG" --repo "$REPO" --json isDraft >/dev/null 2>&1 && break
+            if [ "$i" -eq 60 ]; then
+              echo "::error::no release for ${TAG} after 30 minutes; release.yml creates it, check that run"
+              exit 1
+            fi
+            sleep 30
+          done
+          gh release upload "$TAG" upload/* --repo "$REPO" --clobber

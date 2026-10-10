@@ -90,6 +90,7 @@ import {
 } from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import { type PlanItem, parsePlan } from "./update-plan";
+import { UselessStreak } from "./useless-streak";
 import type { ToolSpec } from "./text-tools";
 
 export type TextTool = {
@@ -132,6 +133,13 @@ export interface TextToolAgentOptions {
 	 * recap. In both modes the check itself is sent the same way.
 	 */
 	keepAnswerFirst?: boolean;
+	/**
+	 * Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK). After
+	 * this many useless tool results in a row (see useless-streak.ts), the next
+	 * model turn gets a harness note and no tools, and its reply ends the turn.
+	 * 0 or unset: off.
+	 */
+	uselessStreak?: number;
 }
 
 export interface TextToolAgentResult {
@@ -584,6 +592,9 @@ export async function runTextToolAgent(
 	const maxRounds = opts.maxRounds ?? 6;
 	const specs = opts.tools.map((t) => t.spec);
 	const toolLog: TextToolLogEntry[] = [];
+	const streak = new UselessStreak(opts.uselessStreak ?? 0);
+	// Set once the streak trips: the next round runs with no tools and ends the turn.
+	let answerOnly = false;
 
 	// Local working copy of the conversation; runTextToolTurn never mutates it,
 	// so we own the growth here.
@@ -666,7 +677,7 @@ export async function runTextToolAgent(
 		}
 		const turn = await runTextToolTurn({
 			messages,
-			tools: specs,
+			tools: answerOnly ? [] : specs,
 			call: opts.call,
 		});
 		// Strip repetition degeneration before the reply is judged, fed back to
@@ -675,6 +686,9 @@ export async function runTextToolAgent(
 		const degen = cleanDegenerateReply(turn.content);
 		const replyText = degen.clean;
 		lastContent = replyText;
+		// Answer-only turn (#3613): whatever it said is the answer. A tool call
+		// in it is not run; the tools were withheld on purpose.
+		if (answerOnly) return finish(finalContent(replyText), round);
 
 		// A reply that stopped inside a tool_call block (output token limit) is
 		// neither a final answer nor a runnable call. Tell the model exactly what
@@ -890,6 +904,7 @@ export async function runTextToolAgent(
 			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
 			if (!isPlanUpdate) {
 				ranWork = true;
+				streak.record(tc.name, tc.arguments, result);
 				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
 				// progress, exactly like an "Error..." result.
 				if (!isRefusedToolResult(result)) {
@@ -946,6 +961,7 @@ export async function runTextToolAgent(
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
 		if (cutOffNote) resultParts.push(cutOffNote);
+		if (streak.tripped() && round < maxRounds) answerOnly = true;
 		messages = [
 			...messages,
 			{ role: "assistant", content: replyText },
@@ -954,7 +970,7 @@ export async function runTextToolAgent(
 				content: [
 					...resultParts,
 					"",
-					FOLLOW_UP_INSTRUCTION,
+					answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION,
 				].join("\n"),
 				...(roundImages.length > 0 ? { images: roundImages } : {}),
 			},

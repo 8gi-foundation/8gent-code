@@ -517,6 +517,8 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			// The final text is read by programs, so a completion check answered
 			// with "DONE:" keeps the model's answer first (#3638).
 			keepAnswerFirst: true,
+			// A lean prompt on the local text-tool path: every call pays its prefill.
+			headless: true,
 		});
 
 		const finalText = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
