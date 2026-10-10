@@ -21,7 +21,7 @@
  * unstaged edit, so the overwrite replaces content HEAD already holds; for
  * `git show` the named blob exists in <rev> and is a blob, so the redirect
  * cannot truncate the target and then fail; and the repository carries no
- * hooks, hooksPath, fsmonitor or filter configuration that could run code.
+ * hooks, hooksPath or fsmonitor configuration, and no filter driver applies to a target.
  *
  * ok needs ALL of:
  *   - a working directory, absolute, that is the root of a git work tree (its
@@ -48,8 +48,10 @@
  *   - for `git show`, the redirect target is the same path as the one named in
  *     <rev>:<path>, and `git cat-file -t <rev>:<path>` is blob;
  *   - the repository hooks directory holds no hook (files ending .sample
- *     aside), and the repository config sets no core.hooksPath,
- *     core.fsmonitor or filter.*.
+ *     aside), and the repository config sets no core.hooksPath
+ *     or core.fsmonitor (any config scope), and no target has a filter
+ *     attribute (`git check-attr filter`, so a global git-lfs entry does not
+ *     matter for a path without one).
  *
  * Not covered on purpose: untracked or missing targets, targets outside the
  * tree, symlinks, hardlinked files, `git checkout`, `-p`, `--staged`,
@@ -133,7 +135,8 @@ function trackedRegularFile(root: string, rel: string): boolean {
 	if (path.relative(root, path.join(realParent, path.basename(abs))) !== rel) return false;
 	// Tag H is a normal tracked entry; a lowercase tag is assume-unchanged, S is skip-worktree.
 	const tag = git(root, ["ls-files", "-v", "--error-unmatch", "--", rel]);
-	return tag.startsWith("H ") && tag.trim().split("\n").length === 1;
+	if (!tag.startsWith("H ") || tag.trim().split("\n").length !== 1) return false;
+	return !hasFilterAttr(root, rel);
 }
 
 /** True when `git config` finds the key (exit 0); an unset key exits 1, which throws. */
@@ -146,17 +149,23 @@ function configSet(root: string, args: string[]): boolean {
 	}
 }
 
-/** True when the repository could run code on its own: hooks, hooksPath, fsmonitor, filters. */
+/** True when the repository could run code on its own: hooks, hooksPath, fsmonitor (any config scope). */
 function repoRunsCode(root: string): boolean {
 	if (configSet(root, ["--get", "core.hooksPath"])) return true;
 	if (configSet(root, ["--get", "core.fsmonitor"])) return true;
-	if (configSet(root, ["--get-regexp", "^filter\\."])) return true;
 	const hooks = path.resolve(root, git(root, ["rev-parse", "--git-path", "hooks"]).trim());
 	try {
 		return readdirSync(hooks).some((n) => !n.endsWith(".sample"));
 	} catch {
 		return false;
 	}
+}
+
+/** True when a filter driver (smudge, clean, lfs) applies to `rel`; unrelated filter.* config does not matter. */
+function hasFilterAttr(root: string, rel: string): boolean {
+	const out = git(root, ["check-attr", "filter", "--", rel]).trim();
+	const value = out.slice(out.lastIndexOf(": ") + 2);
+	return value !== "unspecified" && value !== "unset";
 }
 
 function commitExists(root: string, rev: string): boolean {

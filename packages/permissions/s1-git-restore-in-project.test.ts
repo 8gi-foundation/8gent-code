@@ -9,7 +9,15 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { linkSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	linkSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+	symlinkSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -232,13 +240,59 @@ describe("restoreInProject falls through on", () => {
 	for (const [name, args] of [
 		["core.fsmonitor", ["config", "core.fsmonitor", "true"]],
 		["core.hooksPath", ["config", "core.hooksPath", "hk"]],
-		["a filter driver", ["config", "filter.x.smudge", "cat"]],
 	] as Array<[string, string[]]>) {
 		test(`a repository with ${name}`, () => {
 			git(ws, ...args);
 			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
 		});
 	}
+	test("a staged-only edit (worktree equals HEAD, index differs)", () => {
+		const orig = '{"rate":"broken"}';
+		writeFileSync(join(ws, "config", "other.json"), "staged");
+		git(ws, "add", "config/other.json");
+		writeFileSync(join(ws, "config", "other.json"), "{}");
+		expect(git(ws, "diff", "--quiet", "HEAD", "--", "config/other.json")).toBe("");
+		expect(restoreInProject("git restore --source=HEAD config/other.json", ws).ok).toBe(false);
+		expect(orig).toBeTruthy();
+	});
+
+	describe("with a global git-lfs style filter in HOME", () => {
+		let home: string;
+		let savedHome: string | undefined;
+		beforeEach(() => {
+			home = tempDir("s1-restore-home-");
+			writeFileSync(
+				join(home, ".gitconfig"),
+				'[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n\trequired = true\n',
+			);
+			savedHome = process.env.HOME;
+			process.env.HOME = home;
+			Reflect.deleteProperty(process.env, "XDG_CONFIG_HOME");
+		});
+		afterEach(() => {
+			if (savedHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+			else process.env.HOME = savedHome;
+			rmSync(home, { recursive: true, force: true });
+		});
+		test("the pilot command is allowed when the target has no filter attribute", () => {
+			expect(git(ws, "config", "--global", "--get", "filter.lfs.clean")).toContain("git-lfs");
+			const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
+			expect(restoreInProject(cmd, ws).ok).toBe(true);
+			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
+		});
+		test("it is refused when .gitattributes assigns filter=lfs to the target", () => {
+			writeFileSync(join(ws, ".gitattributes"), "config/rates.json filter=lfs\n");
+			git(ws, "add", ".gitattributes");
+			git(ws, "commit", "-qm", "attrs");
+			// git-lfs may install hooks on commit; clear them so the attribute alone decides.
+			for (const h of readdirSync(join(ws, ".git", "hooks")))
+				if (!h.endsWith(".sample")) unlinkSync(join(ws, ".git", "hooks", h));
+			const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
+			expect(restoreInProject(cmd, ws).ok).toBe(false);
+			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
+		});
+	});
+
 	test("a repository with a hook installed", () => {
 		writeFileSync(join(ws, ".git", "hooks", "post-merge"), "#!/bin/sh\n");
 		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
