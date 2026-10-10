@@ -330,10 +330,10 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	lines.push(
 		"",
 		concise
-			? "**For external info, docs or URLs call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**"
+			? "**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**"
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
-		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
-		"**Scratch files and test data go in `.tmp/` inside the project, never /tmp or ~.**",
+		"**Narration: use `speak`, never espeak or say.**",
+		"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**",
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE);
 
