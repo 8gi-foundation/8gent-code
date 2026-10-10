@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	BRANCH_MAX,
+	PATH_HEAD,
 	PATH_MIN,
 	cellWidth,
 	fitHeaderMiddle,
@@ -17,7 +18,6 @@ import {
 	truncateEnd,
 	truncateMiddle,
 	truncatePath,
-	PATH_HEAD,
 } from "./header-layout.js";
 
 const PATH = "/Users/operator/8gent-code/.claude/worktrees/agent-a8b0f5de5b64292c6";
@@ -159,7 +159,7 @@ describe("fitHeaderMiddle without a branch (audit #10)", () => {
 
 describe("truncatePath keeps the end of a workdir recognisable (#3810)", () => {
 	const RUN = "~/.8gent/rishi-pilot/runs/2026-10-10_005813";
-	const nameOf = (n: number) => `${"a-b-".repeat(20)}`.slice(0, n - 1) + "z";
+	const nameOf = (n: number) => "a-b-".repeat(20).slice(0, n - 1).concat("z");
 
 	for (const n of [29, 30, 60]) {
 		test(`name of ${n} characters keeps the run id tail and the leaf at 69 columns`, () => {
