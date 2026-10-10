@@ -34,7 +34,23 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
+	// speak writes a wav to its `out` path (#3596).
+	"speak",
+	// film_craft writes a bed wav or a recipe folder (#3599); see filmCraftWriteTargets.
+	"film_craft",
 ]);
+
+/**
+ * What a film_craft call writes, as the model named it (#3599): action=bed its wav,
+ * action=plan its out_dir and the mp4 inside it. list and mix write nothing.
+ */
+export function filmCraftWriteTargets(args: Record<string, unknown>): string[] {
+	const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+	const dir = str(args.out_dir) ?? "video";
+	if (args.action === "bed") return [str(args.out) ?? path.join(dir, "bed.wav")];
+	if (args.action === "plan") return [dir, path.join(dir, str(args.out) ?? "film.mp4")];
+	return [];
+}
 
 /**
  * Normalise a spawn_agent `allowedPaths` argument: an array of strings, or a
@@ -42,11 +58,7 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
  * given, so a spawn without it behaves exactly as before.
  */
 export function normaliseAllowedPaths(value: unknown): string[] | undefined {
-	const raw = Array.isArray(value)
-		? value
-		: typeof value === "string"
-			? value.split(",")
-			: [];
+	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
 	const paths = raw
 		.filter((p): p is string => typeof p === "string")
 		.map((p) => p.trim())
@@ -66,17 +78,37 @@ export function editScopeViolation(
 	allowedPaths: readonly string[] | undefined,
 ): string | null {
 	if (!allowedPaths || allowedPaths.length === 0) return null;
-	if (!SCOPED_WRITE_TOOLS.has(toolName)) return null;
+	const isDeckTheme = toolName === "deck_theme";
+	if (!SCOPED_WRITE_TOOLS.has(toolName) && !isDeckTheme) return null;
+	if (isDeckTheme && args.action === "list") return null;
 	const scope = allowedPaths.join(", ");
-	const target = typeof args.path === "string" ? args.path.trim() : "";
-	if (target) {
-		const abs = path.resolve(workingDirectory, target);
-		const inside = allowedPaths.some((p) => {
+	const isInside = (t: string) => {
+		const abs = path.resolve(workingDirectory, t);
+		return allowedPaths.some((p) => {
 			const allowed = path.resolve(workingDirectory, p);
 			return abs === allowed || abs.startsWith(`${allowed}${path.sep}`);
 		});
-		if (inside) return null;
+	};
+	let target: string;
+	let targets: string[];
+	if (toolName === "film_craft") {
+		// film_craft writes a bed wav, or a plan folder and the mp4 in it (#3599); list and mix write nothing.
+		targets = filmCraftWriteTargets(args);
+		if (targets.length === 0) return null;
+		target = targets.find((t) => !isInside(t)) ?? targets[0];
+	} else {
+		// speak names its file in `out`, deck_theme in `deck`, everything else in `path`.
+		const named = isDeckTheme ? args.deck : toolName === "speak" ? args.out : args.path;
+		target = typeof named === "string" ? named.trim() : "";
+		// deck_theme writes the deck and a <theme>.css beside it: both must be in scope.
+		targets = [target];
+		if (isDeckTheme && target) {
+			const themeName =
+				args.action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
+			targets.push(path.join(path.dirname(target), `${themeName}.css`));
+		}
 	}
+	if (target && targets.every(isInside)) return null;
 	return (
 		`[SCOPE BLOCKED] ${toolName} did NOT run. Nothing was changed. ` +
 		`Reason: ${target || "(no path)"} is outside this agent's edit scope (${scope}) ` +

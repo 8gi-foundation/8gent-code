@@ -1344,10 +1344,12 @@ export function extractAutoMemories(
 	result: string,
 ): { fact: string; layer: MemoryLayer }[] {
 	const facts: { fact: string; layer: MemoryLayer }[] = [];
+	// read_file numbers its rows (#3375); parse the file text, not the gutter.
+	const fileText = toolName === "read_file" ? stripReadFileGutter(result) : result;
 
 	if (toolName === "read_file" && String(args.path || "").endsWith("package.json")) {
 		try {
-			const pkg = JSON.parse(result);
+			const pkg = JSON.parse(fileText);
 			if (pkg.name) facts.push({ fact: `Project name: ${pkg.name}`, layer: "project" });
 			if (pkg.description)
 				facts.push({
@@ -1416,7 +1418,7 @@ export function extractAutoMemories(
 	}
 
 	if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
-		const lines = result.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
+		const lines = fileText.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
 		if (lines.length > 0) {
 			facts.push({
 				fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`,
@@ -1426,6 +1428,22 @@ export function extractAutoMemories(
 	}
 
 	return facts;
+}
+
+/**
+ * The file text inside a read_file result (#3375). read_file prints each line
+ * as `cat -n` does (number, tab, text) and may add a note after the last row;
+ * keep the numbered rows' text and drop everything else. A result whose first
+ * line has no gutter is taken to be raw file text and returned unchanged.
+ */
+function stripReadFileGutter(result: string): string {
+	const gutter = /^ *\d+\t/;
+	const rows = result.split("\n");
+	if (!gutter.test(rows[0] ?? "")) return result;
+	return rows
+		.filter((row) => gutter.test(row))
+		.map((row) => row.replace(gutter, ""))
+		.join("\n");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

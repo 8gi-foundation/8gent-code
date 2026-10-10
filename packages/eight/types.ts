@@ -117,6 +117,14 @@ export interface AgentConfig {
 		| "deepseek";
 	/** Channel hint for failover routing. "computer" enables the computer-use chain. */
 	channel?: "text" | "computer";
+	/**
+	 * The user named this provider explicitly (a `--provider` flag, or a host
+	 * config that pins it) (#3746). A provider error then ends the turn with a
+	 * plain message instead of moving to another provider: the failover chain,
+	 * the hedge sibling and the tool-capability reroute all stay on this
+	 * provider. Unset: the adaptive router, as before.
+	 */
+	providerPinned?: boolean;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory?: string;
@@ -140,6 +148,25 @@ export interface AgentConfig {
 	 * "__spawned__") apply to every tool call. Defaults to "primary".
 	 */
 	agentScope?: string;
+	/**
+	 * Headless output (#3638): when the text tool loop's completion check is
+	 * answered with "DONE:", keep the model's reply before the check in front
+	 * of the summary. Set by `8gent run` (packages/eight/run.ts), whose final
+	 * text is read by programs; the TUI leaves it off so a person does not
+	 * read the same summary twice. See TextToolAgentOptions.keepAnswerFirst.
+	 */
+	keepAnswerFirst?: boolean;
+	/**
+	 * Headless run (`8gent run`, packages/eight/run.ts): one prompt, no person
+	 * at the keyboard, often a local model where every prompt token is prefill
+	 * paid on each of many calls. On the local text-tool path the prompt leaves
+	 * out what only an interactive session uses (the category catalog of tools
+	 * this path does not offer, the personal-fact memory nudge) and declares the
+	 * tools to Ollama by name and parameters only, since the system prompt
+	 * already lists each one with its description. The tool set, the
+	 * parameters, and the tool-call rules are unchanged.
+	 */
+	headless?: boolean;
 	/**
 	 * Whether this agent runs unattended (autonomous engine, infinite mode,
 	 * heartbeat/improvement loops). When true, destructive tools are gated by the

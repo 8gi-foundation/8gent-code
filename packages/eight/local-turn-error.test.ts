@@ -76,6 +76,29 @@ describe("describeLocalTurnFailure", () => {
 		expect(out.reason).toContain("timeout");
 	});
 
+	it("a no-progress timeout says how long the silence was and names EIGHT_STREAM_IDLE_MS (#3657)", () => {
+		const err = new TurnTimeoutError(300_000, "lmstudio/m, no output for 300000ms", "idle");
+		const out = describeLocalTurnFailure(err, { endpoint: ENDPOINT, timeoutMs: 1_200_000 });
+		expect(out.kind).toBe("timeout");
+		expect(out.message).toContain("sent nothing for 300 seconds");
+		expect(out.message).toContain("so the turn was stopped.");
+		expect(out.message).toContain("EIGHT_STREAM_IDLE_MS=600000");
+		expect(out.message).toContain("EIGHT_STREAM_IDLE_MS=0");
+		expect(out.message).not.toContain("took longer than");
+		expect(out.message).not.toContain("not reachable");
+		expect(out.reason).toContain("no output for 300 seconds");
+		// The TUI's failed-turn badge recognises it like the other stop messages.
+		expect(isLocalTurnFailureReply(out.message)).toBe(true);
+	});
+
+	it("a ceiling timeout keeps naming EIGHT_TURN_TIMEOUT_MS", () => {
+		const err = new TurnTimeoutError(1_200_000, "lmstudio/m", "ceiling");
+		const out = describeLocalTurnFailure(err, { endpoint: ENDPOINT, timeoutMs: 1_200_000 });
+		expect(out.message).toContain("took longer than 1200 seconds");
+		expect(out.message).toContain("EIGHT_TURN_TIMEOUT_MS");
+		expect(out.message).not.toContain("EIGHT_STREAM_IDLE_MS");
+	});
+
 	it("a timeout with no timeoutMs on the error falls back to the configured limit", () => {
 		const err = Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
 		const out = describeLocalTurnFailure(err, { endpoint: ENDPOINT, timeoutMs: 600_000 });
@@ -122,7 +145,9 @@ describe("isLocalTurnFailureReply", () => {
 	});
 
 	it("does not flag an ordinary reply", () => {
-		expect(isLocalTurnFailureReply("All 7 tests now pass. The bug was in paginate.ts.")).toBe(false);
+		expect(isLocalTurnFailureReply("All 7 tests now pass. The bug was in paginate.ts.")).toBe(
+			false,
+		);
 		expect(isLocalTurnFailureReply("The local model is fast today.")).toBe(false);
 	});
 });

@@ -23,9 +23,27 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { hostedAllowed } from "../providers/failover";
 
 export const SPAWN_AGENT_DESCRIPTION =
-	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.";
+	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='8gent' (default) for coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. Omit model to run the agent on this session's model.";
+
+export const SPAWN_RUNTIME_DESCRIPTION =
+	"Runtime: '8gent' (default, this session's model) or 'shell' (sh -c). 'claude' is a hosted runtime and is off by default.";
+
+export const SPAWN_MODEL_DESCRIPTION =
+	"Optional model for the 8gent runtime, run on this session's provider. Omit it to use this session's model.";
+
+/** Null when the claude runtime (the hosted Claude CLI) may run; otherwise why not (#3710). */
+function claudeHostedRefusal(): string | null {
+	if (hostedAllowed()) return null;
+	return `[HOSTED BLOCKED] spawn_agent runtime "claude" was not run: it sends the task to a hosted model, and hosted providers are off unless the user sets EIGHT_ALLOW_HOSTED=1. Use runtime "8gent", which runs on this session's model.`;
+}
+
+/** True for a model id that only a hosted provider serves: auto:free and OpenRouter's ":free" ids. */
+function isHostedModelId(model: string): boolean {
+	return model === "auto:free" || model.endsWith(":free");
+}
 
 export const ALLOWED_PATHS_DESCRIPTION =
 	"Only for 8gent runtime: the files (or directories) this agent may write or edit. Writes and edits anywhere else are refused and never run. Omit for no limit.";
@@ -53,41 +71,45 @@ async function gateShellChild(
 	cwd: string,
 	holder: PermissionModeHolder,
 ): Promise<string | null> {
-	return runWithPermissionHolder(holder, async () => {
-		const mode = currentPermissionMode();
-		if (mode === "plan") {
-			const refusal = await planModeRefusal("run_command", { command });
-			if (refusal) return refusal;
-		}
-		const { getPermissionManager, isCommandDangerous } = await import("../permissions");
-		const pm = getPermissionManager();
-		const check = pm.checkPermission(command);
-		if (check === "denied")
-			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
-		const { systemOneGate } = await import("../permissions/system-one-gate");
-		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
-		if (!systemOne.run) return systemOne.message as string;
-		const dangerous = isCommandDangerous(command);
-		if (
-			check === "ask" &&
-			systemOne.humanApproved !== true &&
-			!guardedSkipsCard(mode, systemOne, dangerous)
-		) {
-			const allowed = await pm.requestPermission(
-				"Spawn Shell Agent",
-				dangerous
-					? "This command may modify system files or cause data loss."
-					: "The agent wants to run a shell command as a background agent.",
-				command,
-			);
-			if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
-		}
-		return null;
-	});
+	// Judge git state against the directory the child runs in (#3748).
+	const { withCommandDir } = await import("../permissions/command-policy");
+	return withCommandDir(cwd, () =>
+		runWithPermissionHolder(holder, async () => {
+			const mode = currentPermissionMode();
+			if (mode === "plan") {
+				const refusal = await planModeRefusal("run_command", { command });
+				if (refusal) return refusal;
+			}
+			const { getPermissionManager, isCommandDangerous } = await import("../permissions");
+			const pm = getPermissionManager();
+			const check = pm.checkPermission(command);
+			if (check === "denied")
+				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
+			const { systemOneGate } = await import("../permissions/system-one-gate");
+			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
+			if (!systemOne.run) return systemOne.message as string;
+			const dangerous = isCommandDangerous(command);
+			if (
+				check === "ask" &&
+				systemOne.humanApproved !== true &&
+				!guardedSkipsCard(mode, systemOne, dangerous)
+			) {
+				const allowed = await pm.requestPermission(
+					"Spawn Shell Agent",
+					dangerous
+						? "This command may modify system files or cause data loss."
+						: "The agent wants to run a shell command as a background agent.",
+					command,
+				);
+				if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
+			}
+			return null;
+		}),
+	);
 }
 
 export const CHECK_AGENT_DESCRIPTION =
-	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 20s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
+	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 90s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
 
 export const LIST_AGENTS_DESCRIPTION =
 	"[SHELL] Returns a summary of all spawned background agents with their IDs, runtimes, statuses, and elapsed times. Use this to get an overview before checking individual agents, or to find an agentId you lost track of.";
@@ -95,11 +117,16 @@ export const LIST_AGENTS_DESCRIPTION =
 /**
  * How long check_agent waits on a running 8gent agent for it or a sibling to
  * finish (ms). EIGHT_CHECK_AGENT_WAIT_MS overrides; 0 answers at once.
+ *
+ * 90 s (#3583): every pool child runs on the local model, and each early
+ * "still running" costs the parent an inference turn on that same model. At
+ * 20 s the parent of pilot orch-route-three made 35 checks while its children
+ * took 60 to 170 s a step. The wait still ends the moment any agent finishes.
  */
 export function checkAgentWaitMs(): number {
 	const raw = process.env.EIGHT_CHECK_AGENT_WAIT_MS?.trim();
 	const ms = raw ? Number(raw) : Number.NaN;
-	return Number.isFinite(ms) && ms >= 0 ? ms : 20_000;
+	return Number.isFinite(ms) && ms >= 0 ? ms : 90_000;
 }
 
 export async function spawnAgentTool(
@@ -131,6 +158,11 @@ export async function spawnAgentTool(
 			child = createChildHolder(parent, requested);
 		} else if (requested) {
 			child = createPermissionHolder(clampChildMode(await legacyParentMode(), requested));
+		}
+		// The claude runtime is a hosted model: opt-in first, whatever the mode (#3710).
+		if (effectiveRuntime === "claude") {
+			const hosted = claudeHostedRefusal();
+			if (hosted) return hosted;
 		}
 		if (child && effectiveRuntime === "claude") {
 			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
@@ -168,23 +200,27 @@ export async function spawnAgentTool(
 			);
 		}
 
-		// Default: 8gent runtime
-		// Resolve "auto:free" to the best available free model via OpenRouter
-		let resolvedModel = model;
-		if (model === "auto:free") {
-			try {
+		// Default: 8gent runtime, on the parent session's provider (#3710). A
+		// hosted model is resolved and used only with EIGHT_ALLOW_HOSTED=1.
+		const { hostedChildRefusal } = await import("./index");
+		let childRuntime: string | undefined;
+		let resolvedModel = model?.trim() || undefined;
+		if (resolvedModel && isHostedModelId(resolvedModel)) {
+			const refusal = hostedChildRefusal("openrouter", resolvedModel);
+			if (refusal) return refusal;
+			if (resolvedModel === "auto:free") {
 				const { resolveModel } = await import("../providers");
-				const resolved = await resolveModel(model);
+				// Strict: an unreachable list is an error, never a guessed model id.
+				const resolved = await resolveModel(resolvedModel, { strict: true });
 				resolvedModel = resolved.model;
-			} catch {
-				// Fall back to default if provider resolution fails
-				resolvedModel = undefined;
 			}
+			childRuntime = "openrouter";
 		}
 		const { getAgentPool } = await import("./index");
 		const pool = getAgentPool();
 		const agent = await pool.spawnAgent(task, {
-			model: resolvedModel || undefined,
+			model: resolvedModel,
+			...(childRuntime ? { runtime: childRuntime } : {}),
 			workingDirectory: workingDirectory,
 			allowedPaths,
 			...(child ? { permission: child } : {}),

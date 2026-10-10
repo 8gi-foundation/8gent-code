@@ -197,7 +197,13 @@ function noticeOnce(key: string, line: string): void {
  * inside the caller's working directory passes without the judge, since it
  * deletes nothing; and (#3177) so does one whose targets are absent or
  * untracked files this session created, per the caller's CreatedFiles record
- * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions).
+ * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions);
+ * and (#3669) so does `rm [-f] <file>` / `unlink <file>` of exactly one
+ * untracked scratch-style regular file inside the workspace (under run/,
+ * tmp/ or .cache/, or named *.lock / *.pid), such as a stale lock whose
+ * owner is dead (see s1-rm-single.ts). When that last rule says no but the
+ * command was close, its plain-words hint is appended to a block message so
+ * a block is not a dead end.
  *
  * `bun test` runs the repo's own test code, so skipping the judge for it is a
  * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
@@ -481,13 +487,17 @@ function blockMessage(
 	thresholds: SystemOneThresholds | "unknown",
 	why: string,
 	command: string,
+	hint?: string,
 ): string {
 	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
 	// A block is final: no card was shown and no approval can pass it. Say so,
 	// so the reply never tells the person their approval is what is missing (#3124).
 	const final =
 		g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
+	// Plain words on why the single-file delete rule did not take it, and what
+	// it does allow (#3669), so the block is not a dead end.
+	const help = hint ? ` ${hint}` : "";
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final}${help} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -519,6 +529,8 @@ export async function systemOneGate(
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
 	const allow = systemOneAllowlist(env);
+	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
+	let hint: string | undefined;
 	if (allow.enabled) {
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
@@ -540,8 +552,10 @@ export async function systemOneGate(
 		}
 		// An rm whose every target is absent inside the workspace deletes
 		// nothing (#3168); one whose targets are absent or untracked files this
-		// session created removes only its own scratch (#3177). Needs the
-		// caller's working directory (and record); without them, today's behaviour.
+		// session created removes only its own scratch (#3177); an absent
+		// absolute path under a real temp root also deletes nothing (#3381).
+		// Needs the caller's working directory (and record); without them,
+		// today's behaviour.
 		try {
 			const { rmOfNothingOrOwn } = await import("./s1-rm-nothing");
 			const kind = rmOfNothingOrOwn(command, cwd, created);
@@ -556,10 +570,34 @@ export async function systemOneGate(
 						reason:
 							kind === "nothing"
 								? "rm of paths that do not exist in the workspace: nothing to delete"
-								: "rm of untracked files this session created (or of absent paths): its own scratch",
+								: kind === "nothing-temp"
+									? "rm of paths that do not exist (absolute ones under a real temp root): nothing to delete"
+									: "rm of untracked files this session created (or of absent paths): its own scratch",
 					},
 				};
 			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// One untracked scratch-style file that existed before the session,
+		// such as a stale lock whose owner process is dead (#3669). Exactly one
+		// named regular file inside the workspace; see s1-rm-single.ts.
+		try {
+			const { singleFileDelete } = await import("./s1-rm-single");
+			const single = singleFileDelete(command, cwd);
+			if (single.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: `rm of one untracked scratch file inside the workspace (${single.rel})`,
+					},
+				};
+			}
+			hint = single.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}
@@ -590,7 +628,7 @@ export async function systemOneGate(
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
 					: detail;
-			return decide(command, await rulesOnly(command, reason), RULES_ONLY);
+			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint);
 		}
 		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
 		// a person decides through the normal card, never an allow (#3193).
@@ -599,7 +637,7 @@ export async function systemOneGate(
 			err instanceof SystemOneTimeoutError
 				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
 				: `System One unavailable: ${detail}`;
-		return decide(command, await askInstead(command, reason), RULES_ONLY);
+		return decide(command, await askInstead(command, reason), RULES_ONLY, hint);
 	}
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
@@ -608,9 +646,10 @@ export async function systemOneGate(
 			command,
 			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
 			RULES_ONLY,
+			hint,
 		);
 	}
-	return decide(command, guard, thresholds as SystemOneThresholds);
+	return decide(command, guard, thresholds as SystemOneThresholds, hint);
 }
 
 /** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
@@ -652,11 +691,17 @@ async function decide(
 	command: string,
 	guard: BashGuardResult,
 	t: SystemOneThresholds,
+	hint?: string,
 ): Promise<SystemOneGateResult> {
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
 		const why = guard.reason ?? "the command was judged dangerous";
-		return { run: false, guard, thresholds: t, message: blockMessage(guard, t, why, command) };
+		return {
+			run: false,
+			guard,
+			thresholds: t,
+			message: blockMessage(guard, t, why, command, hint),
+		};
 	}
 	// escalate
 	const pDesc = Number.isFinite(guard.pYes) ? `pYes ${fmtP(guard.pYes)}, ` : "";
@@ -685,6 +730,6 @@ async function decide(
 		guard,
 		thresholds: t,
 		humanApproved,
-		message: blockMessage(guard, t, why, command),
+		message: blockMessage(guard, t, why, command, hint),
 	};
 }

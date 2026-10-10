@@ -156,6 +156,13 @@
         "typescript": "^5",
       },
     },
+    "packages/8dk": {
+      "name": "@8gent/8dk",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^5.3.0",
+      },
+    },
     "packages/audit": {
       "name": "@8gent/audit",
       "version": "0.17.3",
@@ -252,6 +259,10 @@
       "devDependencies": {
         "typescript": "^5.3.0",
       },
+    },
+    "packages/film-craft": {
+      "name": "@8gent/film-craft",
+      "version": "0.1.0",
     },
     "packages/g8way": {
       "name": "@8gent/g8way",
@@ -418,6 +429,8 @@
     },
   },
   "packages": {
+    "@8gent/8dk": ["@8gent/8dk@workspace:packages/8dk"],
+
     "@8gent/audit": ["@8gent/audit@workspace:packages/audit"],
 
     "@8gent/auth": ["@8gent/auth@workspace:packages/auth"],
@@ -439,6 +452,8 @@
     "@8gent/design-systems": ["@8gent/design-systems@workspace:packages/design-systems"],
 
     "@8gent/eyes": ["@8gent/eyes@workspace:packages/eyes"],
+
+    "@8gent/film-craft": ["@8gent/film-craft@workspace:packages/film-craft"],
 
     "@8gent/g8way": ["@8gent/g8way@workspace:packages/g8way"],
 

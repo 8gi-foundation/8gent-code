@@ -9,8 +9,9 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { modelFetchAsFetch } from "./model-fetch";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
+import { resolveLlamaServerUrl } from "../local-model-server/select";
 
-export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel";
+export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel" | "llama-server";
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -20,7 +21,7 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama">, string> = {
+const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, string> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
@@ -34,9 +35,15 @@ const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama">, string> = {
  * ollama it is resolved at call time from OLLAMA_BASE_URL, then OLLAMA_HOST,
  * then localhost (#3080): a hardcoded localhost here sent the TUI's per-turn
  * task-router classify to this machine even with ollama configured remote.
+ *
+ * llama-server resolves the same way, from LLAMA_SERVER_URL then
+ * 127.0.0.1:8080, through the same helper the provider registry uses so the
+ * registry and this factory cannot disagree.
  */
 export function defaultBaseUrl(name: ProviderName): string {
-	return name === "ollama" ? `${resolveOllamaBaseUrl()}/v1` : DEFAULT_URLS[name];
+	if (name === "ollama") return `${resolveOllamaBaseUrl()}/v1`;
+	if (name === "llama-server") return `${resolveLlamaServerUrl()}/v1`;
+	return DEFAULT_URLS[name];
 }
 
 /**
@@ -56,14 +63,20 @@ export function createModel(config: ProviderConfig): LanguageModel {
 	}
 	const baseURL = config.baseURL || defaultBaseUrl(config.name);
 	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
+	const apiKey = config.apiKey || getApiKeyFromEnv(config.name);
 
 	const provider = createOpenAICompatible({
 		name: config.name,
 		baseURL,
-		apiKey: config.apiKey || getApiKeyFromEnv(config.name),
+		apiKey,
 		// Every generation request goes through modelFetch: Bun's hidden 300 s
 		// fetch cap is off and EIGHT_TURN_TIMEOUT_MS bounds the step instead.
-		fetch: modelFetchAsFetch,
+		// A hosted provider with no key gets no request at all (#3746): the
+		// refusal fires at send time, so a failover loop records it as this
+		// provider's error and nothing leaves the machine.
+		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
+			? refuseWithoutKey(config.name, baseURL)
+			: modelFetchAsFetch,
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"
@@ -97,6 +110,41 @@ export function createModel(config: ProviderConfig): LanguageModel {
 	return provider(config.model);
 }
 
+/** Providers that run on the user's machine or LAN and take no key. */
+const KEYLESS_PROVIDERS = new Set<string>(["ollama", "lmstudio", "apfel", "llama-server"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * True when a request would go to a hosted endpoint with no API key (#3746).
+ * Keyless local providers and loopback endpoints never count as hosted.
+ */
+export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
+	if (apiKey?.trim()) return false;
+	if (KEYLESS_PROVIDERS.has(name)) return false;
+	let host: string;
+	try {
+		host = new URL(baseURL ?? "").hostname;
+	} catch {
+		return false; // no usable endpoint: nothing could be sent anyway
+	}
+	return !LOOPBACK_HOSTS.has(host);
+}
+
+/** The key's env var name, for the refusal message. */
+function keyEnvName(name: string): string {
+	return `${name.replace(/[^a-z0-9]/gi, "_").toUpperCase()}_API_KEY`;
+}
+
+/** A fetch that never sends: it rejects with a plain message naming the missing key (#3746). */
+function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
+	const host = new URL(baseURL).hostname;
+	return (async () => {
+		throw new Error(
+			`No API key for ${name}, so nothing was sent to ${host}. Set ${keyEnvName(name)} to use it, or pick a local provider.`,
+		);
+	}) as unknown as typeof fetch;
+}
+
 /**
  * Get retry config for free models.
  * Free models allow 1000 calls/day but have per-minute rate limits.
@@ -118,6 +166,10 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 		case "apfel":
 			// apfel optionally accepts a bearer token via APFEL_TOKEN. Default = none.
 			return process.env.APFEL_TOKEN || "apfel";
+		case "llama-server":
+			// llama-server is local and unauthenticated: the provider registry
+			// declares apiKeyEnv: "" for it, so send no key.
+			return undefined;
 	}
 }
 

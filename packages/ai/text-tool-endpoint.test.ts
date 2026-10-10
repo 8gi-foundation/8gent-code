@@ -15,6 +15,7 @@ import { describeLocalTurnFailure, isLocalTurnFailureReply } from "../eight/loca
 import { TurnTimeoutError } from "../eight/turn-timeout";
 import {
 	_resetQwenVariantCache,
+	_resetVisionCache,
 	answerFromRawQwen,
 	buildTextToolCall,
 	DEFAULT_MAX_OUTPUT_TOKENS,
@@ -22,6 +23,12 @@ import {
 	isNativeToolParserFailure,
 	isOllamaNoThink,
 	isToolsUnsupported,
+	MAX_STREAMED_LINE_BYTES,
+	MAX_STREAMED_REPLY_BYTES,
+	modelSupportsVision,
+	readStreamedChatCompletion,
+	readStreamedGenerate,
+	StreamedReplyError,
 	NATIVE_TOOL_MARKUP_REMINDER,
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
@@ -33,6 +40,7 @@ import {
 	shouldDeclareTools,
 	type TextToolUsage,
 	toolCallsFromMessage,
+	toWireMessage,
 } from "./text-tool-endpoint";
 import { resolveBaseUrl as resolveOllamaClientBaseUrl } from "../eight/clients/ollama";
 import { runTextToolAgent, unknownToolResult } from "./text-tool-loop";
@@ -42,6 +50,7 @@ const realFetch = globalThis.fetch;
 afterEach(() => {
 	globalThis.fetch = realFetch;
 	_resetQwenVariantCache();
+	_resetVisionCache();
 });
 
 function stubEndpoint(body: Record<string, unknown>): void {
@@ -855,7 +864,8 @@ describe("buildTextToolCall output cap (#3074)", () => {
 		expect(await call([{ role: "user", content: "hi" }])).toBe("done");
 		expect(seen[0].body.max_tokens).toBe(resolveMaxOutputTokens());
 		expect(seen[0].body.max_tokens).toBeGreaterThan(0);
-		expect(seen[0].body.stream).toBe(false);
+		// Streamed by default since #3657 (judged by progress, not wall time).
+		expect(seen[0].body.stream).toBe(true);
 	});
 
 	it("honours an explicit maxTokens", async () => {
@@ -1047,5 +1057,137 @@ describe("EIGHT_OLLAMA_NO_THINK turns thinking off per Ollama model", () => {
 		expect(renderQwenChatML([{ role: "user", content: "q" }], "qwen3.5", true)).toBe(
 			"<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
 		);
+	});
+});
+
+// #3641: a message with images goes to the OpenAI-compatible endpoint in the
+// array form Ollama and LM Studio take for vision models; text-only messages
+// are sent exactly as before.
+describe("images on the wire (#3641)", () => {
+	const URL1 = "data:image/png;base64,iVBORw0KGgo=";
+
+	it("toWireMessage keeps a text message a plain string", () => {
+		expect(toWireMessage({ role: "user", content: "hi" })).toEqual({ role: "user", content: "hi" });
+		expect(toWireMessage({ role: "user", content: "hi", images: [] })).toEqual({ role: "user", content: "hi" });
+	});
+
+	it("toWireMessage turns images into text plus image_url parts", () => {
+		expect(toWireMessage({ role: "user", content: "look", images: [URL1] })).toEqual({
+			role: "user",
+			content: [
+				{ type: "text", text: "look" },
+				{ type: "image_url", image_url: { url: URL1 } },
+			],
+		});
+	});
+
+	it("buildTextToolCall sends the array form for the message that has images, and strings for the rest", async () => {
+		const seen = stubSequence([ok("I see a Save button.")]);
+		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" });
+		await call([
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "Where do I click?", images: [URL1] },
+		]);
+		const messages = (seen[0] as unknown as { messages: Array<{ role: string; content: unknown }> }).messages;
+		expect(messages[0]).toEqual({ role: "system", content: "sys" });
+		expect(messages[1]).toEqual({
+			role: "user",
+			content: [
+				{ type: "text", text: "Where do I click?" },
+				{ type: "image_url", image_url: { url: URL1 } },
+			],
+		});
+	});
+});
+
+// #3641: whether the model can see decides whether it is ever sent pixels.
+// Ollama answers through /api/show `capabilities`; other local servers go by
+// the model family. Nothing known means no.
+describe("modelSupportsVision (#3641)", () => {
+	function stubShow(answer: (model: string) => Response): string[] {
+		const asked: string[] = [];
+		globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+			if (!String(input).endsWith("/api/show")) throw new Error(`unexpected ${String(input)}`);
+			const model = (JSON.parse(init?.body ?? "{}") as { model: string }).model;
+			asked.push(model);
+			return answer(model);
+		}) as unknown as typeof fetch;
+		return asked;
+	}
+
+	it("ollama: true when /api/show lists vision, false when it does not, one probe per model", async () => {
+		const asked = stubShow((model) =>
+			Response.json({
+				capabilities: model === "qwen3.5:9b" ? ["completion", "vision", "tools"] : ["completion", "tools"],
+			}),
+		);
+		expect(await modelSupportsVision({ provider: "ollama", model: "qwen3.5:9b" })).toBe(true);
+		expect(await modelSupportsVision({ provider: "ollama", model: "8j:latest" })).toBe(false);
+		// Cached: asking again sends nothing.
+		expect(await modelSupportsVision({ provider: "ollama", model: "qwen3.5:9b" })).toBe(true);
+		expect(await modelSupportsVision({ provider: "ollama", model: "8j:latest" })).toBe(false);
+		expect(asked).toEqual(["qwen3.5:9b", "8j:latest"]);
+	});
+
+	it("ollama: a failed lookup is no, and is asked again next time", async () => {
+		const asked = stubShow(() => new Response("not found", { status: 404 }));
+		expect(await modelSupportsVision({ provider: "ollama", model: "m" })).toBe(false);
+		expect(await modelSupportsVision({ provider: "ollama", model: "m" })).toBe(false);
+		expect(asked).toEqual(["m", "m"]);
+	});
+
+	it("ollama: the probe goes to the pinned base URL's root", async () => {
+		let url = "";
+		globalThis.fetch = (async (input: unknown) => {
+			url = String(input);
+			return Response.json({ capabilities: ["completion", "vision"] });
+		}) as unknown as typeof fetch;
+		expect(
+			await modelSupportsVision({ provider: "ollama", model: "m", baseUrl: "http://127.0.0.1:11435/v1" }),
+		).toBe(true);
+		expect(url).toBe("http://127.0.0.1:11435/api/show");
+	});
+
+	it("other local servers: the model family decides, no network", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("no network expected");
+		}) as unknown as typeof fetch;
+		expect(await modelSupportsVision({ provider: "lmstudio", model: "qwen2.5-vl-7b-instruct" })).toBe(true);
+		expect(await modelSupportsVision({ provider: "lmstudio", model: "qwen3-14b" })).toBe(false);
+	});
+});
+
+describe("streamed reply size caps (#3671)", () => {
+	const streamOf = (chunks: string[]): Response =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					const enc = new TextEncoder();
+					for (const k of chunks) c.enqueue(enc.encode(k));
+					c.close();
+				},
+			}),
+		);
+
+	it("rejects a single line longer than the line cap", async () => {
+		const huge = `data: {"choices":[{"delta":{"content":"${"a".repeat(MAX_STREAMED_LINE_BYTES + 10)}"}}]}`;
+		const err = await readStreamedChatCompletion(streamOf([huge])).catch((e) => e);
+		expect(err).toBeInstanceOf(StreamedReplyError);
+		expect(String(err.message)).toContain("line exceeded");
+	});
+
+	it("rejects a body that grows past the reply cap across many small lines", async () => {
+		const line = `{"response":"${"b".repeat(100_000)}"}\n`;
+		const n = Math.ceil(MAX_STREAMED_REPLY_BYTES / line.length) + 2;
+		const err = await readStreamedGenerate(streamOf(Array(n).fill(line))).catch((e) => e);
+		expect(err).toBeInstanceOf(StreamedReplyError);
+		expect(String(err.message)).toContain("reply exceeded");
+	});
+
+	it("still reads a normal streamed reply", async () => {
+		const out = await readStreamedGenerate(
+			streamOf(['{"response":"hi "}\n', '{"response":"there","done":true}\n']),
+		);
+		expect(out.response).toBe("hi there");
 	});
 });

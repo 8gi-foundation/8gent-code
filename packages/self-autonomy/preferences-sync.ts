@@ -9,6 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isCommunicationStyle } from "./communication-style";
 import type { UserConfig } from "./onboarding";
 
 /** Fields synced to/from Convex */
@@ -84,8 +85,9 @@ export class PreferencesSyncManager {
 				if (cloudPrefs.defaultProvider) {
 					localConfig.preferences.model.provider = cloudPrefs.defaultProvider as any;
 				}
-				if (cloudPrefs.communicationStyle) {
-					localConfig.identity.communicationStyle = cloudPrefs.communicationStyle as any;
+				// #3487: only a style from the fixed set is taken; anything else is dropped.
+				if (isCommunicationStyle(cloudPrefs.communicationStyle)) {
+					localConfig.identity.communicationStyle = cloudPrefs.communicationStyle;
 				}
 				if (cloudPrefs.language) {
 					localConfig.identity.language = cloudPrefs.language;

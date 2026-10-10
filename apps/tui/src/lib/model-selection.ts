@@ -22,6 +22,65 @@ export function isLikelyEmbeddingModelId(id: string): boolean {
 	return false;
 }
 
+/**
+ * What an Ollama model says it can do, from `/api/show` `capabilities`
+ * (#3548), or null when it does not say (older Ollama, an error, a timeout).
+ * Known answers are cached per host and model; a null answer is not, so a
+ * host that was down is asked again next time.
+ */
+const capabilityCache = new Map<string, string[]>();
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+async function ollamaCapabilities(
+	root: string,
+	model: string,
+	fetchImpl: FetchLike,
+	timeoutMs: number,
+): Promise<string[] | null> {
+	const key = `${root}\n${model}`;
+	const hit = capabilityCache.get(key);
+	if (hit) return hit;
+	try {
+		const res = await fetchImpl(`${root}/api/show`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model }),
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		if (!res.ok) return null;
+		const caps = ((await res.json()) as { capabilities?: unknown })?.capabilities;
+		if (!Array.isArray(caps) || caps.length === 0) return null;
+		const list = caps.map((c) => String(c));
+		capabilityCache.set(key, list);
+		return list;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Ollama models that can chat (#3548). A model whose reported capabilities
+ * lack "completion" (Ollama's decision models report only "decision"; embedding
+ * models report "embedding") is dropped. A model that reports nothing falls
+ * back to the name heuristic, which, as before, gives way when it would leave
+ * no model at all.
+ */
+export async function filterChatCapable(
+	root: string,
+	ids: string[],
+	opts?: { fetch?: FetchLike; timeoutMs?: number },
+): Promise<string[]> {
+	const fetchImpl = opts?.fetch ?? ((url, init) => fetch(url, init));
+	const timeoutMs = opts?.timeoutMs ?? 2000;
+	const caps = await Promise.all(ids.map((id) => ollamaCapabilities(root, id, fetchImpl, timeoutMs)));
+	const capable = ids
+		.map((id, i) => ({ id, caps: caps[i] }))
+		.filter((m) => m.caps === null || m.caps.includes("completion"));
+	const named = capable.filter((m) => m.caps !== null || !isLikelyEmbeddingModelId(m.id));
+	return (named.length > 0 ? named : capable).map((m) => m.id);
+}
+
 function scoreChatModelCandidate(id: string): number {
 	if (isLikelyEmbeddingModelId(id)) return -1e9;
 	const s = id.toLowerCase();
@@ -284,4 +343,44 @@ export function declaredModels(reader: ProviderModelsReader, provider: string): 
 	} catch {
 		return [];
 	}
+}
+
+/**
+ * Whether the TUI should list a provider's models from the configured Ollama's
+ * installed models rather than from the registry (#3332). The `8gent` provider
+ * is Ollama at the same host (providerToRuntime maps it to "ollama"), so its
+ * declared list (`eight-1.0-q3:14b`, not installed on most machines) hid a
+ * missing default: the session kept it and every turn missed in Ollama, then
+ * went to OpenRouter with an id OpenRouter does not serve. With the installed
+ * list, autoSelectModel swaps the missing model once, before the first turn.
+ */
+export function listsInstalledOllamaModels(provider: string): boolean {
+	return provider === "ollama" || provider === "8gent";
+}
+
+/**
+ * The one-line notice for when autoSelectModel replaced a model Ollama does
+ * not have (#3332), or null when there is nothing to tell: a first pick (no
+ * previous model), a provider not backed by Ollama, or a model that is
+ * installed (an embedding-model swap is not a missing model).
+ *
+ * `installed` is Ollama's raw /api/tags list, before chat filtering. A model
+ * in it but not in `available` is installed and cannot chat (#3548), so the
+ * notice says that rather than claiming it is not installed.
+ */
+export function missingModelNotice(opts: {
+	provider: string;
+	from: string;
+	to: string;
+	available: string[];
+	installed?: string[];
+}): string | null {
+	const { provider, from, to, available, installed } = opts;
+	if (!from || !to || from === to) return null;
+	if (!listsInstalledOllamaModels(provider)) return null;
+	if (available.includes(from)) return null;
+	if (installed?.includes(from)) {
+		return `${from} cannot be used for chat, so this session uses ${to}. Pick another with /model.`;
+	}
+	return `${from} is not installed in Ollama, so this session uses ${to}. Pick another with /model.`;
 }

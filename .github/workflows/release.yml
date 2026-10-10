@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  # #3658: the Release PR workflow tags with GITHUB_TOKEN, and a tag pushed by
+  # that token does not fire the push trigger above, so it starts this
+  # workflow on the tag with workflow_dispatch instead.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,6 +33,28 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      # Fail before anything is built, tagged or uploaded. v0.18.0 built, smoke
+      # tested and published a GitHub Release, then npm publish answered E404
+      # because the NPM_TOKEN secret no longer authenticated (#3326).
+      - name: Preflight (tag ref, version, npm token)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release.yml publishes from a vX.Y.Z tag only, not ${GITHUB_REF}"
+            exit 1
+          fi
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "v${PKG}" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::package.json is ${PKG} but the tag is ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          if ! NPM_USER="$(npm whoami)"; then
+            echo "::error::npm does not accept the NPM_TOKEN secret. Replace it with an npm token that can publish @8gi-foundation/8gent-code, then re-run this workflow on ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+          echo "npm publishes as ${NPM_USER}"
 
       - name: Install dependencies
         run: bun install
@@ -56,39 +82,70 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      # #3575: the release notes are the CHANGELOG.md section built from the
+      # merged PR titles since the previous tag. PR titles are untrusted text:
+      # they only ever reach a file, never the shell source or a ${{ }} body.
       - name: Generate release notes
-        id: notes
-        run: |
-          # Get commits since previous tag
-          PREV_TAG=$(git tag --sort=-version:refname | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log ${PREV_TAG}..HEAD --oneline --no-merges)
-          else
-            COMMITS=$(git log --oneline --no-merges -20)
-          fi
-          echo "commits<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMITS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "v${{ steps.version.outputs.version }}"
-          body: |
-            ## 8gent Code v${{ steps.version.outputs.version }}
-
-            Install: `npm install -g @8gi-foundation/8gent-code`
-
-            ### Commits
-            ${{ steps.notes.outputs.commits }}
-
-            ---
-            Full changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)
-          generate_release_notes: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Notes are cosmetic: a failure here must never block the npm publish.
+          if ! bun scripts/changelog-release.ts --version "$VERSION" --to "$TAG" --out section.md; then
+            echo "::warning::changelog-release failed; the release body points at CHANGELOG.md only."
+            printf '## v%s\n\nSee CHANGELOG.md.\n' "$VERSION" > section.md
+          fi
+          if ! grep -qF "## [$VERSION]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md on $TAG has no [$VERSION] section. Run 'bun scripts/changelog-release.ts --version $VERSION --write' in the release PR."
+          fi
+          {
+            printf '## 8gent Code v%s\n\n' "$VERSION"
+            printf 'Install: `npm install -g @8gi-foundation/8gent-code`\n\n'
+            tail -n +3 section.md
+            printf '\n---\nFull changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)\n'
+          } > release_notes.md
+          cat release_notes.md
+
+      # #3326: the release carries the npm tarball and SHA256SUMS, and stays a
+      # draft until npm has the package and release-guard has confirmed the
+      # assets are on GitHub. A draft is never "latest", so a failure anywhere
+      # below leaves nothing empty or half-shipped where installers look.
+      # CI runs the same `release-guard.sh pack` on every pull request.
+      - name: Stage release assets (npm tarball + SHA256SUMS)
+        run: |
+          bash scripts/release-guard.sh pack release-assets > release-asset-count
+          ls -la release-assets
+          cat release-assets/SHA256SUMS
+
+      - name: Create draft GitHub Release with assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A re-run finds the draft from the failed run and replaces its files.
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --draft --verify-tag \
+              --title "$TAG" --notes-file release_notes.md
+          fi
 
       - name: Publish to npm
-        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # A re-run after a later step failed must not die on "cannot publish
+          # over the previously published version".
+          if [ "$(npm view "@8gi-foundation/8gent-code@${VERSION}" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "@8gi-foundation/8gent-code@${VERSION} is already on npm; not publishing again"
+          else
+            # The exact tarball staged and checksummed above, so npm and the
+            # GitHub Release carry the same bytes (no second prepublishOnly build).
+            npm publish release-assets/*.tgz --access public
+          fi
+
+      - name: Publish the GitHub Release only if it has its assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/release-guard.sh publish "$GITHUB_REF_NAME" "$(cat release-asset-count)"

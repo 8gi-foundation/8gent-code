@@ -307,7 +307,44 @@ and replaces Selene.
   path that did not exist. A file the session only modified, one another
   tab created, a tracked one, or one since replaced (device and inode
   changed) still goes to the judge. The permission layer's own card for a
-  dangerous `rm` is unchanged.
+  dangerous `rm` is unchanged. An absolute path passes only when it is
+  absent, written without `..`, `.` or `//`, and its parent directory exists
+  and is either a real temp root (realpath of `/tmp`, or of `os.tmpdir()`
+  when that is the macOS per-user `T` dir) or reached from one only through
+  real directories, not symlinks, owned by the current uid and not
+  writable by group or others. Above the temp root every component must be
+  a real directory group and others cannot write, and the temp root itself
+  must be unwritable by them or sticky; the only symlinks followed are
+  macOS's `/tmp` and `/var`, by exact target. An absent, symlinked,
+  foreign-owned or group/other-writable directory anywhere on the path goes
+  to the judge. So
+  `rm -f /tmp/todos.json` with no such file skips the judge (#3381). The
+  rules' text test for temp paths is not trusted for this. An existing file
+  in a temp root always goes to the judge.
+- **rm of one stale scratch file (#3669).** Under the same flag, `rm <file>`,
+  `rm -f <file>` or `unlink <file>` skips the judge when the one operand is
+  an untracked regular file inside the workspace that is scratch-style: a
+  directory segment of its real relative path is `run`, `tmp` or `.cache`,
+  or its name ends in `.lock` or `.pid`
+  (`packages/permissions/s1-rm-single.ts`). The pilot's stale
+  `run/worker.lock`, whose owner pid had exited, is the case. Tracked status
+  is read from the file's own real directory (so a nested repository or
+  submodule there is the one asked) with a literal, case-insensitive match
+  on the base name, and with `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+  `GIT_COMMON_DIR` and `GIT_CEILING_DIRECTORIES` dropped from the spawn env.
+  Still judged: any tracked or staged file (under `run/` or not), a
+  dependency lockfile by name (`bun.lock`, `yarn.lock`, `Cargo.lock`,
+  `Gemfile.lock`, `poetry.lock`, `uv.lock`, `pdm.lock`, `composer.lock`,
+  `mix.lock`, `pubspec.lock`, `Podfile.lock`, `flake.lock`, `deno.lock`,
+  `bun.lockb`), a sensitive name even inside a scratch directory (`.env*`,
+  `*.pem`, `*.key`, `*.p12`, `*.sqlite*`, `*.db`), an untracked file that
+  is not scratch-style (`old.log`), a directory, a symlink (pointing
+  anywhere), a path under a symlinked directory that resolves outside, a
+  glob, brace, quote or `$`, `-r`/`-R`/`-d`/`--`, two or more operands, an
+  absolute or `..` path, anything under `.git/` (by written or real path),
+  and `mv`, for which no rule fires. When the command was close to that
+  shape but refused, the block message says why in plain words and what is
+  allowed, so a block is not a dead end.
 - **Flag off:** `systemOneGate` returns before anything else. No decider is
   constructed and `@8gent/decide` is never imported (the gate imports it
   dynamically). Tool output is unchanged.

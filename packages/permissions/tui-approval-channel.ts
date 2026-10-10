@@ -19,12 +19,15 @@
  * just register their handler at boot.
  */
 
-export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip";
+/** "unfit": a `full` request did not fit on screen and was not shown; yes/no callers read it as no. */
+export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip" | "unfit";
 
 export interface TuiApprovalRequest {
 	action: string;
 	details: string;
 	command?: string;
+	/** Show `command` in full, never cut; else the frontend answers "unfit" (#3474). */
+	full?: boolean;
 }
 
 export type TuiApprovalHandler = (
@@ -41,16 +44,23 @@ export function hasTuiApprovalHandler(): boolean {
 	return handler != null;
 }
 
-export async function requestTuiApproval(
+/** The frontend's decision, or null when there is no handler or it failed. */
+export async function requestTuiDecision(
 	request: TuiApprovalRequest,
-): Promise<boolean | null> {
+): Promise<TuiApprovalDecision | null> {
 	if (!handler) return null;
 	try {
-		const decision = await handler(request);
-		return decision === "approve";
+		return await handler(request);
 	} catch {
 		return null;
 	}
+}
+
+export async function requestTuiApproval(
+	request: TuiApprovalRequest,
+): Promise<boolean | null> {
+	const decision = await requestTuiDecision(request);
+	return decision === null ? null : decision === "approve";
 }
 
 /** Test-only: clear the registered handler. */

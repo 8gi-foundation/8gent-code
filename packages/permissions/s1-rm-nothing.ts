@@ -35,16 +35,56 @@
  * did not create, one it only modified, one another tab created, a tracked
  * one.
  *
- * Known window: a background process could create a target between this check
- * and the spawn. rm would then remove a file that appeared in those
- * milliseconds; the agent's own tool calls are serial, so only its background
- * tasks could race it.
+ * Absent temp paths (#3381, the narrow option James approved on 2026-10-03
+ * after the 8SO review): an ABSOLUTE path passes only when ALL of these hold:
+ *   - it is canonical text: no `..`, `.` or empty segment, no trailing slash;
+ *   - it is absent (lstat ENOENT, so a symlink or dangling symlink fails);
+ *   - its parent directory exists (no absent intermediate directories), and
+ *     every component from "/" down to that parent, walked as written, is one
+ *     of: a real directory (lstat, not a symlink) above the temp root, owned
+ *     by root or the current uid, with (mode & 0o022) === 0; the temp root
+ *     itself (realpath("/tmp"), or realpath(os.tmpdir()) when that is a macOS
+ *     per-user /var/folders/../T directory), owned by root or the current
+ *     uid, with (mode & 0o022) === 0 or the sticky bit; a real directory
+ *     below the temp root owned by the current uid with (mode & 0o022) === 0,
+ *     sticky or not; or, on macOS only, the root-owned /tmp or /var link
+ *     whose exact target is private/tmp or private/var, walked in its place.
+ *     Any other symlink fails closed. (8SO B1: an absent or foreign-owned
+ *     ancestor in a world-writable /tmp could be swapped for a symlink out of
+ *     temp between this check and the rm; 8SO B2: so could the child of a
+ *     uid-owned directory that group or others can write, sticky or not;
+ *     8SO B3: so could a symlink, or any entry of a group- or world-writable
+ *     directory, above the temp root.)
+ *     An os.tmpdir() under /tmp is reached by that walk from /tmp.
+ * The text test `isTemp` in decide/rules.ts is never used here: it matches
+ * `/tmp-x`, `/tmp/../etc` and any path containing `/scratchpad`. When the
+ * rules fire nothing (every path looked temp to that text test), every path
+ * must be absolute and pass the realpath test above; a relative path there
+ * returns null.
+ *
+ * Invariant for absolute paths: only an ABSENT path passes. An absolute path
+ * that exists always goes to the judge, whoever created it and whenever:
+ * neither birth time nor ownership shows where a file's contents came from.
+ *
+ * Known window: another process (the agent's background tasks, any other
+ * process of this uid, or, in a shared temp root, another user) could create
+ * the leaf between this check and the spawn. Only the leaf can race: every
+ * component from "/" to the parent is a real directory (or one of macOS's
+ * fixed root-owned /tmp and /var links) that group and others cannot write,
+ * the temp root excepted only under the sticky bit, so no other user can
+ * rename or replace an entry on the path, and the delete stays in that
+ * directory. Under the sticky bit, rm cannot unlink another user's file in
+ * the temp root itself. Not checked: macOS ACLs, which can grant add_file or
+ * delete_child on a 0755 directory and which node cannot read without
+ * spawning `ls -le`. Only a directory's owner or root can set one, and the
+ * temp roots here carry none.
  *
  * Synchronous, never throws.
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -63,7 +103,8 @@ function absent(p: string): boolean {
 	}
 }
 
-function inside(child: string, root: string): boolean {
+/** True when `child` is `root` or below it (both already resolved). */
+export function inside(child: string, root: string): boolean {
 	const rel = path.relative(root, child);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
@@ -79,6 +120,125 @@ function nearestExisting(abs: string): string | null {
 			if (up === cur) return null;
 			cur = up;
 		}
+	}
+}
+
+/** The macOS per-user temp directory, after realpath. */
+const MAC_USER_TMP = /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/;
+
+let rootsForTests: string[] | null = null;
+
+/** Tests only: replace the real temp roots (realpaths), or restore them with null. */
+export function _setTempRootsForTests(roots: string[] | null): void {
+	rootsForTests = roots;
+}
+
+/**
+ * Real temp roots, after realpath: /tmp, and os.tmpdir() only when it is the
+ * macOS per-user temp directory. A TMPDIR under /tmp is not a root of its own:
+ * it is reached from /tmp through the ownership walk in `parentSafe`. A TMPDIR
+ * pointing anywhere else is not trusted.
+ */
+function tempRoots(): string[] {
+	if (rootsForTests) return rootsForTests;
+	const roots: string[] = [];
+	try {
+		const tmp = realpathSync("/tmp");
+		if (tmp !== "/") roots.push(tmp);
+	} catch {
+		// No /tmp.
+	}
+	try {
+		const own = realpathSync(tmpdir());
+		if (MAC_USER_TMP.test(own)) roots.push(own);
+	} catch {
+		// No usable os.tmpdir(): /tmp alone.
+	}
+	return roots;
+}
+
+/**
+ * The only symlinks the walk follows (8SO B3): macOS's own links at "/" that
+ * lead to the temp roots, matched by exact readlink text and owner root.
+ * Any other symlink, anywhere on the path, fails closed.
+ */
+const OS_LINKS: Readonly<Record<string, string>> =
+	process.platform === "darwin" ? { tmp: "private/tmp", var: "private/var" } : {};
+
+/**
+ * True when `dir` (canonical, absolute) exists and every component from "/"
+ * down to it is one of (8SO B1, B2, B3):
+ *   - above the temp root: a real directory (lstat), owned by root or this
+ *     uid, with (mode & 0o022) === 0;
+ *   - the temp root itself: a real directory owned by root or this uid,
+ *     with (mode & 0o022) === 0 or the sticky bit (/tmp is 1777);
+ *   - below the temp root: a real directory owned by this uid with
+ *     (mode & 0o022) === 0 (a sticky bit does not excuse it);
+ *   - an OS_LINKS entry directly under "/", whose exact target is then walked
+ *     in its place.
+ * Anything else, a symlink above the root included, fails closed. So no other
+ * user can rename or replace any entry on the path between this check and
+ * the rm. `dir` may be the temp root itself.
+ */
+function parentSafe(dir: string): boolean {
+	const uid = process.getuid?.();
+	if (uid === undefined || dir === "/") return false;
+	const roots = tempRoots();
+	const writable = (mode: number) => (mode & 0o022) !== 0;
+	const top = lstatSync("/");
+	if (!top.isDirectory() || top.uid !== 0 || writable(top.mode)) return false;
+	let segs = dir.slice(1).split("/");
+	const link = OS_LINKS[segs[0]];
+	if (link !== undefined) {
+		const ln = lstatSync(`/${segs[0]}`);
+		if (ln.isSymbolicLink()) {
+			if (ln.uid !== 0 || readlinkSync(`/${segs[0]}`) !== link) return false;
+			segs = [...link.split("/"), ...segs.slice(1)];
+		}
+	}
+	let cur = "";
+	let rooted = false;
+	for (const seg of segs) {
+		cur += `/${seg}`;
+		const st = lstatSync(cur);
+		if (st.isSymbolicLink() || !st.isDirectory()) return false;
+		if (rooted) {
+			if (st.uid !== uid || writable(st.mode)) return false;
+			continue;
+		}
+		if (st.uid !== 0 && st.uid !== uid) return false;
+		// No symlink has been followed except an exact OS_LINKS target, so
+		// `cur` is its own realpath and compares directly with the roots.
+		if (roots.includes(cur)) {
+			if (writable(st.mode) && (st.mode & 0o1000) === 0) return false;
+			rooted = true;
+			continue;
+		}
+		if (writable(st.mode)) return false;
+	}
+	return rooted;
+}
+
+/** True when `p` is absolute with no `..`, `.` or empty segment and no trailing slash. */
+function canonicalAbsolute(p: string): boolean {
+	if (!p.startsWith("/") || p.endsWith("/")) return false;
+	return !p
+		.slice(1)
+		.split("/")
+		.some((s) => s === "" || s === "." || s === "..");
+}
+
+/**
+ * True when `p` is a canonical absolute path that is absent and whose parent
+ * directory exists and passes `parentSafe`. Any error fails closed.
+ */
+function absentInTemp(p: string): boolean {
+	if (!canonicalAbsolute(p)) return false;
+	if (!absent(p)) return false;
+	try {
+		return parentSafe(path.dirname(p));
+	} catch {
+		return false;
 	}
 }
 
@@ -104,27 +264,29 @@ export function rmOfNothing(command: string, cwd: string | undefined): boolean {
 }
 
 /**
- * "nothing" when `command` is a plain `rm` whose every path is absent;
- * "own-scratch" when every path is absent or an untracked file this session
- * created (and at least one is such a file); null otherwise.
+ * "nothing" when `command` is a plain `rm` whose every path is absent in the
+ * workspace; "nothing-temp" when every path is absent and at least one is an
+ * absolute path under a real temp root (#3381); "own-scratch" when every path
+ * is absent or an untracked file this session created in the workspace, and
+ * at least one is such a file; null otherwise.
  */
 export function rmOfNothingOrOwn(
 	command: string,
 	cwd: string | undefined,
 	created?: CreatedFiles,
-): "nothing" | "own-scratch" | null {
+): "nothing" | "nothing-temp" | "own-scratch" | null {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return null;
 		const text = command.trim();
 		if (!PLAIN.test(text)) return null;
 		if (promptControlText(text) !== null) return null;
 		const rules = decideRules(text);
-		if (
-			rules.verdict !== "escalate" ||
-			rules.rules.length !== 1 ||
-			rules.rules[0] !== "rm_non_temp"
-		)
-			return null;
+		// No rule fired: every path looked temp to the rules' text test. Only
+		// absolute paths that pass the realpath test below may then go on (#3381).
+		const noRules = rules.verdict === "pass" && rules.rules.length === 0;
+		const rmNonTemp =
+			rules.verdict === "escalate" && rules.rules.length === 1 && rules.rules[0] === "rm_non_temp";
+		if (!noRules && !rmNonTemp) return null;
 		const [bin, ...args] = text.split(/ +/);
 		if (bin !== "rm") return null;
 		const paths = args.filter((a) => !a.startsWith("-"));
@@ -132,8 +294,16 @@ export function rmOfNothingOrOwn(
 		if (paths.length === 0 || paths.length > MAX_PATHS) return null;
 		const root = realpathSync(cwd);
 		const own: string[] = [];
+		let temp = false;
 		for (const p of paths) {
-			if (p.startsWith("/") || p.split("/").includes("..")) return null;
+			if (p.startsWith("/")) {
+				// Absolute: only an absent path under a real temp root (#3381).
+				// An existing one is always judged.
+				if (!absentInTemp(p)) return null;
+				temp = true;
+				continue;
+			}
+			if (noRules || p.split("/").includes("..")) return null;
 			const abs = path.resolve(root, p);
 			if (!inside(abs, root)) return null;
 			if (absent(abs)) {
@@ -146,7 +316,7 @@ export function rmOfNothingOrOwn(
 			if (!inside(realpathSync(path.dirname(abs)), root)) return null;
 			own.push(path.relative(root, path.join(realpathSync(path.dirname(abs)), path.basename(abs))));
 		}
-		if (own.length === 0) return "nothing";
+		if (own.length === 0) return temp ? "nothing-temp" : "nothing";
 		return noneTracked(root, own) ? "own-scratch" : null;
 	} catch {
 		return null;

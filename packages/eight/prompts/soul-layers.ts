@@ -5,6 +5,8 @@
  * based on who is talking to Eight.
  */
 
+import { isCommunicationStyle } from "../../self-autonomy/communication-style";
+
 export type AccessTier = "visitor" | "collaborator" | "owner";
 
 // Core identity - always included regardless of tier
@@ -58,7 +60,8 @@ export function composeSoulPrompt(tier: AccessTier, userContext?: UserContext): 
 		let ctx = "\n## User Context\n";
 		if (userContext.name) ctx += `Name: ${userContext.name}\n`;
 		if (userContext.role) ctx += `Role: ${userContext.role}\n`;
-		if (userContext.communicationStyle) ctx += `Style: ${userContext.communicationStyle}\n`;
+		// #3487: only a style from the fixed set is written.
+		if (isCommunicationStyle(userContext.communicationStyle)) ctx += `Style: ${userContext.communicationStyle}\n`;
 		if (userContext.peerRepresentation)
 			ctx += `\nWhat I know about this user:\n${userContext.peerRepresentation}\n`;
 		layers.push(ctx);

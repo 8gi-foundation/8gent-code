@@ -11,7 +11,10 @@
  * since re-classified:
  *   - computer (Mac panel, locally authed): full
  *   - os/app (Clerk-authed web): full
- *   - telegram (single-user allowlisted bridge): full. See below.
+ *   - telegram (multi-user allowlisted bridge, operator session only): full
+ *     for the operator. The bridge may sit in a group with other allowlisted
+ *     people; it refuses their prompts and commands rather than letting them
+ *     share the operator's session. See below.
  *   - discord, browser (bot bridges / untrusted page contexts): READ +
  *     write_basic only; write_full requires second-factor approval on the
  *     originator
@@ -73,8 +76,11 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	os: ["read", "write_basic", "write_full", "admin"],
 	app: ["read", "write_basic", "write_full"],
 	api: [], // Empty = caller controls scope per minted token.
-	// Single-user allowlisted bridge, not an open bot surface. Same ceiling as
-	// `computer` because it is the same operator behind the same local secret.
+	// Multi-user channel: the bridge can sit in a group with several allowlisted
+	// people. The ceiling is the OPERATOR's, and holds only because the bridge
+	// refuses every non-operator prompt and command before it reaches the
+	// daemon session (telegram-bridge.ts isCommandAllowed). Never route a
+	// second person's prompt onto this channel.
 	// Rationale and the three allowlist checks it depends on: file header.
 	telegram: ["read", "write_basic", "write_full", "admin"],
 	discord: ["read", "write_basic"],

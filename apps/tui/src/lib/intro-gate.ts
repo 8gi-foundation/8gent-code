@@ -12,8 +12,8 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveHome } from "../../../../packages/core/home.js";
 
 export type IntroSetting = "on" | "off" | "auto" | undefined;
 
@@ -36,7 +36,7 @@ function seenPath(home: string): string {
 	return join(home, ".8gent", "intro-seen");
 }
 
-export function readSeenVersion(home: string = homedir()): string | null {
+export function readSeenVersion(home: string = resolveHome()): string | null {
 	try {
 		const v = readFileSync(seenPath(home), "utf-8").trim();
 		return v || null;
@@ -46,7 +46,7 @@ export function readSeenVersion(home: string = homedir()): string | null {
 }
 
 /** Record that this version has shown the splash. Best-effort. */
-export function markIntroSeen(version: string, home: string = homedir()): void {
+export function markIntroSeen(version: string, home: string = resolveHome()): void {
 	try {
 		mkdirSync(join(home, ".8gent"), { recursive: true });
 		writeFileSync(seenPath(home), `${version}\n`);

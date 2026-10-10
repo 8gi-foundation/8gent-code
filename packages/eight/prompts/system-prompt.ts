@@ -8,12 +8,17 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveHome } from "../../core/home";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
 import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
+import {
+	type CommunicationStyle,
+	isCommunicationStyle,
+	isLanguageCode,
+} from "../../self-autonomy/communication-style";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -38,7 +43,9 @@ export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
  * by the relay (mac/relay/board_context.py on the heartbeat cadence) so this
  * read is pure and never needs the network.
  */
-export const BOARD_CONTEXT_PATH = join(homedir(), ".8gent", "board-context.md");
+// resolveHome (EIGHT_HOME > HOME > os.homedir) so a sandboxed run, the test
+// preload included, reads its own home; os.homedir() is frozen at process start (#3240).
+export const BOARD_CONTEXT_PATH = join(resolveHome(), ".8gent", "board-context.md");
 
 /**
  * Cap the injected briefing so a long file never bloats every agent's prompt.
@@ -81,6 +88,49 @@ export function buildBoardContextSegment(path: string = BOARD_CONTEXT_PATH): str
 }
 
 /**
+ * Opt-in reply shape for people who lose the thread in long answers (#3487).
+ * Only reaches the prompt when the user picked communicationStyle "action-first".
+ */
+export const ACTION_FIRST_PRECEDENCE =
+	'These rules override any other instruction in this prompt about greetings, completion phrases, jokes or summaries. If a completion marker (such as COMPLETED or INCOMPLETE) is required, write it as one plain line with no joke, placed just before the single "Next:" line.';
+export const ACTION_FIRST_STYLE = [
+	"Shape every reply so the reader can act without rereading:",
+	ACTION_FIRST_PRECEDENCE,
+	"1. Open with the action or the answer itself. No greeting, no restating the question, no warm-up.",
+	"2. Give steps as a numbered list, one action per step. Never more than five items in any list; if there are more, do the first five and say what comes after.",
+	"3. Put commands and paths in code blocks so they can be copied.",
+	"4. When something failed, say what failed and the fix, in plain words, with no apology.",
+	"5. If you give a time estimate, give a number of minutes.",
+	"6. No summary of what you just said and no sign-off line.",
+	'7. End with exactly one line that starts with "Next:" and names one concrete thing to do.',
+].join("\n");
+
+/** The guide line per style. "sarcastic" (the default) has none. */
+const STYLE_GUIDE: Record<CommunicationStyle, string> = {
+	sarcastic: "",
+	concise: "Be brief and direct. Skip explanations unless asked.",
+	detailed: "Explain your reasoning. Teach as you go.",
+	casual: "Keep it friendly and collaborative. We're partners.",
+	formal: "Maintain professional tone. Be precise.",
+	"action-first": ACTION_FIRST_STYLE,
+};
+
+/**
+ * The "Communication style" line of the user context. Also sent, unchanged, as
+ * the closing style reminder on the local text-tool path (#3487). Only a key
+ * from the fixed style set produces a line; any other value yields "".
+ */
+export function communicationStyleLine(style: string): string {
+	if (!isCommunicationStyle(style)) return "";
+	return `Communication style: **${style}**. ${STYLE_GUIDE[style]}`;
+}
+
+/** True when the style is a known key with a guide line (so not "sarcastic"). */
+export function styleHasGuide(style: string): boolean {
+	return isCommunicationStyle(style) && STYLE_GUIDE[style] !== "";
+}
+
+/**
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
@@ -90,7 +140,7 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	communicationStyle?: string | null;
 	language?: string;
 	preferences?: Record<string, unknown>;
-}) => {
+}, opts: { includeBoard?: boolean } = {}) => {
 	const parts: string[] = ["## USER CONTEXT"];
 
 	if (userData.name) {
@@ -99,24 +149,19 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	if (userData.role) {
 		parts.push(`Their role: ${userData.role}.`);
 	}
-	if (userData.communicationStyle) {
-		const styleGuide: Record<string, string> = {
-			concise: "Be brief and direct. Skip explanations unless asked.",
-			detailed: "Explain your reasoning. Teach as you go.",
-			casual: "Keep it friendly and collaborative. We're partners.",
-			formal: "Maintain professional tone. Be precise.",
-		};
-		parts.push(
-			`Communication style: **${userData.communicationStyle}**. ${styleGuide[userData.communicationStyle] || ""}`,
-		);
+	const styleLine = userData.communicationStyle ? communicationStyleLine(userData.communicationStyle) : "";
+	if (styleLine) {
+		parts.push(styleLine);
 	}
-	if (userData.language && userData.language !== "en") {
+	// #3487: only a language code reaches the prompt ("pt-BR", not free text).
+	if (userData.language && userData.language !== "en" && isLanguageCode(userData.language)) {
 		parts.push(`Respond in: ${userData.language}`);
 	}
 
 	// Append the universal board briefing so every agent that gets a user-context
 	// block also gets the shared roadmap + "query the live sources" instruction.
-	const board = buildBoardContextSegment();
+	// #3487: callers leave it out for a model that is not on this machine.
+	const board = opts.includeBoard === false ? "" : buildBoardContextSegment();
 	const userPart = parts.length > 1 ? parts.join("\n") : "";
 	return [userPart, board].filter(Boolean).join("\n\n");
 };
@@ -279,6 +324,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	lines.push(
 		"",
 		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
+		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
 	);
 
 	return lines.join("\n");
@@ -324,7 +370,13 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`json
 {"tool": "git_add", "arguments": {"files": "."}}
 {"tool": "git_commit", "arguments": {"message": "feat: add feature"}}
-\`\`\``;
+\`\`\`
+
+### Recovering a lost file
+Restore from git, never retype contents.
+1. Uncommitted delete (" D <path>" in \`git status\`): \`git checkout HEAD -- <path>\` (\`git restore\` may be denied).
+2. Committed delete: if \`test -e <path>\` succeeds, stop and tell the user, never overwrite. Else the first \`git log --diff-filter=D --oneline -- <path>\` hit <sha> is the deleting commit; run \`git checkout <sha>^ -- <path>\`.
+3. \`git diff <sha>^ -- <path>\` (or HEAD) must print nothing.`;
 
 export const ERROR_RECOVERY_SEGMENT = `## ERROR RECOVERY
 
@@ -393,6 +445,7 @@ When creating UI components, pages, or any visual interface:
 3. Apply the recommended design system consistently across all UI files
 4. Available query outputs: 'summary' (default), 'css' (CSS variables), 'tailwind' (Tailwind config), 'hex' (hex palette)
 5. If the project already has a design system, query it to stay consistent
+6. A Marp deck with no theme: call \`deck_theme\` with action \`list\`, then \`apply\` (or \`mix\`) so it renders designed
 
 Excellent design is the default, not an afterthought.`;
 

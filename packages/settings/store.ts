@@ -12,18 +12,27 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import type { Settings } from "./schema.js";
 
-const SETTINGS_DIR = path.join(os.homedir(), ".8gent");
-const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
+// Resolved on every call through resolveHome(), which honours EIGHT_HOME and
+// $HOME. Bun fixes os.homedir() at process start, so it ignored the test
+// preload's temp HOME and let tests touch the real settings file (#3391).
+function settingsDir(): string {
+	return path.join(resolveHome(), ".8gent");
+}
+
+function settingsFile(): string {
+	return path.join(settingsDir(), "settings.json");
+}
 
 function ensureDir(): void {
 	try {
-		if (!fs.existsSync(SETTINGS_DIR)) {
-			fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+		const dir = settingsDir();
+		if (!fs.existsSync(dir)) {
+			fs.mkdirSync(dir, { recursive: true });
 		}
 	} catch {
 		// Best-effort. saveSettings will swallow any subsequent write error.
@@ -64,10 +73,11 @@ function deepMerge<T>(defaults: T, user: unknown): T {
  */
 export function loadSettings(): Settings {
 	try {
-		if (!fs.existsSync(SETTINGS_FILE)) {
+		const file = settingsFile();
+		if (!fs.existsSync(file)) {
 			return DEFAULT_SETTINGS;
 		}
-		const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
+		const raw = fs.readFileSync(file, "utf-8");
 		const parsed = JSON.parse(raw) as unknown;
 		const merged = deepMerge(DEFAULT_SETTINGS, parsed);
 		// Force version to current — older files get implicitly upgraded.
@@ -84,7 +94,7 @@ export function loadSettings(): Settings {
 export function saveSettings(s: Settings): void {
 	try {
 		ensureDir();
-		fs.writeFileSync(SETTINGS_FILE, `${JSON.stringify(s, null, 2)}\n`, "utf-8");
+		fs.writeFileSync(settingsFile(), `${JSON.stringify(s, null, 2)}\n`, "utf-8");
 	} catch {
 		// Best-effort persistence
 	}
@@ -103,5 +113,5 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
 
 /** Absolute path to the settings file (for debugging / display). */
 export function getSettingsFilePath(): string {
-	return SETTINGS_FILE;
+	return settingsFile();
 }

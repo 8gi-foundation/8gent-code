@@ -5,20 +5,24 @@
  * streams events back as Telegram messages. Runs inside the Vessel container
  * alongside the daemon process.
  *
- * This gives Eight full autonomous capability via Telegram:
- * - Natural language prompts (routed to agent with all tools)
- * - /run <cmd> for direct shell execution
+ * - Natural language prompts (routed to the agent through its normal gates)
  * - /status for daemon health
- * - /deploy for Vercel/Fly deployments
+ * - Operator-only commands (see OPERATOR_COMMANDS) and a private-chat-only
+ *   gate on /run and /deploy (see PRIVILEGED_COMMANDS). The bridge has no
+ *   handler of its own for either: they are refused outside an operator DM
+ *   and otherwise fall through as ordinary prompts.
  * - Startup notification: "I'm online. What do we work on next?"
  */
 
 import { resolveHome } from "../core/home";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	appendFileSync,
+	chmodSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	statSync,
 	unlinkSync,
 	writeFileSync,
@@ -34,6 +38,8 @@ import {
 	runBoardroom,
 } from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
+import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { NO_LINK_PREVIEW } from "./notifications";
 import {
 	decideVoice,
@@ -84,9 +90,12 @@ export function observeUnauthorized(update: unknown): void {
 		try {
 			if (statSync(OBSERVED_LOG).size > OBSERVED_MAX_BYTES) return;
 		} catch {
-			mkdirSync(dirname(OBSERVED_LOG), { recursive: true });
+			mkdirSync(dirname(OBSERVED_LOG), { recursive: true, mode: 0o700 });
 		}
 
+		// Private by construction: the log holds other people's words.
+		if (!existsSync(OBSERVED_LOG)) writeFileSync(OBSERVED_LOG, "", { mode: 0o600 });
+		chmodSync(OBSERVED_LOG, 0o600);
 		appendFileSync(
 			OBSERVED_LOG,
 			`${JSON.stringify({
@@ -114,12 +123,24 @@ const MULTI_STEP_ENABLED = process.env.EIGHT_TG_LEGACY !== "1";
 const SESSION_STORE_PATH =
 	process.env.EIGHT_TG_SESSIONS || `${process.env.HOME ?? ""}/.8gent/telegram-sessions.json`;
 
+export interface MsgEntity {
+	type: string;
+	offset: number;
+	length: number;
+}
+
+type BridgeMessage = NonNullable<TelegramUpdate["message"]>;
+
 interface TelegramUpdate {
 	update_id: number;
 	message?: {
 		message_id: number;
 		from: { id: number; first_name: string; username?: string };
 		chat: { id: number; type?: string };
+		reply_to_message?: { from?: { id?: number } };
+		entities?: MsgEntity[];
+		forward_origin?: unknown;
+		via_bot?: unknown;
 		text?: string;
 		voice?: { file_id: string; duration: number };
 		audio?: { file_id: string; duration: number };
@@ -133,6 +154,20 @@ interface TelegramUpdate {
 }
 
 interface BridgeConfig {
+	/** Test seam: replaces https://api.telegram.org/bot for getUpdates only. */
+	telegramApiBase?: string;
+	/** Poll-loop tuning (#3708). Defaults are production values. */
+	poll?: {
+		/** getUpdates long-poll seconds. Default 30. */
+		timeoutSec?: number;
+		/** Extra ms above the long-poll before the client aborts. Default 5000. */
+		abortGraceMs?: number;
+		backoffBaseMs?: number; // default 1000
+		backoffMaxMs?: number; // default 60000
+		/** Restart the loop if no poll completed for this long. Default 5 min. */
+		watchdogMs?: number;
+		watchdogCheckMs?: number; // default 30000
+	};
 	telegramToken: string;
 	chatId: string;
 	daemonUrl: string; // ws://localhost:18789 (same container)
@@ -282,7 +317,7 @@ async function transcribeVoice(token: string, fileId: string): Promise<string> {
 		}
 		return text;
 	} catch (err) {
-		console.error("[telegram-bridge] transcription failed:", err);
+		console.error("[telegram-bridge] transcription failed:", scrubErr(err, token));
 		return "[voice message received - transcription failed, please send as text]";
 	} finally {
 		for (const f of [ogg, wav]) {
@@ -351,8 +386,343 @@ export function isSenderAuthorized(
 	return type === "private";
 }
 
+/**
+ * Commands that run code or ship it. Direct shell and deploys are the one
+ * power in this bridge that a group must never hold, whoever is in it: the
+ * chat id of a group names a crowd, and a message in a group is data, not an
+ * instruction to execute. Allowed only for an operator, in a private chat.
+ */
+export const PRIVILEGED_COMMANDS = ["/run", "/deploy"] as const;
+
+/**
+ * Commands that dispatch, kill or read the machine's logs. Operator only, but
+ * unlike PRIVILEGED_COMMANDS they may be used in the operator's group, since
+ * they act through the normal agent gates rather than as a raw shell.
+ */
+export const OPERATOR_COMMANDS = [
+	"/delegate",
+	"/kill",
+	"/logs",
+	"/goals",
+	"/voice",
+	"/boardroom",
+	"/cancel",
+	"/unstick",
+	"/plan",
+	"/review",
+] as const;
+
+/** Commands anyone in the allowlist may use. Everything else starting with "/" is refused. */
+export const OPEN_COMMANDS = ["/status", "/help"] as const;
+
+/**
+ * Strip zero-width and other format characters (ZWSP, ZWJ, BOM, bidi marks...)
+ * so `/boardroom\u200Bx` cannot slip past a parser that sees two words while a
+ * router sees one. Run before any command parsing.
+ */
+export function cleanText(text: string): string {
+	return text.replace(/[\p{Cf}\u200B-\u200D\u2060\uFEFF]/gu, "").trim();
+}
+
+/** Entity types inside which an @mention is not an address. */
+const NON_MENTION_CONTAINERS = new Set(["code", "pre", "url", "text_link"]);
+
+export interface SenderCtx {
+	chatType?: string;
+	fromId?: number;
+	/** The message replies to one of this bot's own messages (by bot id). */
+	replyToBot?: boolean;
+	/** Entities of the ORIGINAL text; offsets are UTF-16 code units. */
+	entities?: MsgEntity[];
+	/** Forwarded or sent via an inline bot: never an address. */
+	forwarded?: boolean;
+}
+
+/**
+ * Group addressing. In a group the bot acts only when spoken to:
+ *   - a `mention` entity, leading the message, whose text equals @<username>
+ *     (case-insensitive), sliced from the ORIGINAL text by its UTF-16 offsets
+ *     and not inside a code, pre, url or text_link entity;
+ *   - a reply to one of the bot's own messages (id match, decided by the caller);
+ *   - a /command@<username> naming this bot;
+ *   - a bare /command, only from an operator.
+ * Everything else, the operator's own chat with people included, is ignored.
+ * Forwarded and via-bot messages are never addressed. Private chats always are.
+ * Fails closed: with no known username nothing mentions the bot.
+ * Addressing never widens authority: the tier gate still runs afterwards.
+ * Returns the cleaned text with the leading @mention removed.
+ */
+export function groupAddressing(
+	rawText: string,
+	input: SenderCtx,
+	bot: { username?: string | null },
+	config: SenderConfig,
+): { addressed: boolean; text: string } {
+	const type = input.chatType ?? "private";
+	if (type === "private") return { addressed: true, text: cleanText(rawText) };
+	if (input.forwarded) return { addressed: false, text: cleanText(rawText) };
+	const name = bot.username?.replace(/^@/, "").toLowerCase();
+	const entities = input.entities ?? [];
+	if (name) {
+		for (const e of entities) {
+			if (e.type !== "mention") continue;
+			if (cleanText(rawText.slice(0, e.offset)) !== "") continue; // must lead
+			if (rawText.slice(e.offset, e.offset + e.length).toLowerCase() !== `@${name}`) continue;
+			const inside = entities.some(
+				(c) =>
+					NON_MENTION_CONTAINERS.has(c.type) &&
+					e.offset >= c.offset &&
+					e.offset < c.offset + c.length,
+			);
+			if (inside) continue;
+			const rest = rawText.slice(0, e.offset) + rawText.slice(e.offset + e.length);
+			return { addressed: true, text: cleanText(rest).replace(/^[:,]\s*/, "") };
+		}
+	}
+	const text = cleanText(rawText);
+	if (input.replyToBot) return { addressed: true, text };
+	if (text.startsWith("/")) {
+		const cmd = commandOf(text, name);
+		if (!cmd) return { addressed: false, text }; // another bot's command, or unparseable
+		if (/^\/[A-Za-z0-9_]+@/.test(text)) return { addressed: true, text }; // names us
+		const id = typeof input.fromId === "number" ? String(input.fromId) : null;
+		return { addressed: !!id && operatorsOf(config).includes(id), text };
+	}
+	return { addressed: false, text };
+}
+
+/** Redact bot tokens from anything about to be logged: fetch errors embed the URL. */
+export function scrubErr(err: unknown, token?: string): string {
+	let m = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+	m = m.replace(/\/bot[^/\s"']+/g, "/bot<redacted>");
+	if (token) m = m.split(token).join("<redacted>");
+	return m;
+}
+
+export const COS_COMMANDS: string[] = [
+	"/delegate",
+	"/plan",
+	"/review",
+	"/goals",
+	"/kill",
+	"/status",
+];
+
+export type SenderTier = "full" | "prompt" | "observe";
+
+interface SenderConfig {
+	authorizedUserIds?: string[];
+	operatorUserIds?: string[];
+	/** This bot's own username from getMe; a /cmd@suffix must match it. */
+	botUsername?: string | null;
+}
+
+/** The operators: explicit list, else the first authorised user. Never empty-means-all. */
+function operatorsOf(config: SenderConfig): string[] {
+	if (config.operatorUserIds && config.operatorUserIds.length > 0) return config.operatorUserIds;
+	return config.authorizedUserIds?.slice(0, 1) ?? [];
+}
+
+/**
+ * Three tiers by Telegram user id.
+ *   full    - an operator: prompts and commands.
+ *   prompt  - an authorised user who is not an operator: prompts only.
+ *   observe - everyone else (and every group sender when no allowlist is set):
+ *             recorded to OBSERVED_LOG, never answered.
+ */
+export function senderTier(
+	input: { chatType?: string; fromId?: number },
+	config: SenderConfig,
+): SenderTier {
+	if (!isSenderAuthorized(input, { authorizedUserIds: config.authorizedUserIds })) return "observe";
+	const id = typeof input.fromId === "number" ? String(input.fromId) : null;
+	if (id && operatorsOf(config).includes(id)) return "full";
+	// Private chat with no allowlist is the single-operator case, as before.
+	if (!config.authorizedUserIds || config.authorizedUserIds.length === 0) return "full";
+	return "prompt";
+}
+
+/** `/Run@our_bot args` -> `/run`; null when not a slash command or the suffix names another bot. */
+export function commandOf(text: string, botUsername?: string | null): string | null {
+	const m = /^\s*(\/[A-Za-z0-9_]+)(?:@(\w+))?(?:\s|$)/.exec(text);
+	if (!m) return null;
+	// A suffix names a bot. It must be this one: /cmd@otherbot is not ours.
+	if (m[2] && m[2].toLowerCase() !== botUsername?.replace(/^@/, "").toLowerCase()) return null;
+	return m[1].toLowerCase();
+}
+
+/**
+ * Gate for a message that has already passed the chat and sender checks.
+ * Pure and fail-closed. Parses once, with commandOf, on cleaned text:
+ *   - not a slash message: a prompt. Only a full-tier sender may prompt;
+ *     everyone else shares no session with the operator (see below).
+ *   - slash text that does not parse, or names an unknown command: refused.
+ *   - /run and /deploy: operator, private chat only.
+ *   - OPERATOR_COMMANDS: full tier only.
+ *   - OPEN_COMMANDS: any authorised sender.
+ *
+ * Why prompts are full-tier only: the bridge's daemon session runs headless on
+ * the `telegram` channel with write_full and admin, and run_command is
+ * auto-approved there. A second person's prompt would land in the operator's
+ * own session with the operator's powers. Until non-operator prompts get a
+ * separate deny-by-default session, they are refused.
+ */
+export function isCommandAllowed(
+	rawText: string,
+	input: { chatType?: string; fromId?: number } | undefined,
+	config: SenderConfig,
+): boolean {
+	const text = cleanText(rawText);
+	const full = input !== undefined && senderTier(input, config) === "full";
+	if (!text.startsWith("/")) return full;
+	const cmd = commandOf(text, config.botUsername);
+	if (!cmd) return false;
+	if ((OPEN_COMMANDS as readonly string[]).includes(cmd)) return true;
+	if ((PRIVILEGED_COMMANDS as readonly string[]).includes(cmd)) {
+		const id = typeof input?.fromId === "number" ? String(input.fromId) : null;
+		return !!id && operatorsOf(config).includes(id) && input?.chatType === "private";
+	}
+	if ((OPERATOR_COMMANDS as readonly string[]).includes(cmd)) return full;
+	return false;
+}
+
+/**
+ * The bridge's own agent pool defaults to the local provider. A cloud runtime
+ * is used only when DEFAULT_RUNTIME names one; a stray DEFAULT_MODEL alone
+ * never moves traffic off the machine.
+ */
+export const LOCAL_DEFAULT_RUNTIME = "ollama";
+export const LOCAL_DEFAULT_MODEL = "eight-1.0-q3:14b";
+export function resolveBridgeModel(env: Record<string, string | undefined>): {
+	runtime: string;
+	model: string;
+} {
+	const runtime = env.DEFAULT_RUNTIME?.trim() || LOCAL_DEFAULT_RUNTIME;
+	const local = runtime === "ollama" || runtime === "8gent" || runtime === "lmstudio";
+	const model = env.DEFAULT_MODEL?.trim() || (local ? LOCAL_DEFAULT_MODEL : "auto:free");
+	return { runtime, model };
+}
+
+/**
+ * Two pollers on one bot token share one getUpdates lease and silently drop
+ * each other's messages. Refuse to start if this bridge's token hashes to the
+ * AI James bot's. The reference is a SHA-256 hex digest, from
+ * AI_JAMES_BOT_TOKEN_SHA256 or the file named by AI_JAMES_BOT_TOKEN_SHA256_FILE
+ * (default ~/.8gent/ai-james-bot-token.sha256), so no token is ever stored in
+ * the check and none is ever printed. Returns false when no reference exists.
+ */
+export function assertNotAiJamesToken(
+	token: string,
+	env: Record<string, string | undefined> = process.env,
+	readRef: (path: string) => string | null = (p) => {
+		try {
+			return readFileSync(p, "utf8");
+		} catch {
+			return null;
+		}
+	},
+	chatIds: string[] = [],
+): boolean {
+	const file =
+		env.AI_JAMES_BOT_TOKEN_SHA256_FILE || `${resolveHome()}/.8gent/ai-james-bot-token.sha256`;
+	const ref = (env.AI_JAMES_BOT_TOKEN_SHA256 || readRef(file) || "").trim().toLowerCase();
+	if (!/^[0-9a-f]{64}$/.test(ref)) {
+		// A check that silently skips is not a check. Group mode (any negative
+		// chat id) refuses to start without a reference; DM-only warns.
+		if (chatIds.some((id) => id.trim().startsWith("-"))) {
+			throw new Error(
+				"refusing to start in group mode: AI_JAMES_BOT_TOKEN_SHA256 is not set (or AI_JAMES_BOT_TOKEN_SHA256_FILE is unreadable), so the shared-token check cannot run. Set it to the SHA-256 hex digest of the AI James bot token.",
+			);
+		}
+		console.warn(
+			"[telegram-bridge] AI_JAMES_BOT_TOKEN_SHA256 is not set: shared-token check skipped (DM-only mode)",
+		);
+		return false;
+	}
+	const mine = createHash("sha256").update(token.trim()).digest("hex");
+	if (mine === ref) {
+		throw new Error(
+			"refusing to start: this bot token is the AI James bot token (shared getUpdates lease). Use the 8gent bot's own token.",
+		);
+	}
+	return true;
+}
+
 // Import CoS router lazily to avoid circular deps
 const CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
+
+interface PendingApproval {
+	tool: string;
+	input: unknown;
+	chatId: string;
+	sessionId: string;
+	expiresAt: number;
+	messageId?: number;
+	/** The socket that owns the session: the answer must go back on it. */
+	via: "ws" | "adapter";
+}
+
+/** A pressed card waiting for the daemon to confirm the answer counted. */
+interface AwaitingAck {
+	approval: PendingApproval;
+	status: string;
+	denied: boolean;
+}
+
+const NOT_LIVE =
+	"That request is no longer live (expired, replaced or already answered). Nothing ran.";
+
+/**
+ * Make every character a reader could miss visible: controls (newline and tab
+ * included), bidi overrides, zero-width and other format characters, and
+ * unusual spaces become \u{..}. A card must show exactly what will run.
+ */
+export function visibleText(text: string): string {
+	return text.replace(
+		/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}   -   　᠎﻿]/gu,
+		(ch) => `\\u{${(ch.codePointAt(0) as number).toString(16)}}`,
+	);
+}
+
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** What a card says. Never raw JSON, never shortened (the daemon refuses what will not fit). */
+export function approvalParts(
+	tool: string,
+	input: unknown,
+): { command: string; why: string; cwd: string | null; allowable: boolean } {
+	const f = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+	const command =
+		typeof f.command === "string" ? f.command : typeof input === "string" ? input : tool;
+	const why =
+		typeof f.reason === "string" && f.reason ? f.reason : `The agent wants to use ${tool}.`;
+	return {
+		command: visibleText(command),
+		why: visibleText(why),
+		cwd: typeof f.cwd === "string" ? visibleText(f.cwd) : null,
+		allowable: f.allowable === true,
+	};
+}
+
+/** The card as Telegram HTML (escaped) and as plain text for the retry. */
+export function approvalCardText(
+	tool: string,
+	input: unknown,
+	ttlMs: number,
+): { html: string; plain: string; length: number } {
+	const { command, why, cwd } = approvalParts(tool, input);
+	const head = "Permission required";
+	const tail = `(buttons expire in ${Math.round(ttlMs / 60000) || 1} min)`;
+	const where = cwd ?? "unknown";
+	const plain = `${head} ${tail}\nCommand: ${command}\nIn: ${where}\nWhy: ${why}`;
+	return {
+		html: `<b>${head}</b> ${tail}\nCommand: <code>${escapeHtml(command)}</code>\nIn: <code>${escapeHtml(where)}</code>\nWhy: ${escapeHtml(why)}`,
+		plain,
+		length: plain.length,
+	};
+}
 
 class TelegramDaemonBridge {
 	private config: BridgeConfig;
@@ -360,9 +730,18 @@ class TelegramDaemonBridge {
 	private sessionId: string | null = null;
 	private lastUpdateId = 0;
 	private polling = false;
+	/** Poll-loop generation; the watchdog bumps it to retire a wedged loop (#3708). */
+	private pollGen = 0;
+	private pollAbort: AbortController | null = null;
+	private lastPollDoneAt = Date.now();
+	private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 	private agentReady = false;
 	private agentBusy = false;
-	private pendingApprovals = new Map<string, { tool: string; input: unknown; chatId: string }>();
+	/** Live approval cards by daemon request id (#3621). The daemon re-checks every answer. */
+	private pendingApprovals = new Map<string, PendingApproval>();
+	private awaitingAck = new Map<string, AwaitingAck>();
+	/** Who started the current turn and where, sent with each prompt. */
+	private turn: { chatId: string; operator: boolean } | null = null;
 	private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
 
 	// Multi-step task runtime (issue #1906 / #1913).
@@ -380,8 +759,15 @@ class TelegramDaemonBridge {
 		this.config = config;
 	}
 
+	/** Set from getMe at startup; group addressing cannot match without it. */
+	private botUsername: string | null = null;
+	private botId: number | null = null;
+	/** One DM refusal per sender per hour. Groups get none. */
+	private refusedDms = new Map<number, number>();
+
 	async start(): Promise<void> {
 		console.log("[telegram-bridge] starting...");
+		await this.assertNotAiJamesBot();
 
 		// Connect to daemon WebSocket
 		await this.connectDaemon();
@@ -395,6 +781,7 @@ class TelegramDaemonBridge {
 					url: this.config.daemonUrl,
 					authToken: this.config.authToken,
 					channel: "telegram",
+					approvalSecret: bridgeSecret(),
 				});
 				await this.daemonClient.connect();
 				this.sessionStore = new SessionStore({ persistPath: SESSION_STORE_PATH });
@@ -405,6 +792,7 @@ class TelegramDaemonBridge {
 					sessionStore: this.sessionStore,
 					onFinalReply: (text) => this.maybeSpeak(text),
 				});
+				this.watchAdapterApprovals(this.daemonClient);
 				console.log("[telegram-bridge] multi-step task adapter attached");
 			} catch (err) {
 				console.error("[telegram-bridge] multi-step adapter failed, falling back:", err);
@@ -422,9 +810,10 @@ class TelegramDaemonBridge {
 
 			// Get the pool from the daemon (create a separate one for delegations)
 			const { sessionApiKey } = await import("../eight/failover-provider-config");
-			const cosRuntime = (process.env.DEFAULT_RUNTIME as any) || "openrouter";
+			const { runtime: cosRuntimeName, model: cosModel } = resolveBridgeModel(process.env);
+			const cosRuntime = cosRuntimeName as any;
 			const cosPool = new AgentPool({
-				model: process.env.DEFAULT_MODEL || "auto:free",
+				model: cosModel,
 				runtime: cosRuntime,
 				workingDirectory: process.env.HOME ? `${process.env.HOME}/.8gent/workspace` : "/app",
 				// Only the runtime's own key (#3261).
@@ -468,10 +857,24 @@ class TelegramDaemonBridge {
 		); // Every 10 minutes
 
 		// Start Telegram polling
-		this.polling = true;
-		this.poll();
+		this.startPolling();
 
 		console.log("[telegram-bridge] ready - polling Telegram, connected to daemon");
+	}
+
+	/**
+	 * Replace the bridge's daemon session: destroy the old agent, then create a
+	 * new one. Telegram sessions are never evicted, so a create without the
+	 * destroy leaks an agent until the daemon restarts (#3538).
+	 */
+	private freshSession(): void {
+		const open = this.ws?.readyState === WebSocket.OPEN;
+		if (open && this.sessionId) {
+			this.ws?.send(JSON.stringify({ type: "session:destroy", sessionId: this.sessionId }));
+		}
+		// Cleared even when offline, so the next connect creates rather than resumes.
+		this.sessionId = null;
+		if (open) this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
 	}
 
 	private async connectDaemon(): Promise<void> {
@@ -488,9 +891,18 @@ class TelegramDaemonBridge {
 				if (this.config.authToken) {
 					this.ws?.send(JSON.stringify({ type: "auth", token: this.config.authToken }));
 				}
+				// Prove this socket is the approval bridge (#3621); only it may answer.
+				this.ws?.send(JSON.stringify({ type: "approvals:register", secret: bridgeSecret() }));
 
-				// Create a session
-				this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+				// Resume the session we already own on reconnect; a fresh create
+				// would leak a never-evicted telegram agent (#3538).
+				this.ws?.send(
+					JSON.stringify(
+						this.sessionId
+							? { type: "session:resume", sessionId: this.sessionId, channel: "telegram" }
+							: { type: "session:create", channel: "telegram" },
+					),
+				);
 			};
 
 			this.ws.onmessage = (event: MessageEvent) => {
@@ -501,8 +913,8 @@ class TelegramDaemonBridge {
 				);
 				this.handleDaemonMessage(msg);
 
-				// Resolve on session creation
-				if (msg.type === "session:created") {
+				// Resolve on session creation or resume
+				if (msg.type === "session:created" || msg.type === "session:resumed") {
 					this.sessionId = msg.sessionId;
 					console.log(`[telegram-bridge] session ${this.sessionId}`);
 					resolve();
@@ -522,9 +934,19 @@ class TelegramDaemonBridge {
 	}
 
 	private handleDaemonMessage(msg: any): void {
+		if (msg.type === "approval:resolved") {
+			this.onApprovalResolved(msg);
+			return;
+		}
 		if (msg.type !== "event") return;
 
 		const { event, payload } = msg;
+
+		// Drop events addressed to a session this bridge no longer owns. Destroying
+		// the old session in freshSession() echoes its session:end back on this
+		// socket after sessionId was cleared; acting on it would mark the bridge
+		// idle and cancel the retry timer armed for the replacement session.
+		if (payload?.sessionId && payload.sessionId !== this.sessionId) return;
 
 		switch (event) {
 			case "agent:stream":
@@ -564,7 +986,11 @@ class TelegramDaemonBridge {
 
 			case "approval:required":
 				// NemoClaw-style operator approval via Telegram
-				this.sendApprovalRequest(payload);
+				this.sendApprovalRequest(payload, "ws");
+				break;
+
+			case "approval:closed":
+				this.onApprovalClosed(payload);
 				break;
 
 			case "tool:start":
@@ -573,17 +999,87 @@ class TelegramDaemonBridge {
 		}
 	}
 
-	private async poll(): Promise<void> {
-		while (this.polling) {
+	/**
+	 * Start the poll loop and its watchdog (#3708). Public so a test can drive
+	 * the loop without the daemon and agent start-up in start().
+	 */
+	startPolling(): void {
+		this.polling = true;
+		registerTelegramBridge();
+		this.lastPollDoneAt = Date.now();
+		this.launchPollLoop();
+		const checkMs = this.config.poll?.watchdogCheckMs ?? 30_000;
+		if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+		this.watchdogTimer = setInterval(() => this.watchdogTick(), checkMs);
+		this.watchdogTimer.unref?.();
+	}
+
+	private launchPollLoop(): void {
+		const gen = ++this.pollGen;
+		// The loop catches everything itself; the .catch is the last line of
+		// defence so an unhandled rejection can never end polling silently.
+		this.poll(gen).catch((err) => {
+			console.error("[telegram-bridge] poll loop crashed:", scrubErr(err, this.config.telegramToken));
+			if (this.polling && gen === this.pollGen) setTimeout(() => this.launchPollLoop(), 1000);
+		});
+	}
+
+	private watchdogTick(): void {
+		if (!this.polling) return;
+		const limit = this.config.poll?.watchdogMs ?? 5 * 60_000;
+		const idle = Date.now() - this.lastPollDoneAt;
+		if (idle < limit) return;
+		console.warn(
+			`[telegram-bridge] watchdog: no poll completed for ${Math.round(idle / 1000)}s, restarting poll loop`,
+		);
+		this.pollAbort?.abort();
+		this.lastPollDoneAt = Date.now();
+		this.launchPollLoop();
+	}
+
+	private async poll(gen: number): Promise<void> {
+		const cfg = this.config.poll ?? {};
+		const timeoutSec = cfg.timeoutSec ?? 30;
+		const graceMs = cfg.abortGraceMs ?? 5000;
+		const base = cfg.backoffBaseMs ?? 1000;
+		const max = cfg.backoffMaxMs ?? 60_000;
+		const apiBase = this.config.telegramApiBase ?? TELEGRAM_API;
+		let failures = 0;
+		// gen !== pollGen means the watchdog replaced this loop; it must exit
+		// without touching shared state again.
+		while (this.polling && gen === this.pollGen) {
+			// Each getUpdates owns its AbortController: a stuck socket cannot
+			// outlive timeout + grace, and the watchdog can cancel it.
+			const ac = new AbortController();
+			this.pollAbort = ac;
+			const timer = setTimeout(
+				() => ac.abort(new Error("getUpdates timed out")),
+				timeoutSec * 1000 + graceMs,
+			);
 			try {
 				const res = await fetch(
-					`${TELEGRAM_API}${this.config.telegramToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=30`,
-					{ signal: AbortSignal.timeout(35000) },
+					`${apiBase}${this.config.telegramToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=${timeoutSec}`,
+					{ signal: ac.signal },
 				);
 				const data = await res.json();
+				clearTimeout(timer);
+				if (gen !== this.pollGen) return;
+				if (failures > 0) {
+					console.log(`[telegram-bridge] poll recovered after ${failures} failed attempt(s)`);
+					failures = 0;
+				}
+				recordTelegramPoll();
+				this.lastPollDoneAt = Date.now();
 
 				if (data.ok && data.result) {
 					for (const update of data.result as TelegramUpdate[]) {
+						// A loop the watchdog replaced stops here: it must not handle
+						// more of its batch (the new loop refetches from lastUpdateId)
+						// and must never write lastUpdateId.
+						if (gen !== this.pollGen) return;
+						// Handler progress counts as liveness, so the watchdog only
+						// fires on a handler that is genuinely stuck.
+						this.lastPollDoneAt = Date.now();
 						this.lastUpdateId = update.update_id;
 						// Drop messages from unauthorized chats before any side effect
 						// (transcription, typing indicators, agent dispatch).
@@ -615,16 +1111,17 @@ class TelegramDaemonBridge {
 							update.message &&
 							!this.isAuthorizedSender(update.message.chat?.type, update.message.from?.id)
 						) {
-							await this.refuseSender(update.message.chat.id, update.message.from?.id);
+							this.observeSender(update);
 							continue;
 						}
 						if (update.callback_query) {
 							await this.handleCallbackQuery(update.callback_query);
 						} else if (update.message?.voice || update.message?.audio) {
-							// Voice/audio message - transcribe then process
+							// Voice/audio message. Order: sender (above), addressing, tier,
+							// and only then download, transcription and origin chat.
 							const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
 							if (fileId && update.message.chat) {
-								this.originChatId = String(update.message.chat.id);
+								if (!(await this.admitVoice(update.message))) continue;
 								await tgTyping(this.config.telegramToken, this.replyChat());
 								const transcript = await transcribeVoice(this.config.telegramToken, fileId);
 								console.log(`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`);
@@ -634,21 +1131,35 @@ class TelegramDaemonBridge {
 										this.replyChat(),
 										`Heard: "${transcript}"`,
 									);
-									await this.handleTelegramMessage(transcript, update.message.chat.id);
+									await this.dispatchTranscript(transcript, update.message);
 								} else {
 									await tgSend(this.config.telegramToken, this.replyChat(), transcript);
 								}
 							}
 						} else if (update.message?.text) {
-							await this.handleTelegramMessage(update.message.text, update.message.chat.id);
+							await this.handleTelegramMessage(
+								update.message.text,
+								update.message.chat.id,
+								this.senderCtx(update.message),
+							);
 						}
 					}
 				}
+				if (gen !== this.pollGen) return;
+				this.lastPollDoneAt = Date.now();
 			} catch (err) {
-				// Timeout or network error - just retry
-				if (String(err).includes("abort")) continue;
-				console.error("[telegram-bridge] poll error:", err);
-				await new Promise((r) => setTimeout(r, 2000));
+				clearTimeout(timer);
+				if (gen !== this.pollGen) return;
+				failures++;
+				const delay = Math.min(max, base * 2 ** Math.min(failures - 1, 16));
+				console.error(
+					`[telegram-bridge] poll error (attempt ${failures}, retry in ${Math.round(delay)}ms):`,
+					scrubErr(err, this.config.telegramToken),
+				);
+				// A failed poll is not a stalled loop: keep the watchdog quiet
+				// while backoff is doing its job.
+				this.lastPollDoneAt = Date.now();
+				await new Promise((r) => setTimeout(r, delay));
 			}
 		}
 	}
@@ -683,7 +1194,111 @@ class TelegramDaemonBridge {
 
 	/** Where this turn's output belongs: the originating chat, else the primary. */
 	private replyChat(): string {
-		return this.originChatId ?? this.replyChat();
+		return this.originChatId ?? this.config.chatId;
+	}
+
+	/** A voice transcript is group text like any other: same sender context, same gate. */
+	private async dispatchTranscript(transcript: string, message: BridgeMessage): Promise<void> {
+		await this.handleTelegramMessage(
+			transcript,
+			message.chat.id,
+			this.senderCtx({ ...message, entities: undefined }),
+		);
+	}
+
+	/**
+	 * Admission for a voice note, before anything is downloaded or transcribed:
+	 * addressing, then tier. Sets the origin chat only once both pass.
+	 */
+	async admitVoice(message: BridgeMessage): Promise<boolean> {
+		const ctx = this.senderCtx(message);
+		const cfg = this.gateConfig();
+		if (!groupAddressing("", ctx, { username: this.botUsername }, cfg).addressed) return false;
+		if (senderTier(ctx, cfg) !== "full") {
+			await this.refuseDm(ctx, message.chat.id);
+			return false;
+		}
+		this.originChatId = String(message.chat.id);
+		return true;
+	}
+
+	/** Gate config: the allowlists plus our own username for /cmd@suffix checks. */
+	private gateConfig(): SenderConfig {
+		return { ...this.config, botUsername: this.botUsername };
+	}
+
+	/** Sender context from a raw message. Reply counts only on the bot's own id. */
+	private senderCtx(message: BridgeMessage): SenderCtx {
+		return {
+			chatType: message.chat.type,
+			fromId: message.from?.id,
+			replyToBot: this.botId !== null && message.reply_to_message?.from?.id === this.botId,
+			entities: message.entities,
+			forwarded: !!(message.forward_origin || message.via_bot),
+		};
+	}
+
+	/**
+	 * One refusal per sender per hour, DM only, never echoing what was said.
+	 * Keyed by user id and bounded; a failed send stays silent.
+	 */
+	private async refuseDm(sender: SenderCtx | undefined, chatId: number): Promise<void> {
+		if (sender?.chatType !== "private" || typeof sender.fromId !== "number") return;
+		const now = Date.now();
+		const last = this.refusedDms.get(sender.fromId) ?? 0;
+		if (now - last < 60 * 60 * 1000) return;
+		this.refusedDms.delete(sender.fromId);
+		this.refusedDms.set(sender.fromId, now);
+		while (this.refusedDms.size > 256) {
+			const oldest = this.refusedDms.keys().next().value;
+			if (oldest === undefined) break;
+			this.refusedDms.delete(oldest);
+		}
+		await tgSend(
+			this.config.telegramToken,
+			String(chatId),
+			"Operator only for now. Ask James for access.",
+			"",
+		).catch(() => {});
+	}
+
+	/**
+	 * Second, independent same-token check: ask Telegram who this token is.
+	 * Refuses on username `aijamesosbot`. If Telegram cannot be reached, group
+	 * mode refuses (a check that skips is not a check); DM-only mode warns.
+	 */
+	private async assertNotAiJamesBot(): Promise<void> {
+		const group = (this.config.authorizedChatIds ?? [this.config.chatId]).some((id) =>
+			id.startsWith("-"),
+		);
+		try {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken.trim()}/getMe`, {
+				signal: AbortSignal.timeout(10000),
+			});
+			const me = (await res.json()) as {
+				ok?: boolean;
+				result?: { username?: string; id?: number };
+			};
+			this.botUsername = me.result?.username ?? null;
+			this.botId = me.result?.id ?? null;
+			const name = me.result?.username?.toLowerCase();
+			if (me.ok && name === "aijamesosbot") {
+				throw new Error(
+					"refusing to start: getMe says this token belongs to @aijamesosbot (shared getUpdates lease).",
+				);
+			}
+			if (!me.ok) throw new Error("getMe not ok");
+		} catch (err) {
+			if (String(err).includes("refusing to start")) throw err;
+			if (group) {
+				throw new Error(
+					"refusing to start in group mode: getMe could not verify the bot identity.",
+				);
+			}
+			console.warn(
+				"[telegram-bridge] getMe could not verify bot identity (DM-only mode, continuing)",
+			);
+		}
 	}
 
 	private isAuthorizedSender(chatType: string | undefined, fromId: number | undefined): boolean {
@@ -693,22 +1308,16 @@ class TelegramDaemonBridge {
 		);
 	}
 
-	/** One refusal per sender per hour, so a group cannot use the bot as an echo. */
-	private refusedSenders = new Map<number, number>();
-	private async refuseSender(chatId: number, fromId: number | undefined): Promise<void> {
+	/**
+	 * A sender outside the allowlist is observed, never answered: recorded to
+	 * OBSERVED_LOG, no reply, no dispatch. Replying would let a group use the
+	 * bot as an echo and tell strangers the bot is listening.
+	 */
+	private observeSender(update: TelegramUpdate): void {
+		observeUnauthorized(update);
 		console.warn(
-			`[telegram-bridge] rejected message from unauthorized sender ${fromId ?? "unknown"} in chat ${chatId}`,
+			`[telegram-bridge] observed and dropped message from unauthorized sender ${update.message?.from?.id ?? "unknown"} in chat ${update.message?.chat?.id}`,
 		);
-		if (typeof fromId !== "number") return;
-		const last = this.refusedSenders.get(fromId) ?? 0;
-		if (Date.now() - last < 60 * 60 * 1000) return;
-		this.refusedSenders.set(fromId, Date.now());
-		await tgSend(
-			this.config.telegramToken,
-			String(chatId),
-			"This 8gent instance answers only its operator.",
-			"",
-		).catch(() => {});
 	}
 
 	private isAuthorizedChat(chatId: number): boolean {
@@ -721,7 +1330,11 @@ class TelegramDaemonBridge {
 		});
 	}
 
-	private async handleTelegramMessage(text: string, chatId: number): Promise<void> {
+	private async handleTelegramMessage(
+		text: string,
+		chatId: number,
+		sender?: SenderCtx,
+	): Promise<void> {
 		// Only respond to authorized chats. In local mode this is the
 		// hard boundary that prevents a leaked token from driving the
 		// daemon from a chat that isn't James's.
@@ -730,22 +1343,72 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		// Order: sender (poll loop), addressing, tier. Only after all three:
+		// transcription, origin chat, typing, routing.
+		const gate = this.gateConfig();
+		if (sender) {
+			const addr = groupAddressing(text, sender, { username: this.botUsername }, gate);
+			if (!addr.addressed) return;
+			text = addr.text;
+		}
+
+		// Group text is data. Parse once: the gate and every router below work
+		// from the same cleaned text and the same commandOf() result.
+		if (!isCommandAllowed(text, sender, gate)) {
+			console.warn(
+				`[telegram-bridge] refused ${commandOf(cleanText(text), this.botUsername) ?? "prompt"} from ${sender?.fromId ?? "unknown"} in ${sender?.chatType ?? "unknown"} chat`,
+			);
+			// Silent in groups. In a DM, one reply per sender per hour.
+			await this.refuseDm(sender, chatId);
+			return;
+		}
+		text = cleanText(text);
+		const cmd = commandOf(text, this.botUsername);
+		const fullTier = !!sender && senderTier(sender, gate) === "full";
+
+		// An authorised non-operator (prompt tier) may only reach /status and
+		// /help. They are answered straight to the chat they came from and never
+		// touch originChatId, or they could redirect the operator's in-flight turn.
+		if (sender && !fullTier) {
+			let reply = "Operator only for now. Ask James for access.";
+			if (cmd === "/status") {
+				try {
+					const res = await fetch(
+						`${this.config.daemonUrl
+							.replace("ws", "http")
+							.replace("wss", "https")
+							.replace(/:\d+/, ":18789")}/health`,
+					);
+					const health = await res.json();
+					reply = `Status: ${health.status === "ok" ? "up" : "down"}`;
+				} catch {
+					reply = "Could not reach daemon health endpoint.";
+				}
+			} else if (cmd === "/help") {
+				reply = "/status - up or down\n/help - this message";
+			}
+			await tgSend(this.config.telegramToken, String(chatId), reply, "").catch(() => {});
+			return;
+		}
+
 		// From here until the daemon's terminal event, this turn's output
 		// belongs to this chat. Set before the first typing indicator so even
 		// that lands in the right room.
 		this.originChatId = String(chatId);
+		this.turn = { chatId: String(chatId), operator: fullTier };
+		if (this.daemonClient) this.daemonClient.turn = this.turn;
 
 		// Show typing
 		await tgTyping(this.config.telegramToken, this.replyChat());
 
 		// CEO commands via CoS router (delegate, plan, review, goals, kill)
-		if (this.cosRouter) {
+		if (this.cosRouter && cmd && COS_COMMANDS.includes(cmd) && (cmd !== "/status" || fullTier)) {
 			const handled = await this.cosRouter.handleCommand(text, chatId);
 			if (handled) return;
 		}
 
 		// Handle built-in commands
-		if (text === "/logs") {
+		if (cmd === "/logs") {
 			try {
 				const { execSync } = await import("node:child_process");
 				const logs = execSync(
@@ -763,7 +1426,7 @@ class TelegramDaemonBridge {
 			return;
 		}
 
-		if (text === "/unstick") {
+		if (cmd === "/unstick") {
 			this.agentBusy = false;
 			if (this.adapter) {
 				await this.adapter.cancelCurrent("Reset by /unstick").catch(() => {});
@@ -776,7 +1439,7 @@ class TelegramDaemonBridge {
 			return;
 		}
 
-		if (text === "/cancel") {
+		if (cmd === "/cancel") {
 			if (this.adapter) {
 				const cancelled = await this.adapter.cancelCurrent();
 				await tgSend(
@@ -791,7 +1454,7 @@ class TelegramDaemonBridge {
 			return;
 		}
 
-		if (text.startsWith("/status")) {
+		if (cmd === "/status") {
 			try {
 				const res = await fetch(
 					`${this.config.daemonUrl
@@ -800,6 +1463,14 @@ class TelegramDaemonBridge {
 						.replace(/:\d+/, ":18789")}/health`,
 				);
 				const health = await res.json();
+				if (!fullTier) {
+					await tgSend(
+						this.config.telegramToken,
+						this.replyChat(),
+						`Status: ${health.status === "ok" ? "up" : "down"}`,
+					);
+					return;
+				}
 				await tgSend(
 					this.config.telegramToken,
 					this.replyChat(),
@@ -815,17 +1486,22 @@ class TelegramDaemonBridge {
 			return;
 		}
 
-		if (text.startsWith("/voice")) {
-			await this.handleVoiceCommand(text.slice("/voice".length).trim().toLowerCase());
+		if (cmd === "/voice") {
+			await this.handleVoiceCommand(
+				text
+					.replace(/^\/voice(@\w+)?/i, "")
+					.trim()
+					.toLowerCase(),
+			);
 			return;
 		}
 
-		if (text.startsWith("/boardroom")) {
-			await this.handleBoardroom(text.slice("/boardroom".length).trim());
+		if (cmd === "/boardroom") {
+			await this.handleBoardroom(text.replace(/^\/boardroom(@\w+)?/i, "").trim());
 			return;
 		}
 
-		if (text === "/help") {
+		if (cmd === "/help") {
 			await tgSend(
 				this.config.telegramToken,
 				this.replyChat(),
@@ -856,7 +1532,10 @@ class TelegramDaemonBridge {
 			try {
 				await this.adapter.handleUserMessage(text);
 			} catch (err) {
-				console.error("[telegram-bridge] adapter error, falling back to legacy:", err);
+				console.error(
+					"[telegram-bridge] adapter error, falling back to legacy:",
+					scrubErr(err, this.config.telegramToken),
+				);
 				await tgSend(
 					this.config.telegramToken,
 					this.replyChat(),
@@ -975,7 +1654,10 @@ class TelegramDaemonBridge {
 			);
 			if (result.verdict) await this.maybeSpeak(`Boardroom verdict. ${result.verdict}`);
 		} catch (err) {
-			console.error("[telegram-bridge] boardroom failed:", err);
+			console.error(
+				"[telegram-bridge] boardroom failed:",
+				scrubErr(err, this.config.telegramToken),
+			);
 			await send(`Boardroom failed: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
 			this.boardroomRunning = false;
@@ -998,7 +1680,10 @@ class TelegramDaemonBridge {
 			const data = await res.json();
 			return data?.result?.message_id ?? null;
 		} catch (err) {
-			console.error("[telegram-bridge] sendTracked failed:", err);
+			console.error(
+				"[telegram-bridge] sendTracked failed:",
+				scrubErr(err, this.config.telegramToken),
+			);
 			return null;
 		}
 	}
@@ -1060,16 +1745,16 @@ class TelegramDaemonBridge {
 
 		// Send the prompt
 		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			this.ws.send(JSON.stringify({ type: "prompt", text: prompt }));
+			this.ws.send(
+				JSON.stringify({ type: "prompt", text: prompt, ...(this.turn ? { turn: this.turn } : {}) }),
+			);
 		}
 
 		// Set timeout for this attempt
 		const timer = setTimeout(() => {
 			if (this.agentBusy) {
 				// Create a new session to clear any stuck state
-				if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-					this.ws.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
-				}
+				this.freshSession();
 				// Retry with next strategy
 				this.retryPrompt(originalText, attempt + 1);
 			}
@@ -1081,35 +1766,181 @@ class TelegramDaemonBridge {
 
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-	private async sendApprovalRequest(payload: any): Promise<void> {
-		const { requestId, tool, input } = payload;
-		this.pendingApprovals.set(requestId, { tool, input, chatId: this.replyChat() });
+	/** The operator's private chat with the bot (a DM chat id is the user id). */
+	private operatorDm(): string | null {
+		const ops =
+			this.config.operatorUserIds && this.config.operatorUserIds.length > 0
+				? this.config.operatorUserIds
+				: this.config.authorizedUserIds?.slice(0, 1);
+		return ops?.[0] ?? null;
+	}
 
-		const inputPreview =
-			typeof input === "string" ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200);
+	private async sendApprovalRequest(payload: any, via: PendingApproval["via"]): Promise<void> {
+		const { requestId, tool, input, sessionId } = payload;
+		const now = Date.now();
+		for (const [id, p] of this.pendingApprovals)
+			if (p.expiresAt <= now) this.pendingApprovals.delete(id);
+		// A card raised by a group turn goes to the operator's DM; the group
+		// only hears that one is waiting.
+		const turnChat =
+			input && typeof input.chatId === "string" ? (input.chatId as string) : this.replyChat();
+		const inGroup = turnChat.startsWith("-");
+		const target = inGroup ? this.operatorDm() : turnChat;
+		// Expire a little before the daemon does, so a press the card accepts is one the daemon still holds.
+		const ttl = approvalTtlMs();
+		const entry: PendingApproval = {
+			tool,
+			input,
+			chatId: target ?? turnChat,
+			sessionId,
+			expiresAt: now + ttl - Math.min(5000, ttl / 10),
+			via,
+		};
+		this.pendingApprovals.set(requestId, entry);
 
+		// HTML with everything escaped, then plain text: a command full of
+		// `_`, `*` or `<` must still reach the operator, or the turn waits in silence.
+		const card = approvalCardText(tool, input, ttl);
+		const rows = [
+			[
+				{ text: "Approve", callback_data: `approve:${requestId}` },
+				{ text: "Deny", callback_data: `deny:${requestId}` },
+			],
+		];
+		if (approvalParts(tool, input).allowable) {
+			rows.push([
+				{ text: "Allow this command in this chat", callback_data: `allowchat:${requestId}` },
+			]);
+		}
+		const keyboard = { inline_keyboard: rows };
+		let sent: { ok: boolean; messageId?: number } = { ok: false };
+		// Never cut a command to fit: a card that cannot show it whole is not sent.
+		if (target && card.length <= MAX_MSG_LENGTH) {
+			sent = await this.tgPost("sendMessage", {
+				chat_id: target,
+				text: card.html,
+				parse_mode: "HTML",
+				...NO_LINK_PREVIEW,
+				reply_markup: keyboard,
+			});
+			if (!sent.ok) {
+				sent = await this.tgPost("sendMessage", {
+					chat_id: target,
+					text: card.plain,
+					...NO_LINK_PREVIEW,
+					reply_markup: keyboard,
+				});
+			}
+		}
+		if (sent.ok) {
+			entry.messageId = sent.messageId;
+			if (inGroup) {
+				await tgSend(this.config.telegramToken, turnChat, "Approval needed, check your DM.", "");
+			}
+			return;
+		}
+		// Nobody can see it, so nobody can answer it: close it now, not after the TTL.
+		this.pendingApprovals.delete(requestId);
+		this.answerApproval(requestId, entry, false, { undelivered: true });
+		await tgSend(
+			this.config.telegramToken,
+			turnChat,
+			"Could not show an approval card, so the command was not run.",
+			"",
+		);
+	}
+
+	/** One Bot API call; ok only when Telegram accepted it. */
+	private async tgPost(
+		method: string,
+		body: Record<string, unknown>,
+	): Promise<{ ok: boolean; messageId?: number }> {
 		try {
-			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/${method}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					chat_id: this.replyChat(),
-					text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}`,
-					parse_mode: "Markdown",
-					...NO_LINK_PREVIEW,
-					reply_markup: {
-						inline_keyboard: [
-							[
-								{ text: "Approve", callback_data: `approve:${requestId}` },
-								{ text: "Deny", callback_data: `deny:${requestId}` },
-							],
-						],
-					},
-				}),
+				body: JSON.stringify(body),
 			});
+			const data = (await res.json().catch(() => null)) as {
+				ok?: boolean;
+				result?: { message_id?: number };
+			} | null;
+			return { ok: res.ok && data?.ok !== false, messageId: data?.result?.message_id };
 		} catch (err) {
-			console.error("[telegram-bridge] failed to send approval request:", err);
+			console.error(
+				`[telegram-bridge] ${method} failed:`,
+				scrubErr(err, this.config.telegramToken),
+			);
+			return { ok: false };
 		}
+	}
+
+	/** Send a decision on the socket that owns the session; the daemon re-checks it. */
+	private answerApproval(
+		requestId: string,
+		approval: PendingApproval,
+		approved: boolean,
+		opts: { scope?: "chat"; undelivered?: boolean; approver?: string } = {},
+	): void {
+		if (approval.via === "adapter" && this.daemonClient) {
+			this.daemonClient.respondApproval(requestId, approved, opts);
+		} else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify({ type: "approval:response", requestId, approved, ...opts }));
+		}
+	}
+
+	/** The daemon closed a prompt with no answer: take the buttons away and say so. */
+	private onApprovalClosed(payload: { requestId: string; outcome: string }): void {
+		const approval = this.pendingApprovals.get(payload.requestId);
+		if (!approval) return;
+		this.pendingApprovals.delete(payload.requestId);
+		void this.closeApprovalCard(
+			approval,
+			payload.outcome === "replaced"
+				? "Replaced by a newer request. Nothing ran"
+				: "Expired. Nothing ran",
+		);
+	}
+
+	/**
+	 * The daemon's verdict on an answer. The card changes only now, so it never
+	 * claims "Approved" for an answer the daemon refused.
+	 */
+	private onApprovalResolved(r: { requestId?: string; ok?: boolean }): void {
+		const waiting = r.requestId ? this.awaitingAck.get(r.requestId) : undefined;
+		if (r.requestId) this.awaitingAck.delete(r.requestId);
+		const chat = waiting?.approval.chatId ?? this.replyChat();
+		if (r.ok && waiting) {
+			void this.closeApprovalCard(waiting.approval, waiting.status);
+			if (waiting.denied) tgSend(this.config.telegramToken, chat, "Denied. Nothing ran.", "");
+			return;
+		}
+		if (r.ok) return;
+		if (waiting) void this.closeApprovalCard(waiting.approval, "No longer live. Nothing ran");
+		tgSend(this.config.telegramToken, chat, NOT_LIVE, "");
+	}
+
+	/**
+	 * Default-mode prompts run on the adapter's own session, so its approval
+	 * cards, closures and verdicts arrive on that socket, never on this.ws.
+	 */
+	private watchAdapterApprovals(client: DaemonClient): void {
+		client.on("approval:required", (p) => {
+			this.sendApprovalRequest(p, "adapter");
+		});
+		client.on("approval:closed", (p) => this.onApprovalClosed(p));
+		client.on("approval:resolved", (r) => this.onApprovalResolved(r));
+	}
+
+	/** Replace a card's buttons with how it ended, keeping the command as the record. */
+	private async closeApprovalCard(p: PendingApproval, status: string): Promise<void> {
+		if (!p.messageId) return;
+		await this.tgPost("editMessageText", {
+			chat_id: p.chatId,
+			message_id: p.messageId,
+			text: `${status}: ${approvalParts(p.tool, p.input).command}`,
+			...NO_LINK_PREVIEW,
+		});
 	}
 
 	/**
@@ -1149,15 +1980,20 @@ class TelegramDaemonBridge {
 		//
 		// Fails closed: a callback with no originating chat is rejected.
 		const originChatId = query.message?.chat?.id;
-		if (typeof originChatId !== "number" || !this.isAuthorizedChat(originChatId)) {
+		// Approval cards for group turns live in the operator's DM, which need
+		// not be on the chat allowlist: accept a tap there only from the operator.
+		const approvalTap = /^(approve|deny|allowchat):/.test(query.data ?? "");
+		const operatorDm =
+			approvalTap &&
+			query.message?.chat?.type === "private" &&
+			originChatId === query.from?.id &&
+			this.isOperator(query.from?.id);
+		if (typeof originChatId !== "number" || (!this.isAuthorizedChat(originChatId) && !operatorDm)) {
 			console.warn(
 				`[telegram-bridge] rejected callback query from unauthorized chat ${originChatId ?? "unknown"}`,
 			);
 			return;
 		}
-
-		// A tap is a turn of its own: everything it triggers belongs here.
-		this.originChatId = String(originChatId);
 
 		if (!this.isAuthorizedSender(query.message?.chat?.type, query.from?.id)) {
 			console.warn(
@@ -1170,23 +2006,26 @@ class TelegramDaemonBridge {
 		// Consent is narrower than conversation: an allowlisted agent may be
 		// mid-exchange in this room and still have no business approving a
 		// tool call on the operator's machine.
-		if (data.startsWith("approve:") || data.startsWith("deny:")) {
-			if (!this.isOperator(query.from?.id)) {
-				console.warn(
-					`[telegram-bridge] rejected approval decision from non-operator ${query.from?.id ?? "unknown"}`,
-				);
-				await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						callback_query_id: query.id,
-						text: "Only the operator can approve tool use.",
-						show_alert: true,
-					}),
-				}).catch(() => {});
-				return;
-			}
+		if (!this.isOperator(query.from?.id)) {
+			console.warn(
+				`[telegram-bridge] rejected button press from non-operator ${query.from?.id ?? "unknown"}`,
+			);
+			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					callback_query_id: query.id,
+					text: "Only the operator can use these buttons.",
+					show_alert: true,
+				}),
+			}).catch(() => {});
+			return;
 		}
+		// A tap is a turn of its own: everything it triggers belongs here. Set
+		// only now, after the chat, sender and operator checks have all passed,
+		// so a stranger's tap cannot move where the operator's replies go.
+		// An approval tap answers a card; it does not move the turn's chat.
+		if (!approvalTap) this.originChatId = String(originChatId);
 		const { prefix, payload } = parseCallbackData(data);
 		const requestId = payload || data.split(":")[1] || "";
 
@@ -1215,8 +2054,7 @@ class TelegramDaemonBridge {
 				// differ - "New task" drops the conversation context.
 				await this.clearKeyboard(query.message?.message_id);
 				if (prefix === CB_PREFIX.taskNew) {
-					this.sessionId = null;
-					this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+					this.freshSession();
 					await tgSend(
 						this.config.telegramToken,
 						this.replyChat(),
@@ -1234,11 +2072,13 @@ class TelegramDaemonBridge {
 		}
 
 		const action = prefix;
-		if (!requestId || !this.pendingApprovals.has(requestId)) {
+		if (action !== "approve" && action !== "deny" && action !== "allowchat") return;
+		const approval = this.pendingApprovals.get(requestId);
+		if (!approval) {
+			// A second press, or a press on a card that was replaced or expired.
+			await tgSend(this.config.telegramToken, String(originChatId), NOT_LIVE, "");
 			return;
 		}
-
-		const approval = this.pendingApprovals.get(requestId)!;
 		// An approval belongs to the chat that was asked. With several chats
 		// allowlisted, being in ANY of them is not permission to answer a
 		// prompt raised in another one.
@@ -1249,39 +2089,35 @@ class TelegramDaemonBridge {
 			return;
 		}
 		this.pendingApprovals.delete(requestId);
-
-		const approved = action === "approve";
-		const statusText = approved ? "Approved" : "Denied";
-
-		// Update the message to show the decision
-		if (query.message) {
-			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					chat_id: query.message.chat.id,
-					message_id: query.message.message_id,
-					text: `*${statusText}:* \`${approval.tool}\``,
-					parse_mode: "Markdown",
-					...NO_LINK_PREVIEW,
-				}),
-			}).catch(() => {});
+		if (Date.now() >= approval.expiresAt) {
+			await this.closeApprovalCard(approval, "Expired. Nothing ran");
+			await tgSend(this.config.telegramToken, String(originChatId), NOT_LIVE, "");
+			return;
 		}
 
-		// Send the approval decision back to the daemon
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			this.ws.send(
-				JSON.stringify({
-					type: "approval:response",
-					requestId,
-					approved,
-				}),
-			);
-		}
+		const approved = action !== "deny";
+		const scope = action === "allowchat" ? "chat" : undefined;
+		// The card changes when the daemon confirms (onApprovalResolved).
+		this.awaitingAck.set(requestId, {
+			approval: { ...approval, messageId: approval.messageId ?? query.message?.message_id },
+			status: scope
+				? "Allowed this command in this chat"
+				: approved
+					? "Approved"
+					: "Denied. Nothing ran",
+			denied: !approved,
+		});
+		this.answerApproval(requestId, approval, approved, {
+			...(scope ? { scope } : {}),
+			approver: String(query.from?.id ?? ""),
+		});
 	}
 
 	stop(): void {
 		this.polling = false;
+		this.pollAbort?.abort();
+		if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+		this.watchdogTimer = null;
 		this.adapter?.close();
 		this.adapter = null;
 		this.daemonClient?.close();
@@ -1333,6 +2169,7 @@ export async function startLocalTelegramBridge(opts: {
 	if (authorizedChatIds.length === 0) {
 		throw new Error("TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode");
 	}
+	assertNotAiJamesToken(token, process.env, undefined, authorizedChatIds);
 	// The first allowlisted chat is the default destination for outbound
 	// messages. Inbound messages from any chat in the allowlist are
 	// accepted; everything else is dropped in handleTelegramMessage.
@@ -1373,11 +2210,16 @@ if (import.meta.main) {
 		process.exit(1);
 	}
 	console.log(`[telegram-bridge] BOT_NAME=${botName || "aijames"} (reading ${tokenVar})`);
+	// The 8gent bot must never share the AI James token (one getUpdates lease).
 
 	const authorizedChatIds = splitIds(process.env.TELEGRAM_AUTHORIZED_CHAT_IDS);
 	const authorizedUserIds = splitIds(process.env.TELEGRAM_AUTHORIZED_USER_IDS);
 	const operatorUserIds = splitIds(process.env.TELEGRAM_OPERATOR_USER_IDS);
 	const chatsToWatch = authorizedChatIds.length > 0 ? authorizedChatIds : [chatId];
+	// Any bridge with a group allowlisted, and the eightgent bridge always.
+	if (botName === "eightgent" || chatsToWatch.some((id) => id.startsWith("-"))) {
+		assertNotAiJamesToken(token, process.env, undefined, chatsToWatch);
+	}
 	if (authorizedUserIds.length === 0 && chatsToWatch.some((id) => id.startsWith("-"))) {
 		console.warn(
 			"[telegram-bridge] a group chat is allowlisted but TELEGRAM_AUTHORIZED_USER_IDS is empty: every sender in that group will be refused",

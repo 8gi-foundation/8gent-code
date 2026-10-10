@@ -19,12 +19,15 @@ import {
 	CHECK_AGENT_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
 	checkAgentTool,
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
@@ -36,8 +39,12 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
+import { withImagesWritten } from "./image-shape";
+import { writeShapeLine } from "./write-shape";
+import { writeScopeLine } from "./write-scope";
+import { safePath } from "../eight/tools";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -203,6 +210,21 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 
 function resolvePath(p: string): string {
 	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
+}
+
+/**
+ * The path native write_file or edit_file may touch (#3747): inside the
+ * workspace root, by safePath (traversal, symlink escape, credential paths).
+ * Returns the path, or the refusal to hand back. Only these two native tools
+ * use it: native read_file (#3759), run_command and the notebook tools
+ * (#3760) are not covered by this change.
+ */
+function confinedWritePath(p: string): { path: string } | { refused: string } {
+	try {
+		return { path: safePath(p, getToolContext().workingDirectory) };
+	} catch (err) {
+		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
+	}
 }
 
 // ============================================
@@ -393,15 +415,23 @@ const writeFile = tool({
 	execute: async ({ path: filePath, content }) => {
 		const blocked = gateWrite("write_file", { path: filePath, content });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		const wasNew = pathAbsent(absolutePath);
 		const recordWrite = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
-		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
+		// Report what is on disk so a requested count can be checked (#3580).
+		const shape = writeShapeLine(absolutePath, content);
+		// A new top-folder file while the work lives in one subfolder (#3580).
+		const { createdFiles, workingDirectory } = getToolContext();
+		const scope = writeScopeLine(createdFiles, workingDirectory, absolutePath, wasNew);
+		return `File written: ${absolutePath}${shape ? `\n${shape}` : ""}${scope ? `\n${scope}` : ""}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 
@@ -418,7 +448,9 @@ const editFile = tool({
 		if (noAnchor) return noAnchor;
 		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		const edited = applyEdit(content, oldText, newText);
@@ -598,7 +630,10 @@ const runCommand = tool({
 		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
-		return runShellCommand(command);
+		const startedAt = Date.now();
+		const output = await runShellCommand(command);
+		// Report images the command drew, and any cut off at an edge (#3580).
+		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
 	},
 });
 
@@ -805,6 +840,38 @@ const makePdfTool = tool({
 				{
 					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
 					hint: "Provide exactly one of markdown/html/htmlPath/mdPath. Ensure ~/.8gent/bin/make-pdf is installed.",
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+const speakTool = tool({
+	description:
+		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
+	inputSchema: z.object({
+		text: z.string().describe("The words to speak (max 2000 characters)"),
+		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
+		out: z
+			.string()
+			.optional()
+			.describe("Output .wav path inside the working directory"),
+	}),
+	execute: async ({ text, voice, out }) => {
+		try {
+			const { resolveSpeakOut } = await import("../eight/tools");
+			const target = resolveSpeakOut(out, getToolContext().workingDirectory);
+			const blocked = gateWrite("speak", { path: target });
+			if (blocked) return blocked;
+			const { speak } = await import("../tools/speak");
+			return JSON.stringify(await speak({ text, voice, out: target }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{
+					error: `speak failed: ${err instanceof Error ? err.message : String(err)}`,
+					hint: "out must be a .wav inside the working directory. Needs Supertonic or KittenTTS installed locally; do not fall back to say.",
 				},
 				null,
 				2,
@@ -1080,7 +1147,7 @@ const mcpListTools = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		try {
-			const { getMCPClient } = await import("../mcp");
+			const { clean, getMCPClient } = await import("../mcp");
 			const mcpClient = getMCPClient();
 			const tools = mcpClient.listTools();
 
@@ -1090,8 +1157,12 @@ const mcpListTools = tool({
 
 			const grouped: Record<string, string[]> = {};
 			for (const { server, tool } of tools) {
-				if (!grouped[server]) grouped[server] = [];
-				grouped[server].push(`  - ${tool.name}: ${tool.description || "No description"}`);
+				// Server-supplied text: control and bidi characters never reach the model.
+				const key = clean(server, 80, true);
+				if (!grouped[key]) grouped[key] = [];
+				grouped[key].push(
+					`  - ${clean(tool.name, 120, true)}: ${clean(tool.description || "No description", 2000, true)}`,
+				);
 			}
 
 			let output = "Available MCP Tools:\n\n";
@@ -1203,6 +1274,9 @@ const backgroundOutput = tool({
 // ============================================
 
 async function runShellCommand(command: string): Promise<string> {
+	// Judge git state against the directory this command runs in (#3748).
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");
 
@@ -1390,13 +1464,11 @@ const spawnAgent = tool({
 		runtime: z
 			.enum(["8gent", "claude", "shell"])
 			.optional()
-			.describe("Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)"),
+			.describe(SPAWN_RUNTIME_DESCRIPTION),
 		model: z
 			.string()
 			.optional()
-			.describe(
-				"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
-			),
+			.describe(SPAWN_MODEL_DESCRIPTION),
 		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
 		permissionMode: z.enum(["plan", "ask", "guarded", "infinite"]).optional().describe(PERMISSION_MODE_DESCRIPTION),
@@ -1984,6 +2056,40 @@ const queryDesignSystem = tool({
 				style: s.style,
 			})),
 		};
+	},
+});
+
+const deckTheme = tool({
+	description:
+		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+	inputSchema: z.object({
+		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
+		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
+		name: z.string().optional().describe("Theme name from list (apply)"),
+		palette: z.string().optional().describe("Theme name to take colours from (mix)"),
+		type: z.string().optional().describe("Theme name to take fonts from (mix)"),
+	}),
+	execute: async ({ action, deck, name, palette, type }) => {
+		try {
+			const dt = await import("../design-systems/deck-themes.js");
+			if (action === "list") return { themes: dt.listThemes() };
+			if (!deck) return { error: `deck_theme ${action} needs deck (path to the deck .md)` };
+			if (action === "apply" && !name) return { error: "deck_theme apply needs name" };
+			if (action === "mix" && (!palette || !type)) {
+				return { error: "deck_theme mix needs palette and type" };
+			}
+			const cwd = getToolContext().workingDirectory;
+			const deckPath = dt.resolveDeckPath(resolvePath(deck), cwd);
+			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
+			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
+				const blocked = gateWrite("write_file", { path: target, content: "" });
+				if (blocked) return { error: blocked };
+			}
+			if (action === "apply") return dt.applyTheme(deckPath, String(name));
+			return dt.mixTheme(deckPath, String(palette), String(type));
+		} catch (err) {
+			return { error: String(err instanceof Error ? err.message : err) };
+		}
 	},
 });
 
@@ -2950,6 +3056,7 @@ export const agentTools = bindToolContext({
 	// Design
 	suggest_design: suggestDesign,
 	query_design_system: queryDesignSystem,
+	deck_theme: deckTheme,
 
 	// Self-awareness
 	self_inspect: selfInspect,
@@ -2994,6 +3101,7 @@ export const agentTools = bindToolContext({
 
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
+	speak: speakTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

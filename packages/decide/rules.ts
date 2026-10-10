@@ -30,6 +30,8 @@
  * INVARIANT: rules only make the guard stricter. There is no allow path here.
  */
 
+import { homedir } from "node:os";
+
 export type RuleVerdict = "block" | "escalate" | "pass";
 
 export interface RuleResult {
@@ -135,9 +137,155 @@ class Collector {
 	secretRead = false;
 	/** A network sender appears somewhere in the command (any nesting level). */
 	netSink = false;
+	/**
+	 * Same-line `NAME=value` / `export NAME=value` assignments seen so far
+	 * (#3314). Each name keeps EVERY value it was given on the line, already
+	 * expanded against the state before that assignment: the text cannot tell
+	 * which assignment ran (`D=/; false && D=build`), so any of them may hold.
+	 * An absent name is unknown. null = too many values to judge (overflow).
+	 */
+	readonly vars = new Map<string, string[] | null>();
+	/** The working directory is home or a system path (from the caller, or a `cd` on this line). */
+	cwdDanger = false;
+	/** This line has `&&`, `||` or a compound command, so an assignment on it may not have run. */
+	conditional = false;
 	d(rule: string, block = BLOCK_RULES.has(rule)): void {
 		this.fired.push({ rule, block });
 	}
+}
+
+// ------------------------------------------------------------------ variables (#3314)
+
+/** `$NAME`, `${NAME}`, `${NAME<op>word}` (one level of nested braces in word), `$0`..`$9`, `$@`, `$*`. */
+const VAR_REF_RE = new RegExp(
+	[
+		String.raw`\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[0-9@*])`, // ${NAME
+		String.raw`(?:(:?[-=?+])((?:[^{}]|\{[^{}]*\})*))?\}`, // optional <op>word, then }
+		String.raw`|([A-Za-z_][A-Za-z0-9_]*|[0-9@*]))`, // or $NAME
+	].join(""),
+);
+const MAX_CANDIDATES = 64;
+const MAX_NESTING = 8;
+/** References in one argument; past this the argument is not judged (block). */
+const MAX_REFS = 64;
+function countDollars(p: string): number {
+	let n = 0;
+	for (let i = p.indexOf("$"); i >= 0 && n <= MAX_REFS; i = p.indexOf("$", i + 1)) n++;
+	return n;
+}
+/** A target that names the working directory itself or everything in it: `.`, `*`, `./*`, `.*`. */
+const CWD_TARGET_RE = /^(\.\/)*(\.|\*|\.\*)?\/?$/;
+const ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
+const DECLARERS = new Set(["export", "declare", "typeset", "local", "readonly"]);
+/** `&&`, `||` or a compound-command keyword, in quote-masked text. */
+const CONDITIONAL_RE = /&&|\|\||(^|[\s;&|(])(if|then|else|elif|while|until|do|case)(?=[\s;]|$)/;
+const HOME_DIR = homedir().replace(/\/+$/, "");
+
+/** Too many candidates, or nesting too deep, to judge. Callers fail closed. */
+class ExpansionOverflow extends Error {}
+
+/**
+ * Every text a path argument could expand to, judged statically and failing
+ * closed. A variable assigned on the line may be any of its values; `$HOME`
+ * always stays `$HOME` too (a reassigned HOME never loosens a match); any
+ * other unknown variable stays as `$NAME` AND may be empty, unless
+ * `${NAME:?}` forbids the empty case. `${A:-w}` and `${A:=w}` may be either
+ * side; `${A:+w}` is empty or w. Only the text after a reference is re-scanned,
+ * so a `$NAME` placeholder is never expanded twice. `depth` counts nesting
+ * (a word inside `${A:-word}`), not references in sequence. Throws
+ * ExpansionOverflow rather than return a partial list.
+ */
+function expandCandidates(p: string, vars: ReadonlyMap<string, string[] | null>, depth = 0): string[] {
+	const m = VAR_REF_RE.exec(p);
+	if (!m) return [p];
+	// The recursion is one frame per reference: refuse a long argument up front
+	// rather than let it overflow the stack (8SO M3). Counting every `$` over-counts.
+	if (depth > MAX_NESTING || countDollars(p) > MAX_REFS) throw new ExpansionOverflow();
+	const name = m[1] ?? m[4];
+	const op = m[2] ?? "";
+	const word = m[3] ?? "";
+	const prefix = p.slice(0, m.index);
+	const suffix = p.slice(m.index + m[0].length);
+	const known = vars.get(name);
+	if (known === null) throw new ExpansionOverflow();
+	let values: string[];
+	if (name === "HOME") values = ["$HOME", ...(known ?? [])];
+	else values = known ?? [`$${name}`, ""];
+	if (op === ":-" || op === "-" || op === ":=" || op === "=") values = [...values, ...expandCandidates(word, vars, depth + 1)];
+	else if (op === ":+" || op === "+") values = ["", ...expandCandidates(word, vars, depth + 1)];
+	else if (op === ":?") values = values.filter((v) => v !== "");
+	const out = new Set<string>();
+	const rest = expandCandidates(suffix, vars, depth);
+	for (const v of values) {
+		for (const s of rest) {
+			out.add(prefix + v + s);
+			if (out.size > MAX_CANDIDATES) throw new ExpansionOverflow();
+		}
+	}
+	return [...out];
+}
+
+/** Home, a home top-level folder, or a system path. */
+function dangerousDir(d: string): boolean {
+	const t = d.length > 1 ? d.replace(/\/+$/, "") : d;
+	return SYSTEM_PATH_RE.test(t) || HOME_TOP_RE.test(t) || t === HOME_DIR;
+}
+
+/** The values a `NAME=value` adds to NAME: expanded against the state before it. null = overflow. */
+function assignedValues(name: string, value: string, r: Collector): string[] | null {
+	const prev = r.vars.get(name);
+	if (prev === null) return null;
+	// Not yet assigned on this line: on a conditional line this assignment may
+	// not run, so the outer value (unknown, possibly empty) stays possible.
+	const before = prev ?? (r.conditional ? [`$${name}`, ""] : []);
+	let added: string[];
+	if (/\$\(|`|<\(/.test(value)) added = [`$${name}`, ""]; // a command's output: unknown
+	else {
+		try {
+			added = expandCandidates(value, r.vars);
+		} catch {
+			return null;
+		}
+	}
+	const all = [...new Set([...before, ...added])];
+	return all.length > MAX_CANDIDATES ? null : all;
+}
+
+/** Record same-line assignments and `cd` targets, after the segment itself is analysed. */
+function trackShellState(tIn: string[], r: Collector): void {
+	let t = tIn;
+	while (t.length && CONTROL.has(t[0])) t = t.slice(1);
+	if (!t.length) return;
+	const declared = DECLARERS.has(t[0]);
+	const words = declared ? t.slice(1).filter((w) => !w.startsWith("-")) : t;
+	// `D=x` alone sets D. `D=x cmd` is a prefix assignment: the expansion in
+	// cmd never sees it, so it records nothing and $D stays unknown.
+	if (declared || words.every((w) => ASSIGN_RE.test(w))) {
+		for (const w of words) {
+			const a = ASSIGN_RE.exec(w);
+			if (a) r.vars.set(a[1], assignedValues(a[1], a[2], r));
+		}
+		return;
+	}
+	const s = stripWrappers(t);
+	if (s[0] !== "cd" && s[0] !== "pushd") return;
+	const target = positional(s.slice(1))[0];
+	if (target === undefined) {
+		r.cwdDanger = true; // a bare cd goes home
+		return;
+	}
+	// A relative cd, `cd -` or a cd that fails cannot be resolved from text
+	// (it may go up, through a symlink, or nowhere), so the state is kept.
+	if (!/^[/~$]/.test(target)) return;
+	let cands: string[];
+	try {
+		cands = expandCandidates(target, r.vars);
+	} catch {
+		return; // overflow: keep the state
+	}
+	if (cands.some(dangerousDir)) r.cwdDanger = true;
+	else if (cands.every((c) => c.startsWith("/") && !c.includes("$"))) r.cwdDanger = false;
+	// Anything else could not be resolved: keep the state (fail closed).
 }
 
 // ------------------------------------------------------------------ helpers
@@ -509,7 +657,18 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 		return;
 	}
 	if (hasFlag(args, "rR", ["--recursive"])) {
-		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p));
+		const hits = (p: string) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p) || (r.cwdDanger && p !== "" && CWD_TARGET_RE.test(p));
+		// Each path as written, and every text it could expand to (#3314).
+		// Any failure to expand (overflow, or anything else) is a block: fail
+		// closed, and never rethrow, which would abort the rest of the analysis.
+		const expandHits = (p: string) => {
+			try {
+				return expandCandidates(p, r.vars).some(hits);
+			} catch {
+				return true;
+			}
+		};
+		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => hits(p) || expandHits(p));
 		r.d("rm_recursive", catastrophic);
 	} else if (!(paths.length && paths.every(isTemp))) {
 		r.d("rm_non_temp");
@@ -838,6 +997,14 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	} else if (DB_CLIENTS.has(b)) sqlScan(args.join(" "), r);
 	else if (b === "rsync") {
 		if (/--delete\b|--delete-\w+|--remove-source-files/.test(args.join(" "))) r.d("rsync_delete");
+	} else if (b === "zip") {
+		// -m / --move deletes the inputs once archived, also inside a short
+		// cluster (-qm, -rm). Lowercase only: -MM is "must match".
+		if (args.some((a) => a === "--move" || /^-[A-Za-z0-9]*m[A-Za-z0-9]*$/.test(a))) r.d("archive_removes_source");
+	} else if (b === "tar" || b === "gtar" || b === "bsdtar") {
+		if (args.some((a) => a === "--remove-files")) r.d("archive_removes_source");
+	} else if (b === "7z" || b === "7za" || b === "7zr" || b === "7zz") {
+		if (args.some((a) => a === "-sdel")) r.d("archive_removes_source");
 	} else if (b === "xcrun") {
 		if (/simctl\s+(delete|erase)/.test(args.join(" "))) r.d("simulator_delete_or_erase");
 	}
@@ -852,6 +1019,7 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	const { text: body, docs } = cutHeredocs(text);
 	// Whole-command rules, on this level's text with quoted data masked.
 	const view = maskData(body);
+	if (CONDITIONAL_RE.test(maskQuotes(body))) r.conditional = true;
 	if (REMOTE_EXEC_RE.test(view)) r.d("remote_code_substituted_into_shell");
 	if (SECRET_READ.test(view)) r.secretRead = true;
 	if (NET_SINK.test(view)) r.netSink = true;
@@ -870,15 +1038,27 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	let prev: string | null = null;
 	for (const { text: seg, piped } of segs) {
 		ruleRedirects(seg, r);
-		prev = analyseTokens(tokens(stripRedirects(seg)), piped, prev, r, depth);
+		const t = tokens(stripRedirects(seg));
+		prev = analyseTokens(t, piped, prev, r, depth);
+		trackShellState(t, r);
 	}
 	for (const s of subs) analyse(s, r, depth + 1);
 }
 
+export interface DecideRulesOptions {
+	/**
+	 * The directory the command runs in. When it is home or a system path, a
+	 * recursive delete of `*`, `.`, `./*` or `.*` blocks (#3314). Omitted:
+	 * only a `cd` on the same line can set it.
+	 */
+	cwd?: string;
+}
+
 /** Run the rule pre-filter on one command. Pure, synchronous, never throws. */
-export function decideRules(command: string): RuleResult {
+export function decideRules(command: string, opts: DecideRulesOptions = {}): RuleResult {
 	const r = new Collector();
 	try {
+		if (opts.cwd) r.cwdDanger = dangerousDir(opts.cwd);
 		analyse(command, r);
 		if (r.secretRead && r.netSink) r.d("secret_to_network");
 	} catch {

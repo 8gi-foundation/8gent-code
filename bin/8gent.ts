@@ -94,6 +94,8 @@ USAGE:
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
+                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
+                              must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
   update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
@@ -501,6 +503,10 @@ async function main() {
 
 		case "cron":
 			await cronCommand(restArgs);
+			break;
+
+		case "blueprint":
+			await blueprintCommand(restArgs);
 			break;
 
 		case "daemon": {
@@ -1708,6 +1714,52 @@ async function cronCommand(args: string[]) {
 	}
 }
 
+// ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────
+
+async function blueprintCommand(args: string[]) {
+	const bp = await import("../packages/cron/blueprints.ts");
+	if (!bp.blueprintsEnabled()) {
+		console.error("Blueprints are off. Set EIGHT_BLUEPRINTS=1 to try them.");
+		process.exit(1);
+	}
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const [sub, target, ...pairs] = args;
+	if (!sub || sub === "list") {
+		for (const b of bp.BLUEPRINTS) {
+			console.log(`${b.name}  ${b.description}`);
+			for (const s of b.slots) console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
+		}
+		return;
+	}
+	if (sub === "add" && target) {
+		const slots: Record<string, string> = Object.create(null);
+		for (const p of pairs) {
+			const i = p.indexOf("=");
+			const key = p.slice(0, i);
+			let why = "";
+			if (i < 1) why = `Expected key=value, got ${JSON.stringify(p)}`;
+			else if (key === "__proto__") why = `Not a slot name: ${JSON.stringify(key)}`;
+			else if (key in slots) why = `Slot given twice: ${JSON.stringify(key)}`;
+			if (why) {
+				console.error(why);
+				process.exit(1);
+			}
+			slots[key] = p.slice(i + 1);
+		}
+		try {
+			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
+			console.log(`Saved routine ${r.id} (${r.name}), cron pattern "${r.schedule}".`);
+			console.log("Nothing runs routines yet; this trial only saves them.");
+		} catch (e) {
+			console.error(e instanceof Error ? e.message : String(e));
+			process.exit(1);
+		}
+		return;
+	}
+	console.error("Usage: 8gent blueprint list | add <name> key=value...");
+	process.exit(1);
+}
+
 // ── Chat Command (non-interactive, pipe-friendly) ─────────────────
 
 // ── Text-Tool Chat (local-model agentic loop) ─────────────────────
@@ -2228,9 +2280,18 @@ async function preferencesCommand(args: string[]) {
 				case "role":
 					user.identity.role = value;
 					break;
-				case "style":
-					user.identity.communicationStyle = value as any;
+				case "style": {
+					// #3487: only a style from the fixed set is stored.
+					const { COMMUNICATION_STYLES, isCommunicationStyle } = await import(
+						"../packages/self-autonomy/communication-style"
+					);
+					if (!isCommunicationStyle(value)) {
+						console.error(`Unknown style. Use one of: ${COMMUNICATION_STYLES.join(", ")}`);
+						process.exit(1);
+					}
+					user.identity.communicationStyle = value;
 					break;
+				}
 				case "language":
 					user.identity.language = value;
 					break;

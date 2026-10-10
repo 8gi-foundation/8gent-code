@@ -226,6 +226,8 @@ export async function planModeRefusal(
 	args: Record<string, unknown>,
 ): Promise<string | null> {
 	if (PLAN_READ_ONLY_TOOLS.has(toolName)) return null;
+	// film_craft list and mix only read the preset catalog (#3599); plan and bed write files.
+	if (toolName === "film_craft" && (args.action === "list" || args.action === "mix")) return null;
 	if (SHELL_TOOLS.has(toolName)) {
 		const command = typeof args.command === "string" ? args.command : "";
 		try {

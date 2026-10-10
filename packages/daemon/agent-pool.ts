@@ -10,7 +10,9 @@ import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import { bus } from "./events";
+import type { SessionJournal } from "./session-journal";
 
 export interface PoolConfig {
 	/** Default model to use (e.g. "qwen3.5:14b") */
@@ -32,16 +34,60 @@ interface SessionEntry {
 	lastActiveAt: number;
 	messageCount: number;
 	busy: boolean; // true while agent.chat() is in flight
+	/**
+	 * Waiters for this session, FIFO (#3554, EIGHT_SESSION_QUEUE=1 only).
+	 * Each is resolved with true when handed the session, or false when the
+	 * session ends before its turn.
+	 */
+	queue: Array<(admitted: boolean) => void>;
 	/** Tenant attribution for Wave 4 multi-tenant rollout. */
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
 	clerkId?: string;
 }
 
+/** Per-session options for AgentPool.createSession. */
+export interface SessionOverrides {
+	maxTurns?: number;
+	tenantId?: string;
+	clerkId?: string;
+	/**
+	 * Restricted policy scope this session's agent gates tool calls under
+	 * (e.g. "__table__"). When set, every tool call routes through ToolG8
+	 * with this id as the agentId, so the deny-by-default rules installed
+	 * for that scope apply. Defaults to the standard "primary" scope.
+	 */
+	agentScope?: string;
+	/**
+	 * Per-session backend routing. Lets a caller (e.g. a Table officer
+	 * pinned to a specific local model) override the pool defaults for
+	 * this one session. `runtime` is still subject to the F4 local-only
+	 * gate for Table sessions; a cloud runtime is downgraded to the safe
+	 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
+	 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
+	 * (and, via createClient, to the LLM client) when set.
+	 */
+	runtime?: AgentConfig["runtime"];
+	model?: string;
+	baseUrl?: string;
+	systemPrompt?: string;
+}
+
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** #3554: queue messages to a busy session instead of refusing them. Off by default. */
+function sessionQueueEnabled(): boolean {
+	return process.env.EIGHT_SESSION_QUEUE === "1";
+}
+
+/** #3554: max messages waiting per session (not counting the one running). */
+function sessionQueueMax(): number {
+	const n = Number(process.env.EIGHT_SESSION_QUEUE_MAX);
+	return Number.isInteger(n) && n >= 0 ? n : 32;
+}
 
 /** Known session channels. Add new entries here when wiring a new surface. */
 export const KNOWN_CHANNELS = [
@@ -77,8 +123,11 @@ export class AgentPool {
 	private sessions = new Map<string, SessionEntry>();
 	private config: PoolConfig;
 	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+	/** Open-session journal for resume after a crash (#3552). Unset by default. */
+	private journal: SessionJournal | null;
 
-	constructor(config: Partial<PoolConfig> = {}) {
+	constructor(config: Partial<PoolConfig> = {}, options: { journal?: SessionJournal } = {}) {
+		this.journal = options.journal ?? null;
 		this.config = {
 			model: config.model || DEFAULT_MODEL,
 			runtime: config.runtime || DEFAULT_RUNTIME,
@@ -122,6 +171,7 @@ export class AgentPool {
 					`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`,
 				);
 				this.sessions.delete(id);
+				this.unjournal(id);
 				bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
 			}
 		}
@@ -131,31 +181,12 @@ export class AgentPool {
 	createSession(
 		sessionId: string,
 		channel: string,
-		overrides?: {
-			maxTurns?: number;
-			tenantId?: string;
-			clerkId?: string;
-			/**
-			 * Restricted policy scope this session's agent gates tool calls under
-			 * (e.g. "__table__"). When set, every tool call routes through ToolG8
-			 * with this id as the agentId, so the deny-by-default rules installed
-			 * for that scope apply. Defaults to the standard "primary" scope.
-			 */
-			agentScope?: string;
-			/**
-			 * Per-session backend routing. Lets a caller (e.g. a Table officer
-			 * pinned to a specific local model) override the pool defaults for
-			 * this one session. `runtime` is still subject to the F4 local-only
-			 * gate for Table sessions; a cloud runtime is downgraded to the safe
-			 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
-			 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
-			 * (and, via createClient, to the LLM client) when set.
-			 */
-			runtime?: AgentConfig["runtime"];
-			model?: string;
-			baseUrl?: string;
-			systemPrompt?: string;
-		},
+		overrides?: SessionOverrides,
+		/**
+		 * journal: false skips the resume journal write. The boot resume uses
+		 * it so the entry keeps naming the old checkpoint until restore succeeds.
+		 */
+		options: { journal?: boolean } = {},
 	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
@@ -277,9 +308,24 @@ export class AgentPool {
 			lastActiveAt: now,
 			messageCount: 0,
 			busy: false,
+			queue: [],
 			tenantId,
 			clerkId: overrides?.clerkId,
 		});
+
+		if (this.journal && options.journal !== false) {
+			try {
+				this.journal.upsert({
+					sessionId,
+					channel,
+					ttSessionId: agent.getTimeTravelSessionId(),
+					createdAt: now,
+					...(overrides ? { overrides } : {}),
+				});
+			} catch (err) {
+				console.error(`[agent-pool] session journal write failed for ${sessionId}: ${String(err)}`);
+			}
+		}
 
 		console.log(
 			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, runtime=${runtime}, model=${model})`,
@@ -287,7 +333,11 @@ export class AgentPool {
 	}
 
 	/** Send a message to an agent and stream the response via the event bus */
-	async chat(sessionId: string, text: string): Promise<string> {
+	/**
+	 * `turn` is set only for a turn the Telegram bridge started on its own
+	 * authenticated socket (#3621); then a dangerous command asks the operator.
+	 */
+	async chat(sessionId: string, text: string, turn?: ApprovalTurn): Promise<string> {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) {
 			bus.emit("agent:error", { sessionId, error: "session not found" });
@@ -295,12 +345,23 @@ export class AgentPool {
 		}
 
 		if (entry.busy) {
-			bus.emit("agent:error", {
-				sessionId,
-				error: "agent is busy processing another message",
-			});
-			return "[error] agent is busy";
+			if (!sessionQueueEnabled()) {
+				bus.emit("agent:error", {
+					sessionId,
+					error: "agent is busy processing another message",
+				});
+				return "[error] agent is busy";
+			}
+			// #3554: wait in line. The finishing turn hands the session over with
+			// busy still true, so nothing can jump the queue in between.
+			if (entry.queue.length >= sessionQueueMax()) {
+				bus.emit("agent:error", { sessionId, error: "session queue full" });
+				return "[error] session queue full";
+			}
+			const admitted = await new Promise<boolean>((resolve) => entry.queue.push(resolve));
+			if (!admitted) return "[error] session ended";
 		}
+		entry.busy = true;
 
 		// Usage monitor gate - stop burning tokens when limits hit
 		const usage = getUsageMonitor();
@@ -308,6 +369,7 @@ export class AgentPool {
 		if (!budget.allowed) {
 			const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
 			bus.emit("agent:error", { sessionId, error: msg });
+			this.release(entry);
 			return msg;
 		}
 		const warning = usage.getWarning();
@@ -319,14 +381,17 @@ export class AgentPool {
 			});
 		}
 
-		entry.busy = true;
 		entry.messageCount++;
 		entry.lastActiveAt = Date.now();
 		bus.emit("agent:thinking", { sessionId });
 
 		const startMs = Date.now();
 		try {
-			const response = await entry.agent.chat(text);
+			const response = await (turn
+				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), () =>
+						entry.agent.chat(text),
+					)
+				: entry.agent.chat(text));
 
 			// Track token usage (estimate: ~4 chars/token).
 			const promptTokens = Math.ceil(text.length / 4);
@@ -364,8 +429,28 @@ export class AgentPool {
 			bus.emit("agent:error", { sessionId, error: errorMsg });
 			return `[error] ${errorMsg}`;
 		} finally {
-			entry.busy = false;
+			// A call aborted mid-turn never sends onToolEnd; the turn is over,
+			// so nothing is running any more (#3653).
+			this.journalTool(sessionId, () => this.journal?.clearInFlight(sessionId));
+			this.release(entry);
 		}
+	}
+
+	/** In-flight tool journaling (#3653). Only with EIGHT_RESUME_ON_BOOT; never fails a turn. */
+	private journalTool(sessionId: string, write: () => void): void {
+		if (!this.journal) return;
+		try {
+			write();
+		} catch (err) {
+			console.error(`[agent-pool] in-flight tool journal write failed for ${sessionId}: ${String(err)}`);
+		}
+	}
+
+	/** Hand the session to the next queued message, or mark it idle. */
+	private release(entry: SessionEntry): void {
+		const next = entry.queue.shift();
+		if (next) next(true);
+		else entry.busy = false;
 	}
 
 	/** Destroy a session and its Agent */
@@ -374,7 +459,19 @@ export class AgentPool {
 		if (!entry) return;
 
 		this.sessions.delete(sessionId);
+		this.unjournal(sessionId);
+		// #3554: queued messages never run on an ended session.
+		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
+	}
+
+	private unjournal(sessionId: string): void {
+		if (!this.journal) return;
+		try {
+			this.journal.remove(sessionId);
+		} catch (err) {
+			console.error(`[agent-pool] session journal remove failed for ${sessionId}: ${String(err)}`);
+		}
 	}
 
 	/** Check if a session exists */
@@ -468,6 +565,14 @@ export class AgentPool {
 	private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
 		return {
 			onToolStart: (event) => {
+				this.journalTool(sessionId, () =>
+					this.journal?.markToolStart(sessionId, {
+						id: event.toolCallId,
+						tool: event.toolName,
+						args: event.args ?? {},
+						startedAt: Date.now(),
+					}),
+				);
 				bus.emit("tool:start", {
 					sessionId,
 					tool: event.toolName,
@@ -476,6 +581,7 @@ export class AgentPool {
 			},
 
 			onToolEnd: (event) => {
+				this.journalTool(sessionId, () => this.journal?.markToolEnd(sessionId, event.toolCallId));
 				bus.emit("tool:result", {
 					sessionId,
 					tool: event.toolName,

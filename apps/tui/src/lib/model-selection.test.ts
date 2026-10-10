@@ -19,7 +19,11 @@ import {
 	autoSelectModel,
 	canReuseTabAgent,
 	declaredModels,
+	filterChatCapable,
+	listsInstalledOllamaModels,
+	missingModelNotice,
 	normalizeProviderId,
+	pickBestChatModel,
 	providerToRuntime,
 	specForActivatedTab,
 	tabAgentRole,
@@ -260,5 +264,143 @@ describe("tabAgentRole (#3095)", () => {
 		expect(tabAgentRole(undefined)).toBeUndefined();
 		expect(tabAgentRole({})).toBeUndefined();
 		expect(tabAgentRole({ role: "admin" })).toBeUndefined();
+	});
+});
+
+// #3332: the 8gent provider IS the configured Ollama (localhost:11434), but the
+// TUI read its model list from the registry's declared list. That list holds
+// eight-1.0-q3:14b, which is not installed, so the missing default stayed the
+// session model and every turn asked Ollama for it, missed, and fell through to
+// OpenRouter with an id OpenRouter does not serve ("All providers exhausted").
+describe("a missing default model is swapped before the first turn (#3332)", () => {
+	const installed = ["qwen3.5:9b-32k", "qwen3.5:9b", "qwen3.8:27b-mlx", "nomic-embed-text:latest"];
+
+	test("8gent and ollama list what Ollama has installed; other providers do not", () => {
+		expect(listsInstalledOllamaModels("8gent")).toBe(true);
+		expect(listsInstalledOllamaModels("ollama")).toBe(true);
+		expect(listsInstalledOllamaModels("lmstudio")).toBe(false);
+		expect(listsInstalledOllamaModels("openrouter")).toBe(false);
+		expect(listsInstalledOllamaModels("")).toBe(false);
+	});
+
+	test("default absent: the installed list replaces it with an installed chat model", () => {
+		const next = autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: null });
+		expect(next).not.toBeNull();
+		expect(installed).toContain(next as string);
+		expect(next).not.toBe("nomic-embed-text:latest");
+	});
+
+	test("default present: it is kept and no notice is shown", () => {
+		const withDefault = [...installed, "eight-1.0-q3:14b"];
+		expect(
+			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: withDefault, explicit: null }),
+		).toBeNull();
+		expect(missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.5:9b", available: withDefault })).toBeNull();
+	});
+
+	test("an explicit --model still wins over the installed list (#3084 holds)", () => {
+		const pin: ModelSpec = { provider: "8gent", model: "eight-1.0-q3:14b" };
+		expect(
+			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: pin }),
+		).toBeNull();
+	});
+
+	test("the swap of a missing model says so in one line, naming both models", () => {
+		const notice = missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.8:27b-mlx", available: installed });
+		expect(notice).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.8:27b-mlx. Pick another with /model.");
+		expect(notice).not.toContain("\n");
+	});
+
+	test("a model that is installed but cannot chat is not called missing (#3548)", () => {
+		const notice = missingModelNotice({
+			provider: "ollama",
+			from: "clef:27b",
+			to: "qwen3.5:14b",
+			available: ["qwen3.5:14b"],
+			installed: ["clef:27b", "qwen3.5:14b"],
+		});
+		expect(notice).toBe("clef:27b cannot be used for chat, so this session uses qwen3.5:14b. Pick another with /model.");
+		expect(notice).not.toContain("not installed");
+	});
+
+	test("a model absent from the installed list is still called missing", () => {
+		expect(
+			missingModelNotice({
+				provider: "8gent",
+				from: "eight-1.0-q3:14b",
+				to: "qwen3.5:14b",
+				available: ["qwen3.5:14b"],
+				installed: ["clef:27b", "qwen3.5:14b"],
+			}),
+		).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.5:14b. Pick another with /model.");
+	});
+
+	test("no notice for a first pick, a non-Ollama provider, or a model that is installed", () => {
+		expect(missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed })).toBeNull();
+		expect(missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] })).toBeNull();
+		expect(missingModelNotice({ provider: "ollama", from: "qwen3.5:9b", to: "qwen3.8:27b-mlx", available: installed })).toBeNull();
+	});
+});
+
+describe("filterChatCapable (#3548)", () => {
+	const ROOT = "http://ollama.test:11434";
+	/** A stub /api/show: capabilities per model, or a status / throw. */
+	function stubShow(table: Record<string, string[] | number | "throw" | "none">) {
+		const calls: string[] = [];
+		const fetchImpl = async (url: string, init?: RequestInit) => {
+			const model = JSON.parse(String(init?.body ?? "{}")).model as string;
+			calls.push(`${url} ${model}`);
+			const entry = table[model];
+			if (entry === "throw") throw new Error("connection refused");
+			if (typeof entry === "number") return new Response("", { status: entry });
+			if (entry === "none" || entry === undefined) return Response.json({ modelfile: "FROM x" });
+			return Response.json({ capabilities: entry });
+		};
+		return { calls, fetchImpl };
+	}
+
+	test("drops decision-only models that report no completion capability", async () => {
+		const { fetchImpl } = stubShow({
+			"clef:27b": ["decision"],
+			"nimble:latest": ["decision"],
+			"qwen3.5:14b": ["completion", "tools"],
+		});
+		const ids = ["clef:27b", "nimble:latest", "qwen3.5:14b"];
+		const kept = await filterChatCapable(`${ROOT}/a`, ids, { fetch: fetchImpl });
+		expect(kept).toEqual(["qwen3.5:14b"]);
+		// The decision model no longer outranks the chat model in the picker.
+		expect(pickBestChatModel(kept)).toBe("qwen3.5:14b");
+	});
+
+	test("keeps a model when capabilities are absent or the lookup fails, and name-filters it", async () => {
+		const { fetchImpl } = stubShow({
+			"old-chat:7b": "none",
+			"broken:8b": 500,
+			"down:3b": "throw",
+			"nomic-embed-text:latest": "none",
+		});
+		const ids = ["old-chat:7b", "broken:8b", "down:3b", "nomic-embed-text:latest"];
+		const kept = await filterChatCapable(`${ROOT}/b`, ids, { fetch: fetchImpl });
+		expect(kept).toEqual(["old-chat:7b", "broken:8b", "down:3b"]);
+	});
+
+	test("reported capabilities win over the name heuristic", async () => {
+		const { fetchImpl } = stubShow({
+			"embed-chat-tuned:8b": ["completion"],
+			"mxbai-embed-large:latest": ["embedding"],
+		});
+		const kept = await filterChatCapable(`${ROOT}/c`, ["embed-chat-tuned:8b", "mxbai-embed-large:latest"], {
+			fetch: fetchImpl,
+		});
+		expect(kept).toEqual(["embed-chat-tuned:8b"]);
+	});
+
+	test("caches a known answer per host and model, but retries a failed lookup", async () => {
+		const { calls, fetchImpl } = stubShow({ "qwen3.5:14b": ["completion"], "down:3b": "throw" });
+		const root = `${ROOT}/d`;
+		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
+		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
+		expect(calls.filter((c) => c.endsWith(" qwen3.5:14b"))).toEqual([`${root}/api/show qwen3.5:14b`]);
+		expect(calls.filter((c) => c.endsWith(" down:3b")).length).toBe(2);
 	});
 });

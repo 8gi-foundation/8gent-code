@@ -79,6 +79,24 @@ jobs:
           # Held in a repository secret, never in the repo.
           PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
 
+      # #3326: release dry run. The same command release.yml runs on a tag, so
+      # a PR that would make the release ship without its tarball or checksums
+      # fails here, not on release day. Nothing is uploaded or published.
+      - name: Release guard selftest
+        run: bash scripts/release-guard.sh selftest
+
+      - name: Release dry run (npm tarball + SHA256SUMS)
+        run: |
+          rm -rf "$RUNNER_TEMP/release-assets"
+          COUNT="$(bash scripts/release-guard.sh pack "$RUNNER_TEMP/release-assets")"
+          VERSION="$(node -p "require('./package.json').version")"
+          cd "$RUNNER_TEMP/release-assets"
+          ls -la
+          test -s "8gi-foundation-8gent-code-${VERSION}.tgz" || { echo "::error::no npm tarball for ${VERSION}"; exit 1; }
+          sha256sum -c SHA256SUMS
+          [ "$COUNT" -ge 2 ] || { echo "::error::expected at least 2 release assets, staged ${COUNT}"; exit 1; }
+          echo "release dry run: ${COUNT} assets staged for v${VERSION}"
+
       - name: Verify version sync
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
@@ -180,15 +198,17 @@ jobs:
             }
           "
 
-      - name: CHANGELOG entry required
+      # #3575: PRs do not edit CHANGELOG.md. The release step builds it from
+      # merged PR titles (scripts/changelog-release.ts), so parallel PRs stop
+      # conflicting on the same lines. Only release PRs should touch it.
+      - name: CHANGELOG.md is built at release
         if: github.event_name == 'pull_request'
         run: |
           CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..HEAD 2>/dev/null || git diff --name-only HEAD~1)
-          if echo "$CHANGED" | grep -q "CHANGELOG.md"; then
-            echo "CHANGELOG entry found - OK"
+          if echo "$CHANGED" | grep -qxF "CHANGELOG.md"; then
+            echo "::warning::This PR edits CHANGELOG.md. Unless it is a release PR, drop that change: the release step builds the changelog from merged PR titles (#3575)."
           else
-            echo "::error::PR must include a CHANGELOG.md entry"
-            exit 1
+            echo "No CHANGELOG.md edit - OK"
           fi
 
   smoke:

@@ -1,0 +1,138 @@
+# clean-install.yml - install a PUBLISHED release the way a stranger does (#3743).
+#
+# Runs scripts/clean-install-check.sh on the self-hosted helm runner: a plain
+# node:22 container, no repo checkout inside it, no Bun, a fresh HOME. It
+# installs @8gi-foundation/8gent-code@<version> from npm (or the release
+# tarball, checked against SHA256SUMS, when the npm publish lags), then runs
+# `8gent --version` and `8gent --help`. A release with neither an npm version
+# nor a tarball fails here instead of going out empty (#3326).
+#
+# TRIGGERS:
+#   release: published   a release a person publishes.
+#   workflow_run Release the Release workflow tags and releases with
+#                        GITHUB_TOKEN, and events made by that token do not
+#                        start other workflows (#3658), so `release: published`
+#                        alone would never fire for our own releases.
+#                        workflow_run does. Runs only when Release ran on a v* tag.
+#                        It only fires once release.yml can run at all: today it
+#                        targets ubuntu-latest, which this org cannot use (#3658).
+#   workflow_dispatch    any version, `latest`, or a tarball URL.
+#   pull_request         only when the check itself changes; checks npm latest.
+#
+# Reproduce locally with Docker:
+#   sh scripts/clean-install-check.sh 0.17.0
+
+name: Clean install
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (0.19.0 or v0.19.0), latest, or a release tarball URL"
+        required: true
+        default: latest
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/clean-install-check.sh
+      - .github/workflows/clean-install.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clean-install-${{ github.event.release.tag_name || github.event.workflow_run.head_branch || inputs.version || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  clean-install:
+    name: Clean-container install of the published package
+    # Self-hosted: never run code from a fork's pull request on this machine.
+    # workflow_run: only a Release run on a v* tag, and not one that was cancelled.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_run' || (startsWith(github.event.workflow_run.head_branch, 'v') && github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.conclusion != 'skipped'))
+    runs-on: [self-hosted, 8gi, helm]
+    timeout-minutes: 20
+    steps:
+      # The script from main (or the PR under test): old tags predate it. The
+      # container never sees this checkout. A plain full checkout on purpose:
+      # this runner reuses one workspace across workflows, and a sparse
+      # checkout here left Linux (Docker) without its Dockerfile.
+      - name: Checkout (for the check script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || github.event.repository.default_branch }}
+
+      # This runner shares one workspace across every workflow. An earlier
+      # version of this job used a sparse checkout, which left
+      # core.sparseCheckout=true in .git/config; actions/checkout's own
+      # `sparse-checkout disable` writes to config.worktree and then drops
+      # extensions.worktreeConfig, so the flag survived and later jobs got a
+      # one-file tree. Turn it off and re-materialise the tree if it is set.
+      - name: Workspace is not sparse
+        run: |
+          if [ "$(git config --local --bool core.sparseCheckout || echo false)" = true ] \
+             || git ls-files -t | grep -q '^S '; then
+            git config --local core.sparseCheckout false
+            git ls-files -z | xargs -0 git update-index --no-skip-worktree
+            git checkout -f HEAD -- .
+            echo "::warning::Workspace had core.sparseCheckout=true; turned off and restored the full tree."
+          fi
+          # .github/docker/linux-ci/Dockerfile belongs to linux-docker.yml (Linux (Docker)),
+          # the job that broke when this workspace was left sparse. Its presence is the proof
+          # that the full tree is back.
+          test -f .github/docker/linux-ci/Dockerfile || { echo "::error::workspace tree is incomplete"; exit 1; }
+
+      - name: Which release
+        id: target
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+          INPUT: ${{ inputs.version }}
+        run: |
+          case "$EVENT" in
+            release)      T=$RELEASE_TAG ;;
+            workflow_run) T=$RUN_TAG ;;
+            workflow_dispatch) T=$INPUT ;;
+            *)            T=latest ;;
+          esac
+          [ -n "$T" ] || { echo "::error::No version to check for event $EVENT"; exit 1; }
+          echo "target=$T" >> "$GITHUB_OUTPUT"
+          echo "Checking: $T ($EVENT)"
+
+      - name: Docker is up
+        run: |
+          docker info --format 'docker {{.ServerVersion}} {{.OSType}}/{{.Architecture}}' \
+            || { echo "::error::Docker daemon is not reachable from the runner. Is Docker Desktop running?"; exit 1; }
+
+      - name: Clean-container install
+        shell: bash
+        timeout-minutes: 15
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+        run: |
+          OUT="$RUNNER_TEMP/clean-install-${{ github.run_id }}.log"
+          set +e
+          sh scripts/clean-install-check.sh "$TARGET" 2>&1 | tee "$OUT"
+          CODE=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Clean-container install: \`$TARGET\`"
+            echo
+            echo '```'
+            grep -E '^(==|node |npm latest|PASS|FAIL|NOTE|clean-install-check:)' "$OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$OUT"
+          if [ "$CODE" != 0 ]; then
+            echo "::error::A stranger cannot install $TARGET. See the job summary."
+          fi
+          exit "$CODE"

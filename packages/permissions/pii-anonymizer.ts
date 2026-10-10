@@ -435,6 +435,46 @@ export function deanonymize(text: string, map: Map<string, string>): string {
 	return out;
 }
 
+/**
+ * Streaming counterpart of `deanonymize`. A model often splits a placeholder
+ * like `[EMAIL_1]` across stream chunks ("[", "EMAIL_", "1", "]"), so restoring
+ * each chunk on its own never matches. `push` holds back only a trailing
+ * fragment that could still grow into a known placeholder and emits the rest
+ * restored; `flush` releases whatever is held, unchanged, at stream end.
+ * Concatenated output equals `deanonymize` over the whole reply.
+ */
+export function createStreamDeanonymizer(map: Map<string, string>): {
+	push(chunk: string): string;
+	flush(): string;
+} {
+	const tokens = [...map.keys()];
+	const maxLen = tokens.reduce((n, t) => Math.max(n, t.length), 0);
+	let held = "";
+	return {
+		push(chunk: string): string {
+			if (map.size === 0) return chunk;
+			const text = held + chunk;
+			// Earliest "[" in the tail whose suffix is a strict prefix of a token.
+			let cut = text.length;
+			for (let i = Math.max(0, text.length - maxLen + 1); i < text.length; i++) {
+				if (text[i] !== "[") continue;
+				const tail = text.slice(i);
+				if (tokens.some((t) => t.length > tail.length && t.startsWith(tail))) {
+					cut = i;
+					break;
+				}
+			}
+			held = text.slice(cut);
+			return deanonymize(text.slice(0, cut), map);
+		},
+		flush(): string {
+			const out = held;
+			held = "";
+			return out;
+		},
+	};
+}
+
 // ============================================
 // Verification (fail-closed support)
 // ============================================
