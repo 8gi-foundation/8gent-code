@@ -31,6 +31,9 @@ const ENV: Record<string, string> = {
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TURN_TIMEOUT_MS: "20000",
 	OPENROUTER_API_KEY: OR_KEY,
+	// Hosted is opt-in (#3710). Granting it here makes the pinned cases prove the
+	// pin alone stops the fallback, and lets the unpinned cases reach openrouter.
+	EIGHT_ALLOW_HOSTED: "1",
 };
 let home: string;
 let repo: string;
