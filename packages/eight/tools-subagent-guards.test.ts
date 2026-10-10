@@ -42,7 +42,7 @@ describe("edit_file refuses an empty oldText (#3101)", () => {
 				newText: "# twofix",
 			});
 			expect(read(dir, "src/wordcount.ts")).toBe(WORDCOUNT);
-			expect(out).toMatch(/^Error: edit_file on \S*src\/wordcount\.ts did NOT run\./);
+			expect(out).toMatch(/^Error: edit_file on \S*src[\\/]wordcount\.ts did NOT run\./);
 			expect(out).toContain("write_file");
 			expect(out).toContain("non-empty");
 		});

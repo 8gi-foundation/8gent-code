@@ -104,11 +104,13 @@ describe("SessionJournal", () => {
 			createdAt: 1,
 			overrides: { clerkId: "u1" },
 		});
-		expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
 		// A rewrite keeps it owner-only, even over a file that was looser.
 		fs.chmodSync(journalPath, 0o644);
 		j.upsert({ sessionId: "b", channel: "api", ttSessionId: "session_2", createdAt: 2 });
-		expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
 	});
 
 	test("a failed write throws and leaves no temp file behind", () => {

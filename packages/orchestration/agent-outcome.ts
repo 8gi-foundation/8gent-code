@@ -35,7 +35,10 @@ export interface AgentOutcomeInput {
 export function relativeTo(workingDirectory: string, file: string): string {
 	const abs = path.resolve(workingDirectory, file);
 	const rel = path.relative(workingDirectory, abs);
-	return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : abs;
+	// Forward slashes on every platform: the model and the checks compare these as text.
+	return rel && !rel.startsWith("..") && !path.isAbsolute(rel)
+		? rel.split(path.sep).join("/")
+		: abs;
 }
 
 /**

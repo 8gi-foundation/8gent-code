@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../../tests/rm-retry";
 
 // Isolated DB, set before any vessel module opens it.
 const dataDir = mkdtempSync(join(tmpdir(), "linkedin-vessel-test-"));
@@ -128,7 +129,7 @@ beforeEach(() => {
 afterAll(() => {
 	globalThis.fetch = realFetch;
 	delete process.env.LINKEDIN_SESSION_COOKIE;
-	rmSync(dataDir, { recursive: true, force: true });
+	rmRetry(dataDir);
 });
 
 describe("auth", () => {

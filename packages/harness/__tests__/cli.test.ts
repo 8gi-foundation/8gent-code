@@ -19,6 +19,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { fileURLToPath } from "node:url";
 import {
 	CLI_HARNESS_ENV,
 	CliHarness,
@@ -27,7 +28,7 @@ import {
 } from "../adapters/cli";
 import { HarnessRegistry, type StatusEvent, createDefaultRegistry } from "../index";
 
-const FIXTURE = new URL("./fixtures/fake-cli.ts", import.meta.url).pathname;
+const FIXTURE = fileURLToPath(new URL("./fixtures/fake-cli.ts", import.meta.url));
 const BUN = process.execPath;
 
 function fixtureHarness(

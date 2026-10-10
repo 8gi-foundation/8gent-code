@@ -15,7 +15,11 @@ import { DEFAULT_SETTINGS } from "./defaults.js";
 import { getSettingsFilePath, loadSettings, saveSettings } from "./store.js";
 
 describe("settings store path follows $HOME (#3391)", () => {
-	const saved = { HOME: process.env.HOME, EIGHT_HOME: process.env.EIGHT_HOME };
+	const saved = {
+		HOME: process.env.HOME,
+		USERPROFILE: process.env.USERPROFILE,
+		EIGHT_HOME: process.env.EIGHT_HOME,
+	};
 	let home: string;
 
 	beforeEach(() => {
@@ -24,6 +28,8 @@ describe("settings store path follows $HOME (#3391)", () => {
 		// this exercises HOME itself.
 		delete process.env.EIGHT_HOME;
 		process.env.HOME = home;
+		// On Windows resolveHome reads USERPROFILE before HOME.
+		process.env.USERPROFILE = home;
 	});
 
 	afterEach(() => {

@@ -14,10 +14,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
+import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
 
@@ -74,8 +75,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 /** Every request the model receives for one chat() turn. */

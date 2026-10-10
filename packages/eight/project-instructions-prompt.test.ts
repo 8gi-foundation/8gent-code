@@ -9,9 +9,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 import { Agent } from "./agent";
 import { PROJECT_INSTRUCTIONS_CAP, projectInstructionsSection } from "./instruction-loader";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -31,8 +32,8 @@ beforeAll(() => {
 afterAll(() => {
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 function systemPrompt(runtime: string, extra: Record<string, unknown> = {}): string {
@@ -85,7 +86,7 @@ describe("projectInstructionsSection cap", () => {
 			expect(section).not.toContain("global rule");
 			expect(section).toContain("1 lower-priority instruction file(s) left out");
 		} finally {
-			rmSync(globalDir, { recursive: true, force: true });
+			rmRetry(globalDir);
 		}
 	});
 
@@ -98,7 +99,7 @@ describe("projectInstructionsSection cap", () => {
 			expect(section).toContain(SENTINEL);
 			expect(section).toContain("truncated");
 		} finally {
-			rmSync(big, { recursive: true, force: true });
+			rmRetry(big);
 		}
 	});
 
@@ -107,7 +108,7 @@ describe("projectInstructionsSection cap", () => {
 		try {
 			expect(projectInstructionsSection(empty)).toBe("");
 		} finally {
-			rmSync(empty, { recursive: true, force: true });
+			rmRetry(empty);
 		}
 	});
 });

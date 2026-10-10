@@ -5,19 +5,19 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { statSync, rmSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
 import {
-	groupAddressing,
 	OBSERVED_LOG,
-	observeUnauthorized,
-	scrubErr,
-	cleanText,
-	assertNotAiJamesToken,
-	commandOf,
-	isCommandAllowed,
-	resolveBridgeModel,
-	senderTier,
 	TelegramDaemonBridge,
+	assertNotAiJamesToken,
+	cleanText,
+	commandOf,
+	groupAddressing,
+	isCommandAllowed,
+	observeUnauthorized,
+	resolveBridgeModel,
+	scrubErr,
+	senderTier,
 } from "./telegram-bridge";
 
 const JAMES = 5486040131;
@@ -388,7 +388,8 @@ describe("F3 F4 F5", () => {
 			update_id: 1,
 			message: { date: 1, text: "x", message_id: 1, chat: { id: 1 }, from: { first_name: "a" } },
 		});
-		expect(statSync(OBSERVED_LOG).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(statSync(OBSERVED_LOG).mode & 0o777).toBe(0o600);
 		rmSync(OBSERVED_LOG);
 	});
 });

@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 let Agent: typeof import("./agent").Agent;
 let sp: typeof import("./prompts/system-prompt");
@@ -121,7 +121,7 @@ describe("board briefing and user-global files follow the endpoint actually used
 		// EIGHT_HOME to a fresh temp dir before any module loads, #3240).
 		const runHome = process.env.EIGHT_HOME ?? "";
 		expect(runHome.startsWith(tmpdir()) || runHome.startsWith(realpathSync(tmpdir()))).toBe(true);
-		expect(sp.BOARD_CONTEXT_PATH.startsWith(`${runHome}/`)).toBe(true);
+		expect(sp.BOARD_CONTEXT_PATH.startsWith(`${runHome}${sep}`)).toBe(true);
 		mkdirSync(dirname(sp.BOARD_CONTEXT_PATH), { recursive: true });
 		writeFileSync(sp.BOARD_CONTEXT_PATH, `${BOARD}\n`);
 		// A user-global instruction file (#3236): goes only to an on-box model.
