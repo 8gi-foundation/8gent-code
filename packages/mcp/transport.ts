@@ -107,9 +107,11 @@ export class StdioTransport implements Transport {
 		// the reader a moment to deliver what is already buffered, then shut down.
 		const proc = this.proc;
 		void proc.exited.then(() => {
-			setTimeout(() => {
+			const timer = setTimeout(() => {
 				if (this.proc === proc) this._shutdown("MCP server exited");
 			}, 250);
+			// Never keep the host process alive just for this grace period.
+			timer.unref?.();
 		});
 
 		// Read stderr in background (logging)
