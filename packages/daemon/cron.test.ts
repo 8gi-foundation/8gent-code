@@ -187,3 +187,83 @@ describe("heavy jobs", () => {
 		expect(logOf("h")).toContain("h");
 	});
 });
+
+describe("hardening (8SO)", () => {
+	test("job id cannot escape the log dir; logs are 0600, dir 0700", async () => {
+		write([mk({ id: "../../evil", payload: "echo hi" })]);
+		await cron.loadJobs();
+		await cron.tickAt(T("2026-10-10T12:00:00"));
+		const lp = cron.logPath("../../evil");
+		expect(path.dirname(lp)).toBe(path.join(dir, "cron-logs"));
+		expect(path.basename(lp).startsWith(".")).toBe(false);
+		expect(fs.statSync(lp).mode & 0o777).toBe(0o600);
+		expect(fs.statSync(path.join(dir, "cron-logs")).mode & 0o777).toBe(0o700);
+		expect(fs.existsSync(path.join(dir, "..", "evil.log"))).toBe(false);
+	});
+	test("a log over the cap is rotated, one run is capped", async () => {
+		const lp = cron.logPath("big");
+		fs.writeFileSync(lp, Buffer.alloc(5 * 1024 * 1024 + 10));
+		cron.logPath("big");
+		expect(fs.existsSync(`${lp}.1`)).toBe(true);
+		expect(fs.existsSync(lp)).toBe(false);
+	});
+	test("cron.json is written 0600", async () => {
+		write([mk({ id: "a", expression: "0 0 1 1 *" })]);
+		await cron.loadJobs();
+		cron.addJob(mk({ id: "b", expression: "0 0 1 1 *" }));
+		await new Promise((r) => setTimeout(r, 50));
+		expect(fs.statSync(file()).mode & 0o777).toBe(0o600);
+	});
+	test("env is cleaned: bad keys and non-strings dropped, daemon env untouched", () => {
+		expect(cron.cleanEnv({ OK: "1", "BAD KEY": "x", "A=B": "x", N: 5, Z: "a\0b" })).toEqual({ OK: "1" });
+		expect(process.env.CRON_LEAK).toBeUndefined();
+	});
+	test("addJob rejects malformed or non-absolute-cwd jobs", () => {
+		expect(cron.addJob({ ...mk({ id: "p" }), payload: 5 as unknown as string })).toBe(false);
+		expect(cron.addJob({ ...mk({ id: "p" }), type: "rm" as never })).toBe(false);
+		expect(cron.addJob({ ...mk({ id: "p" }), expression: "nope" })).toBe(false);
+		expect(cron.addJob({ ...mk({ id: "p" }), cwd: "relative/dir" })).toBe(false);
+		expect(cron.addJob({ ...mk({ id: "" }) })).toBe(false);
+	});
+	test("a lock from a previous boot with a recycled live pid is stale", async () => {
+		const oldBoot = Date.now() - 86_400_000;
+		fs.writeFileSync(path.join(dir, "cron-heavy.lock"), JSON.stringify({ pid: process.pid, job: "x", boot: oldBoot }));
+		write([mk({ id: "h", heavy: true, payload: "echo ran" })]);
+		await cron.loadJobs();
+		await cron.tickAt(T("2026-10-10T12:00:00"));
+		expect(logOf("h")).toContain("ran");
+	});
+	test("a symlink at the lock path is not followed for writes", async () => {
+		const target = path.join(dir, "victim.txt");
+		fs.writeFileSync(target, "keep");
+		fs.symlinkSync(target, path.join(dir, "cron-heavy.lock"));
+		write([mk({ id: "h", heavy: true, payload: "echo ran" })]);
+		await cron.loadJobs();
+		await cron.tickAt(T("2026-10-10T12:00:00"));
+		expect(fs.readFileSync(target, "utf8")).toBe("keep");
+	});
+	test("catch-up at boot is capped", async () => {
+		const jobs = Array.from({ length: 15 }, (_, i) =>
+			mk({ id: `c${i}`, expression: "0 * * * *", lastRun: "2026-10-10T09:00:05", payload: "true" }),
+		);
+		write(jobs);
+		await cron.loadJobs();
+		await cron.catchup(T("2026-10-10T12:20:00"));
+		expect(read().filter((j: { lastRun: string }) => j.lastRun > "2026-10-10T09:00:05").length).toBe(10);
+	});
+	test("vm_stat parsing counts reclaimable pages as free", () => {
+		const txt = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               1000.
+Pages active:                             4000.
+Pages inactive:                           3000.
+Pages speculative:                         500.
+Pages wired down:                         1500.
+Pages purgeable:                           500.
+Pages occupied by compressor:                0.
+`;
+		const v = cron.parseVmStat(txt);
+		expect(v).not.toBeNull();
+		expect(v!.free / 16384).toBe(5000);
+		expect(v!.total / 16384).toBe(10500);
+	});
+});
