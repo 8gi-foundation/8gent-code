@@ -9,7 +9,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -121,9 +121,6 @@ describe("restoreInProject allows", () => {
 		"git restore -- config/rates.json",
 		`git restore --source=${sha} config/rates.json`,
 		`git restore --source=HEAD~1 -- config/rates.json config/other.json`,
-		"git checkout -- config/rates.json",
-		`git checkout ${sha} -- config/rates.json`,
-		"git checkout HEAD -- config/rates.json config/other.json",
 	];
 	test("every shape, including the exact pilot command", () => {
 		for (const cmd of allowed()) expect([cmd, restoreInProject(cmd, ws).ok]).toEqual([cmd, true]);
@@ -176,6 +173,8 @@ describe("restoreInProject falls through on", () => {
 		["a caret rev", `git show ${sha}^:config/rates.json > config/rates.json`],
 		["an unknown rev", "git show deadbeef:config/rates.json > config/rates.json"],
 		["a rev that is not a commit-ish name", "git checkout nope -- config/rates.json"],
+		["checkout with a separator", "git checkout -- config/rates.json"],
+		["checkout of a rev", `git checkout ${sha} -- config/rates.json`],
 		["checkout without a separator", "git checkout config/rates.json"],
 		["checkout of a branch", "git checkout main"],
 		["no paths", "git restore"],
@@ -193,7 +192,6 @@ describe("restoreInProject falls through on", () => {
 		for (const cmd of [
 			`git show ${sha}:config/rates.json > config/rates.json`,
 			"git restore config/rates.json",
-			"git checkout -- config/rates.json",
 		])
 			expect([cmd, restoreInProject(cmd, ws).ok]).toEqual([cmd, false]);
 	});
@@ -201,6 +199,53 @@ describe("restoreInProject falls through on", () => {
 		writeFileSync(join(ws, "config", "rates.json"), "edited");
 		git(ws, "add", "config/rates.json");
 		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
+	});
+
+	test("a show whose blob is not in the rev (redirect would truncate)", () => {
+		writeFileSync(join(ws, "config", "late.json"), "{}");
+		git(ws, "add", "config/late.json");
+		git(ws, "commit", "-qm", "late");
+		const cmd = `git show ${sha}:config/late.json > config/late.json`;
+		expect(restoreInProject(cmd, ws).ok).toBe(false);
+		expect(restoreInProject(`git show HEAD:config/late.json > config/late.json`, ws).ok).toBe(true);
+	});
+	test("a show of a tree, not a blob", () => {
+		expect(restoreInProject(`git show ${sha}:config > config`, ws).ok).toBe(false);
+	});
+	test("a hardlinked target", () => {
+		linkSync(join(ws, "config", "other.json"), join(outside, "twin.json"));
+		expect(restoreInProject("git restore config/other.json", ws).ok).toBe(false);
+	});
+	test("a staged-only edit that matches the worktree is still refused", () => {
+		writeFileSync(join(ws, "config", "other.json"), "staged");
+		git(ws, "add", "config/other.json");
+		expect(restoreInProject("git restore --source=HEAD config/other.json", ws).ok).toBe(false);
+	});
+	test("an assume-unchanged target", () => {
+		git(ws, "update-index", "--assume-unchanged", "config/other.json");
+		expect(restoreInProject("git restore config/other.json", ws).ok).toBe(false);
+	});
+	test("a skip-worktree target", () => {
+		git(ws, "update-index", "--skip-worktree", "config/other.json");
+		expect(restoreInProject("git restore config/other.json", ws).ok).toBe(false);
+	});
+	for (const [name, args] of [
+		["core.fsmonitor", ["config", "core.fsmonitor", "true"]],
+		["core.hooksPath", ["config", "core.hooksPath", "hk"]],
+		["a filter driver", ["config", "filter.x.smudge", "cat"]],
+	] as Array<[string, string[]]>) {
+		test(`a repository with ${name}`, () => {
+			git(ws, ...args);
+			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
+		});
+	}
+	test("a repository with a hook installed", () => {
+		writeFileSync(join(ws, ".git", "hooks", "post-merge"), "#!/bin/sh\n");
+		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
+	});
+	test("sample hooks do not count", () => {
+		writeFileSync(join(ws, ".git", "hooks", "post-merge.sample"), "#!/bin/sh\n");
+		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
 	});
 
 	test("no working directory", () => {
