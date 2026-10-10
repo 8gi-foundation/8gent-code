@@ -21,8 +21,22 @@ describe("review discipline segment", () => {
 		expect(s).toContain("nice-to-have");
 	});
 
+	test("asks for one or two proving lines and summarises repeats in words", () => {
+		const s = REVIEW_DISCIPLINE_SEGMENT.toLowerCase();
+		expect(s).toContain("one or two lines");
+		expect(s).toContain("similar call sites");
+		expect(s).toContain("instead of listing");
+	});
+
+	test("does not mention benchmarks, judges, pilots or numeric limits", () => {
+		const s = REVIEW_DISCIPLINE_SEGMENT.toLowerCase();
+		for (const word of ["benchmark", "judge", "pilot", "limit", "score"]) {
+			expect(s).not.toContain(word);
+		}
+	});
+
 	test("is short and has no dashes", () => {
-		expect(REVIEW_DISCIPLINE_SEGMENT.length).toBeLessThan(900);
+		expect(REVIEW_DISCIPLINE_SEGMENT.length).toBeLessThan(1150);
 		expect(REVIEW_DISCIPLINE_SEGMENT).not.toMatch(/[–—]/);
 	});
 

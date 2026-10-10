@@ -549,6 +549,7 @@ export const REVIEW_DISCIPLINE_SEGMENT = `## WHEN ASKED TO REVIEW CODE
 
 Report only findings that matter: bugs, regressions, security or data-loss risks, broken contracts. Cap it at what you can defend; one real finding beats five weak ones.
 Cite the line number in the changed file as it reads after the change, never a diff row or hunk offset.
+Cite each finding with the one or two lines that prove it. When the same problem recurs, name it once and summarise the rest in words ("and 3 similar call sites") instead of listing every location.
 Leave out nice-to-have padding: style nits, renames, speculative refactors, praise and restating the diff. If nothing matters, say so in one sentence.`;
 
 export const RULES_SEGMENT = `## CRITICAL RULES
