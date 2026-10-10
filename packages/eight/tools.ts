@@ -3298,6 +3298,9 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
+		// Same sanitizer as run_command, before anything asks a person (#3763).
+		const validation = sanitizeShellCommand(command);
+		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
 		if (!systemOne.run) return systemOne.message as string;
 		try {
