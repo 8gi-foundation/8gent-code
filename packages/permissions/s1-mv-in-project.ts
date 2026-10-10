@@ -20,7 +20,8 @@
  *     no quotes, glob, brace, `$`, backtick, `~`, redirect, pipe, `;`, `&`,
  *     `#`, newline (so a variable or glob target is never covered); no
  *     prompt-control text; and decideRules fired no rule;
- *   - the first word is `mv`, flags only -n / -v (no -f, -i, -t, -T, `--`);
+ *   - the first word is `mv` (or `git mv`, #3826; several sources are fine when
+ *     the destination is an existing directory), flags only -n / -v (no -f, -i, -t, -T, `--`);
  *   - at least two operands, every one relative with no `..` segment, no `.`
  *     operand, and no `.git` segment as written;
  *   - every source exists as a regular file or a real directory (not a
@@ -106,7 +107,7 @@ export type MoveInProject = { ok: true; reason: string } | { ok: false };
 
 const NO: MoveInProject = { ok: false };
 
-function protectedName(name: string): boolean {
+export function protectedName(name: string): boolean {
 	return (
 		name.startsWith(".") ||
 		PROTECTED_NAMES.has(name.toLowerCase()) ||
@@ -115,7 +116,7 @@ function protectedName(name: string): boolean {
 	);
 }
 
-function protectedRel(rel: string): boolean {
+export function protectedRel(rel: string): boolean {
 	return PROTECTED_PREFIXES.some(
 		(p) => rel === p || rel.startsWith(`${p}/`) || p.startsWith(`${rel}/`),
 	);
@@ -137,7 +138,7 @@ function treeNeedsReview(dir: string, root: string): boolean {
 	return walk(dir);
 }
 
-function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+export function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
 	try {
 		return lstatSync(p);
 	} catch {
@@ -146,7 +147,7 @@ function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
 }
 
 /** A relative operand with no `..`, no `.`, no `.git` and no empty segment as written. */
-function plainRelative(p: string): boolean {
+export function plainRelative(p: string): boolean {
 	if (!p || p.startsWith("/") || p.startsWith("-")) return false;
 	return p
 		.replace(/\/+$/, "")
@@ -155,12 +156,12 @@ function plainRelative(p: string): boolean {
 }
 
 /** A leading "./" is harmless, and the operand is then still checked as written. */
-function stripDot(p: string): string {
+export function stripDot(p: string): string {
 	return p.startsWith("./") ? p.slice(2) : p;
 }
 
 /**
- * ok when `command` is `mv [-n] [-v] <src>... <dest>` with every endpoint
+ * ok when `command` is `mv` or `git mv`, `[-n] [-v] <src>... <dest>`, with every endpoint
  * inside `cwd` and nothing overwritten; see the header for every condition.
  */
 export function moveInProject(command: string, cwd: string | undefined): MoveInProject {
@@ -169,9 +170,12 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 		const text = command.trim();
 		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
 		const words = text.split(/ +/);
-		if (words[0] !== "mv") return NO;
+		// `git mv` is the same move through the index (#3826); `git -C`, `git -c`
+		// and any other word between `git` and `mv` never match.
+		const isGit = words[0] === "git" && words[1] === "mv";
+		if (words[0] !== "mv" && !isGit) return NO;
 		if (decideRules(text).rules.length !== 0) return NO;
-		const args = words.slice(1);
+		const args = words.slice(isGit ? 2 : 1);
 		const flags = args.filter((a) => a.startsWith("-"));
 		const operands = args.filter((a) => !a.startsWith("-")).map(stripDot);
 		if (flags.some((f) => !MV_FLAG.test(f))) return NO;
@@ -244,7 +248,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 		}
 		return {
 			ok: true,
-			reason: `mv of ${moves.length === 1 ? "one path" : `${moves.length} paths`} inside the workspace, nothing overwritten`,
+			reason: `${isGit ? "git mv" : "mv"} of ${moves.length === 1 ? "one path" : `${moves.length} paths`} inside the workspace, nothing overwritten`,
 		};
 	} catch {
 		return NO;

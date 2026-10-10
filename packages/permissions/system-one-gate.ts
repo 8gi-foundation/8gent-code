@@ -621,6 +621,25 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// `git clone <local repo> <new dir inside the workspace>` (#3826).
+		try {
+			const { cloneLocalIntoProject } = await import("./s1-clone-local");
+			const clone = cloneLocalIntoProject(command, cwd);
+			if (clone.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: clone.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";

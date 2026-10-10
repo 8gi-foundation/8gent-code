@@ -95,6 +95,7 @@ beforeEach(() => {
 	writeFileSync(join(ws, "withenv", ".env"), "S=1");
 	mkdirSync(join(ws, "plain"));
 	writeFileSync(join(ws, "plain", "a.txt"), "x");
+	writeFileSync(join(ws, "plain", "note-1.txt"), "x");
 	writeFileSync(join(outside, "victim.txt"), "x");
 	symlinkSync(join(outside, "victim.txt"), join(ws, "inbox", "link.txt"));
 	symlinkSync(outside, join(ws, "escape"));
@@ -125,6 +126,11 @@ describe("moveInProject allows", () => {
 		"mv ./inbox/note-1.txt ./inbox/notes/",
 		"mv inbox/note-1.txt inbox/note-2.txt inbox/notes/",
 		"mv plain inbox/plain-moved",
+		"git mv inbox/note-1.txt inbox/notes/",
+		"git mv inbox/doc-1.md inbox/sheet-1.csv inbox/docs/",
+		"git mv inbox/note-1.txt inbox/note-2.txt inbox/sheet-1.csv inbox/notes/",
+		"git mv inbox/sheet-1.csv inbox/sheet-renamed.csv",
+		"git mv -n -v inbox/note-1.txt inbox/notes/",
 	]) {
 		test(cmd, () => {
 			expect(moveInProject(cmd, ws).ok).toBe(true);
@@ -184,6 +190,32 @@ describe("moveInProject refuses", () => {
 		["landing as a git hook name", "mv inbox/note-1.txt pre-push"],
 		["landing as credentials", "mv inbox/note-1.txt credentials"],
 		["the workspace root", "mv . inbox/x"],
+		["git mv outside destination", "git mv inbox/note-1.txt ../x.txt"],
+		["git mv absolute destination", "git mv inbox/note-1.txt /tmp/x.txt"],
+		["git mv traversal source", "git mv ../x.txt inbox/notes/"],
+		["git mv traversal in the middle", "git mv inbox/note-1.txt inbox/../../x"],
+		["git mv through a symlinked directory", "git mv inbox/note-1.txt escape/"],
+		["git mv symlink source", "git mv inbox/link.txt inbox/notes/"],
+		["git mv overwrite", "git mv inbox/note-1.txt inbox/note-2.txt"],
+		["git mv overwrite in destination directory", "git mv inbox/note-9.txt inbox/notes/"],
+		["git mv -f", "git mv -f inbox/note-1.txt inbox/note-2.txt"],
+		["git mv -f without a clash", "git mv -f inbox/note-1.txt inbox/notes/"],
+		["git mv --force", "git mv --force inbox/note-1.txt inbox/notes/"],
+		["git mv -k", "git mv -k inbox/note-1.txt inbox/notes/"],
+		["git -C before mv", "git -C .. mv inbox/note-1.txt inbox/notes/"],
+		["git -c before mv", "git -c core.hooksPath=x mv inbox/note-1.txt inbox/notes/"],
+		["git mv protected manifest", "git mv package.json inbox/notes/"],
+		["git mv into .git", "git mv inbox/note-1.txt .git/x"],
+		["git mv chained with ;", "git mv inbox/note-1.txt inbox/notes/ ; rm -rf inbox"],
+		["git mv chained with &&", "git mv inbox/note-1.txt inbox/notes/ && echo hi"],
+		["git mv piped", "git mv inbox/note-1.txt inbox/notes/ | cat"],
+		["git mv one operand", "git mv inbox/note-1.txt"],
+		["git mv several sources into a non-directory", "git mv inbox/note-1.txt inbox/note-2.txt inbox/new.txt"],
+		["mv several sources, one escapes", "mv inbox/note-1.txt ../x.txt inbox/notes/"],
+		["mv several sources, one overwrites", "mv inbox/note-1.txt inbox/note-9.txt inbox/notes/"],
+		["mv several sources with the same base name", "mv inbox/note-1.txt plain/note-1.txt inbox/docs/"],
+		["mv chained with ;", "mv inbox/note-1.txt inbox/notes/ ; ls"],
+		["mv piped", "mv inbox/note-1.txt inbox/notes/ | cat"],
 	];
 	for (const [name, cmd] of refused) {
 		test(name, () => {
