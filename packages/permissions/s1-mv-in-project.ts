@@ -36,6 +36,13 @@
  *   - no endpoint name is protected: no name starting with `.` (dotfiles,
  *     .env, .git, .claude), no dependency lockfile or project manifest, no
  *     key, certificate or database file;
+ *   - no landing name configures or runs tooling by itself (*.config.js,
+ *     bunfig.toml, tsconfig*.json, conftest.py, setup.py, *.sh, git hook
+ *     names), and none starts with credential, secret or id_;
+ *   - nothing under packages/permissions, packages/decide or hooks moves or
+ *     receives a move;
+ *   - a moved directory holds no dot entry, protected name or protected path
+ *     anywhere below it, and no more than 2000 entries;
  *   - a directory is not moved into itself.
  *
  * Not covered on purpose: moves that leave the workspace or arrive from
@@ -49,7 +56,7 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -86,7 +93,14 @@ const PROTECTED_NAMES = new Set([
 	"makefile",
 	"dockerfile",
 ]);
-const SENSITIVE_NAME = /\.(pem|key|p12|db)$|\.sqlite/i;
+const SENSITIVE_NAME = /\.(pem|key|p12|db)$|\.sqlite|^(credential|secret|id_)/i;
+/** Names that run or configure tooling on their own (bun, jest, pytest, git hooks): never a landing name. */
+const AUTO_EXEC_NAME =
+	/\.config\.[cm]?[jt]s$|^bunfig\.toml$|^tsconfig[\w.-]*\.json$|^(conftest\.py|setup\.py|setup\.cfg|justfile|pre-commit|pre-push|commit-msg|post-[\w-]+)$|\.sh$/i;
+/** Security-bearing source: never moved, never a landing place (workspace-relative). */
+const PROTECTED_PREFIXES = ["packages/permissions", "packages/decide", "hooks"];
+/** Most entries a moved directory may hold before it goes to review. */
+const MAX_TREE = 2000;
 
 export type MoveInProject = { ok: true; reason: string } | { ok: false };
 
@@ -94,8 +108,33 @@ const NO: MoveInProject = { ok: false };
 
 function protectedName(name: string): boolean {
 	return (
-		name.startsWith(".") || PROTECTED_NAMES.has(name.toLowerCase()) || SENSITIVE_NAME.test(name)
+		name.startsWith(".") ||
+		PROTECTED_NAMES.has(name.toLowerCase()) ||
+		SENSITIVE_NAME.test(name) ||
+		AUTO_EXEC_NAME.test(name)
 	);
+}
+
+function protectedRel(rel: string): boolean {
+	return PROTECTED_PREFIXES.some(
+		(p) => rel === p || rel.startsWith(`${p}/`) || p.startsWith(`${rel}/`),
+	);
+}
+
+/** True when a directory tree holds a dot entry, a protected name, a protected path or too many entries. */
+function treeNeedsReview(dir: string, root: string): boolean {
+	let count = 0;
+	const walk = (d: string): boolean => {
+		for (const e of readdirSync(d, { withFileTypes: true })) {
+			if (++count > MAX_TREE) return true;
+			if (protectedName(e.name)) return true;
+			const abs = path.join(d, e.name);
+			if (protectedRel(path.relative(root, abs))) return true;
+			if (e.isDirectory() && walk(abs)) return true;
+		}
+		return false;
+	};
+	return walk(dir);
 }
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
@@ -186,11 +225,13 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			const realSrc = path.join(realParent, path.basename(srcAbs));
 			const relSrc = path.relative(root, realSrc);
 			if (relSrc.split("/").some((s) => s.startsWith("."))) return NO;
+			if (protectedRel(relSrc) || protectedRel(path.relative(root, finalAbs))) return NO;
 			if (protectedName(path.basename(realSrc)) || protectedName(path.basename(finalAbs)))
 				return NO;
 			if (st.isDirectory()) {
-				// A nested repository moves with its history: review it.
-				if (lstatOrNull(path.join(realSrc, ".git"))) return NO;
+				// A tree holding a repository, a dotfile, a protected name or path, or
+				// too many entries carries them along unchecked: review it.
+				if (treeNeedsReview(realSrc, root)) return NO;
 				// A directory cannot move into itself.
 				if (inside(finalAbs, realSrc)) return NO;
 			}

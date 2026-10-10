@@ -86,6 +86,13 @@ beforeEach(() => {
 	mkdirSync(join(ws, ".git"));
 	mkdirSync(join(ws, ".claude"));
 	mkdirSync(join(ws, "nested", ".git"), { recursive: true });
+	mkdirSync(join(ws, "deep", "sub", ".git"), { recursive: true });
+	mkdirSync(join(ws, "packages", "permissions"), { recursive: true });
+	writeFileSync(join(ws, "packages", "permissions", "policy-engine.ts"), "x");
+	mkdirSync(join(ws, "hooks"));
+	writeFileSync(join(ws, "hooks", "pre-push"), "x");
+	mkdirSync(join(ws, "withenv"));
+	writeFileSync(join(ws, "withenv", ".env"), "S=1");
 	mkdirSync(join(ws, "plain"));
 	writeFileSync(join(ws, "plain", "a.txt"), "x");
 	writeFileSync(join(outside, "victim.txt"), "x");
@@ -164,6 +171,18 @@ describe("moveInProject refuses", () => {
 		["a directory into itself", "mv inbox inbox/notes/inbox"],
 		["one operand", "mv inbox/note-1.txt"],
 		["not an mv", "cp inbox/note-1.txt inbox/notes/"],
+		["a repository buried below a directory", "mv deep inbox/notes/"],
+		["a directory holding a dotfile", "mv withenv inbox/notes/"],
+		["a directory that contains protected paths", "mv packages inbox/notes/"],
+		["security source", "mv packages/permissions/policy-engine.ts inbox/notes/"],
+		["landing in security source", "mv inbox/note-1.txt packages/permissions/"],
+		["a git hook directory", "mv hooks inbox/notes/hooks"],
+		["landing as tsconfig", "mv inbox/note-1.txt tsconfig.json"],
+		["landing as a jest config", "mv inbox/note-1.txt inbox/jest.config.js"],
+		["landing as conftest", "mv inbox/note-1.txt conftest.py"],
+		["landing as a shell script", "mv inbox/note-1.txt inbox/run.sh"],
+		["landing as a git hook name", "mv inbox/note-1.txt pre-push"],
+		["landing as credentials", "mv inbox/note-1.txt credentials"],
 		["the workspace root", "mv . inbox/x"],
 	];
 	for (const [name, cmd] of refused) {
