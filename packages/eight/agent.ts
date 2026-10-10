@@ -2071,7 +2071,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			},
 
 			onStepFinish: async (event: StepFinishEvent) => {
-				this.progressWatch?.touch(); // #3855: a model step finished
+				this.progressWatch?.stepDone(); // #3855: a model step finished, its tools are done
 				stepCount++;
 				// Update runtime params so self_inspect shows live step count
 				Object.assign(this.runtimeParams, {
