@@ -8,6 +8,7 @@
 import type { RecordingState, WhisperModelName } from "@8gent/voice";
 import { Box, Text } from "ink";
 import React, { useState, useEffect } from "react";
+import { formatMicLabel } from "../../../../packages/voice/input-device.js";
 import { AppText, Label, MutedText } from "./primitives/AppText.js";
 import { Badge } from "./primitives/Badge.js";
 import { Inline } from "./primitives/Inline.js";
@@ -35,6 +36,22 @@ export interface VoiceIndicatorProps {
 	downloadingModel?: WhisperModelName | null;
 	/** Compact mode (for status bar) */
 	compact?: boolean;
+	/** Active input device name, resolved at the start of each recording */
+	micName?: string | null;
+	/** Transcriber backend in use, e.g. "whisper.cpp local (tiny)" */
+	backendLabel?: string;
+	/** Device lookup for this recording has not landed yet */
+	micChecking?: boolean;
+}
+
+/** Second line of the full indicator: "Mic: <name>" plus the transcriber backend. */
+export function micLine(
+	micName: string | null | undefined,
+	backendLabel?: string,
+	checking = false,
+): string {
+	const mic = checking ? "Mic: checking..." : formatMicLabel(micName);
+	return backendLabel ? `${mic} | ${backendLabel}` : mic;
 }
 
 // ============================================
@@ -51,6 +68,9 @@ export function VoiceIndicator({
 	downloadProgress,
 	downloadingModel,
 	compact = false,
+	micName,
+	backendLabel,
+	micChecking = false,
 }: VoiceIndicatorProps) {
 	// Downloading state takes priority
 	if (downloadProgress !== null && downloadProgress !== undefined && downloadingModel) {
@@ -75,6 +95,12 @@ export function VoiceIndicator({
 				{state === "recording" && <AudioLevelBar level={audioLevel} />}
 				{state === "idle" && <MutedText>[Ctrl+R to record]</MutedText>}
 			</Inline>
+
+			{(micName !== undefined || micChecking) && (
+				<Box paddingLeft={3}>
+					<MutedText>{micLine(micName, backendLabel, micChecking)}</MutedText>
+				</Box>
+			)}
 
 			{/* Partial transcript preview */}
 			{state === "recording" && partialTranscript && (

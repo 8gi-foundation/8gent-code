@@ -509,6 +509,12 @@ function computeCliOverrides(
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
+	describeMissingVoiceSetup,
+	describeTranscriberBackend,
+	formatMicLabel,
+	resolveInputDevice,
+} from "../../../packages/voice/input-device.js";
+import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
 	resolveSpeechVoice,
@@ -946,6 +952,43 @@ export function App({
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 		},
 	});
+
+	// Mic name for the recording indicator: re-resolved at the start of every recording.
+	const [micName, setMicName] = useState<string | null>(null);
+	const [micChecking, setMicChecking] = useState(false);
+	const [voiceBackendLabel, setVoiceBackendLabel] = useState<string>("");
+	useEffect(() => {
+		if (voice.state !== "recording") return;
+		// Never show a stale name: reset, then take the engine's per-recording lookup.
+		setMicName(null);
+		const cur = voice.engine.getInputDeviceName();
+		setMicChecking(!cur.resolved);
+		if (cur.resolved) setMicName(cur.name);
+		const onDevice = ({ name }: { name: string | null }) => {
+			setMicName(name);
+			setMicChecking(false);
+		};
+		voice.engine.on("input-device", onDevice);
+		let cancelled = false;
+		voice.engine
+			.checkDependencies()
+			.then((deps) => {
+				if (cancelled) return;
+				setVoiceBackendLabel(
+					describeTranscriberBackend({
+						whisperBinaryPath: deps.whisperBinaryPath,
+						downloadedModels: deps.downloadedModels,
+						model: voice.engine.getConfig().model,
+						mode: voice.engine.getConfig().mode,
+					}),
+				);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+			voice.engine.off("input-device", onDevice);
+		};
+	}, [voice.state]);
 
 	// Voice chat — adds messages to screen AND calls agent directly
 	const voiceChat = useVoiceChat({
@@ -4632,7 +4675,29 @@ export function App({
 						const status = voice.isAvailable
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
 							: `Voice: Not available (${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"})`;
-						addSystemMessage(status);
+						(async () => {
+							const deps = await voice.engine.checkDependencies();
+							const dev = await resolveInputDevice();
+							const missing = describeMissingVoiceSetup({
+								soxPath: deps.soxPath,
+								whisperBinaryPath: deps.whisperBinaryPath,
+								downloadedModels: deps.downloadedModels,
+								modelsDir: deps.modelsDir,
+							});
+							addSystemMessage(
+								[
+									status,
+									formatMicLabel(dev),
+									describeTranscriberBackend({
+										whisperBinaryPath: deps.whisperBinaryPath,
+										downloadedModels: deps.downloadedModels,
+										model: voice.engine.getConfig().model,
+										mode: voice.engine.getConfig().mode,
+									}),
+									...missing,
+								].join("\n"),
+							);
+						})().catch(() => addSystemMessage(status));
 					} else if (args[0] === "stop") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
@@ -6265,6 +6330,18 @@ export function App({
 							contentWidth={chatContentWidth}
 							maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 						/>
+						{voice.state === "recording" && (
+							<Box flexShrink={0}>
+								<VoiceIndicator
+									state={voice.state}
+									audioLevel={voice.audioLevel}
+									durationMs={voice.recordingDurationMs}
+									micName={micName}
+									micChecking={micChecking}
+									backendLabel={voiceBackendLabel}
+								/>
+							</Box>
+						)}
 						{/* Thinking zone — strict 4-row compact box, full content width */}
 						{isProcessing && (
 							<Box flexShrink={0}>

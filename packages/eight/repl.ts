@@ -864,6 +864,29 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 
 	if (trimmed === "/voice test") {
 		const { testVoice } = await import("../hooks/voice.js");
+		// Mic and transcriber report: device resolved fresh, one line per missing piece.
+		try {
+			const dev = await import("../voice/input-device.js");
+			const { findSoxPath } = await import("../voice/recorder.js");
+			const { findWhisperBinary } = await import("../voice/transcriber.js");
+			const { WhisperModelManager } = await import("../voice/model-manager.js");
+			const { isCloudAvailable } = await import("../voice/cloud-transcriber.js");
+			const mm = new WhisperModelManager();
+			const setup = {
+				soxPath: await findSoxPath(),
+				whisperBinaryPath: await findWhisperBinary(),
+				downloadedModels: mm.getDownloadedModels() as string[],
+				modelsDir: mm.getModelsDir(),
+				cloudAvailable: isCloudAvailable(),
+			};
+			console.log(`\x1b[36m${dev.formatMicLabel(await dev.resolveInputDevice())}\x1b[0m`);
+			console.log(`\x1b[36m${dev.describeTranscriberBackend(setup)}\x1b[0m`);
+			for (const line of dev.describeMissingVoiceSetup(setup)) {
+				console.log(`\x1b[33m${line}\x1b[0m`);
+			}
+		} catch {
+			// Diagnostics are best effort; the output test below still runs.
+		}
 		console.log("Testing voice...");
 		try {
 			await testVoice();

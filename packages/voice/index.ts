@@ -259,6 +259,12 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 	// Recording
 	// ============================================
 
+	/** Input device name for the current recording; null until resolved. */
+	getInputDeviceName(): { resolved: boolean; name: string | null } {
+		const d = this.recorder?.getDevice() ?? null;
+		return { resolved: d !== null, name: d?.name ?? null };
+	}
+
 	/**
 	 * Start recording from the microphone.
 	 */
@@ -287,6 +293,8 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 				this.vad.processLevel(level);
 			}
 		});
+
+		this.recorder.on("device", (d) => this.emit("input-device", { name: d.name }));
 
 		this.recorder.on("error", ({ message }) => {
 			this.emitError("RECORDING_FAILED", message);
