@@ -39,8 +39,11 @@ PY
 	return { root, work, log };
 }
 
+// POSIX-only: the stub engine is a #!/usr/bin/env bash script, which Windows cannot spawn.
+const posixTest = process.platform === "win32" ? test.skip : test;
+
 describe("speak is wired into the local agent", () => {
-	test("ToolExecutor runs speak inside the working directory", async () => {
+	posixTest("ToolExecutor runs speak inside the working directory", async () => {
 		const { work } = fixture();
 		const ex = new ToolExecutor(work);
 		const out = JSON.parse(await ex.execute("speak", { text: "hello", voice: "Rishi", out: "w.wav" }));
@@ -63,7 +66,7 @@ describe("speak is wired into the local agent", () => {
 		expect(existsSync(join(work, "a.mp3"))).toBe(false);
 	});
 
-	test("a scoped sub-agent cannot speak outside its scope", async () => {
+	posixTest("a scoped sub-agent cannot speak outside its scope", async () => {
 		const { work } = fixture();
 		const ex = new ToolExecutor(work, "child", undefined, { allowedPaths: ["allowed"] });
 		const no = await ex.execute("speak", { text: "hi", out: "other.wav" });
@@ -97,7 +100,7 @@ describe("speak is wired into the local agent", () => {
 		expect(readFileSync(join(root, "victim.wav"), "utf8")).toBe("keep");
 	});
 
-	test("text starting with a dash arrives after -- so it cannot be parsed as an option", async () => {
+	posixTest("text starting with a dash arrives after -- so it cannot be parsed as an option", async () => {
 		const { work, log } = fixture();
 		const ex = new ToolExecutor(work);
 		await ex.execute("speak", { text: "--output=/tmp/pwn.wav --help", out: "d.wav" });
@@ -105,7 +108,7 @@ describe("speak is wired into the local agent", () => {
 		expect(existsSync(`${log}.dd`)).toBe(true);
 	});
 
-	test("text with shell metacharacters is passed as one argv, never a shell", async () => {
+	posixTest("text with shell metacharacters is passed as one argv, never a shell", async () => {
 		const { work, log } = fixture();
 		const ex = new ToolExecutor(work);
 		await ex.execute("speak", { text: EVIL, out: "m.wav" });
@@ -113,7 +116,7 @@ describe("speak is wired into the local agent", () => {
 		for (const f of ["PWNED", "PWNED2", "PWNED3"]) expect(existsSync(join(work, f))).toBe(false);
 	});
 
-	test("native handler: same boundary (traversal, non-wav, argv) and writes inside the workdir", async () => {
+	posixTest("native handler: same boundary (traversal, non-wav, argv) and writes inside the workdir", async () => {
 		const { root, work, log } = fixture();
 		setToolContext({ workingDirectory: work });
 		const run = (a: Record<string, unknown>) =>
