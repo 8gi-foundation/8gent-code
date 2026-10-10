@@ -240,7 +240,7 @@ describe("singleFileDelete", () => {
 		["a tracked file spelt in another case", "rm -f run/case.lock"],
 		["a tracked file spelt in its own case", "rm -f run/Case.lock"],
 		...(HAS_COLON_NAMES
-			? [["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"]]
+			? [["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"] as [string, string]]
 			: []),
 		["a file tracked by a nested repository", "rm -f run/nested/a.lock"],
 		["a file tracked by a submodule", "rm -f run/mod/m.lock"],
