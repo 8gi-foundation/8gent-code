@@ -1,6 +1,5 @@
 /**
- * #3770: pilot design-mockup-practice missed d2_position (0.7239 vs 0.77).
- * The model read a 1280 px mock-up shown downscaled to 1024 and eyeballed a
+ * #3770: a model that read a 1280 px mock-up shown downscaled to 1024 eyeballed a
  * 1080 px column with 24 px padding; the mock-up's column is 800 px wide at
  * x=240. read_image now reports measured full-size geometry so the page can be
  * built with the real numbers. Images are raw pixels, no fonts, so the test is
@@ -77,5 +76,58 @@ describe("measureLayout (#3770)", () => {
 		});
 		expect(out).toContain("Measured layout of the full-size image");
 		expect(out).toContain("width 800px");
+	});
+
+	test("a paragraph beside an image reports its own line tops (#3823)", async () => {
+		const file = await mockup([
+			{ x: 240, y: 100, w: 680, h: 12 },
+			{ x: 240, y: 125, w: 680, h: 12 },
+			{ x: 240, y: 150, w: 600, h: 12 },
+			{ x: 940, y: 100, w: 100, h: 100 },
+		]);
+		const m = await measureLayout(file);
+		const band = m!.bands.find((b) => b.y === 100)!;
+		expect(band.spans[0].rows).toEqual([
+			{ y: 100, h: 12 },
+			{ y: 125, h: 12 },
+			{ y: 150, h: 12 },
+		]);
+		expect(band.spans[1].rows).toBeUndefined();
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("lines: y=100 h=12, y=125 h=12, y=150 h=12");
+	});
+
+	test("an inset table cell is reported as an offset from the column left (#3823)", async () => {
+		const file = await mockup([
+			{ x: 240, y: 40, w: 800, h: 30 },
+			{ x: 259, y: 300, w: 57, h: 15 },
+			{ x: 415, y: 300, w: 280, h: 15 },
+		]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("x=259 (+19 from column left) w=57");
+		expect(line).toContain("x=415 (+175 from column left) w=280");
+		expect(line).toContain("position:absolute");
+		expect(line).not.toMatch(/\u2014/);
+	});
+});
+
+describe("page height guidance (#3823)", () => {
+	test("tells the model to keep the full mock-up height and names the trailing blank", async () => {
+		const file = await mockup([
+			{ x: 240, y: 40, w: 180, h: 30 },
+			{ x: 240, y: 100, w: 680, h: 20 },
+		]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("total page height: 900px");
+		expect(line).toContain("min-height: 900px");
+		expect(line).toContain("the last content ends at y=120");
+		expect(line).toContain("780px below it is blank canvas");
+	});
+
+	test("omits the blank-canvas note when the content fills the image", async () => {
+		const file = await mockup([{ x: 240, y: 0, w: 800, h: 900 }]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("total page height: 900px");
+		expect(line).not.toContain("blank canvas");
 	});
 });

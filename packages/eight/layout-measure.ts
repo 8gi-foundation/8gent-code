@@ -1,12 +1,10 @@
 /**
  * 8gent Code - measured layout of a design mock-up (#3770).
  *
- * Pilot design-mockup-practice scored 22 of 23 checks; the one miss was
- * d2_position (0.7239 against 0.77). The mock-up is 1280 px wide with an 800 px
- * column at x=240. read_image hands a model that can see a copy downscaled to
- * 1024 px, so every coordinate it guessed was 0.8 of the real one, and it built
- * a 1080 px column with 24 px padding. Position is scored in page space, so the
- * blocks sat off the mock-up even though the words and colours were right.
+ * The mock-up is 1280 px wide with an 800 px column at x=240. read_image hands a
+ * model that can see a copy downscaled to 1024 px, so every coordinate it guessed
+ * was 0.8 of the real one, and it built a 1080 px column with 24 px padding. The
+ * blocks then sat off the mock-up even though the words and colours were right.
  *
  * This reads the full-size pixels and reports the content column, whether it is
  * centred, and each horizontal band of content with its x-extents. It is
@@ -24,9 +22,12 @@ const BAND_GAP = 6;
 const SPAN_GAP = 16;
 const MAX_PIXELS = 40_000_000;
 const MAX_BANDS = 40;
+const MAX_ROWS = 12;
 const CENTER_TOLERANCE = 4;
 
-export type Span = { x: number; w: number };
+/** A line of content inside one span of a multi-span band (#3823). */
+export type Row = { y: number; h: number };
+export type Span = { x: number; w: number; rows?: Row[] };
 export type Band = { y: number; h: number; x: number; w: number; spans: Span[] };
 export type LayoutMeasure = {
 	width: number;
@@ -73,6 +74,26 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 		if (start >= 0) ranges.push([start, height - 1 - blank]);
 		if (ranges.length === 0) return null;
 
+		const rowsIn = (y0: number, y1: number, x0: number, x1: number): Row[] => {
+			const out: Row[] = [];
+			let st = -1;
+			let bl = 0;
+			for (let y = y0; y <= y1; y++) {
+				let has = false;
+				const base = y * width;
+				for (let x = x0; x < x1 && !has; x++) if (ink(base + x)) has = true;
+				if (has) {
+					if (st < 0) st = y;
+					bl = 0;
+				} else if (st >= 0 && ++bl > BAND_GAP) {
+					out.push({ y: st, h: y - bl - st + 1 });
+					st = -1;
+				}
+			}
+			if (st >= 0) out.push({ y: st, h: y1 - bl - st + 1 });
+			return out;
+		};
+
 		const bands: Band[] = ranges.map(([y0, y1]) => {
 			const colInk = new Uint8Array(width);
 			for (let y = y0; y <= y1; y++) {
@@ -92,6 +113,14 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 				}
 			}
 			if (s >= 0) spans.push({ x: s, w: width - gap - s });
+			// #3823: a paragraph beside an image shares one band with it, which hid the
+			// paragraph's own line tops. Split each span of a side-by-side band again.
+			if (spans.length > 1) {
+				for (const sp of spans) {
+					const rows = rowsIn(y0, y1, sp.x, sp.x + sp.w);
+					if (rows.length > 1) sp.rows = rows.slice(0, MAX_ROWS);
+				}
+			}
 			const left = spans[0].x;
 			const right = spans[spans.length - 1].x + spans[spans.length - 1].w;
 			return { y: y0, h: y1 - y0 + 1, x: left, w: right - left, spans };
@@ -112,12 +141,33 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 	}
 }
 
+/**
+ * A mock-up screenshot is the whole canvas, including blank space below the last content. A page built
+ * only as tall as its content is shorter than the mock-up, so every element ends up at a different
+ * fraction of the page height. Tell the model the full canvas height and where the content stops.
+ */
+export function pageHeightLines(m: LayoutMeasure): string[] {
+	const last = m.bands[m.bands.length - 1];
+	if (!last) return [];
+	const end = last.y + last.h;
+	const blank = m.height - end;
+	const base = `  total page height: ${m.height}px. The mock-up canvas includes blank space below the content; reproduce the full canvas height (html { min-height: ${m.height}px }) so every element keeps its place on the page.`;
+	return blank >= 40 ? [`  the last content ends at y=${end}; the remaining ${blank}px below it is blank canvas.`, base] : [base];
+}
+
 /** One block of text for a read_image result, or "" when there is nothing to say. */
 export async function layoutMeasureLine(file: string): Promise<string> {
 	const m = await measureLayout(file);
 	if (!m) return "";
 	const rows = m.bands.map((b) => {
-		const spans = b.spans.map((s) => `x=${s.x} w=${s.w}`).join(" | ");
+		const spans = b.spans
+			.map((s) => {
+				const off = s.x - m.column.left;
+				const at = off > 0 ? `x=${s.x} (+${off} from column left)` : `x=${s.x}`;
+				const rows = s.rows ? ` [lines: ${s.rows.map((r) => `y=${r.y} h=${r.h}`).join(", ")}]` : "";
+				return `${at} w=${s.w}${rows}`;
+			})
+			.join(" | ");
 		return `  y=${b.y} h=${b.h}: ${spans}`;
 	});
 	return [
@@ -125,6 +175,8 @@ export async function layoutMeasureLine(file: string): Promise<string> {
 		`  content column x=${m.column.left}..${m.column.right} (width ${m.column.width}px, left margin ${m.column.left}px, right margin ${m.width - m.column.right}px${m.centered ? ", centered" : ""})`,
 		"  content bands, top to bottom (y is the top edge, h the height, x the left edge, w the width):",
 		...rows,
+		...pageHeightLines(m),
 		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins.`,
+		"These are the edges of the visible pixels (ink), not CSS boxes: a text box starts a few px above its y (half the line gap), and a table or list cell holding text at x greater than the column left needs that much left padding. Reproduce every listed x offset and every y gap. If a block is still off after the first render, place it with position:absolute at the listed left and top inside a position:relative column rather than relying on flow.",
 	].join("\n");
 }
