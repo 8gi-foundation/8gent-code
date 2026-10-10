@@ -31,6 +31,8 @@ import {
 	sendTmuxKeys,
 	spawnTmuxSession,
 } from "../terminal-tab/index.js";
+import { getPermissionManager } from "../permissions/index.js";
+import { commandSegments } from "../permissions/command-policy.js";
 
 // ---------------- Per-session read offsets ----------------
 //
@@ -40,6 +42,85 @@ import {
 // stateless across tool calls but the cursor needs to persist.
 //
 const readOffsets = new Map<string, number>();
+
+
+// ---------------- Command policy (#3767) ----------------
+//
+// term_spawn starts a program and term_send types into a live session, so
+// both reach a shell the same way run_command does. Every command line they
+// carry goes through the same command policy: the always-blocked list is
+// refused, the ask-every-time list asks a person (refused with no terminal),
+// in every mode including Infinite. Text that cannot be read with confidence
+// as a command is treated as needing a person.
+
+/** Typed but not yet submitted, per session, so a later Enter is judged with it. */
+const pendingInput = new Map<string, string>();
+
+// Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
+const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
+
+/** True when the line has quotes or shell constructs we cannot read for sure. */
+function unreadable(text: string): boolean {
+	if (CONTROL_CHARS.test(text)) return true;
+	if (/\$\(|`|<<|<\(|>\(/.test(text)) return true;
+	let quote: string | null = null;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === "\\" && quote !== "'") {
+			i++;
+			if (i >= text.length) return true;
+			continue;
+		}
+		if (quote) {
+			if (c === quote) quote = null;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return quote !== null;
+}
+
+function shellQuote(token: string): string {
+	return /^[\w@%+=:,./-]+$/.test(token) ? token : `'${token.replace(/'/g, "'\\''")}'`;
+}
+
+/** Null when the input may go ahead, else the refusal to hand back to the agent. */
+async function gateInput(tool: string, text: string): Promise<string | null> {
+	const pm = getPermissionManager();
+	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
+	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
+
+	for (const line of lines) {
+		for (const part of [line, ...commandSegments(line)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${line}`);
+		}
+		if (pm.checkPermission(line) === "denied") {
+			return refuse(`blocked by security policy: ${line}`);
+		}
+	}
+
+	if (unreadable(text)) {
+		const ok = await pm.askPerson(
+			"Type Into Terminal Session",
+			"The agent wants to type text that cannot be read as a plain command.",
+			text,
+		);
+		return ok ? null : refuse(`a person declined input that could not be read as a command: ${text}`);
+	}
+
+	for (const line of lines) {
+		if (pm.checkPermission(line) === "ask") {
+			const ok = await pm.requestPermission(
+				"Execute Shell Command",
+				"The agent wants to run a command in a terminal session.",
+				line,
+			);
+			if (!ok) return refuse(`user declined to run: ${line}`);
+		}
+	}
+	return null;
+}
 
 // ---------------- Tool definitions ----------------
 
@@ -174,6 +255,9 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const cmdArgs = Array.isArray(args.args) ? (args.args as string[]).map(String) : [];
 	const label = (args.label as string | undefined) ?? command;
 
+	const denied = await gateInput("term_spawn", [command, ...cmdArgs].map(shellQuote).join(" "));
+	if (denied) return denied;
+
 	const handle = await spawnTmuxSession({
 		command,
 		args: cmdArgs,
@@ -220,6 +304,15 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 		return `ERR: session "${sessionId}" is not running.`;
 	}
 	const appendEnter = args.appendEnter !== false;
+	// Judge what is on the line, including text typed earlier and not yet submitted.
+	const line = (pendingInput.get(sessionId) ?? "") + text;
+	const denied = await gateInput("term_send", line);
+	if (denied) return denied;
+	// A submit (Enter, or a newline inside the text) clears what was pending;
+	// without one, only the text after the last newline is still on the line.
+	const tail = line.slice(Math.max(line.lastIndexOf("\n"), line.lastIndexOf("\r")) + 1);
+	if (appendEnter) pendingInput.delete(sessionId);
+	else pendingInput.set(sessionId, tail);
 	await sendTmuxKeys(sessionId, text, { appendEnter });
 	return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
 }
@@ -273,5 +366,6 @@ async function termKill(args: Record<string, unknown>): Promise<string> {
 	await killTmuxSession(sessionId);
 	deleteSession(sessionId);
 	readOffsets.delete(sessionId);
+	pendingInput.delete(sessionId);
 	return JSON.stringify({ ok: true, sessionId, killed: true });
 }

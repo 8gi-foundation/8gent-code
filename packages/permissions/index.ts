@@ -823,6 +823,27 @@ export class PermissionManager {
 	}
 
 	/**
+	 * Why a command is refused in every mode, Infinite included, or null (#3767).
+	 * Public so tools that type into a terminal session can use the same list.
+	 */
+	alwaysBlockedReason(command: string): string | null {
+		const check = this.isAlwaysBlocked(command);
+		return check.blocked ? (check.reason ?? "always blocked") : null;
+	}
+
+	/**
+	 * Ask a person, whatever the mode, with No as the default (#3767). With no
+	 * terminal attached there is no one to ask, so the answer is no.
+	 */
+	async askPerson(action: string, details: string, command?: string): Promise<boolean> {
+		if (this.isHeadless()) {
+			console.log(`[permissions] DENIED (no terminal to ask): ${command || action}`);
+			return false;
+		}
+		return this.promptUser(action, details, command, true);
+	}
+
+	/**
 	 * Why a person must approve this command every time, or null (#3748): a
 	 * push to the default branch, a network command that sends data, or any
 	 * network command while a local provider is pinned.
