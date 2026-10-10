@@ -282,7 +282,7 @@ export interface ToolCatalogOptions {
 }
 
 /** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
-const SLIDES_TO_VIDEO_NOTE =
+export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
 /**

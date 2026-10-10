@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
-import { TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
+import { SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {
@@ -76,5 +76,11 @@ describe("slides-to-video join guidance (#3862)", () => {
 		expect(concise).toContain("segment count equals slide count");
 		expect(concise).toContain("trailing newline");
 		expect(concise.length).toBeLessThan(2048);
+	});
+
+	it("appears exactly once in each catalog variant", () => {
+		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(seg.split(SLIDES_TO_VIDEO_NOTE).length - 1).toBe(1);
+		}
 	});
 });
