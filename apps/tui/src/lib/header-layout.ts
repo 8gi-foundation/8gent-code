@@ -75,6 +75,27 @@ export function truncateMiddle(value: string, max: number): string {
 	return `${chars.slice(0, head).join("")}…${tail > 0 ? chars.slice(chars.length - tail).join("") : ""}`;
 }
 
+/** Head kept by truncatePath: enough to recognise the root ("~/.8gent/ris"). */
+export const PATH_HEAD = 12;
+
+/**
+ * Shorten a filesystem path for the header. What identifies a workdir is
+ * its end (run id, scenario or project name, leaf directory), not its
+ * root, so the head is held at PATH_HEAD columns and the tail gets the
+ * rest. The even split of truncateMiddle cut a 30-character leaf name
+ * back to a few characters of the run id (issue #3810).
+ */
+export function truncatePath(value: string, max: number): string {
+	if (max <= 0) return "";
+	if (cellWidth(value) <= max) return value;
+	if (max === 1) return "…";
+	const chars = [...value];
+	const keep = max - 1;
+	const head = Math.min(PATH_HEAD, Math.ceil(keep / 2));
+	const tail = keep - head;
+	return `${chars.slice(0, head).join("")}…${tail > 0 ? chars.slice(chars.length - tail).join("") : ""}`;
+}
+
 /** Keep the head of a string, replacing the tail with an ellipsis. */
 export function truncateEnd(value: string, max: number): string {
 	if (max <= 0) return "";
@@ -121,13 +142,13 @@ export function fitHeaderMiddle(
 		const noteCost = sync ? (path ? 1 : 0) + syncW : 0;
 		if (cellWidth(path) + noteCost <= available) return { path, branch: "", sync };
 		if (path && available - noteCost >= PATH_MIN) {
-			return { path: truncateMiddle(path, available - noteCost), branch: "", sync };
+			return { path: truncatePath(path, available - noteCost), branch: "", sync };
 		}
 		// The note holds the branch's slot, so like a branch it outranks a
 		// path too short to read: 80 columns shows "no repo", not
 		// "/Users/j…/work".
 		if (sync && syncW <= available) return { path: "", branch: "", sync };
-		if (path && available >= PATH_MIN) return { path: truncateMiddle(path, available), branch: "", sync: "" };
+		if (path && available >= PATH_MIN) return { path: truncatePath(path, available), branch: "", sync: "" };
 		return empty;
 	}
 
@@ -139,13 +160,13 @@ export function fitHeaderMiddle(
 	// 2. Full branch, full sync, path cut in the middle.
 	let pathRoom = available - PATH_BRANCH_GAP - branchW - syncCost;
 	if (path && pathRoom >= PATH_MIN) {
-		return { path: truncateMiddle(path, pathRoom), branch, sync };
+		return { path: truncatePath(path, pathRoom), branch, sync };
 	}
 
 	// 3. Full branch, sync dropped, path cut in the middle.
 	pathRoom = available - PATH_BRANCH_GAP - branchW;
 	if (path && pathRoom >= PATH_MIN) {
-		return { path: truncateMiddle(path, pathRoom), branch, sync: "" };
+		return { path: truncatePath(path, pathRoom), branch, sync: "" };
 	}
 
 	// 4. Path hidden. Keep the full branch, and the sync label if it fits.
