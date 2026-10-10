@@ -34,6 +34,7 @@ describe("review discipline segment", () => {
 		expect(s).toContain("fix suggestion");
 		expect(s).toContain('"minor"');
 		expect(s).toContain("list of files reviewed");
+		expect(s).toContain("security or data-loss findings always stay");
 	});
 
 	test("does not mention benchmarks, judges, pilots or numeric limits", () => {

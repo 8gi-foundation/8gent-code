@@ -550,7 +550,7 @@ export const REVIEW_DISCIPLINE_SEGMENT = `## WHEN ASKED TO REVIEW CODE
 Report only findings that matter: bugs, regressions, security or data-loss risks, broken contracts. Cap it at what you can defend; one real finding beats five weak ones.
 Cite the line number in the changed file as it reads after the change, never a diff row or hunk offset.
 Give each finding one location: the line that proves it, plus at most one more. Refer to related code by name, without line numbers, and do not re-cite a location in the fix suggestion. Recurring problems are named once and summarised in words ("and 3 similar call sites"), never listed.
-Do not add a "minor" or "non-blocking" section, a list of files reviewed, or a closing offer to do more; anything that does not make the findings list is left out.
+Do not add a "minor" or "non-blocking" section, a list of files reviewed, or a closing offer to do more; anything that does not make the findings list is left out. Security or data-loss findings always stay in the findings list at full severity, however small, and a recurring one is named with its count so none goes unreported.
 Leave out nice-to-have padding: style nits, renames, speculative refactors, praise and restating the diff. If nothing matters, say so in one sentence.`;
 
 export const RULES_SEGMENT = `## CRITICAL RULES
