@@ -14,7 +14,8 @@
  *     refused, so --upload-pack/-u, --config/-c, --template, --recurse-submodules,
  *     --separate-git-dir, --origin, --reference, --filter and `--` never match,
  *     and so does `git -C`/`git -c` before `clone`;
- *   - the source is a LOCAL PATH only: relative, no `:` or `@` anywhere (so
+ *   - the source is a LOCAL PATH only (relative, or absolute and judged by where
+ *     it resolves), no `:` or `@` anywhere (so
  *     https://, ssh://, git@host:, file:// and host:path are all refused), not
  *     starting with `-`, no empty, `.` or dot-leading segment other than the
  *     single leading `..` of the sibling form;
@@ -88,10 +89,7 @@ function looksLikeRepo(dir: string): boolean {
 	if (isDir(path.join(dir, ".git"))) return true;
 	const head = lstatOrNull(path.join(dir, "HEAD"));
 	return (
-		!!head &&
-		head.isFile() &&
-		isDir(path.join(dir, "objects")) &&
-		isDir(path.join(dir, "refs"))
+		!!head && head.isFile() && isDir(path.join(dir, "objects")) && isDir(path.join(dir, "refs"))
 	);
 }
 
@@ -103,7 +101,11 @@ function noTrackedSymlinks(dir: string): boolean {
 			timeout: 5000,
 			maxBuffer: 64 * 1024 * 1024,
 			stdio: ["ignore", "pipe", "ignore"],
-			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", HOME: "/nonexistent" } as unknown as NodeJS.ProcessEnv,
+			env: {
+				PATH: process.env.PATH ?? "/usr/bin:/bin",
+				GIT_CONFIG_NOSYSTEM: "1",
+				HOME: "/nonexistent",
+			} as unknown as NodeJS.ProcessEnv,
 		});
 		return !out.split("\n").some((l) => l.startsWith("120000"));
 	} catch {
@@ -165,31 +167,44 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		const [srcArg, destArg] = operands;
 		// Local path only: a scheme, user@host or host:path always has `:` or `@`.
 		if (/[:@]/.test(srcArg) || /[:@]/.test(destArg)) return NO;
+		if (!srcArg) return NO;
 		const srcSegs = srcArg.replace(/\/+$/, "").split("/");
-		if (!srcArg || srcArg.startsWith("/")) return NO;
-		const sibling = srcSegs[0] === "..";
-		if (sibling) {
-			// Exactly `../<name>`.
-			if (srcSegs.length !== 2) return NO;
-			if (srcSegs[1] === "" || srcSegs[1].startsWith(".")) return NO;
+		const absolute = srcArg.startsWith("/");
+		if (absolute) {
+			// No empty, `.` or `..` segment as written; the resolved location is what is judged below.
+			if (srcSegs.slice(1).some((s) => s === "" || s === "." || s === "..")) return NO;
+		} else if (srcSegs[0] === "..") {
+			// The only relative form that leaves the workspace is exactly `../<name>`.
+			if (srcSegs.length !== 2 || srcSegs[1] === "" || srcSegs[1].startsWith(".")) return NO;
 		} else if (srcSegs.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."))) {
 			return NO;
 		}
 		if (!plainRelative(destArg) || destArg.endsWith("/")) return NO;
 
 		const root = realpathSync(cwd);
-		const srcAbs = path.resolve(root, srcArg);
+		const srcAbs = path.resolve(root, srcArg.replace(/\/+$/, ""));
 		const st = lstatOrNull(srcAbs);
 		if (!st || st.isSymbolicLink() || !st.isDirectory()) return NO;
 		const realSrc = realpathSync(srcAbs);
 		const parentOfRoot = path.dirname(root);
-		if (sibling) {
-			if (parentIsTooBroad(parentOfRoot)) return NO;
-			if (realSrc.toLowerCase() !== path.join(parentOfRoot, srcSegs[1]).toLowerCase()) return NO;
-			if (!bareRepo(realSrc)) return NO;
-		} else {
-			if (!inside(realSrc, root) || realSrc === root) return NO;
+		if (inside(realSrc, root)) {
+			// A repository inside the workspace, judged by where it resolves.
+			if (realSrc === root) return NO;
+			if (
+				path
+					.relative(root, realSrc)
+					.split("/")
+					.some((s) => s.startsWith("."))
+			)
+				return NO;
 			if (!looksLikeRepo(realSrc)) return NO;
+		} else {
+			// Exactly <workspace parent>/<name>, a bare repository, however it was spelled.
+			if (parentIsTooBroad(parentOfRoot)) return NO;
+			const name = path.basename(realSrc);
+			if (name.startsWith(".")) return NO;
+			if (realSrc.toLowerCase() !== path.join(parentOfRoot, name).toLowerCase()) return NO;
+			if (!bareRepo(realSrc)) return NO;
 		}
 		if (!noTrackedSymlinks(realSrc)) return NO;
 
@@ -201,11 +216,20 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		const finalAbs = path.join(realParent, path.basename(destAbs));
 		const relParent = path.relative(root, realParent);
 		if (relParent.split("/").some((s) => s.startsWith("."))) return NO;
-		if (path.relative(root, finalAbs).split("/").some((seg) => INSTALL_DIRS.has(seg.toLowerCase()))) return NO;
+		if (
+			path
+				.relative(root, finalAbs)
+				.split("/")
+				.some((seg) => INSTALL_DIRS.has(seg.toLowerCase()))
+		)
+			return NO;
 		if (protectedName(path.basename(finalAbs))) return NO;
 		if (protectedRel(path.relative(root, finalAbs))) return NO;
 		if (inside(finalAbs, realSrc)) return NO;
-		return { ok: true, reason: "git clone of a local repository into a new directory inside the workspace" };
+		return {
+			ok: true,
+			reason: "git clone of a local repository into a new directory inside the workspace",
+		};
 	} catch {
 		return NO;
 	}

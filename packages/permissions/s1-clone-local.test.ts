@@ -7,7 +7,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -144,6 +144,57 @@ afterEach(() => {
 	Reflect.deleteProperty(process.env, SYSTEM_ONE_ALLOWLIST_FLAG);
 });
 
+describe("cloneLocalIntoProject absolute sources", () => {
+	test("absolute spelling of the sibling is allowed", () => {
+		const real = realpathSync(container);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(true);
+	});
+	test("absolute path inside the workspace is allowed", () => {
+		const real = realpathSync(ws);
+		expect(cloneLocalIntoProject(`git clone ${real}/vendor-src.git notes`, ws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, ws).ok).toBe(true);
+	});
+	for (const [name, rel] of [
+		["a dot sibling", ".SecretRepo"],
+		["a deeper path", "deeper/x.git"],
+		["a non-bare sibling", "wt-repo"],
+		["a sibling with a committed symlink", "linky.git"],
+		["a path with ..", "proj/../shared-notes.git"],
+	] as const) {
+		test(`absolute path to ${name} is refused`, () => {
+			expect(
+				cloneLocalIntoProject(`git clone ${realpathSync(container)}/${rel} notes`, ws).ok,
+			).toBe(false);
+		});
+	}
+	test("absolute path to a symlinked sibling is refused", () => {
+		expect(
+			cloneLocalIntoProject(`git clone ${realpathSync(container)}/sibling-link.git notes`, ws).ok,
+		).toBe(false);
+	});
+	test("absolute path elsewhere is refused", () => {
+		expect(cloneLocalIntoProject(`git clone ${realpathSync(outside)}/far.git notes`, ws).ok).toBe(
+			false,
+		);
+		expect(cloneLocalIntoProject("git clone /etc notes", ws).ok).toBe(false);
+		expect(cloneLocalIntoProject("git clone /tmp/x notes", ws).ok).toBe(false);
+	});
+	test("absolute sibling is refused when the parent is $HOME", () => {
+		const h = process.env.HOME;
+		process.env.HOME = realpathSync(container);
+		try {
+			expect(
+				cloneLocalIntoProject(`git clone ${realpathSync(container)}/shared-notes.git notes`, ws).ok,
+			).toBe(false);
+		} finally {
+			process.env.HOME = h;
+		}
+	});
+	test("absolute path to the workspace parent is refused", () => {
+		expect(cloneLocalIntoProject(`git clone ${realpathSync(container)} notes`, ws).ok).toBe(false);
+	});
+});
+
 describe("cloneLocalIntoProject allows", () => {
 	for (const cmd of [
 		"git clone ../shared-notes.git notes",
@@ -169,7 +220,7 @@ describe("cloneLocalIntoProject refuses", () => {
 		["host:path", "git clone example.com:a/b.git notes"],
 		["file:// URL", "git clone file:///etc/x.git notes"],
 		["git:// URL", "git clone git://example.com/a.git notes"],
-		["absolute local source", `git clone ${"/tmp"}/shared-notes.git notes`],
+		["absolute source outside the sibling rule", `git clone ${"/tmp"}/shared-notes.git notes`],
 		["source outside workspace and its parent", "git clone ../../far.git notes"],
 		["non-bare sibling", "git clone ../wt-repo notes"],
 		["dot-dir sibling", "git clone ../.SecretRepo notes"],
@@ -182,7 +233,10 @@ describe("cloneLocalIntoProject refuses", () => {
 		["empty repository (scan cannot run)", "git clone ../empty.git notes"],
 		["destination node_modules", "git clone ../shared-notes.git node_modules"],
 		["destination under node_modules", "git clone ../shared-notes.git node_modules/foo"],
-		["destination under Node_Modules (case)", "git clone ../shared-notes.git existing/Node_Modules/foo"],
+		[
+			"destination under Node_Modules (case)",
+			"git clone ../shared-notes.git existing/Node_Modules/foo",
+		],
 		["destination vendor", "git clone ../shared-notes.git vendor"],
 		["destination venv", "git clone ../shared-notes.git venv"],
 		["destination dist", "git clone ../shared-notes.git dist"],
@@ -194,7 +248,10 @@ describe("cloneLocalIntoProject refuses", () => {
 		["source missing", "git clone ../nope.git notes"],
 		["the parent directory itself", "git clone .. notes"],
 		["destination exists", "git clone ../shared-notes.git existing"],
-		["destination inside an existing directory that exists as file", "git clone ../shared-notes.git existing/f.txt"],
+		[
+			"destination inside an existing directory that exists as file",
+			"git clone ../shared-notes.git existing/f.txt",
+		],
 		["destination outside with ..", "git clone ../shared-notes.git ../notes"],
 		["destination absolute", `git clone ../shared-notes.git ${"/tmp"}/notes`],
 		["destination through a symlinked directory", "git clone ../shared-notes.git escape/notes"],
