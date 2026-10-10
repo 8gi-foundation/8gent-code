@@ -226,17 +226,21 @@ registerTool(
 			pattern: string;
 			limit?: number;
 		};
-		const { execSync } = require("node:child_process");
+		const { execFileSync } = require("node:child_process");
 
 		try {
-			// Use find with basic glob matching
-			const escaped = pattern.replace(/\*/g, "STAR").replace(/\?/g, "QUEST");
-			const cmd = `find . -type f -name "${pattern.split("/").pop()}" | head -${limit}`;
-			const output = execSync(cmd, {
+			// argv, never a shell string: the pattern is a name to match, not a command (#3763).
+			const name = pattern.split("/").pop() ?? "";
+			if (!/^[^"'`$;\n\r]*$/.test(name)) return { files: [], count: 0, truncated: false };
+			const max = Math.max(1, Math.floor(Number(limit)) || 50);
+			const output = execFileSync("find", [".", "-type", "f", "-name", name], {
 				cwd: ctx.workingDirectory,
 				encoding: "utf-8",
 				timeout: 10000,
-			});
+			})
+				.split("\n")
+				.slice(0, max)
+				.join("\n");
 			const files = output
 				.trim()
 				.split("\n")
@@ -281,25 +285,39 @@ registerTool(
 			fileType,
 			limit = 20,
 		} = input as { pattern: string; fileType?: string; limit?: number };
-		const { execSync } = require("node:child_process");
+		const { execFileSync } = require("node:child_process");
+
+		// argv, never a shell string: the pattern and file type are data (#3763).
+		if (!/^[^"'`$;\n\r]*$/.test(pattern) || (fileType && !/^[A-Za-z0-9_+-]+$/.test(fileType))) {
+			return { matches: [], count: 0 };
+		}
+		const max = Math.max(1, Math.floor(Number(limit)) || 20);
 
 		// Try ripgrep first, fall back to grep
 		let cmd: string;
+		let argv: string[];
 		try {
-			execSync("which rg", { encoding: "utf-8" });
-			cmd = `rg -n --max-count ${limit} --no-heading`;
-			if (fileType) cmd += ` -t ${fileType}`;
-			cmd += ` "${pattern}"`;
+			execFileSync("which", ["rg"], { encoding: "utf-8" });
+			cmd = "rg";
+			argv = ["-n", "--max-count", String(max), "--no-heading"];
+			if (fileType) argv.push("-t", fileType);
+			argv.push("-e", pattern);
 		} catch {
-			cmd = `grep -rn --include="*.${fileType || "*"}" "${pattern}" . | head -${limit}`;
+			cmd = "grep";
+			argv = ["-rn", `--include=*.${fileType || "*"}`, "-e", pattern, "."];
 		}
 
 		try {
-			const output = execSync(cmd, {
-				cwd: ctx.workingDirectory,
-				encoding: "utf-8",
-				timeout: 15000,
-			});
+			const output = (
+				execFileSync(cmd, argv, {
+					cwd: ctx.workingDirectory,
+					encoding: "utf-8",
+					timeout: 15000,
+				}) as string
+			)
+				.split("\n")
+				.slice(0, max)
+				.join("\n");
 			const matches = output
 				.trim()
 				.split("\n")
