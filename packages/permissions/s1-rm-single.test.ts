@@ -420,7 +420,8 @@ describe("systemOneGate", () => {
 		"rm -f .git/index.lock",
 		"rm -f run/g/index.lock",
 		"unlink run/worker.lock run/other.lock",
-		"mv run/worker.lock run/worker.lock.stale",
+		// mv has its own lane now (s1-mv-in-project.ts, #3809); a move that leaves the workspace is still judged
+		"mv run/worker.lock ../worker.lock.stale",
 		// a case twin only exists on a case-insensitive filesystem; on Linux run/case.lock is absent,
 		// and removing an absent file is already allowed by the rm-of-nothing rule
 		...(process.platform === "darwin" ? ["rm -f run/case.lock"] : []),
