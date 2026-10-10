@@ -33,6 +33,35 @@ afterEach(() => {
 	delete process.env.SAFE_PATHS;
 });
 
+// --- #3838: the configured post_message bot env file ---
+describe("#3838: the bot env file named in settings is a credential file", () => {
+	test("denied by absolute path and from a cwd of HOME; unconfigured files stay allowed", () => {
+		const dir = path.join(FAKE_HOME, ".config", "bot");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.mkdirSync(path.join(FAKE_HOME, ".8gent"), { recursive: true });
+		const envFile = path.join(dir, "bot.env");
+		fs.writeFileSync(envFile, "TELEGRAM_BOT_TOKEN=x\n");
+		fs.writeFileSync(path.join(dir, "other.env"), "A=1\n");
+		const settings = path.join(FAKE_HOME, ".8gent", "settings.json");
+		fs.writeFileSync(
+			settings,
+			JSON.stringify({ postMessage: { botEnvFile: "~/.config/bot/bot.env" } }),
+		);
+		try {
+			expect(validatePath(envFile, FAKE_PROJ)).toEqual({
+				ok: false,
+				reason: "protected credential file",
+			});
+			expect(validatePath(".config/bot/bot.env", FAKE_HOME).ok).toBe(false);
+			expect(validatePath("~/.config/bot/bot.env", FAKE_PROJ).ok).toBe(false);
+			expect(validatePath(path.join(dir, "other.env"), FAKE_PROJ).ok).toBe(true);
+		} finally {
+			fs.rmSync(settings, { force: true });
+		}
+		expect(validatePath(envFile, FAKE_PROJ).ok).toBe(true);
+	});
+});
+
 // --- AC1: protected credential file ---
 describe("AC1: protected credential file under ~/.ssh", () => {
 	test("rejects /Users/x/.ssh/id_rsa with reason 'protected credential file'", () => {
