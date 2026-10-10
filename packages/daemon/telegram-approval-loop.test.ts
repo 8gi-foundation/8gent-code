@@ -555,7 +555,9 @@ describe("audit log (8SO MEDIUM-5)", () => {
 		expect(lines[0]).toMatchObject({ approver: String(JAMES), chat: String(JAMES) });
 		expect(typeof lines[0].requestId).toBe("string");
 		expect(typeof lines[0].ts).toBe("string");
-		expect(statSync(join(dataDir, "approvals-audit.jsonl")).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32")
+			expect(statSync(join(dataDir, "approvals-audit.jsonl")).mode & 0o777).toBe(0o600);
 	});
 });
 

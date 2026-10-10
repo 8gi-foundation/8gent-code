@@ -63,7 +63,9 @@ export function resolveSafePath(p: string, roots: string[]): string {
 	const abs = path.resolve(expandHome(p));
 	const inRoot = roots.some((root) => abs === root || abs.startsWith(`${root}${path.sep}`));
 	if (!inRoot) throw new Error(`path outside allowed roots: ${abs}`);
-	if (DENIED_PATH.some((re) => re.test(abs))) {
+	// The deny patterns are written with "/"; a Windows path uses a backslash.
+	const slashed = abs.split(path.sep).join("/");
+	if (DENIED_PATH.some((re) => re.test(slashed))) {
 		throw new Error(`path denied (secret-shaped): ${abs}`);
 	}
 	return abs;

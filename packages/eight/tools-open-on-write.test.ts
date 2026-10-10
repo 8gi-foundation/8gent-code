@@ -86,34 +86,46 @@ describe("write_file opens only deliverables (#3107)", () => {
 		expect(await openedPaths()).toEqual([]);
 	});
 
-	test("a viewable deliverable is opened, and the result says so", async () => {
-		const dir = workdir();
-		const ex = new ToolExecutor(dir);
-		const out = await ex.execute("write_file", { path: "report.html", content: "<h1>hi</h1>" });
-		expect(out).toStartWith(`File written and opened: ${path.join(dir, "report.html")}`);
-		expect(await openedPaths(1)).toEqual([path.join(dir, "report.html")]);
-	});
+	// The stub `open` is a shell script on PATH; Windows cannot run it as a command.
+	test.skipIf(process.platform === "win32")(
+		"a viewable deliverable is opened, and the result says so",
+		async () => {
+			const dir = workdir();
+			const ex = new ToolExecutor(dir);
+			const out = await ex.execute("write_file", { path: "report.html", content: "<h1>hi</h1>" });
+			expect(out).toStartWith(`File written and opened: ${path.join(dir, "report.html")}`);
+			expect(await openedPaths(1)).toEqual([path.join(dir, "report.html")]);
+		},
+	);
 
-	test("a Marp deck counts as a document; other markdown does not", async () => {
-		const dir = workdir();
-		const ex = new ToolExecutor(dir);
-		await ex.execute("write_file", { path: "deck/deck.md", content: MARP });
-		await ex.execute("write_file", { path: "deck/outline.md", content: "# Outline\n- a\n" });
-		expect(await openedPaths(1)).toEqual([path.join(dir, "deck", "deck.md")]);
-	});
+	// The stub `open` is a shell script on PATH; Windows cannot run it as a command.
+	test.skipIf(process.platform === "win32")(
+		"a Marp deck counts as a document; other markdown does not",
+		async () => {
+			const dir = workdir();
+			const ex = new ToolExecutor(dir);
+			await ex.execute("write_file", { path: "deck/deck.md", content: MARP });
+			await ex.execute("write_file", { path: "deck/outline.md", content: "# Outline\n- a\n" });
+			expect(await openedPaths(1)).toEqual([path.join(dir, "deck", "deck.md")]);
+		},
+	);
 
-	test("the same path opens at most once per turn, and again next turn", async () => {
-		const dir = workdir();
-		const ex = new ToolExecutor(dir);
-		const a = await ex.execute("write_file", { path: "chart.svg", content: "<svg/>" });
-		const b = await ex.execute("write_file", { path: "chart.svg", content: "<svg></svg>" });
-		expect(a).toContain("File written and opened");
-		expect(b).toStartWith("File written: ");
-		expect(await openedPaths(1)).toHaveLength(1);
-		ex.beginTurn();
-		await ex.execute("write_file", { path: "chart.svg", content: "<svg/>" });
-		expect(await openedPaths(2)).toHaveLength(2);
-	});
+	// The stub `open` is a shell script on PATH; Windows cannot run it as a command.
+	test.skipIf(process.platform === "win32")(
+		"the same path opens at most once per turn, and again next turn",
+		async () => {
+			const dir = workdir();
+			const ex = new ToolExecutor(dir);
+			const a = await ex.execute("write_file", { path: "chart.svg", content: "<svg/>" });
+			const b = await ex.execute("write_file", { path: "chart.svg", content: "<svg></svg>" });
+			expect(a).toContain("File written and opened");
+			expect(b).toStartWith("File written: ");
+			expect(await openedPaths(1)).toHaveLength(1);
+			ex.beginTurn();
+			await ex.execute("write_file", { path: "chart.svg", content: "<svg/>" });
+			expect(await openedPaths(2)).toHaveLength(2);
+		},
+	);
 
 	test("never from a spawned sub-agent", async () => {
 		const ex = new ToolExecutor(workdir(), "primary", undefined, { openOnWrite: false });

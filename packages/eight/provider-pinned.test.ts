@@ -11,9 +11,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
 
@@ -139,8 +140,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 async function turn(

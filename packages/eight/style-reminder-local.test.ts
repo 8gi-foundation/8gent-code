@@ -11,9 +11,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
@@ -71,8 +72,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 function writeUser(identity: Record<string, unknown>) {

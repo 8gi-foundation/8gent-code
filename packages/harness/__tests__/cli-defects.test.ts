@@ -25,12 +25,13 @@
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { CliHarness } from "../adapters/cli";
 import { handleHarnessRoute } from "../http";
 import { HarnessRegistry, type StatusEvent } from "../index";
 import { HarnessRunner } from "../runner";
 
-const FIXTURE = new URL("./fixtures/fake-cli.ts", import.meta.url).pathname;
+const FIXTURE = fileURLToPath(new URL("./fixtures/fake-cli.ts", import.meta.url));
 const BUN = process.execPath;
 
 const tokens: string[] = [];

@@ -23,7 +23,7 @@ describe("planInstall", () => {
 			"https://nodejs.org/dist/v22.12.0/node-v22.12.0-darwin-arm64.tar.gz",
 		);
 		expect(plan.runtimeDir).toContain("node-22.12.0");
-		expect(plan.binPath).toContain("bin/node");
+		expect(plan.binPath).toContain(join("bin", "node"));
 		expect(plan.archiveExt).toBe("tar.gz");
 	});
 	it("uses node.exe path on win32", () => {

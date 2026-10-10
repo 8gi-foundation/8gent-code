@@ -189,20 +189,25 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		expect(commits()).toBe(2);
 	}, 30_000);
 
-	test("a test script that calls a missing binary: commits, unverified, never refused", async () => {
-		repo({ name: "t", private: true, scripts: { test: "nosuchbin-3402" } });
-		write("bun.lock", "");
-		write("test/cli.test.ts", FAIL);
-		await ex.execute("git_add", { files: "." });
-		const out = await ex.execute("git_commit", { message: "x" });
-		expect(out).toStartWith("[COMMIT GATE] `bun run test` could not run (");
-		expect(out).toContain("not found");
-		expect(out).toContain("so this commit is not verified by the test suite.");
-		expect(out).not.toContain("COMMIT BLOCKED");
-		expect(isErrorToolResult(out)).toBe(false);
-		expect(commits()).toBe(2);
-		expect(out).toContain("nosuchbin-3402");
-	}, 30_000);
+	// bun's Windows script shell exits 1, not 127, for a missing binary, so the gate sees a failing suite.
+	test.skipIf(process.platform === "win32")(
+		"a test script that calls a missing binary: commits, unverified, never refused",
+		async () => {
+			repo({ name: "t", private: true, scripts: { test: "nosuchbin-3402" } });
+			write("bun.lock", "");
+			write("test/cli.test.ts", FAIL);
+			await ex.execute("git_add", { files: "." });
+			const out = await ex.execute("git_commit", { message: "x" });
+			expect(out).toStartWith("[COMMIT GATE] `bun run test` could not run (");
+			expect(out).toContain("not found");
+			expect(out).toContain("so this commit is not verified by the test suite.");
+			expect(out).not.toContain("COMMIT BLOCKED");
+			expect(isErrorToolResult(out)).toBe(false);
+			expect(commits()).toBe(2);
+			expect(out).toContain("nosuchbin-3402");
+		},
+		30_000,
+	);
 
 	test("the runner itself is not on PATH (bun, or yarn for a yarn.lock): commits, unverified", async () => {
 		const cases = [

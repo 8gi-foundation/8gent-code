@@ -146,7 +146,7 @@ export async function runExperiment(
 	const err = validateSpec(spec);
 	if (err) throw new Error(`invalid experiment spec: ${err}`);
 
-	const skillSlug = skillPath.split("/").pop()?.replace(/\.md$/, "") ?? "unknown";
+	const skillSlug = skillPath.split(/[\\/]/).pop()?.replace(/\.md$/, "") ?? "unknown";
 	const record: ExperimentRecord = {
 		skillSlug,
 		skillPath,

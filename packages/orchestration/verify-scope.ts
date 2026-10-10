@@ -51,7 +51,7 @@ export function snapshotScope(
 	for (const p of allowedPaths ?? []) {
 		const abs = path.resolve(wd, p);
 		if (!inside(wd, abs) || (existsSync(abs) && statSync(abs).isDirectory())) continue;
-		out[path.relative(wd, abs)] = hashOf(abs);
+		out[path.relative(wd, abs).split(path.sep).join("/")] = hashOf(abs);
 	}
 	return out;
 }

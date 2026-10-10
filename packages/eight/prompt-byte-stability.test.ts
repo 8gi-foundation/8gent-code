@@ -14,9 +14,10 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 import type { Agent as AgentT } from "./agent";
 
 // Loaded in beforeAll, after $HOME and EIGHT_DATA_DIR point at a temp dir: the
@@ -90,8 +91,8 @@ afterAll(() => {
 		else process.env[k] = v;
 	}
 	tools?.resetRuntimeParams();
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 function build(): AgentT {

@@ -199,8 +199,10 @@ describe("spill to file", () => {
 		const path = /saved to (\S+)\]/.exec(out)?.[1] ?? "";
 		expect(path.startsWith(join(d, "tool-results", "s-"))).toBe(true);
 		expect(readFileSync(path, "utf8")).toBe(big);
-		expect(statSync(path).mode & 0o777).toBe(0o600);
-		expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
 		// Measured without the path, whose length depends on TMPDIR.
 		expect(out.replace(path, "").length).toBeLessThan(PREVIEW + 400);
 		expect(out).not.toContain(SENTINEL);

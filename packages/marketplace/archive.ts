@@ -115,9 +115,13 @@ export function buildArchive(opts: BuildArchiveOptions): void {
 	const listFile = `${opts.outPath}.filelist`;
 	fs.writeFileSync(listFile, `${list.join("\n")}\n`);
 
-	const args = ["-czf", opts.outPath, "-C", opts.stagingDir, "-T", listFile];
+	// GNU tar reads "C:\\x.tgz" as host "C" plus a path, so name the archive relative to its folder.
+	const args = ["-czf", path.basename(opts.outPath), "-C", opts.stagingDir, "-T", listFile];
 
-	const res = spawnSync("tar", args, { stdio: "inherit" });
+	const res = spawnSync("tar", args, {
+		stdio: "inherit",
+		cwd: path.dirname(path.resolve(opts.outPath)),
+	});
 	fs.rmSync(listFile, { force: true });
 	if (res.status !== 0) {
 		throw new Error(`tar exited with code ${res.status}`);
@@ -149,7 +153,10 @@ function collectSortedRelativePaths(rootAbs: string, rootName: string): string[]
  */
 export function extractArchive(archivePath: string, destDir: string): void {
 	fs.mkdirSync(destDir, { recursive: true });
-	const res = spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "inherit" });
+	const res = spawnSync("tar", ["-xzf", path.basename(archivePath), "-C", path.resolve(destDir)], {
+		stdio: "inherit",
+		cwd: path.dirname(path.resolve(archivePath)),
+	});
 	if (res.status !== 0) {
 		throw new Error(`tar -xzf exited with code ${res.status}`);
 	}
@@ -166,7 +173,10 @@ export interface EntryAuditResult {
  */
 export function auditArchiveEntries(archivePath: string, expectedRoot: string): EntryAuditResult {
 	const errors: string[] = [];
-	const res = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf-8" });
+	const res = spawnSync("tar", ["-tzf", path.basename(archivePath)], {
+		encoding: "utf-8",
+		cwd: path.dirname(path.resolve(archivePath)),
+	});
 	if (res.status !== 0) {
 		return { ok: false, errors: [`tar -tzf failed: ${res.stderr}`] };
 	}

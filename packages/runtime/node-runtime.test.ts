@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -202,21 +202,25 @@ describe("getRuntimeDir + isRuntimeReady", () => {
 		expect(ready).toBe(false);
 	});
 
-	it("isRuntimeReady returns true when a real-version-emitting binary is present", async () => {
-		// Stand up a fake "node" shell script that prints a real version.
-		const binDir = join(sandbox, "node-22.12.0", "bin");
-		mkdirSync(binDir, { recursive: true });
-		const fakeNode = join(binDir, "node");
-		writeFileSync(fakeNode, "#!/bin/bash\necho 'v22.12.0'\n");
-		chmodSync(fakeNode, 0o755);
-		const ready = await isRuntimeReady({
-			root: sandbox,
-			version: "22.12.0",
-			platform: "darwin",
-			minVersion: "22.12.0",
-		});
-		expect(ready).toBe(true);
-	});
+	// The fake node is a bash script: it cannot run as a Windows executable.
+	it.skipIf(process.platform === "win32")(
+		"isRuntimeReady returns true when a real-version-emitting binary is present",
+		async () => {
+			// Stand up a fake "node" shell script that prints a real version.
+			const binDir = join(sandbox, "node-22.12.0", "bin");
+			mkdirSync(binDir, { recursive: true });
+			const fakeNode = join(binDir, "node");
+			writeFileSync(fakeNode, "#!/bin/bash\necho 'v22.12.0'\n");
+			chmodSync(fakeNode, 0o755);
+			const ready = await isRuntimeReady({
+				root: sandbox,
+				version: "22.12.0",
+				platform: "darwin",
+				minVersion: "22.12.0",
+			});
+			expect(ready).toBe(true);
+		},
+	);
 
 	it("isRuntimeReady returns false when the binary reports a too-low version", async () => {
 		const binDir = join(sandbox, "node-22.12.0", "bin");

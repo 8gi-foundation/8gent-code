@@ -19,13 +19,13 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
-	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import { rmRetry } from "../../tests/rm-retry";
 import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
@@ -120,8 +120,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 function build(model: string, events?: Record<string, unknown>): AgentT {
@@ -491,7 +491,7 @@ describe("`8gent run --image` stays inside the working directory", () => {
 			]);
 		} finally {
 			write.mockRestore();
-			rmSync(outside, { recursive: true, force: true });
+			rmRetry(outside);
 		}
 		expect(code).toBe(1);
 		expect(bodies.length).toBe(start);
