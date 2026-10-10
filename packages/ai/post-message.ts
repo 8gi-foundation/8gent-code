@@ -13,12 +13,19 @@
  * The helpers get argv, never a shell string. They read the bot token
  * themselves; this module never sees it, and everything it returns is
  * scrubbed.
+ *
+ * Direct send (#3838): when the person names a bot env file in settings
+ * (postMessage.botEnvFile), text posts go straight to the Bot API with fetch.
+ * The key is read from that file inside this process at send time. It never
+ * reaches a command line, the model, a tool result or a log, and text that
+ * holds it is refused. The API base is fixed; only the process environment
+ * (EIGHT_TG_API_BASE) can change it, never a file the model can write.
  */
 
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir as osHome } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { scrub } from "../eight/secret-scanner";
 import { getPermissionManager } from "../permissions";
 import { ToolG8 } from "../permissions/toolg8";
@@ -47,6 +54,14 @@ export interface PostMessageDeps {
 	approved: Set<string>;
 	/** Chats a person declined in this process; not asked again. */
 	declined: Set<string>;
+	/** Direct Bot API send (#3838); set only when settings name a bot env file. */
+	direct?: DirectSend;
+}
+
+export interface DirectSend {
+	/** True when the text holds the bot key; such text is never sent. */
+	holdsKey: (text: string) => boolean;
+	send: (chat: string, text: string) => Promise<{ id?: string; error?: string }>;
 }
 
 export const POST_LIMIT_PER_SESSION = 10;
@@ -76,15 +91,100 @@ function appendLog(entry: object): void {
 	}
 }
 
+/** Where the bot key lives: settings postMessage.botEnvFile and botTokenVar. */
+export interface DirectConfig {
+	file: string;
+	name: string;
+}
+
+/** postMessage.botEnvFile from settings; null when unset, relative, or unreadable settings. */
+export function readDirectConfig(): DirectConfig | null {
+	try {
+		const pm = JSON.parse(
+			readFileSync(join(home(), ".8gent", "settings.json"), "utf8"),
+		)?.postMessage;
+		const f = pm?.botEnvFile;
+		if (typeof f !== "string" || f.trim() === "") return null;
+		const file = f.startsWith("~/") ? join(home(), f.slice(2)) : f;
+		if (!isAbsolute(file)) return null;
+		const name =
+			typeof pm.botTokenVar === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(pm.botTokenVar)
+				? pm.botTokenVar
+				: "TELEGRAM_BOT_TOKEN";
+		return { file, name };
+	} catch {
+		return null;
+	}
+}
+
+/** One NAME=value from an env file (export prefix and quotes allowed); null when absent. */
+export function readBotKey(file: string, name: string): string | null {
+	try {
+		for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+			const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+			if (!m || m[1] !== name) continue;
+			const value = m[2].replace(/^(['"])(.*)\1$/, "$2");
+			return value || null;
+		}
+	} catch {
+		// unreadable file: no key, nothing sends
+	}
+	return null;
+}
+
+const TG_API = "https://api.telegram.org";
+/** The Bot API base. Process environment only, so nothing written during a session moves it. */
+const apiBase = () => (process.env.EIGHT_TG_API_BASE || TG_API).replace(/\/+$/, "");
+
+function directSend(cfg: DirectConfig): DirectSend {
+	const key = () => readBotKey(cfg.file, cfg.name);
+	return {
+		holdsKey: (text) => {
+			const k = key();
+			return k !== null && text.includes(k);
+		},
+		send: async (chat, text) => {
+			const k = key();
+			if (!k) return { error: `the bot env file has no ${cfg.name}` };
+			const hide = (s: string) => s.split(k).join("[redacted-token]");
+			try {
+				const res = await fetch(`${apiBase()}/bot${k}/sendMessage`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ chat_id: chat, text }),
+					// A redirect would carry the key in the path to another host.
+					redirect: "error",
+					signal: AbortSignal.timeout(30_000),
+				});
+				const body = (await res.json().catch(() => null)) as {
+					ok?: boolean;
+					result?: { message_id?: unknown };
+					description?: unknown;
+				} | null;
+				const id = body?.result?.message_id;
+				if (res.ok && body?.ok === true && Number.isInteger(id)) return { id: String(id) };
+				return {
+					error: hide(`HTTP ${res.status}: ${String(body?.description ?? "no description")}`),
+				};
+			} catch (e) {
+				return { error: hide(String((e as Error)?.message ?? e)) };
+			}
+		},
+	};
+}
+
 const CHAT_RE = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31})$/;
 const VOICE_RE = /^[A-Za-z]{1,24}$/;
 const TEXT_MAX = 4096;
 const VOICE_MAX = 600;
 export const POST_MESSAGE_APPROVAL_ACTION = "Post to Telegram";
 
-/** The tool is offered only where the helper it wraps is installed. */
+/** Offered where the helper is installed, or where settings name a bot env file that exists. */
 export function postMessageAvailable(): boolean {
-	return existsSync(postMessageBins().text);
+	return (
+		existsSync(postMessageBins().text) ||
+		(directSnapshot !== null && existsSync(directSnapshot.file))
+	);
 }
 
 function postMessageBins(): PostMessageDeps["bins"] {
@@ -98,6 +198,8 @@ function postMessageBins(): PostMessageDeps["bins"] {
  * a write through some other tool) cannot grant a recipient (#3595).
  */
 let allowedSnapshot: string[] = readAllowedChats();
+/** postMessage.botEnvFile, taken at the same moment and for the same reason. */
+let directSnapshot: DirectConfig | null = readDirectConfig();
 /**
  * Chats a person approved on a card in THIS process. Memory only: nothing on
  * disk can authorise a post, so nothing an agent can write can either. Every
@@ -109,6 +211,7 @@ const declinedChats = new Set<string>();
 /** Test seam only: re-take the allowlist and forget approvals, as a new process would. */
 export function _snapshotAllowedChats(): void {
 	allowedSnapshot = readAllowedChats();
+	directSnapshot = readDirectConfig();
 	approvedChats.clear();
 	declinedChats.clear();
 }
@@ -138,7 +241,8 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 			}),
 		gate: (chat) => {
 			const g = ToolG8.instance().gate(agentId, "network_request", {
-				url: "https://api.telegram.org/",
+				// The base this post will call, so policy judges the real destination.
+				url: `${directSnapshot ? apiBase() : TG_API}/`,
 				to: chat,
 			});
 			return { allowed: g.allowed || g.requiresApproval === true, reason: g.reason };
@@ -151,6 +255,7 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 		approved: approvedChats,
 		declined: declinedChats,
 		sent: sessions.get(sessionKey) ?? sessions.set(sessionKey, { n: 0 }).get(sessionKey)!,
+		direct: directSnapshot ? directSend(directSnapshot) : undefined,
 	};
 }
 
@@ -193,6 +298,10 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 		return "[ERROR] voice must be a plain name such as Rishi.";
 	if (text.length > (voice ? VOICE_MAX : TEXT_MAX))
 		return `[ERROR] text is ${text.length} characters; the cap is ${voice ? VOICE_MAX : TEXT_MAX}.`;
+	// A bot key never leaves in a message, whichever transport sends it.
+	BOT_TOKEN_RE.lastIndex = 0;
+	if (BOT_TOKEN_RE.test(text) || deps.direct?.holdsKey(text))
+		return "[BLOCKED] post_message: the text holds a bot key. Nothing was sent. Remove it; never post credentials.";
 
 	// Attempts count, not only successes: a refused or failed post spends the limit.
 	if (deps.sent.n >= deps.limit)
@@ -224,6 +333,13 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	const refusal = await askPerson(args, deps);
 	if (refusal) return refusal;
 
+	if (deps.direct && !voice) {
+		const r = await deps.direct.send(chat, text);
+		if (!r.id) return `[ERROR] post_message failed: ${clip(r.error ?? "") || "no output"}`;
+		deps.log({ chat, length: text.length, voice: false, at: new Date().toISOString() });
+		return `Posted message to ${chat}, message_id ${r.id}.`;
+	}
+
 	const [bin, argv] = voice
 		? [deps.bins.voice, ["--voice", voice, "--chat", chat, "--", text]]
 		: [deps.bins.text, ["text", "--chat", chat, "--", text]];
@@ -241,7 +357,7 @@ export const POST_MESSAGE_TOOL_DEF = {
 	function: {
 		name: "post_message",
 		description:
-			"[MESSAGING] Post a message to a Telegram chat (local tg-group helper), or a voice note when voice is set (say-telegram, officer voice name such as Rishi). The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Never put credentials in the text.",
+			"[MESSAGING] Post a message to a Telegram chat, or a voice note when voice is set (say-telegram, officer voice name such as Rishi). Use this, not curl: the bot key is already configured and must never be typed or sourced. Give text, or text_file for a drafted file in the project. The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Never put credentials in the text.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -254,12 +370,17 @@ export const POST_MESSAGE_TOOL_DEF = {
 					description:
 						"The message exactly as it should appear (max 4096 characters, 600 for a voice note)",
 				},
+				text_file: {
+					type: "string",
+					description:
+						"Path inside the project to a file whose contents are the message; used when text is empty",
+				},
 				voice: {
 					type: "string",
 					description: "Officer voice name; sends a voice note instead of text",
 				},
 			},
-			required: ["chat", "text"],
+			required: ["chat"],
 		},
 	},
 };
