@@ -282,6 +282,13 @@ export interface ToolCatalogOptions {
 }
 
 /** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
+/** Short notes shared by the concise catalog and the headless prompt (#3865). */
+export const CONCISE_WEB_NOTE =
+	"**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**";
+export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**";
+export const SCRATCH_DIR_NOTE =
+	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
+
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
@@ -330,10 +337,10 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	lines.push(
 		"",
 		concise
-			? "**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**"
+			? CONCISE_WEB_NOTE
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
-		"**Narration: use `speak`, never espeak or say.**",
-		"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**",
+		NARRATION_NOTE,
+		SCRATCH_DIR_NOTE,
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE);
 

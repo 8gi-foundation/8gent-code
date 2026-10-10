@@ -81,7 +81,12 @@ import { browserProfileWarning, localBrowserTools } from "../tools/eight-browser
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
-import { SLIDES_TO_VIDEO_NOTE, buildToolCatalogSegment } from "./prompts/system-prompt";
+import {
+	NARRATION_NOTE,
+	SCRATCH_DIR_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+	buildToolCatalogSegment,
+} from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -195,12 +200,12 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 }
 
 /**
- * The two notes from the tool catalog a headless run keeps: the model has the
- * internet, and narration goes through `speak`. Same wording as the catalog.
+ * The notes from the tool catalog a headless run keeps: internet, narration
+ * through `speak`, scratch dir, slides to video. Same wording as the catalog.
  */
-const HEADLESS_TOOL_NOTES =
-	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**\n" +
-	SLIDES_TO_VIDEO_NOTE;
+const HEADLESS_WEB_NOTE =
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
+const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
