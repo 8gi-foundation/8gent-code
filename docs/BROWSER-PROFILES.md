@@ -43,6 +43,7 @@ A symlink at the profile dir, token, port file or userData is refused.
 - **No tool-level card.** `browser_task` and `browser_screenshot` skip the card. The `desktop_use` policy still applies.
 - **Sensitive clicks still go to the approver.** Sign in, buy, delete and send are examples. With no one to ask, the click is refused.
 - **Secret fields are never typed into.** That covers password, payment, PIN, OTP and contenteditable fields. 8gent asks the page first and fails closed on any error; the browser re-checks the exact element.
+- **Every profile checks destinations.** Browser opens (browser_open and an open step in browser_task) go through the same net-guard classification as web_fetch, DNS answers included, before the browser is called: private ranges, link-local and metadata addresses and internal names are refused. Loopback is refused unless its host:port is listed in `EIGHT_BROWSER_ALLOW_LOOPBACK` (comma separated, for example `127.0.0.1:5173`); a named profile ignores that list.
 - **No loopback or private hosts.** Loopback, private, link-local and CGNAT ranges, `.local`, `localhost` (including a trailing dot), IPv4 embedded in IPv6, `user:pass@` URLs and non-http(s) URLs are refused before the browser is called. The browser also blocks them at its network layer on every request and redirect hop.
 - **Screenshots go to the workspace.** The profile dir is protected, so the agent could not read them back from there.
 

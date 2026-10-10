@@ -30,6 +30,7 @@ import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDe
 import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
+import { layoutMeasureLine } from "./layout-measure";
 import { writeShapeLine } from "../ai/write-shape";
 import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
@@ -2929,7 +2930,7 @@ export class ToolExecutor {
 			if (await this.visionCapable()) {
 				const shown = await resizeImage(absolutePath, 1024, 1024);
 				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
-				const text = JSON.stringify(
+				const meta = JSON.stringify(
 					{
 						path: shown.path,
 						width: shown.width,
@@ -2940,10 +2941,14 @@ export class ToolExecutor {
 					null,
 					2,
 				);
+				// #3770: the copy above is downscaled, so give the real pixel geometry.
+				const measured = await layoutMeasureLine(absolutePath);
+				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);
-			return JSON.stringify(
+			const measured = await layoutMeasureLine(absolutePath);
+			const info = JSON.stringify(
 				{
 					path: imageInfo.path,
 					width: imageInfo.width,
@@ -2958,6 +2963,7 @@ export class ToolExecutor {
 				null,
 				2,
 			);
+			return measured ? `${info}\n${measured}` : info;
 		} catch (err) {
 			return `Error reading image: ${err}`;
 		}

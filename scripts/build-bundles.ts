@@ -15,6 +15,8 @@
  *   bun scripts/build-bundles.ts          # both bundles
  *   bun scripts/build-bundles.ts --tui    # dist/tui.js only
  */
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 
 const stubDevtools: BunPlugin = {
@@ -36,12 +38,13 @@ const targets = [
 	{ name: "tui", entry: "apps/tui/src/index.tsx", external: ["sharp"] },
 ].filter((t) => !process.argv.includes("--tui") || t.name === "tui");
 
-const root = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/D:/..." which Bun.build rejects.
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 for (const t of targets) {
 	const result = await Bun.build({
-		entrypoints: [root + t.entry],
-		outdir: root + "dist",
+		entrypoints: [join(root, t.entry)],
+		outdir: join(root, "dist"),
 		naming: `${t.name}.js`,
 		target: "bun",
 		external: t.external,
