@@ -100,7 +100,14 @@ import {
 	providerConfigForStep,
 } from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
-import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
+import {
+	type ProgressWatch,
+	resolveStepCeilingMs,
+	resolveStreamIdleMs,
+	resolveTurnTimeoutMs,
+	withProgressTimeout,
+	withTurnTimeout,
+} from "./turn-timeout";
 import {
 	type CheckpointEntry,
 	type Summarizer,
@@ -265,6 +272,8 @@ export class Agent {
 	private offBoxSystemPrompt: (() => string) | null = null;
 	private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
 	private loopWarningInjected = false;
+	/** #3855: progress signal for the in-flight native attempt, null between attempts. */
+	private progressWatch: ProgressWatch | null = null;
 	private loopDetector = new ToolLoopDetector();
 	private events: AgentEventCallbacks;
 	private planner: ProactivePlanner;
@@ -1865,9 +1874,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					undefined,
 					event.stepNumber,
 				);
+				// #3855: a tool is now running; its own timeout owns that time, so the
+				// native attempt's idle gap is suspended until onToolCallFinish.
+				this.progressWatch?.hold();
 			},
 
 			onToolCallFinish: async (event) => {
+				// #3855: the tool returned; progress, re-arm the idle gap.
+				this.progressWatch?.release();
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
 
@@ -2057,6 +2071,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			},
 
 			onStepFinish: async (event: StepFinishEvent) => {
+				this.progressWatch?.stepDone(); // #3855: a model step finished, its tools are done
 				stepCount++;
 				// Update runtime params so self_inspect shows live step count
 				Object.assign(this.runtimeParams, {
@@ -2269,7 +2284,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// chain is exhausted the turn throws "All providers exhausted" instead
 			// of hanging for the full 30-min session watchdog. Override with
 			// EIGHT_TURN_TIMEOUT_MS.
-			const attemptTimeoutMs = resolveTurnTimeoutMs();
+			// #3855: generate() is a whole multi-step tool loop, so a flat 300 s wall
+			// clock killed healthy long turns. A native attempt now fails on NO
+			// PROGRESS (no step or tool finishing for the idle gap, default 5 min,
+			// EIGHT_STREAM_IDLE_MS) and on the outer turn budget (default 20 min,
+			// EIGHT_TURN_TIMEOUT_MS), the same policy the text-tool path uses.
+			const attemptIdleMs = resolveStreamIdleMs();
+			const attemptTimeoutMs = resolveStepCeilingMs();
 
 			outer: for (let chainStep = 0; chainStep < MAX_PROVIDERS; chainStep++) {
 				const key = `${currentEntry.provider}::${currentEntry.model}`;
@@ -2330,9 +2351,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								});
 							}
 						}
-						const hedgeOut = await withTurnTimeout(
-							() =>
-								hedge.run(
+						const hedgeOut = await withProgressTimeout(
+							(watch) => {
+								this.progressWatch = watch;
+								return hedge.run(
 									candidates,
 									async (cand, signal) => {
 										const candAgent =
@@ -2355,15 +2377,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 										prompt: textForAgent,
 										abortSignal: this.abortController?.signal,
 									},
-								),
-							attemptTimeoutMs,
-							// Abort the shared signal so the stalled request tears down.
-							() => {
-								attemptTimedOut = true;
-								this.abortController?.abort();
+								);
 							},
-							`${currentEntry.provider}/${currentEntry.model}`,
-						);
+							{
+								idleMs: attemptIdleMs,
+								ceilingMs: attemptTimeoutMs,
+								// Abort the shared signal so the stalled request tears down.
+								onTimeout: () => {
+									attemptTimedOut = true;
+									this.abortController?.abort();
+								},
+								label: `${currentEntry.provider}/${currentEntry.model}`,
+							},
+						).finally(() => {
+							this.progressWatch = null;
+						});
 						result = hedgeOut.result;
 						resolved = true;
 						// Update agentConfig so any downstream logic sees the provider that actually succeeded
@@ -2472,19 +2500,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						}));
 					let retryTimedOut = false;
 					try {
-						result = await withTurnTimeout(
-							() =>
-								retryAgent.generate({
+						result = await withProgressTimeout(
+							(watch) => {
+								this.progressWatch = watch;
+								return retryAgent.generate({
 									messages: messages2,
 									abortSignal: this.abortController?.signal,
-								}),
-							attemptTimeoutMs,
-							() => {
-								retryTimedOut = true;
-								this.abortController?.abort();
+								});
 							},
-							"retry/maxOutputTokens",
-						);
+							{
+								idleMs: attemptIdleMs,
+								ceilingMs: attemptTimeoutMs,
+								onTimeout: () => {
+									retryTimedOut = true;
+									this.abortController?.abort();
+								},
+								label: "retry/maxOutputTokens",
+							},
+						).finally(() => {
+							this.progressWatch = null;
+						});
 					} catch (retryErr: any) {
 						// Only a genuine user ESC (no timeout) re-throws. A timeout-driven
 						// abort or any other failure keeps the prior successful result.
@@ -2518,19 +2553,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				];
 				let verifyTimedOut = false;
 				try {
-					const verified = await withTurnTimeout(
-						() =>
-							verifyAgent.generate({
+					const verified = await withProgressTimeout(
+						(watch) => {
+							this.progressWatch = watch;
+							return verifyAgent.generate({
 								messages: verifyMessages,
 								abortSignal: this.abortController?.signal,
-							}),
-						attemptTimeoutMs,
-						() => {
-							verifyTimedOut = true;
-							this.abortController?.abort();
+							});
 						},
-						"verify-gate",
-					);
+						{
+							idleMs: attemptIdleMs,
+							ceilingMs: attemptTimeoutMs,
+							onTimeout: () => {
+								verifyTimedOut = true;
+								this.abortController?.abort();
+							},
+							label: "verify-gate",
+						},
+					).finally(() => {
+						this.progressWatch = null;
+					});
 					if (verified?.text?.trim()) {
 						result = { ...verified, text: stripDoneMarker(verified.text) };
 					}
