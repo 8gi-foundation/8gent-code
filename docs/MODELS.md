@@ -140,7 +140,11 @@ this, so re-check that page if the connection fails.
 }
 ```
 
-Then export the token in the shell that starts 8gent (`export HF_TOKEN=...`).
+Then export the token in the shell that starts 8gent (`export HF_TOKEN=...`),
+and start 8gent from that same shell. If the variable is not set, the request
+fails with "No API key for Hugging Face. Set HF_TOKEN", which means the shell,
+not the file, is what to fix. Name a model as in the example rather than relying
+on discovery for a first run.
 Fields, all optional except `baseUrl`:
 
 | Field | Default | Meaning |
