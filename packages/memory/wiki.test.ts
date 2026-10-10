@@ -19,6 +19,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import { WikiGenerator, slugify } from "./wiki.js";
 
@@ -100,7 +101,7 @@ describe("WikiGenerator", () => {
 	beforeEach(() => {
 		cleanupDb();
 		cleanupOut();
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		graph = new KnowledgeGraph(db);
 		createMemoriesTable(db);
 		wiki = new WikiGenerator(db, graph);

@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { ConceptLinker } from "./concept-linker.js";
 import { KnowledgeGraph } from "./graph.js";
 
@@ -34,7 +35,7 @@ function cleanup() {
 describe("ConceptLinker", () => {
 	beforeEach(() => {
 		cleanup();
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		graph = new KnowledgeGraph(db);
 		linker = new ConceptLinker(graph);
 	});

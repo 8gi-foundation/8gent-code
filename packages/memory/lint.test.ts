@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import { lintMemory, lintReportToMarkdown } from "./lint.js";
 
@@ -81,7 +82,7 @@ function insertMemory(
 describe("lintMemory", () => {
 	beforeEach(() => {
 		cleanup();
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		createMemoriesTable(db);
 		graph = new KnowledgeGraph(db);
 	});
@@ -259,7 +260,7 @@ describe("lintMemory", () => {
 		// Also get a clean-ish baseline. Windows cannot delete a file that is still open.
 		db.close();
 		cleanup();
-		const db2 = new Database(TEST_DB);
+		const db2 = trackStatements(new Database(TEST_DB));
 		createMemoriesTable(db2);
 		const graph2 = new KnowledgeGraph(db2);
 		const e1 = graph2.addEntity("concept", "clean");

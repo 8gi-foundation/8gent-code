@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { trackStatements } from "../memory/tracked-db.js";
 
 // ============================================
 // Types
@@ -55,7 +56,7 @@ export function resetDb(): void {
 
 export function getDb(): Database {
 	if (_db) return _db;
-	_db = new Database(getDbPath());
+	_db = trackStatements(new Database(getDbPath()));
 	_db.exec(`
     CREATE TABLE IF NOT EXISTS reflections (
       session_id TEXT PRIMARY KEY,

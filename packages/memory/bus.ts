@@ -160,10 +160,6 @@ export function createSharedMemoryBus(dbPath: string): SharedMemoryBus {
 
 	return {
 		close() {
-			// Prepared statements keep the file open past db.close() (sqlite3_close_v2); Windows refuses to delete it then.
-			insertMsg.finalize();
-			selectByScope.finalize();
-			selectByChannel.finalize();
 			store.close();
 		},
 		storeMessage(

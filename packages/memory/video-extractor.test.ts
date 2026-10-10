@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptSegment, VideoEvent, VideoExtraction } from "@8gent/eyes";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import {
 	type VideoTripleExtractorFn,
@@ -309,7 +310,7 @@ describe("ingestVideoToGraph", () => {
 
 	beforeEach(() => {
 		removeDbFiles(TEST_DB);
-		db = new Database(TEST_DB, { create: true });
+		db = trackStatements(new Database(TEST_DB, { create: true }));
 		graph = new KnowledgeGraph(db);
 	});
 

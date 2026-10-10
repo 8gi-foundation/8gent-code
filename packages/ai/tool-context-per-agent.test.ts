@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { removeTree } from "../../tests/db-files";
+import { resetMemoryManager } from "../memory";
 import { type EightAgentConfig, createEightAgent } from "./agent";
 import { agentTools, createRuntimeParams, getToolContext, setToolContext } from "./tools";
 
@@ -30,6 +31,8 @@ const dirs: string[] = [];
 
 afterAll(() => {
 	for (const s of servers) s.stop(true);
+	// The per-agent memory managers hold their project databases open; Windows cannot remove the dirs until they close.
+	resetMemoryManager();
 	for (const d of dirs) removeTree(d);
 	removeTree(process.env.EIGHT_DATA_DIR as string);
 });

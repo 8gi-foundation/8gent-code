@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 
 const TEST_DB = join(tmpdir(), "test-graph-project-scope.db");
@@ -33,7 +34,7 @@ describe("KnowledgeGraph project scoping", () => {
 
 	beforeEach(() => {
 		rm(TEST_DB);
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		graph = new KnowledgeGraph(db);
 	});
 
@@ -126,7 +127,7 @@ describe("KnowledgeGraph migration from unscoped schema", () => {
 	it("adds project_id to a populated pre-scoping DB and backfills 'default'", () => {
 		// Build a DB with the OLD unscoped schema and seed two entities + one
 		// relationship, exactly as a pre-feature daemon would have left it.
-		const raw = new Database(MIGRATE_DB);
+		const raw = trackStatements(new Database(MIGRATE_DB));
 		raw.run(`
 			CREATE TABLE knowledge_entities (
 				id            TEXT PRIMARY KEY,
@@ -171,7 +172,7 @@ describe("KnowledgeGraph migration from unscoped schema", () => {
 		raw.close();
 
 		// Open through KnowledgeGraph: initSchema runs the migration.
-		const db = new Database(MIGRATE_DB);
+		const db = trackStatements(new Database(MIGRATE_DB));
 		const graph = new KnowledgeGraph(db);
 
 		// No data lost: both entities + the relationship survive.
@@ -206,13 +207,13 @@ describe("KnowledgeGraph migration from unscoped schema", () => {
 
 	it("re-opening an already-migrated DB is a no-op (idempotent)", () => {
 		// First open creates + migrates.
-		let db = new Database(MIGRATE_DB);
+		let db = trackStatements(new Database(MIGRATE_DB));
 		let graph = new KnowledgeGraph(db);
 		graph.addEntity("concept", "Persisted", undefined, "project-a");
 		db.close();
 
 		// Second open must not throw and must preserve the data.
-		db = new Database(MIGRATE_DB);
+		db = trackStatements(new Database(MIGRATE_DB));
 		graph = new KnowledgeGraph(db);
 		const found = graph.findEntities({ projectId: "project-a" });
 		expect(found).toHaveLength(1);

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { MemoryStore } from "./store.js";
 import type { CoreMemory, SemanticMemory } from "./types.js";
 
@@ -104,7 +105,7 @@ describe("forget() — soft delete", () => {
 		expect(result).toBe(true);
 
 		// Verify via raw SQL that row still exists with deleted_at set
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const row = rawDb.prepare("SELECT id, deleted_at FROM memories WHERE id = ?").get(id) as {
 			id: string;
 			deleted_at: number | null;
@@ -169,7 +170,7 @@ describe("forget() — soft delete", () => {
 		store.forget(id, "archiving");
 
 		// Check memory_versions via raw SQL
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const versions = rawDb
 			.prepare("SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version DESC")
 			.all(id) as Array<{
@@ -202,7 +203,7 @@ describe("forget() — soft delete", () => {
 
 		store.forget(id);
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const version = rawDb
 			.prepare("SELECT change_reason FROM memory_versions WHERE memory_id = ?")
 			.get(id) as { change_reason: string } | null;
@@ -266,7 +267,7 @@ describe("update() — versioning", () => {
 
 		store.update("mem_snap", { content: "New content" }, "refine", "agent");
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const versions = rawDb
 			.prepare("SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version")
 			.all("mem_snap") as Array<{
@@ -293,7 +294,7 @@ describe("update() — versioning", () => {
 		store.update("mem_multi", { content: "v3 content" }, "third version", "agent");
 		store.update("mem_multi", { content: "v4 content" }, "fourth version", "agent");
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const versions = rawDb
 			.prepare(
 				"SELECT version, data_snapshot, change_reason FROM memory_versions WHERE memory_id = ? ORDER BY version",
@@ -345,7 +346,7 @@ describe("update() — versioning", () => {
 
 		store.update("mem_blob", { content: "Changed content" }, "update blob", "system");
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const row = rawDb
 			.prepare("SELECT data_snapshot FROM memory_versions WHERE memory_id = ?")
 			.get("mem_blob") as { data_snapshot: string } | null;
@@ -372,7 +373,7 @@ describe("update() — versioning", () => {
 
 		store.update("mem_audit", { content: "Audited" }, "quarterly review", "compliance-agent");
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const row = rawDb
 			.prepare("SELECT changed_by, change_reason FROM memory_versions WHERE memory_id = ?")
 			.get("mem_audit") as { changed_by: string; change_reason: string } | null;
@@ -410,7 +411,7 @@ describe("update() — versioning", () => {
 		);
 
 		// Verify via raw SQL that the data column is updated
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const row = rawDb
 			.prepare("SELECT data, version, importance FROM memories WHERE id = ?")
 			.get("mem_merged") as {
@@ -434,7 +435,7 @@ describe("update() — versioning", () => {
 		const mem = makeCoreMem({ id: "mem_ts" });
 		store.write(mem);
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const before = rawDb.prepare("SELECT updated_at FROM memories WHERE id = ?").get("mem_ts") as {
 			updated_at: number;
 		};
@@ -444,7 +445,7 @@ describe("update() — versioning", () => {
 
 		store.update("mem_ts", { content: "Updated" }, "ts test", "agent");
 
-		const rawDb2 = new Database(dbPath, { readonly: true });
+		const rawDb2 = trackStatements(new Database(dbPath, { readonly: true }));
 		const after = rawDb2.prepare("SELECT updated_at FROM memories WHERE id = ?").get("mem_ts") as {
 			updated_at: number;
 		};
@@ -464,7 +465,7 @@ describe("forget + update interplay", () => {
 		store.update("mem_combo", { content: "v2" }, "first change", "agent");
 		store.forget("mem_combo", "done with it");
 
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const versions = rawDb
 			.prepare(
 				"SELECT version, change_reason FROM memory_versions WHERE memory_id = ? ORDER BY version",
@@ -493,7 +494,7 @@ describe("forget + update interplay", () => {
 		expect(result).toBe(false);
 
 		// But version history still exists
-		const rawDb = new Database(dbPath, { readonly: true });
+		const rawDb = trackStatements(new Database(dbPath, { readonly: true }));
 		const count = rawDb
 			.prepare("SELECT COUNT(*) as c FROM memory_versions WHERE memory_id = ?")
 			.get("mem_preserved") as { c: number };

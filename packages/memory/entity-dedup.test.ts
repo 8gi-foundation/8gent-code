@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import type { EntityType } from "./graph.js";
 
@@ -30,7 +31,7 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 	beforeEach(() => {
 		// Clean slate for every test
 		removeDbFiles(TEST_DB);
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		graph = new KnowledgeGraph(db);
 	});
 
