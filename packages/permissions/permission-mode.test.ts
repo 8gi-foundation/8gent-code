@@ -408,7 +408,8 @@ describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE=0", () 
 		expect(existsSync(join(w.dir, "victim.txt"))).toBe(false);
 	});
 
-	test("an allowed command that is not dangerous runs without a card (Ask would have asked)", async () => {
+	// run_command goes through cmd.exe on Windows, where printf does not exist.
+	test.skipIf(process.platform === "win32")("an allowed command that is not dangerous runs without a card (Ask would have asked)", async () => {
 		const out = await executorIn(w.dir, "guarded").execute("run_command", {
 			command: "printf ok > made.txt",
 		});

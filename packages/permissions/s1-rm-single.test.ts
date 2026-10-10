@@ -33,6 +33,9 @@ import { registerTuiApprovalHandler } from "./tui-approval-channel";
 
 afterAll(cleanupTempDirs);
 
+// Windows refuses a filename that starts with a colon; those cases run on POSIX only.
+const HAS_COLON_NAMES = process.platform !== "win32";
+
 class AlwaysDangerous implements DecideBackend {
 	readonly name = "stub";
 	readonly model = "always-dangerous";
@@ -124,10 +127,17 @@ beforeEach(() => {
 	// Tracked files whose names need the literal, case-insensitive check:
 	// a capitalised twin and a name that starts with a colon.
 	writeFileSync(join(ws, "run", "Case.lock"), "pid=1");
-	writeFileSync(join(ws, "run", ":colon.lock"), "pid=1");
-	git(ws, "add", "--", "run/Case.lock", ":(literal)run/:colon.lock");
+	// A colon cannot start a filename on Windows (it is the drive/stream separator), so the
+	// colon-named fixtures exist on POSIX only. The command grammar admits no other character
+	// that git treats as pathspec magic and Windows allows, so there is no twin to add.
+	const literalNames = ["run/Case.lock"];
+	if (HAS_COLON_NAMES) {
+		writeFileSync(join(ws, "run", ":colon.lock"), "pid=1");
+		literalNames.push(":(literal)run/:colon.lock");
+	}
+	git(ws, "add", "--", ...literalNames);
 	git(ws, "commit", "-qm", "names");
-	writeFileSync(join(ws, "run", ":free.lock"), "pid=1");
+	if (HAS_COLON_NAMES) writeFileSync(join(ws, "run", ":free.lock"), "pid=1");
 	// An independent repository nested under run/, with a tracked lock.
 	mkdirSync(join(ws, "run", "nested"));
 	git(join(ws, "run", "nested"), "init", "-q");
@@ -229,7 +239,9 @@ describe("singleFileDelete", () => {
 		// Tracked status is read from the file's own directory, by literal name.
 		["a tracked file spelt in another case", "rm -f run/case.lock"],
 		["a tracked file spelt in its own case", "rm -f run/Case.lock"],
-		["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"],
+		...(HAS_COLON_NAMES
+			? [["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"]]
+			: []),
 		["a file tracked by a nested repository", "rm -f run/nested/a.lock"],
 		["a file tracked by a submodule", "rm -f run/mod/m.lock"],
 		// Dependency lockfiles are project state, not scratch.
@@ -262,11 +274,14 @@ describe("singleFileDelete", () => {
 		expect(singleFileDelete(`rm -f ${join(ws, "run", "worker.lock")}`, ws).ok).toBe(false);
 	});
 
-	test("literal names: an untracked colon-named lock, and an untracked lock in a nested repository, still pass", () => {
+	test.skipIf(!HAS_COLON_NAMES)("literal names: an untracked colon-named lock still passes (POSIX only: Windows forbids a leading colon)", () => {
 		expect(singleFileDelete("rm -f run/:free.lock", ws)).toEqual({
 			ok: true,
 			rel: "run/:free.lock",
 		});
+	});
+
+	test("literal names: an untracked lock in a nested repository still passes", () => {
 		expect(singleFileDelete("rm -f run/nested/free.lock", ws)).toEqual({
 			ok: true,
 			rel: "run/nested/free.lock",
@@ -353,7 +368,9 @@ describe("singleFileDelete", () => {
 		expect(hint("rm -f run/tracked.lock")).toStartWith("That file is tracked by git.");
 		expect(hint("rm -f run/mod/m.lock")).toStartWith("That file is tracked by git.");
 		expect(hint("rm -f run/nested/a.lock")).toStartWith("That file is tracked by git.");
-		expect(hint("rm -f run/:colon.lock")).toStartWith("That file is tracked by git.");
+		if (HAS_COLON_NAMES) {
+			expect(hint("rm -f run/:colon.lock")).toStartWith("That file is tracked by git.");
+		}
 		// On a case-insensitive file system the other spelling names the same
 		// file, and it is the tracked check that refuses it, not the lstat.
 		if (process.platform === "darwin")
@@ -424,7 +441,7 @@ describe("systemOneGate", () => {
 		// a case twin only exists on a case-insensitive filesystem; on Linux run/case.lock is absent,
 		// and removing an absent file is already allowed by the rm-of-nothing rule
 		...(process.platform === "darwin" ? ["rm -f run/case.lock"] : []),
-		"rm -f run/:colon.lock",
+		...(HAS_COLON_NAMES ? ["rm -f run/:colon.lock"] : []),
 		"rm -f run/nested/a.lock",
 		"rm -f run/mod/m.lock",
 		"rm -f run/bun.lock",

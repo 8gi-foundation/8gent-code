@@ -48,6 +48,9 @@ afterAll(() => {
 	}
 });
 
+/** A path as the profile spells it: SBPL strings escape backslashes and quotes (Windows paths have backslashes). */
+const sbpl = (p: string) => p.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
 // ============================================
 // Profile generation (pure, every platform)
 // ============================================
@@ -56,7 +59,7 @@ describe("buildSeatbeltProfile", () => {
 	test("denies by default and allows the work dir", () => {
 		const profile = buildSeatbeltProfile({ workDir: WORKSPACE });
 		expect(profile.startsWith("(version 1)\n(deny default)")).toBe(true);
-		expect(profile).toContain(`(allow file-read* file-write* (subpath "${WORKSPACE}"))`);
+		expect(profile).toContain(`(allow file-read* file-write* (subpath "${sbpl(WORKSPACE)}"))`);
 	});
 
 	test("network is denied unless explicitly allowed", () => {
@@ -75,7 +78,7 @@ describe("buildSeatbeltProfile", () => {
 			readPaths: [FAKE_HOME],
 			writePaths: [OUTSIDE],
 		});
-		const sshDeny = profile.indexOf(path.join(FAKE_HOME, ".ssh"));
+		const sshDeny = profile.indexOf(sbpl(path.join(FAKE_HOME, ".ssh")));
 		const lastAllow = profile.lastIndexOf("(allow ");
 		expect(sshDeny).toBeGreaterThan(-1);
 		expect(sshDeny).toBeGreaterThan(lastAllow);
@@ -87,8 +90,8 @@ describe("buildSeatbeltProfile", () => {
 			readPaths: ["/one/read"],
 			writePaths: ["/two/write"],
 		});
-		expect(profile).toContain(`(allow file-read* (subpath "/one/read"))`);
-		expect(profile).toContain(`(allow file-read* file-write* (subpath "/two/write"))`);
+		expect(profile).toContain(`(allow file-read* (subpath "${sbpl(path.normalize("/one/read"))}"))`);
+		expect(profile).toContain(`(allow file-read* file-write* (subpath "${sbpl(path.normalize("/two/write"))}"))`);
 	});
 
 	test("escapes quotes in paths so a crafted dir name cannot break the profile", () => {
