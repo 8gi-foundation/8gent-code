@@ -17,7 +17,13 @@
  *
  * Two policies live here:
  *
- *  - Native (non-streamed) path: one wall-clock bound per attempt,
+ *  - Native path (#3855): generate() is a whole multi-step tool loop, so it is
+ *    judged by withProgressTimeout below (idle gap re-armed by step and tool
+ *    progress, plus the resolveStepCeilingMs() outer budget). The flat bound
+ *    that follows still guards single non-looping calls and the text-tool
+ *    rounds:
+ *
+ *  - One wall-clock bound per attempt,
  *    DEFAULT_TURN_TIMEOUT_MS (5 min), override with EIGHT_TURN_TIMEOUT_MS.
  *    A generate() that does not stream gives no progress signal, so total time
  *    is the only thing we can judge. 5 min is the compromise for a LOCAL-FIRST
@@ -182,4 +188,89 @@ export function resolveStepCeilingMs(
 		return resolveTurnTimeoutMs(env);
 	}
 	return DEFAULT_STREAM_CEILING_MS;
+}
+
+/**
+ * Progress signal for a multi-step native attempt (#3855).
+ *
+ * One native generate() is a whole tool loop: many model calls and tool runs
+ * inside a single awaited promise. A flat wall clock of DEFAULT_TURN_TIMEOUT_MS
+ * around it killed healthy cloud turns that kept producing (a media run killed
+ * 9 s after its last output). The loop reports progress here instead:
+ *
+ *  - touch(): a step finished or a tool returned; re-arm the idle gap.
+ *  - hold()/release(): a tool is running. Its own timeout owns that time, so
+ *    the idle gap is suspended while any tool is in flight and re-armed fresh
+ *    when the last one returns. The ceiling never pauses.
+ */
+export class ProgressWatch {
+	private held = 0;
+	private onTouch: (() => void) | null = null;
+	bind(rearm: () => void): void {
+		this.onTouch = rearm;
+	}
+	touch(): void {
+		if (this.held === 0) this.onTouch?.();
+	}
+	hold(): void {
+		this.held++;
+		this.onTouch?.();
+	}
+	release(): void {
+		this.held = Math.max(0, this.held - 1);
+		this.onTouch?.();
+	}
+	get isHeld(): boolean {
+		return this.held > 0;
+	}
+}
+
+export interface ProgressTimeoutOptions {
+	/** Max quiet gap between progress signals; null turns the gap off. */
+	idleMs: number | null;
+	/** Hard wall-clock bound for the whole attempt (the outer turn budget). */
+	ceilingMs: number;
+	onTimeout?: () => void;
+	label?: string;
+}
+
+/**
+ * Race a multi-step attempt against an idle gap (re-armed by progress) and a
+ * wall-clock ceiling. A silent provider dies after one gap; a loop that keeps
+ * finishing steps or tools lives until the ceiling. Fail-closed on both.
+ */
+export async function withProgressTimeout<T>(
+	run: (watch: ProgressWatch) => Promise<T>,
+	opts: ProgressTimeoutOptions,
+): Promise<T> {
+	const watch = new ProgressWatch();
+	let idleTimer: ReturnType<typeof setTimeout> | null = null;
+	let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
+	let rejectFn: (e: Error) => void = () => {};
+	const fire = (ms: number, kind: TurnTimeoutKind) => {
+		try {
+			opts.onTimeout?.();
+		} catch {
+			// Aborting must never mask the timeout rejection.
+		}
+		rejectFn(new TurnTimeoutError(ms, opts.label, kind));
+	};
+	const rearm = () => {
+		if (idleTimer) clearTimeout(idleTimer);
+		idleTimer = null;
+		if (opts.idleMs === null || watch.isHeld) return;
+		idleTimer = setTimeout(() => fire(opts.idleMs as number, "idle"), opts.idleMs);
+	};
+	const timeout = new Promise<never>((_, reject) => {
+		rejectFn = reject;
+	});
+	watch.bind(rearm);
+	ceilingTimer = setTimeout(() => fire(opts.ceilingMs, "ceiling"), opts.ceilingMs);
+	rearm();
+	try {
+		return await Promise.race([run(watch), timeout]);
+	} finally {
+		if (idleTimer) clearTimeout(idleTimer);
+		if (ceilingTimer) clearTimeout(ceilingTimer);
+	}
 }
