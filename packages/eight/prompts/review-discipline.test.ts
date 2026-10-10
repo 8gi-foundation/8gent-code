@@ -23,9 +23,17 @@ describe("review discipline segment", () => {
 
 	test("asks for one or two proving lines and summarises repeats in words", () => {
 		const s = REVIEW_DISCIPLINE_SEGMENT.toLowerCase();
-		expect(s).toContain("one or two lines");
+		expect(s).toContain("one location");
 		expect(s).toContain("similar call sites");
-		expect(s).toContain("instead of listing");
+		expect(s).toContain("never listed");
+	});
+
+	test("bans minor sections, files-reviewed lists and re-citing in fixes", () => {
+		const s = REVIEW_DISCIPLINE_SEGMENT.toLowerCase();
+		expect(s).toContain("without line numbers");
+		expect(s).toContain("fix suggestion");
+		expect(s).toContain('"minor"');
+		expect(s).toContain("list of files reviewed");
 	});
 
 	test("does not mention benchmarks, judges, pilots or numeric limits", () => {
@@ -36,7 +44,7 @@ describe("review discipline segment", () => {
 	});
 
 	test("is short and has no dashes", () => {
-		expect(REVIEW_DISCIPLINE_SEGMENT.length).toBeLessThan(1150);
+		expect(REVIEW_DISCIPLINE_SEGMENT.length).toBeLessThan(1400);
 		expect(REVIEW_DISCIPLINE_SEGMENT).not.toMatch(/[–—]/);
 	});
 
