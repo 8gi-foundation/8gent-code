@@ -11,11 +11,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { MemoryStore } from "./store.js";
 import { type CoreMemory, type Memory, type SemanticMemory, generateId } from "./types.js";
 
-const TEST_DB = `/tmp/memory-store-test-${Date.now()}.db`;
+const TEST_DB = join(tmpdir(), `memory-store-test-${Date.now()}.db`);
 
 function makeCoreMemory(overrides: Partial<CoreMemory> = {}): CoreMemory {
 	const now = Date.now();
@@ -78,10 +80,7 @@ describe("JSONB double-encoding guard", () => {
 
 	afterEach(() => {
 		store.close();
-		for (const suffix of ["", "-wal", "-shm"]) {
-			const p = TEST_DB + suffix;
-			if (existsSync(p)) unlinkSync(p);
-		}
+		removeDbFiles(TEST_DB);
 	});
 
 	// ── Test 1: Roundtrip with object metadata — no double-encoding ────
