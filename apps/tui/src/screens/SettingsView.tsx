@@ -28,6 +28,7 @@ import {
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
+import { KeyVaultScreen } from "./KeyVaultScreen.js";
 
 // ----------------------------------------------------------------------------
 // Field descriptors
@@ -414,6 +415,13 @@ const CATEGORIES: Category[] = [
 			},
 		],
 	},
+	{
+		// Rendered by KeyVaultScreen, not by the field list: provider keys are
+		// masked, stored in the OS keychain, and kept per signed-in user.
+		id: "keys",
+		label: "Keys",
+		fields: [],
+	},
 ];
 
 // ----------------------------------------------------------------------------
@@ -440,7 +448,7 @@ interface SettingsViewProps {
 	onClose: () => void;
 }
 
-type Mode = "browse" | "edit";
+type Mode = "browse" | "edit" | "keys";
 
 // Splitting this component changes prop surface and file structure; tracked separately from the lint sweep.
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
@@ -609,6 +617,11 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 				return;
 			}
 
+			if (category?.id === "keys" && key.return) {
+				setMode("keys");
+				return;
+			}
+
 			if (!field) return;
 
 			// Tab cycles categories
@@ -669,10 +682,13 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 				return;
 			}
 		},
-		{ isActive: visible },
+		{ isActive: visible && mode !== "keys" },
 	);
 
 	if (!visible) return null;
+
+	// Keys section: the masked entry screen owns the keyboard until it closes.
+	if (mode === "keys") return <KeyVaultScreen onClose={() => setMode("browse")} />;
 
 	// Help overlay
 	if (showHelp) {
@@ -736,6 +752,9 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 						{category?.label || ""}
 					</Text>
 					<Box marginTop={1} flexDirection="column">
+						{category?.id === "keys" ? (
+							<MutedText>Press Enter to add, replace or delete provider API keys.</MutedText>
+						) : null}
 						<Stack>
 							{(category?.fields || []).map((f, i) => {
 								const selected = i === fieldIndex;

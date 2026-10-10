@@ -224,6 +224,8 @@ export class SecretVault {
 			JSON.stringify(this.data, null, 2),
 			{ mode: 0o600 }, // owner read/write only
 		);
+		// mode above only applies on create; tighten a pre-existing loose file.
+		fs.chmodSync(this.vaultPath, 0o600);
 	}
 }
 
