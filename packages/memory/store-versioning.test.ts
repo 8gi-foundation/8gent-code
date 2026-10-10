@@ -9,7 +9,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { removeDbFiles } from "../../tests/db-files";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryStore } from "./store.js";
@@ -90,10 +90,7 @@ afterEach(() => {
 		// already closed
 	}
 	// Clean up temp DB files
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = dbPath + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(dbPath);
 });
 
 // ── Soft Delete Tests ────────────────────────────────────────────────────

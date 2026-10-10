@@ -7,7 +7,9 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { DecisionAuditStore, GENESIS_HASH } from "./decision-store.js";
 import {
 	getDecisionAuditStore,
@@ -22,20 +24,11 @@ let store: DecisionAuditStore;
 let dbPath: string;
 
 function tmpDb(): string {
-	return `/tmp/decision-audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`;
+	return join(tmpdir(), `decision-audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`);
 }
 
 function cleanup(p: string): void {
-	for (const ext of ["", "-wal", "-shm"]) {
-		const f = p + ext;
-		if (existsSync(f)) {
-			try {
-				unlinkSync(f);
-			} catch {
-				/* best effort */
-			}
-		}
-	}
+	removeDbFiles(p);
 }
 
 function sample(overrides: Partial<LogDecisionInput> = {}): LogDecisionInput {

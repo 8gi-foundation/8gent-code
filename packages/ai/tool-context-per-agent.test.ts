@@ -12,6 +12,7 @@
  * after agent A, which is the order that broke A.
  */
 
+import { removeTree } from "../../tests/db-files";
 import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -29,8 +30,8 @@ const dirs: string[] = [];
 
 afterAll(() => {
 	for (const s of servers) s.stop(true);
-	for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
-	fs.rmSync(process.env.EIGHT_DATA_DIR as string, { recursive: true, force: true });
+	for (const d of dirs) removeTree(d);
+	removeTree(process.env.EIGHT_DATA_DIR as string);
 });
 
 function tempDir(label: string): string {

@@ -14,21 +14,20 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { KnowledgeGraph } from "./graph.js";
 import { lintMemory, lintReportToMarkdown } from "./lint.js";
 
-const TEST_DB = "/tmp/test-memory-lint.db";
+const TEST_DB = join(tmpdir(), "test-memory-lint.db");
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let db: Database;
 let graph: KnowledgeGraph;
 
 function cleanup() {
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = TEST_DB + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(TEST_DB);
 }
 
 function createMemoriesTable(db: Database) {

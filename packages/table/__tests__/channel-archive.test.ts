@@ -12,6 +12,7 @@
  * because it is the case that runs against James's live 48-channel table.db.
  */
 
+import { removeTree } from "../../../tests/db-files";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
@@ -39,7 +40,7 @@ beforeEach(() => {
 afterEach(() => {
 	store.close();
 	try {
-		fs.rmSync(tmpDir, { recursive: true, force: true });
+		removeTree(tmpDir);
 	} catch {
 		// best effort
 	}
@@ -229,7 +230,7 @@ describe("archived_at migration", () => {
 			expect(migrated.listChannels({ includeArchived: true }).length).toBe(1);
 		} finally {
 			migrated.close();
-			fs.rmSync(dir, { recursive: true, force: true });
+			removeTree(dir);
 		}
 	});
 

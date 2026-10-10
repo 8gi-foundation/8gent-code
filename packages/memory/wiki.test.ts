@@ -15,12 +15,15 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { KnowledgeGraph } from "./graph.js";
 import { WikiGenerator, slugify } from "./wiki.js";
 
-const TEST_DB = "/tmp/test-wiki-generator.db";
-const TEST_OUT = "/tmp/test-wiki-out";
+const TEST_DB = join(tmpdir(), "test-wiki-generator.db");
+const TEST_OUT = join(tmpdir(), "test-wiki-out");
 
 let db: Database;
 let graph: KnowledgeGraph;
@@ -34,10 +37,7 @@ let conceptCache: string;
 let serviceRedis: string;
 
 function cleanupDb() {
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = TEST_DB + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(TEST_DB);
 }
 
 function cleanupOut() {
