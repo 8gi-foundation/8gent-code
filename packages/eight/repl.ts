@@ -542,7 +542,7 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			// is the same rule the OpenAI-compatible auth gate reads. The old
 			// hardcoded `name === "ollama"` said "○ no key" for every other
 			// keyless local provider, declared ones included.
-			const keyInfo = p.apiKeyEnv ? hasKey : "\x1b[32m✓ local\x1b[0m";
+			const keyInfo = p.apiKeyEnv || p.apiKeyRef ? hasKey : "\x1b[32m✓ local\x1b[0m";
 			console.log(`  ${p.displayName.padEnd(20)} ${keyInfo}${isActive}`);
 		}
 		console.log("\n  Use \x1b[36m/provider <name>\x1b[0m to switch");
@@ -560,7 +560,7 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 		// An empty apiKeyEnv is the registry's declaration that no key exists,
 		// which covers every keyless local provider rather than only ollama.
 		console.log(
-			`  API Key: ${!p.apiKeyEnv ? "not needed (local)" : hasKey ? "✓ set" : "✗ not set"}`,
+			`  API Key: ${!p.apiKeyEnv && !p.apiKeyRef ? "not needed (local)" : hasKey ? "✓ set" : "✗ not set"}`,
 		);
 		console.log(
 			`  Tools: ${p.supportsTools ? "✓" : "✗"}  Streaming: ${p.supportsStreaming ? "✓" : "✗"}  Vision: ${p.supportsVision ? "✓" : "✗"}`,
@@ -611,14 +611,12 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			// Same rule as everywhere else: a provider that declares no key env
 			// var takes no key. Storing one for a keyless declared provider wrote
 			// a credential that is never sent and told the user it was saved.
-			if (!p.apiKeyEnv) {
+			if (!p.apiKeyEnv && !p.apiKeyRef) {
 				console.log(`\x1b[33m${p.displayName} doesn't need an API key (it's local)\x1b[0m`);
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				// Report where it actually went - the path is redirectable via
-				// EIGHT_DATA_DIR / EIGHT_PROVIDERS_SETTINGS_PATH.
-				console.log(`  Stored in ${pm.getSettingsPath()}`);
+				console.log("  Stored in the key vault (OS keychain when available), not in providers.json.");
 			}
 		}
 		return true;

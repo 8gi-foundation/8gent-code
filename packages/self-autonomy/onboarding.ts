@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
 import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
-import { getVault } from "../secrets";
+import { getVault, getVaultOrNull } from "../secrets";
 import {
 	loadSettings,
 	saveSettings,
@@ -1247,7 +1247,7 @@ export class OnboardingManager {
 		text = text.replace("{voice}", voiceDesc);
 		text = text.replace(
 			"{telegram}",
-			getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up",
+			getVaultOrNull()?.has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up",
 		);
 		text = text.replace(
 			"{found_on_machine}",
