@@ -67,12 +67,41 @@ export class NoAllowedProviderError extends Error {
 		readonly model: string,
 		readonly channel: FailoverChannel,
 		readonly allowed: readonly string[],
+		hostedBlocked = false,
 	) {
 		super(
-			`No allowed provider for model "${model}" (${channel} channel). EIGHT_PROVIDERS_ALLOW=${allowed.join(",")}`,
+			hostedBlocked
+				? `No local provider for model "${model}" (${channel} channel). Hosted providers need EIGHT_ALLOW_HOSTED=1.`
+				: `No allowed provider for model "${model}" (${channel} channel). EIGHT_PROVIDERS_ALLOW=${allowed.join(",")}`,
 		);
 		this.name = "NoAllowedProviderError";
 	}
+}
+
+/**
+ * Providers whose inference runs on this machine (or on a box the user points a
+ * local runtime at). Everything else is hosted.
+ */
+export const LOCAL_FAILOVER_PROVIDERS: readonly string[] = [
+	"8gent",
+	"ollama",
+	"lmstudio",
+	"llama-server",
+	"apfel",
+	"apple-foundation",
+];
+
+/** True when `provider` is not a local runtime: using it sends work off the machine. */
+export function isHostedProvider(provider: string): boolean {
+	return !LOCAL_FAILOVER_PROVIDERS.includes(provider.trim().toLowerCase());
+}
+
+/**
+ * Hosted providers are opt-in (#3710): only EIGHT_ALLOW_HOSTED=1 lets a chain,
+ * a child agent or a model lookup use or contact one.
+ */
+export function hostedAllowed(env: Record<string, string | undefined> = process.env): boolean {
+	return env.EIGHT_ALLOW_HOSTED?.trim() === "1";
 }
 
 /** EIGHT_PROVIDERS_ALLOW as a lowercase list; null when unset or empty (no filtering). */
@@ -90,6 +119,12 @@ export interface ModelFailoverOptions {
 	 * means all. An empty array allows nothing, so every resolve() throws.
 	 */
 	allow?: readonly string[] | null;
+	/**
+	 * Whether chains may use hosted providers. Defaults to EIGHT_ALLOW_HOSTED=1.
+	 * Without it, hosted entries are dropped and a model with no chain throws
+	 * NoAllowedProviderError instead of going to openrouter (#3710).
+	 */
+	allowHosted?: boolean;
 }
 
 export class ModelFailover {
@@ -97,15 +132,22 @@ export class ModelFailover {
 	private down: Set<string> = new Set();
 	private events: FailoverEvent[] = [];
 	private allow: string[] | null;
+	/** True when hosted providers were filtered out because there is no opt-in. */
+	private hostedBlocked: boolean;
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
 		opts: ModelFailoverOptions = {},
 	) {
-		this.allow =
+		const explicit =
 			opts.allow === undefined
 				? allowFromEnv()
 				: (opts.allow?.map((p) => p.trim().toLowerCase()) ?? null);
+		this.hostedBlocked = !(opts.allowHosted ?? hostedAllowed());
+		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
+		this.allow = this.hostedBlocked
+			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
+			: explicit;
 		const loaded = chains || this.loadChains();
 		this.chainsByChannel = this.allow ? this.filterChains(loaded, this.allow) : loaded;
 	}
@@ -282,10 +324,10 @@ export class ModelFailover {
 	 * Return the first healthy model in the chain for the given channel.
 	 * Defaults to the `text` channel for back-compat with existing callers.
 	 *
-	 * When no chain is registered for a model, fall back to the free cloud
-	 * tier rather than assuming ollama is installed — Windows / fresh
-	 * installs frequently lack it and "ollama is the universal fallback"
-	 * is what made the model crash on first launch.
+	 * Hosted providers are opt-in (EIGHT_ALLOW_HOSTED=1). Without it, chains
+	 * hold only local providers and a model with no chain throws
+	 * NoAllowedProviderError. With it, a model with no chain is retried on
+	 * openrouter, the free cloud tier.
 	 *
 	 * With an allowlist (EIGHT_PROVIDERS_ALLOW) chains hold only allowed
 	 * providers, and when nothing allowed can serve the model this throws
@@ -294,7 +336,7 @@ export class ModelFailover {
 	resolve(model: string, channel: FailoverChannel = "text"): FailoverEntry {
 		const chain = this.chainsByChannel[channel]?.[model];
 		if (this.allow && (chain ? chain.models.length === 0 : !this.allow.includes("openrouter"))) {
-			throw new NoAllowedProviderError(model, channel, this.allow);
+			throw new NoAllowedProviderError(model, channel, this.allow, this.hostedBlocked);
 		}
 		if (!chain) return { model, provider: "openrouter" };
 

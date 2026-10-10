@@ -370,7 +370,13 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`json
 {"tool": "git_add", "arguments": {"files": "."}}
 {"tool": "git_commit", "arguments": {"message": "feat: add feature"}}
-\`\`\``;
+\`\`\`
+
+### Recovering a lost file
+Restore from git, never retype contents.
+1. Uncommitted delete (" D <path>" in \`git status\`): \`git checkout HEAD -- <path>\` (\`git restore\` may be denied).
+2. Committed delete: if \`test -e <path>\` succeeds, stop and tell the user, never overwrite. Else the first \`git log --diff-filter=D --oneline -- <path>\` hit <sha> is the deleting commit; run \`git checkout <sha>^ -- <path>\`.
+3. \`git diff <sha>^ -- <path>\` (or HEAD) must print nothing.`;
 
 export const ERROR_RECOVERY_SEGMENT = `## ERROR RECOVERY
 

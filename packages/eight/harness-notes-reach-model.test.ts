@@ -150,6 +150,26 @@ for (const [label, textTools] of [
 			expect(JSON.stringify(notes[0]?.content)).toContain(CONTEXT_NOTE_HEADER);
 		}, 60_000);
 
+		test("vision: a failed interpretation is shown to the user and noted to the model", async () => {
+			const interpret = spyOn(VisionInterpreter.prototype, "interpret").mockImplementation(
+				function (this: unknown) {
+					const onError = (this as { onError?: (id: string, m: string) => void }).onError;
+					onError?.("vision-test", "SENTINEL_3715_no_vision_model");
+					return "vision-test";
+				},
+			);
+			try {
+				const shown: string[] = [];
+				const agent = build({ onStepFinish: (s: { text?: string }) => shown.push(s.text ?? "") });
+				const body = await turn(agent, "What is in this screenshot?", "aGVsbG8=");
+				expect(shown.some((t) => t.startsWith("Image could not be interpreted"))).toBe(true);
+				expect(shown.some((t) => t.includes("running in the background"))).toBe(false);
+				expect(carrying(body, "SENTINEL_3715_no_vision_model").length).toBe(1);
+			} finally {
+				interpret.mockRestore();
+			}
+		}, 60_000);
+
 		test("vision: the interpretation is sent, and the prefix does not move", async () => {
 			// The vision model is a network call; stand it in with one that
 			// reports a fixed description through the interpreter's own callback.
