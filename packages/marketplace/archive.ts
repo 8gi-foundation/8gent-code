@@ -148,14 +148,23 @@ function collectSortedRelativePaths(rootAbs: string, rootName: string): string[]
 }
 
 /**
+ * The archive as tar should see it from `cwd`: relative, forward slashes.
+ * GNU tar reads any "C:..." argument as host "C" plus a path, so a Windows
+ * drive path never reaches it; on POSIX this is an ordinary relative path.
+ */
+function tarPathFrom(cwd: string, archivePath: string): string {
+	return path.relative(path.resolve(cwd), path.resolve(archivePath)).split(path.sep).join("/");
+}
+
+/**
  * Extract a `.8gent-app.tar.gz` into `destDir` using system tar.
  * Caller is responsible for verifying integrity afterwards.
  */
 export function extractArchive(archivePath: string, destDir: string): void {
 	fs.mkdirSync(destDir, { recursive: true });
-	const res = spawnSync("tar", ["-xzf", path.basename(archivePath), "-C", path.resolve(destDir)], {
+	const res = spawnSync("tar", ["-xzf", tarPathFrom(destDir, archivePath)], {
 		stdio: "inherit",
-		cwd: path.dirname(path.resolve(archivePath)),
+		cwd: path.resolve(destDir),
 	});
 	if (res.status !== 0) {
 		throw new Error(`tar -xzf exited with code ${res.status}`);

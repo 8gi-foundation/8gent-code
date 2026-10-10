@@ -213,10 +213,13 @@ async function extractTarGz(archivePath: string, destDir: string): Promise<void>
 			throw new InstallAppError(`unsafe archive entry (escapes sandbox): ${entry}`, "UNSAFE_ENTRY");
 		}
 	}
-	await runTar(
-		["-xzf", path.basename(archivePath), "-C", path.resolve(destDir)],
-		path.dirname(path.resolve(archivePath)),
-	);
+	// Run inside destDir with the archive named relative to it: GNU tar reads any
+	// "C:..." argument (the archive or a -C directory) as host "C" plus a path.
+	const relArchive = path
+		.relative(resolvedDest, path.resolve(archivePath))
+		.split(path.sep)
+		.join("/");
+	await runTar(["-xzf", relArchive], resolvedDest);
 }
 
 function listTarEntries(archivePath: string): Promise<string[]> {

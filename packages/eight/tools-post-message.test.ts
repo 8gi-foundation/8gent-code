@@ -62,15 +62,19 @@ describe("post_message in ToolExecutor", () => {
 		expect(names(new ToolExecutor(work, "pm-test"))).not.toContain("post_message");
 	});
 
-	test("advertised when installed; an approved call runs the helper once", async () => {
-		process.env.EIGHT_TG_BIN_DIR = bins;
-		registerTuiApprovalHandler(async () => "approve");
-		const exec = new ToolExecutor(work, "pm-test");
-		expect(names(exec)).toContain("post_message");
-		const out = await exec.execute("post_message", { chat: "-1004417730052", text: "hi" });
-		expect(out).toContain("message_id 777");
-		expect(await Bun.file(log).text()).toBe("text --chat -1004417730052 -- hi\n");
-	});
+	// POSIX only: the tg-group stub is a shell script, which Windows cannot run as a command.
+	test.skipIf(process.platform === "win32")(
+		"advertised when installed; an approved call runs the helper once",
+		async () => {
+			process.env.EIGHT_TG_BIN_DIR = bins;
+			registerTuiApprovalHandler(async () => "approve");
+			const exec = new ToolExecutor(work, "pm-test");
+			expect(names(exec)).toContain("post_message");
+			const out = await exec.execute("post_message", { chat: "-1004417730052", text: "hi" });
+			expect(out).toContain("message_id 777");
+			expect(await Bun.file(log).text()).toBe("text --chat -1004417730052 -- hi\n");
+		},
+	);
 
 	test("a declined call never runs the helper", async () => {
 		process.env.EIGHT_TG_BIN_DIR = bins;
@@ -96,17 +100,21 @@ describe("post_message in ToolExecutor", () => {
 		expect(await Bun.file(log).exists()).toBe(false);
 	});
 
-	test("an approved post is logged to ~/.8gent/post-message.log without the text", async () => {
-		process.env.EIGHT_TG_BIN_DIR = bins;
-		registerTuiApprovalHandler(async () => "approve");
-		await new ToolExecutor(work, "pm-log").execute("post_message", {
-			chat: "-1004417730052",
-			text: "private words",
-		});
-		const line = readFileSync(join(home, ".8gent", "post-message.log"), "utf8");
-		expect(line).toContain("-1004417730052");
-		expect(line).not.toContain("private words");
-	});
+	// POSIX only: the tg-group stub is a shell script, which Windows cannot run as a command.
+	test.skipIf(process.platform === "win32")(
+		"an approved post is logged to ~/.8gent/post-message.log without the text",
+		async () => {
+			process.env.EIGHT_TG_BIN_DIR = bins;
+			registerTuiApprovalHandler(async () => "approve");
+			await new ToolExecutor(work, "pm-log").execute("post_message", {
+				chat: "-1004417730052",
+				text: "private words",
+			});
+			const line = readFileSync(join(home, ".8gent", "post-message.log"), "utf8");
+			expect(line).toContain("-1004417730052");
+			expect(line).not.toContain("private words");
+		},
+	);
 
 	test("a settings edit during the session grants nothing (snapshot at start)", async () => {
 		process.env.EIGHT_TG_BIN_DIR = bins;

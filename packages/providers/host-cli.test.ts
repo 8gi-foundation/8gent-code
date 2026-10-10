@@ -78,20 +78,28 @@ describe("host-CLI delegation: availability gating", () => {
 		expect(result.reason).toContain("No host CLI binary configured");
 	});
 
-	it("reports available when flag set and binary on PATH", () => {
-		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
-		const result = checkHostCliAvailability("stub-ok");
-		expect(result.available).toBe(true);
-		expect(result.binary).toContain("stub-ok");
-	});
+	// POSIX only: the CLI stubs are sh scripts, which Windows cannot run as commands.
+	it.skipIf(process.platform === "win32")(
+		"reports available when flag set and binary on PATH",
+		() => {
+			process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
+			const result = checkHostCliAvailability("stub-ok");
+			expect(result.available).toBe(true);
+			expect(result.binary).toContain("stub-ok");
+		},
+	);
 
-	it("isHostCliAvailable reflects flag + binary presence", () => {
-		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
-		expect(isHostCliAvailable("stub-ok")).toBe(true);
-		expect(isHostCliAvailable("stub-does-not-exist-zzz")).toBe(false);
-		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
-		expect(isHostCliAvailable("stub-ok")).toBe(false);
-	});
+	// POSIX only: the CLI stubs are sh scripts, which Windows cannot run as commands.
+	it.skipIf(process.platform === "win32")(
+		"isHostCliAvailable reflects flag + binary presence",
+		() => {
+			process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
+			expect(isHostCliAvailable("stub-ok")).toBe(true);
+			expect(isHostCliAvailable("stub-does-not-exist-zzz")).toBe(false);
+			process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
+			expect(isHostCliAvailable("stub-ok")).toBe(false);
+		},
+	);
 });
 
 describe("HostCliClient: primary-style spec (-p prompt, exit 7 rate limit)", () => {
@@ -105,35 +113,44 @@ describe("HostCliClient: primary-style spec (-p prompt, exit 7 rate limit)", () 
 		);
 	});
 
-	it("returns stdout as the assistant message on success", async () => {
-		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
-		const client = new HostCliClient({
-			spec: { binary: "stub-ok", rateLimitExitCode: 7 },
-		});
-		const res = await client.chat([{ role: "user", content: "ping" }]);
-		expect(res.done).toBe(true);
-		expect(res.message.role).toBe("assistant");
-		expect(res.message.content).toBe("ok");
-	});
+	// POSIX only: the CLI stubs are sh scripts, which Windows cannot run as commands.
+	it.skipIf(process.platform === "win32")(
+		"returns stdout as the assistant message on success",
+		async () => {
+			process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
+			const client = new HostCliClient({
+				spec: { binary: "stub-ok", rateLimitExitCode: 7 },
+			});
+			const res = await client.chat([{ role: "user", content: "ping" }]);
+			expect(res.done).toBe(true);
+			expect(res.message.role).toBe("assistant");
+			expect(res.message.content).toBe("ok");
+		},
+	);
 
-	it("surfaces rate-limit exits as HostCliRateLimitError", async () => {
-		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
-		const client = new HostCliClient({
-			spec: { binary: "stub-ratelimit", rateLimitExitCode: 7 },
-		});
-		try {
-			await client.chat([{ role: "user", content: "ping" }]);
-			throw new Error("should have thrown");
-		} catch (err) {
-			expect(err).toBeInstanceOf(HostCliRateLimitError);
-			const e = err as HostCliRateLimitError;
-			expect(e.exitCode).toBe(7);
-		}
-	});
+	// POSIX only: the CLI stubs are sh scripts, which Windows cannot run as commands.
+	it.skipIf(process.platform === "win32")(
+		"surfaces rate-limit exits as HostCliRateLimitError",
+		async () => {
+			process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
+			const client = new HostCliClient({
+				spec: { binary: "stub-ratelimit", rateLimitExitCode: 7 },
+			});
+			try {
+				await client.chat([{ role: "user", content: "ping" }]);
+				throw new Error("should have thrown");
+			} catch (err) {
+				expect(err).toBeInstanceOf(HostCliRateLimitError);
+				const e = err as HostCliRateLimitError;
+				expect(e.exitCode).toBe(7);
+			}
+		},
+	);
 });
 
 describe("HostCliClient: secondary-style spec (exec subcommand, auth via stderr)", () => {
-	it("returns stdout on success", async () => {
+	// POSIX only: the CLI stubs are sh scripts, which Windows cannot run as commands.
+	it.skipIf(process.platform === "win32")("returns stdout on success", async () => {
 		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
 		const client = new HostCliClient({
 			spec: {

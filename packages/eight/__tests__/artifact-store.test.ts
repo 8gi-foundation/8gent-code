@@ -254,11 +254,15 @@ describe("ArtifactStore — PathGuard on write-path (8SO)", () => {
 		);
 	});
 
-	it("rejects construction when dataDir resolves to /dev", () => {
-		expect(() => new ArtifactStore("s-dev", "/dev/null/artifacts", 50_000)).toThrow(
-			/device|guard|denied/i,
-		);
-	});
+	// POSIX only: there is no /dev on Windows.
+	it.skipIf(process.platform === "win32")(
+		"rejects construction when dataDir resolves to /dev",
+		() => {
+			expect(() => new ArtifactStore("s-dev", "/dev/null/artifacts", 50_000)).toThrow(
+				/device|guard|denied/i,
+			);
+		},
+	);
 
 	it("allows a normal tmp dataDir", () => {
 		expect(() => new ArtifactStore("s-ok", dataDir, 50_000)).not.toThrow();

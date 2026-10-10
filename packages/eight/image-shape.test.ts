@@ -202,9 +202,11 @@ describe("imagesWrittenLine", () => {
 		await writePng(path.join(dir, ".cache/thumb.png"), slidePixels(FITTED));
 		await writePng(path.join(dir, "build/slides/s1.png"), slidePixels(FITTED));
 		const start = Date.now() - 2_000;
-		expect(imagesWrittenSince(dir, start).map((f) => path.relative(dir, f.file))).toEqual([
-			"build/slides/s1.png",
-		]);
+		expect(
+			imagesWrittenSince(dir, start).map((f) =>
+				path.relative(dir, f.file).split(path.sep).join("/"),
+			),
+		).toEqual(["build/slides/s1.png"]);
 	});
 
 	test("an unreadable image is still listed, and the check never throws", async () => {

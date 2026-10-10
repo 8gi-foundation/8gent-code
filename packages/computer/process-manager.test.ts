@@ -58,24 +58,28 @@ describe("quitByName quits the exact running process", () => {
 		if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 	});
 
-	test("a uniquely named process is found by exact name and receives SIGTERM", async () => {
-		// A symlink to sleep under a unique name: ps reports the unique name, so
-		// the test can only ever signal its own child.
-		const name = `q8t${process.pid}`.slice(0, 15);
-		const bin = join(dir, name);
-		symlinkSync("/bin/sleep", bin);
-		child = spawn(bin, ["30"], { stdio: "ignore" });
-		const exited = new Promise<NodeJS.Signals | null>((resolve) =>
-			child?.on("exit", (_code, signal) => resolve(signal)),
-		);
-		// Wait until ps can see it.
-		await new Promise((r) => setTimeout(r, 200));
+	// POSIX only: symlinks /bin/sleep and signals it by name; Windows has neither.
+	test.skipIf(process.platform === "win32")(
+		"a uniquely named process is found by exact name and receives SIGTERM",
+		async () => {
+			// A symlink to sleep under a unique name: ps reports the unique name, so
+			// the test can only ever signal its own child.
+			const name = `q8t${process.pid}`.slice(0, 15);
+			const bin = join(dir, name);
+			symlinkSync("/bin/sleep", bin);
+			child = spawn(bin, ["30"], { stdio: "ignore" });
+			const exited = new Promise<NodeJS.Signals | null>((resolve) =>
+				child?.on("exit", (_code, signal) => resolve(signal)),
+			);
+			// Wait until ps can see it.
+			await new Promise((r) => setTimeout(r, 200));
 
-		// A prefix of the name is not a match: exact names only.
-		expect(quitByName(name.slice(0, -1)).ok).toBe(false);
+			// A prefix of the name is not a match: exact names only.
+			expect(quitByName(name.slice(0, -1)).ok).toBe(false);
 
-		const result = quitByName(name, "graceful");
-		expect(result).toEqual({ ok: true });
-		expect(await exited).toBe("SIGTERM");
-	});
+			const result = quitByName(name, "graceful");
+			expect(result).toEqual({ ok: true });
+			expect(await exited).toBe("SIGTERM");
+		},
+	);
 });
