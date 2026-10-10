@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "../memory/tracked-db.js";
 import { DecisionAuditStore, GENESIS_HASH } from "./decision-store.js";
 import {
 	getDecisionAuditStore,
@@ -24,7 +25,10 @@ let store: DecisionAuditStore;
 let dbPath: string;
 
 function tmpDb(): string {
-	return join(tmpdir(), `decision-audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`);
+	return join(
+		tmpdir(),
+		`decision-audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`,
+	);
 }
 
 function cleanup(p: string): void {
@@ -107,7 +111,7 @@ describe("DecisionAuditStore", () => {
 		store.logDecision(sample());
 
 		// Attacker flips the deny at seq 2 into an allow behind the store's back.
-		const raw = new Database(dbPath);
+		const raw = trackStatements(new Database(dbPath));
 		raw
 			.prepare(
 				"UPDATE policy_decision_log SET decision = 'allow', reason = 'allowed' WHERE seq = 2",
@@ -126,7 +130,7 @@ describe("DecisionAuditStore", () => {
 	it("detects a deleted interior entry", () => {
 		for (let i = 0; i < 4; i++) store.logDecision(sample());
 
-		const raw = new Database(dbPath);
+		const raw = trackStatements(new Database(dbPath));
 		raw.prepare("DELETE FROM policy_decision_log WHERE seq = 2").run();
 		raw.close();
 
@@ -144,7 +148,7 @@ describe("DecisionAuditStore", () => {
 
 		// Attacker rewrites seq 2 wholesale with a self-consistent hash but a
 		// prev_hash that does not point at seq 1.
-		const raw = new Database(dbPath);
+		const raw = trackStatements(new Database(dbPath));
 		raw.prepare("UPDATE policy_decision_log SET prev_hash = ? WHERE seq = 2").run("f".repeat(64));
 		raw.close();
 
@@ -163,7 +167,7 @@ describe("DecisionAuditStore", () => {
 
 		// Attacker drops the newest entry. The remaining prefix is a valid
 		// chain, which is exactly why the head must be anchored externally.
-		const raw = new Database(dbPath);
+		const raw = trackStatements(new Database(dbPath));
 		raw.prepare("DELETE FROM policy_decision_log WHERE seq = 2").run();
 		raw.close();
 

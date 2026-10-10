@@ -13,6 +13,7 @@
  */
 
 import { removeTree } from "../../../tests/db-files";
+import { trackStatements } from "../../memory/tracked-db.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
@@ -176,7 +177,7 @@ describe("archived_at migration", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "table-migrate-"));
 		const dbPath = path.join(dir, "legacy.db");
 
-		const legacy = new Database(dbPath, { create: true });
+		const legacy = trackStatements(new Database(dbPath, { create: true }));
 		legacy.exec(`
 			CREATE TABLE channels (
 				id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
