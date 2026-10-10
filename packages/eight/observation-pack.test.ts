@@ -4,7 +4,6 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
-	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +15,7 @@ import {
 	observationPackEnabled,
 	readOutputTool,
 } from "./observation-pack";
+import { rmRetry } from "../../tests/rm-retry";
 
 type Msg = { role: "system" | "user" | "assistant" | "tool"; content: string };
 
@@ -26,7 +26,7 @@ function freshDir(): string {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) rmRetry(d);
 });
 
 // A 40 KB fake tool result with multi-byte characters and CRLF, so a lossy
@@ -127,7 +127,8 @@ describe("ObservationPacker", () => {
 		const files = filesUnder(dir);
 		expect(files.length).toBe(1);
 		expect(files[0].startsWith(sessionDir)).toBe(true);
-		expect(statSync(files[0]).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(statSync(files[0]).mode & 0o777).toBe(0o600);
 	});
 
 	test("recent outputs, small outputs and non-result messages are untouched", () => {
@@ -266,8 +267,8 @@ describe("Agent text-tool path with EIGHT_OBSERVATION_PACK", () => {
 	});
 	afterAll(() => {
 		server?.stop(true);
-		rmSync(home, { recursive: true, force: true });
-		rmSync(repo, { recursive: true, force: true });
+		rmRetry(home);
+		rmRetry(repo);
 		for (const k of keys) {
 			if (saved[k] === undefined) Reflect.deleteProperty(process.env, k);
 			else process.env[k] = saved[k];
@@ -299,7 +300,8 @@ describe("Agent text-tool path with EIGHT_OBSERVATION_PACK", () => {
 		const saved =
 			filesUnder(join(home, ".8gent", "sessions")).find((f) => f.endsWith(`${handle}.txt`)) ?? "";
 		expect(saved).not.toBe("");
-		expect(statSync(saved).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32") expect(statSync(saved).mode & 0o777).toBe(0o600);
 		const full = readFileSync(saved, "utf8");
 		expect(full).toContain("log line 0 \u00e9 status ok");
 		expect(full).toContain("log line 899 \u00e9 status ok");

@@ -115,9 +115,19 @@ export function buildArchive(opts: BuildArchiveOptions): void {
 	const listFile = `${opts.outPath}.filelist`;
 	fs.writeFileSync(listFile, `${list.join("\n")}\n`);
 
-	const args = ["-czf", opts.outPath, "-C", opts.stagingDir, "-T", listFile];
+	// tar runs in the archive's folder with the archive named relative to it (see
+	// tarPathFrom), so every other path argument must be absolute.
+	const outDir = path.dirname(path.resolve(opts.outPath));
+	const args = [
+		"-czf",
+		tarPathFrom(outDir, opts.outPath),
+		"-C",
+		path.resolve(opts.stagingDir),
+		"-T",
+		path.resolve(listFile),
+	];
 
-	const res = spawnSync("tar", args, { stdio: "inherit" });
+	const res = spawnSync("tar", args, { stdio: "inherit", cwd: outDir });
 	fs.rmSync(listFile, { force: true });
 	if (res.status !== 0) {
 		throw new Error(`tar exited with code ${res.status}`);
@@ -144,12 +154,27 @@ function collectSortedRelativePaths(rootAbs: string, rootName: string): string[]
 }
 
 /**
+ * The archive as tar should see it from `cwd`: relative, forward slashes.
+ * GNU tar reads "host:path" as a remote archive when a colon comes before any
+ * slash, which covers a Windows drive path ("C:\\x.tgz") and a bare name like
+ * "foo:bar.tgz". A relative path with a "./" prefix never has a colon before a
+ * slash, so a bare name gets one.
+ */
+export function tarPathFrom(cwd: string, archivePath: string): string {
+	const rel = path.relative(path.resolve(cwd), path.resolve(archivePath)).split(path.sep).join("/");
+	return rel.includes("/") ? rel : `./${rel}`;
+}
+
+/**
  * Extract a `.8gent-app.tar.gz` into `destDir` using system tar.
  * Caller is responsible for verifying integrity afterwards.
  */
 export function extractArchive(archivePath: string, destDir: string): void {
 	fs.mkdirSync(destDir, { recursive: true });
-	const res = spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "inherit" });
+	const res = spawnSync("tar", ["-xzf", tarPathFrom(destDir, archivePath)], {
+		stdio: "inherit",
+		cwd: path.resolve(destDir),
+	});
 	if (res.status !== 0) {
 		throw new Error(`tar -xzf exited with code ${res.status}`);
 	}
@@ -166,7 +191,11 @@ export interface EntryAuditResult {
  */
 export function auditArchiveEntries(archivePath: string, expectedRoot: string): EntryAuditResult {
 	const errors: string[] = [];
-	const res = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf-8" });
+	const res = spawnSync(
+		"tar",
+		["-tzf", tarPathFrom(path.dirname(path.resolve(archivePath)), archivePath)],
+		{ encoding: "utf-8", cwd: path.dirname(path.resolve(archivePath)) },
+	);
 	if (res.status !== 0) {
 		return { ok: false, errors: [`tar -tzf failed: ${res.stderr}`] };
 	}

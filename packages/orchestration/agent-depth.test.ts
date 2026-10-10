@@ -196,23 +196,27 @@ describe("MAX_AGENT_DEPTH (#3331)", () => {
 		}
 	});
 
-	test("a process child (claude or shell runtime) is told its depth through EIGHT_AGENT_DEPTH", async () => {
-		const saved = process.env.EIGHT_SYSTEM_ONE;
-		process.env.EIGHT_SYSTEM_ONE = "off";
-		const out = JSON.parse(
-			await runAtAgentDepth(2, () =>
-				spawnAgentTool(dir, 'printf "%s" "$EIGHT_AGENT_DEPTH"', "shell"),
-			),
-		) as { agentId: string };
-		if (saved === undefined) delete process.env.EIGHT_SYSTEM_ONE;
-		else process.env.EIGHT_SYSTEM_ONE = saved;
-		let status = getCLIAgentStatus(out.agentId);
-		for (let i = 0; i < 200 && !status?.result; i++) {
-			await Bun.sleep(10);
-			status = getCLIAgentStatus(out.agentId);
-		}
-		expect(status?.result?.stdout).toBe("3");
-	});
+	// POSIX only: the child echoes $EIGHT_AGENT_DEPTH, which only a POSIX shell expands.
+	test.skipIf(process.platform === "win32")(
+		"a process child (claude or shell runtime) is told its depth through EIGHT_AGENT_DEPTH",
+		async () => {
+			const saved = process.env.EIGHT_SYSTEM_ONE;
+			process.env.EIGHT_SYSTEM_ONE = "off";
+			const out = JSON.parse(
+				await runAtAgentDepth(2, () =>
+					spawnAgentTool(dir, 'printf "%s" "$EIGHT_AGENT_DEPTH"', "shell"),
+				),
+			) as { agentId: string };
+			if (saved === undefined) delete process.env.EIGHT_SYSTEM_ONE;
+			else process.env.EIGHT_SYSTEM_ONE = saved;
+			let status = getCLIAgentStatus(out.agentId);
+			for (let i = 0; i < 200 && !status?.result; i++) {
+				await Bun.sleep(10);
+				status = getCLIAgentStatus(out.agentId);
+			}
+			expect(status?.result?.stdout).toBe("3");
+		},
+	);
 });
 
 /** Run `script` in a fresh bun process whose inherited EIGHT_AGENT_DEPTH is replaced by `value`. */

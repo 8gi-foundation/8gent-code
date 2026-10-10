@@ -258,28 +258,32 @@ describe("with EIGHT_ALLOW_HOSTED=1 the previous behaviour holds", () => {
 		expect(fo.resolve("qwen3.5:latest").provider).toBe("openrouter");
 	});
 
-	test("the claude runtime runs in Infinite mode", async () => {
-		// A stand-in `claude` on PATH, so the test never starts the real CLI.
-		const bin = mkdtempSync(join(tmpdir(), "fake-claude-"));
-		const fake = join(bin, "claude");
-		writeFileSync(fake, "#!/bin/sh\necho fake-claude\n");
-		chmodSync(fake, 0o755);
-		process.env.PATH = `${bin}:/usr/bin:/bin`;
-		try {
-			const out = JSON.parse(
-				await runWithPermissionHolder(createPermissionHolder("infinite"), () =>
-					spawnAs(PARENT, "task", "claude"),
-				),
-			);
-			expect(out.runtime).toBe("claude");
-			let status = getCLIAgentStatus(out.agentId);
-			for (let i = 0; i < 50 && status?.status === "running"; i++) {
-				await new Promise((r) => setTimeout(r, 50));
-				status = getCLIAgentStatus(out.agentId);
+	// POSIX only: the fake claude is a shell script, which Windows cannot run as a command.
+	test.skipIf(process.platform === "win32")(
+		"the claude runtime runs in Infinite mode",
+		async () => {
+			// A stand-in `claude` on PATH, so the test never starts the real CLI.
+			const bin = mkdtempSync(join(tmpdir(), "fake-claude-"));
+			const fake = join(bin, "claude");
+			writeFileSync(fake, "#!/bin/sh\necho fake-claude\n");
+			chmodSync(fake, 0o755);
+			process.env.PATH = `${bin}:/usr/bin:/bin`;
+			try {
+				const out = JSON.parse(
+					await runWithPermissionHolder(createPermissionHolder("infinite"), () =>
+						spawnAs(PARENT, "task", "claude"),
+					),
+				);
+				expect(out.runtime).toBe("claude");
+				let status = getCLIAgentStatus(out.agentId);
+				for (let i = 0; i < 50 && status?.status === "running"; i++) {
+					await new Promise((r) => setTimeout(r, 50));
+					status = getCLIAgentStatus(out.agentId);
+				}
+				expect(status?.result?.stdout.trim()).toBe("fake-claude");
+			} finally {
+				rmSync(bin, { recursive: true, force: true });
 			}
-			expect(status?.result?.stdout.trim()).toBe("fake-claude");
-		} finally {
-			rmSync(bin, { recursive: true, force: true });
-		}
-	});
+		},
+	);
 });

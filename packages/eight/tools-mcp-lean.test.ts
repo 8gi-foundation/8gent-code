@@ -97,6 +97,11 @@ function drive(lean: string | undefined, connect: boolean): Out {
 	const env: Record<string, string> = {
 		PATH: process.env.PATH ?? "/usr/bin:/bin",
 		HOME: home,
+		// Windows reads USERPROFILE and TEMP/TMP, and needs SystemRoot to start at all.
+		USERPROFILE: home,
+		TEMP: join(dir, "tmp"),
+		TMP: join(dir, "tmp"),
+		...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
 		TMPDIR: join(dir, "tmp"),
 		EIGHT_HEADLESS: "1",
 	};
@@ -119,6 +124,8 @@ function drive(lean: string | undefined, connect: boolean): Out {
 	const out = JSON.parse(
 		line
 			.slice(6)
+			// The driver prints JSON, which doubles the backslashes of a Windows path.
+			.replaceAll(JSON.stringify(home).slice(1, -1), "<HOME>")
 			.replaceAll(home, "<HOME>")
 			.replace(/lean-drive-\d+/g, "lean-drive-PID"),
 	) as Out;
@@ -159,7 +166,7 @@ describe("flag on: real client, fake stdio server, lazy connect", () => {
 		for (const k of ["call50", "call20"] as const) {
 			expect(on[k]).not.toContain(SENTINEL);
 			const path = /saved to (\S+)\]/.exec(on[k])?.[1] ?? "";
-			expect(path.startsWith("<HOME>/.8gent/tool-results/s-")).toBe(true);
+			expect(path.startsWith(join("<HOME>", ".8gent", "tool-results", "s-"))).toBe(true);
 			expect(readFileSync(path.replace("<HOME>", on.home), "utf8")).toContain(SENTINEL);
 		}
 		// Secrets are scrubbed before the spill (#2464 order): not in the file, not in context.
@@ -243,6 +250,11 @@ function consent(mode: "approve" | "deny" | "headless" | "plan" | "infinite") {
 		env: {
 			PATH: process.env.PATH ?? "/usr/bin:/bin",
 			HOME: home,
+			// Windows reads USERPROFILE and TEMP/TMP, and needs SystemRoot to start at all.
+			USERPROFILE: home,
+			TEMP: join(dir, "tmp"),
+			TMP: join(dir, "tmp"),
+			...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
 			TMPDIR: join(dir, "tmp"),
 			EIGHT_MCP_LEAN: "1",
 			DRIVE_MODE: mode,
@@ -271,7 +283,9 @@ describe("flag on: no server starts without the person's yes", () => {
 		const r = consent("approve");
 		const start = r.cards.filter((c) => c.startsWith("start 1 MCP server from your MCP config"));
 		expect(start.length).toBe(1);
-		expect(start[0]).toContain(`\n- work: ${process.execPath} ${marked} `);
+		// The card quotes any word with whitespace, a quote or a backslash (a Windows path), as lean.ts does.
+		const q = (w: string) => (/[\s"'\\]/.test(w) ? JSON.stringify(w) : w);
+		expect(start[0]).toContain(`\n- work: ${q(process.execPath)} ${q(marked)} `);
 		expect(start[0]).toContain("(env: WORK_TOKEN)");
 		// The per-call card is not blind: it names the call and its arguments.
 		expect(r.cards).toContain(

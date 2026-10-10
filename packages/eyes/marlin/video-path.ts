@@ -9,7 +9,7 @@
  */
 
 import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 
 export type VideoPathResult = { ok: true; absolutePath: string } | { ok: false; reason: string };
 
@@ -58,7 +58,7 @@ export function resolveVideoPath(input: string, cwd: string = process.cwd()): Vi
 	} catch (e) {
 		return { ok: false, reason: `Cannot resolve directory: ${(e as Error).message}` };
 	}
-	const escapesRoot = !real.startsWith(`${allowedRoot}/`) && real !== allowedRoot;
+	const escapesRoot = !real.startsWith(`${allowedRoot}${sep}`) && real !== allowedRoot;
 	if (escapesRoot) {
 		return {
 			ok: false,

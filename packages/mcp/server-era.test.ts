@@ -21,7 +21,7 @@ const entry = join(dir, "entry.ts");
 writeFileSync(
 	entry,
 	`import { startMCPServer } from ${JSON.stringify(join(import.meta.dir, "server.ts"))};
-await startMCPServer(["--tools=safe", "--cwd=${dir}"]);
+await startMCPServer(["--tools=safe", ${JSON.stringify(`--cwd=${dir}`)}]);
 `,
 );
 const cfg: ServerConfig = {

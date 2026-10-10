@@ -131,7 +131,8 @@ describe("chat allowlist on the audio channel", () => {
 		expect(res.reason).toContain("allowlist");
 	});
 
-	test("sends when the destination matches", async () => {
+	// POSIX only: the TTS helper stub is a shell script, which Windows cannot run as a command.
+	test.skipIf(process.platform === "win32")("sends when the destination matches", async () => {
 		const bin = join(tmp(), "fake-kittentts");
 		writeFileSync(bin, "#!/bin/sh\ncat > /dev/null\nexit 0\n", { mode: 0o755 });
 		const res = await sendVoiceNote({

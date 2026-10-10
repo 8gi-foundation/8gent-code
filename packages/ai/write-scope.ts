@@ -74,6 +74,8 @@ export function writeScopeLine(
 	created.set(session, next ? { count: state.count + 1, folder: next } : null);
 	if (rel.includes(path.sep) || !folder || ROOT_FILE.test(rel)) return "";
 	if (CODE_ROOTS.has(folder.split(path.sep)[0])) return "";
-	const target = path.join(folder, rel);
-	return `Scope: ${rel} is a new file in the top folder, but every other file you have created with write_file is in ${folder}/. If the request put the work in ${folder}/, write it as ${target} instead, then delete the top-folder copy.`;
+	// Shown to the model: forward slashes on every platform.
+	const shown = folder.split(path.sep).join("/");
+	const target = `${shown}/${rel}`;
+	return `Scope: ${rel} is a new file in the top folder, but every other file you have created with write_file is in ${shown}/. If the request put the work in ${shown}/, write it as ${target} instead, then delete the top-folder copy.`;
 }

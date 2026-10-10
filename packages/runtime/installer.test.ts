@@ -23,7 +23,7 @@ describe("planInstall", () => {
 			"https://nodejs.org/dist/v22.12.0/node-v22.12.0-darwin-arm64.tar.gz",
 		);
 		expect(plan.runtimeDir).toContain("node-22.12.0");
-		expect(plan.binPath).toContain("bin/node");
+		expect(plan.binPath).toContain(join("bin", "node"));
 		expect(plan.archiveExt).toBe("tar.gz");
 	});
 	it("uses node.exe path on win32", () => {
@@ -64,24 +64,28 @@ describe("installRuntime — dryRun", () => {
 		expect(existsSync(result.runtimeDir)).toBe(false);
 	});
 
-	it("dryRun reports already-ready when binary exists", async () => {
-		// Create a fake runtime that satisfies the version probe.
-		const { mkdirSync, writeFileSync, chmodSync } = await import("node:fs");
-		const binDir = join(sandbox, "node-22.12.0", "bin");
-		mkdirSync(binDir, { recursive: true });
-		const fakeNode = join(binDir, "node");
-		writeFileSync(fakeNode, "#!/bin/bash\necho 'v22.12.0'\n");
-		chmodSync(fakeNode, 0o755);
+	// POSIX only: the fake node is a bash script, which Windows cannot run.
+	it.skipIf(process.platform === "win32")(
+		"dryRun reports already-ready when binary exists",
+		async () => {
+			// Create a fake runtime that satisfies the version probe.
+			const { mkdirSync, writeFileSync, chmodSync } = await import("node:fs");
+			const binDir = join(sandbox, "node-22.12.0", "bin");
+			mkdirSync(binDir, { recursive: true });
+			const fakeNode = join(binDir, "node");
+			writeFileSync(fakeNode, "#!/bin/bash\necho 'v22.12.0'\n");
+			chmodSync(fakeNode, 0o755);
 
-		const result = await installRuntime({
-			version: "22.12.0",
-			root: sandbox,
-			platform: "darwin",
-			arch: "arm64",
-			dryRun: true,
-		});
-		expect(result.action).toBe("already-ready");
-	});
+			const result = await installRuntime({
+				version: "22.12.0",
+				root: sandbox,
+				platform: "darwin",
+				arch: "arm64",
+				dryRun: true,
+			});
+			expect(result.action).toBe("already-ready");
+		},
+	);
 });
 
 // Integration test — actually downloads from nodejs.org. Gated on

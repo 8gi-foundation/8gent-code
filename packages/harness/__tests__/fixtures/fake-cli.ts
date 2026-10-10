@@ -29,10 +29,10 @@
  *   flood                print 5000 short lines, then "END-MARKER", exit 0
  */
 
-export {};
+import { fileURLToPath } from "node:url";
 
 const [mode, ...rest] = process.argv.slice(2);
-const SELF = new URL(import.meta.url).pathname;
+const SELF = fileURLToPath(import.meta.url);
 
 function sleepForever(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 600_000));
