@@ -6,6 +6,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
@@ -52,10 +53,31 @@ let judge: AlwaysDangerous;
 const saved: Record<string, string | undefined> = {};
 const KEYS = [SYSTEM_ONE_FLAG, SYSTEM_ONE_ALLOWLIST_FLAG, "EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT"];
 
-function bare(dir: string): void {
-	mkdirSync(join(dir, "objects"), { recursive: true });
-	mkdirSync(join(dir, "refs"));
-	writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
+function git(cwd: string, ...args: string[]): void {
+	const r = spawnSync(
+		"git",
+		["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args],
+		{ cwd, encoding: "utf8" },
+	);
+	if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+}
+
+/** A work tree repository with one commit at `dir`; `link` adds a tracked symlink. */
+function workRepo(dir: string, link = false): void {
+	mkdirSync(dir, { recursive: true });
+	git(dir, "init", "-q", "-b", "main");
+	writeFileSync(join(dir, "a.txt"), "x");
+	if (link) symlinkSync("/etc/hosts", join(dir, "l"));
+	git(dir, "add", "-A");
+	git(dir, "commit", "-q", "-m", "init");
+}
+
+/** A bare repository with one commit at `dir`. */
+function bare(dir: string, link = false): void {
+	const tmp = `${dir}.seed`;
+	workRepo(tmp, link);
+	git(container, "clone", "-q", "--bare", tmp, dir);
+	rmSync(tmp, { recursive: true, force: true });
 }
 
 beforeAll(() => {
@@ -79,14 +101,27 @@ beforeEach(() => {
 	ws = join(container, "proj");
 	mkdirSync(ws);
 	bare(join(container, "shared-notes.git"));
-	// a work tree repository beside the project
-	mkdirSync(join(container, "wt-repo", ".git", "objects"), { recursive: true });
+	// a work tree repository beside the project (not bare)
+	workRepo(join(container, "wt-repo"));
 	// a bare repository inside the project
 	bare(join(ws, "vendor-src.git"));
+	// a work tree repository inside the project
+	workRepo(join(ws, "inner-repo"));
 	// not a repository
 	mkdirSync(join(container, "plain-dir"));
 	// a repository somewhere that is not the workspace or its parent
 	bare(join(outside, "far.git"));
+	// dot-leading and case-variant siblings
+	bare(join(container, ".SecretRepo"));
+	bare(join(container, "deep"));
+	mkdirSync(join(container, "deeper"));
+	bare(join(container, "deeper", "x.git"));
+	// tracked symlinks
+	bare(join(container, "linky.git"), true);
+	workRepo(join(ws, "linky-inner"), true);
+	// an empty bare repository (history scan cannot run)
+	mkdirSync(join(container, "empty.git"));
+	git(container, "init", "-q", "--bare", "empty.git");
 	mkdirSync(join(ws, "existing"));
 	writeFileSync(join(ws, "existing", "f.txt"), "x");
 	mkdirSync(join(ws, "packages", "permissions"), { recursive: true });
@@ -115,9 +150,9 @@ describe("cloneLocalIntoProject allows", () => {
 		"git clone -q ../shared-notes.git notes",
 		"git clone --quiet ../shared-notes.git notes",
 		"git clone ./../shared-notes.git ./notes",
-		"git clone ../wt-repo notes",
 		"git clone vendor-src.git notes",
 		"git clone vendor-src.git existing/inner",
+		"git clone inner-repo notes",
 	]) {
 		test(cmd, () => {
 			expect(cloneLocalIntoProject(cmd, ws).ok).toBe(true);
@@ -136,6 +171,23 @@ describe("cloneLocalIntoProject refuses", () => {
 		["git:// URL", "git clone git://example.com/a.git notes"],
 		["absolute local source", `git clone ${"/tmp"}/shared-notes.git notes`],
 		["source outside workspace and its parent", "git clone ../../far.git notes"],
+		["non-bare sibling", "git clone ../wt-repo notes"],
+		["dot-dir sibling", "git clone ../.SecretRepo notes"],
+		["dot-dir sibling, case variant", "git clone ../.secretrepo notes"],
+		["source deeper than one level", "git clone ../deeper/x.git notes"],
+		["sibling through a nested .. path", "git clone ../deeper/../shared-notes.git notes"],
+		["workspace source with a dot segment", "git clone ./inner-repo/../vendor-src.git notes"],
+		["committed symlink in a sibling", "git clone ../linky.git notes"],
+		["committed symlink in a workspace repo", "git clone linky-inner notes"],
+		["empty repository (scan cannot run)", "git clone ../empty.git notes"],
+		["destination node_modules", "git clone ../shared-notes.git node_modules"],
+		["destination under node_modules", "git clone ../shared-notes.git node_modules/foo"],
+		["destination under Node_Modules (case)", "git clone ../shared-notes.git existing/Node_Modules/foo"],
+		["destination vendor", "git clone ../shared-notes.git vendor"],
+		["destination venv", "git clone ../shared-notes.git venv"],
+		["destination dist", "git clone ../shared-notes.git dist"],
+		["destination build/x", "git clone ../shared-notes.git build/x"],
+		["destination site-packages", "git clone ../shared-notes.git existing/site-packages"],
 		["source is a plain directory, not a repository", "git clone ../plain-dir notes"],
 		["source is a symlink inside", "git clone src-link notes"],
 		["source is a symlink beside", "git clone ../sibling-link.git notes"],
@@ -189,6 +241,26 @@ describe("cloneLocalIntoProject refuses", () => {
 			expect(cloneLocalIntoProject(cmd, ws).ok).toBe(false);
 		});
 	}
+
+	test("workspace parent is $HOME", () => {
+		const h = process.env.HOME;
+		process.env.HOME = container;
+		try {
+			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(false);
+		} finally {
+			process.env.HOME = h;
+		}
+	});
+
+	test("workspace parent is an ancestor of $HOME", () => {
+		const h = process.env.HOME;
+		process.env.HOME = join(container, "some", "home");
+		try {
+			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(false);
+		} finally {
+			process.env.HOME = h;
+		}
+	});
 
 	test("no working directory", () => {
 		expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", undefined).ok).toBe(false);

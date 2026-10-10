@@ -14,16 +14,18 @@
  *     refused, so --upload-pack/-u, --config/-c, --template, --recurse-submodules,
  *     --separate-git-dir, --origin, --reference, --filter and `--` never match,
  *     and so does `git -C`/`git -c` before `clone`;
- *   - the source is a LOCAL PATH only: relative (it may use `..`, the pilot's
- *     source is a sibling), no `:` or `@` anywhere (so https://, ssh://, git@host:,
- *     file:// and host:path are all refused), not starting with `-`, no `.git`
- *     segment as written, no empty or `.` segment;
- *   - the source exists, is a real directory (not a symlink), and its real path
- *     is inside the workspace or inside the workspace's parent directory (a
- *     sibling such as ../shared-notes.git); nothing further out is read;
- *   - the source is a git repository: a bare one (HEAD file plus objects/ and
- *     refs/) or a work tree whose .git is a real directory (not a file or
- *     symlink, so no gitdir: redirect);
+ *   - the source is a LOCAL PATH only: relative, no `:` or `@` anywhere (so
+ *     https://, ssh://, git@host:, file:// and host:path are all refused), not
+ *     starting with `-`, no empty, `.` or dot-leading segment other than the
+ *     single leading `..` of the sibling form;
+ *   - the source is a real directory (not a symlink) and is either (a) a
+ *     repository inside the workspace, or (b) written exactly `../<name>`, a
+ *     BARE repository (HEAD, objects/, refs/ at its root, no .git) that is a
+ *     sibling of the workspace, where the workspace parent is not `/`, not
+ *     $HOME and not an ancestor of $HOME (compared case-insensitively);
+ *     everything else falls through;
+ *   - the source's tracked tree (git ls-tree -r HEAD, run without a shell
+ *     under a short timeout) holds no symlink; if the scan cannot run, refuse;
  *   - the destination is relative, plain, with no `..`/`.`/`.git` segment, does
  *     NOT exist (lstat, so a dangling link counts), its parent is a real
  *     directory inside the workspace with no dot segment, it is not inside the
@@ -39,7 +41,9 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -53,6 +57,21 @@ import {
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
+/** Dependency, install and build output directories: never a clone destination at any depth (lower-cased). */
+const INSTALL_DIRS = new Set([
+	"node_modules",
+	"vendor",
+	"venv",
+	".venv",
+	"dist",
+	"build",
+	"bower_components",
+	"jspm_packages",
+	"site-packages",
+	"pods",
+	".pnpm",
+	".yarn",
+]);
 const CLONE_FLAG = /^(-q|--quiet)$/;
 
 export type CloneLocal = { ok: true; reason: string } | { ok: false };
@@ -76,6 +95,60 @@ function looksLikeRepo(dir: string): boolean {
 	);
 }
 
+/** True when `dir` has no symlink in its tracked tree. False when the scan cannot run. */
+function noTrackedSymlinks(dir: string): boolean {
+	try {
+		const out = execFileSync("git", ["-C", dir, "ls-tree", "-r", "HEAD"], {
+			encoding: "utf8",
+			timeout: 5000,
+			maxBuffer: 64 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "ignore"],
+			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", HOME: "/nonexistent" },
+		});
+		return !out.split("\n").some((l) => l.startsWith("120000"));
+	} catch {
+		return false;
+	}
+}
+
+function bareRepo(dir: string): boolean {
+	const head = lstatOrNull(path.join(dir, "HEAD"));
+	return (
+		!!head &&
+		head.isFile() &&
+		isDir(path.join(dir, "objects")) &&
+		isDir(path.join(dir, "refs")) &&
+		!lstatOrNull(path.join(dir, ".git"))
+	);
+}
+
+/** The workspace parent is a shared place: refuse `/`, $HOME and any ancestor of $HOME. */
+function parentIsTooBroad(parent: string): boolean {
+	const p = parent.toLowerCase();
+	if (p === "/" || p === path.parse(parent).root.toLowerCase()) return true;
+	const homes = new Set<string>();
+	const add = (h: string | undefined) => {
+		if (!h) return;
+		homes.add(h.toLowerCase());
+		// Resolve the nearest existing ancestor so /var and /private/var compare equal.
+		let cur = h;
+		let rest = "";
+		for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
+			try {
+				homes.add(path.join(realpathSync(cur), rest).toLowerCase());
+				break;
+			} catch {
+				rest = path.join(path.basename(cur), rest);
+				cur = path.dirname(cur);
+			}
+		}
+	};
+	add(process.env.HOME);
+	add(homedir());
+	for (const h of homes) if (h === p || h.startsWith(p.endsWith("/") ? p : `${p}/`)) return true;
+	return false;
+}
+
 export function cloneLocalIntoProject(command: string, cwd: string | undefined): CloneLocal {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
@@ -93,12 +166,15 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		// Local path only: a scheme, user@host or host:path always has `:` or `@`.
 		if (/[:@]/.test(srcArg) || /[:@]/.test(destArg)) return NO;
 		const srcSegs = srcArg.replace(/\/+$/, "").split("/");
-		if (
-			!srcArg ||
-			srcArg.startsWith("/") ||
-			srcSegs.some((s) => s === "" || s === "." || s.toLowerCase() === ".git")
-		)
+		if (!srcArg || srcArg.startsWith("/")) return NO;
+		const sibling = srcSegs[0] === "..";
+		if (sibling) {
+			// Exactly `../<name>`.
+			if (srcSegs.length !== 2) return NO;
+			if (srcSegs[1] === "" || srcSegs[1].startsWith(".")) return NO;
+		} else if (srcSegs.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."))) {
 			return NO;
+		}
 		if (!plainRelative(destArg) || destArg.endsWith("/")) return NO;
 
 		const root = realpathSync(cwd);
@@ -107,8 +183,15 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		if (!st || st.isSymbolicLink() || !st.isDirectory()) return NO;
 		const realSrc = realpathSync(srcAbs);
 		const parentOfRoot = path.dirname(root);
-		if (!(inside(realSrc, root) || inside(realSrc, parentOfRoot)) || realSrc === parentOfRoot) return NO;
-		if (!looksLikeRepo(realSrc)) return NO;
+		if (sibling) {
+			if (parentIsTooBroad(parentOfRoot)) return NO;
+			if (realSrc.toLowerCase() !== path.join(parentOfRoot, srcSegs[1]).toLowerCase()) return NO;
+			if (!bareRepo(realSrc)) return NO;
+		} else {
+			if (!inside(realSrc, root) || realSrc === root) return NO;
+			if (!looksLikeRepo(realSrc)) return NO;
+		}
+		if (!noTrackedSymlinks(realSrc)) return NO;
 
 		const destAbs = path.resolve(root, destArg);
 		if (!inside(destAbs, root) || destAbs === root) return NO;
@@ -118,6 +201,7 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		const finalAbs = path.join(realParent, path.basename(destAbs));
 		const relParent = path.relative(root, realParent);
 		if (relParent.split("/").some((s) => s.startsWith("."))) return NO;
+		if (path.relative(root, finalAbs).split("/").some((seg) => INSTALL_DIRS.has(seg.toLowerCase()))) return NO;
 		if (protectedName(path.basename(finalAbs))) return NO;
 		if (protectedRel(path.relative(root, finalAbs))) return NO;
 		if (inside(finalAbs, realSrc)) return NO;
