@@ -23,6 +23,7 @@
 
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import { trackStatements } from "../memory/tracked-db.js";
 import type {
 	ChainVerification,
 	DecisionEvent,
@@ -138,7 +139,7 @@ export class DecisionAuditStore {
 	private db: Database;
 
 	constructor(dbPath: string) {
-		this.db = new Database(dbPath, { create: true });
+		this.db = trackStatements(new Database(dbPath, { create: true }));
 		try {
 			this.db.exec("PRAGMA journal_mode = WAL");
 			this.db.exec("PRAGMA synchronous = NORMAL");

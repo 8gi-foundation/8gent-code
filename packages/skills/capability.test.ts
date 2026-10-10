@@ -11,8 +11,9 @@
  *   - skills without capability declarations remain backward compatible
  */
 
+import { removeTree } from "../../tests/db-files";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CapabilityAuditStore } from "../audit/capability-store.js";
@@ -81,7 +82,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	if (tempRoot && existsSync(tempRoot)) {
-		rmSync(tempRoot, { recursive: true, force: true });
+		removeTree(tempRoot);
 	}
 });
 

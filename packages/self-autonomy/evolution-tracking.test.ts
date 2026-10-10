@@ -3,6 +3,7 @@
  * pattern frequency, evolution summary, and schema versioning.
  */
 
+import { removeTree } from "../../tests/db-files";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -28,7 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	resetDb();
-	fs.rmSync(tmpDir, { recursive: true, force: true });
+	removeTree(tmpDir);
 	process.env.EIGHT_DATA_DIR = undefined;
 });
 

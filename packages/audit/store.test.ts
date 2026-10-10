@@ -4,29 +4,22 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { AccessAuditStore } from "./store.js";
 
 let store: AccessAuditStore;
 let dbPath: string;
 
 beforeEach(() => {
-	dbPath = `/tmp/audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`;
+	dbPath = join(tmpdir(), `audit-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`);
 	store = new AccessAuditStore(dbPath);
 });
 
 afterEach(() => {
 	store.close();
-	for (const ext of ["", "-wal", "-shm"]) {
-		const p = dbPath + ext;
-		if (existsSync(p)) {
-			try {
-				unlinkSync(p);
-			} catch {
-				/* best effort */
-			}
-		}
-	}
+	removeDbFiles(dbPath);
 });
 
 describe("AccessAuditStore", () => {

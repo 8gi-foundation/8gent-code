@@ -14,21 +14,21 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import { lintMemory, lintReportToMarkdown } from "./lint.js";
 
-const TEST_DB = "/tmp/test-memory-lint.db";
+const TEST_DB = join(tmpdir(), "test-memory-lint.db");
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let db: Database;
 let graph: KnowledgeGraph;
 
 function cleanup() {
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = TEST_DB + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(TEST_DB);
 }
 
 function createMemoriesTable(db: Database) {
@@ -82,7 +82,7 @@ function insertMemory(
 describe("lintMemory", () => {
 	beforeEach(() => {
 		cleanup();
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		createMemoriesTable(db);
 		graph = new KnowledgeGraph(db);
 	});
@@ -257,9 +257,10 @@ describe("lintMemory", () => {
 
 		const report = lintMemory(db, graph);
 
-		// Also get a clean-ish baseline
+		// Also get a clean-ish baseline. Windows cannot delete a file that is still open.
+		db.close();
 		cleanup();
-		const db2 = new Database(TEST_DB);
+		const db2 = trackStatements(new Database(TEST_DB));
 		createMemoriesTable(db2);
 		const graph2 = new KnowledgeGraph(db2);
 		const e1 = graph2.addEntity("concept", "clean");
