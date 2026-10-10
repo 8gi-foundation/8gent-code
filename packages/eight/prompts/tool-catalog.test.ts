@@ -62,6 +62,13 @@ describe("buildToolCatalogSegment", () => {
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(concise.length).toBeLessThan(2048);
 	});
+
+	it("tells the local model to keep scratch files inside the project (#3865)", () => {
+		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(text).toContain(".tmp/");
+			expect(text).toContain("never /tmp");
+		}
+	});
 });
 
 describe("slides-to-video join guidance (#3862)", () => {
