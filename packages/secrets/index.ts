@@ -47,6 +47,21 @@ function deriveKey(): Buffer {
 	return crypto.pbkdf2Sync(fingerprint, salt, 100_000, 32, "sha256");
 }
 
+/** The vault file exists but could not be read. Carries no vault contents. */
+export class VaultUnreadableError extends Error {
+	constructor(
+		readonly vaultPath: string,
+		readonly copyPath: string | null,
+	) {
+		super(
+			copyPath
+				? `The vault file could not be read. It was left unchanged and a copy kept at ${copyPath}.`
+				: "The vault file could not be read. It was left unchanged.",
+		);
+		this.name = "VaultUnreadableError";
+	}
+}
+
 // ============================================
 // SecretVault
 // ============================================
@@ -196,36 +211,67 @@ export class SecretVault {
 
 	// ---------- Persistence ----------
 
+	/**
+	 * Read the vault file. A missing or blank file is an empty vault. A file that
+	 * cannot be read or understood is NEVER treated as empty: the next save()
+	 * would overwrite whatever it held. Instead a private copy is kept beside it
+	 * and a VaultUnreadableError is thrown, so the caller fails loudly.
+	 */
 	private load(): VaultData {
 		if (!fs.existsSync(this.vaultPath)) {
 			return { version: 1, entries: {} };
 		}
 
+		let raw: string;
 		try {
-			const raw = fs.readFileSync(this.vaultPath, "utf-8");
+			raw = fs.readFileSync(this.vaultPath, "utf-8");
+		} catch {
+			throw new VaultUnreadableError(this.vaultPath, null);
+		}
+		if (raw.trim() === "") return { version: 1, entries: {} };
+
+		try {
 			const parsed = JSON.parse(raw) as VaultData;
-			if (parsed.version !== 1) {
-				throw new Error(`Unsupported vault version: ${parsed.version}`);
+			const entries = parsed?.entries;
+			if (
+				parsed?.version !== 1 ||
+				!entries ||
+				typeof entries !== "object" ||
+				Array.isArray(entries)
+			) {
+				throw new Error("unsupported vault shape");
 			}
 			return parsed;
 		} catch {
-			// Corrupted vault — start fresh
-			return { version: 1, entries: {} };
+			throw new VaultUnreadableError(this.vaultPath, this.keepCopy(raw));
 		}
+	}
+
+	/** Preserve an unreadable vault file (owner-only). Returns the copy's path. */
+	private keepCopy(raw: string): string | null {
+		const digest = crypto.createHash("sha256").update(raw).digest("hex").slice(0, 8);
+		const copy = `${this.vaultPath}.unreadable-${digest}`;
+		try {
+			fs.writeFileSync(copy, raw, { mode: 0o600, flag: "wx" });
+		} catch (err) {
+			// An identical copy from an earlier run is fine; anything else means
+			// we have no backup, which the error message says.
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") return null;
+		}
+		return copy;
 	}
 
 	private save(): void {
 		const dir = path.dirname(this.vaultPath);
 		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
+			fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 		}
-		fs.writeFileSync(
-			this.vaultPath,
-			JSON.stringify(this.data, null, 2),
-			{ mode: 0o600 }, // owner read/write only
-		);
-		// mode above only applies on create; tighten a pre-existing loose file.
-		fs.chmodSync(this.vaultPath, 0o600);
+		// Write a new owner-only file and rename it into place: the vault is never
+		// readable by others at any moment, and a crash cannot leave it half written.
+		const tmp = `${this.vaultPath}.tmp-${process.pid}`;
+		fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+		fs.chmodSync(tmp, 0o600);
+		fs.renameSync(tmp, this.vaultPath);
 	}
 }
 
@@ -234,6 +280,15 @@ export class SecretVault {
 // ============================================
 
 let _vault: SecretVault | null = null;
+
+/** Like getVault(), but null when the vault file is unreadable (callers that can run without it). */
+export function getVaultOrNull(): SecretVault | null {
+	try {
+		return getVault();
+	} catch {
+		return null;
+	}
+}
 
 export function getVault(): SecretVault {
 	if (!_vault) {
