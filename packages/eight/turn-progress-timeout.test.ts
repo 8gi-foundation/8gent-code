@@ -136,3 +136,14 @@ describe("withProgressTimeout (#3855)", () => {
 		expect(fired).toBe(false);
 	});
 });
+
+describe("#3855 plain timeout reason", () => {
+	it("names idle vs ceiling and the knob that moves each", () => {
+		const idle = new TurnTimeoutError(300_000, "p/m", "idle");
+		const ceil = new TurnTimeoutError(1_200_000, "p/m", "ceiling");
+		expect(idle.message).toContain("no progress for 300s");
+		expect(idle.message).toContain("EIGHT_STREAM_IDLE_MS");
+		expect(ceil.message).toContain("turn budget of 1200s");
+		expect(ceil.message).toContain("EIGHT_TURN_TIMEOUT_MS");
+	});
+});

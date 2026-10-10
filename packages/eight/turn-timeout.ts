@@ -56,9 +56,12 @@ export class TurnTimeoutError extends Error {
 	readonly timeoutMs: number;
 	readonly kind: TurnTimeoutKind;
 	constructor(timeoutMs: number, label?: string, kind: TurnTimeoutKind = "ceiling") {
-		super(
-			`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}`,
-		);
+		// #3855: say plainly which limit stopped the turn and which knob moves it.
+		const why =
+			kind === "idle"
+				? `: no progress for ${Math.round(timeoutMs / 1000)}s (quiet gap; raise with EIGHT_STREAM_IDLE_MS)`
+				: `: turn budget of ${Math.round(timeoutMs / 1000)}s reached (raise with EIGHT_TURN_TIMEOUT_MS)`;
+		super(`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}${why}`);
 		this.name = "TurnTimeoutError";
 		this.timeoutMs = timeoutMs;
 		this.kind = kind;
