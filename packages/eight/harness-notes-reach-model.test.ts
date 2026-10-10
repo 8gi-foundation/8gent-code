@@ -76,8 +76,10 @@ beforeAll(async () => {
 	});
 });
 
-afterAll(() => {
+afterAll(async () => {
 	server?.stop(true);
+	// The agent opened a memory database under home; Windows will not delete it while open.
+	(await import("../memory/index")).resetMemoryManager();
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;

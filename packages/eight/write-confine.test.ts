@@ -109,8 +109,8 @@ describe("run mode sets the workspace root (#3747)", () => {
 
 	test("the root is the run's working directory, resolved", () => {
 		expect(runWorkspaceRoot({ workspaceBoundary: true }, {}, "/w/repo")).toBe(path.resolve("/w/repo"));
-		expect(runWorkspaceRoot({ workspaceBoundary: true, cwd: "sub" }, {}, "/w/repo")).toBe("/w/repo/sub");
-		expect(runWorkspaceRoot({ workspaceBoundary: true, cwd: "/abs" }, {}, "/w/repo")).toBe("/abs");
+		expect(runWorkspaceRoot({ workspaceBoundary: true, cwd: "sub" }, {}, "/w/repo")).toBe(path.resolve("/w/repo/sub"));
+		expect(runWorkspaceRoot({ workspaceBoundary: true, cwd: "/abs" }, {}, "/w/repo")).toBe(path.resolve("/abs"));
 	});
 
 	test("a root already set is kept, and opting out sets nothing", () => {

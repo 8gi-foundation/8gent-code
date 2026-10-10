@@ -43,24 +43,31 @@ describe("tarPathFrom", () => {
 	});
 });
 
+// path.relative cannot express a path on another Windows drive (temp on C:, cwd on D:), so a
+// relative outPath is not constructible there.
+const crossDrive = path.isAbsolute(path.relative(process.cwd(), os.tmpdir()));
+
 describe("buildArchive / extractArchive / auditArchiveEntries", () => {
-	it("builds into a RELATIVE outPath (cwd differs from the archive's folder)", () => {
-		const stagingDir = stage("demo");
-		const outAbs = path.join(tmpRoot, "out", "demo.tgz");
-		fs.mkdirSync(path.dirname(outAbs));
-		const outRel = path.relative(process.cwd(), outAbs);
-		expect(path.isAbsolute(outRel)).toBe(false);
+	it.skipIf(crossDrive)(
+		"builds into a RELATIVE outPath (cwd differs from the archive's folder)",
+		() => {
+			const stagingDir = stage("demo");
+			const outAbs = path.join(tmpRoot, "out", "demo.tgz");
+			fs.mkdirSync(path.dirname(outAbs));
+			const outRel = path.relative(process.cwd(), outAbs);
+			expect(path.isAbsolute(outRel)).toBe(false);
 
-		buildArchive({ stagingDir, rootName: "demo", outPath: outRel });
-		expect(fs.existsSync(outAbs)).toBe(true);
-		expect(fs.existsSync(`${outAbs}.filelist`)).toBe(false);
+			buildArchive({ stagingDir, rootName: "demo", outPath: outRel });
+			expect(fs.existsSync(outAbs)).toBe(true);
+			expect(fs.existsSync(`${outAbs}.filelist`)).toBe(false);
 
-		const audit = auditArchiveEntries(outRel, "demo");
-		expect(audit.errors).toEqual([]);
-		const dest = path.join(tmpRoot, "dest");
-		extractArchive(outRel, dest);
-		expect(fs.existsSync(path.join(dest, "demo", "manifest.json"))).toBe(true);
-	});
+			const audit = auditArchiveEntries(outRel, "demo");
+			expect(audit.errors).toEqual([]);
+			const dest = path.join(tmpRoot, "dest");
+			extractArchive(outRel, dest);
+			expect(fs.existsSync(path.join(dest, "demo", "manifest.json"))).toBe(true);
+		},
+	);
 
 	// A colon is not a legal filename character on Windows.
 	it.skipIf(process.platform === "win32")(

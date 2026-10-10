@@ -209,28 +209,34 @@ describe("the agent runs the suite before it commits (#3402)", () => {
 		30_000,
 	);
 
-	test("the runner itself is not on PATH (bun, or yarn for a yarn.lock): commits, unverified", async () => {
-		const cases = [
-			{ lock: "bun.lock", script: "bun ./count.ts", runner: "bun run test" },
-			{ lock: "yarn.lock", script: "jest", runner: "yarn test" },
-		];
-		for (const { lock, script, runner } of cases) {
-			repo({ name: "t", private: true, scripts: { test: script } });
-			write(lock, "");
-			git("add", lock);
-			git("commit", "-q", "-m", "lock");
-			write("test/cli.test.ts", FAIL);
-			await ex.execute("git_add", { files: "." });
-			process.env.PATH = NO_RUNNER_PATH;
-			const out = await ex.execute("git_commit", { message: "x" });
-			process.env.PATH = BUN_FIRST_PATH;
-			expect(out).toStartWith(`[COMMIT GATE] \`${runner}\` could not run (`);
-			expect(out).toMatch(/not found/); // bash says "command not found", dash (Linux /bin/sh) says "bun: not found"
-			expect(commits()).toBe(3);
-			expect(runs()).toBe(0);
-			rmSync(dir, { recursive: true, force: true });
-		}
-	}, 30_000);
+	// Windows cmd.exe reports a missing runner as "is not recognized" with exit 1, not exit 127 "not found",
+	// so the gate cannot tell it from a failing suite there.
+	test.skipIf(process.platform === "win32")(
+		"the runner itself is not on PATH (bun, or yarn for a yarn.lock): commits, unverified",
+		async () => {
+			const cases = [
+				{ lock: "bun.lock", script: "bun ./count.ts", runner: "bun run test" },
+				{ lock: "yarn.lock", script: "jest", runner: "yarn test" },
+			];
+			for (const { lock, script, runner } of cases) {
+				repo({ name: "t", private: true, scripts: { test: script } });
+				write(lock, "");
+				git("add", lock);
+				git("commit", "-q", "-m", "lock");
+				write("test/cli.test.ts", FAIL);
+				await ex.execute("git_add", { files: "." });
+				process.env.PATH = NO_RUNNER_PATH;
+				const out = await ex.execute("git_commit", { message: "x" });
+				process.env.PATH = BUN_FIRST_PATH;
+				expect(out).toStartWith(`[COMMIT GATE] \`${runner}\` could not run (`);
+				expect(out).toMatch(/not found/); // bash says "command not found", dash (Linux /bin/sh) says "bun: not found"
+				expect(commits()).toBe(3);
+				expect(runs()).toBe(0);
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
 
 	test("a suite killed by a signal (Exit code null) is red, never cached green", async () => {
 		repo(BUN_PKG);

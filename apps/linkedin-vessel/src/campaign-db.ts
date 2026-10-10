@@ -16,6 +16,12 @@ function getDbPath(): string {
 
 let _db: Database | null = null;
 
+/** Close the shared database so its file can be removed (tests; Windows will not delete an open file). */
+export function closeDb(): void {
+	_db?.close();
+	_db = null;
+}
+
 export function getDb(): Database {
 	if (_db) return _db;
 	_db = new Database(getDbPath());
