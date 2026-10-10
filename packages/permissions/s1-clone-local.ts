@@ -103,7 +103,7 @@ function noTrackedSymlinks(dir: string): boolean {
 			timeout: 5000,
 			maxBuffer: 64 * 1024 * 1024,
 			stdio: ["ignore", "pipe", "ignore"],
-			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", HOME: "/nonexistent" } as NodeJS.ProcessEnv,
+			env: { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", HOME: "/nonexistent" } as unknown as NodeJS.ProcessEnv,
 		});
 		return !out.split("\n").some((l) => l.startsWith("120000"));
 	} catch {
