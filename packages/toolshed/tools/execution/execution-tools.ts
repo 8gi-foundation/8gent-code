@@ -4,12 +4,20 @@
  * Shell execution, process management, and environment tools.
  */
 
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { sanitizeShellCommand } from "../../../permissions/shell-sanitizer";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
+
+/** Why a model-supplied argument was refused. */
+export const UNSAFE_ARG_REASON = "Argument contains a quote, $, backtick or ; and was not run";
+
+/** A model-supplied word with no quote, $, backtick, ; or line break. Kept as a second guard behind argv. */
+export function isPlainArg(value: unknown): boolean {
+	return typeof value === "string" && !/["'`$;\n\r]/.test(value);
+}
 
 // ── run_command ─────────────────────────────────────
 
@@ -85,35 +93,46 @@ registerTool(
 		const { file, grep } = input as { file?: string; grep?: string };
 		const cwd = ctx.workingDirectory;
 
-		// Detect test runner
-		let cmd: string;
+		// An argument that starts a new shell word is never a file or a test name.
+		const bad = [file, grep].find((v) => v !== undefined && !isPlainArg(v));
+		if (bad !== undefined) {
+			return { passed: false, output: `[BLOCKED] ${UNSAFE_ARG_REASON}`, command: "" };
+		}
+
+		// Detect test runner. argv, never a shell string (#3763).
+		let argv: string[];
 		const pkgPath = path.join(cwd, "package.json");
 		if (fs.existsSync(pkgPath)) {
 			const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 			const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
 			if (deps.vitest) {
-				cmd = "npx vitest run";
-				if (file) cmd += ` ${file}`;
-				if (grep) cmd += ` -t "${grep}"`;
+				argv = ["npx", "vitest", "run"];
+				if (file) argv.push(file);
+				if (grep) argv.push("-t", grep);
 			} else if (deps.jest) {
-				cmd = "npx jest";
-				if (file) cmd += ` ${file}`;
-				if (grep) cmd += ` -t "${grep}"`;
+				argv = ["npx", "jest"];
+				if (file) argv.push(file);
+				if (grep) argv.push("-t", grep);
 			} else if (fs.existsSync(path.join(cwd, "bun.lockb"))) {
-				cmd = "bun test";
-				if (file) cmd += ` ${file}`;
-				if (grep) cmd += ` -t "${grep}"`;
+				argv = ["bun", "test"];
+				if (file) argv.push(file);
+				if (grep) argv.push("-t", grep);
 			} else {
-				cmd = "npm test";
+				argv = ["npm", "test"];
 			}
 		} else {
-			cmd = "bun test";
-			if (file) cmd += ` ${file}`;
+			argv = ["bun", "test"];
+			if (file) argv.push(file);
 		}
+		const cmd = argv.join(" ");
 
 		try {
-			const stdout = execSync(cmd, { cwd, encoding: "utf-8", timeout: 120000 });
+			const stdout = execFileSync(argv[0], argv.slice(1), {
+				cwd,
+				encoding: "utf-8",
+				timeout: 120000,
+			});
 			return { passed: true, output: stdout.slice(0, 8000), command: cmd };
 		} catch (err: any) {
 			return {
@@ -157,11 +176,17 @@ registerTool(
 		else if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) pm = "pnpm";
 		else if (fs.existsSync(path.join(cwd, "yarn.lock"))) pm = "yarn";
 
-		let cmd = `${pm} ${packages?.length ? "add" : "install"}`;
-		if (packages?.length) cmd += ` ${packages.join(" ")}`;
-		if (dev) cmd += pm === "npm" ? " --save-dev" : " -D";
+		// A package name is a plain spec: no shell syntax, and never an option (#3763).
+		const badPkg = (packages ?? []).find((p) => !isPlainArg(p) || p.startsWith("-"));
+		if (badPkg !== undefined) {
+			return { packageManager: pm, command: "", output: `[BLOCKED] ${UNSAFE_ARG_REASON}` };
+		}
 
-		const stdout = execSync(cmd, { cwd, encoding: "utf-8", timeout: 120000 });
+		const argv = [packages?.length ? "add" : "install", ...(packages ?? [])];
+		if (dev) argv.push(pm === "npm" ? "--save-dev" : "-D");
+		const cmd = `${pm} ${argv.join(" ")}`;
+
+		const stdout = execFileSync(pm, argv, { cwd, encoding: "utf-8", timeout: 120000 });
 		return { packageManager: pm, command: cmd, output: stdout.slice(0, 4000) };
 	},
 );
@@ -186,23 +211,32 @@ registerTool(
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { filter, port } = input as { filter?: string; port?: number };
 
-		if (port) {
+		if (port !== undefined && port !== null) {
+			// A port is a number, whatever the model sent (#3763).
+			const portNum = Number(port);
+			if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+				return { processes: [], message: `Invalid port: ${String(port).slice(0, 20)}` };
+			}
 			try {
-				const output = execSync(`lsof -i :${port} -P -n`, {
+				const output = execFileSync("lsof", ["-i", `:${portNum}`, "-P", "-n"], {
 					encoding: "utf-8",
 					timeout: 5000,
 				});
 				return { processes: output.trim().split("\n").slice(1) };
 			} catch {
-				return { processes: [], message: `No process found on port ${port}` };
+				return { processes: [], message: `No process found on port ${portNum}` };
 			}
 		}
 
-		let cmd = "ps aux";
-		if (filter) cmd += ` | grep -i "${filter}" | grep -v grep`;
 		try {
-			const output = execSync(cmd, { encoding: "utf-8", timeout: 5000 });
-			const lines = output.trim().split("\n").slice(0, 20);
+			const output = execFileSync("ps", ["aux"], { encoding: "utf-8", timeout: 5000 });
+			// Filtered here, not by a shell pipeline: the filter is text, never a command.
+			const needle = filter?.toLowerCase();
+			const lines = output
+				.trim()
+				.split("\n")
+				.filter((l) => !needle || (l.toLowerCase().includes(needle) && !/\bgrep\b/.test(l)))
+				.slice(0, 20);
 			return { processes: lines };
 		} catch {
 			return { processes: [] };

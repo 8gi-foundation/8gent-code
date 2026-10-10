@@ -16,7 +16,7 @@
  * Smaller models that struggle with function schemas can compose CLI strings naturally.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -687,8 +687,9 @@ function executeSegment(
 
 	// Fall through to shell
 	try {
-		const fullCmd = [command, ...args.map((a) => (a.includes(" ") ? `"${a}"` : a))].join(" ");
-		const stdout = execSync(fullCmd, {
+		// argv, never a shell: the model's words are not re-parsed, so $(...), backticks
+		// and ; in an argument stay plain text (#3763).
+		const stdout = execFileSync(command, args, {
 			cwd: ctx.workingDirectory,
 			encoding: "utf-8",
 			timeout: 30000,
