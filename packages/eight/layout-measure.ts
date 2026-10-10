@@ -1,12 +1,10 @@
 /**
  * 8gent Code - measured layout of a design mock-up (#3770).
  *
- * Pilot design-mockup-practice scored 22 of 23 checks; the one miss was
- * d2_position (0.7239 against 0.77). The mock-up is 1280 px wide with an 800 px
- * column at x=240. read_image hands a model that can see a copy downscaled to
- * 1024 px, so every coordinate it guessed was 0.8 of the real one, and it built
- * a 1080 px column with 24 px padding. Position is scored in page space, so the
- * blocks sat off the mock-up even though the words and colours were right.
+ * The mock-up is 1280 px wide with an 800 px column at x=240. read_image hands a
+ * model that can see a copy downscaled to 1024 px, so every coordinate it guessed
+ * was 0.8 of the real one, and it built a 1080 px column with 24 px padding. The
+ * blocks then sat off the mock-up even though the words and colours were right.
  *
  * This reads the full-size pixels and reports the content column, whether it is
  * centred, and each horizontal band of content with its x-extents. It is
@@ -144,18 +142,17 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 }
 
 /**
- * Position is scored on block centres normalised by the rendered page's own height (#3823), so a page
- * shorter than the mock-up moves every block even when each is the right size. Measured on the
- * design-mockup-practice run: content ends at y=740 of a 1413 px image; the model built a 1016 px page
- * (position 0.70), and the same page with html min-height 1413px scored 0.87.
+ * A mock-up screenshot is the whole canvas, including blank space below the last content. A page built
+ * only as tall as its content is shorter than the mock-up, so every element ends up at a different
+ * fraction of the page height. Tell the model the full canvas height and where the content stops.
  */
 export function pageHeightLines(m: LayoutMeasure): string[] {
 	const last = m.bands[m.bands.length - 1];
 	if (!last) return [];
 	const end = last.y + last.h;
 	const blank = m.height - end;
-	const base = `  total page height: ${m.height}px. Make the rendered document exactly ${m.height}px tall (html { min-height: ${m.height}px }), not just tall enough for the content: the layout is judged against the full page height, so a shorter page shifts every block.`;
-	return blank >= 40 ? [`  the last content ends at y=${end}; the remaining ${blank}px is blank canvas below it and must stay in the page.`, base] : [base];
+	const base = `  total page height: ${m.height}px. The mock-up canvas includes blank space below the content; reproduce the full canvas height (html { min-height: ${m.height}px }) so every element keeps its place on the page.`;
+	return blank >= 40 ? [`  the last content ends at y=${end}; the remaining ${blank}px below it is blank canvas.`, base] : [base];
 }
 
 /** One block of text for a read_image result, or "" when there is nothing to say. */

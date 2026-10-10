@@ -1,6 +1,5 @@
 /**
- * #3770: pilot design-mockup-practice missed d2_position (0.7239 vs 0.77).
- * The model read a 1280 px mock-up shown downscaled to 1024 and eyeballed a
+ * #3770: a model that read a 1280 px mock-up shown downscaled to 1024 eyeballed a
  * 1080 px column with 24 px padding; the mock-up's column is 800 px wide at
  * x=240. read_image now reports measured full-size geometry so the page can be
  * built with the real numbers. Images are raw pixels, no fonts, so the test is
@@ -122,7 +121,7 @@ describe("page height guidance (#3823)", () => {
 		expect(line).toContain("total page height: 900px");
 		expect(line).toContain("min-height: 900px");
 		expect(line).toContain("the last content ends at y=120");
-		expect(line).toContain("780px is blank canvas");
+		expect(line).toContain("780px below it is blank canvas");
 	});
 
 	test("omits the blank-canvas note when the content fills the image", async () => {
