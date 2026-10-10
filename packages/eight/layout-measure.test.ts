@@ -111,3 +111,24 @@ describe("measureLayout (#3770)", () => {
 		expect(line).not.toMatch(/\u2014/);
 	});
 });
+
+describe("page height guidance (#3823)", () => {
+	test("tells the model to keep the full mock-up height and names the trailing blank", async () => {
+		const file = await mockup([
+			{ x: 240, y: 40, w: 180, h: 30 },
+			{ x: 240, y: 100, w: 680, h: 20 },
+		]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("total page height: 900px");
+		expect(line).toContain("min-height: 900px");
+		expect(line).toContain("the last content ends at y=120");
+		expect(line).toContain("780px is blank canvas");
+	});
+
+	test("omits the blank-canvas note when the content fills the image", async () => {
+		const file = await mockup([{ x: 240, y: 0, w: 800, h: 900 }]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("total page height: 900px");
+		expect(line).not.toContain("blank canvas");
+	});
+});

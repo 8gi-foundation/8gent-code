@@ -143,6 +143,21 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 	}
 }
 
+/**
+ * Position is scored on block centres normalised by the rendered page's own height (#3823), so a page
+ * shorter than the mock-up moves every block even when each is the right size. Measured on the
+ * design-mockup-practice run: content ends at y=740 of a 1413 px image; the model built a 1016 px page
+ * (position 0.70), and the same page with html min-height 1413px scored 0.87.
+ */
+export function pageHeightLines(m: LayoutMeasure): string[] {
+	const last = m.bands[m.bands.length - 1];
+	if (!last) return [];
+	const end = last.y + last.h;
+	const blank = m.height - end;
+	const base = `  total page height: ${m.height}px. Make the rendered document exactly ${m.height}px tall (html { min-height: ${m.height}px }), not just tall enough for the content: the layout is judged against the full page height, so a shorter page shifts every block.`;
+	return blank >= 40 ? [`  the last content ends at y=${end}; the remaining ${blank}px is blank canvas below it and must stay in the page.`, base] : [base];
+}
+
 /** One block of text for a read_image result, or "" when there is nothing to say. */
 export async function layoutMeasureLine(file: string): Promise<string> {
 	const m = await measureLayout(file);
@@ -163,6 +178,7 @@ export async function layoutMeasureLine(file: string): Promise<string> {
 		`  content column x=${m.column.left}..${m.column.right} (width ${m.column.width}px, left margin ${m.column.left}px, right margin ${m.width - m.column.right}px${m.centered ? ", centered" : ""})`,
 		"  content bands, top to bottom (y is the top edge, h the height, x the left edge, w the width):",
 		...rows,
+		...pageHeightLines(m),
 		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins.`,
 		"These are the edges of the visible pixels (ink), not CSS boxes: a text box starts a few px above its y (half the line gap), and a table or list cell holding text at x greater than the column left needs that much left padding. Reproduce every listed x offset and every y gap. If a block is still off after the first render, place it with position:absolute at the listed left and top inside a position:relative column rather than relying on flow.",
 	].join("\n");
