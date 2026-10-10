@@ -247,13 +247,11 @@ describe("restoreInProject falls through on", () => {
 		});
 	}
 	test("a staged-only edit (worktree equals HEAD, index differs)", () => {
-		const orig = '{"rate":"broken"}';
 		writeFileSync(join(ws, "config", "other.json"), "staged");
 		git(ws, "add", "config/other.json");
 		writeFileSync(join(ws, "config", "other.json"), "{}");
 		expect(git(ws, "diff", "--quiet", "HEAD", "--", "config/other.json")).toBe("");
 		expect(restoreInProject("git restore --source=HEAD config/other.json", ws).ok).toBe(false);
-		expect(orig).toBeTruthy();
 	});
 
 	describe("with a global git-lfs style filter in HOME", () => {

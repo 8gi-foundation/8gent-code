@@ -136,6 +136,8 @@ function trackedRegularFile(root: string, rel: string): boolean {
 	// Tag H is a normal tracked entry; a lowercase tag is assume-unchanged, S is skip-worktree.
 	const tag = git(root, ["ls-files", "-v", "--error-unmatch", "--", rel]);
 	if (!tag.startsWith("H ") || tag.trim().split("\n").length !== 1) return false;
+	// Deliberate: the show form refuses a filtered path too, although `git show` applies
+	// no filter. One rule for every form keeps the lane simple and strict.
 	return !hasFilterAttr(root, rel);
 }
 
