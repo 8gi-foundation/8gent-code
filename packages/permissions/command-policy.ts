@@ -334,7 +334,7 @@ export function stripPrefix(argv: string[]): Unwrapped | null {
 }
 
 /** The commands `find -exec` / `-execdir` / `-ok` / `-okdir` run. */
-function findPayloads(argv: string[]): string[][] {
+export function findPayloads(argv: string[]): string[][] {
 	if (path.basename(argv[0] ?? "") !== "find") return [];
 	const out: string[][] = [];
 	for (let i = 1; i < argv.length; i++) {
