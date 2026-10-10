@@ -2001,16 +2001,27 @@ export class ToolExecutor {
 				return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
-			case "post_message":
+			case "post_message": {
 				// Policy gate, then the person, inside postMessage; never a shell string.
+				let text = typeof args.text === "string" ? args.text : "";
+				// text_file (#3838): a drafted message in the project, read here so no
+				// shell substitution is needed. safePath keeps it inside the workspace.
+				if (text === "" && typeof args.text_file === "string" && args.text_file !== "") {
+					const file = safePath(args.text_file, this.workingDirectory);
+					if (!fs.existsSync(file)) return `[ERROR] text_file not found: ${args.text_file}`;
+					if (fs.statSync(file).size > 64 * 1024)
+						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
+					text = fs.readFileSync(file, "utf8").replace(/\s+$/, "");
+				}
 				return postMessage(
 					{
 						chat: String(args.chat ?? ""),
-						text: typeof args.text === "string" ? args.text : "",
+						text,
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
 					},
 					postMessageDeps(this.agentId, this.postSession),
 				);
+			}
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
 					"issue",
