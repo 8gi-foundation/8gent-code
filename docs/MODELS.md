@@ -110,6 +110,71 @@ What changes when the template is pointed at a non-Qwen vision model:
   `goal_failed`. Models without reliable tool-call termination should be
   wrapped with a regex parser in the loop (out of scope for v0).
 
+## Declared providers (Hugging Face Inference Providers or any OpenAI-compatible endpoint)
+
+A provider name in `~/.8gent/providers.json` that is not compiled in is a
+declaration. It needs a `baseUrl` and nothing else (source:
+`packages/providers/declared.ts`). The entry is ignored with a warning if
+`baseUrl` is missing or is not http(s).
+
+Hugging Face Inference Providers exposes an OpenAI-compatible router at
+`https://router.huggingface.co/v1`, chat endpoint
+`https://router.huggingface.co/v1/chat/completions`, authenticated with a
+Hugging Face token as a bearer token (confirmed against
+huggingface.co/docs/inference-providers, 2026-10-10). Hugging Face can change
+this, so re-check that page if the connection fails.
+
+```json
+{
+  "activeProvider": "huggingface",
+  "activeModel": "openai/gpt-oss-120b",
+  "providers": {
+    "huggingface": {
+      "displayName": "Hugging Face",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "compat": "openai",
+      "apiKeyEnv": "HF_TOKEN",
+      "defaultModel": "openai/gpt-oss-120b"
+    }
+  }
+}
+```
+
+Then export the token in the shell that starts 8gent (`export HF_TOKEN=...`).
+Fields, all optional except `baseUrl`:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `compat` | `"openai"` | Wire shape: `"openai"` (`{baseUrl}/chat/completions`, `{baseUrl}/models`), `"ollama"`, or `"anthropic"` |
+| `apiKeyEnv` | `""` (keyless) | Name of the environment variable holding the key |
+| `apiKey` | none | A literal key stored in the file. Avoid it, see below |
+| `defaultModel` / `models` | empty | Model ids; when empty, discovery asks the endpoint (`GET {baseUrl}/models`, 5 s timeout) |
+| `supportsTools`, `supportsStreaming` | `true` | Set `false` to turn off |
+| `supportsVision` | `false` | Opt-in |
+| `supportedThinkingLevels` | `[]` | Unrecognised levels are dropped |
+| `enabled` | `true` | Writing the entry is the opt-in |
+
+Use `apiKeyEnv`, not `apiKey`. `providers.json` is a plain file that gets
+copied, synced and pasted into bug reports, and a literal key in it travels
+with it. An environment variable keeps the secret out of the file, and an
+empty `apiKeyEnv` is how a declaration says "no key needed", so a keyless local
+endpoint and a keyed cloud one are written the same way.
+
+Things to know before you rely on it:
+
+- Cloud is opt-in. Once this provider is active, your prompts and the code
+  context in them leave your machine for Hugging Face and whichever
+  downstream provider it routes to.
+- Tool calling depends on the model and provider chosen. `supportsTools`
+  defaults to `true`, but that is only 8gent's assumption; some models and
+  providers behind the router do not implement tool calls well or at all.
+  Test with a small task first.
+- Model ids take Hugging Face's own suffixes (`:fastest`, `:cheapest`,
+  `:preferred`, or a provider name). The router picks the downstream
+  provider, so behaviour can differ between runs.
+- A secure key entry screen, so you do not have to hand-edit a file or
+  export variables, is tracked in #3848.
+
 ## Adding a new model
 
 1. Add a `ModelEntry` to `MODELS` in `packages/eight/registry.ts`.
