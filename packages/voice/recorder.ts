@@ -6,10 +6,11 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
+import { type InputDevice, resolveInputDevice } from "./input-device.js";
 
 export interface RecorderOptions {
 	/** Sample rate in Hz (default: 16000 for Whisper) */
@@ -29,6 +30,8 @@ export interface RecorderEvents {
 	stop: [{ path: string; durationMs: number }];
 	"audio-level": [{ level: number }];
 	error: [{ message: string }];
+	/** Emitted at the start of every recording with the current default input */
+	device: [InputDevice];
 }
 
 /**
@@ -73,6 +76,43 @@ export async function checkSoxInstalled(): Promise<{
 }
 
 /**
+ * RMS level (0-1) of the last ~100 ms of 16-bit PCM in a growing WAV file.
+ * sox flushes in blocks, so this is real but updates in steps. Returns null
+ * when the file has no audio data yet or the format is not 16-bit.
+ */
+export function readTailLevel(path: string, bitDepth = 16, windowBytes = 3200): number | null {
+	if (bitDepth !== 16) return null;
+	try {
+		const size = statSync(path).size;
+		if (size <= 44 + 2) return null;
+		const len = Math.min(windowBytes, size - 44) & ~1;
+		const buf = Buffer.alloc(len);
+		const fd = openSync(path, "r");
+		try {
+			readSync(fd, buf, 0, len, size - len);
+		} finally {
+			closeSync(fd);
+		}
+		return pcm16Level(buf);
+	} catch {
+		return null;
+	}
+}
+
+/** RMS of little-endian 16-bit samples, scaled so ordinary speech reads mid-bar. */
+export function pcm16Level(buf: Uint8Array): number {
+	const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+	const n = Math.floor(buf.byteLength / 2);
+	if (n === 0) return 0;
+	let sum = 0;
+	for (let i = 0; i < n; i++) {
+		const v = view.getInt16(i * 2, true) / 32768;
+		sum += v * v;
+	}
+	return Math.min(1, Math.sqrt(sum / n) * 4);
+}
+
+/**
  * Microphone recorder using sox `rec` command.
  *
  * Usage:
@@ -93,6 +133,7 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	private levelInterval: ReturnType<typeof setInterval> | null = null;
 	private isRecording = false;
 	private options: Required<RecorderOptions>;
+	private device: InputDevice = { name: null, source: "unknown" };
 
 	constructor(opts: RecorderOptions = {}) {
 		super();
@@ -122,6 +163,11 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			});
 			throw new Error(`sox not installed. ${soxCheck.installHint}`);
 		}
+
+		// Resolve the input device on EVERY start, never cached, so a headset or
+		// AirPods switch applies on the next press. sox records from the OS default.
+		this.device = await resolveInputDevice();
+		this.emit("device", this.device);
 
 		// Generate a fresh temp path for this recording
 		this.outputPath = this.options.outputPath.includes("8gent-voice-")
@@ -153,27 +199,11 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			this.startTime = Date.now();
 			this.emit("start");
 
-			// Simulate audio levels (sox rec doesn't output levels in quiet mode)
-			// In a real implementation, we'd use sox's --show-progress or stat effect
+			// Real levels: RMS of the newest PCM samples sox has written to the file.
 			this.levelInterval = setInterval(() => {
-				if (this.isRecording) {
-					// Generate a pseudo-level based on file size growth
-					// This gives a rough indication that audio is being captured
-					try {
-						if (existsSync(this.outputPath)) {
-							const stat = statSync(this.outputPath);
-							const bytesPerSecond =
-								this.options.sampleRate * this.options.channels * (this.options.bitDepth / 8);
-							const expectedBytes = ((Date.now() - this.startTime) / 1000) * bytesPerSecond;
-							const ratio = expectedBytes > 0 ? Math.min(stat.size / expectedBytes, 1) : 0;
-							// Add some randomness to simulate real audio levels
-							const level = Math.max(0, Math.min(1, ratio * 0.5 + Math.random() * 0.3));
-							this.emit("audio-level", { level });
-						}
-					} catch {
-						// File might not exist yet, ignore
-					}
-				}
+				if (!this.isRecording) return;
+				const level = readTailLevel(this.outputPath, this.options.bitDepth);
+				if (level !== null) this.emit("audio-level", { level });
 			}, 100);
 
 			// Safety: max recording duration
@@ -236,6 +266,13 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 		const result = { path: this.outputPath, durationMs };
 		this.emit("stop", result);
 		return result;
+	}
+
+	/**
+	 * The input device resolved at the start of the current (or last) recording.
+	 */
+	getDevice(): InputDevice {
+		return this.device;
 	}
 
 	/**
