@@ -281,6 +281,10 @@ export interface ToolCatalogOptions {
 	omit?: Iterable<string>;
 }
 
+/** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
+const SLIDES_TO_VIDEO_NOTE =
+	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
+
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
  * Closes #1082 (structured, honest, versioned tool/policy/skills snapshot).
@@ -302,7 +306,9 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	} else {
 		lines.push(
 			"",
-			"These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
+			concise
+				? "Call these tools directly."
+				: "These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
 		);
 	}
 	lines.push("");
@@ -323,10 +329,12 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 
 	lines.push(
 		"",
-		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
+		concise
+			? "**For external info, docs or URLs call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**"
+			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
 	);
-	if (!concise) lines.push("**Slides to video: loop over `slide*.png`, not `while read` on a text file (it drops a last line with no trailing newline). Before joining, confirm segment count equals slide count.**");
+	lines.push(SLIDES_TO_VIDEO_NOTE);
 
 	return lines.join("\n");
 }

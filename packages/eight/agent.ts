@@ -199,7 +199,7 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  * internet, and narration goes through `speak`. Same wording as the catalog.
  */
 const HEADLESS_TOOL_NOTES =
-	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**\n**Slides to video: loop over `slide*.png`, not `while read` on a text file (it drops a last line with no trailing newline). Before joining, confirm segment count equals slide count.**";
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**\n**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text

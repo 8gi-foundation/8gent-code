@@ -68,10 +68,13 @@ describe("slides-to-video join guidance (#3862)", () => {
 	it("tells the model to cover every slide when joining", () => {
 		expect(TOOL_CATALOG_SEGMENT).toContain("Slides to video");
 		expect(TOOL_CATALOG_SEGMENT).toContain("segment count equals slide count");
-		expect(TOOL_CATALOG_SEGMENT).toContain("while read");
+		expect(TOOL_CATALOG_SEGMENT).toContain("trailing newline");
 	});
 
-	it("is left out of the concise segment to keep its budget", () => {
-		expect(buildToolCatalogSegment({ concise: true })).not.toContain("Slides to video");
+	it("is present on the concise path the local TUI uses, within its budget", () => {
+		const concise = buildToolCatalogSegment({ concise: true });
+		expect(concise).toContain("segment count equals slide count");
+		expect(concise).toContain("trailing newline");
+		expect(concise.length).toBeLessThan(2048);
 	});
 });
