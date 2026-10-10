@@ -81,7 +81,7 @@ import { browserProfileWarning, localBrowserTools } from "../tools/eight-browser
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
-import { buildToolCatalogSegment } from "./prompts/system-prompt";
+import { SLIDES_TO_VIDEO_NOTE, buildToolCatalogSegment } from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -199,7 +199,8 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  * internet, and narration goes through `speak`. Same wording as the catalog.
  */
 const HEADLESS_TOOL_NOTES =
-	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**";
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**\n" +
+	SLIDES_TO_VIDEO_NOTE;
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text

@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
 
 let Agent: typeof import("./agent").Agent;
 
@@ -154,6 +155,11 @@ describe("headless prompt diet", () => {
 		expect(sys).toContain("NEVER guess, invent, or recall a tool's output");
 		expect(sys).toContain("you MUST use the write_file tool");
 		expect(sys).toContain("Do not claim you have no internet access");
+	}, 60_000);
+
+	test("headless carries the shared slides-to-video note (#3862)", async () => {
+		const [headless] = await run(true);
+		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
 	}, 60_000);
 
 	test("headless does not advertise tools the run does not offer", async () => {
