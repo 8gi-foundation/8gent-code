@@ -49,7 +49,7 @@ import { getProviderManager, type ProviderName as ProviderRegistryName } from ".
 import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
-import { getVault } from "../secrets";
+import { getVaultOrNull } from "../secrets";
 import { type HeartbeatAgents, getHeartbeatAgents } from "../self-autonomy/heartbeat";
 import { OnboardingManager } from "../self-autonomy/onboarding";
 import type {
@@ -724,8 +724,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 
 		// ── Telegram: Auto-start if token exists in vault ────────────────
-		const vault = getVault();
-		if (vault.has("TELEGRAM_BOT_TOKEN") && !getActiveTelegramBot()) {
+		const vault = getVaultOrNull();
+		if (vault?.has("TELEGRAM_BOT_TOKEN") && !getActiveTelegramBot()) {
 			const telegramToken = vault.get("TELEGRAM_BOT_TOKEN");
 			if (telegramToken) {
 				const chatId = vault.get("TELEGRAM_CHAT_ID");

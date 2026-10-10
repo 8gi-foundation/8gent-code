@@ -62,7 +62,7 @@ afterEach(() => {
 	instance = null;
 });
 
-async function mount() {
+async function mount(opts: { problem?: string | null; failWith?: string } = {}) {
 	const saved: [string, string][] = [];
 	const stored: { name: string; last4: string; backend: "keychain" }[] = [];
 	const stdin = new FakeStdin();
@@ -71,7 +71,9 @@ async function mount() {
 		<KeyVaultScreen
 			targets={[{ label: "Hugging Face", vaultName: "HF_TOKEN" }]}
 			onClose={() => {}}
+			problem={opts.problem ?? null}
 			store={(n, v) => {
+				if (opts.failWith) throw new Error(opts.failWith);
 				saved.push([n, v]);
 				stored.push({ name: n, last4: v.slice(-4), backend: "keychain" });
 				return "keychain";
@@ -129,5 +131,18 @@ describe("KeyVaultScreen", () => {
 		await press("\x1b", "Nothing saved");
 		expect(saved).toEqual([]);
 		expect(all()).not.toContain("abcd");
+	});
+
+	test("a failing store never echoes its error text, which may carry the key", async () => {
+		const { press, all } = await mount({ failWith: `boom ${KEY}` });
+		await press("\r", "Key for Hugging Face");
+		await press(`${KEY}\r`, "Could not save the key");
+		expect(all()).not.toContain(KEY);
+		expect(all()).not.toContain("boom");
+	});
+
+	test("an unreadable vault is reported in plain words", async () => {
+		const { all } = await mount({ problem: "The vault file could not be read. It was left unchanged." });
+		expect(all()).toContain("could not be read");
 	});
 });

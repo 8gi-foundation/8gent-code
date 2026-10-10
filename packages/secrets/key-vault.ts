@@ -27,7 +27,8 @@ export interface KeyBackend {
 	get(name: string): string | undefined;
 	set(name: string, value: string): void;
 	delete(name: string): boolean;
-	list(): string[];
+	/** Names stored under `prefix` (an owner, e.g. "user:abc/"). */
+	list(prefix?: string): string[];
 }
 
 export interface RunResult {
@@ -68,26 +69,40 @@ abstract class IndexedBackend implements KeyBackend {
 	protected abstract write(account: string, value: string): boolean;
 	protected abstract remove(account: string): void;
 
+	/**
+	 * One index entry PER OWNER ("<owner>/" prefix of the id), so the keychain
+	 * never holds a single list naming every user's keys.
+	 */
+	private indexAccount(prefix: string): string {
+		return `${INDEX}:${prefix.replace(/\/$/, "")}`;
+	}
+	private ownerPrefix(name: string): string {
+		const i = name.indexOf("/");
+		return i < 0 ? "" : name.slice(0, i + 1);
+	}
+
 	get(name: string): string | undefined {
-		return name === INDEX ? undefined : this.read(name);
+		return name.startsWith(INDEX) ? undefined : this.read(name);
 	}
 	set(name: string, value: string): void {
-		if (name === INDEX) throw new Error("Reserved key name");
+		if (name.startsWith(INDEX)) throw new Error("Reserved key name");
 		if (!this.write(name, value)) throw new Error(`${this.name} write failed`);
-		const index = parseIndex(this.read(INDEX));
+		const account = this.indexAccount(this.ownerPrefix(name));
+		const index = parseIndex(this.read(account));
 		if (!index.includes(name)) {
 			index.push(name);
-			this.write(INDEX, JSON.stringify(index.sort()));
+			this.write(account, JSON.stringify(index.sort()));
 		}
 	}
 	delete(name: string): boolean {
-		if (name === INDEX || this.read(name) === undefined) return false;
+		if (name.startsWith(INDEX) || this.read(name) === undefined) return false;
 		this.remove(name);
-		this.write(INDEX, JSON.stringify(parseIndex(this.read(INDEX)).filter((k) => k !== name)));
+		const account = this.indexAccount(this.ownerPrefix(name));
+		this.write(account, JSON.stringify(parseIndex(this.read(account)).filter((k) => k !== name)));
 		return true;
 	}
-	list(): string[] {
-		return parseIndex(this.read(INDEX));
+	list(prefix = ""): string[] {
+		return parseIndex(this.read(this.indexAccount(prefix)));
 	}
 }
 
@@ -107,6 +122,9 @@ export class MacKeychainBackend extends IndexedBackend {
 		return r.ok && out ? out : undefined;
 	}
 	protected write(account: string, value: string): boolean {
+		// The account goes into a line read by `security -i`: only a plain, quote-free
+		// token may be used, so nothing in an account name can start a second command.
+		if (!/^[A-Za-z0-9_.@:/-]+$/.test(account)) throw new Error("keychain account not usable");
 		const hex = Buffer.from(value, "utf8").toString("hex");
 		const line = `add-generic-password -s ${SERVICE} -a ${account} -X ${hex} -U\n`;
 		return this.run("security", ["-i"], line).ok && this.read(account) !== undefined;
@@ -160,8 +178,8 @@ export class FileKeyBackend implements KeyBackend {
 	delete(name: string) {
 		return this.vault.delete(name);
 	}
-	list() {
-		return this.vault.list();
+	list(prefix = "") {
+		return this.vault.list().filter((n) => n.startsWith(prefix));
 	}
 }
 
@@ -210,6 +228,20 @@ export function activeKeyBackend(): KeyBackendName {
 	return primary().name;
 }
 
+/**
+ * Null when the vault is usable. Otherwise a short, neutral sentence for the
+ * screen: the file vault exists but could not be read, and was left unchanged.
+ */
+export function keyVaultProblem(): string | null {
+	try {
+		primary();
+		fileBackend();
+		return null;
+	} catch (err) {
+		return err instanceof Error ? err.message : "The key vault could not be opened.";
+	}
+}
+
 // ---------- Per-user namespace ----------
 //
 // Every entry is stored as "<owner>/<name>". The owner is the signed-in user id
@@ -224,7 +256,7 @@ function localOwner(): string {
 	} catch {
 		/* no passwd entry: keep "unknown" */
 	}
-	return `os:${user}`;
+	return `os:${user.replace(/[^A-Za-z0-9_.@:-]/g, "_")}`;
 }
 
 let owner = localOwner();
@@ -291,10 +323,10 @@ export function deleteVaultKey(name: string): boolean {
 	let removed = false;
 	try {
 		removed = primary().delete(scoped(name));
+		if (primary().name !== "file") removed = fileBackend().delete(scoped(name)) || removed;
 	} catch {
-		/* keychain unreadable: still clear the file copy below */
+		/* a backend is unreadable: nothing is rewritten, the entry stays where it is */
 	}
-	if (primary().name !== "file") removed = fileBackend().delete(scoped(name)) || removed;
 	cache.delete(scoped(name));
 	return removed;
 }
@@ -309,16 +341,21 @@ export interface VaultKeyInfo {
 /** What is stored, safe to render: names and last 4 characters, never the key. */
 export function listVaultKeys(): VaultKeyInfo[] {
 	const out = new Map<string, VaultKeyInfo>();
-	const backends: KeyBackend[] =
-		primary().name === "file" ? [primary()] : [primary(), fileBackend()];
+	const prefix = `${owner}/`;
+	const backends: KeyBackend[] = [];
+	try {
+		backends.push(primary());
+		if (primary().name !== "file") backends.push(fileBackend());
+	} catch {
+		/* unreadable file vault: list what is readable, keyVaultProblem() explains the rest */
+	}
 	for (const b of backends) {
 		let names: string[] = [];
 		try {
-			names = b.list();
+			names = b.list(prefix);
 		} catch {
 			continue;
 		}
-		const prefix = `${owner}/`;
 		for (const id of names) {
 			if (!id.startsWith(prefix)) continue; // another user's entry: never read
 			const name = id.slice(prefix.length);

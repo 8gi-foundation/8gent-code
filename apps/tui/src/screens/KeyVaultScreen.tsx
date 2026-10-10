@@ -19,6 +19,7 @@ import {
 	type VaultKeyInfo,
 	deleteVaultKey,
 	currentKeyOwner,
+	keyVaultProblem,
 	listVaultKeys,
 	maskKey,
 	storeVaultKey,
@@ -52,6 +53,8 @@ export interface KeyVaultScreenProps {
 	onClose: () => void;
 	/** Providers still carrying a plain-text key in providers.json. */
 	plainKeyProviders?: string[];
+	/** Set when the key vault could not be opened (see keyVaultProblem). */
+	problem?: string | null;
 	/** Test seams. Default to the real vault. */
 	store?: (name: string, value: string) => string;
 	remove?: (name: string) => boolean;
@@ -62,6 +65,7 @@ export function KeyVaultScreen({
 	targets = providerKeyTargets(),
 	onClose,
 	plainKeyProviders = plainKeyProviderNames(),
+	problem = keyVaultProblem(),
 	store = storeVaultKey,
 	remove = deleteVaultKey,
 	list = listVaultKeys,
@@ -166,6 +170,11 @@ export function KeyVaultScreen({
 					<Text>Key for {targets[index].label}:</Text>
 					<Text>{`[ ${maskKey(secret.current)}${typedLength === 0 ? "" : " "}]`}</Text>
 					<Text dimColor>Enter saves. Esc cancels.</Text>
+				</Box>
+			)}
+			{problem && (
+				<Box marginTop={1}>
+					<Text color="red">{problem}</Text>
 				</Box>
 			)}
 			{plainKeyProviders.length > 0 && (
