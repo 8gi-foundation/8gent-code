@@ -147,3 +147,77 @@ describe("#3855 plain timeout reason", () => {
 		expect(ceil.message).toContain("EIGHT_TURN_TIMEOUT_MS");
 	});
 });
+
+describe("withProgressTimeout hardening (#3855, 8SO)", () => {
+	it("a touch after the attempt settled arms no zombie timer and fires no abort", async () => {
+		let aborts = 0;
+		let leaked: import("./turn-timeout").ProgressWatch | null = null;
+		await withProgressTimeout(
+			async (watch) => {
+				leaked = watch;
+				return "ok";
+			},
+			{ idleMs: 40, ceilingMs: 5_000, onTimeout: () => aborts++ },
+		);
+		leaked!.touch();
+		leaked!.release();
+		leaked!.stepDone();
+		await sleep(150);
+		expect(aborts).toBe(0);
+	});
+
+	it("the ceiling cannot be held off: a held tool and constant touches still die at the ceiling", async () => {
+		const p = withProgressTimeout(
+			async (watch) => {
+				watch.hold();
+				for (;;) {
+					await sleep(10);
+					watch.touch();
+					watch.stepDone();
+				}
+			},
+			{ idleMs: 100, ceilingMs: 200 },
+		);
+		await expect(p).rejects.toMatchObject({ kind: "ceiling" });
+	});
+
+	it("a hold leaked by a throwing tool is cleared by the step finishing, so idle still catches silence", async () => {
+		const p = withProgressTimeout(
+			async (watch) => {
+				watch.hold(); // tool threw, release never called
+				watch.stepDone();
+				await sleep(2_000);
+			},
+			{ idleMs: 100, ceilingMs: 5_000 },
+		);
+		await expect(p).rejects.toMatchObject({ kind: "idle" });
+	});
+
+	it("timeout invokes onTimeout once and error text names limit and knob without secrets", async () => {
+		let aborts = 0;
+		const err: any = await withProgressTimeout(() => sleep(2_000), {
+			idleMs: 50,
+			ceilingMs: 5_000,
+			onTimeout: () => aborts++,
+			label: "p/m",
+		}).catch((e) => e);
+		expect(err).toBeInstanceOf(TurnTimeoutError);
+		expect(aborts).toBe(1);
+		expect(err.message).toContain("EIGHT_STREAM_IDLE_MS");
+		expect(err.message).not.toMatch(/key|token|bearer|sk-|http/i);
+	});
+});
+
+describe("env parsing fails safe (#3855, 8SO)", () => {
+	const { resolveStreamIdleMs, resolveStepCeilingMs } = require("./turn-timeout");
+	it("NaN, negative and huge values never yield an unbounded or instant ceiling", () => {
+		for (const v of ["NaN", "abc", "-5", "1e999", "99999999999999"]) {
+			const ceil = resolveStepCeilingMs({ EIGHT_TURN_TIMEOUT_MS: v });
+			expect(Number.isFinite(ceil)).toBe(true);
+			expect(ceil).toBeGreaterThanOrEqual(1000);
+			expect(ceil).toBeLessThanOrEqual(2_147_483_647);
+		}
+		expect(resolveStreamIdleMs({ EIGHT_STREAM_IDLE_MS: "abc" })).toBe(300_000);
+		expect(resolveStepCeilingMs({ EIGHT_STREAM_IDLE_MS: "0" })).toBeGreaterThan(0);
+	});
+});

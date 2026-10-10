@@ -223,6 +223,15 @@ export class ProgressWatch {
 		this.held = Math.max(0, this.held - 1);
 		this.onTouch?.();
 	}
+	/**
+	 * A model step finished, so every tool of that step has returned. Zero the
+	 * hold count (a tool that threw without onToolCallFinish must not leave the
+	 * idle gap suspended for the rest of the attempt) and re-arm the gap.
+	 */
+	stepDone(): void {
+		this.held = 0;
+		this.onTouch?.();
+	}
 	get isHeld(): boolean {
 		return this.held > 0;
 	}
@@ -258,7 +267,11 @@ export async function withProgressTimeout<T>(
 		}
 		rejectFn(new TurnTimeoutError(ms, opts.label, kind));
 	};
+	let closed = false;
 	const rearm = () => {
+		// A late progress signal after settle must never re-arm a zombie timer
+		// that would abort the NEXT turn's shared controller.
+		if (closed) return;
 		if (idleTimer) clearTimeout(idleTimer);
 		idleTimer = null;
 		if (opts.idleMs === null || watch.isHeld) return;
@@ -273,6 +286,7 @@ export async function withProgressTimeout<T>(
 	try {
 		return await Promise.race([run(watch), timeout]);
 	} finally {
+		closed = true;
 		if (idleTimer) clearTimeout(idleTimer);
 		if (ceilingTimer) clearTimeout(ceilingTimer);
 	}
