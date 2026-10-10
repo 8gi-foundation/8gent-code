@@ -216,6 +216,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
@@ -1726,6 +1727,31 @@ export function App({
 		}
 
 	}, [isProcessing, soundEnabled]);
+
+	// OSC 7501 program status: tell the host terminal working / blocked / done /
+	// error / idle. TTY-only, off with EIGHT_NO_PROGRAM_STATUS=1 (lib/program-status.ts).
+	const programStatus = useRef<ReturnType<typeof createProgramStatusEmitter> | null>(null);
+	const hasRunTurnRef = useRef(false);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		if (isProcessing) hasRunTurnRef.current = true;
+		programStatus.current.set(
+			deriveProgramState({
+				isProcessing,
+				approvalPending: approvalPending !== null,
+				lastTurn: hasRunTurnRef.current ? (turnEndedInError(messages) ? "error" : "ok") : null,
+			}),
+		);
+	}, [isProcessing, approvalPending, messages]);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		const emitter = programStatus.current;
+		const uninstall = installProgramStatusCleanup(emitter);
+		return () => {
+			uninstall();
+			emitter.clear();
+		};
+	}, []);
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
@@ -5086,6 +5112,54 @@ export function App({
 					// Handle /vision command
 					else if (command === ("vision" as any)) {
 						handleVisionCommand(args);
+					}
+					// Handle /toolshed command: skill registry list | search | stats
+					else if ((command as string) === "toolshed") {
+						const sub = args[0] || "stats";
+						import("../../../packages/toolshed/skill-registry.js")
+							.then(({ getSkillRegistry }) => {
+								const registry = getSkillRegistry();
+								if (sub === "stats") {
+									const st = registry.getStats();
+									addSystemMessage(
+										`Toolshed: ${st.skillCount} skills, ${st.capabilities} capabilities, ~${st.totalTokens} tokens (avg ${st.avgTokensPerSkill}).`,
+									);
+								} else if (sub === "list" || sub === "search") {
+									const pattern = sub === "search" ? args.slice(1).join(" ") : "";
+									if (sub === "search" && !pattern) {
+										addSystemMessage("Usage: /toolshed search <pattern>");
+										return;
+									}
+									const found = registry.search(pattern || ".");
+									addSystemMessage(
+										found.length === 0
+											? "Toolshed: no skills match."
+											: `Toolshed: ${found.length} skills\n${found
+													.slice(0, 40)
+													.map((k) => `  ${k.name}  ${k.description}`)
+													.join("\n")}`,
+									);
+								} else {
+									addSystemMessage("Usage: /toolshed [list|search <pattern>|stats]");
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`Toolshed: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
+					// Handle /quarantine command: skill quarantine manager (no add from the TUI)
+					else if ((command as string) === "quarantine") {
+						Promise.all([
+							import("../../../packages/quarantine/index.js"),
+							import("./lib/quarantine-command.js"),
+						])
+							.then(([{ getQuarantineManager }, { runQuarantineCommand }]) =>
+								runQuarantineCommand(getQuarantineManager() as never, args),
+							)
+							.then((msg) => addSystemMessage(msg))
+							.catch((e) =>
+								addSystemMessage(`Quarantine: ${e instanceof Error ? e.message : String(e)}`),
+							);
 					}
 					// Workspace tab commands
 					else if (command === ("notes" as any)) {

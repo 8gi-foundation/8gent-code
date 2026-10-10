@@ -130,6 +130,8 @@ import {
 	PERMISSION_MODE_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
 	checkAgentTool,
 	listAgentsTool,
 	spawnAgentTool,
@@ -173,6 +175,65 @@ import { formatEditNotFound } from "./edit-hint";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
+
+/**
+ * Replay class per tool (#3653), used when a crashed session resumes with a
+ * tool call that was still running (EIGHT_RESUME_ON_BOOT=1).
+ *  - "replay": a checked local read with no side effect; safe to run again.
+ *  - "never":  writes, shell, git changes, messages, network and desktop
+ *              actions; it may already have happened, so it is never rerun.
+ *  - "ask":    anything not listed (the default); not rerun either, the
+ *              model is told to check with the user first.
+ */
+export type ReplayClass = "replay" | "never" | "ask";
+
+/**
+ * Only reads with no side effect that pass the same path and policy checks
+ * as a live call: read_file (safePath + ToolG8 read_file) and git_log (no
+ * repo-configured helpers run). Language-server tools can start a server that
+ * runs project code; git status/diff can run fsmonitor, external diff and
+ * textconv helpers; the PDF, notebook, outline and listing readers take paths
+ * without the full checks. Those stay "ask" (#3653 review).
+ */
+const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
+
+const NEVER_REPLAY_TOOLS = new Set([
+	"write_file",
+	"edit_file",
+	"run_command",
+	"git_checkout",
+	"git_create_branch",
+	"git_add",
+	"git_commit",
+	"git_push",
+	"gh_pr_create",
+	"gh_issue_create",
+	"post_message",
+	"spawn_agent",
+	"speak",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"web_search",
+	"web_fetch",
+	"vercel_deploy",
+	"vercel_set_env",
+	"mcp_call_tool",
+	"background_start",
+	"remember",
+	"enable_infinite_mode",
+	"run_computer_task",
+]);
+
+/** Prefixes whose tools act on the desktop or a browser: never replayed. */
+const NEVER_REPLAY_PREFIXES = ["desktop_", "browser_"];
+
+export function toolReplayClass(toolName: string): ReplayClass {
+	if (REPLAY_SAFE_TOOLS.has(toolName)) return "replay";
+	if (NEVER_REPLAY_TOOLS.has(toolName)) return "never";
+	if (NEVER_REPLAY_PREFIXES.some((p) => toolName.startsWith(p))) return "never";
+	return "ask";
+}
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -416,6 +477,51 @@ const GUTTER = /^(?: {5}\d| {4}\d{2}| {3}\d{3}| {2}\d{4}| \d{5}|\d{6,})\t/;
 /** Number `lines` as `cat -n` does, the first one being line `first`. */
 export function numberLines(lines: string[], first: number): string {
 	return lines.map((line, i) => `${String(first + i).padStart(6)}\t${line}`).join("\n");
+}
+
+const DIFF_FILE = /\.(diff|patch)$/i;
+const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * A unified diff with the patched file's line numbers in the gutter. The cat -n
+ * numbers of a .diff are rows of the diff, and a reviewer cited them as source
+ * lines (store.test.ts:75, a 12-line file). Added and context rows get their
+ * line in the patched file; headers and removed rows get none. Null when the
+ * text has no hunk, so a stray .patch file keeps the plain gutter.
+ */
+export function numberDiffLines(lines: string[]): string | null {
+	let oldLeft = 0;
+	let newLeft = 0;
+	let next = 0;
+	let hunks = 0;
+	const blank = " ".repeat(6);
+	const rows = lines.map((line) => {
+		const h = oldLeft <= 0 && newLeft <= 0 ? HUNK.exec(line) : null;
+		if (h) {
+			hunks++;
+			oldLeft = h[1] === undefined ? 1 : Number(h[1]);
+			newLeft = h[3] === undefined ? 1 : Number(h[3]);
+			next = Number(h[2]);
+			return `${blank}\t${line}`;
+		}
+		if (oldLeft <= 0 && newLeft <= 0) return `${blank}\t${line}`;
+		const c = line[0];
+		if (c === "-") {
+			oldLeft--;
+			return `${blank}\t${line}`;
+		}
+		if (c === "\\") return `${blank}\t${line}`;
+		if (c === "+") newLeft--;
+		else {
+			oldLeft--;
+			newLeft--;
+		}
+		return `${String(next++).padStart(6)}\t${line}`;
+	});
+	if (hunks === 0) return null;
+	const note =
+		"[Unified diff. The numbers are line numbers in the patched file, blank on headers and removed lines. Cite those with the file named after +++, never a row of this diff.]";
+	return `${note}\n${rows.join("\n")}`;
 }
 
 /** True when every non-empty line of `text` starts with a read_file gutter. */
@@ -931,12 +1037,11 @@ export class ToolExecutor {
 							runtime: {
 								type: "string",
 								enum: ["8gent", "claude", "shell"],
-								description: "Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)",
+								description: SPAWN_RUNTIME_DESCRIPTION,
 							},
 							model: {
 								type: "string",
-								description:
-									"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
+								description: SPAWN_MODEL_DESCRIPTION,
 							},
 							timeout: {
 								type: "number",
@@ -2463,6 +2568,10 @@ export class ToolExecutor {
 			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
+		if (DIFF_FILE.test(absolutePath)) {
+			const diff = numberDiffLines(lines);
+			if (diff !== null) return diff;
+		}
 		return numberLines(lines, 1);
 	}
 

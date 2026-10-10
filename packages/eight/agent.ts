@@ -26,13 +26,23 @@ import {
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
-import { AgentDepthError, currentAgentDepth, processAgentDepthRefusal } from "../orchestration/index";
+import {
+	AgentDepthError,
+	currentAgentDepth,
+	processAgentDepthRefusal,
+	runAsParentSession,
+} from "../orchestration/index";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
-import { type FailoverEntry, ModelFailover } from "../providers/failover";
+import {
+	type FailoverChannel,
+	type FailoverEntry,
+	ModelFailover,
+	NoAllowedProviderError,
+} from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
 import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
@@ -98,7 +108,7 @@ import {
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
-import { VisionInterpreter } from "./vision-interpreter";
+import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -119,6 +129,13 @@ import {
 	voice as personalityVoice,
 } from "../personality/voice.js";
 import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
+import {
+	ObservationPacker,
+	ObservationStore,
+	observationPackEnabled,
+	readOutputTool,
+} from "./observation-pack";
+import { resolveHome } from "../core/home";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -154,6 +171,7 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
+import { resolveUselessStreak } from "../ai/useless-streak";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
@@ -174,6 +192,13 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 	const command = args.command;
 	return typeof command === "string" && !sanitizeShellCommand(command).safe;
 }
+
+/**
+ * The two notes from the tool catalog a headless run keeps: the model has the
+ * internet, and narration goes through `speak`. Same wording as the catalog.
+ */
+const HEADLESS_TOOL_NOTES =
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**";
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -227,6 +252,7 @@ export class Agent {
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	private hookManager: HookManager;
 	private sessionId: string;
+	private observations: ObservationStore | null = null;
 	private sessionStartTime: number;
 	private enableReporting = true;
 	private totalCost: number | null = null;
@@ -493,7 +519,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const runtimeName = this.config.runtime as string;
 		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
+		// A headless run keeps the honesty line and the two catalog notes but drops
+		// the category catalog: the tool-call protocol already lists every tool this
+		// path offers with its signature, and the catalog also named tools it does
+		// not offer (desktop_*, lsp_*, gh_*). No person shares personal facts in a
+		// one-shot run, so the remember nudge goes too.
+		const compactLocalPrompt = config.headless
+			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -907,6 +940,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				return result;
 			},
 		}));
+		// Stale-output handles (#3477, EIGHT_OBSERVATION_PACK=1): old big tool
+		// results become a handle; read_output reads them back exactly.
+		const observations = observationPackEnabled() ? this.observationStore() : null;
+		if (observations) tools.push(readOutputTool(observations));
 
 		// Conversation: the in-place system instructions plus the non-system
 		// history (runTextToolAgent injects the tool protocol into the system
@@ -992,6 +1029,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
 				tools: tools.map((t) => t.spec),
+				// Headless: name and parameters only; the system prompt carries the
+				// descriptions, so a run does not pay for them twice on every call.
+				declareDescriptions: this.config.headless !== true,
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;
@@ -1005,13 +1045,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					});
 				},
 			});
-			const call = (msgs: Parameters<typeof rawCall>[0]) =>
-				withTurnTimeout(
-					() => rawCall(withStyleReminder(msgs, this.styleReminder)),
+			// One packer per attempt: it counts this attempt's model requests.
+			const packer = observations ? new ObservationPacker(observations) : null;
+			const call = (msgs: Parameters<typeof rawCall>[0]) => {
+				const sent = packer ? packer.pack(msgs) : msgs;
+				return withTurnTimeout(
+					() => rawCall(withStyleReminder(sent, this.styleReminder)),
 					attemptTimeoutMs,
 					() => this.abortController?.abort(),
 					`${provider}/${model} (text-tools)`,
 				);
+			};
 			return runTextToolAgent({
 				messages: turnMessages,
 				tools,
@@ -1023,6 +1067,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
 				finalCheck: () => verifyNudgeFor(this.turnToolLedger),
+				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
+				// off by default): N empty or error results in a row and the next
+				// round gets no tools, only a note to answer with what it has.
+				uselessStreak: resolveUselessStreak(),
 			});
 		};
 
@@ -1291,7 +1339,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.contextNoteMessages.push(message);
 	}
 
-	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+	/**
+	 * One turn. Children this turn spawns inherit this agent's provider, model
+	 * and baseUrl as they are when the child starts (#3710).
+	 */
+	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		return runAsParentSession(
+			() => ({
+				runtime: this.config.runtime,
+				model: this.config.model,
+				baseUrl: this.config.baseUrl,
+			}),
+			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+		);
+	}
+
+	private async runTurn(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+	): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
@@ -1309,6 +1376,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// The main agent stays on its text model — never switches.
 		// Vision result gets injected as a harness note when ready (#3260).
 		let visionId: string | null = null;
+		let visionFailed = false;
 
 		// A model that can see gets the image itself (#3641): on the text-tool
 		// path it goes out on this turn's user message in the provider's native
@@ -1326,6 +1394,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
+				onError: (_id, message) => {
+					visionFailed = true;
+					this.config.events?.onStepFinish?.({
+						text: `Image could not be interpreted, continuing without it. (${oneLineError(message)})`,
+						stepNumber: 0,
+						toolCalls: [],
+						usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+						finishReason: "other",
+					});
+					// Without this the agent waits on a description that never comes and
+					// spends the turn probing the image with scripts (#3715).
+					this.messageHistory.push({
+						role: "user",
+						content: harnessNote(
+							`[Vision Unavailable] The attached image could not be interpreted (${oneLineError(message)}). Do not wait for it or try to decode the image with scripts. Work from the text of the request, state plainly what you could not see, and write the deliverable anyway.`,
+						),
+					});
+				},
 				onResult: (_id, result) => {
 					// Inject vision description as a harness note: a second system
 					// message would be dropped before the model call (#3260).
@@ -1346,13 +1432,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Fire and forget — runs in parallel while main agent works
 			visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
 
-			this.config.events?.onStepFinish?.({
-				text: "Image attached — vision interpreter running in the background.",
-				stepNumber: 0,
-				toolCalls: [],
-				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-				finishReason: "other",
-			});
+			if (!visionFailed) {
+				this.config.events?.onStepFinish?.({
+					text: "Image attached — vision interpreter running in the background.",
+					stepNumber: 0,
+					toolCalls: [],
+					usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+					finishReason: "other",
+				});
+			}
 		}
 
 		// ── Proactive Questioning Gate ─────────────────────────────────
@@ -2200,7 +2288,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						if (hedge.enabled) {
 							// Add sibling free/local entries from the failover chain as extra
 							// candidates. Non-fatal if the chain has no siblings.
-							const sibling = failover.resolve(currentEntry.model, channel);
+							// No allowed sibling (hosted off, #3710): hedge on the current entry alone.
+							const sibling = tryResolve(failover, currentEntry, channel);
 							if (
 								(sibling.model !== currentEntry.model ||
 									sibling.provider !== currentEntry.provider) &&
@@ -2303,7 +2392,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							error: msg.slice(0, 200),
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
-						const next = failover.resolve(currentEntry.model, channel);
+						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
+						const next = tryResolve(failover, currentEntry, channel);
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
@@ -3022,6 +3112,28 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return { meta, messages };
 	}
 
+	/** This session's packed tool outputs, saved under ~/.8gent/sessions/<session id> (#3477). */
+	private observationStore(): ObservationStore {
+		this.observations ??= new ObservationStore(
+			path.join(resolveHome(), ".8gent", "sessions", this.sessionId),
+		);
+		return this.observations;
+	}
+
+	/**
+	 * Crash resume (#3653): run one tool outside a model turn, through the
+	 * same executor (permissions, secret scrub) as a normal call. The caller
+	 * only uses it for tools whose replay class is "replay".
+	 */
+	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		return this.executor.execute(toolName, args);
+	}
+
+	/** Crash resume (#3653): add a harness note the model sees next turn. */
+	addHarnessNote(body: string): void {
+		this.messageHistory.push({ role: "user", content: harnessNote(body) });
+	}
+
 	/**
 	 * Restore conversation from a checkpoint.
 	 * Injects historical messages into the agent context.
@@ -3216,6 +3328,24 @@ function readSettingsFileSync(): Settings | null {
 		return null;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * The failover chain's next entry, or `current` when no allowed provider can
+ * serve the model: with hosted providers off (#3710) or an allowlist set,
+ * resolve() throws rather than sending the turn to a provider nobody chose.
+ */
+function tryResolve(
+	failover: ModelFailover,
+	current: FailoverEntry,
+	channel: FailoverChannel,
+): FailoverEntry {
+	try {
+		return failover.resolve(current.model, channel);
+	} catch (err) {
+		if (err instanceof NoAllowedProviderError) return current;
+		throw err;
 	}
 }
 

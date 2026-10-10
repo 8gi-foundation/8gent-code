@@ -221,6 +221,12 @@ describe("rankPaths", () => {
 });
 
 describe("grep ranking", () => {
+	test("parseRgLines normalises a Windows backslash path to forward slashes", () => {
+		expect(parseRgLines(".\\src\\a.ts\u00004:x")).toEqual([
+			{ file: "src/a.ts", line: 4, text: "x" },
+		]);
+	});
+
 	test("parseRgLines reads path NUL line:text (rg --null) and drops ./", () => {
 		expect(parseRgLines("./a/b.ts\u000012:  const x = 1\nnot a hit\nc.md\u00003:x: y")).toEqual([
 			{ file: "a/b.ts", line: 12, text: "  const x = 1" },
@@ -555,7 +561,10 @@ describe("refreshDue", () => {
 	});
 });
 
-describe("ripgrep timeout", () => {
+// The stand-in rg is a #!/bin/sh script, which Windows cannot spawn.
+const describePosix = process.platform === "win32" ? describe.skip : describe;
+
+describePosix("ripgrep timeout", () => {
 	let slowDir: string;
 	let slowRg: string;
 	let countFile: string;
@@ -616,7 +625,8 @@ describe("ripgrep timeout", () => {
 	});
 });
 
-describe("a file name that contains :digits:", () => {
+// ":" is not a legal file name character on Windows.
+describePosix("a file name that contains :digits:", () => {
 	test("grep returns the whole file name", async () => {
 		write("odd/a:12:b.ts", "export const colonNamedMarker = 1;\n");
 		const r = await locate('"colonNamedMarker"', ctx());
