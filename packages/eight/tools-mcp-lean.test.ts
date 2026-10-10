@@ -250,6 +250,11 @@ function consent(mode: "approve" | "deny" | "headless" | "plan" | "infinite") {
 		env: {
 			PATH: process.env.PATH ?? "/usr/bin:/bin",
 			HOME: home,
+			// Windows reads USERPROFILE and TEMP/TMP, and needs SystemRoot to start at all.
+			USERPROFILE: home,
+			TEMP: join(dir, "tmp"),
+			TMP: join(dir, "tmp"),
+			...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
 			TMPDIR: join(dir, "tmp"),
 			EIGHT_MCP_LEAN: "1",
 			DRIVE_MODE: mode,

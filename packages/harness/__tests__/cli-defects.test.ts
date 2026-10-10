@@ -44,7 +44,8 @@ function uniqueToken(): string {
 afterAll(() => {
 	// Never leave a stray fixture process on the host, even if a test failed.
 	for (const token of tokens) {
-		Bun.spawnSync(["pkill", "-9", "-f", token]);
+		// pkill does not exist on Windows; the tests that leave these processes are POSIX only.
+		if (process.platform !== "win32") Bun.spawnSync(["pkill", "-9", "-f", token]);
 	}
 });
 
@@ -99,79 +100,88 @@ async function collectWithWatchdog(
 	return { events, watchdogFired: winner === "watchdog" };
 }
 
-describe("#2806 timeout kills the whole process tree, bounded", () => {
-	it("terminates a wrapper whose grandchild holds the pipes open, within a bounded window", async () => {
-		const token = uniqueToken();
-		const harness = fixtureHarness("hang-tree", { timeoutMs: 300 });
-		const startedAt = Date.now();
-		const { events, watchdogFired } = await collectWithWatchdog(
-			harness.run({ id: "d1", prompt: token }),
-			8_000,
-		);
+// POSIX only: kills by process group and finds grandchildren with ps; Windows tree-kill is not covered here.
+describe.skipIf(process.platform === "win32")(
+	"#2806 timeout kills the whole process tree, bounded",
+	() => {
+		it("terminates a wrapper whose grandchild holds the pipes open, within a bounded window", async () => {
+			const token = uniqueToken();
+			const harness = fixtureHarness("hang-tree", { timeoutMs: 300 });
+			const startedAt = Date.now();
+			const { events, watchdogFired } = await collectWithWatchdog(
+				harness.run({ id: "d1", prompt: token }),
+				8_000,
+			);
 
-		expect(watchdogFired).toBe(false);
-		const last = events[events.length - 1];
-		expect(last?.state).toBe("error");
-		expect(last?.output).toContain("timed out");
-		expect(Date.now() - startedAt).toBeLessThan(6_000);
+			expect(watchdogFired).toBe(false);
+			const last = events[events.length - 1];
+			expect(last?.state).toBe("error");
+			expect(last?.output).toContain("timed out");
+			expect(Date.now() - startedAt).toBeLessThan(6_000);
 
-		await sleep(300);
-		expect(liveProcesses(token)).toBe("");
-	}, 20_000);
+			await sleep(300);
+			expect(liveProcesses(token)).toBe("");
+		}, 20_000);
 
-	it("escalates to SIGKILL when the child traps SIGTERM", async () => {
-		const token = uniqueToken();
-		const harness = fixtureHarness("trap-term", { timeoutMs: 300 });
-		const startedAt = Date.now();
-		const { events, watchdogFired } = await collectWithWatchdog(
-			harness.run({ id: "d2", prompt: token }),
-			8_000,
-		);
+		it("escalates to SIGKILL when the child traps SIGTERM", async () => {
+			const token = uniqueToken();
+			const harness = fixtureHarness("trap-term", { timeoutMs: 300 });
+			const startedAt = Date.now();
+			const { events, watchdogFired } = await collectWithWatchdog(
+				harness.run({ id: "d2", prompt: token }),
+				8_000,
+			);
 
-		expect(watchdogFired).toBe(false);
-		expect(events[events.length - 1]?.state).toBe("error");
-		expect(Date.now() - startedAt).toBeLessThan(6_000);
+			expect(watchdogFired).toBe(false);
+			expect(events[events.length - 1]?.state).toBe("error");
+			expect(Date.now() - startedAt).toBeLessThan(6_000);
 
-		await sleep(300);
-		expect(liveProcesses(token)).toBe("");
-	}, 20_000);
+			await sleep(300);
+			expect(liveProcesses(token)).toBe("");
+		}, 20_000);
 
-	it("yields a terminal event even when the child exits 0 but a grandchild keeps the pipe open", async () => {
-		const token = uniqueToken();
-		const harness = fixtureHarness("orphan-pipe", { timeoutMs: 10_000 });
-		const startedAt = Date.now();
-		const { events, watchdogFired } = await collectWithWatchdog(
-			harness.run({ id: "d3", prompt: token }),
-			8_000,
-		);
+		it("yields a terminal event even when the child exits 0 but a grandchild keeps the pipe open", async () => {
+			const token = uniqueToken();
+			const harness = fixtureHarness("orphan-pipe", { timeoutMs: 10_000 });
+			const startedAt = Date.now();
+			const { events, watchdogFired } = await collectWithWatchdog(
+				harness.run({ id: "d3", prompt: token }),
+				8_000,
+			);
 
-		// The wrapper exits 0 almost immediately; the run must settle on the
-		// wrapper's exit, not wait for the orphaned grandchild's EOF.
-		expect(watchdogFired).toBe(false);
-		const last = events[events.length - 1];
-		expect(last?.state).toBe("done");
-		expect(Date.now() - startedAt).toBeLessThan(6_000);
+			// The wrapper exits 0 almost immediately; the run must settle on the
+			// wrapper's exit, not wait for the orphaned grandchild's EOF.
+			expect(watchdogFired).toBe(false);
+			const last = events[events.length - 1];
+			expect(last?.state).toBe("done");
+			expect(Date.now() - startedAt).toBeLessThan(6_000);
 
-		await sleep(300);
-		expect(liveProcesses(token)).toBe("");
-	}, 20_000);
-});
+			await sleep(300);
+			expect(liveProcesses(token)).toBe("");
+		}, 20_000);
+	},
+);
 
 describe("#2807 abandonment at any yield point kills the spawned process", () => {
-	it("kills the child when the consumer breaks right after the post-spawn working yield", async () => {
-		const token = uniqueToken();
-		const harness = fixtureHarness("hang-quiet", { timeoutMs: 60_000 });
+	// POSIX only: proves the kill with ps.
+	it.skipIf(process.platform === "win32")(
+		"kills the child when the consumer breaks right after the post-spawn working yield",
+		async () => {
+			const token = uniqueToken();
+			const harness = fixtureHarness("hang-quiet", { timeoutMs: 60_000 });
 
-		let n = 0;
-		for await (const _e of harness.run({ id: "d4", prompt: token })) {
-			n++;
-			if (n >= 2) break; // queued, then the post-spawn "working" yield
-		}
-		expect(n).toBe(2);
+			let n = 0;
+			for await (const _e of harness.run({ id: "d4", prompt: token })) {
+				n++;
+				if (n >= 2) break; // queued, then the post-spawn "working" yield
+			}
+			expect(n).toBe(2);
 
-		await sleep(400);
-		expect(liveProcesses(token)).toBe("");
-	}, 15_000);
+			await sleep(400);
+			expect(liveProcesses(token)).toBe("");
+		},
+		15_000,
+	);
 });
 
 describe("#2808 needsInputPattern is guarded against catastrophic backtracking", () => {

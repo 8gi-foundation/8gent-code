@@ -101,7 +101,7 @@ beforeAll(async () => {
 	// Refuse to write anywhere but the run's temp home (test preload, #3240).
 	const runHome = process.env.EIGHT_HOME ?? "";
 	if (!(runHome.startsWith(tmpdir()) || runHome.startsWith(realpathSync(tmpdir())))) throw new Error("EIGHT_HOME is not a temp dir");
-	if (!boardPath.startsWith(`${runHome}${sep}`)) throw new Error("board path is not under the run's temp home");
+	if (!boardPath.startsWith(`${runHome}${sep}`)) throw new Error(`board path ${boardPath} is not under the run's temp home ${runHome}`);
 	mkdirSync(dirname(boardPath), { recursive: true });
 	writeFileSync(boardPath, `${BOARD}\n`);
 });

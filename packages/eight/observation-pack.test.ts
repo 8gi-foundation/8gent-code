@@ -4,7 +4,6 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
-	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +15,7 @@ import {
 	observationPackEnabled,
 	readOutputTool,
 } from "./observation-pack";
+import { rmRetry } from "../../tests/rm-retry";
 
 type Msg = { role: "system" | "user" | "assistant" | "tool"; content: string };
 
@@ -26,7 +26,7 @@ function freshDir(): string {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) rmRetry(d);
 });
 
 // A 40 KB fake tool result with multi-byte characters and CRLF, so a lossy
@@ -267,8 +267,8 @@ describe("Agent text-tool path with EIGHT_OBSERVATION_PACK", () => {
 	});
 	afterAll(() => {
 		server?.stop(true);
-		rmSync(home, { recursive: true, force: true });
-		rmSync(repo, { recursive: true, force: true });
+		rmRetry(home);
+		rmRetry(repo);
 		for (const k of keys) {
 			if (saved[k] === undefined) Reflect.deleteProperty(process.env, k);
 			else process.env[k] = saved[k];

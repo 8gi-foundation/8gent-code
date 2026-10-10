@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { rmRetry } from "../../tests/rm-retry";
 
 const saved: Record<string, string | undefined> = {};
 let root: string;
@@ -54,7 +55,7 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	fs.rmSync(root, { recursive: true, force: true });
+	rmRetry(root);
 });
 
 beforeEach(() => {
@@ -305,14 +306,23 @@ describe("resumeJournaledSessions", () => {
 });
 
 describe("SIGKILL mid-task", () => {
-	test("a killed process's open session comes back with its last checkpoint", async () => {
-		const script = path.join(path.dirname(journalPath), "crash.ts");
-		const poolPath = path.join(import.meta.dir, "agent-pool.ts");
-		const journalMod = path.join(import.meta.dir, "session-journal.ts");
-		const storeMod = path.join(import.meta.dir, "..", "eight", "timetravel", "checkpoint-store.ts");
-		fs.writeFileSync(
-			script,
-			`import { AgentPool } from ${JSON.stringify(poolPath)};
+	// POSIX only: asserts the child died of SIGKILL; Windows processes have no signals.
+	test.skipIf(process.platform === "win32")(
+		"a killed process's open session comes back with its last checkpoint",
+		async () => {
+			const script = path.join(path.dirname(journalPath), "crash.ts");
+			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
+			const journalMod = path.join(import.meta.dir, "session-journal.ts");
+			const storeMod = path.join(
+				import.meta.dir,
+				"..",
+				"eight",
+				"timetravel",
+				"checkpoint-store.ts",
+			);
+			fs.writeFileSync(
+				script,
+				`import { AgentPool } from ${JSON.stringify(poolPath)};
 import { SessionJournal } from ${JSON.stringify(journalMod)};
 import { TimeTravelStore } from ${JSON.stringify(storeMod)};
 const journal = new SessionJournal(${JSON.stringify(journalPath)});
@@ -327,27 +337,33 @@ store.save(agent.getTimeTravelSessionId(), [
 ], { reason: "interval", toolCallCount: 8 });
 process.kill(process.pid, "SIGKILL");
 `,
-		);
-		const proc = Bun.spawn([process.execPath, script], {
-			env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
-			stdout: "ignore",
-			stderr: "ignore",
-		});
-		await proc.exited;
-		expect(proc.signalCode).toBe("SIGKILL");
+			);
+			const proc = Bun.spawn([process.execPath, script], {
+				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
+				stdout: "ignore",
+				stderr: "ignore",
+			});
+			await proc.exited;
+			expect(proc.signalCode).toBe("SIGKILL");
 
-		const journal = new mod.SessionJournal(journalPath);
-		expect(journal.read().map((e) => e.sessionId)).toEqual(["s_crash"]);
-		const pool = newPool(journal);
-		const [r] = mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
-		expect(r.sessionId).toBe("s_crash");
-		expect(r.toolCallCount).toBe(8);
-		expect(pool.getAgent("s_crash")!.getMessageHistory().slice(1)).toEqual([
-			{ role: "user", content: "deploy the site" },
-			{ role: "assistant", content: "step 3 of 5" },
-		]);
-		expect(pool.getSessionInfo("s_crash")!.channel).toBe("telegram");
-	}, 60_000);
+			const journal = new mod.SessionJournal(journalPath);
+			expect(journal.read().map((e) => e.sessionId)).toEqual(["s_crash"]);
+			const pool = newPool(journal);
+			const [r] = mod.resumeJournaledSessions(
+				journal,
+				pool,
+				new TimeTravelStore({ dataDir: ttDir }),
+			);
+			expect(r.sessionId).toBe("s_crash");
+			expect(r.toolCallCount).toBe(8);
+			expect(pool.getAgent("s_crash")!.getMessageHistory().slice(1)).toEqual([
+				{ role: "user", content: "deploy the site" },
+				{ role: "assistant", content: "step 3 of 5" },
+			]);
+			expect(pool.getSessionInfo("s_crash")!.channel).toBe("telegram");
+		},
+		60_000,
+	);
 });
 
 /**
@@ -520,7 +536,7 @@ describe("replay set review (#3653)", () => {
 		await mod.settleInterruptedToolCalls(journal, pool);
 		const history = pool.getAgent("s_escape")!.getMessageHistory();
 		expect(history[history.length - 1].content).not.toContain("outside marker 3653");
-		fs.rmSync(outside, { recursive: true, force: true });
+		rmRetry(outside);
 	});
 
 	test("journal summaries and the harness note are scrubbed of secrets", async () => {
