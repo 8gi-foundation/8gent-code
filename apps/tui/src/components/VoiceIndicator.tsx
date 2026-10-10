@@ -40,11 +40,17 @@ export interface VoiceIndicatorProps {
 	micName?: string | null;
 	/** Transcriber backend in use, e.g. "whisper.cpp local (tiny)" */
 	backendLabel?: string;
+	/** Device lookup for this recording has not landed yet */
+	micChecking?: boolean;
 }
 
 /** Second line of the full indicator: "Mic: <name>" plus the transcriber backend. */
-export function micLine(micName: string | null | undefined, backendLabel?: string): string {
-	const mic = formatMicLabel(micName);
+export function micLine(
+	micName: string | null | undefined,
+	backendLabel?: string,
+	checking = false,
+): string {
+	const mic = checking ? "Mic: checking..." : formatMicLabel(micName);
 	return backendLabel ? `${mic} | ${backendLabel}` : mic;
 }
 
@@ -64,6 +70,7 @@ export function VoiceIndicator({
 	compact = false,
 	micName,
 	backendLabel,
+	micChecking = false,
 }: VoiceIndicatorProps) {
 	// Downloading state takes priority
 	if (downloadProgress !== null && downloadProgress !== undefined && downloadingModel) {
@@ -89,9 +96,9 @@ export function VoiceIndicator({
 				{state === "idle" && <MutedText>[Ctrl+R to record]</MutedText>}
 			</Inline>
 
-			{micName !== undefined && (
+			{(micName !== undefined || micChecking) && (
 				<Box paddingLeft={3}>
-					<MutedText>{micLine(micName, backendLabel)}</MutedText>
+					<MutedText>{micLine(micName, backendLabel, micChecking)}</MutedText>
 				</Box>
 			)}
 

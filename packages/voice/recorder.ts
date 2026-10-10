@@ -25,6 +25,15 @@ export interface RecorderOptions {
 	outputPath?: string;
 }
 
+/** Injection points for tests; production uses the defaults. */
+export interface RecorderDeps {
+	resolveDevice?: () => Promise<InputDevice>;
+	checkSox?: () => Promise<{ installed: boolean; installHint: string }>;
+	spawnRec?: (args: string[]) => Subprocess;
+	/** Wait this long after SIGTERM before escalating to SIGKILL (default 1500) */
+	killGraceMs?: number;
+}
+
 export interface RecorderEvents {
 	start: [];
 	stop: [{ path: string; durationMs: number }];
@@ -133,10 +142,12 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	private levelInterval: ReturnType<typeof setInterval> | null = null;
 	private isRecording = false;
 	private options: Required<RecorderOptions>;
-	private device: InputDevice = { name: null, source: "unknown" };
+	private device: InputDevice | null = null;
+	private deps: RecorderDeps;
 
-	constructor(opts: RecorderOptions = {}) {
+	constructor(opts: RecorderOptions = {}, deps: RecorderDeps = {}) {
 		super();
+		this.deps = deps;
 		this.options = {
 			sampleRate: opts.sampleRate ?? 16000,
 			channels: opts.channels ?? 1,
@@ -156,7 +167,7 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			throw new Error("Already recording");
 		}
 
-		const soxCheck = await checkSoxInstalled();
+		const soxCheck = await (this.deps.checkSox ?? checkSoxInstalled)();
 		if (!soxCheck.installed) {
 			this.emit("error", {
 				message: `sox/rec not found. ${soxCheck.installHint}`,
@@ -164,10 +175,9 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			throw new Error(`sox not installed. ${soxCheck.installHint}`);
 		}
 
-		// Resolve the input device on EVERY start, never cached, so a headset or
-		// AirPods switch applies on the next press. sox records from the OS default.
-		this.device = await resolveInputDevice();
-		this.emit("device", this.device);
+		// The device name is display-only and is resolved in parallel below, so
+		// the lookup can never delay the start of recording.
+		this.device = null;
 
 		// Generate a fresh temp path for this recording
 		this.outputPath = this.options.outputPath.includes("8gent-voice-")
@@ -190,14 +200,24 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 		];
 
 		try {
-			this.process = spawn(["rec", ...args], {
-				stdout: "ignore",
-				stderr: "ignore",
-			});
+			this.process = this.deps.spawnRec
+				? this.deps.spawnRec(args)
+				: spawn(["rec", ...args], { stdout: "ignore", stderr: "ignore" });
 
 			this.isRecording = true;
 			this.startTime = Date.now();
 			this.emit("start");
+
+			// Resolve on EVERY start, never cached, so a headset or AirPods switch
+			// applies on the next press. sox records from the OS default input.
+			const startedAt = this.startTime;
+			(this.deps.resolveDevice ?? resolveInputDevice)()
+				.then((d) => {
+					if (this.startTime !== startedAt) return; // a newer recording owns the slot
+					this.device = d;
+					this.emit("device", d);
+				})
+				.catch(() => {});
 
 			// Real levels: RMS of the newest PCM samples sox has written to the file.
 			this.levelInterval = setInterval(() => {
@@ -243,21 +263,33 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 
 		const durationMs = Date.now() - this.startTime;
 
-		// Kill the rec process (sends SIGTERM which makes it finalize the WAV header)
+		// SIGTERM lets sox finalize the WAV header; escalate to SIGKILL if it
+		// has not exited after a short grace period.
+		const proc = this.process;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			this.process.kill("SIGTERM");
-			// Wait for process to exit cleanly
-			await Promise.race([
-				this.process.exited,
-				new Promise((resolve) => setTimeout(resolve, 2000)),
+			proc.kill("SIGTERM");
+			const exited = await Promise.race([
+				proc.exited.then(() => true),
+				new Promise<boolean>((resolve) => {
+					timer = setTimeout(() => resolve(false), this.deps.killGraceMs ?? 1500);
+				}),
 			]);
+			if (!exited) {
+				try {
+					proc.kill("SIGKILL");
+				} catch {
+					// Already dead
+				}
+			}
 		} catch {
-			// Force kill if SIGTERM didn't work
 			try {
-				this.process.kill("SIGKILL");
+				proc.kill("SIGKILL");
 			} catch {
 				// Already dead
 			}
+		} finally {
+			if (timer) clearTimeout(timer);
 		}
 
 		this.isRecording = false;
@@ -269,9 +301,9 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	}
 
 	/**
-	 * The input device resolved at the start of the current (or last) recording.
+	 * The input device for the current recording, or null until the lookup lands.
 	 */
-	getDevice(): InputDevice {
+	getDevice(): InputDevice | null {
 		return this.device;
 	}
 

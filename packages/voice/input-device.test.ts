@@ -10,7 +10,7 @@ import {
 	formatMicLabel,
 	resolveInputDevice,
 } from "./input-device.js";
-import { pcm16Level, readTailLevel } from "./recorder.js";
+import { MicRecorder, pcm16Level, readTailLevel } from "./recorder.js";
 
 const macJson = (defaultName: string) =>
 	JSON.stringify({
@@ -131,5 +131,89 @@ describe("real input levels", () => {
 		for (let i = 0; i < 1600; i++) pcm.writeInt16LE(8000, i * 2);
 		writeFileSync(f, Buffer.concat([Buffer.alloc(44), pcm]));
 		expect(readTailLevel(f)).toBeGreaterThan(0.5);
+	});
+});
+
+describe("MicRecorder hardening", () => {
+	const okSox = async () => ({ installed: true, installHint: "" });
+	const fakeProc = (onKill: (sig?: string) => void, exitsOn: "SIGTERM" | "SIGKILL" | "never") => {
+		let resolve!: (n: number) => void;
+		const exited = new Promise<number>((r) => {
+			resolve = r;
+		});
+		return {
+			exited,
+			kill(sig?: string) {
+				onKill(sig);
+				if (sig === exitsOn || (exitsOn === "SIGTERM" && sig === undefined)) resolve(0);
+			},
+		} as any;
+	};
+
+	test("recording starts before the device lookup finishes", async () => {
+		let release!: (d: { name: string; source: "pactl" }) => void;
+		const lookup = new Promise<{ name: string; source: "pactl" }>((r) => {
+			release = r;
+		});
+		let spawned = false;
+		const rec = new MicRecorder(
+			{ outputPath: join(tmpdir(), "x-no-write.wav") },
+			{
+				checkSox: okSox,
+				resolveDevice: () => lookup,
+				spawnRec: () => {
+					spawned = true;
+					return fakeProc(() => {}, "SIGTERM");
+				},
+			},
+		);
+		const names: Array<string | null> = [];
+		rec.on("device", (d) => names.push(d.name));
+		await rec.start(); // resolves while the lookup is still pending
+		expect(spawned).toBe(true);
+		expect(rec.getIsRecording()).toBe(true);
+		expect(rec.getDevice()).toBeNull();
+		release({ name: "Blue Yeti", source: "pactl" });
+		await lookup;
+		await Promise.resolve();
+		expect(names).toEqual(["Blue Yeti"]);
+		expect(rec.getDevice()?.name).toBe("Blue Yeti");
+		await rec.stop();
+	});
+
+	test("stop escalates SIGTERM to SIGKILL when sox does not exit", async () => {
+		const sigs: Array<string | undefined> = [];
+		const rec = new MicRecorder(
+			{ outputPath: join(tmpdir(), "x-no-write.wav") },
+			{
+				checkSox: okSox,
+				resolveDevice: async () => ({ name: null, source: "unknown" }),
+				spawnRec: () => fakeProc((s) => sigs.push(s), "SIGKILL"),
+				killGraceMs: 20,
+			},
+		);
+		await rec.start();
+		await rec.stop();
+		expect(sigs).toEqual(["SIGTERM", "SIGKILL"]);
+	});
+
+	test("no SIGKILL when sox exits on SIGTERM", async () => {
+		const sigs: Array<string | undefined> = [];
+		const rec = new MicRecorder(
+			{ outputPath: join(tmpdir(), "x-no-write.wav") },
+			{
+				checkSox: okSox,
+				resolveDevice: async () => ({ name: null, source: "unknown" }),
+				spawnRec: () => fakeProc((s) => sigs.push(s), "SIGTERM"),
+				killGraceMs: 20,
+			},
+		);
+		await rec.start();
+		await rec.stop();
+		expect(sigs).toEqual(["SIGTERM"]);
+	});
+
+	test("indicator shows checking until the name lands", () => {
+		expect(micLine(null, "T", true)).toBe("Mic: checking... | T");
 	});
 });

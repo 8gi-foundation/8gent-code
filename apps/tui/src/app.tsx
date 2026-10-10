@@ -955,26 +955,38 @@ export function App({
 
 	// Mic name for the recording indicator: re-resolved at the start of every recording.
 	const [micName, setMicName] = useState<string | null>(null);
+	const [micChecking, setMicChecking] = useState(false);
 	const [voiceBackendLabel, setVoiceBackendLabel] = useState<string>("");
 	useEffect(() => {
 		if (voice.state !== "recording") return;
+		// Never show a stale name: reset, then take the engine's per-recording lookup.
+		setMicName(null);
+		const cur = voice.engine.getInputDeviceName();
+		setMicChecking(!cur.resolved);
+		if (cur.resolved) setMicName(cur.name);
+		const onDevice = ({ name }: { name: string | null }) => {
+			setMicName(name);
+			setMicChecking(false);
+		};
+		voice.engine.on("input-device", onDevice);
 		let cancelled = false;
-		(async () => {
-			const dev = await resolveInputDevice();
-			const deps = await voice.engine.checkDependencies();
-			if (cancelled) return;
-			setMicName(dev.name);
-			setVoiceBackendLabel(
-				describeTranscriberBackend({
-					whisperBinaryPath: deps.whisperBinaryPath,
-					downloadedModels: deps.downloadedModels,
-					model: voice.engine.getConfig().model,
-					mode: voice.engine.getConfig().mode,
-				}),
-			);
-		})().catch(() => {});
+		voice.engine
+			.checkDependencies()
+			.then((deps) => {
+				if (cancelled) return;
+				setVoiceBackendLabel(
+					describeTranscriberBackend({
+						whisperBinaryPath: deps.whisperBinaryPath,
+						downloadedModels: deps.downloadedModels,
+						model: voice.engine.getConfig().model,
+						mode: voice.engine.getConfig().mode,
+					}),
+				);
+			})
+			.catch(() => {});
 		return () => {
 			cancelled = true;
+			voice.engine.off("input-device", onDevice);
 		};
 	}, [voice.state]);
 
@@ -6325,6 +6337,7 @@ export function App({
 									audioLevel={voice.audioLevel}
 									durationMs={voice.recordingDurationMs}
 									micName={micName}
+									micChecking={micChecking}
 									backendLabel={voiceBackendLabel}
 								/>
 							</Box>

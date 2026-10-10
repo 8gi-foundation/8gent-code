@@ -140,6 +140,8 @@ export type VoiceEventMap = {
 	"recording-start": [];
 	"recording-stop": [{ durationMs: number }];
 	"audio-level": [{ level: number }];
+	/** Input device name resolved for the current recording (display only) */
+	"input-device": [{ name: string | null }];
 	"partial-transcript": [TranscriptEvent];
 	"final-transcript": [TranscriptEvent];
 	error: [{ code: VoiceErrorCode; message: string }];
