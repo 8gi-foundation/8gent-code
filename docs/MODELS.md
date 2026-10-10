@@ -140,8 +140,18 @@ this, so re-check that page if the connection fails.
 }
 ```
 
-Then export the token in the shell that starts 8gent (`export HF_TOKEN=...`),
-and start 8gent from that same shell. If the variable is not set, the request
+Then put the token in the shell that starts 8gent, and start 8gent from that
+same shell. Read it without echo so it never lands in your shell history or on
+screen:
+
+```bash
+read -rs HF_TOKEN && export HF_TOKEN
+```
+
+Do not type `export HF_TOKEN=hf_...` on the command line (it is saved in
+history), do not add it to a dotfile that is committed or synced, and use a
+fine-grained token with only the Inference Providers permission so a leak can
+be revoked cheaply. If the variable is not set, the request
 fails with "No API key for Hugging Face. Set HF_TOKEN", which means the shell,
 not the file, is what to fix. Name a model as in the example rather than relying
 on discovery for a first run.
@@ -160,15 +170,24 @@ Fields, all optional except `baseUrl`:
 
 Use `apiKeyEnv`, not `apiKey`. `providers.json` is a plain file that gets
 copied, synced and pasted into bug reports, and a literal key in it travels
-with it. An environment variable keeps the secret out of the file, and an
+with it. If a literal key does end up in the file (for example from a settings
+screen that writes one), run `chmod 600 ~/.8gent/providers.json`, never commit
+the file, never paste it or screenshot it, and rotate the token if it ever
+leaves your machine. An environment variable keeps the secret out of the file, and an
 empty `apiKeyEnv` is how a declaration says "no key needed", so a keyless local
 endpoint and a keyed cloud one are written the same way.
 
 Things to know before you rely on it:
 
-- Cloud is opt-in. Once this provider is active, your prompts and the code
-  context in them leave your machine for Hugging Face and whichever
-  downstream provider it routes to.
+- Cloud is opt-in, and it is a real data egress. Once this provider is active,
+  your prompts, file contents, tool output and the code context in them leave
+  your machine for Hugging Face and whichever downstream provider it routes to,
+  which are third parties under their own retention terms. 8gent's PII
+  anonymization gate is the only filter on that path. It is pattern based, so
+  it can miss personal data, and it does not scrub secrets, proprietary code or
+  confidential business content. Do not use this provider on a repo or session
+  that holds personal data, children's data, client confidential material or
+  credentials. Keep those on a local provider.
 - Tool calling depends on the model and provider chosen. `supportsTools`
   defaults to `true`, but that is only 8gent's assumption; some models and
   providers behind the router do not implement tool calls well or at all.
