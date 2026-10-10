@@ -77,7 +77,7 @@ function registryLookup(name: string): { needsKey: boolean; hasKey: boolean } {
 	const pm = getProviderManager();
 	if (!pm.isKnownProvider(name)) return { needsKey: false, hasKey: false };
 	const config = pm.getProvider(name);
-	return { needsKey: Boolean(config.apiKeyEnv), hasKey: Boolean(pm.getApiKey(name)) };
+	return { needsKey: Boolean(config.apiKeyEnv || config.apiKeyRef), hasKey: Boolean(pm.getApiKey(name)) };
 }
 
 /**
