@@ -34,8 +34,11 @@ afterEach(() => {
 	fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// POSIX-only: the stub engine is a #!/usr/bin/env bash script, which Windows cannot spawn.
+const posixTest = process.platform === "win32" ? test.skip : test;
+
 describe("speak", () => {
-	test("Supertonic path returns wav path and duration", async () => {
+	posixTest("Supertonic path returns wav path and duration", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = stub("st");
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
 		const r = await speak({ text: "hello there", voice: "Rishi", out: path.join(dir, "t.wav") });
@@ -45,7 +48,7 @@ describe("speak", () => {
 		expect(r.path.endsWith("t.wav")).toBe(true);
 	});
 
-	test("falls back to Kitten when Supertonic is missing", async () => {
+	posixTest("falls back to Kitten when Supertonic is missing", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = "/nonexistent";
 		process.env.EIGHT_KITTEN_PY = stub("py");
 		const r = await speak({ text: "hello", voice: "Rishi", out: path.join(dir, "k.wav") });
