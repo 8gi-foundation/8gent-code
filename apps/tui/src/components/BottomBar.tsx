@@ -70,13 +70,15 @@ export function BottomBar(props: BottomBarProps) {
 				onKeysDone={props.onDjKeysDone}
 				fmWidth={fmWidth}
 				columns={columns}
-				footer={(station) => (
+				footer={(station, hasTrack) => (
 					<StatusSegments
 						// One column of slack so a full row never triggers a terminal wrap.
 						width={Math.max(0, columns - (station ? fmWidth : 0) - 1)}
 						leading={station}
 						toast={props.permToast}
 						notice={props.notice}
+						// ^D only does something with a track loaded; its cap shows then.
+						dj={hasTrack}
 						data={{
 							mode: props.mode,
 							tokensPerSecond: props.tokensPerSecond,

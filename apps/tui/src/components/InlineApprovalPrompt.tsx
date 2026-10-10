@@ -91,10 +91,13 @@ export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPro
 					{target}
 				</Text>
 			</Box>
+			{/* sharedGap 0: the cells between caps hit nothing. A gap click must
+			    never approve; a miss here does nothing and the user aims again. */}
 			<KeyCapRow
 				caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
 				idPrefix="card"
 				z={10}
+				sharedGap={0}
 			/>
 		</Box>
 	);

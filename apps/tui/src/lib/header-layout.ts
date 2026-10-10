@@ -18,6 +18,8 @@
  * has to render it with a truncating wrap as a last line of defence.
  */
 
+import stringWidth from "string-width";
+
 /** Longest branch name the header will show before cutting the tail. */
 export const BRANCH_MAX = 32;
 /** Shortest path slice worth showing; below this the path is hidden. */
@@ -32,35 +34,13 @@ const BRANCH_GLYPH = 2;
 const BRANCH_MIN = 4;
 
 /**
- * Terminal cell width of a string. Counts code points and treats the
- * common East Asian wide and fullwidth blocks as two cells so a CJK
- * workspace path does not overflow the row. Combining marks count zero.
+ * Terminal cell width of a string, measured by `string-width`, the same
+ * function Ink measures with when it draws. Click geometry and layout math
+ * then agree with the screen: CJK and emoji take two cells, an emoji ZWJ
+ * sequence is one glyph, combining marks take none.
  */
 export function cellWidth(value: string): number {
-	let width = 0;
-	for (const ch of value) {
-		const cp = ch.codePointAt(0) ?? 0;
-		if (cp === 0) continue;
-		// Combining diacritics and zero-width joiners take no cell.
-		if ((cp >= 0x0300 && cp <= 0x036f) || cp === 0x200b || cp === 0x200d || cp === 0xfe0f) continue;
-		if (
-			(cp >= 0x1100 && cp <= 0x115f) ||
-			(cp >= 0x2e80 && cp <= 0xa4cf) ||
-			(cp >= 0xac00 && cp <= 0xd7a3) ||
-			(cp >= 0xf900 && cp <= 0xfaff) ||
-			(cp >= 0xfe30 && cp <= 0xfe4f) ||
-			(cp >= 0xff00 && cp <= 0xff60) ||
-			(cp >= 0xffe0 && cp <= 0xffe6) ||
-			(cp >= 0x1f300 && cp <= 0x1f64f) ||
-			(cp >= 0x1f900 && cp <= 0x1f9ff) ||
-			(cp >= 0x20000 && cp <= 0x3fffd)
-		) {
-			width += 2;
-		} else {
-			width += 1;
-		}
-	}
-	return width;
+	return stringWidth(value);
 }
 
 /** Keep the head and tail of a string, replacing the middle with an ellipsis. */

@@ -13,6 +13,7 @@
 import { Box, Text } from "ink";
 import React, { useRef } from "react";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { keyBytes } from "../lib/key-bytes.js";
 import { injectKeys } from "../lib/mouse-input.js";
 import { t } from "../theme.js";
@@ -56,27 +57,41 @@ export interface CapSpec {
 }
 
 /**
+ * Each cap's whole drawn span, brackets and verb included, measured in
+ * terminal cells (a wide glyph takes two). Caps whose key has no bytes are
+ * not targets. `send` defaults to injecting the key; tests pass their own.
+ */
+export function keyCapSpans(
+	caps: CapSpec[],
+	idPrefix: string,
+	send: (bytes: string) => void = injectKeys,
+): ClickSpan[] {
+	const spans: ClickSpan[] = [];
+	let x = 0;
+	caps.forEach((c, i) => {
+		x += c.gap ?? (i > 0 ? KEY_CAP_GAP.length : 0);
+		const w = cellWidth(keyCapText(c.cap, c.verb));
+		const bytes = keyBytes(c.cap);
+		if (bytes) spans.push({ id: `${idPrefix}:${c.cap}`, dx: x, w, action: () => send(bytes) });
+		x += w;
+	});
+	return spans;
+}
+
+/**
  * A row of key caps that are also click targets (#3239): a click injects the
  * cap's key, so it does exactly what the key does. `z` lifts a surface's caps
- * (palette, approval card) over the HUD's.
+ * (palette, approval card) over the HUD's. `sharedGap` is the widest gap
+ * between caps that the neighbours split; 0 keeps every gap cell dead.
  */
 export function KeyCapRow({
 	caps,
 	idPrefix,
 	z = 0,
-}: { caps: CapSpec[]; idPrefix: string; z?: number }) {
+	sharedGap,
+}: { caps: CapSpec[]; idPrefix: string; z?: number; sharedGap?: number }) {
 	const ref = useRef(null);
-	const spans: ClickSpan[] = [];
-	let x = 0;
-	caps.forEach((c, i) => {
-		x += c.gap ?? (i > 0 ? KEY_CAP_GAP.length : 0);
-		const w = keyCapText(c.cap, c.verb).length;
-		const bytes = keyBytes(c.cap);
-		if (bytes)
-			spans.push({ id: `${idPrefix}:${c.cap}`, dx: x, w, action: () => injectKeys(bytes) });
-		x += w;
-	});
-	useClickSpans(ref, spans, z);
+	useClickSpans(ref, keyCapSpans(caps, idPrefix), z, sharedGap);
 	const pressed = usePressedIn(`${idPrefix}:`);
 	return (
 		<Box ref={ref} flexShrink={0}>

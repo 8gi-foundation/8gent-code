@@ -232,22 +232,31 @@ export function fmSegmentWidth(columns: number): number {
 /**
  * The key hints, most used first; display order is the same. [^P] palette
  * leads: the palette lists every command, so at 80 columns it is the one
- * hint that stays. Ctrl+C saves the session and quits (app.tsx), so it says
- * quit, not clear.
+ * hint that stays. Ctrl+C quits (app.tsx), so it says quit, not clear.
+ *
+ * Only keys that visibly do something are taught here, because a key cap
+ * is also a button (#3239): a cap that does nothing reads as a broken click
+ * (James, 2026-10-02: "only plan from the buttons in the footer actually
+ * works"). ^O expand, ^K kanban and ^B processes left the row: their state
+ * changes, but nothing has drawn it since #2350. They come back when their
+ * views render again.
  */
 export const FOOTER_HINTS = [
 	"^P palette",
 	"^X plan",
 	// Ask has no perm segment, so the switch key is taught here instead.
 	`${PERM_KEY} perm`,
-	"^O expand",
-	"^K kanban",
-	"^B processes",
-	"^D DJ",
 	"^A anim",
 	"^S sound",
 	"^C quit",
 ];
+/**
+ * ^D hands the DJ deck the keyboard, and only while a track is loaded; with
+ * nothing loaded it does nothing, so the cap shows only then, after perm.
+ */
+/** The cap that quits; its gaps stay dead. */
+const QUIT_CAP = "^C";
+export const DJ_HINT = "^D DJ";
 /** Columns kept between the last status segment and the first hint. */
 const HINTS_MARGIN = 3;
 
@@ -258,10 +267,13 @@ export function hintWidth(hint: string): number {
 }
 
 /** The hints that fit in `width` columns, most used first, never cut. */
-export function fitFooterHints(width: number, permShown = false): string[] {
+export function fitFooterHints(width: number, permShown = false, djTrack = false): string[] {
+	const all = djTrack
+		? [...FOOTER_HINTS.slice(0, 3), DJ_HINT, ...FOOTER_HINTS.slice(3)]
+		: FOOTER_HINTS;
 	const out: string[] = [];
 	let used = 0;
-	for (const hint of FOOTER_HINTS) {
+	for (const hint of all) {
 		// The perm segment already shows the key.
 		if (permShown && hint.endsWith(" perm")) continue;
 		const cost = hintWidth(hint) + (out.length > 0 ? KEY_CAP_GAP.length : 0);
@@ -334,7 +346,14 @@ export function footerClickSpans(
 		const w = hintWidth(h);
 		const bytes = keyBytes(splitHint(h).cap);
 		if (bytes)
-			hintSpans.push({ id: `footer:hint:${h}`, dx: hx, w, action: () => injectKeys(bytes) });
+			hintSpans.push({
+				id: `footer:hint:${h}`,
+				dx: hx,
+				w,
+				// Quit exits with no confirm: a near-miss must never reach it.
+				tight: splitHint(h).cap === QUIT_CAP,
+				action: () => injectKeys(bytes),
+			});
 		hx += w;
 	});
 	return { segments: segSpans, hints: hintSpans };
@@ -346,6 +365,7 @@ export function StatusSegments({
 	toast,
 	leading = false,
 	notice,
+	dj = false,
 }: {
 	data: FooterData;
 	width: number;
@@ -354,6 +374,8 @@ export function StatusSegments({
 	leading?: boolean;
 	/** A short confirmation in the hint slot, e.g. "copied 22 chars" after a selection (#3239). */
 	notice?: string | null;
+	/** A DJ track is loaded, so ^D does something and its cap shows. */
+	dj?: boolean;
 }) {
 	const all = buildFooterSegments(data);
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
@@ -364,6 +386,7 @@ export function StatusSegments({
 			: fitFooterHints(
 					Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
 					segments.some((s) => s.key === "perm"),
+					dj,
 				);
 	const segRef = useRef(null);
 	const hintRef = useRef(null);
