@@ -106,6 +106,11 @@ afterEach(() => {
 	rmSync(outside, { recursive: true, force: true });
 });
 
+// On Windows run_command goes through cmd.exe: `echo x > f` writes "x " + CRLF, and mv/tar/zip are
+// not there. The cases that feed these POSIX commands to the shell are skipped; the redirect
+// parsing and the bun-based cases above and below still run.
+const WIN_CMD = process.platform === "win32";
+
 const run = (ex: ToolExecutor, command: string) => ex.execute("run_command", { command });
 const write = (ex: ToolExecutor, path: string) =>
 	ex.execute("write_file", { path, content: "scratch\n" });
@@ -205,7 +210,7 @@ describe("the pilot case, both tool paths", () => {
 		onlyPermissionCards("rm -f bunout.txt");
 	});
 
-	test("an ordinary redirect still counts: echo x > out.txt, then >>, then rm -f out.txt", async () => {
+	test.skipIf(WIN_CMD)("an ordinary redirect still counts: echo x > out.txt, then >>, then rm -f out.txt", async () => {
 		const ex = new ToolExecutor(ws, "own-a");
 		await run(ex, "echo x > out.txt");
 		await run(ex, "echo y >> out.txt");
@@ -319,7 +324,7 @@ describe("a redirect target that no longer holds the created file is not recorde
 	}
 	const userFile = () => writeFileSync(join(ws, "user.txt"), "the user's only copy");
 
-	test("a target replaced by a rename during the command is not recorded (ToolExecutor)", async () => {
+	test.skipIf(WIN_CMD)("a target replaced by a rename during the command is not recorded (ToolExecutor)", async () => {
 		userFile();
 		const ex = new ToolExecutor(ws, "own-a");
 		await run(ex, "mv user.txt out.txt > out.txt");
@@ -329,7 +334,7 @@ describe("a redirect target that no longer holds the created file is not recorde
 		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
 	});
 
-	test("a target replaced by a rename is not recorded (native run_command)", async () => {
+	test.skipIf(WIN_CMD)("a target replaced by a rename is not recorded (native run_command)", async () => {
 		userFile();
 		const agent = nativeAgent(new CreatedFiles());
 		await agent.run("mv user.txt out.txt > out.txt");
@@ -337,7 +342,7 @@ describe("a redirect target that no longer holds the created file is not recorde
 		await judged(agent.run, "rm -f out.txt", "out.txt");
 	});
 
-	test("a recorded target replaced by a later redirect command is forgotten", async () => {
+	test.skipIf(WIN_CMD)("a recorded target replaced by a later redirect command is forgotten", async () => {
 		userFile();
 		const ex = new ToolExecutor(ws, "own-a");
 		await run(ex, "echo x > out.txt");
@@ -348,7 +353,7 @@ describe("a redirect target that no longer holds the created file is not recorde
 		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
 	});
 
-	test("an archive command that removes its source escalates, and rm of its output is judged", async () => {
+	test.skipIf(WIN_CMD)("an archive command that removes its source escalates, and rm of its output is judged", async () => {
 		userFile();
 		const ex = new ToolExecutor(ws, "own-a");
 		// Unapproved, archive_removes_source escalates and the zip never runs.
