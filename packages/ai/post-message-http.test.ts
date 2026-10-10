@@ -6,7 +6,15 @@
  * the send log or in the gate audit log.
  */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -62,7 +70,7 @@ process.env.EIGHT_DATA_DIR = data;
 process.env.EIGHT_TG_BIN_DIR = join(root, "no-helpers"); // no tg-group: direct send only
 process.env.EIGHT_TG_API_BASE = `http://127.0.0.1:${stub.port}`;
 
-const { _snapshotAllowedChats } = await import("./post-message");
+const { _snapshotAllowedChats, checkApiBase } = await import("./post-message");
 const { _resetTuiApprovalChannel, registerTuiApprovalHandler } = await import(
 	"../permissions/tui-approval-channel"
 );
@@ -259,6 +267,144 @@ describe("post_message direct send (#3838)", () => {
 			expect(out).not.toContain(plain);
 		} finally {
 			writeFileSync(envFile, `# posting key\nexport TG_KEY="${KEY}"\nOTHER=1\n`);
+		}
+	});
+
+	test("file tools cannot open the configured bot env file, even from HOME", async () => {
+		approve();
+		symlinkSync(envFile, join(work, "innocent.txt"));
+		try {
+			const fromHome = new ToolExecutor(home, "http-guard-home");
+			const attempts: Array<[InstanceType<typeof ToolExecutor>, string, Record<string, unknown>]> =
+				[
+					[fromHome, "read_file", { path: ".config/bot/bot.env" }],
+					[fromHome, "read_file", { path: envFile }],
+					[fromHome, "post_message", { chat: CHAT, text_file: ".config/bot/bot.env" }],
+					[
+						new ToolExecutor(work, "http-guard-link"),
+						"post_message",
+						{ chat: CHAT, text_file: "innocent.txt" },
+					],
+				];
+			for (const [exec, tool, args] of attempts) {
+				let out: string;
+				try {
+					out = await exec.execute(tool, args);
+				} catch (e) {
+					out = String(e);
+				}
+				expect(out).toMatch(/protected credential file|BLOCKED|DENIED/);
+				expect(out).not.toContain(KEY);
+			}
+			expect(hits).toEqual([]);
+		} finally {
+			rmSync(join(work, "innocent.txt"), { force: true });
+		}
+	});
+
+	test("an API error echoing the percent-encoded key is redacted too", async () => {
+		approve();
+		reply = () =>
+			Response.json(
+				{
+					ok: false,
+					description: `bad ${encodeURIComponent(KEY)} and ${encodeURIComponent(KEY).toLowerCase()}`,
+				},
+				{ status: 400 },
+			);
+		const out = await new ToolExecutor(work, "http-pct").execute("post_message", {
+			chat: CHAT,
+			text: "hi",
+		});
+		expect(out).toContain("400");
+		expect(out).not.toContain(encodeURIComponent(KEY));
+		expect(out).not.toContain(encodeURIComponent(KEY).toLowerCase());
+		expect(out).not.toContain(KEY.split(":")[1]);
+	});
+
+	test("EIGHT_TG_API_BASE: credentials always refused, plain http only under the test runner", () => {
+		expect(checkApiBase("https://api.telegram.org/", false)).toEqual({
+			base: "https://api.telegram.org",
+		});
+		expect(checkApiBase("http://127.0.0.1:9", true).base).toBe("http://127.0.0.1:9");
+		expect(checkApiBase("http://127.0.0.1:9", false).error).toContain("https");
+		expect(checkApiBase("ftp://example.com", true).error).toContain("https");
+		for (const t of [true, false]) {
+			const r = checkApiBase("https://user:pw@example.com", t);
+			expect(r.base).toBeUndefined();
+			expect(r.error).not.toContain("pw");
+		}
+	});
+
+	test("a refused API base sends nothing: credentials in the URL, or http outside the test runner", async () => {
+		approve();
+		const saveBase = process.env.EIGHT_TG_API_BASE;
+		const saveEnv = { NODE_ENV: process.env.NODE_ENV, BUN_TEST: process.env.BUN_TEST };
+		try {
+			process.env.EIGHT_TG_API_BASE = `http://u:p@127.0.0.1:${stub.port}`;
+			const a = await new ToolExecutor(work, "http-base-a").execute("post_message", {
+				chat: CHAT,
+				text: "hi",
+			});
+			expect(a).toContain("must not carry credentials");
+			process.env.EIGHT_TG_API_BASE = saveBase;
+			(process.env as Record<string, string | undefined>).NODE_ENV = "production";
+			Reflect.deleteProperty(process.env, "BUN_TEST");
+			const b = await new ToolExecutor(work, "http-base-b").execute("post_message", {
+				chat: CHAT,
+				text: "hi",
+			});
+			expect(b).toContain("must be https");
+			expect(hits).toEqual([]);
+		} finally {
+			process.env.EIGHT_TG_API_BASE = saveBase;
+			for (const [k, v] of Object.entries(saveEnv)) {
+				if (v === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = v;
+			}
+		}
+	});
+
+	test("any secret the scanner knows is refused before the card, from text or a drafted file", async () => {
+		let asked = 0;
+		registerTuiApprovalHandler(async () => {
+			asked++;
+			return "approve";
+		});
+		// Built at run time so no scanner flags this source file.
+		const fake = ["sk-", "a".repeat(24), "T3BlbkFJ", "b".repeat(24)].join("");
+		writeFileSync(join(work, "draft.txt"), `release notes\nOPENAI_API_KEY=${fake}\n`);
+		const exec = new ToolExecutor(work, "http-scan");
+		for (const args of [
+			{ chat: CHAT, text_file: "draft.txt" },
+			{ chat: CHAT, text: `use ${fake}` },
+		]) {
+			const out = await exec.execute("post_message", args);
+			expect(out).toContain("holds a secret");
+			expect(out).not.toContain(fake);
+		}
+		expect(asked).toBe(0);
+		expect(hits).toEqual([]);
+	});
+
+	test("a botTokenVar that is not a plain upper-case name disables direct send", () => {
+		const settings = join(home, ".8gent", "settings.json");
+		const good = readFileSync(settings, "utf8");
+		try {
+			for (const bad of ["tg_key", "TG-KEY", "TG_KEY;rm", ""]) {
+				writeFileSync(
+					settings,
+					JSON.stringify({
+						postMessage: { allowedChats: [CHAT], botEnvFile: envFile, botTokenVar: bad },
+					}),
+				);
+				_snapshotAllowedChats();
+				const defs = JSON.stringify(new ToolExecutor(work, "http-var").getToolDefinitions());
+				expect(defs).not.toContain('"post_message"');
+			}
+		} finally {
+			writeFileSync(settings, good);
+			_snapshotAllowedChats();
 		}
 	});
 

@@ -107,6 +107,23 @@ function homeDir(): string {
 	return process.env.EIGHT_FAKE_HOME || os.homedir();
 }
 
+/**
+ * The bot env file named by postMessage.botEnvFile in <home>/.8gent/settings.json
+ * (#3838), or null. It holds the posting key, so file tools treat it like a
+ * credential file. post_message reads the same setting through this function.
+ */
+export function configuredBotEnvFile(home: string): string | null {
+	try {
+		const f = JSON.parse(fs.readFileSync(path.join(home, ".8gent", "settings.json"), "utf8"))
+			?.postMessage?.botEnvFile;
+		if (typeof f !== "string" || f.trim() === "") return null;
+		const file = f.startsWith("~/") ? path.join(home, f.slice(2)) : f;
+		return path.isAbsolute(file) ? file : null;
+	} catch {
+		return null;
+	}
+}
+
 function isUncPath(raw: string): boolean {
 	// Windows UNC: starts with \\ or // followed by host/share segment.
 	if (raw.startsWith("\\\\")) return true;
@@ -218,6 +235,15 @@ export function validatePath(
 		for (const parts of PROTECTED_HOME_FILES) {
 			const target = resolveSafe(flavor.join(home, ...parts), home, platform);
 			if (resolved === target) return { ok: false, reason: "protected settings file" };
+		}
+	}
+
+	// 5b2. The configured post_message bot env file (#3838), wherever it lives.
+	{
+		const home = host.home ?? homeDir();
+		const envFile = configuredBotEnvFile(home);
+		if (envFile && resolved === resolveSafe(envFile, home, platform)) {
+			return { ok: false, reason: "protected credential file" };
 		}
 	}
 

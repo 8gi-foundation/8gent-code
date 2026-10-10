@@ -25,9 +25,10 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir as osHome } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { scrub } from "../eight/secret-scanner";
 import { getPermissionManager } from "../permissions";
+import { configuredBotEnvFile } from "../permissions/path-guard";
 import { ToolG8 } from "../permissions/toolg8";
 import { hasTuiApprovalHandler, requestTuiDecision } from "../permissions/tui-approval-channel";
 
@@ -97,21 +98,22 @@ export interface DirectConfig {
 	name: string;
 }
 
-/** postMessage.botEnvFile from settings; null when unset, relative, or unreadable settings. */
+/** Env variable names botTokenVar may use: upper case, digits, underscore. */
+const TOKEN_VAR_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+/**
+ * postMessage.botEnvFile and botTokenVar from settings. null when the file is
+ * unset or relative, or when botTokenVar is set but not a plain upper-case
+ * name: a malformed setting disables direct send rather than guessing.
+ */
 export function readDirectConfig(): DirectConfig | null {
+	const file = configuredBotEnvFile(home());
+	if (!file) return null;
 	try {
-		const pm = JSON.parse(
-			readFileSync(join(home(), ".8gent", "settings.json"), "utf8"),
-		)?.postMessage;
-		const f = pm?.botEnvFile;
-		if (typeof f !== "string" || f.trim() === "") return null;
-		const file = f.startsWith("~/") ? join(home(), f.slice(2)) : f;
-		if (!isAbsolute(file)) return null;
-		const name =
-			typeof pm.botTokenVar === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(pm.botTokenVar)
-				? pm.botTokenVar
-				: "TELEGRAM_BOT_TOKEN";
-		return { file, name };
+		const v = JSON.parse(readFileSync(join(home(), ".8gent", "settings.json"), "utf8"))?.postMessage
+			?.botTokenVar;
+		if (v === undefined) return { file, name: "TELEGRAM_BOT_TOKEN" };
+		return typeof v === "string" && TOKEN_VAR_RE.test(v) ? { file, name: v } : null;
 	} catch {
 		return null;
 	}
@@ -133,8 +135,32 @@ export function readBotKey(file: string, name: string): string | null {
 }
 
 const TG_API = "https://api.telegram.org";
+
+/**
+ * Check an EIGHT_TG_API_BASE value. Credentials in the URL are always refused;
+ * a non-https scheme only under the test runner (local stubs). The value is
+ * never echoed back.
+ */
+export function checkApiBase(raw: string, testMode: boolean): { base?: string; error?: string } {
+	let u: URL;
+	try {
+		u = new URL(raw);
+	} catch {
+		return { error: "EIGHT_TG_API_BASE is not a URL" };
+	}
+	if (u.username || u.password) return { error: "EIGHT_TG_API_BASE must not carry credentials" };
+	if (u.protocol !== "https:" && !(testMode && u.protocol === "http:"))
+		return { error: "EIGHT_TG_API_BASE must be https" };
+	return { base: raw.replace(/\/+$/, "") };
+}
+
+const testMode = () => process.env.NODE_ENV === "test" || process.env.BUN_TEST === "1";
+
 /** The Bot API base. Process environment only, so nothing written during a session moves it. */
-const apiBase = () => (process.env.EIGHT_TG_API_BASE || TG_API).replace(/\/+$/, "");
+const apiBase = (): { base?: string; error?: string } => {
+	const raw = process.env.EIGHT_TG_API_BASE;
+	return raw ? checkApiBase(raw, testMode()) : { base: TG_API };
+};
 
 function directSend(cfg: DirectConfig): DirectSend {
 	const key = () => readBotKey(cfg.file, cfg.name);
@@ -144,11 +170,14 @@ function directSend(cfg: DirectConfig): DirectSend {
 			return k !== null && text.includes(k);
 		},
 		send: async (chat, text) => {
+			const api = apiBase();
+			if (!api.base) return { error: api.error };
 			const k = key();
 			if (!k) return { error: `the bot env file has no ${cfg.name}` };
-			const hide = (s: string) => s.split(k).join("[redacted-token]");
+			const forms = [k, encodeURIComponent(k), encodeURIComponent(k).toLowerCase()];
+			const hide = (s: string) => forms.reduce((t, f) => t.split(f).join("[redacted-token]"), s);
 			try {
-				const res = await fetch(`${apiBase()}/bot${k}/sendMessage`, {
+				const res = await fetch(`${api.base}/bot${k}/sendMessage`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ chat_id: chat, text }),
@@ -242,7 +271,7 @@ export function postMessageDeps(agentId: string, sessionKey = agentId): PostMess
 		gate: (chat) => {
 			const g = ToolG8.instance().gate(agentId, "network_request", {
 				// The base this post will call, so policy judges the real destination.
-				url: `${directSnapshot ? apiBase() : TG_API}/`,
+				url: `${(directSnapshot && apiBase().base) || TG_API}/`,
 				to: chat,
 			});
 			return { allowed: g.allowed || g.requiresApproval === true, reason: g.reason };
@@ -302,6 +331,10 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	BOT_TOKEN_RE.lastIndex = 0;
 	if (BOT_TOKEN_RE.test(text) || deps.direct?.holdsKey(text))
 		return "[BLOCKED] post_message: the text holds a bot key. Nothing was sent. Remove it; never post credentials.";
+	// Any other secret the shared scanner knows (an API key from a workspace .env, say).
+	const found = scrub(text);
+	if (found.redactedCount > 0)
+		return `[BLOCKED] post_message: the text holds a secret (${found.rules.join(", ")}). Nothing was sent. Remove it; never post credentials.`;
 
 	// Attempts count, not only successes: a refused or failed post spends the limit.
 	if (deps.sent.n >= deps.limit)
