@@ -10,6 +10,7 @@ export type SlashCommand =
 	| "status"
 	| "model"
 	| "provider"
+	| "apikeys"
 	| "llama"
 	| "models"
 	| "voice"
@@ -97,6 +98,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "predict",
 		aliases: ["p", "next"],
 		description: "Show predicted next steps",
+	},
+	{
+		name: "apikeys",
+		aliases: ["apikey"],
+		description: "Enter or remove provider API keys (masked, kept in the OS keychain)",
+		usage: "/apikeys",
 	},
 	{
 		name: "avenues",
