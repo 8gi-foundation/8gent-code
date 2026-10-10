@@ -22,6 +22,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+	BlockedDestinationError,
+	type Resolver,
+	checkDestination,
+	classifyAddress,
+} from "./net-guard";
 
 export type BrowserCall = (cmd: string, args?: Record<string, unknown>) => Promise<any>;
 export type BrowserAction =
@@ -145,6 +151,70 @@ export function blockedForProfile(url: string): string | null {
 		}
 	}
 	return null;
+}
+
+// ── Destination guard, every profile (#3603) ─────────────────────────────────
+// web_fetch refuses private, link-local and metadata destinations through net-guard.ts; the
+// browser path had that rule only inside a named profile. Now every open (browser_open and an
+// open step in browser_task) goes through the same classification, DNS answers included.
+// Loopback is the one exception, and only for a host:port the person or task listed in
+// EIGHT_BROWSER_ALLOW_LOOPBACK (comma separated, e.g. "127.0.0.1:5173,localhost:3000").
+// The browser's own network layer (8gent-browser private-net.ts) stays as the second check.
+
+let testResolver: Resolver | null = null;
+/** Test seam: a fixed DNS answer so destination checks never touch the network. */
+export function _setResolverForTest(r: Resolver | null): void {
+	testResolver = r;
+}
+
+/** Loopback host:port entries from the environment. Non-loopback entries are dropped at use. */
+export function loopbackAllowlist(env: Env = process.env): string[] {
+	return (env.EIGHT_BROWSER_ALLOW_LOOPBACK ?? "")
+		.split(",")
+		.map((x) => x.trim().toLowerCase())
+		.filter(Boolean);
+}
+
+function hostPort(u: URL): string {
+	let host = u.hostname.toLowerCase();
+	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	host = host.replace(/\.+$/, "");
+	const port = u.port || (u.protocol === "https:" ? "443" : "80");
+	return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
+function isLoopbackHost(host: string): boolean {
+	const h = host.startsWith("[") ? host.slice(1, -1) : host;
+	return h === "localhost" || h.endsWith(".localhost") || classifyAddress(h) === "loopback";
+}
+
+/** Why a browser destination is refused, or null. Network-free for literals; resolves names. */
+export async function blockedBrowserDestination(
+	url: string,
+	opts: { allowLoopback?: string[]; resolve?: Resolver } = {},
+): Promise<string | null> {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return `Refused: "${url}" is not a valid URL.`;
+	}
+	const hp = hostPort(u);
+	const host = hp.slice(0, hp.lastIndexOf(":"));
+	const allowed = (opts.allowLoopback ?? []).map((x) => x.trim().toLowerCase());
+	if (
+		(u.protocol === "http:" || u.protocol === "https:") &&
+		isLoopbackHost(host) &&
+		allowed.includes(hp)
+	)
+		return null;
+	try {
+		await checkDestination(url, { resolve: opts.resolve });
+		return null;
+	} catch (e) {
+		if (e instanceof BlockedDestinationError) return e.message.replace(/ web_fetch only.*$/, "");
+		throw e;
+	}
 }
 
 export function validateBrowserAction(
@@ -514,10 +584,22 @@ const SECRET_FIELDS = [
 export function createEightBrowser(
 	call: BrowserCall = wsCall,
 	/** isolated: a named profile (#3622). No typing into secret fields, no private hosts. */
-	opts: { settleMs?: number; isolated?: boolean | (() => boolean) } = {},
+	opts: {
+		settleMs?: number;
+		isolated?: boolean | (() => boolean);
+		/** Loopback host:port the task may open (default: EIGHT_BROWSER_ALLOW_LOOPBACK). Ignored in a named profile. */
+		allowLoopback?: string[];
+		/** DNS resolver, injectable for tests. */
+		resolve?: Resolver;
+	} = {},
 ) {
 	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
 	const settle = opts.settleMs ?? 400;
+	const destinationBlocked = (url: string) =>
+		blockedBrowserDestination(url, {
+			allowLoopback: isolated() ? [] : (opts.allowLoopback ?? loopbackAllowlist()),
+			resolve: opts.resolve ?? testResolver ?? undefined,
+		});
 	/** Does `selector` reach a password, payment or contenteditable field? Asked of the page
 	 *  itself, so it holds for any selector. Fails closed: an error reply (a malformed
 	 *  selector) or anything but an elements array counts as secret. */
@@ -637,6 +719,8 @@ export function createEightBrowser(
 	async function open(url: string): Promise<string> {
 		const v = validateBrowserAction({ action: "open", url }, { isolated: isolated() });
 		if (!v.ok) return `browser_open failed: ${v.error}`;
+		const blocked = await destinationBlocked(url);
+		if (blocked) return `browser_open failed: ${blocked}`;
 		const r = await call("tab.open", { url });
 		owned.add((current = String(r.id)));
 		await call("page.waitFor", { tabId: current, selector: "body", timeoutMs: 10_000 });
@@ -669,6 +753,10 @@ export function createEightBrowser(
 		for (const [i, r] of raw.entries()) {
 			const v = validateBrowserAction(r, { isolated: isolated() });
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
+			if (v.action.action === "open") {
+				const blocked = await destinationBlocked(v.action.url);
+				if (blocked) return fail(`dry run: step ${i}: ${blocked}`);
+			}
 			plan.push(v.action);
 		}
 		const refuseSecret = (i: number, sel: string) =>
