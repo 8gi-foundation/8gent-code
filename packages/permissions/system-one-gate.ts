@@ -601,6 +601,26 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// Restoring tracked files from git history inside the work tree (#3840).
+		// Needs the caller's working directory; see s1-git-restore-in-project.ts.
+		try {
+			const { restoreInProject } = await import("./s1-git-restore-in-project");
+			const restore = restoreInProject(command, cwd);
+			if (restore.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: restore.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {
