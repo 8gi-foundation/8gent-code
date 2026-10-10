@@ -17,12 +17,15 @@ describe("trackStatements (#3814)", () => {
 		expect(trackedCount(db)).toBe(0);
 	});
 
-	it("does not pin statements nobody holds: the record stays bounded", () => {
+	it("does not pin statements nobody holds: the record stays bounded", async () => {
 		const db = trackStatements(new Database(":memory:"));
 		db.exec("CREATE TABLE t (a INTEGER)");
 		for (let round = 0; round < 5; round++) {
 			for (let i = 0; i < 500; i++) db.prepare("SELECT * FROM t WHERE a = ?").get(i);
-			Bun.gc(true); // test only: make the unreferenced statements collectable now
+			// Test only, never product code: WeakRef targets stay alive until the end of the
+			// current turn, so yield first, then collect the unreferenced statements now.
+			await Bun.sleep(0);
+			Bun.gc(true);
 		}
 		for (let i = 0; i < 100; i++) db.prepare("SELECT 1").get();
 		// 2600 prepares in total; only the prune headroom survives, not one entry per call.
