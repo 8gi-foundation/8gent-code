@@ -20,8 +20,10 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { TranscriptSegment, VideoEvent, VideoExtraction } from "@8gent/eyes";
+import { removeDbFiles } from "../../tests/db-files";
 import { KnowledgeGraph } from "./graph.js";
 import {
 	type VideoTripleExtractorFn,
@@ -55,7 +57,7 @@ function makeExtraction(overrides: Partial<VideoExtraction> = {}): VideoExtracti
 	};
 }
 
-const TEST_DB = "/tmp/test-video-extractor-2633.db";
+const TEST_DB = join(tmpdir(), "test-video-extractor-2633.db");
 
 // ── 1. intervalsOverlap ───────────────────────────────────────────────
 
@@ -306,14 +308,14 @@ describe("ingestVideoToGraph", () => {
 	let graph: KnowledgeGraph;
 
 	beforeEach(() => {
-		if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+		removeDbFiles(TEST_DB);
 		db = new Database(TEST_DB, { create: true });
 		graph = new KnowledgeGraph(db);
 	});
 
 	afterEach(() => {
 		db.close();
-		if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+		removeDbFiles(TEST_DB);
 	});
 
 	it("writes the video, events, and edges into the graph", async () => {

@@ -15,11 +15,13 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { KnowledgeGraph } from "./graph.js";
 import type { EntityType } from "./graph.js";
 
-const TEST_DB = "/tmp/test-entity-dedup-1369.db";
+const TEST_DB = join(tmpdir(), "test-entity-dedup-1369.db");
 
 describe("Entity dedup -- KnowledgeGraph", () => {
 	let db: Database;
@@ -27,14 +29,14 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 
 	beforeEach(() => {
 		// Clean slate for every test
-		if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+		removeDbFiles(TEST_DB);
 		db = new Database(TEST_DB);
 		graph = new KnowledgeGraph(db);
 	});
 
 	afterEach(() => {
 		db.close();
-		if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+		removeDbFiles(TEST_DB);
 	});
 
 	// -- Test 1: same (type, name) returns existing ID -------------------------

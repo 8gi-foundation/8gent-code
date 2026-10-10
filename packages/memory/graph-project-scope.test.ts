@@ -15,14 +15,16 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { KnowledgeGraph } from "./graph.js";
 
-const TEST_DB = "/tmp/test-graph-project-scope.db";
-const MIGRATE_DB = "/tmp/test-graph-migrate.db";
+const TEST_DB = join(tmpdir(), "test-graph-project-scope.db");
+const MIGRATE_DB = join(tmpdir(), "test-graph-migrate.db");
 
 function rm(p: string): void {
-	if (existsSync(p)) unlinkSync(p);
+	removeDbFiles(p);
 }
 
 describe("KnowledgeGraph project scoping", () => {

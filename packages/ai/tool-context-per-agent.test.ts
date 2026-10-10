@@ -12,11 +12,11 @@
  * after agent A, which is the order that broke A.
  */
 
-import { removeTree } from "../../tests/db-files";
 import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { removeTree } from "../../tests/db-files";
 import { type EightAgentConfig, createEightAgent } from "./agent";
 import { agentTools, createRuntimeParams, getToolContext, setToolContext } from "./tools";
 
@@ -33,6 +33,15 @@ afterAll(() => {
 	for (const d of dirs) removeTree(d);
 	removeTree(process.env.EIGHT_DATA_DIR as string);
 });
+
+/**
+ * How `pwd` prints a directory. POSIX: the path itself. Windows: the shell is
+ * Git Bash, which prints an MSYS path (/tmp/...) for the same directory, so
+ * match the unique final component, which still tells A's directory from B's.
+ */
+function shown(dir: string): string {
+	return process.platform === "win32" ? path.basename(dir) : dir;
+}
 
 function tempDir(label: string): string {
 	// realpath: /tmp is a symlink on macOS and `pwd` prints the resolved path.
@@ -61,7 +70,9 @@ function scriptedModel(call: Call): { baseURL: string; toolResults: string[] } {
 				);
 				return Response.json({
 					...base,
-					choices: [{ index: 0, message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+					choices: [
+						{ index: 0, message: { role: "assistant", content: "done" }, finish_reason: "stop" },
+					],
 					usage,
 				});
 			}
@@ -123,8 +134,8 @@ describe("two agents in one process keep their own tool context (#3127)", () => 
 		const b = agentFor(dirB, "primary", { name: "run_command", args: { command: "pwd" } });
 
 		// A runs after B was built: the order that used to hand A B's directory.
-		expect(await run(a)).toContain(dirA);
-		expect(await run(b)).toContain(dirB);
+		expect(await run(a)).toContain(shown(dirA));
+		expect(await run(b)).toContain(shown(dirB));
 	});
 
 	test("write_file resolves a relative path against each agent's own directory", async () => {
@@ -232,10 +243,15 @@ describe("two agents in one process keep their own runtime params (#3140)", () =
 			{ name: "self_append_context", args: { context: "only for A", reason: "test" } },
 			{ tools: selfAndMemoryTools, runtime: runtimeA },
 		);
-		agentFor(tempDir("apb"), "primary", { name: "self_inspect", args: {} }, {
-			tools: selfAndMemoryTools,
-			runtime: runtimeB,
-		});
+		agentFor(
+			tempDir("apb"),
+			"primary",
+			{ name: "self_inspect", args: {} },
+			{
+				tools: selfAndMemoryTools,
+				runtime: runtimeB,
+			},
+		);
 
 		await run(a);
 		expect(runtimeA.appendedContext).toEqual(["only for A"]);

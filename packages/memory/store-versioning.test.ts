@@ -9,9 +9,9 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { removeDbFiles } from "../../tests/db-files";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { MemoryStore } from "./store.js";
 import type { CoreMemory, SemanticMemory } from "./types.js";
 

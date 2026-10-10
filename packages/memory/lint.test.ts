@@ -256,7 +256,8 @@ describe("lintMemory", () => {
 
 		const report = lintMemory(db, graph);
 
-		// Also get a clean-ish baseline
+		// Also get a clean-ish baseline. Windows cannot delete a file that is still open.
+		db.close();
 		cleanup();
 		const db2 = new Database(TEST_DB);
 		createMemoriesTable(db2);
