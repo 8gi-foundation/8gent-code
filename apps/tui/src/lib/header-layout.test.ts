@@ -191,6 +191,14 @@ describe("truncatePath keeps the end of a workdir recognisable (#3810)", () => {
 		expect(cellWidth(truncatePath(RUN, 13))).toBe(13);
 	});
 
+	test("wide characters never overflow the budget", () => {
+		const wide = "~/プロジェクト/作業ディレクトリ/日本語のフォルダ名/work";
+		for (const max of [3, 14, 20, 24, 30]) {
+			expect(cellWidth(truncatePath(wide, max))).toBeLessThanOrEqual(max);
+		}
+		expect(truncatePath(wide, 30).endsWith("/work")).toBe(true);
+	});
+
 	test("fitHeaderMiddle uses the end-biased cut", () => {
 		const path = `${RUN}/${nameOf(30)}/work`;
 		const m = fitHeaderMiddle(path, "main", "", 69 + 3 + 4);

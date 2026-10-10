@@ -91,9 +91,27 @@ export function truncatePath(value: string, max: number): string {
 	if (max === 1) return "…";
 	const chars = [...value];
 	const keep = max - 1;
-	const head = Math.min(PATH_HEAD, Math.ceil(keep / 2));
-	const tail = keep - head;
-	return `${chars.slice(0, head).join("")}…${tail > 0 ? chars.slice(chars.length - tail).join("") : ""}`;
+	const headBudget = Math.min(PATH_HEAD, Math.ceil(keep / 2));
+	// Accumulate by cell width, not code point, so wide characters never overflow.
+	let head = "";
+	let headW = 0;
+	let i = 0;
+	for (; i < chars.length; i++) {
+		const w = cellWidth(chars[i]);
+		if (headW + w > headBudget) break;
+		head += chars[i];
+		headW += w;
+	}
+	const tailBudget = keep - headW;
+	let tail = "";
+	let tailW = 0;
+	for (let j = chars.length - 1; j >= i; j--) {
+		const w = cellWidth(chars[j]);
+		if (tailW + w > tailBudget) break;
+		tail = chars[j] + tail;
+		tailW += w;
+	}
+	return `${head}…${tail}`;
 }
 
 /** Keep the head of a string, replacing the tail with an ellipsis. */
