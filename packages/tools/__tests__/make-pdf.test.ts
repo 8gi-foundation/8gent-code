@@ -46,15 +46,18 @@ afterEach(() => {
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+// POSIX-only: the stub renderer is a #!/usr/bin/env bash script, which Windows cannot spawn.
+const posixTest = process.platform === "win32" ? test.skip : test;
+
 describe("makePdf", () => {
-	test("returns a creative-dir path and document kind", async () => {
+	posixTest("returns a creative-dir path and document kind", async () => {
 		const result = await makePdf({ markdown: "# Hi", title: "Stub" });
 		expect(result.kind).toBe("document");
 		expect(result.path.startsWith(CREATIVE_DIR)).toBe(true);
 		expect(result.path.endsWith(".pdf")).toBe(true);
 	});
 
-	test("captures the LAST stdout line as the output path", async () => {
+	posixTest("captures the LAST stdout line as the output path", async () => {
 		const result = await makePdf({ markdown: "# Hi" });
 		expect(result.path).toBe(`${CREATIVE_DIR}/doc-stub.pdf`);
 	});
@@ -69,14 +72,14 @@ describe("makePdf", () => {
 		);
 	});
 
-	test("propagates a non-zero exit as a rejection with the stderr reason", async () => {
+	posixTest("propagates a non-zero exit as a rejection with the stderr reason", async () => {
 		process.env.EIGHT_MAKE_PDF_BIN = writeStub(
 			`#!/usr/bin/env bash\necho "no renderer available" 1>&2\nexit 3\n`,
 		);
 		await expect(makePdf({ markdown: "# Hi" })).rejects.toThrow(/no renderer available/);
 	});
 
-	test("passes an outName resolved inside the creative folder to --out", async () => {
+	posixTest("passes an outName resolved inside the creative folder to --out", async () => {
 		// Stub echoes back the --out value it received so we can assert resolution.
 		process.env.EIGHT_MAKE_PDF_BIN = writeStub(
 			`#!/usr/bin/env bash\n` +

@@ -18,10 +18,13 @@ const nodeAvailable = (() => {
 	return Boolean(bin);
 })();
 
+// POSIX-only: these cases run /bin/sh (or $SHELL) inside the pty, which a Windows host does not have.
+const posixShell = process.platform !== "win32";
+
 const SHELL = process.env.SHELL || "/bin/bash";
 
 describe("PtySession — bridge spawn + capture output", () => {
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"spawns a one-shot command and emits its stdout via onData",
 		async () => {
 			const session = new PtySession({
@@ -45,7 +48,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 		8000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"forwards stdin writes back through onData (echo loop)",
 		async () => {
 			const session = new PtySession({
@@ -77,7 +80,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 });
 
 describe("PtySession — lifecycle", () => {
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"reports pid after ready and null after exit",
 		async () => {
 			const session = new PtySession({
@@ -99,7 +102,7 @@ describe("PtySession — lifecycle", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"invokes onExit callback with exit code",
 		async () => {
 			const session = new PtySession({
@@ -124,7 +127,7 @@ describe("PtySession — lifecycle", () => {
 });
 
 describe("PtySession — resize", () => {
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"resize() does not throw on a live session",
 		async () => {
 			const session = new PtySession({
@@ -140,7 +143,7 @@ describe("PtySession — resize", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable)(
+	it.if(nodeAvailable && posixShell)(
 		"resize() is a no-op on a dead session (does not throw)",
 		async () => {
 			const session = new PtySession({

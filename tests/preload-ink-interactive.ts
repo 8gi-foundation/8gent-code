@@ -13,3 +13,12 @@
 import { mock } from "bun:test";
 
 mock.module("is-in-ci", () => ({ default: false }));
+
+// The TUI draws ASCII glyphs on the legacy Windows console, detected as win32 with no
+// WT_SESSION and no TERM_PROGRAM (apps/tui/src/lib/term-caps.ts). A GitHub Windows runner
+// is exactly that, so render tests that assert the rich glyphs (check marks, box rules,
+// bullets) saw "+" and "=" there. Declare a modern terminal for the test process; the
+// legacy fallback itself stays covered by term-caps.test.ts, which passes its own env.
+if (process.platform === "win32" && !process.env.WT_SESSION && !process.env.TERM_PROGRAM) {
+	process.env.TERM_PROGRAM = "8gent-test";
+}
