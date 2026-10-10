@@ -393,7 +393,10 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				});
 				break;
 			}
-			addJob(job);
+			if (!addJob(job)) {
+				send(ws, { type: "error", message: "invalid cron job" });
+				break;
+			}
 			send(ws, { type: "cron:added", jobId: job.id });
 			break;
 		}

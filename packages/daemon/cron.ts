@@ -44,11 +44,90 @@ const ONCE_CATCHUP_MS = 24 * 60 * 60_000;
 
 const cronPath = () => path.join(getDataDir(), "cron.json");
 const lockPath = () => path.join(getDataDir(), "cron-heavy.lock");
-const logPath = (id: string) => {
+const MAX_LOG_BYTES = 5 * 1024 * 1024; // rotate a log past this, and cap one run at this
+const MAX_CATCHUP_PER_BOOT = 10;
+const MAX_PAYLOAD = 64 * 1024;
+
+/** Log file for a job. Id is reduced to a safe basename (no traversal, no dotfile). */
+export function logPath(id: string): string {
 	const dir = path.join(getDataDir(), "cron-logs");
-	fs.mkdirSync(dir, { recursive: true });
-	return path.join(dir, `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.log`);
-};
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	try {
+		fs.chmodSync(dir, 0o700);
+	} catch {}
+	const safe = String(id).replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 100) || "_";
+	const p = path.join(dir, `${safe}.log`);
+	try {
+		if (fs.statSync(p).size > MAX_LOG_BYTES) fs.renameSync(p, `${p}.1`);
+	} catch {}
+	return p;
+}
+
+/** Append to a log, creating it 0600. */
+function logAppend(file: string, text: string): void {
+	fs.appendFileSync(file, text, { mode: 0o600 });
+}
+
+/** Env for a child: string values only, sane keys. Drops anything else. */
+export function cleanEnv(env: unknown): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (!env || typeof env !== "object") return out;
+	for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+		if (typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !v.includes("\0")) out[k] = v;
+	}
+	return out;
+}
+
+/** Validate a job handed in over the wire. null = reject. */
+export function validateJob(j: unknown): CronJob | null {
+	const o = j as Partial<CronJob> | null;
+	if (!o || typeof o !== "object") return null;
+	if (typeof o.id !== "string" || !o.id || o.id.length > 128) return null;
+	if (typeof o.name !== "string" || !o.name || o.name.length > 200) return null;
+	if (typeof o.expression !== "string" || o.expression.length > 200) return null;
+	const okExpr = o.expression.startsWith("once:")
+		? !Number.isNaN(new Date(o.expression.slice(5)).getTime())
+		: o.expression.trim().split(/\s+/).length === 5;
+	if (!okExpr) return null;
+	if (o.type !== "shell" && o.type !== "agent-prompt" && o.type !== "webhook") return null;
+	if (typeof o.payload !== "string" || o.payload.length > MAX_PAYLOAD) return null;
+	if (o.cwd !== undefined && (typeof o.cwd !== "string" || !path.isAbsolute(o.cwd))) return null;
+	return {
+		id: o.id,
+		name: o.name,
+		expression: o.expression,
+		type: o.type,
+		payload: o.payload,
+		enabled: o.enabled !== false,
+		lastRun: null,
+		nextRun: null,
+		recurring: o.recurring !== false,
+		...(o.cwd ? { cwd: o.cwd } : {}),
+		...(o.env ? { env: cleanEnv(o.env) } : {}),
+		...(o.heavy ? { heavy: true } : {}),
+	};
+}
+
+/** Memory reading. os.freemem on macOS counts only never-touched pages and
+ * ignores reclaimable cache, so read vm_stat there: free + inactive + speculative + purgeable. */
+export function parseVmStat(text: string): { free: number; total: number } | null {
+	const size = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+	if (!size) return null;
+	const pages = (label: string) => Number(new RegExp(`^${label}:\\s+(\\d+)`, "m").exec(text)?.[1] ?? 0);
+	const free = pages("Pages free") + pages("Pages inactive") + pages("Pages speculative") + pages("Pages purgeable");
+	const total = free + pages("Pages active") + pages("Pages wired down") + pages("Pages occupied by compressor");
+	return total > 0 ? { free: free * size, total: total * size } : null;
+}
+function readFreeMem(): number {
+	if (process.platform === "darwin") {
+		try {
+			const r = Bun.spawnSync(["/usr/bin/vm_stat"]);
+			const v = parseVmStat(r.stdout.toString());
+			if (v) return (v.free / v.total) * os.totalmem();
+		} catch {}
+	}
+	return os.freemem();
+}
 
 let jobs: CronJob[] = [];
 let tickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,7 +139,7 @@ let writeChain: Promise<unknown> = Promise.resolve();
 
 /** Test seam: memory readings. Defaults to os.freemem / os.totalmem. */
 export const cronHooks = {
-	freeMem: () => os.freemem(),
+	freeMem: () => readFreeMem(),
 	totalMem: () => os.totalmem(),
 	memFloorPct: () => {
 		const v = Number(process.env.EIGHT_CRON_MEM_FLOOR_PCT);
@@ -104,7 +183,7 @@ function mutate(fn: (list: CronJob[]) => void): Promise<void> {
 			}
 			fn(list);
 			const tmp = `${cronPath()}.${process.pid}.tmp`;
-			fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+			fs.writeFileSync(tmp, JSON.stringify(list, null, 2), { mode: 0o600 }); // env may hold secrets
 			fs.renameSync(tmp, cronPath());
 			jobs = list;
 		});
@@ -191,23 +270,38 @@ function isAlive(pid: number): boolean {
 	}
 }
 
+const bootMs = () => Math.round((Date.now() - os.uptime() * 1000) / 60_000) * 60_000;
+const lockBody = (pid: number, job: string) => JSON.stringify({ pid, job, boot: bootMs() });
+/** A lock is live only if its pid is alive AND it was written in this boot (pids get reused). */
+function lockLive(raw: string): boolean {
+	try {
+		const l = JSON.parse(raw);
+		if (!l.pid || !isAlive(l.pid)) return false;
+		if (typeof l.boot === "number" && Math.abs(l.boot - bootMs()) > 5 * 60_000) return false;
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** Take the heavy lock. false = another live heavy job holds it. Dead pid is cleared. */
 function acquireHeavy(jobId: string): boolean {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		try {
-			const fd = fs.openSync(lockPath(), "wx");
-			fs.writeSync(fd, JSON.stringify({ pid: process.pid, job: jobId }));
+			const fd = fs.openSync(lockPath(), "wx", 0o600); // O_EXCL: never follows a symlink
+			fs.writeSync(fd, lockBody(process.pid, jobId));
 			fs.closeSync(fd);
 			return true;
 		} catch {
-			let holder = 0;
+			let raw = "";
 			try {
-				holder = JSON.parse(fs.readFileSync(lockPath(), "utf8")).pid;
+				raw = fs.readFileSync(lockPath(), "utf8");
 			} catch {}
-			if (holder && isAlive(holder)) return false;
-			console.log(`[cron] clearing stale heavy lock (pid ${holder || "unreadable"})`);
+			if (raw && lockLive(raw)) return false;
+			console.log("[cron] clearing stale heavy lock");
 			try {
-				fs.unlinkSync(lockPath());
+				// re-read: only unlink if it is still the stale one we judged
+				if (fs.readFileSync(lockPath(), "utf8") === raw) fs.unlinkSync(lockPath());
 			} catch {}
 		}
 	}
@@ -216,7 +310,8 @@ function acquireHeavy(jobId: string): boolean {
 
 function setHeavyPid(jobId: string, pid: number): void {
 	try {
-		fs.writeFileSync(lockPath(), JSON.stringify({ pid, job: jobId }));
+		const cur = fs.readFileSync(lockPath(), "utf8");
+		if (JSON.parse(cur).job === jobId) fs.writeFileSync(lockPath(), lockBody(pid, jobId), { mode: 0o600 });
 	} catch {}
 }
 
@@ -235,9 +330,14 @@ async function drain(
 ): Promise<void> {
 	if (!stream) return;
 	const dec = new TextDecoder();
+	let written = 0;
 	for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
 		const text = dec.decode(chunk, { stream: true });
-		fs.appendFileSync(file, text);
+		if (written < MAX_LOG_BYTES) {
+			logAppend(file, text);
+			written += text.length;
+			if (written >= MAX_LOG_BYTES) logAppend(file, "\n[log capped for this run]\n");
+		}
 		if (capture) tail.text = (tail.text + text).slice(-4000);
 	}
 }
@@ -255,11 +355,11 @@ async function executeJob(job: CronJob): Promise<void> {
 		let output: unknown;
 		if (job.type === "shell") {
 			const log = logPath(job.id);
-			fs.appendFileSync(log, `\n=== ${new Date().toISOString()} ${job.name} ===\n`);
+			logAppend(log, `\n=== ${new Date().toISOString()} ${job.name.replace(/[\r\n]/g, " ")} ===\n`);
 			const sh = shellInvocation(job.payload);
 			const proc = Bun.spawn([sh.file, ...sh.args], {
 				cwd: job.cwd || getDataDir(),
-				env: { ...process.env, ...(job.env ?? {}) },
+				env: { ...process.env, ...cleanEnv(job.env) },
 				stdout: "pipe",
 				stderr: "pipe",
 				windowsHide: true,
@@ -272,7 +372,7 @@ async function executeJob(job: CronJob): Promise<void> {
 				drain(proc.stderr as ReadableStream<Uint8Array>, log, { text: "" }, false),
 			]);
 			const code = await proc.exited;
-			fs.appendFileSync(log, `\n=== exit ${code} (${Date.now() - startMs}ms) ===\n`);
+			logAppend(log, `\n=== exit ${code} (${Date.now() - startMs}ms) ===\n`);
 			output = out.text;
 		} else if (job.type === "webhook") {
 			const res = await fetch(job.payload, { method: "POST" });
@@ -375,6 +475,10 @@ export async function catchup(now: Date = new Date()): Promise<void> {
 	const cur = Math.floor(now.getTime() / 60_000);
 	for (const job of jobs) {
 		if (!job.enabled) continue;
+		if (runs.length >= MAX_CATCHUP_PER_BOOT) {
+			console.log(`[cron] catchup capped at ${MAX_CATCHUP_PER_BOOT}; the rest wait for their next slot`);
+			break;
+		}
 		const prev = previousScheduled(job.expression, now);
 		if (!prev) continue;
 		const last = job.lastRun ? new Date(job.lastRun).getTime() : null;
@@ -411,11 +515,17 @@ export function stopCron(): void {
 	}
 }
 
-export function addJob(job: CronJob): void {
+export function addJob(input: CronJob): boolean {
+	const job = validateJob(input);
+	if (!job) {
+		console.error("[cron] addJob rejected: invalid job");
+		return false;
+	}
 	jobs.push(job);
 	mutate((list) => {
 		if (!list.some((j) => j.id === job.id)) list.push(job);
 	}).catch(console.error);
+	return true;
 }
 
 export function removeJob(id: string): boolean {
