@@ -197,7 +197,8 @@ export function singleFileDelete(command: string, cwd: string | undefined): Sing
 		const realParent = realpathSync(path.dirname(abs));
 		if (!inside(realParent, root)) return no("That path resolves outside the working directory.");
 		const base = path.basename(abs);
-		const rel = path.relative(root, path.join(realParent, base));
+		// Segments are split on "/" below and reported to the model: keep them POSIX-style on Windows.
+		const rel = path.relative(root, path.join(realParent, base)).split(path.sep).join("/");
 		if (hasGitSegment(rel)) return no();
 		if (!scratchStyle(rel)) return no("That file is not a scratch file.");
 		if (LOCKFILES.has(base.toLowerCase()))

@@ -176,7 +176,7 @@ beforeEach(() => {
 		calibrationDir: tempDir("s1-single-nocal-"),
 	});
 	process.env[SYSTEM_ONE_FLAG] = "1";
-});
+}, 60_000); // git init, commit and submodule add take seconds on a Windows runner
 
 afterEach(() => {
 	rmSync(ws, { recursive: true, force: true });
