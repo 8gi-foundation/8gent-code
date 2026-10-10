@@ -78,4 +78,36 @@ describe("measureLayout (#3770)", () => {
 		expect(out).toContain("Measured layout of the full-size image");
 		expect(out).toContain("width 800px");
 	});
+
+	test("a paragraph beside an image reports its own line tops (#3823)", async () => {
+		const file = await mockup([
+			{ x: 240, y: 100, w: 680, h: 12 },
+			{ x: 240, y: 125, w: 680, h: 12 },
+			{ x: 240, y: 150, w: 600, h: 12 },
+			{ x: 940, y: 100, w: 100, h: 100 },
+		]);
+		const m = await measureLayout(file);
+		const band = m!.bands.find((b) => b.y === 100)!;
+		expect(band.spans[0].rows).toEqual([
+			{ y: 100, h: 12 },
+			{ y: 125, h: 12 },
+			{ y: 150, h: 12 },
+		]);
+		expect(band.spans[1].rows).toBeUndefined();
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("lines: y=100 h=12, y=125 h=12, y=150 h=12");
+	});
+
+	test("an inset table cell is reported as an offset from the column left (#3823)", async () => {
+		const file = await mockup([
+			{ x: 240, y: 40, w: 800, h: 30 },
+			{ x: 259, y: 300, w: 57, h: 15 },
+			{ x: 415, y: 300, w: 280, h: 15 },
+		]);
+		const line = await layoutMeasureLine(file);
+		expect(line).toContain("x=259 (+19 from column left) w=57");
+		expect(line).toContain("x=415 (+175 from column left) w=280");
+		expect(line).toContain("position:absolute");
+		expect(line).not.toMatch(/\u2014/);
+	});
 });
