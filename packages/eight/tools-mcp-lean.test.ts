@@ -283,7 +283,9 @@ describe("flag on: no server starts without the person's yes", () => {
 		const r = consent("approve");
 		const start = r.cards.filter((c) => c.startsWith("start 1 MCP server from your MCP config"));
 		expect(start.length).toBe(1);
-		expect(start[0]).toContain(`\n- work: ${process.execPath} ${marked} `);
+		// The card quotes any word with whitespace, a quote or a backslash (a Windows path), as lean.ts does.
+		const q = (w: string) => (/[\s"'\\]/.test(w) ? JSON.stringify(w) : w);
+		expect(start[0]).toContain(`\n- work: ${q(process.execPath)} ${q(marked)} `);
 		expect(start[0]).toContain("(env: WORK_TOKEN)");
 		// The per-call card is not blind: it names the call and its arguments.
 		expect(r.cards).toContain(

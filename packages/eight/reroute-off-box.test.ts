@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 
 const BOARD = "SENTINEL_3487_reroute_board";
 const STANDING = "SENTINEL_3487_reroute_user_global";
@@ -115,8 +116,8 @@ afterAll(() => {
 		if (savedEnv[k] === undefined) delete process.env[k];
 		else process.env[k] = savedEnv[k];
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 async function rerouteTurn(ollamaHost: string) {

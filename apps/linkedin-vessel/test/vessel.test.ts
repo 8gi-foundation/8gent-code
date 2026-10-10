@@ -14,7 +14,7 @@ for (const k of ["LINKEDIN_JSESSIONID", "TELEGRAM_BOT_TOKEN", "CONTROL_PLANE_URL
 const { handleRequest, handleControlPlaneMessage } = await import("../src/index");
 const { setQueue, MAX_MESSAGE_CHARS } = await import("../src/mcp-server");
 const { ReviewQueue, PREVIEW_CHARS, listPending } = await import("../src/queue");
-const { getDb } = await import("../src/campaign-db");
+const { closeDb, getDb } = await import("../src/campaign-db");
 const { notifyApprovalNeeded } = await import("../src/telegram-notify");
 const { readFileSync, readdirSync } = await import("node:fs");
 const { dailyCap } = await import("../src/rate-limiter");
@@ -129,6 +129,7 @@ beforeEach(() => {
 afterAll(() => {
 	globalThis.fetch = realFetch;
 	delete process.env.LINKEDIN_SESSION_COOKIE;
+	closeDb();
 	rmRetry(dataDir);
 });
 
