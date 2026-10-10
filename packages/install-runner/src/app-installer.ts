@@ -219,13 +219,14 @@ async function extractTarGz(archivePath: string, destDir: string): Promise<void>
 		.relative(resolvedDest, path.resolve(archivePath))
 		.split(path.sep)
 		.join("/");
-	await runTar(["-xzf", relArchive], resolvedDest);
+	await runTar(["-xzf", relArchive.includes("/") ? relArchive : `./${relArchive}`], resolvedDest);
 }
 
 function listTarEntries(archivePath: string): Promise<string[]> {
 	return new Promise((resolve, reject) => {
-		// GNU tar reads "C:\\x.tgz" as host "C" plus a path, so name the archive relative to its folder.
-		const proc = spawn("tar", ["-tzf", path.basename(archivePath)], {
+		// GNU tar reads "host:path" as a remote archive when a colon precedes any slash
+		// ("C:\\x.tgz", "foo:bar.tgz"), so name the archive "./name" relative to its folder.
+		const proc = spawn("tar", ["-tzf", `./${path.basename(archivePath)}`], {
 			cwd: path.dirname(path.resolve(archivePath)),
 		});
 		const out: Buffer[] = [];
