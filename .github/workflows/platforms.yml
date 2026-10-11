@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           # Pinned to what windows-task.yml uses; `latest` moved to 1.4.3, which segfaults mid-run
           # on windows-latest (#3820). Sharding below is the mitigation, not a fix for the crash.
