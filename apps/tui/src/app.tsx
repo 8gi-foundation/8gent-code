@@ -35,6 +35,7 @@ import {
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
+import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
@@ -1043,6 +1044,10 @@ export function App({
 
 	// Named session management
 	const sessionMgr = React.useMemo(() => new SessionManager(), []);
+	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
+	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
+	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
+	const historyPickDaemonRef = useRef(false);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1397,6 +1402,8 @@ export function App({
 	useEffect(() => {
 		if (!activeSessionId) return;
 		const timer = setInterval(() => {
+			// A linked session is saved by the daemon after every turn (#3929).
+			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
 				const serializable = messages.map((m) => ({
@@ -2228,6 +2235,97 @@ export function App({
 		]);
 	}, []);
 
+	// Shared sessions (#3929). While linked, chat goes to a daemon session that
+	// the 8gent Browser panel (or another TUI) can sit on too, and this TUI shows
+	// what they send. Unlinked, the TUI runs its own in-process 8gent as before.
+	const setMessagesLatest = useRef(setMessages);
+	setMessagesLatest.current = setMessages;
+	const sharedSeq = useRef(0);
+	const pushShared = useCallback((role: "user" | "assistant" | "system", content: string) => {
+		const id = `shared-${Date.now()}-${sharedSeq.current++}`;
+		setMessagesLatest.current((prev) => [...prev, { id, role, content, timestamp: new Date() }]);
+	}, []);
+
+	const unlinkDaemon = useCallback(async (): Promise<string | null> => {
+		const link = daemonLinkRef.current;
+		if (!link) return null;
+		daemonLinkRef.current = null;
+		const sid = link.client.sessionId;
+		link.off();
+		await link.client.detach().catch(() => {});
+		link.client.close();
+		return sid;
+	}, []);
+
+	/** Join a daemon session (live, or past and restored), replacing the chat with its transcript. */
+	const linkDaemonSession = useCallback(
+		async (sessionId: string): Promise<boolean> => {
+			let client = daemonLinkRef.current?.client;
+			try {
+				if (!client) client = await DaemonSessionClient.connect();
+				const attached = await client.attach(sessionId, "tui");
+				if (daemonLinkRef.current?.client !== client) {
+					const off = client.onEvent((e) => {
+						switch (e.kind) {
+							case "user":
+								pushShared("user", `[${surfaceLabel(e.channel)}] ${e.text}`);
+								break;
+							case "reply":
+								pushShared("assistant", e.text);
+								break;
+							case "tool":
+								pushShared("system", `8gent is using ${e.tool}`);
+								break;
+							case "error":
+								pushShared("system", `8gent: ${e.text}`);
+								break;
+							case "ended":
+								pushShared(
+									"system",
+									"The shared session ended. Back on this TUI's own 8gent; earlier turns are not in its context.",
+								);
+								void unlinkDaemon();
+								break;
+						}
+					});
+					daemonLinkRef.current = { client, off };
+				}
+				setActiveSessionId(attached.sessionId);
+				const restored = attached.transcript.map((m, i) => ({
+					id: `shared-restored-${i}`,
+					role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+					content: m.content,
+					timestamp: new Date(),
+				}));
+				setMessages(restored as Message[]);
+				addSystemMessage(
+					`Shared session ${attached.sessionId} (${surfaceLabel(attached.channel)})` +
+						`${attached.restored ? ", restored from history" : ""}` +
+						`${attached.truncated ? ", older messages not shown" : ""}.\n` +
+						"Messages now go to the shared 8gent session. /sessions detach returns to this TUI's own 8gent.",
+				);
+				return true;
+			} catch (err) {
+				if (client && daemonLinkRef.current?.client !== client) client.close();
+				addSystemMessage(
+					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\n` +
+						"Start the daemon with `8gent daemon`, or use /resume for sessions on this machine.",
+				);
+				return false;
+			}
+		},
+		[addSystemMessage, pushShared, setMessages, unlinkDaemon],
+	);
+	useEffect(() => () => void unlinkDaemon(), [unlinkDaemon]);
+	// EIGHT_TUI_SHARE=1: share this TUI's session through the daemon from the
+	// start, so the 8gent Browser panel can pick "the TUI session" right away.
+	const autoSharedRef = useRef(false);
+	useEffect(() => {
+		if (process.env.EIGHT_TUI_SHARE !== "1" || !activeSessionId || autoSharedRef.current) return;
+		autoSharedRef.current = true;
+		void linkDaemonSession(activeSessionId);
+	}, [activeSessionId, linkDaemonSession]);
+
 	// System One (on by default; EIGHT_SYSTEM_ONE=0 turns it off): its two
 	// one-time notices (no judge, so rules and allowlist only; or which judge
 	// is loading, and its size) land in the chat once each, not on stderr,
@@ -2999,6 +3097,7 @@ export function App({
 							"  /router - Task router settings\n" +
 							"  /plan - Show current plan status\n" +
 							"  /session [name|list|resume] - Named session management\n" +
+							"  /sessions [share|attach|stop|detach] - Shared sessions (with the 8gent Browser panel)\n" +
 							"  /fork [label] - Fork conversation at current message\n" +
 							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
 							"  /branch [list|switch <id>] - List or switch branches\n" +
@@ -3486,7 +3585,117 @@ export function App({
 					break;
 				}
 
+				case "sessions": {
+					// Shared sessions (#3929): live and past daemon sessions, shared with
+					// the 8gent Browser panel.
+					const sub = args[0]?.toLowerCase() ?? "list";
+					if (sub === "detach") {
+						const sid = await unlinkDaemon();
+						addSystemMessage(
+							sid
+								? `Left shared session ${sid}. It keeps running for anyone else on it. Back on this TUI's own 8gent; turns made there are not in its context.`
+								: "Not on a shared session.",
+						);
+						break;
+					}
+					if (sub === "stop") {
+						const link = daemonLinkRef.current;
+						if (!link) {
+							addSystemMessage("Not on a shared session.");
+							break;
+						}
+						const stopped = await link.client.abort().catch(() => false);
+						addSystemMessage(stopped ? "Stopped the shared session's current turn." : "Nothing was running.");
+						break;
+					}
+					if (sub === "share") {
+						if (!activeSessionId) {
+							addSystemMessage("No session to share yet.");
+							break;
+						}
+						if (daemonLinkRef.current?.client.sessionId === activeSessionId) {
+							addSystemMessage(`Already shared as ${activeSessionId}.`);
+							break;
+						}
+						// Save now so the daemon restores everything said so far.
+						const current = (tabMessagesRef.current.get(activeTabId) ?? []).filter(
+							(m) => m.role === "user" || m.role === "assistant",
+						);
+						sessionMgr.update(
+							activeSessionId,
+							current.map((m) => ({ role: m.role, content: m.content })),
+							{ model: currentModel, provider: currentProvider },
+						);
+						await linkDaemonSession(activeSessionId);
+						break;
+					}
+					if (sub === "attach") {
+						if (!args[1]) {
+							addSystemMessage("Usage: /sessions attach <id>");
+							break;
+						}
+						await linkDaemonSession(args[1]);
+						break;
+					}
+					if (sub !== "list") {
+						addSystemMessage(
+							"Usage:\n" +
+								"  /sessions              - Pick a live or past shared session\n" +
+								"  /sessions share        - Share this conversation (the 8gent Browser panel can join it)\n" +
+								"  /sessions attach <id>  - Join a shared session by id\n" +
+								"  /sessions stop         - Stop the shared session's current turn\n" +
+								"  /sessions detach       - Leave it and go back to this TUI's own 8gent",
+						);
+						break;
+					}
+					let lister = daemonLinkRef.current?.client;
+					let found: Awaited<ReturnType<DaemonSessionClient["list"]>>;
+					try {
+						if (!lister) lister = await DaemonSessionClient.connect();
+						found = await lister.list(30);
+					} catch (err) {
+						addSystemMessage(
+							`Shared sessions need the 8gent daemon: ${err instanceof Error ? err.message : String(err)}.\n` +
+								"Start it with `8gent daemon`, or use /resume for sessions on this machine.",
+						);
+						break;
+					} finally {
+						if (lister && lister !== daemonLinkRef.current?.client) lister.close();
+					}
+					const entries: ConversationEntry[] = [
+						...found.live.map((l) => ({
+							_id: l.sessionId,
+							sessionId: l.sessionId,
+							title: `Open now - ${surfaceLabel(l.channel)}${l.busy ? " - working" : ""} - ${l.title ?? l.sessionId}`,
+							messageCount: l.messageCount,
+							model: "",
+							workingDirectory: "",
+							startedAt: l.createdAt,
+							lastActiveAt: l.lastActiveAt,
+						})),
+						...found.past.map((p) => ({
+							_id: p.sessionId,
+							sessionId: p.sessionId,
+							title: `Earlier - ${surfaceLabel(p.channel)} - ${p.title}`,
+							messageCount: p.messageCount,
+							model: p.model,
+							workingDirectory: p.cwd,
+							startedAt: p.lastActiveAt,
+							lastActiveAt: p.lastActiveAt,
+						})),
+					];
+					if (entries.length === 0) {
+						addSystemMessage("No shared sessions yet. /sessions share shares this one.");
+						break;
+					}
+					historyPickDaemonRef.current = true;
+					setHistoryConversations(entries);
+					setViewMode("history");
+					break;
+				}
+
 				case "history": {
+					historyPickDaemonRef.current = false;
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
@@ -3536,6 +3745,7 @@ export function App({
 				}
 
 				case "resume": {
+					historyPickDaemonRef.current = false;
 					// Show interactive session picker from local sessions
 					const resumeSessions = sessionMgr.list(50);
 					if (resumeSessions.length === 0) {
@@ -5278,6 +5488,10 @@ export function App({
 			toggleBodyPart,
 			resolveSetupChecks,
 			addSetupQuestion,
+			activeSessionId,
+			activeTabId,
+			linkDaemonSession,
+			unlinkDaemon,
 		],
 	);
 
@@ -5435,6 +5649,25 @@ export function App({
 				}
 			} else {
 				addSystemMessage("I didn't quite catch that. Please try again.");
+			}
+			return;
+		}
+
+		// Linked to a shared session (#3929): the shared 8gent answers, and every
+		// surface on the session sees the message.
+		const daemonLink = daemonLinkRef.current;
+		if (daemonLink?.client.sessionId && input && !attached) {
+			appendToTab(tabId, {
+				id: `user-${Date.now()}`,
+				role: "user" as const,
+				content: bubbleContent,
+				timestamp: new Date(),
+			});
+			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
+			try {
+				daemonLink.client.prompt(input);
+			} catch (err) {
+				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return;
 		}
@@ -6116,6 +6349,12 @@ export function App({
 					<HistoryScreen
 						conversations={historyConversations}
 						onSelect={(conv) => {
+							if (historyPickDaemonRef.current) {
+								historyPickDaemonRef.current = false;
+								setViewMode("chat");
+								void linkDaemonSession(conv.sessionId);
+								return;
+							}
 							const resumed = sessionMgr.resume(conv.sessionId);
 							if (resumed) {
 								setActiveSessionId(resumed.id);

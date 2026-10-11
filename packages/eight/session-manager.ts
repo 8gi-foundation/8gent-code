@@ -20,6 +20,15 @@ export interface SessionInfo {
 	messageCount: number;
 	createdAt: string;
 	lastActiveAt: string;
+	/** Surface that owns it when shared through the daemon ("tui", "browser", ...). */
+	channel?: string;
+}
+
+/** Ids become file names: only plain ids are ever read or written by id. */
+export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isSessionId(v: unknown): v is string {
+	return typeof v === "string" && SESSION_ID_PATTERN.test(v);
 }
 
 interface SessionFile extends SessionInfo {
@@ -66,7 +75,7 @@ export class SessionManager {
 		const needle = nameOrId.toLowerCase();
 
 		// Try exact ID match first
-		const byId = this.readFile(needle);
+		const byId = isSessionId(needle) ? this.readFile(needle) : null;
 		if (byId) return byId;
 
 		// Scan all sessions for name prefix match
@@ -84,6 +93,42 @@ export class SessionManager {
 		return this.listAll()
 			.sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
 			.slice(0, limit);
+	}
+
+	/** Read one session by exact id (no name matching). Null when absent or the id is not plain. */
+	get(id: string): (SessionInfo & { messages: Array<{ role: string; content: string }> }) | null {
+		if (!isSessionId(id)) return null;
+		return this.readFile(id);
+	}
+
+	/**
+	 * Write a session's messages, creating the file when it does not exist yet
+	 * (a daemon session the store has never seen). Keeps the name and createdAt
+	 * of an existing file.
+	 */
+	save(
+		id: string,
+		messages: Array<{ role: string; content: string }>,
+		meta: Partial<Pick<SessionInfo, "model" | "provider" | "branch" | "cwd" | "channel">> = {},
+	): void {
+		if (!isSessionId(id)) throw new Error(`invalid session id: ${id}`);
+		const now = new Date().toISOString();
+		const prev = this.readFile(id);
+		const file: SessionFile = {
+			...(prev ?? {
+				id,
+				model: "unknown",
+				provider: "unknown",
+				cwd: meta.cwd || process.cwd(),
+				createdAt: now,
+			}),
+			...Object.fromEntries(Object.entries(meta).filter(([, v]) => v !== undefined)),
+			id,
+			messages,
+			messageCount: messages.length,
+			lastActiveAt: now,
+		} as SessionFile;
+		this.write(id, file);
 	}
 
 	/** Rename a session. */

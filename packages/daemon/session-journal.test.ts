@@ -211,7 +211,7 @@ describe("resumeJournaledSessions", () => {
 
 		const restored = after.getAgent("s_task")!;
 		expect(restored.getMessageHistory().slice(1)).toEqual(history.slice(1));
-		expect(after.getSessionInfo("s_task")).toEqual({
+		expect(after.getSessionInfo("s_task")).toMatchObject({
 			channel: "api",
 			messageCount: 0,
 			busy: false,

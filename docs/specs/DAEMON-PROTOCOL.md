@@ -103,6 +103,91 @@ Server -> {
 }
 ```
 
+## Shared Sessions (v1.4)
+
+One session, many surfaces (#3929): the TUI, the 8gent Browser panel and any other
+loopback client can list sessions, join one live, and bring a past one back. Every
+client bound to a session already receives its events; these frames add discovery,
+a transcript on join, an echo of what other clients send, and a Stop that does not
+end the session.
+
+All four requests need an authenticated connection (the token, when
+`daemon.authToken` is set) **and** a loopback peer, checked per frame:
+`{ "type": "error", "message": "shared sessions are loopback-only" }` otherwise.
+Session ids must match `^[A-Za-z0-9_-]{1,64}$` before any disk access.
+Only the `tui`, `os`, `app`, `api` and `browser` channels are listed, attached,
+stopped or saved; telegram, table, delegation and computer sessions stay private.
+
+### List
+
+```
+Client -> { "type": "session:list", "past": true, "limit": 20 }   // past defaults true; limit 1..100
+Server -> {
+  "type": "session:list",
+  "live": [ { "sessionId": "s_lz1_ab12cd", "channel": "tui", "title": "auth bug", "busy": false,
+              "messageCount": 6, "clients": 2, "createdAt": 1789300000000, "lastActiveAt": 1789300100000 } ],
+  "past": [ { "sessionId": "ebeb469c", "channel": "tui", "title": "Session 2026-10-11", "messageCount": 15,
+              "model": "eight:latest", "cwd": "/Users/me/project", "lastActiveAt": 1789300000000 } ]
+}
+```
+
+`past` comes from `~/.8gent/sessions/<id>.json` (`$EIGHT_DATA_DIR/sessions` when set),
+the store the TUI saves to; ids already live are not repeated.
+
+### Attach
+
+```
+Client -> { "type": "session:attach", "sessionId": "ebeb469c", "channel": "browser" }
+Server -> { "type": "session:attached", "sessionId": "ebeb469c", "channel": "tui", "busy": false,
+            "restored": true, "transcript": [ { "role": "user", "content": "..." } ], "truncated": false }
+```
+
+- A live id binds this connection to it.
+- A past id is created in the pool on its saved channel (a file with none was written by
+  the TUI, so `tui`) and in its saved `cwd` when that directory exists, its user/assistant
+  messages are restored into the agent, and the connection is bound (`restored: true`).
+- `channel` names the attaching surface; it labels this client's `user:message` echoes.
+- The transcript is the last 200 user/assistant messages, each capped at 20,000 chars.
+- Errors: `invalid session id`, `session not found`, `session cannot be shared`.
+
+### Detach
+
+```
+Client -> { "type": "session:detach" }
+Server -> { "type": "session:detached", "sessionId": "s_..." }
+```
+
+The session keeps running for the other clients; no `session:end` is emitted.
+
+### Abort (shared-safe Stop)
+
+```
+Client -> { "type": "session:abort", "sessionId": "s_..." }   // defaults to the bound session
+Server -> { "type": "session:aborted", "sessionId": "s_...", "aborted": true }
+```
+
+Stops the turn in flight; the session and its history stay. Use it instead of
+`session:destroy`, which ends the session for every client on it.
+
+### Echo of other clients' prompts
+
+```
+Server -> { "type": "event", "event": "user:message", "payload": { "sessionId": "s_...", "text": "...", "channel": "tui" } }
+```
+
+Sent to every other client bound to the session when one sends `prompt`. The sender is not echoed.
+
+### Behaviour that changed with v1.4
+
+- A client disconnecting emits `session:end { reason: "client-disconnect" }` only when no
+  other client is still bound to that session.
+- After every turn on a shareable channel the daemon saves the user/assistant history to the
+  session store (SessionManager format plus `channel`), so the TUI and a later `session:attach`
+  can resume it after a daemon restart.
+- Approvals are unchanged: `approval:*` still reaches only the registered approval bridge, and a
+  prompt from an attached client runs with no approval turn.
+- `sessions:list` (v1.0) is unchanged.
+
 ## Session Time-Travel
 
 Rewind and fork verbs over the content-addressed checkpoint store
@@ -730,6 +815,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.4 | 2026-10-11 | Shared sessions: `session:list` / `session:attach` / `session:detach` / `session:abort`, `user:message` echo, disconnect only ends a session for the last client, shareable sessions saved to the session store. (#3929) |
 | 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |
 | 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |
 | 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |

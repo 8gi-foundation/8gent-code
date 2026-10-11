@@ -44,7 +44,23 @@ import {
 } from "./routes/store/index";
 import { handleStageHttp } from "./huddle-stage";
 import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
-import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
+import { SessionManager } from "../eight/session-manager";
+import * as nodePath from "node:path";
+import {
+	type SharedPool,
+	type SharedSessionInbound,
+	type SharedSessionOutbound,
+	type SharedStore,
+	handleSharedSession,
+	isSharedSessionType,
+	persistSession,
+} from "./shared-sessions";
+import {
+	bindParticipant,
+	handleTableFrame,
+	isLoopbackAddress,
+	isTableFrame,
+} from "./table-routes";
 import {
 	type TimeTravelInbound,
 	type TimeTravelOutbound,
@@ -115,7 +131,8 @@ type InboundMessage =
 			approver?: string;
 	  }
 	| { type: "ping" }
-	| TimeTravelInbound;
+	| TimeTravelInbound
+	| SharedSessionInbound;
 
 type OutboundMessage =
 	| { type: "auth:ok" }
@@ -132,7 +149,8 @@ type OutboundMessage =
 	| { type: "pong" }
 	| { type: "approval:resolved"; requestId: string; ok: boolean; reason?: string }
 	| { type: "approvals:registered"; ok: boolean }
-	| TimeTravelOutbound;
+	| TimeTravelOutbound
+	| SharedSessionOutbound;
 
 const clients = new Map<any, ClientState>();
 let nextClientId = 0;
@@ -159,6 +177,38 @@ function broadcastToChannel(channelId: string, frame: unknown): void {
 				// client disconnected
 			}
 		}
+	}
+}
+
+/**
+ * The session store shared with the TUI (~/.8gent/sessions, SessionManager's
+ * format). Lazy, so a daemon that never shares a session never creates it.
+ */
+let sessionStore: { dir: string; store: SessionManager } | null = null;
+function getSessionStore(): SharedStore {
+	// The TUI's store is $HOME/.8gent/sessions (SessionManager's default).
+	// Resolved per call: EIGHT_DATA_DIR and HOME can differ between test files.
+	const dir = process.env.EIGHT_DATA_DIR
+		? nodePath.join(process.env.EIGHT_DATA_DIR, "sessions")
+		: nodePath.join(process.env.HOME || "~", ".8gent", "sessions");
+	if (sessionStore?.dir !== dir) sessionStore = { dir, store: new SessionManager(dir) };
+	return sessionStore.store as unknown as SharedStore;
+}
+
+/** Connections bound to a session (shared sessions, #3929). */
+function clientsOn(sessionId: string, except?: unknown): number {
+	let n = 0;
+	for (const [ws, s] of clients) {
+		if (ws !== except && s.sessionId === sessionId && !s.isComputerRoute) n++;
+	}
+	return n;
+}
+
+/** Show the other clients on a session what this one sent (#3929). */
+function echoPrompt(from: unknown, sessionId: string, text: string, channel: string): void {
+	for (const [ws, s] of clients) {
+		if (ws === from || s.isComputerRoute || !s.authenticated || s.sessionId !== sessionId) continue;
+		send(ws, { type: "event", event: "user:message", payload: { sessionId, text, channel } });
 	}
 }
 
@@ -269,6 +319,25 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 	const pool = config.pool;
 
+	// Shared sessions (#3929): list, attach, detach, abort. Loopback-only on
+	// every frame, like Table, whatever the listener's bind.
+	if (isSharedSessionType((msg as { type?: unknown }).type)) {
+		if (!isLoopbackAddress(state.remoteAddress)) {
+			send(ws, { type: "error", message: "shared sessions are loopback-only" });
+			return;
+		}
+		const { reply, bind, surface } = handleSharedSession(msg as SharedSessionInbound, {
+			pool: pool as unknown as SharedPool,
+			store: getSessionStore(),
+			boundSessionId: state.sessionId,
+			clientsOn: (id) => clientsOn(id),
+		});
+		if (bind !== undefined) state.sessionId = bind;
+		if (surface) state.channel = surface;
+		send(ws, reply);
+		return;
+	}
+
 	switch (msg.type) {
 		case "ping":
 			send(ws, { type: "pong" });
@@ -360,6 +429,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// Only the bridge's own socket can make a turn ask for approval; a
 			// client that merely resumed the session cannot.
 			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
+			if (typeof msg.text === "string") echoPrompt(ws, sid, msg.text, state.channel);
 			pool
 				.chat(sid, msg.text, turn)
 				.then((response) => {
@@ -371,6 +441,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 						sessionId: sid,
 						error: err instanceof Error ? err.message : String(err),
 					});
+				})
+				.finally(() => {
+					// Shareable sessions are saved after every turn so the TUI and a
+					// later session:attach can resume them (#3929).
+					persistSession(pool as unknown as SharedPool, getSessionStore, sid);
 				});
 			break;
 		}
@@ -779,10 +854,14 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
 						if (state.approvalBridge) channelApprovals.endSession(state.sessionId);
-						bus.emit("session:end", {
-							sessionId: state.sessionId,
-							reason: "client-disconnect",
-						});
+						// A shared session goes on for the clients still on it (#3929):
+						// only the last one leaving ends it for listeners.
+						if (clientsOn(state.sessionId, ws) === 0) {
+							bus.emit("session:end", {
+								sessionId: state.sessionId,
+								reason: "client-disconnect",
+							});
+						}
 					}
 				}
 				clients.delete(ws);

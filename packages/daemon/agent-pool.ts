@@ -71,6 +71,12 @@ export interface SessionOverrides {
 	model?: string;
 	baseUrl?: string;
 	systemPrompt?: string;
+	/**
+	 * Working directory for this session's tools. Set when a saved TUI
+	 * session is attached through the daemon, so its tools keep running in
+	 * the project it was started in (#3929). Defaults to the pool's.
+	 */
+	workingDirectory?: string;
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -100,6 +106,7 @@ export const KNOWN_CHANNELS = [
 	"computer",
 	"browser",
 	"table",
+	"tui",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
@@ -269,7 +276,7 @@ export class AgentPool {
 			// Optional per-session persona (officer character prompt). Undefined
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
 			systemPrompt: overrides?.systemPrompt,
-			workingDirectory: this.config.workingDirectory,
+			workingDirectory: overrides?.workingDirectory ?? this.config.workingDirectory,
 			// The pool key was resolved for the pool's default runtime. A session
 			// whose runtime differs (an override, or a Table session forced local)
 			// gets only its own runtime's key, never the pool's (#3261).
@@ -485,16 +492,34 @@ export class AgentPool {
 	}
 
 	/** Get session info */
-	getSessionInfo(
-		sessionId: string,
-	): { channel: string; messageCount: number; busy: boolean } | null {
+	getSessionInfo(sessionId: string): {
+		channel: string;
+		messageCount: number;
+		busy: boolean;
+		createdAt: number;
+		lastActiveAt: number;
+	} | null {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) return null;
 		return {
 			channel: entry.channel,
 			messageCount: entry.messageCount,
 			busy: entry.busy,
+			createdAt: entry.createdAt,
+			lastActiveAt: entry.lastActiveAt,
 		};
+	}
+
+	/**
+	 * Stop the turn in flight without ending the session (#3929): the
+	 * shared-safe Stop, since session:destroy would end it for every client.
+	 * False when the session does not exist or nothing is running.
+	 */
+	abort(sessionId: string): boolean {
+		const entry = this.sessions.get(sessionId);
+		if (!entry || !entry.busy) return false;
+		entry.agent.abort();
+		return true;
 	}
 
 	/** Get count of active sessions */
