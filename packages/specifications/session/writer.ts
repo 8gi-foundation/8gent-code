@@ -56,7 +56,11 @@ export class SessionWriter {
 		totalTokens: 0,
 	};
 
-	constructor(sessionId: string, sessionsDir?: string) {
+	/** Epoch-ms clock; injectable so tests can prove duration = end - start. */
+	private clock: () => number;
+
+	constructor(sessionId: string, sessionsDir?: string, clock: () => number = Date.now) {
+		this.clock = clock;
 		this.sessionId = sessionId;
 		this.startTime = Date.now();
 
@@ -83,8 +87,11 @@ export class SessionWriter {
 	}
 
 	private now(): string {
-		return new Date().toISOString();
+		return new Date(this.clock()).toISOString();
 	}
+
+	/** Epoch ms at which each open step began, keyed by step number. */
+	private stepStartedAt = new Map<number, number>();
 
 	// ============================================
 	// Session lifecycle
@@ -115,9 +122,11 @@ export class SessionWriter {
 	/** Write step start boundary (v2) */
 	writeStepStart(stepNumber: number, model?: ModelInfo, messageCount?: number): void {
 		this.totalSteps = Math.max(this.totalSteps, stepNumber + 1);
+		const at = this.clock();
+		this.stepStartedAt.set(stepNumber, at);
 		this.write({
 			type: "step_start",
-			timestamp: this.now(),
+			timestamp: new Date(at).toISOString(),
 			sequenceNumber: this.nextSeq(),
 			stepNumber,
 			model,
@@ -139,12 +148,17 @@ export class SessionWriter {
 		if (options?.usage) {
 			this.accumulateUsage(options.usage);
 		}
+		const at = this.clock();
+		const startedAt = this.stepStartedAt.get(stepNumber);
+		this.stepStartedAt.delete(stepNumber);
 		this.write({
 			type: "step_end",
-			timestamp: this.now(),
+			timestamp: new Date(at).toISOString(),
 			sequenceNumber: this.nextSeq(),
 			stepNumber,
 			finishReason,
+			// Wall time from step_start to step_end; absent when no start was seen.
+			durationMs: startedAt === undefined ? undefined : at - startedAt,
 			usage: options?.usage,
 			response: options?.response,
 			providerMetadata: options?.providerMetadata,

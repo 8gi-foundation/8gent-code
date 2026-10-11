@@ -2104,6 +2104,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					});
 			},
 
+			onStepStart: ({ stepNumber }) => {
+				// Provider and model names only: never prompt text, args or output.
+				this.sessionWriter.writeStepStart(stepNumber, {
+					provider: String(providerConfig.name),
+					modelId: String(providerConfig.model),
+				});
+			},
+
 			onStepFinish: async (event: StepFinishEvent) => {
 				stepCount++;
 				// Update runtime params so self_inspect shows live step count
