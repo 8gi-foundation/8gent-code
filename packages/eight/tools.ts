@@ -177,6 +177,7 @@ import { ArtifactStore } from "./artifact-store";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
 import { formatEditNotFound } from "./edit-hint";
+import { isNoToolScope } from "./agent-scopes";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
@@ -1743,6 +1744,11 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// A no-tool scope (classroom, #3939) runs nothing, whatever reached here:
+		// the model is offered zero tools; this is the backstop at the executor.
+		if (isNoToolScope(this.agentId)) {
+			return `Error: tool "${toolName}" is not available in this session (no tools are permitted).`;
+		}
 		// Every call runs in this agent's permission mode (#3170), so the
 		// permission layer below answers for this agent and no other.
 		if (this.permission && currentPermissionHolder() !== this.permission) {

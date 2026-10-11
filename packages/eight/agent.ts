@@ -9,6 +9,7 @@
  */
 
 import { getModeManager } from "./modes";
+import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -497,7 +498,7 @@ export class Agent {
 			(userData.onboardingComplete || userData.identity.name) &&
 			style &&
 			styleHasGuide(style) &&
-			config.agentScope !== "__table__"
+			!isVerbatimScope(config.agentScope)
 		) {
 			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
@@ -530,7 +531,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
 		const globalMemoriesBlock = recallGlobalMemoriesSync();
 		this.sessionMemoryContext =
-			config.agentScope === "__table__" ? "" : globalMemoriesBlock + priorSessionsBlock;
+			isVerbatimScope(config.agentScope) ? "" : globalMemoriesBlock + priorSessionsBlock;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -565,7 +566,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have (they were advertised), "never claim you cannot do something"
 		// pushing them to fabricate, and private-memory leakage into an
 		// untrusted channel. Table sessions bypass it.
-		const isTableScope = config.agentScope === "__table__";
+		const isTableScope = isVerbatimScope(config.agentScope);
 		// Project instructions (AGENTS.md / 8GENT.md / CLAUDE.md) reach the model
 		// on both coding paths (#3236), as the trailing section so the prefix
 		// before it stays stable (#3222). Table officers keep their supplied
@@ -628,7 +629,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// and producing rigid "PLAN: 1. 2. 3." replies with fake shell blocks. Table
 		// sessions therefore use their supplied prompt VERBATIM.
 		const systemPromptFull =
-			this.config.agentScope === "__table__"
+			isVerbatimScope(this.config.agentScope)
 				? basePrompt + languageInstruction
 				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
@@ -1149,7 +1150,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// read-only text-tool set (read_file, list_files, get_outline,
 		// get_symbol, search_symbols, recall - see TABLE_SESSION_TOOLS above), so
 		// there is no genuine capability gap this gate protects against here.
-		const isTableSession = this.config.agentScope === "__table__";
+		const isTableSession = isVerbatimScope(this.config.agentScope);
 		let effectiveProvider = providerName;
 		let effectiveModel = providerModel;
 		if (!isTableSession) {
@@ -1293,7 +1294,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			gated.violated ||
 			breakerStop !== null ||
 			agentResult.unverified.length > 0 ||
-			this.config.agentScope === "__table__"
+			isVerbatimScope(this.config.agentScope)
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1515,7 +1516,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		if (needsClarification(textForAgent) && !imageBase64) {
+		if (
+			needsClarification(textForAgent) &&
+			!imageBase64 &&
+			!isNoToolScope(this.config.agentScope)
+		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {
@@ -1566,7 +1571,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			this.config.agentScope !== "__table__" &&
+			!isVerbatimScope(this.config.agentScope) &&
 			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
 
 		// Changed session context goes in before the user's words (#3222).
@@ -1747,8 +1752,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"search_symbols",
 			"recall",
 		]);
-		const scopedTools =
-			this.config.agentScope === "__table__"
+		const scopedTools = isNoToolScope(this.config.agentScope)
+			? {}
+			: this.config.agentScope === "__table__"
 				? Object.fromEntries(
 						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
 					)
@@ -1765,7 +1771,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have executed them (ToolG8's __table__ rules were the only thing left
 		// standing). Officers "hallucinating tool names" were reading a catalog.
 		const textToolAllowlist = (
-			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools
+			isNoToolScope(this.config.agentScope)
+				? []
+				: this.config.agentScope === "__table__"
+					? [...TABLE_SESSION_TOOLS]
+					: localCoreTools
 		).filter((name) => getModeManager().isToolAllowed(name));
 
 		// ── Populate runtime params for self-awareness tools ──────────
@@ -1813,7 +1823,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				providerModel: providerConfig.model,
 				// A withheld browser says so up front (#3785); a __table__ session has no browser by design.
 				instructions:
-					this.config.agentScope === "__table__"
+					isVerbatimScope(this.config.agentScope)
 						? effectiveInstructions
 						: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
 				localCoreTools: textToolAllowlist,
@@ -2635,7 +2645,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
 			const flavoredContent =
-				gatedNative.violated || this.config.agentScope === "__table__"
+				gatedNative.violated || isVerbatimScope(this.config.agentScope)
 					? content
 					: flavorResponse(content, flavor);
 
@@ -2651,7 +2661,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Trace capture (#2752 step 1) also routes through here: when only
 			// traceCapture is opted in, processTurn still returns null (loop off)
 			// and collectSessionTrace persists the scrubbed trajectory locally.
-			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
+			if (
+				!isNoToolScope(this.config.agentScope) &&
+				(this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled)
+			) {
 				const toolCallsSucceeded =
 					this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
@@ -3365,6 +3378,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * a hard dependency of the agent loop.
 	 */
 	private async tryRunPreToolRouter(userMessage: string): Promise<void> {
+		// A no-tool scope (classroom) never pre-fetches: that would run a tool on untrusted text.
+		if (isNoToolScope(this.config.agentScope)) return;
 		const cwd = this.config.workingDirectory || process.cwd();
 		let decision: RouterDecision;
 		try {

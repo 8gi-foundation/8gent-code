@@ -90,6 +90,8 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	// target. It never registers as a dispatch surface, so it holds no dispatch
 	// capabilities (like `api`, scope is controlled at the Table layer itself).
 	table: [],
+	// Classroom runs untrusted web text with no tools; never a dispatch target.
+	classroom: [],
 };
 
 /** Capabilities that require second-factor approval on the originator. */
