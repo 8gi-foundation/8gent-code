@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
+import { curlToLoopback } from "../../permissions/s1-curl-loopback";
 import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
@@ -11,6 +12,7 @@ import {
 } from "../../permissions/tui-approval-channel";
 import {
 	type BrowserCall,
+	LOCAL_SERVER_CURL_NOTE,
 	_setProfileHomeForTest,
 	_setResolverForTest,
 	blockedForProfile,
@@ -662,6 +664,37 @@ describe("browserWithheldNote (a withheld browser says why and how to get it, #3
 		expect(note).toMatch(/EIGHT_BROWSER_PROFILE/);
 		expect(note).toMatch(/loopback|private/);
 		expect(note).not.toContain("\u2014");
+	});
+	test("carries the local-server curl rules, the only copy a local text-tool session sees (#3941 follow-up)", () => {
+		const note = browserWithheldNote({}) ?? "";
+		expect(note).toContain(LOCAL_SERVER_CURL_NOTE);
+		expect(note).toContain("under .tmp/");
+		expect(note).toContain("never /tmp");
+		expect(note).toContain("Do not pass -L");
+		expect(note).toMatch(/no pipes, ; or &&/);
+	});
+	test("the example curl in the note passes System One's loopback lane as written", () => {
+		const example = /\((curl [^)]+)\)/.exec(LOCAL_SERVER_CURL_NOTE)?.[1];
+		expect(example).toBeDefined();
+		const ws = realpathSync(mkdtempSync(join(tmpdir(), "curl-note-")));
+		// The lane refuses when a proxy variable or a curlrc could redirect curl; isolate both, as
+		// permissions/s1-curl-loopback.test.ts does, so this checks the advice and not the runner.
+		const keys = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "HOME", "CURL_HOME", "XDG_CONFIG_HOME"];
+		const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+		for (const k of keys) Reflect.deleteProperty(process.env, k);
+		process.env.HOME = ws;
+		try {
+			const cmd = (example as string).replace("URL", "http://127.0.0.1:5173/login");
+			expect(curlToLoopback(cmd, ws).ok).toBe(true);
+			// The /tmp form the model kept choosing in the pilot does not pass; that is why the note says so.
+			expect(curlToLoopback("curl -s -c /tmp/cj.txt http://127.0.0.1:5173/", ws).ok).toBe(false);
+		} finally {
+			for (const k of keys) {
+				if (saved[k] === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = saved[k];
+			}
+			rmSync(ws, { recursive: true, force: true });
+		}
 	});
 	test("a bad profile name is still withheld; a valid one offers the tools so no note", () => {
 		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "../x" })).not.toBeNull();
