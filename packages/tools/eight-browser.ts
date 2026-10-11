@@ -19,9 +19,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix as pathPosix, win32 as pathWin32 } from "node:path";
 import {
 	BlockedDestinationError,
 	type Resolver,
@@ -231,6 +231,17 @@ export const hasSecretPlaceholder = (text: string): boolean => {
 	return PLACEHOLDER.test(text);
 };
 
+/**
+ * True when `file` is `home` or below it, compared with the rules of `platform`
+ * (case-insensitive on win32). Pure, so the Windows rule is testable on any OS.
+ */
+export function secretsPathInHome(file: string, home: string, platform: NodeJS.Platform): boolean {
+	const p = platform === "win32" ? pathWin32 : pathPosix;
+	const norm = (x: string) => (platform === "win32" ? p.resolve(x).toLowerCase() : p.resolve(x));
+	const rel = p.relative(norm(home), norm(file));
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel);
+}
+
 /** Secrets file: { "NAME": { "value": "...", "hosts": ["app.example.com"] } }, mode 0600. */
 export function resolveSecretText(
 	text: string,
@@ -240,7 +251,16 @@ export function resolveSecretText(
 	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
 	let table: Record<string, { value?: unknown; hosts?: unknown }>;
 	try {
-		if (statSync(file).mode & 0o077)
+		// Windows has no POSIX mode bits (stat reports 0o666 for every file), so the mode check
+		// would refuse every secrets file there. Instead the file must live under the user's home,
+		// whose NTFS ACL is user-only by default. The ACL itself is not read: accepted risk,
+		// docs/security/windows-secrets-file.md.
+		if (
+			process.platform === "win32" &&
+			!secretsPathInHome(realpathSync.native(file), realpathSync.native(homedir()), "win32")
+		)
+			return { ok: false, error: "on Windows the secrets file must be inside your home folder" };
+		if (process.platform !== "win32" && statSync(file).mode & 0o077)
 			return { ok: false, error: "the secrets file must not be readable by group or others" };
 		table = JSON.parse(readFileSync(file, "utf8"));
 	} catch {

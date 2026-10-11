@@ -17,6 +17,7 @@ import {
 	browserProfile,
 	browserProfileWarning,
 	createEightBrowser,
+	secretsPathInHome,
 	localBrowserTools,
 	touchesBrowserSecrets,
 	browserWithheldNote,
@@ -390,7 +391,15 @@ describe("state rendering", () => {
 	});
 });
 
-describe("wsTransport (real WebSocket round trip)", () => {
+// Skipped on Windows: every block that opens a real Bun.serve WebSocket server. The windows-latest
+// run dies in this file: Bun 1.4.3 segfaults and 1.4.2 segfaults or hangs, at a different test each
+// run, right after such a server is stopped, and every test after it in the process is lost.
+// Cause not isolated; tracked in #3820. The driver logic is also covered by the in-process
+// fakeSite() tests above, which still run on Windows.
+const describeNotWin = process.platform === "win32" ? describe.skip : describe;
+const testNotWin = process.platform === "win32" ? test.skip : test;
+
+describeNotWin("wsTransport (real WebSocket round trip)", () => {
 	test("authenticates with the token file, then sends the command and returns its result", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "8b-ws-"));
 		writeFileSync(join(dir, "token"), "tok-123\n");
@@ -660,7 +669,7 @@ describe("browserWithheldNote (a withheld browser says why and how to get it, #3
 	});
 });
 
-describe("wsTransport with a named profile", () => {
+describeNotWin("wsTransport with a named profile", () => {
 	afterEach(() => _setProfileHomeForTest(null));
 
 	test("uses the profile's own token and port file, not the default token or EIGHT_BROWSER_CONTROL_PORT", async () => {
@@ -753,7 +762,7 @@ describe("isolated driver (named profile): no typing into password or payment fi
 	});
 });
 
-describe("ToolExecutor: named profile acts without a card; default profile still asks", () => {
+describeNotWin("ToolExecutor: named profile acts without a card; default profile still asks", () => {
 	const dir = mkdtempSync(join(tmpdir(), "browser-profile-gate-"));
 	const saved = {
 		profile: process.env.EIGHT_BROWSER_PROFILE,
@@ -995,7 +1004,7 @@ describe("ToolExecutor, review round", () => {
 		expect(out).toContain("[PERMISSION DENIED]");
 	});
 
-	test("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
+	testNotWin("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
 		const site = fakeSite();
 		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
 		try {
@@ -1013,7 +1022,7 @@ describe("ToolExecutor, review round", () => {
 		}
 	});
 
-	test("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
+	testNotWin("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
 		const site = nextSite();
 		const shot: BrowserCall = async (cmd, args) =>
 			cmd === "page.screenshot"
@@ -1223,6 +1232,32 @@ describe("browser destinations go through the net guard in every profile (#3603)
 	});
 });
 
+describe("secretsPathInHome: the Windows secrets-file rule, run on any OS (#3814)", () => {
+	const home = "C:\\Users\\james";
+	test("inside the home folder is accepted, case-insensitively", () => {
+		expect(secretsPathInHome("C:\\Users\\james\\.8gent\\secrets.json", home, "win32")).toBe(true);
+		expect(secretsPathInHome("c:\\users\\JAMES\\AppData\\Local\\Temp\\s.json", home, "win32")).toBe(
+			true,
+		);
+	});
+	test("outside the home folder is refused", () => {
+		for (const f of [
+			"C:\\ProgramData\\secrets.json",
+			"D:\\shared\\secrets.json",
+			"C:\\Users\\other\\secrets.json",
+			"C:\\Users\\james-old\\secrets.json",
+			"C:\\Users\\james\\..\\other\\secrets.json",
+			"\\\\server\\share\\secrets.json",
+			"C:\\Users\\james",
+		])
+			expect(secretsPathInHome(f, home, "win32"), f).toBe(false);
+	});
+	test("posix rules are unchanged by the helper", () => {
+		expect(secretsPathInHome("/home/a/s.json", "/home/a", "linux")).toBe(true);
+		expect(secretsPathInHome("/tmp/s.json", "/home/a", "linux")).toBe(false);
+	});
+});
+
 describe("secret placeholders: the model never holds the value (#3604)", () => {
 	const SECRET = "s3cr3t-Value-42";
 	const OTHER = "other-secret-77";
@@ -1276,7 +1311,10 @@ describe("secret placeholders: the model never holds the value (#3604)", () => {
 			["wrong host", "{{secret:OTHER_PW}}", () => write(0o600)],
 			["unknown name", "{{secret:NOPE}}", () => write(0o600)],
 			["no host list", "{{secret:NO_HOSTS}}", () => write(0o600)],
-			["loose mode", "{{secret:APP_PW}}", () => write(0o644)],
+			// Windows has no mode bits to loosen; the check does not apply there.
+			...(process.platform === "win32"
+				? []
+				: ([["loose mode", "{{secret:APP_PW}}", () => write(0o644)]] as const)),
 		] as const) {
 			setup();
 			const site = fakeSite();

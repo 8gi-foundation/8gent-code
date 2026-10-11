@@ -116,7 +116,7 @@ describe("childInvocation: a hostile working directory", () => {
 
 	test("the TUI entry strips BUN_BE_BUN before any subprocess can inherit it", () => {
 		const r = Bun.spawnSync(
-			[process.execPath, "-e", `import "${path.resolve(import.meta.dir, "strip-bun-be-bun.ts")}"; console.log(String(process.env.BUN_BE_BUN));`],
+			[process.execPath, "-e", `import ${JSON.stringify(path.resolve(import.meta.dir, "strip-bun-be-bun.ts"))}; console.log(String(process.env.BUN_BE_BUN));`],
 			{ env: { ...process.env, BUN_BE_BUN: "1" } },
 		);
 		expect(r.stdout.toString().trim()).toBe("undefined");

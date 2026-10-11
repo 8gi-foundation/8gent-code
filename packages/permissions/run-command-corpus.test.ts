@@ -150,7 +150,11 @@ const privatePath = process.env.EIGHT_CORPUS_PRIVATE;
 const privateRows: Row[] =
 	privatePath && existsSync(privatePath) ? JSON.parse(readFileSync(privatePath, "utf-8")) : [];
 
-describe("run_command decisions across modes", () => {
+// The corpus runs commands through a stand-in `sh` first on a ":"-separated PATH; Windows runs
+// run_command through cmd.exe (packages/core/shell.ts) and never reaches that shim. Native
+// Windows run_command coverage is #3821.
+const describePosixShell = process.platform === "win32" ? describe.skip : describe;
+describePosixShell("run_command decisions across modes", () => {
 	test("headless auto-approves a harmless command through the real approval logic", async () => {
 		expect(await decide("echo hello", "headless")).toBe("ran");
 		expect(asked).toEqual([]);

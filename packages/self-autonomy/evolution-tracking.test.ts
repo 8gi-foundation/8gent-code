@@ -62,7 +62,7 @@ describe("recordEvent", () => {
 			);
 		}
 		expect(ids.size).toBe(50);
-	});
+	}, 30_000); // 50 durable inserts: about 5 s on a Windows runner, over bun's 5 s default
 
 	it("stores metadata as JSON correctly", () => {
 		const meta = { tool: "grep", exitCode: 0, flags: ["--recursive"] };

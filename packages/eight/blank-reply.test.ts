@@ -6,9 +6,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDir } from "../../tests/temp-dirs";
 import type { Agent as AgentT } from "./agent";
 
 let Agent: typeof import("./agent").Agent;
@@ -66,8 +67,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	removeDir(home);
+	removeDir(repo);
 });
 
 function build(): AgentT {
