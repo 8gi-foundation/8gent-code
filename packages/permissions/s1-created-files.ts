@@ -27,7 +27,10 @@
  *     in (mv keeps its mtime and birth time), a hard link, anything from a
  *     command during which an untracked name that was not this session's
  *     vanished, a tracked file newly went missing, or a gitignored name
- *     vanished (`git ls-files -o -d -t`, and `-o -i --directory`, each side); anything from a command whose text holds a
+ *     vanished or an ignored directory's mtime moved (a file inside it was
+ *     added, removed or renamed; this also skips a command that writes build
+ *     output into an ignored directory) (`git ls-files -o -d -t`, and
+ *     `-o -i --directory`, each side); anything from a command whose text holds a
  *     rename-class word (mv, rename, install, rsync, ln, cp, ditto, git mv/rm/
  *     reset/stash/checkout/restore/clean/apply/...: "mv t.ts t2.ts && touch
  *     t2.ts" must not launder a file), is backgrounded (&, nohup, setsid), or
@@ -131,12 +134,25 @@ const SLOW_SNAPSHOT_MS = 500;
 /** Names one record may remember as seen (#3514); past this it records nothing new. */
 const MAX_SEEN = 20_000;
 
+/** mtime in ns of the directory `abs` (lstat), or null when it cannot be read. */
+function dirMtimeNs(abs: string): bigint | null {
+	try {
+		return lstatSync(abs, { bigint: true }).mtimeNs;
+	} catch {
+		return null;
+	}
+}
+
 /** One `git ls-files -o -d -t` listing: untracked names and tracked names missing from the worktree. */
 interface Snapshot {
 	untracked: string[];
 	missing: Set<string>;
-	/** Gitignored names, whole ignored directories collapsed to one entry. */
-	ignored: Set<string>;
+	/**
+	 * Gitignored names, whole ignored directories collapsed to one entry. The value
+	 * is the directory's mtime in ns (changes when anything inside is added,
+	 * removed or renamed), or null for a plain file or an unreadable directory.
+	 */
+	ignored: Map<string, bigint | null>;
 }
 
 /**
@@ -178,7 +194,12 @@ function snapshot(cwd: string): Snapshot | null {
 		const out: Snapshot = {
 			untracked: [],
 			missing: new Set(),
-			ignored: new Set(ignored.map((n) => path.resolve(root, n))),
+			ignored: new Map(
+				ignored.map((n) => {
+					const abs = path.resolve(root, n);
+					return [abs, n.endsWith("/") ? dirMtimeNs(abs) : null] as const;
+				}),
+			),
 		};
 		for (const e of entries) {
 			const abs = path.resolve(root, e.slice(2));
@@ -320,7 +341,12 @@ export class CreatedFiles {
 			// A tracked file newly missing: it may have been renamed to a new untracked name.
 			for (const abs of after.missing) if (!before.missing.has(abs)) return;
 			// An ignored name vanished (.env moved by a script, a quoted or computed mv): same reason.
-			for (const abs of before.ignored) if (!after.ignored.has(abs)) return;
+			// A file inside an ignored directory is not listed (the directory is one name),
+			// so a directory whose mtime moved or that vanished counts too (8SO F3).
+			for (const [abs, mtime] of before.ignored) {
+				if (!after.ignored.has(abs)) return;
+				if (mtime !== after.ignored.get(abs)) return;
+			}
 			for (const [abs, id] of ours) {
 				// In place (same inode), or a fresh file the command wrote over it.
 				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);

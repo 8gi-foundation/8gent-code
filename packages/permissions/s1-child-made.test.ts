@@ -472,6 +472,28 @@ describe.skipIf(WIN)("rename then rewrite does not launder a file (8SO F1)", () 
 		}
 	});
 
+	test("8SO F3: a file moved out of a gitignored directory stays judged", () => {
+		writeFileSync(join(ws, ".gitignore"), ".env\nsecrets/\n");
+		mkdirSync(join(ws, "secrets"));
+		writeFileSync(join(ws, "secrets/key"), "K=1\n");
+		const cmd = "m''v secrets/key cfg.txt && sed -i.b s/K/Z/ cfg.txt";
+		const done = rec.watchCommand(ws, cmd);
+		execSync(cmd, { cwd: ws, stdio: "ignore", shell: "/bin/sh" });
+		done();
+		expect(existsSync(join(ws, "secrets/key"))).toBe(false);
+		expect(own("cfg.txt")).toBe(false);
+		expect(rmOwn("rm -f cfg.txt")).toBeNull();
+	});
+
+	test("8SO F3: a command that adds a file to an ignored directory records nothing; a quiet one does", () => {
+		writeFileSync(join(ws, ".gitignore"), "out/\n");
+		mkdirSync(join(ws, "out"));
+		child("echo b > out/build.txt && echo x > made.txt");
+		expect(own("made.txt")).toBe(false);
+		child("echo y > quiet.txt");
+		expect(own("quiet.txt")).toBe(true);
+	});
+
 	test("8SO F2: os.rename, renameSync, shutil.move, rename( are rename-class words", () => {
 		for (const cmd of [
 			`python3 -c "import os;os.rename('.env','c.txt')"`,
