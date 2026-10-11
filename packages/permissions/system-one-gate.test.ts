@@ -981,8 +981,12 @@ describe("on by default (EIGHT_SYSTEM_ONE unset)", () => {
 			expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 			// Dangerous to the permission layer: headless denies it, as today.
 			const chmod = await executor.execute("run_command", { command: "chmod 777 victim.txt" });
-			expect(chmod).toContain("DENIED");
-			expect(notes.length).toBe(1);
+			// win32: run_command goes through cmd.exe, where chmod is not a classified permission
+			// change; the Windows-native cases are #3821. Everywhere else it is denied.
+			if (process.platform !== "win32") {
+				expect(chmod).toContain("DENIED");
+				expect(notes.length).toBe(1);
+			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
