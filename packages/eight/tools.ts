@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { hasTuiApprovalHandler } from "../permissions/tui-approval-channel";
 import { RepeatDenialGuard } from "./repeat-denial";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import { z } from "zod";
@@ -2520,6 +2521,7 @@ export class ToolExecutor {
 					this.repeatDenials.annotate(
 						command,
 						await this.runCommand(command, args.timeout as number | undefined),
+						hasTuiApprovalHandler(),
 					);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
@@ -3357,7 +3359,7 @@ export class ToolExecutor {
 			// A command declined once stays declined for the session; say so, so the
 			// model does not read the repeat as a fresh, retryable policy hit (#3870).
 			if (this.permissionManager.wasDeclined(command))
-				return `[PERMISSION DENIED] This command was declined earlier in this session (nobody approved it) and was not run: ${command}`;
+				return `[PERMISSION DENIED] This command was declined earlier in this session and was not run: ${command}`;
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
