@@ -11,12 +11,15 @@
 #   1. Only https, only github.com release downloads, and every redirect hop
 #      checked against GitHub's download hosts.
 #   2. SHA256SUMS is signed with the release signing key embedded below
-#      (minisign). It is checked with minisign.exe when that is installed.
-#   3. The exe is checked against GitHub's build provenance attestation with
-#      `gh attestation verify` when the GitHub CLI is installed and signed in.
+#      (minisign). Once a key is embedded the signature is REQUIRED: it is
+#      checked with minisign.exe from PATH, or else with minisign 0.12
+#      downloaded from github.com/jedisct1/minisign and pinned by the SHA256
+#      below. EIGHT_ALLOW_UNVERIFIED=1 is the explicit opt-out.
+#   3. The exe is checked against GitHub's build provenance attestation
+#      (signed by release-binaries.yml for this tag) with `gh attestation
+#      verify` when the GitHub CLI is installed and signed in.
 #   4. The exe's SHA256 must match SHA256SUMS, and its own --version must name
 #      the release, before it replaces anything.
-# Set EIGHT_REQUIRE_VERIFIED=1 to refuse an install unless step 2 or 3 ran.
 #
 # Settings (environment variables, all optional):
 #   EIGHT_VERSION           install this version (0.20.0 or v0.20.0) instead of the newest
@@ -24,7 +27,7 @@
 #   EIGHT_REPO              GitHub owner/repo (default: 8gi-foundation/8gent-code)
 #   EIGHT_RELEASES_URL      the releases list (https, or http://127.0.0.1 for tests)
 #   EIGHT_NO_MODIFY_PATH    1 = leave your PATH alone
-#   EIGHT_REQUIRE_VERIFIED  1 = refuse unless the signature or attestation was checked
+#   EIGHT_ALLOW_UNVERIFIED  1 = continue when a release key exists but no minisign can run
 #
 # It never replaces a newer 8gent with an older one unless EIGHT_VERSION asks
 # for that version by name.
@@ -33,6 +36,12 @@
 # scripts/release-signing.pub by scripts/lib/install-sh.test.ts. Empty until
 # the maintainer generates the release key; see that file.
 $EightSigningKey = ''
+
+# Pinned signature verifier, used only when minisign is not on PATH: release
+# 0.12 of github.com/jedisct1/minisign, checked against jedisct1's published
+# signature when pinned.
+$EightMinisignVersion = '0.12'
+$EightMinisignWinSha256 = '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'
 
 function Install-Eight {
 	$ErrorActionPreference = 'Stop'
@@ -55,7 +64,17 @@ function Install-Eight {
 	if ($local -and $env:EIGHT_TEST_SIGNING_KEY) { $key = $env:EIGHT_TEST_SIGNING_KEY }
 
 	function Test-EightUrl([string]$url, [string]$kind) {
-		if ($local) { return ($url -match '^http://127\.0\.0\.1[:/]') }
+		$isLocal = ($url -match '^http://127\.0\.0\.1[:/]')
+		if ($kind -eq 'verifier') {
+			if ($local -and $isLocal) { return $true }
+			return $url.StartsWith('https://github.com/jedisct1/minisign/releases/download/', [StringComparison]::Ordinal)
+		}
+		if ($kind -eq 'verifier-hop') {
+			if ($local -and $isLocal) { return $true }
+			$kind = 'hop'
+		} elseif ($local) {
+			return $isLocal
+		}
 		if ($url -notmatch '^https://') { return $false }
 		if ($kind -eq 'list') { return $true }
 		if ($kind -eq 'asset') { return $url.StartsWith("https://github.com/$repo/releases/download/", [StringComparison]::Ordinal) }
@@ -82,7 +101,8 @@ function Install-Eight {
 				$code = [int]$resp.StatusCode
 				if ($code -ge 300 -and $code -lt 400) {
 					$next = (New-Object Uri ([Uri]$url), ([string]$resp.Headers['Location'])).AbsoluteUri
-					if (-not (Test-EightUrl $next 'hop')) { throw "Refusing a redirect to $next" }
+					$hopKind = if ($kind -eq 'verifier') { 'verifier-hop' } else { 'hop' }
+					if (-not (Test-EightUrl $next $hopKind)) { throw "Refusing a redirect to $next" }
 					$url = $next
 					continue
 				}
@@ -183,19 +203,46 @@ function Install-Eight {
 
 		$sumsFile = Join-Path $tmp 'SHA256SUMS'
 		Get-EightFile (Get-AssetUrl 'SHA256SUMS') $sumsFile 'asset'
-		$verified = $false
 		if ($key) {
 			$sigUrl = Get-AssetUrl 'SHA256SUMS.minisig'
 			if (-not $sigUrl) { throw "Release v$version has no SHA256SUMS.minisig; refusing unsigned checksums." }
 			$sigFile = Join-Path $tmp 'SHA256SUMS.minisig'
 			Get-EightFile $sigUrl $sigFile 'asset'
-			$minisign = Get-Command minisign -ErrorAction SilentlyContinue
-			if ($minisign) {
-				$r = Invoke-EightProcess $minisign.Source @('-q', '-V', '-m', $sumsFile, '-x', $sigFile, '-P', $key) 60
+			$msBin = $null
+			$onPath = Get-Command minisign -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+			if ($onPath) {
+				$msBin = $onPath.Source
+			} else {
+				# The pinned verifier: exact release, SHA256 checked before it runs.
+				$msZip = "minisign-$EightMinisignVersion-win64.zip"
+				$msUrl = "https://github.com/jedisct1/minisign/releases/download/$EightMinisignVersion/$msZip"
+				$msSha = $EightMinisignWinSha256
+				if ($local -and $env:EIGHT_TEST_MINISIGN_URL) {
+					$msUrl = $env:EIGHT_TEST_MINISIGN_URL
+					if ($env:EIGHT_TEST_MINISIGN_SHA256) { $msSha = $env:EIGHT_TEST_MINISIGN_SHA256 }
+				}
+				Write-Host "Fetching the pinned signature verifier (minisign $EightMinisignVersion)..."
+				$msFile = Join-Path $tmp $msZip
+				Get-EightFile $msUrl $msFile 'verifier'
+				$gotSha = (Get-FileHash -LiteralPath $msFile -Algorithm SHA256).Hash.ToLower()
+				if ($gotSha -ne $msSha) { throw "The downloaded minisign does not match its pinned SHA256 (expected $msSha, got $gotSha). Nothing installed." }
+				$msDir = Join-Path $tmp 'minisign'
+				Expand-Archive -LiteralPath $msFile -DestinationPath $msDir -Force
+				$msArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
+				$msBin = Join-Path $msDir "minisign-win64\$msArch\minisign.exe"
+				if (-not (Test-Path -LiteralPath $msBin)) { $msBin = $null }
+			}
+			if ($msBin) {
+				$r = Invoke-EightProcess $msBin @('-q', '-V', '-m', $sumsFile, '-x', $sigFile, '-P', $key) 60
 				if ($r.Code -ne 0) { throw "SHA256SUMS for v$version does not carry a valid release signature. Nothing installed." }
 				Write-Host 'Release signature on SHA256SUMS: verified.'
-				$verified = $true
+			} elseif ($env:EIGHT_ALLOW_UNVERIFIED -eq '1') {
+				Write-Warning 'The release signature was NOT checked (no minisign for this machine), as EIGHT_ALLOW_UNVERIFIED=1 asked.'
+			} else {
+				throw 'Cannot check the release signature: install minisign and run this again, or set EIGHT_ALLOW_UNVERIFIED=1 to skip it.'
 			}
+		} else {
+			Write-Warning 'This release has no signing key yet; only the SHA256 checksum (and the GitHub attestation, if gh is signed in) is checked.'
 		}
 		$sums = @{}
 		foreach ($line in Get-Content -LiteralPath $sumsFile) {
@@ -216,22 +263,15 @@ function Install-Eight {
 			$actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
 			if ($actual -ne $sums[$name]) { throw "Checksum mismatch for $name (expected $($sums[$name]), got $actual). Nothing installed." }
 			if ($ghReady) {
-				$r = Invoke-EightProcess $gh.Source @('attestation', 'verify', $file, '--repo', $repo) 120
+				$r = Invoke-EightProcess $gh.Source @('attestation', 'verify', $file, '--repo', $repo, '--signer-workflow', "$repo/.github/workflows/release-binaries.yml", '--source-ref', "refs/tags/v$version") 120
 				if ($r.Code -ne 0) { throw "GitHub build attestation for $name v$version did not verify. Nothing installed." }
 				Write-Host 'GitHub build attestation: verified.'
-				$verified = $true
 			}
 			$got = Get-EightVersion $file
 			if ($got -eq $version) { $chosen = $file; break }
 			Write-Host "$name did not start on this machine (reported '$got'); trying the next build."
 		}
 		if (-not $chosen) { throw "No 8gent v$version build started on this machine. Nothing installed." }
-		if (-not $verified) {
-			if ($env:EIGHT_REQUIRE_VERIFIED -eq '1') {
-				throw 'EIGHT_REQUIRE_VERIFIED=1 but neither minisign nor a signed-in GitHub CLI (gh) is available to verify the release.'
-			}
-			Write-Warning 'Only the SHA256 checksum was checked. Install minisign, or the GitHub CLI and run gh auth login, to also verify the release signature or build attestation.'
-		}
 
 		# Stage beside the target, then rename: a running 8gent.exe cannot be
 		# overwritten but can be renamed. Any failure puts the old exe back.
@@ -261,9 +301,19 @@ function Install-Eight {
 	$same = { param($a) $a.TrimEnd('\') -ieq $installDir.TrimEnd('\') }
 	if ($env:EIGHT_NO_MODIFY_PATH -ne '1') {
 		# First on the user PATH, so an older npm copy in %APPDATA%\npm does not win.
-		$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-		$parts = @($userPath -split ';' | Where-Object { $_ -and -not (& $same $_) })
-		[Environment]::SetEnvironmentVariable('Path', ((@($installDir) + $parts) -join ';'), 'User')
+		# Read and written raw as REG_EXPAND_SZ, so entries like %USERPROFILE%\bin
+		# keep their variables instead of being frozen to today's values.
+		$envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+		try {
+			$userPath = [string]$envKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+			$parts = @($userPath -split ';' | Where-Object { $_ -and -not (& $same $_) })
+			$envKey.SetValue('Path', ((@($installDir) + $parts) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+		} finally {
+			$envKey.Close()
+		}
+		# Tell running programs (Explorer, new terminals) that the environment changed.
+		[Environment]::SetEnvironmentVariable('EIGHT_INSTALL_PATH_TOUCH', '1', 'User')
+		[Environment]::SetEnvironmentVariable('EIGHT_INSTALL_PATH_TOUCH', $null, 'User')
 		$env:Path = $installDir + ';' + (($env:Path -split ';' | Where-Object { $_ -and -not (& $same $_) }) -join ';')
 		Write-Host "Put $installDir first on your user PATH. New terminals pick it up; this one already has it."
 	}
