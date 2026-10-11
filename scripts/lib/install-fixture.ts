@@ -82,6 +82,12 @@ writeFileSync(
 	),
 );
 writeFileSync(join(dir, "releases-old.json"), JSON.stringify([release("0.0.1", true)], null, 2));
+// v0.0.5's SHA256SUMS is served, so only the off-host binary URL can stop it.
+mkdirSync(join(dir, "releases", "download", "v0.0.5"), { recursive: true });
+copyFileSync(
+	join(dir, "releases", "download", "v0.0.2", "SHA256SUMS"),
+	join(dir, "releases", "download", "v0.0.5", "SHA256SUMS"),
+);
 writeFileSync(
 	join(dir, "releases-evil.json"),
 	JSON.stringify([release("0.0.5", true, false, "http://example.com")], null, 2),

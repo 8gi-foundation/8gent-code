@@ -167,6 +167,9 @@ function Install-Eight {
 			return $u
 		}
 
+		# Check the URLs before anything is downloaded.
+		foreach ($n in @($assets[0], 'SHA256SUMS')) { [void](Get-AssetUrl $n) }
+
 		$target = Join-Path $installDir '8gent.exe'
 		$current = Get-EightVersion $target
 		if ($current -and (-not $want) -and (([version]$current) -gt ([version]$version))) {
