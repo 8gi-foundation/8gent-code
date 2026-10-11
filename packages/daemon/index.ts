@@ -47,6 +47,7 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
+import { resolveBindHost } from "./origin-guard";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
@@ -402,7 +403,7 @@ export async function main(): Promise<void> {
 	}
 
 	// Name the address actually bound, so a 0.0.0.0 daemon never reads as loopback-only.
-	const bound = process.env.DAEMON_HOSTNAME || "0.0.0.0";
+	const bound = resolveBindHost();
 	const healthHost = bound === "0.0.0.0" ? "localhost" : bound;
 	console.log(`[daemon] ready - ws://${bound}:${config.port}`);
 	console.log(`[daemon] health check: http://${healthHost}:${config.port}/health`);

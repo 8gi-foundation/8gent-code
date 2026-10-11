@@ -109,6 +109,11 @@ jobs:
             $bound = Get-NetTCPConnection -LocalPort 18797 -State Listen | Select-Object -ExpandProperty LocalAddress
             "listening on: $($bound -join ', ')"
             if ($bound | Where-Object { $_ -ne "127.0.0.1" }) { throw "daemon run must listen on 127.0.0.1 only, got: $($bound -join ', ')" }
+            # A web page that is not ours must be refused before any upgrade.
+            $code = 0
+            try { Invoke-WebRequest -Uri http://127.0.0.1:18797/ -Headers @{ Origin = "https://evil.example" } -UseBasicParsing | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+            if ($code -ne 403) { throw "Origin https://evil.example must get 403, got $code" }
+            "foreign origin refused (403)"
             $ws = [System.Net.WebSockets.ClientWebSocket]::new()
             $ct = [Threading.CancellationToken]::None
             $ws.ConnectAsync([Uri]"ws://127.0.0.1:18797", $ct).Wait(10000) | Out-Null

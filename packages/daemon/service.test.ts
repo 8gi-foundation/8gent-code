@@ -3,7 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type ServiceContext,
-	applyRunDefaults,
 	daemonCommand,
 	describeState,
 	hostContext,
@@ -356,16 +355,6 @@ describe("8gent daemon", () => {
 		expect(describeState({ state: "unavailable", reason: "no systemd." })).toBe(
 			"unavailable. no systemd.",
 		);
-	});
-
-	test("daemon run listens on loopback unless DAEMON_HOSTNAME is set", () => {
-		const env: Record<string, string | undefined> = {};
-		applyRunDefaults(env);
-		expect(env.DAEMON_HOSTNAME).toBe("127.0.0.1");
-
-		const exposed: Record<string, string | undefined> = { DAEMON_HOSTNAME: "0.0.0.0" };
-		applyRunDefaults(exposed);
-		expect(exposed.DAEMON_HOSTNAME).toBe("0.0.0.0");
 	});
 
 	test("an unknown subcommand prints usage and fails", async () => {
