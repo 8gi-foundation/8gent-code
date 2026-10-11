@@ -7,26 +7,30 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
 import { runExtCommand } from "./ext-cli";
-import { ExtensionHost, defaultExtensionsDir, extensionsWanted } from "./host";
+import { ExtensionHost, defaultExtensionsDir, extensionsWanted, noInstallActive } from "./host";
 import {
 	PI_IMPORT_MANIFEST,
 	type PiImportEntry,
 	Type,
 	defaultPiExtensionsDir,
+	extensionHash,
+	isPiExtension,
 	rewritePiImports,
+	servedBytesCheck,
 	unservedImports,
 } from "./pi-compat";
 
 const FIXTURES = path.join(import.meta.dir, "__fixtures__", "pi-extensions");
 const made: string[] = [];
 const tmp = () => {
-	const d = mkdtempSync(path.join(tmpdir(), "pi-import-"));
+	const d = mkdtempSync(path.join(tmpdir(), "picompat-"));
 	made.push(d);
 	return d;
 };
@@ -95,11 +99,11 @@ describe("8gent ext import-pi", () => {
 		const hello = manifest(dest).find((m) => m.name === "pi-hello-tool");
 		expect(hello?.source).toBe(path.join(FIXTURES, "hello-tool.ts"));
 		expect(hello?.enabled).toBe(false);
-		expect(hello?.sha256).toBe(
-			createHash("sha256")
-				.update(readFileSync(path.join(FIXTURES, "hello-tool.ts")))
-				.digest("hex"),
-		);
+		const fileSha = createHash("sha256")
+			.update(readFileSync(path.join(FIXTURES, "hello-tool.ts")))
+			.digest("hex");
+		expect(hello?.files).toEqual({ "pi-hello-tool.ts": fileSha });
+		expect(hello?.sha256).toBe(extensionHash({ "pi-hello-tool.ts": fileSha }));
 	});
 
 	test("imported extensions stay off until enabled; files the person wrote load as before", async () => {
@@ -224,6 +228,149 @@ describe("8gent ext import-pi", () => {
 	});
 });
 
+describe("the import gate fails closed", () => {
+	const mineAndRogue = (dest: string) => {
+		writeFileSync(
+			path.join(dest, "mine.ts"),
+			`export default (api) => api.registerCommand({ name: "mine", run: () => "yes" });`,
+		);
+		writeFileSync(
+			path.join(dest, "pi-rogue.ts"),
+			`export default (pi) => pi.registerCommand("rogue", { handler: async () => {} });`,
+		);
+	};
+	const isPiResult = (file: string) => isPiExtension(file);
+
+	test("a pi-* file with no import record never loads (no pi-imports.json at all)", async () => {
+		const dest = tmp();
+		mineAndRogue(dest);
+		const host = new ExtensionHost(dest);
+		const results = await host.load();
+		expect(results.find((r) => r.file.endsWith("pi-rogue.ts"))?.error).toContain(
+			"has no import record",
+		);
+		expect(host.hasCommand("rogue")).toBe(false);
+		expect(host.hasCommand("mine")).toBe(true);
+	});
+
+	test("a pi-* file not in an existing record never loads", async () => {
+		const dest = tmp();
+		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
+		mineAndRogue(dest);
+		const results = await new ExtensionHost(dest).load();
+		expect(results.find((r) => r.file.endsWith("pi-rogue.ts"))?.error).toContain(
+			"has no import record",
+		);
+	});
+
+	test("an unreadable pi-imports.json refuses every pi-* extension, enabled or not", async () => {
+		const dest = tmp();
+		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
+		await enableAll(dest);
+		mineAndRogue(dest);
+		writeFileSync(path.join(dest, PI_IMPORT_MANIFEST), "{ not json");
+		const host = new ExtensionHost(dest);
+		const results = await host.load();
+		const piResults = results.filter((r) => isPiResult(r.file));
+		expect(piResults.length).toBeGreaterThan(5);
+		for (const r of piResults) {
+			expect(r.ok).toBe(false);
+			expect(r.error).toContain("cannot be read");
+		}
+		expect(host.getTool("hello")).toBeUndefined();
+		expect(host.hasCommand("mine")).toBe(true);
+		// A new import refuses to work over a corrupt record rather than overwrite it.
+		expect(
+			(await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest })).output,
+		).toContain("cannot be read");
+	});
+
+	test("the hash covers dotfiles; a symlink inside a folder is refused at import and at load", async () => {
+		const src = tmp();
+		mkdirSync(path.join(src, "dotted"));
+		writeFileSync(
+			path.join(src, "dotted", "index.ts"),
+			`import { v } from "./.helper";\nexport default (pi) => pi.registerCommand("dot", { handler: async (_a, ctx) => ctx.ui.notify(v) });`,
+		);
+		writeFileSync(path.join(src, "dotted", ".helper.ts"), `export const v = "dot ok";`);
+		mkdirSync(path.join(src, "linked"));
+		writeFileSync(path.join(src, "linked", "index.ts"), "export default () => {};");
+		symlinkSync("/etc/hosts", path.join(src, "linked", "hosts"));
+		const dest = tmp();
+		const r = await runExtCommand(["import-pi", src], { extensionsDir: dest });
+		expect(r.output).toContain("pi-linked  not imported");
+		expect(r.output).toContain("symlink");
+		expect(existsSync(path.join(dest, "pi-linked"))).toBe(false);
+
+		const entry = manifest(dest).find((m) => m.name === "pi-dotted");
+		expect(Object.keys(entry?.files ?? {}).sort()).toEqual([".helper.ts", "index.ts"]);
+		await runExtCommand(["enable", "pi-dotted"], { extensionsDir: dest });
+		const host = new ExtensionHost(dest);
+		await host.load();
+		expect(await host.runCommand("dot", "", { cwd: dest })).toBe("dot ok");
+
+		writeFileSync(path.join(dest, "pi-dotted", ".helper.ts"), `export const v = "tampered";`);
+		const after = await host.load();
+		expect(after.find((x) => x.file.includes("pi-dotted"))?.error).toContain(
+			"changed since import",
+		);
+		expect(host.hasCommand("dot")).toBe(false);
+
+		// A link planted inside an imported folder after import is refused too.
+		writeFileSync(path.join(dest, "pi-dotted", ".helper.ts"), `export const v = "dot ok";`);
+		symlinkSync("/etc/hosts", path.join(dest, "pi-dotted", "planted"));
+		const linked = await host.load();
+		expect(linked.find((x) => x.file.includes("pi-dotted"))?.error).toContain("symlink");
+	});
+
+	test("the load hook serves only bytes that match the record (no check-then-load gap)", async () => {
+		const dest = tmp();
+		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest });
+		const file = path.join(dest, "pi-hello-tool.ts");
+		const good = new Uint8Array(readFileSync(file));
+		expect(servedBytesCheck(dest, file, good)).toBeNull();
+		const bad = new TextEncoder().encode(
+			`${readFileSync(file, "utf8")}\n// swapped after the check\n`,
+		);
+		expect(servedBytesCheck(dest, file, bad)).toContain("changed since import");
+		await runExtCommand(["disable", "pi-hello-tool"], { extensionsDir: dest });
+		expect(servedBytesCheck(dest, file, good)).toContain("is off");
+		expect(servedBytesCheck(dest, path.join(dest, "pi-unknown.ts"), good)).toContain("not part of");
+	});
+
+	test("extensions load only when Bun cannot auto-install", async () => {
+		expect(noInstallActive(["--no-install"], {}, "/nowhere")).toBe(true);
+		expect(noInstallActive([], {}, "/nowhere")).toBe(false);
+		const withBunfig = tmp();
+		writeFileSync(
+			path.join(withBunfig, "bunfig.toml"),
+			`[test]\npreload = []\n\n[install]\nauto = "disable"\n`,
+		);
+		expect(noInstallActive([], { NODE_ENV: "test" }, withBunfig)).toBe(true);
+		expect(noInstallActive([], { NODE_ENV: "test" }, tmp())).toBe(false);
+		expect(noInstallActive([], {}, withBunfig)).toBe(false);
+
+		// In a folder without that bunfig, this test process has no --no-install: nothing loads.
+		const dest = tmp();
+		writeFileSync(
+			path.join(dest, "mine.ts"),
+			`export default (api) => api.registerCommand({ name: "mine", run: () => "yes" });`,
+		);
+		const cwd = process.cwd();
+		process.chdir(tmp());
+		try {
+			const host = new ExtensionHost(dest);
+			const results = await host.load();
+			expect(results[0].status).toBe("off");
+			expect(results[0].error).toContain("--no-install");
+			expect(host.hasCommand("mine")).toBe(false);
+		} finally {
+			process.chdir(cwd);
+		}
+	});
+});
+
 describe("guards around imported code", () => {
 	test("an extension cannot register a tool under a Pi built-in name (a second shell)", async () => {
 		const dir = tmp();
@@ -297,6 +444,18 @@ describe("guards around imported code", () => {
 		expect(cli).toContain('["--no-install", "run", tuiPath');
 		expect(readFileSync(path.join(repo, "bin", "8gent-run.js"), "utf8")).toContain(
 			'["--no-install", cli',
+		);
+		expect(cli).toContain('["--no-install", "run", benchmarkPath');
+		expect(cli).toContain('["--no-install", "run", demoPath');
+		expect(cli).not.toMatch(/spawn\("bun", \["run"/);
+		expect(
+			readFileSync(path.join(repo, "apps", "tui", "src", "index.tsx"), "utf8").split("\n")[0],
+		).toBe("#!/usr/bin/env -S bun --no-install");
+		expect(readFileSync(path.join(repo, "packages", "cron", "index.ts"), "utf8")).toContain(
+			'["bun", "--no-install", "run", "bin/8gent.ts"',
+		);
+		expect(readFileSync(path.join(repo, "bunfig.toml"), "utf8")).toMatch(
+			/\[install\]\s*\nauto = "disable"/,
 		);
 	});
 

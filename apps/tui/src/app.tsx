@@ -4216,7 +4216,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", "--no-install", "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,

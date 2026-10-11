@@ -127,7 +127,7 @@ export class CronManager {
 			// Fire and forget - spawn 8gent with the job's command
 			const args = job.command.split(/\s+/);
 			try {
-				Bun.spawn(["bun", "run", "bin/8gent.ts", ...args], {
+				Bun.spawn(["bun", "--no-install", "run", "bin/8gent.ts", ...args], {
 					stdout: "ignore",
 					stderr: "ignore",
 				});

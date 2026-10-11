@@ -1057,7 +1057,7 @@ async function benchmarkCommand(args: string[]) {
 	}
 	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
+	const proc = spawn("bun", ["--no-install", "run", benchmarkPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1074,7 +1074,7 @@ async function demoCommand(args: string[]) {
 	}
 	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", demoPath, ...args], {
+	const proc = spawn("bun", ["--no-install", "run", demoPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});

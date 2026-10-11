@@ -154,6 +154,28 @@ export function extensionsWanted(
 	return argv.includes("--extensions") || env.EIGHT_EXTENSIONS === "1";
 }
 
+/**
+ * Is this Bun process unable to auto-install packages? True when it was
+ * started with --no-install (every 8gent launcher passes it). Under `bun test`
+ * (NODE_ENV=test, no flags) the bunfig.toml in the working folder must say
+ * `[install] auto = "disable"`, as the repo's does.
+ */
+export function noInstallActive(
+	execArgv: readonly string[] = process.execArgv,
+	env: NodeJS.ProcessEnv = process.env,
+	cwd: string = process.cwd(),
+): boolean {
+	if (execArgv.includes("--no-install")) return true;
+	if (env.NODE_ENV !== "test") return false;
+	try {
+		const toml = fs.readFileSync(path.join(cwd, "bunfig.toml"), "utf8");
+		const install = toml.split(/^\[/m).find((sec) => sec.startsWith("install]"));
+		return install ? /^\s*auto\s*=\s*"disable"/m.test(install) : false;
+	} catch {
+		return false;
+	}
+}
+
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
 export function defaultExtensionsDir(): string {
 	const home = resolveHome();
@@ -244,6 +266,26 @@ export class ExtensionHost {
 	 * through a symlinked folder.
 	 */
 	async load(): Promise<ExtensionLoadResult[]> {
+		// Extension code may import anything; only a Bun that cannot auto-install
+		// keeps that to local files. Without --no-install, load nothing.
+		if (!noInstallActive()) {
+			const files = this.files();
+			const reason =
+				"extensions are off: 8gent was started without Bun's --no-install, so an import could download a package";
+			this.tools = new Map();
+			this.commands = new Map();
+			this.handlers = [];
+			this.byFile = new Map();
+			this.results = files.map((file) => ({
+				file,
+				ok: false,
+				error: reason,
+				tools: [],
+				commands: [],
+				status: "off" as const,
+			}));
+			return this.results;
+		}
 		const reserved = new Set(this.reserved());
 		const results: ExtensionLoadResult[] = [];
 		const next = new Map<string, FileRegistration>();
