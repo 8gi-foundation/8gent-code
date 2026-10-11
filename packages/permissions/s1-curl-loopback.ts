@@ -44,7 +44,8 @@
  * `curl -s -c .tmp/cj.txt URL | grep -o 'name=csrf value=[a-f0-9]*'`): `grep`
  * (flags from a fixed letter set, exactly one pattern, no file, no -f/-r/-e),
  * `head`/`tail` (`-N` or `-n N`), or `wc` (`-l`, `-c`, `-w`). Nothing after the
- * filter, no second pipe, no `||`, `|&`. The filter reads only the pipe, so it
+ * filter, no second pipe, no `||`, `|&`. A piped command is refused when GREP_OPTIONS,
+ * GREP_COLOR or GREP_COLORS is set in the environment (grep would read options from it). The filter reads only the pipe, so it
  * cannot reach a file, a host or a shell.
  *
  * Redirects (-L/--location) are refused. curl cannot be told "loopback only"
@@ -168,6 +169,7 @@ function splitWords(text: string): Word[] | null {
 }
 
 const GREP_FLAGS = /^-[oEFiqvcnwxsh]+$/;
+const GREP_ENV = /^GREP_(OPTIONS|COLORS?)$/i;
 const COUNT = /^\d{1,4}$/;
 
 /** Split `curl ... | filter` at the single unquoted pipe: [left, right|null], or null when unsafe. */
@@ -324,7 +326,10 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 		if (decideRules(text).rules.length !== 0) return NO;
 		const piped = splitPipe(text);
 		if (!piped) return NO;
-		if (piped[1] !== null && !stdinFilterOk(piped[1])) return NO;
+		if (piped[1] !== null) {
+			if (!stdinFilterOk(piped[1])) return NO;
+			for (const k of Object.keys(process.env)) if (GREP_ENV.test(k) && process.env[k]) return NO;
+		}
 		const words = splitWords(piped[0]);
 		if (!words || words.length < 2 || words.length > MAX_WORDS || words[0] !== "curl") return NO;
 

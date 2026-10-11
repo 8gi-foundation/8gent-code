@@ -347,6 +347,18 @@ describe("one trailing stdin-only filter", () => {
 		expect(ok("curl -s http://example.com/ | grep x")).toBe(false);
 		expect(ok("curl -s -L http://127.0.0.1:55376/ | grep x")).toBe(false);
 	});
+	for (const k of ["GREP_OPTIONS", "GREP_COLOR", "GREP_COLORS"]) {
+		test(`${k} set: a piped command is refused, a bare curl still passes`, () => {
+			process.env[k] = "--color=always";
+			try {
+				expect(ok(`${C} | grep -o csrf`)).toBe(false);
+				expect(ok(`${C} | head -5`)).toBe(false);
+				expect(ok(C)).toBe(true);
+			} finally {
+				Reflect.deleteProperty(process.env, k);
+			}
+		});
+	}
 	test("a quoted pipe is not a pipe", () => {
 		expect(ok("curl -s -H 'X: a|b' http://127.0.0.1:55376/")).toBe(true);
 	});
