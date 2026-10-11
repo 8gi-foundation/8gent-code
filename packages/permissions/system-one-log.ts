@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveHome } from "../core/home.js";
+import { scrub } from "../eight/secret-scanner";
 
 export type JudgeOutcome = "verdict" | "timeout" | "error";
 
@@ -83,6 +84,18 @@ const ENV_ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=/;
 // Lowercase word, at most two trailing digits (bun, git, python3): a secret pasted as the command word has mixed case or digits through it.
 const PLAIN_PROGRAM = /^[a-z][a-z._+-]{0,31}[0-9]{0,2}$/;
 
+const SAFE_ENV_NAME = /^[A-Z_][A-Z0-9_]{0,31}$/;
+
+/** An env NAME is logged only if it looks like a name and no secret pattern matches it (a key can be used as a name). */
+function safeEnvName(name: string): string {
+	if (!SAFE_ENV_NAME.test(name)) return "?";
+	try {
+		return scrub(name).redactedCount > 0 ? "?" : name;
+	} catch {
+		return "?";
+	}
+}
+
 export function describeCommand(command: string): { program: string; envNames: string[]; argc: number } {
 	const w = words(String(command ?? ""));
 	const envNames: string[] = [];
@@ -90,7 +103,7 @@ export function describeCommand(command: string): { program: string; envNames: s
 	while (i < w.length) {
 		const m = ENV_ASSIGN.exec(w[i]);
 		if (!m) break;
-		if (envNames.length < 10) envNames.push(m[1]);
+		if (envNames.length < 10) envNames.push(safeEnvName(m[1]));
 		i++;
 	}
 	const first = w[i] ?? "";
