@@ -388,7 +388,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request.
+For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request. A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command. One command per run_command call, no semicolons.
 
 ### Git Flow
 \`\`\`json

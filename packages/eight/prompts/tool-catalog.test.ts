@@ -122,5 +122,7 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 		expect(TOOL_PATTERNS_SEGMENT).toContain("under .tmp/");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("do not pass -L");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("second loopback request");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("read that file with read_file next");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("never repeat the same command");
 	});
 });
