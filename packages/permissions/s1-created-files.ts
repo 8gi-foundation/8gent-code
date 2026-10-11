@@ -13,6 +13,27 @@
  *   - a run_command whose `>` / `>>` redirect names a plain relative path that
  *     did not exist just before the command and is, after it, still the file
  *     created for it then (see "pinned" below).
+ *   - (#3514) a run_command after which a NEW untracked, non-ignored name
+ *     holds a regular file written during the command: `git ls-files -o
+ *     --exclude-standard` is taken before and after, and a name absent before,
+ *     present after, never seen before any earlier command of this record,
+ *     with one hard link and a modification time at or after the command
+ *     start, is recorded (pilot: a CLI run as TODO_FILE=.tmp/td.json bun
+ *     src/cli.ts add ... makes .tmp/td.json; a child made it, not a redirect).
+ *     Not recorded: a name that existed before (sed -i, an atomic save, touch),
+ *     a name seen before any earlier command (git stash -u then pop recreates
+ *     it), a gitignored name (.env), a file moved in (mv keeps its mtime),
+ *     a hard link, anything from a command during which an untracked name
+ *     that was not this session's, or a tracked file, vanished; anything when
+ *     the snapshot fails (no repository, git missing, a 5 s timeout, more
+ *     than 5,000 untracked names, more than 20,000 names seen): fail closed.
+ *     An own entry is refreshed after a command only when it still names the
+ *     same device and inode, or a fresh file written during the command.
+ *     Known gap, for 8SO: another process (an editor, another tab) creating a
+ *     brand-new untracked file in the workspace while a command runs is
+ *     recorded, and so is a file moved in whose mtime a child of the command
+ *     reset. The second needs a child process, which can delete files without
+ *     System One seeing it anyway.
  * Both tool paths (packages/eight/tools.ts, packages/ai/tools.ts) record into
  * the same object: one per ToolExecutor, which the Agent also hands to its
  * native tool context. A different agent, tab or child has its own record.
@@ -46,6 +67,7 @@
  * that fails before it) leaves that empty file behind.
  */
 
+import { spawnSync } from "node:child_process";
 import { constants, closeSync, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { decideRules, maskQuotes } from "../decide/rules";
@@ -93,8 +115,49 @@ export function pathAbsent(abs: string): boolean {
 	}
 }
 
+/** Untracked names one snapshot may hold (#3514); more records nothing. */
+const MAX_UNTRACKED = 5_000;
+/** Names one record may remember as seen (#3514); past this it records nothing new. */
+const MAX_SEEN = 20_000;
+
+/**
+ * The names `git ls-files <args> -z` lists under `cwd`, as absolute paths
+ * under its realpath. Null when `cwd` is not in a repository, git fails or
+ * times out (5 s), or there are more than MAX_UNTRACKED of them.
+ */
+function gitNames(cwd: string, args: string[]): string[] | null {
+	try {
+		const root = realpathSync(cwd);
+		const r = spawnSync("git", ["-C", root, "ls-files", ...args, "-z"], {
+			encoding: "utf8",
+			timeout: 5_000,
+			maxBuffer: 16 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		if (r.error || r.status !== 0) return null;
+		const names = r.stdout.split("\0").filter(Boolean);
+		if (names.length > MAX_UNTRACKED) return null;
+		return names.map((n) => path.resolve(root, n));
+	} catch {
+		return null;
+	}
+}
+
+/** True when `abs` is a regular file (lstat) with one link, written at or after `startNs`. */
+function writtenSince(abs: string, startNs: bigint): boolean {
+	try {
+		const st = lstatSync(abs, { bigint: true });
+		return st.isFile() && st.nlink === 1n && st.mtimeNs >= startNs;
+	} catch {
+		return false;
+	}
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
+	/** Every untracked name present when one of this record's commands started (#3514). */
+	private readonly seen = new Set<string>();
+	private seenFull = false;
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {
@@ -125,6 +188,49 @@ export class CreatedFiles {
 		const want = this.files.get(key);
 		const now = regularFile(abs);
 		return !!want && !!now && want === now;
+	}
+
+	/**
+	 * Bracket one of the session's own commands by untracked-name snapshots
+	 * (#3514): call before it runs, and call the result after it exits. A name
+	 * absent before, present after, and never seen before any earlier command
+	 * is recorded when it is a regular file written during the command. Own
+	 * entries that survive the command are refreshed. Any snapshot failure, or
+	 * a vanished name, records and refreshes nothing.
+	 */
+	watchCommand(cwd: string): () => void {
+		const start = (BigInt(Date.now()) + 1n) * 1_000_000n;
+		const before = gitNames(cwd, ["-o", "--exclude-standard"]);
+		const missingBefore = gitNames(cwd, ["-d"]);
+		if (!before || !missingBefore) return () => {};
+		const ours = new Map<string, string>();
+		for (const abs of before) {
+			const id = this.createdBySession(abs) ? inodeOf(abs) : null;
+			if (id) ours.set(abs, id);
+		}
+		for (const abs of before) this.seen.add(abs);
+		if (this.seen.size > MAX_SEEN) this.seenFull = true;
+		let open = true;
+		return () => {
+			if (!open) return;
+			open = false;
+			const after = gitNames(cwd, ["-o", "--exclude-standard"]);
+			const missingAfter = gitNames(cwd, ["-d"]);
+			if (!after || !missingAfter) return;
+			// A name that was not ours vanished, or a tracked file went missing:
+			// something was moved or deleted, so a new name may be that file.
+			const now = new Set(after);
+			if (before.some((abs) => !ours.has(abs) && !now.has(abs))) return;
+			const wasMissing = new Set(missingBefore);
+			if (missingAfter.some((abs) => !wasMissing.has(abs))) return;
+			for (const [abs, id] of ours) {
+				// In place (same inode), or a fresh file the command wrote over it.
+				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);
+			}
+			if (this.seenFull) return;
+			for (const abs of after)
+				if (!this.seen.has(abs) && writtenSince(abs, start)) this.record(abs);
+		};
 	}
 
 	get size(): number {
@@ -266,6 +372,8 @@ export function watchRedirects(
 			seen.add(abs);
 			watches.push(pinTarget(abs, root, record));
 		}
+		// After the pins, so a redirect target they pre-created is already "seen" here.
+		watches.push(record.watchCommand(cwd));
 	} catch {
 		// Fall through with what was pinned, so every descriptor is closed.
 	}
