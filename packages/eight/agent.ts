@@ -74,7 +74,7 @@ import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
-import { completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -1452,7 +1452,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.turnTask = userMessage;
-		this.turnGitBaseline = gitSnapshot(this.config.workingDirectory || process.cwd());
+		this.turnGitBaseline = asksForCommit(userMessage)
+			? gitSnapshot(this.config.workingDirectory || process.cwd())
+			: null;
 		// write_file may open each deliverable once per turn (#3107).
 		this.executor.beginTurn();
 

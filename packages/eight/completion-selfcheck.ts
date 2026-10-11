@@ -30,7 +30,8 @@ export function completionSelfCheckEnabled(env: Env = process.env): boolean {
 const MAX_TASK = 8192;
 const FILE_VERB =
 	/\b(?:create[sd]?|creating|write|writes|wrote|written|writing|save[sd]?|saving|generate[sd]?|generating|produce[sd]?|producing|export(?:s|ed|ing)?|render(?:s|ed|ing)?|output)\b/i;
-const FILE_TOKEN = /(?<![\w/.~-])((?:~\/|\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,5})(?![\w/-])/g;
+const FILE_TOKEN =
+	/(?<![\p{L}\p{N}_/.~-])((?:~\/|\.{0,2}\/)?[\p{L}\p{N}_@.-]+(?:\/[\p{L}\p{N}_@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,5})(?![\p{L}\p{N}_/-])/gu;
 const REMOVES = /\b(?:delete|remove|rename|move|rm|mv)\b/i;
 const TEST_ASK =
 	/\b(?:run|runs|running|pass|passes|passing)\b[^.\n]{0,40}\b(?:tests?|test suite)\b|\btests? (?:pass|must pass|should pass)\b/i;
@@ -41,12 +42,26 @@ const COMMIT_NOT_ASK =
 const COMMIT_ASK =
 	/\b(?:and\s+commit|then\s+commit|commit\s+(?:the|your|it|them|these|all|everything|changes|work)\b)/i;
 const NO_COMMIT = /\b(?:do not|don't|dont|never|without|no)\s+(?:\w+\s+)?commit/i;
+/** One predicate for turn start (take a git baseline?) and turn end (check it?). */
+export function asksForCommit(task: string, env: Env = process.env): boolean {
+	const t = task.slice(0, MAX_TASK);
+	return (
+		completionSelfCheckEnabled(env) && COMMIT_ASK.test(t.replace(COMMIT_NOT_ASK, " ")) && !NO_COMMIT.test(t)
+	);
+}
+
 const NO_FRAMEWORK = /^[A-Z][A-Za-z]*\.js$/;
 
 /** Files named after a creating verb, in the same sentence. URLs, framework names (Node.js) and files the sentence removes are skipped. */
 export function deliverableFiles(task: string): string[] {
 	const out = new Set<string>();
-	const text = task.slice(0, MAX_TASK).replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ");
+	// Windows paths: drive-rooted and backslash-prefixed tokens are not ours to check;
+	// the rest are read with / separators.
+	const text = task
+		.slice(0, MAX_TASK)
+		.replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
+		.replace(/(?<![^\s`"'(])(?:[A-Za-z]:|\\)[^\s`"',;]*/g, " ")
+		.replace(/\\/g, "/");
 	for (const sentence of text.split(/(?<=[.!?\n])\s+/)) {
 		const verb = FILE_VERB.exec(sentence);
 		if (!verb || REMOVES.test(sentence)) continue;
@@ -119,8 +134,7 @@ export function completionSelfCheckNudge(opts: {
 		.map(({ f }) => f);
 	const misses: string[] = [];
 	if (missing.length) misses.push(`these files the task names do not exist: ${missing.join(", ")}`);
-	const commitText = task.replace(COMMIT_NOT_ASK, " ");
-	if (COMMIT_ASK.test(commitText) && !NO_COMMIT.test(task) && opts.gitBaseline) {
+	if (asksForCommit(task, opts.env) && opts.gitBaseline) {
 		const now = gitSnapshot(cwd);
 		const left = now ? [...now].filter(([line, sig]) => opts.gitBaseline?.get(line) !== sig) : [];
 		if (left.length)

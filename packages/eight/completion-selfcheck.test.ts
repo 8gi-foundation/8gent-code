@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
+	asksForCommit,
 	completionSelfCheckEnabled,
 	completionSelfCheckNudge as nudge,
 	deliverableFiles,
@@ -93,5 +94,27 @@ describe("completion self-check", () => {
 		expect(nudge({ task: "Write x.md", cwd: d, ledger: [] })).toBeNull();
 		expect(nudge({ task: "and commit the work", cwd: d, ledger: wrote })).toBeNull();
 		expect(run("a ".repeat(20000) + "Write late.md", d)).toBeNull();
+	});
+
+	test("Windows paths: drive-rooted and backslash-prefixed are skipped, relative ones read with /", () => {
+		expect(deliverableFiles("Save the report to C:\\Users\\art\\out\\report.md")).toEqual([]);
+		expect(deliverableFiles("Write \\\\server\\share\\x.md")).toEqual([]);
+		expect(deliverableFiles("Create src\\app\\main.ts")).toEqual(["src/app/main.ts"]);
+		const d = repo();
+		expect(run("Save the report to C:\\Users\\art\\out\\report.md", d)).toBeNull();
+	});
+
+	test("Unicode file names stay intact", () => {
+		expect(deliverableFiles("Create naïve-notes.md and 日本語/メモ.txt")).toEqual(["naïve-notes.md", "日本語/メモ.txt"]);
+		const d = repo();
+		expect(run("Write naïve-notes.md", d)).toContain("naïve-notes.md");
+	});
+
+	test("no commit ask means no snapshot predicate", () => {
+		expect(asksForCommit("Fix the bug and commit the work", {})).toBe(true);
+		expect(asksForCommit("Fix the bug", {})).toBe(false);
+		expect(asksForCommit("Review the last commit", {})).toBe(false);
+		expect(asksForCommit("Fix it, do not commit", {})).toBe(false);
+		expect(asksForCommit("Fix it and commit", { EIGHT_COMPLETION_SELFCHECK: "0" })).toBe(false);
 	});
 });
