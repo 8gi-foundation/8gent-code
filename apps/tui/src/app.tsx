@@ -6743,6 +6743,7 @@ export function App({
 							display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
 						>
 							<CommandInput
+								cwd={projectCwd}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={
