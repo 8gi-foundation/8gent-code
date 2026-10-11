@@ -19,15 +19,16 @@ git diff | 8gent -p "review"                    # piped text is added ahead of t
 8gent --mode rpc                                # JSON-RPC server, same as --rpc
 ```
 
-- `-p` / `--print`: one prompt, then exit. Reads stdin when it is piped.
+- `-p` / `--print`: one prompt, then exit, wherever the flag sits (`8gent "review" -p` works). Reads stdin when it is piped, up to 8 MB (larger input is a usage error). With a prompt on the line, stdin is read only when it is a pipe or a file; a pipe whose writer never closes makes the run wait, so close it or use `< /dev/null`.
+- `-p` saves the run so it can be continued. The older `8gent run` saves only with `--session` or `--continue`. Secrets in saved text are redacted.
 - `--mode json|text`: `json` is the event stream below; `text` is the final answer only (default).
   `--mode rpc` starts the JSON-RPC 2.0 server (`--rpc`).
-- `--continue` / `-c`: resume the latest session whose folder is the working folder (`--cwd` or the current one). With none, a new session starts.
+- `--continue` / `-c`: resume the latest non-empty session whose folder is the working folder (`--cwd` or the current one). With none, a new session starts.
 - `--session <id>`: resume that session; an unknown id is an error.
 - `--no-session`: do not read or write a session.
 - `--session-dir <dir>`: read and write sessions in `<dir>`.
-- `--tools a,b`: offer only those tools; a call to any other is refused.
-- Exit code: 0 on success, 1 on a usage error, an agent error, or a failed project check.
+- `--tools a,b`: offer only those tools; a call to any other is refused. A name that is no tool is warned about (an `error`/`usage` event in json mode, stderr otherwise). It only narrows an active mode, never widens it.
+- Exit code: 0 on success, 1 on a usage error, an agent error, an unreachable or timed-out model, or a failed project check.
 
 ## Events
 
@@ -50,6 +51,8 @@ A run emits `session_start`, then any number of `assistant`, `tool_use` and
 is always a `result`; a host that wants "is it finished" can stop on it. The
 `session_id` on `session_start` and `result` is the saved session's id, so a
 later `--session <id>` continues it.
+
+This schema is 8gent's own. It is not wire-compatible with `pi --mode json`; a host written for Pi needs a small adapter.
 
 Unknown extra keys may appear in later versions; read the keys you know.
 

@@ -4,7 +4,7 @@
  * --continue resumes this folder's latest session. No real model is loaded.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateRunEvent } from "./run-events";
@@ -146,6 +146,56 @@ describe("8gent -p", () => {
 			const fresh = await headless(["--continue", "--cwd", other, "hello"]);
 			expect(fresh.lines[0].resumed).toBe(false);
 		} finally {
+			rmSync(other, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("a secret in piped input is not written to the saved session", async () => {
+		const other = mkdtempSync(join(tmpdir(), "headless-secret-"));
+		try {
+			const secret = "AKIAIOSFODNN7EXAMPLE";
+			const { code } = await headless(["--cwd", other, "summarise"], `# .env\nAWS_ACCESS_KEY_ID=${secret}\n`);
+			expect(code).toBe(0);
+			const files = saved_().map((f) => readFileSync(join(home, ".8gent", "sessions", f), "utf-8"));
+			expect(files.some((t) => t.includes("AWS_ACCESS_KEY_ID"))).toBe(true);
+			expect(files.some((t) => t.includes(secret))).toBe(false);
+		} finally {
+			rmSync(other, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("legacy run saves nothing unless --session or --continue is given", async () => {
+		const other = mkdtempSync(join(tmpdir(), "headless-legacy-"));
+		try {
+			const n = saved_().length;
+			const { runRunCommand } = await import("./run");
+			const realWrite = process.stdout.write.bind(process.stdout);
+			process.stdout.write = (() => true) as typeof process.stdout.write;
+			try {
+				await runRunCommand(["--yes", "--provider", "ollama", "--model", "m", "--cwd", other, "hello"]);
+			} finally {
+				process.stdout.write = realWrite;
+			}
+			expect(saved_().length).toBe(n);
+		} finally {
+			rmSync(other, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("an unreachable model endpoint is result error and exit 1", async () => {
+		const other = mkdtempSync(join(tmpdir(), "headless-down-"));
+		const host = process.env.OLLAMA_HOST;
+		process.env.OLLAMA_HOST = "http://127.0.0.1:9";
+		try {
+			const { code, lines } = await headless(["--no-session", "--cwd", other, "hello"]);
+			expect(code).toBe(1);
+			const result = lines.at(-1);
+			expect(result?.type).toBe("result");
+			expect(result?.subtype).toBe("error");
+			expect(String(result?.error)).toContain("not reachable");
+			for (const l of lines) expect(validateRunEvent(l)).toEqual([]);
+		} finally {
+			process.env.OLLAMA_HOST = host;
 			rmSync(other, { recursive: true, force: true });
 		}
 	}, 60_000);

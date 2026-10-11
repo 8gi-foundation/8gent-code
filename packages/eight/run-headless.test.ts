@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { ModeManager } from "./modes";
 import { type RunEvent, validateRunEvent } from "./run-events";
 import { defaultRunSessionStore } from "./run-session";
-import { combinePromptAndStdin, continueTarget, headlessRoute, parseRunArgs } from "./run";
+import { MAX_STDIN_BYTES, runRunCommand, unknownToolNames, combinePromptAndStdin, continueTarget, headlessRoute, parseRunArgs } from "./run";
 
 describe("headless flags", () => {
 	test("-p with a prompt, --mode json, --tools, session flags", () => {
@@ -53,7 +53,9 @@ describe("routing", () => {
 		expect(headlessRoute(["--print", "x"])).toBe("run");
 		expect(headlessRoute(["--mode", "json", "x"])).toBe("run");
 		expect(headlessRoute(["--mode=rpc"])).toBe("rpc");
-		expect(headlessRoute(["chat", "-p", "x"])).toBeNull();
+		expect(headlessRoute(["review", "-p"])).toBe("run"); // flags after the prompt
+		expect(headlessRoute(["chat", "--mode", "json"])).toBeNull();
+		expect(headlessRoute(["x", "--mode=rpc"])).toBe("rpc");
 		expect(headlessRoute([])).toBeNull();
 		expect(headlessRoute(["--resume"])).toBeNull();
 	});
@@ -61,6 +63,8 @@ describe("routing", () => {
 		expect(continueTarget(["--model=x"])).toBeNull();
 		expect(continueTarget(["--continue"])).toEqual({ rest: [] });
 		expect(continueTarget(["--continue", "--fast"])).toEqual({ rest: ["--fast"] });
+		expect(continueTarget(["-c"])).toEqual({ rest: [] });
+		expect(continueTarget(["-c", "abc"])?.id).toBe("abc");
 		expect(continueTarget(["--continue", "abc", "--fast"])).toEqual({
 			id: "abc",
 			rest: ["--fast"],
@@ -140,7 +144,37 @@ describe("folder sessions", () => {
 	});
 });
 
+describe("folder sessions, empty and case", () => {
+	test("an empty session (the TUI writes one per launch) is never the latest", async () => {
+		const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "run-sess-"));
+		const store = defaultRunSessionStore(dir);
+		const meta = { model: "m", provider: "p", cwd: "/work/a" };
+		store.save("real", [{ role: "user", content: "a" }], meta);
+		await Bun.sleep(5);
+		store.save("empty", [], meta);
+		expect(store.latestForCwd("/work/a")?.id).toBe("real");
+	});
+});
+
+describe("stdin cap and unknown tools", () => {
+	test("input over 8 MB is a usage error that states the size", async () => {
+		const big = "x".repeat(MAX_STDIN_BYTES + 1);
+		const code = await runRunCommand(["-p", "--mode", "json", "review"], { stdin: async () => big });
+		expect(code).toBe(1);
+	});
+	test("unknown --tools names are reported, real ones are not", async () => {
+		expect(await unknownToolNames(["read_file", "nope_tool"])).toEqual(["nope_tool"]);
+	});
+});
+
 describe("--tools", () => {
+	test("a narrower mode is never widened", () => {
+		const mm = new ModeManager(path.join(os.tmpdir(), "no-modes.yaml"));
+		mm.setActiveMode("architect");
+		mm.applyToolAllowlist(["read_file", "write_file"]);
+		expect(mm.isToolAllowed("write_file")).toBe(false);
+		expect(mm.isToolAllowed("read_file")).toBe(true);
+	});
 	test("only the named tools pass the mode filter", () => {
 		const mm = new ModeManager(path.join(os.tmpdir(), "no-modes.yaml"));
 		mm.applyToolAllowlist(["read_file", "grep"]);

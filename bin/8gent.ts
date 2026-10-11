@@ -437,7 +437,7 @@ async function main() {
 				console.log(
 					`Continuing session: ${latest.name || latest.id} (${latest.model}, ${latest.messageCount} msgs)`,
 				);
-				sessionId = latest.name || latest.id;
+				sessionId = latest.id;
 			} else {
 				console.log("No earlier session in this folder. Starting fresh.");
 			}

@@ -17,7 +17,7 @@ export interface RunSessionMessage {
 }
 
 export interface RunSessionStore {
-	/** The most recently active session whose folder is `cwd`, or null. */
+	/** The most recently active non-empty session whose folder is `cwd`, or null. */
 	latestForCwd(cwd: string): SessionInfo | null;
 	/** One session by exact id, with its messages. */
 	load(id: string): (SessionInfo & { messages: RunSessionMessage[] }) | null;
@@ -29,14 +29,16 @@ export interface RunSessionStore {
 	): void;
 }
 
-const same = (a: string, b: string) => path.resolve(a) === path.resolve(b);
+/** Same folder; case-insensitive on Windows, as the session lane compares them. */
+const key = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
+const same = (a: string, b: string) => key(a) === key(b);
 
 export function defaultRunSessionStore(sessionDir?: string): RunSessionStore {
 	const sm = new SessionManager(sessionDir);
 	return {
 		latestForCwd(cwd) {
 			// list() is sorted newest first.
-			return sm.list(Number.MAX_SAFE_INTEGER).find((s) => same(s.cwd, cwd)) ?? null;
+			return sm.list(Number.MAX_SAFE_INTEGER).find((s) => s.messageCount > 0 && same(s.cwd, cwd)) ?? null; // the TUI writes an empty session on every launch
 		},
 		load: (id) => sm.get(id),
 		save(id, messages, meta) {

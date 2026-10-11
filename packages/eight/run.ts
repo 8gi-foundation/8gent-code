@@ -22,6 +22,8 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { isLocalTurnFailureReply } from "./local-turn-error";
+import { scrub } from "./secret-scanner";
 import type { RunEvent } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
 import type { AgentEventCallbacks } from "./types";
@@ -248,11 +250,16 @@ export function parseRunArgs(argv: string[]): RunOptions {
 
 /**
  * Which headless surface a command line asks for, when it leads with flags
- * (not a subcommand): `-p`/`--print` and `--mode json|text` run one prompt,
+ * (not a subcommand): `-p`/`--print` (anywhere on the line) and `--mode json|text` run one prompt,
  * `--mode rpc` (like `--rpc`) is the JSON-RPC server (F1).
  */
+const SUBCOMMANDS = new Set(["init","outline","symbol","search","benchmark","demo","tui","run","pipeline","pet","infinite","chat","agent","session","export","preferences","memory","airdrop","drop","onboard","auth","cron","blueprint","daemon","rpc","mcp-server","review","doctor","update","upgrade","permissions","perms","keys","env","install","publish","start","open","stop","kill","restart","build","log","logs","login","logout","whoami","status"]);
+
 export function headlessRoute(args: string[]): "run" | "rpc" | null {
-	if (args.length === 0 || !args[0].startsWith("-")) return null;
+	if (args.length === 0) return null;
+	// -p / --print is the front door wherever it sits (`8gent "review" -p` too).
+	if (args.includes("-p") || args.includes("--print")) return "run";
+	if (!args[0].startsWith("-") && SUBCOMMANDS.has(args[0])) return null;
 	const modeIdx = args.findIndex((a) => a === "--mode" || a.startsWith("--mode="));
 	if (modeIdx !== -1) {
 		const v =
@@ -260,7 +267,6 @@ export function headlessRoute(args: string[]): "run" | "rpc" | null {
 		if (v === "rpc") return "rpc";
 		if (v === "json" || v === "text") return "run";
 	}
-	if (args.includes("-p") || args.includes("--print")) return "run";
 	return null;
 }
 
@@ -270,7 +276,7 @@ export function headlessRoute(args: string[]): "run" | "rpc" | null {
  * names a session. Returns null when `--continue` is absent.
  */
 export function continueTarget(args: string[]): { id?: string; rest: string[] } | null {
-	const i = args.indexOf("--continue");
+	const i = args.findIndex((a) => a === "--continue" || a === "-c");
 	if (i === -1) return null;
 	const next = args[i + 1];
 	if (next && !next.startsWith("-")) {
@@ -291,12 +297,61 @@ export function combinePromptAndStdin(prompt: string, piped: string): string {
 	return prompt ? `${body}\n\n${prompt}` : body;
 }
 
-async function readPipedStdin(): Promise<string> {
-	if (process.stdin.isTTY) return "";
-	const chunks: Buffer[] = [];
+/** Names in `tools` that no tool answers to. */
+export async function unknownToolNames(tools: string[]): Promise<string[]> {
+	const known = new Set<string>();
 	try {
-		for await (const c of process.stdin) chunks.push(Buffer.from(c));
+		const { agentTools } = await import("../ai/tools");
+		for (const k of Object.keys(agentTools)) known.add(k);
+		const { ToolExecutor } = await import("./tools");
+		const os = await import("node:os");
+		for (const d of new ToolExecutor(os.tmpdir()).getToolDefinitions() as Array<{ function?: { name?: unknown } }>)
+			if (typeof d.function?.name === "string") known.add(d.function.name);
 	} catch {
+		return [];
+	}
+	return tools.filter((t) => !known.has(t));
+}
+
+/** Largest piped stdin read (8 MB). */
+export const MAX_STDIN_BYTES = 8 * 1024 * 1024;
+
+export class StdinTooLargeError extends Error {
+	constructor(readonly bytes: number) {
+		super(
+			`Error: piped input is larger than ${MAX_STDIN_BYTES / (1024 * 1024)} MB (read ${(bytes / (1024 * 1024)).toFixed(1)} MB so far). Trim it, for example git diff -- <path>.`,
+		);
+	}
+}
+
+/**
+ * Piped stdin, capped at 8 MB. With a prompt on the command line the read is
+ * skipped unless stdin is a pipe or a file, so a host that leaves an open
+ * socket or terminal on stdin cannot hang the run. Without a prompt, or with
+ * a pipe, it reads to the end: `8gent -p "x" < /dev/null` is fine, but a
+ * pipe whose writer never closes will wait.
+ */
+export async function readPipedStdin(hasPrompt = false): Promise<string> {
+	if (process.stdin.isTTY) return "";
+	if (hasPrompt) {
+		try {
+			const st = (await import("node:fs")).fstatSync(0);
+			if (!st.isFIFO() && !st.isFile()) return "";
+		} catch {
+			return "";
+		}
+	}
+	const chunks: Buffer[] = [];
+	let total = 0;
+	try {
+		for await (const c of process.stdin) {
+			const b = Buffer.from(c);
+			total += b.length;
+			if (total > MAX_STDIN_BYTES) throw new StdinTooLargeError(total);
+			chunks.push(b);
+		}
+	} catch (err) {
+		if (err instanceof StdinTooLargeError) throw err;
 		return "";
 	}
 	return Buffer.concat(chunks).toString("utf-8");
@@ -454,7 +509,16 @@ export async function runRunCommand(
 ): Promise<number> {
 	const opts = parseRunArgs(argv);
 	if (opts.print || !opts.prompt) {
-		opts.prompt = combinePromptAndStdin(opts.prompt, await (deps.stdin ?? readPipedStdin)());
+		try {
+			const piped = await (deps.stdin ?? (() => readPipedStdin(Boolean(opts.prompt))))();
+			if (Buffer.byteLength(piped) > MAX_STDIN_BYTES) throw new StdinTooLargeError(Buffer.byteLength(piped));
+			opts.prompt = combinePromptAndStdin(opts.prompt, piped);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			else process.stderr.write(`${msg}\n`);
+			return 1;
+		}
 	}
 
 	if (!opts.prompt) {
@@ -483,6 +547,12 @@ export async function runRunCommand(
 
 	// --tools: only these tools for the run (F5). Applies to the whole process.
 	if (opts.tools) {
+		const unknown = await unknownToolNames(opts.tools);
+		if (unknown.length) {
+			const msg = `Warning: --tools names no such tool: ${unknown.join(", ")}.`;
+			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			else process.stderr.write(`${msg}\n`);
+		}
 		const { getModeManager } = await import("./modes");
 		getModeManager().applyToolAllowlist(opts.tools);
 	}
@@ -536,7 +606,8 @@ export async function runRunCommand(
 	// Resume (F4): --session <id>, or --continue for this folder's latest session.
 	// --no-session keeps the run out of the store, so nothing is read or written.
 	const workDirForSession = resolvePath(opts.cwd || process.cwd());
-	const store: RunSessionStore | null = opts.noSession
+	const persist = !opts.noSession && (opts.print || Boolean(opts.session) || opts.continueLatest);
+	const store: RunSessionStore | null = !persist
 		? null
 		: (deps.sessions ?? defaultRunSessionStore(opts.sessionDir));
 	let resumeFrom: { id: string; messages: Array<{ role: string; content: string }> } | null = null;
@@ -718,7 +789,14 @@ export async function runRunCommand(
 			try {
 				store.save(
 					sessionId,
-					agent.getMessageHistory().filter((m) => m.role !== "system"),
+					agent
+						.getMessageHistory()
+						.filter((m) => m.role !== "system")
+						.map((m) => ({
+							...m,
+							// A secret in piped input or tool output is not written to disk.
+							content: typeof m.content === "string" ? scrub(m.content).scrubbed : m.content,
+						})),
 					{ model, provider, cwd: workDirForSession },
 				);
 			} catch (err) {
@@ -737,9 +815,9 @@ export async function runRunCommand(
 		if (check.status === "fail") exitCode = 1;
 		if (notice) process.stderr.write(`${notice}\n`);
 
-		if (isEmptyReplyNote(finalText)) {
-			// #3524: a blank model reply is not a finished turn, so a script must
-			// not read it as success.
+		if (isEmptyReplyNote(finalText) || isLocalTurnFailureReply(finalText)) {
+			// #3524: a blank model reply, or an unreachable or timed-out local model,
+			// is not a finished turn, so a script must not read it as success.
 			exitCode = 1;
 			if (isStreamJson) {
 				emit({

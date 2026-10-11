@@ -178,7 +178,8 @@ export class ModeManager {
 			name: "Tool allowlist",
 			description: "Only the tools named on the command line",
 			systemPromptPrefix: "",
-			allowedTools: [...names],
+			// Intersect with the mode already active: --tools can narrow, never widen.
+			allowedTools: names.filter((n) => this.isToolAllowed(n)),
 		};
 		this.active = "tool-allowlist";
 	}
