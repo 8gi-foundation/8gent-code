@@ -38,3 +38,13 @@ export function getExtensionManager(): ExtensionManager {
 }
 
 export { craftExtension, type CraftOptions, type CraftResult } from "./crafter";
+
+export {
+	defaultPromptsDir,
+	expandPromptCommand,
+	expandTemplate,
+	loadPromptTemplates,
+	parseTemplate,
+	splitArgs,
+	type PromptTemplate,
+} from "./prompts";
