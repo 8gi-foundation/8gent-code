@@ -115,7 +115,15 @@ const YAML_EVENT_MAP: Record<YamlHookEvent, HookType> = {
 
 export interface YamlHookConfig {
 	event: YamlHookEvent;
-	matcher?: string; // tool name glob: exact name or "*"
+	/**
+	 * Which tool calls fire the hook: "*" (or unset) for every tool, otherwise
+	 * one LITERAL tool name, compared exactly. There are no globs and no action
+	 * classes: a `run_command` matcher does not see other shell tools (such as
+	 * `powershell`) or MCP tools that also run commands. To guard every way of
+	 * running a command, add one entry per tool name, or use "*" and decide in
+	 * the hook from the `tool` field of the payload.
+	 */
+	matcher?: string;
 	command: string; // shell command to run
 	timeout?: number; // ms, default 5000
 }
