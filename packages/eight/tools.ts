@@ -176,7 +176,7 @@ import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../
 import { ArtifactStore } from "./artifact-store";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
-import { formatEditNotFound } from "./edit-hint";
+import { formatEditNotFound, uniqueWhitespaceMatch } from "./edit-hint";
 import { isNoToolScope } from "./agent-scopes";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -2715,7 +2715,16 @@ export class ToolExecutor {
 		// gate checked (String.replace would expand `$&` etc. in newText).
 		// A duplicate oldText is refused, never silently applied to the first
 		// copy (#3898); the refusal is logged so it can be counted.
-		const located = locateEdit(content, oldText, startLine);
+		let located = locateEdit(content, oldText, startLine);
+		if (located.kind === "none") {
+			// Whitespace-only miss with one candidate: use the file's exact
+			// bytes for oldText and go through the same gates (L17).
+			const exact = uniqueWhitespaceMatch(content, oldText);
+			if (exact !== null && exact !== oldText) {
+				oldText = exact;
+				located = locateEdit(content, oldText, startLine);
+			}
+		}
 		const refusal = editRefusal(located, filePath);
 		if (refusal) {
 			logEditRefusal(located, filePath, oldText.length);

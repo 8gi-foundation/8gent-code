@@ -92,19 +92,59 @@ describe("edit-hint bounded work", () => {
 	});
 });
 
-describe("ToolExecutor edit_file not-found", () => {
-	it("returns the hint and leaves the file byte-identical", async () => {
+import { uniqueWhitespaceMatch } from "./edit-hint";
+
+const TAB_FILE = 'switch (c) {\n\tcase "list":\n\t\tbreak;\n\tdefault:\n\t\tfail();\n\t}\n';
+
+describe("uniqueWhitespaceMatch", () => {
+	it("returns the file's exact block for a unique whitespace-only miss", () => {
+		expect(uniqueWhitespaceMatch(TAB_FILE, '  default:\n    fail();\n  }')).toBe(
+			"\tdefault:\n\t\tfail();\n\t}",
+		);
+	});
+	it("keeps a trailing newline and refuses ambiguity or non-matches", () => {
+		expect(uniqueWhitespaceMatch(TAB_FILE, "  default:\n")).toBe("\tdefault:\n");
+		expect(uniqueWhitespaceMatch("a\n b\na\n b\n", "a\nb")).toBeNull();
+		expect(uniqueWhitespaceMatch(TAB_FILE, "nothing here")).toBeNull();
+		expect(uniqueWhitespaceMatch(TAB_FILE, "   ")).toBeNull();
+	});
+});
+
+describe("ToolExecutor edit_file whitespace miss", () => {
+	it("applies a unique whitespace-only match against the file's exact text", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edit-hint-"));
 		const f = path.join(dir, "cli.ts");
 		fs.writeFileSync(f, FILE);
+		const out = await new ToolExecutor(dir).execute("edit_file", {
+			path: "cli.ts",
+			oldText: "   const args = process.argv.slice(2);\n   if (args[0] === 'add') {",
+			newText: "  const args = [];\n  if (args[0] === 'add') {",
+		});
+		expect(out).toContain("File edited");
+		expect(fs.readFileSync(f, "utf-8")).toBe(
+			FILE.replace("  const args = process.argv.slice(2);\n  if (args[0] === 'add') {", "  const args = [];\n  if (args[0] === 'add') {"),
+		);
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("keeps the hint and leaves the file byte-identical when the match is ambiguous or fuzzy", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edit-hint-"));
+		const f = path.join(dir, "cli.ts");
+		fs.writeFileSync(f, `${FILE}${FILE}`);
 		const before = fs.readFileSync(f);
 		const out = await new ToolExecutor(dir).execute("edit_file", {
 			path: "cli.ts",
 			oldText: "   const args = process.argv.slice(2);\n   if (args[0] === 'add') {",
 			newText: "x",
 		});
-		expect(out).toContain("Retry edit_file with this exact text; do not rewrite the file.");
-		expect(out).toContain("  const args = process.argv.slice(2);\n  if (args[0] === 'add') {");
+		expect(out).toContain("Could not find the text to replace");
+		expect(fs.readFileSync(f).equals(before)).toBe(true);
+		const out2 = await new ToolExecutor(dir).execute("edit_file", {
+			path: "cli.ts",
+			oldText: "const args = process.argv.slice(3);\nif (args[0] === 'add') {",
+			newText: "x",
+		});
+		expect(out2).toContain("closest match");
 		expect(fs.readFileSync(f).equals(before)).toBe(true);
 		fs.rmSync(dir, { recursive: true, force: true });
 	});

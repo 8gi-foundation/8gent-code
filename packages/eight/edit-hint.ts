@@ -114,3 +114,41 @@ export function formatEditNotFound(filePath: string, content: string, oldText: s
 	}
 	return `${base}\n${how} Exact current text (starts at line ${first}):\n${body}\n\n${retry}`;
 }
+
+/**
+ * The file's exact text for a block that matches oldText line for line after
+ * whitespace normalisation, only when exactly one such block exists (L17).
+ * Models miss an indent or trailing space by a char; the hint already told
+ * them so, but they burned a turn (and sometimes the run) retrying. The caller
+ * swaps this in for oldText and re-runs the normal locate/policy path, so
+ * every gate still sees the exact bytes. Zero or several blocks: null.
+ */
+export function uniqueWhitespaceMatch(content: string, oldText: string): string | null {
+	const lines = content.split("\n");
+	const want = oldText.split("\n");
+	const trailingNewline = want.length > 1 && want[want.length - 1] === "";
+	if (trailingNewline) want.pop();
+	if (want.length === 0 || norm(oldText) === "") return null;
+	const wantNorm = want.map(norm);
+	const fileNorm = lines.map(norm);
+	let found = -1;
+	for (let i = 0; i + want.length <= lines.length; i++) {
+		let ok = true;
+		for (let j = 0; j < want.length; j++) {
+			if (fileNorm[i + j] !== wantNorm[j]) {
+				ok = false;
+				break;
+			}
+		}
+		if (!ok) continue;
+		if (found !== -1) return null; // ambiguous
+		found = i;
+	}
+	if (found === -1) return null;
+	const block = lines.slice(found, found + want.length).join("\n");
+	if (trailingNewline) {
+		if (found + want.length >= lines.length) return null;
+		return `${block}\n`;
+	}
+	return block;
+}
