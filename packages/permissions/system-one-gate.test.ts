@@ -288,6 +288,9 @@ describe("systemOneGate verdicts (stub decider)", () => {
 		const r = await systemOneGate("echo SYS1_THROW", on);
 		expect(r.run).toBe(false);
 		expect(r.message).toContain("no approval channel is available");
+		// #3870: say plainly the judge was unavailable and the command did not run.
+		expect(r.message).toContain("safety judge was unavailable");
+		expect(r.message).toContain("was not run");
 		expect(r.message).toContain("pYes=NaN");
 		expect(r.message).toContain("failing closed");
 	});

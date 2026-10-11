@@ -994,7 +994,9 @@ async function decide(
 	const base =
 		humanApproved === false
 			? "escalated and the user declined"
-			: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
+			: guard.backend === RULES_ONLY
+				? "the safety judge was unavailable and no approval channel is available, so the command was not run (escalate is treated as block, failing closed)"
+				: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
 	const why = guard.backend === RULES_ONLY && guard.reason ? `${base} (${guard.reason})` : base;
 	return {
 		run: false,
