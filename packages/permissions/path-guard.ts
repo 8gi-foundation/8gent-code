@@ -305,19 +305,20 @@ function escapeRe(s: string): string {
 }
 
 /** Spellings of a session record (or the data dir itself) in a flattened command. */
-function sessionRecordPatterns(): RegExp[] {
+function sessionRecordPatterns(includeRoot = true): RegExp[] {
 	const dirs = SESSION_RECORD_DIRS.join("|");
 	const files = SESSION_RECORD_FILES.map(escapeRe).join("|");
 	const pats = [
 		new RegExp(`\\.8gent/+(?:${dirs})(?![\\w-])`),
 		new RegExp(`\\.8gent/+(?:${files})(?![\\w.-])`),
 		new RegExp(`(?:^|[\\s/=])(?:${files})(?![\\w.-])`),
-		/\.8gent\/*(?=$|[\s;&|)])/,
+		...(includeRoot ? [/\.8gent\/*(?=$|[\s;&|)])/] : []),
 	];
 	const dataDir = process.env.EIGHT_DATA_DIR;
 	if (dataDir) {
 		const d = escapeRe(dataDir.toLowerCase().replace(/\/+$/, ""));
-		pats.push(new RegExp(`${d}/+(?:${dirs}|${files})`), new RegExp(`${d}/*(?=$|[\\s;&|)])`));
+		pats.push(new RegExp(`${d}/+(?:${dirs}|${files})`));
+		if (includeRoot) pats.push(new RegExp(`${d}/*(?=$|[\\s;&|)])`));
 	}
 	return pats;
 }
@@ -334,7 +335,7 @@ export function commandMutatesSessionRecords(command: string): boolean {
 	const pats = sessionRecordPatterns();
 	const names = (t: string) => pats.some((p) => p.test(t));
 	// An interpreter that names a record can write it in ways no verb list sees; deny the naming.
-	if (INTERPRETER.test(flat) && names(flat)) return true;
+	if (INTERPRETER.test(flat) && sessionRecordPatterns(false).some((p) => p.test(flat))) return true;
 	let inRecordDir = false;
 	for (const raw of flat.split(/;|&&|\|\||\||\n/)) {
 		const seg = raw.trim();

@@ -140,7 +140,14 @@ describe("interpreters that name a record are denied", () => {
 			expect(evaluatePolicy("run_command", { command: c, cwd: PROJ, workingDirectory: PROJ }).allowed).toBe(false);
 		});
 	test("interpreters that do not name a record are not flagged", () => {
-		for (const c of ["python3 script.py", "node build.js", `bun -e "console.log(1)"`, "perl -v"])
+		for (const c of [
+			"python3 script.py",
+			"node build.js",
+			`bun -e "console.log(1)"`,
+			"perl -v",
+			// naming the bare data dir is a listing, left to the browser-secret check
+			`node -e "require('fs').readdirSync(process.env.HOME+'/.8gent')"`,
+		])
 			expect(commandMutatesSessionRecords(c)).toBe(false);
 	});
 });
