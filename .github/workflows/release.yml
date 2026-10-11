@@ -9,8 +9,12 @@ on:
   # workflow on the tag with workflow_dispatch instead.
   workflow_dispatch:
 
+# contents: write creates the draft release. id-token: write lets npm publish
+# through trusted publishing (OIDC) with provenance, so a release no longer
+# depends on a long-lived NPM_TOKEN that can silently stop working (#3981).
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -19,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -29,18 +33,39 @@ jobs:
           bun-version: 1.4.3
 
       - name: Setup Node (for npm publish)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - name: npm new enough for trusted publishing
+        run: |
+          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)"; then
+            npm install -g npm@11
+          fi
+          npm --version
 
       # Fail before anything is built, tagged or uploaded. v0.18.0 built, smoke
       # tested and published a GitHub Release, then npm publish answered E404
       # because the NPM_TOKEN secret no longer authenticated (#3326).
-      - name: Preflight (tag ref, version, npm token)
+      # npm can publish two ways; at least one must work right now:
+      #   1. trusted publishing: npmjs.com lists this repository and release.yml
+      #      as a trusted publisher for the package (no secret at all), or
+      #   2. the NPM_TOKEN secret, if npm still accepts it.
+      # The trusted-publishing check is the same OIDC token exchange npm itself
+      # does at publish time; the short-lived token it returns is discarded.
+      - name: Preflight (tag ref, version, npm auth)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
         run: |
+          # The pack smoke below requires this secret (#3283); say so before
+          # the build, not twenty minutes in.
+          if [ -z "${PACK_SMOKE_OWNER_IDENTITY}" ]; then
+            echo "::error::the PACK_SMOKE_OWNER_IDENTITY secret is not set for this repository (Settings, Secrets and variables, Actions). The release pack smoke refuses to run without it."
+            exit 1
+          fi
           if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::release.yml publishes from a vX.Y.Z tag only, not ${GITHUB_REF}"
             exit 1
@@ -50,11 +75,23 @@ jobs:
             echo "::error::package.json is ${PKG} but the tag is ${GITHUB_REF_NAME}"
             exit 1
           fi
-          if ! NPM_USER="$(npm whoami)"; then
-            echo "::error::npm does not accept the NPM_TOKEN secret. Replace it with an npm token that can publish @8gi-foundation/8gent-code, then re-run this workflow on ${GITHUB_REF_NAME}."
+          OIDC=0
+          ID_TOKEN="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).value||"")}catch{}})' || true)"
+          if [ -n "$ID_TOKEN" ]; then
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${ID_TOKEN}" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@8gi-foundation%2f8gent-code" || true)"
+            if [ "${CODE:0:1}" = "2" ]; then OIDC=1; fi
+          fi
+          if [ "$OIDC" = 1 ]; then
+            echo "npm publishes through trusted publishing (OIDC, with provenance)"
+          elif [ -n "${NODE_AUTH_TOKEN}" ] && NPM_USER="$(npm whoami)"; then
+            echo "npm publishes as ${NPM_USER} (NPM_TOKEN). Trusted publishing is not set up for this workflow yet."
+          else
+            echo "::error::npm would refuse this publish. Either add a trusted publisher on npmjs.com (package @8gi-foundation/8gent-code, Settings, Trusted Publisher, GitHub Actions: organization 8gi-foundation, repository 8gent-code, workflow release.yml), or replace the NPM_TOKEN secret with a token that can publish the package. Then re-run this workflow on ${GITHUB_REF_NAME}."
             exit 1
           fi
-          echo "npm publishes as ${NPM_USER}"
 
       - name: Install dependencies
         run: bun install
@@ -100,7 +137,9 @@ jobs:
           fi
           {
             printf '## 8gent Code v%s\n\n' "$VERSION"
-            printf 'Install: `npm install -g @8gi-foundation/8gent-code`\n\n'
+            printf 'Install on Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`\n\n'
+            printf 'Install on macOS or Linux: `curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh`\n\n'
+            printf 'Or with npm: `npm install -g @8gi-foundation/8gent-code`\n\n'
             tail -n +3 section.md
             printf '\n---\nFull changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)\n'
           } > release_notes.md
@@ -142,8 +181,24 @@ jobs:
           else
             # The exact tarball staged and checksummed above, so npm and the
             # GitHub Release carry the same bytes (no second prepublishOnly build).
-            npm publish release-assets/*.tgz --access public
+            npm publish release-assets/*.tgz --access public --provenance
           fi
+
+      # npm `latest` must be this release, or `npm install -g` and everything
+      # that reads npm keep handing out an old version (0.17.0 was latest for
+      # five months). publish moves latest by default; this proves it did.
+      - name: npm latest is this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          LATEST=""
+          for i in $(seq 1 20); do
+            LATEST="$(npm view @8gi-foundation/8gent-code dist-tags.latest 2>/dev/null || true)"
+            if [ "$LATEST" = "$VERSION" ]; then echo "npm latest is ${VERSION}"; exit 0; fi
+            sleep 15
+          done
+          echo "::error::npm dist-tag latest is '${LATEST}', not ${VERSION}"
+          exit 1
 
       # #3803: this job no longer publishes the release. v0.18.1 and v0.19.0
       # went public with only an npm tarball and no Windows .exe because
@@ -153,3 +208,23 @@ jobs:
       # job's tarball are all on it and npm has the version.
       - name: Leave the release as a draft for the installers
         run: echo "release stays a draft until release-binaries.yml attaches the installers and publishes it"
+
+  # A failed release used to be invisible for a week (#3658). Any failure
+  # above opens (or comments on) one P0 issue, so it lands where people look.
+  alarm:
+    name: Open an issue when the release fails
+    needs: release
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Open or update the release-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/release-alarm.sh "release.yml" "$REF" "$RUN_URL"

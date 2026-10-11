@@ -1,12 +1,15 @@
 # release-binaries.yml - Build self-contained binaries and installers for
-# macOS, Linux and Windows on a v* tag, and attach them to the GitHub Release.
+# macOS, Linux and Windows on a v* tag, prove they start on each OS, attach
+# them to the GitHub Release and publish it.
 #
-# RUNNER: everything builds on the org's self-hosted helm runner (Apple
-# Silicon Mac, labels self-hosted,8gi,helm). The org does not use
-# GitHub-hosted minutes. Bun cross-compiles every target from macOS; nfpm
-# builds the .deb/.rpm and makensis builds the Windows installer, both
-# installed on the runner. This proves the binaries build and package; it does
-# not run them on Linux or Windows.
+# RUNNERS (#3981): GitHub-hosted. The build ran on the self-hosted helm Mac,
+# whose disk gate refused the v0.18.0 job on 1 Oct (10 GB free, floor 12 GB),
+# so v0.18.1 and v0.19.0 shipped with no binaries at all. A release must not
+# depend on one machine's free disk. The repository is public, so hosted
+# minutes cost nothing. macos-latest (Apple Silicon) builds every target, since
+# Bun cross-compiles them all from macOS and notarization needs xcrun; the
+# Windows exe and the Linux binary are then started on windows-latest and
+# ubuntu-latest before anything is attached.
 #
 # Reproduce locally on any Mac with bun, nfpm and makensis installed:
 #   bun install && bun run scripts/build-binaries.ts
@@ -15,8 +18,10 @@
 # (makensis on macOS/Linux takes -D; the Windows build takes /D.)
 #
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
-# are produced (they run, but trigger OS trust prompts). Windows Authenticode
-# signing needs signtool, which the helm runner does not have; see SIGNING.md.
+# are produced (they run, but trigger OS trust prompts). macOS codesigning with
+# EIGHT_MAC_SIGN_IDENTITY needs that identity in the runner's keychain, which a
+# hosted runner does not have, so it is not passed here; notarization (below)
+# and Linux GPG signing still apply when their secrets exist. See SIGNING.md.
 # The npm publish and the GitHub Release (as a draft) live in release.yml; this
 # workflow publishes the release once every installer, the tarball and npm are in.
 
@@ -28,8 +33,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# Least privilege (#3803 hardening): the build job runs on the self-hosted
-# runner and only reads. Only the job that edits the release gets write.
+# Least privilege (#3803 hardening): builds and smoke tests only read. Only
+# the job that edits the release gets contents: write, and only the alarm
+# gets issues: write.
 permissions:
   contents: read
 
@@ -40,13 +46,20 @@ concurrency:
 jobs:
   build:
     name: Build macOS, Linux and Windows
-    runs-on: [self-hosted, 8gi, helm]
+    runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Toolchain
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Toolchain (nfpm, makensis)
         run: |
+          brew install makensis
+          brew install nfpm || brew install goreleaser/tap/nfpm
           bun --version
           nfpm --version
           makensis -VERSION
@@ -56,8 +69,6 @@ jobs:
 
       - name: Compile all targets
         run: bun run scripts/build-binaries.ts
-        env:
-          EIGHT_MAC_SIGN_IDENTITY: ${{ secrets.EIGHT_MAC_SIGN_IDENTITY }}
 
       # Runs the real commands against the compiled binary (script from #2966).
       # Source-mode tests cannot see import-time failures that only exist inside
@@ -129,16 +140,71 @@ jobs:
           cat installers.sha256
 
       - name: Upload artifacts to workflow
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: 8gent-binaries
           path: dist/installers/*
           if-no-files-found: error
 
+  # No CI run had ever started the Windows exe before a release. Start both
+  # Windows builds on a real Windows machine; nothing is attached otherwise.
+  # --version is the gate; the memory round trip is reported as a warning so
+  # a first Windows release is not held back by a memory-store bug.
+  smoke-windows:
+    name: Start the Windows exe on Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: --version, then a memory round trip
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('8gent-windows-x64.exe', '8gent-windows-x64-baseline.exe')) {
+            $exe = Join-Path (Resolve-Path bins) $name
+            $home8 = Join-Path $env:RUNNER_TEMP ("home-" + $name)
+            New-Item -ItemType Directory -Force -Path $home8 | Out-Null
+            $env:USERPROFILE = $home8
+            $env:HOME = $home8
+            $v = & $exe --version | Out-String
+            Write-Host "${name} --version -> $v"
+            if ($LASTEXITCODE -ne 0 -or $v -notmatch '8gent Code v\d+\.\d+\.\d+') { throw "${name} did not report a version" }
+            if (($env:TAG -match '^v\d+\.\d+\.\d+$') -and ($v -notmatch [regex]::Escape("8gent Code $env:TAG"))) { throw "${name} reports '$v', not $env:TAG" }
+            try {
+              & $exe memory remember 'smoke-check-marker' | Out-Null
+              $r = & $exe memory recall smoke-check | Out-String
+            } catch { $r = "$_" }
+            if ($r -notmatch 'smoke-check-marker') { Write-Host "::warning::${name} memory recall did not return the marker: $r" }
+            Write-Host "${name} PASS"
+          }
+
+  smoke-linux:
+    name: Start the Linux binary on Linux
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (smoke-compiled.sh)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: Smoke-test the compiled Linux binary
+        run: |
+          chmod +x bins/8gent-linux-x64
+          bash scripts/smoke-compiled.sh bins/8gent-linux-x64
+
   release:
     name: Attach to GitHub Release
-    needs: build
-    runs-on: [self-hosted, 8gi, helm]
+    needs: [build, smoke-windows, smoke-linux]
+    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -153,10 +219,10 @@ jobs:
           fi
 
       - name: Checkout (release-guard.sh)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: 8gent-binaries
           path: upload
@@ -216,7 +282,7 @@ jobs:
             sleep 30
           done
           if [ "$npm_ok" != 1 ]; then
-            echo "::error::@8gi-foundation/8gent-code@${VERSION} is not on npm after 15 minutes; release ${TAG} stays a draft. Check the release.yml run (npm token)."
+            echo "::error::@8gi-foundation/8gent-code@${VERSION} is not on npm after 15 minutes; release ${TAG} stays a draft. Check the release.yml run (npm auth)."
             exit 1
           fi
           bash scripts/release-guard.sh publish-complete "$TAG" \
@@ -229,3 +295,33 @@ jobs:
             '^8gent-linux-arm64$' \
             '\.tgz$' \
             '^SHA256SUMS$'
+
+  # The public release, installed the way a user installs it: the one-line
+  # installers' scripts on fresh Windows, macOS and Linux machines, checking
+  # that `8gent --version` names this tag.
+  install-smoke:
+    name: Install the published release
+    needs: release
+    uses: ./.github/workflows/release-install-smoke.yml
+    with:
+      tag: ${{ github.ref_name }}
+
+  # A failed release used to be invisible for a week (#3658). Any failure
+  # above opens (or comments on) one P0 issue, so it lands where people look.
+  alarm:
+    name: Open an issue when the release fails
+    needs: [build, smoke-windows, smoke-linux, release, install-smoke]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Open or update the release-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/release-alarm.sh "release-binaries.yml" "$REF" "$RUN_URL"
