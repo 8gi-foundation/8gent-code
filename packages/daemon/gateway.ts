@@ -43,6 +43,7 @@ import {
 	handleStoreOpen,
 } from "./routes/store/index";
 import { handleStageHttp } from "./huddle-stage";
+import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
 import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
 import {
 	type TimeTravelInbound,
@@ -558,18 +559,21 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 	// run_command/network/write_file and explicitly allow only channel_post.
 	installTablePolicies();
 
-	// v0: the /computer route and Table frames are loopback-only. We keep the
-	// global bind unchanged (other channels still listen on 0.0.0.0) and enforce
-	// loopback PER-SURFACE: the /computer route rejects non-loopback peers at
-	// upgrade, and Table channel:*/message:* frames are rejected per-frame in
-	// table-routes (isLoopbackAddress) regardless of this global bind. Set
-	// DAEMON_HOSTNAME=127.0.0.1 to lock every surface down.
-	const hostname = process.env.DAEMON_HOSTNAME || "0.0.0.0";
+	// Loopback unless DAEMON_HOSTNAME says otherwise, and never a wider bind
+	// without a token. The /computer route and Table frames keep their own
+	// per-surface loopback checks on top of this.
+	const hostname = resolveBindHost();
+	assertSafeBind(hostname, config.authToken);
 
 	const server = Bun.serve({
 		port: config.port,
 		hostname,
 		fetch(req, server) {
+			// Before any route or upgrade: refuse web pages that are not ours
+			// (cross-site WebSocket hijack) and foreign Host headers (DNS rebinding).
+			const refused = guardRequest(req, hostname, config.port);
+			if (refused) return refused;
+
 			const url = new URL(req.url);
 
 			// Tag computer-route upgrades so the websocket open handler can branch.
