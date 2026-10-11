@@ -523,7 +523,7 @@ const listFiles = tool({
 const gitStatus = tool({
 	description: "Get git status",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git status"),
+	execute: async () => runArgv("git", ["status"]),
 });
 
 const gitDiff = tool({
@@ -531,7 +531,7 @@ const gitDiff = tool({
 	inputSchema: z.object({
 		staged: z.boolean().optional().describe("Show staged changes only"),
 	}),
-	execute: async ({ staged }) => runShellCommand(staged ? "git diff --staged" : "git diff"),
+	execute: async ({ staged }) => runArgv("git", staged ? ["diff", "--staged"] : ["diff"]),
 });
 
 const gitLog = tool({
@@ -539,7 +539,8 @@ const gitLog = tool({
 	inputSchema: z.object({
 		count: z.number().optional().describe("Number of commits to show (default: 10)"),
 	}),
-	execute: async ({ count }) => runShellCommand(`git log --oneline -${count || 10}`),
+	execute: async ({ count }) =>
+		runArgv("git", ["log", "--oneline", `-${Math.floor(Math.abs(Number(count) || 10)) || 10}`]),
 });
 
 const gitAdd = tool({
@@ -547,7 +548,13 @@ const gitAdd = tool({
 	inputSchema: z.object({
 		files: z.string().optional().describe("Files to add (default: all)"),
 	}),
-	execute: async ({ files }) => runShellCommand(`git add ${files || "."}`),
+	// Whitespace-separated pathspecs after "--": none of them can be an option.
+	execute: async ({ files }) => {
+		const paths = String(files || "")
+			.split(/\s+/)
+			.filter(Boolean);
+		return runArgv("git", ["add", "--", ...(paths.length ? paths : ["."])]);
+	},
 });
 
 const gitCommit = tool({
@@ -555,7 +562,7 @@ const gitCommit = tool({
 	inputSchema: z.object({
 		message: z.string().describe("Commit message"),
 	}),
-	execute: async ({ message }) => runShellCommand(`git commit -m "${message}"`),
+	execute: async ({ message }) => runArgv("git", ["commit", "-m", String(message)]),
 });
 
 const gitPush = tool({
@@ -564,13 +571,13 @@ const gitPush = tool({
 		setUpstream: z.boolean().optional().describe("Set upstream tracking"),
 	}),
 	execute: async ({ setUpstream }) =>
-		runShellCommand(`git push ${setUpstream ? "-u origin HEAD" : ""}`),
+		runArgv("git", setUpstream ? ["push", "-u", "origin", "HEAD"] : ["push"]),
 });
 
 const gitBranch = tool({
 	description: "List all git branches",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git branch -a"),
+	execute: async () => runArgv("git", ["branch", "-a"]),
 });
 
 const gitCheckout = tool({
@@ -578,7 +585,9 @@ const gitCheckout = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("Branch name to checkout"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout ${branch}`),
+	// No "--" here: after it git checkout reads paths, not a branch. Refuse instead.
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", String(branch)]),
 });
 
 const gitCreateBranch = tool({
@@ -586,7 +595,8 @@ const gitCreateBranch = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("New branch name"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout -b ${branch}`),
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", "-b", String(branch)]),
 });
 
 // ============================================
@@ -596,7 +606,7 @@ const gitCreateBranch = tool({
 const ghPrList = tool({
 	description: "List pull requests",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh pr list"),
+	execute: async () => runArgv("gh", ["pr", "list"]),
 });
 
 const ghPrCreate = tool({
@@ -606,7 +616,7 @@ const ghPrCreate = tool({
 		body: z.string().optional().describe("PR description"),
 	}),
 	execute: async ({ title, body }) =>
-		runShellCommand(`gh pr create --title "${title}" --body "${body || ""}"`),
+		runArgv("gh", ["pr", "create", "--title", String(title), "--body", String(body || "")]),
 });
 
 const ghPrView = tool({
@@ -614,13 +624,17 @@ const ghPrView = tool({
 	inputSchema: z.object({
 		number: z.number().optional().describe("PR number (default: current branch PR)"),
 	}),
-	execute: async ({ number }) => runShellCommand(`gh pr view ${number || ""}`),
+	execute: async ({ number }) =>
+		runArgv(
+			"gh",
+			number ? ["pr", "view", String(Math.floor(Math.abs(Number(number))))] : ["pr", "view"],
+		),
 });
 
 const ghIssueList = tool({
 	description: "List issues",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh issue list"),
+	execute: async () => runArgv("gh", ["issue", "list"]),
 });
 
 const ghIssueCreate = tool({
@@ -635,9 +649,16 @@ const ghIssueCreate = tool({
 	}),
 	execute: async ({ title, body, assignee }) => {
 		const who = assignee || "@me";
-		return runShellCommand(
-			`gh issue create --title "${title}" --body "${body || ""}" --assignee "${who}"`,
-		);
+		return runArgv("gh", [
+			"issue",
+			"create",
+			"--title",
+			String(title),
+			"--body",
+			String(body || ""),
+			"--assignee",
+			String(who),
+		]);
 	},
 });
 
@@ -1298,18 +1319,17 @@ const backgroundOutput = tool({
 // Shell Command Runner (shared)
 // ============================================
 
-async function runShellCommand(command: string): Promise<string> {
-	// Judge git state against the directory this command runs in (#3748).
-	const cwd = getToolContext().workingDirectory;
-	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+/**
+ * The gates every command passes before it runs: the permission policy, System
+ * One and the approval card. Returns the refusal to show, or null to run.
+ * Shared by the shell runner and the argv runner, so a git or gh tool is
+ * judged exactly as the same command typed into run_command would be.
+ */
+async function commandRefusal(command: string): Promise<string | null> {
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
-	const { getHookManager } = await import("../hooks");
-
-	// Captured once: the timer and process callbacks below run after this call.
 	const ctx = getToolContext();
 	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
-	const hookManager = getHookManager();
 
 	const permissionCheck = permissionManager.checkPermission(command);
 	if (permissionCheck === "denied") {
@@ -1344,6 +1364,21 @@ async function runShellCommand(command: string): Promise<string> {
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
+	return null;
+}
+
+async function runShellCommand(command: string): Promise<string> {
+	// Judge git state against the directory this command runs in (#3748).
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+	const { getHookManager } = await import("../hooks");
+
+	// Captured once: the timer and process callbacks below run after this call.
+	const ctx = getToolContext();
+	const hookManager = getHookManager();
+
+	const refusal = await commandRefusal(command);
+	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
@@ -1469,6 +1504,115 @@ async function runShellCommand(command: string): Promise<string> {
 				command: finalCommand,
 				error: err.message,
 				workingDirectory: ctx.workingDirectory,
+			});
+			resolve(`Error: ${err.message}`);
+		});
+	});
+}
+
+// ============================================
+// Argv Command Runner (git and gh tools, #3998)
+// ============================================
+
+/** Quote one argv word for display, so the gates read what actually runs. */
+function quoteWord(word: string): string {
+	if (word !== "" && /^[A-Za-z0-9_./:@%+=,-]+$/.test(word)) return word;
+	return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The command line an argv call is judged and shown as. Display only, never run. */
+export function argvDisplay(bin: string, args: readonly string[]): string {
+	return [bin, ...args].map(quoteWord).join(" ");
+}
+
+/**
+ * A value that goes where git or gh reads options would be read as one
+ * (`--upload-pack=x`, `-c core.sshCommand=x`). Refuse it rather than run it.
+ */
+export function optionRefusal(label: string, value: string): string | null {
+	return value.startsWith("-")
+		? `[BLOCKED] ${label} may not start with "-": it would be read as an option. Got: ${value}`
+		: null;
+}
+
+const ARGV_NON_INTERACTIVE_ENV = {
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS_REQUIRE: "force",
+	GH_PROMPT_DISABLED: "1",
+};
+
+const ARGV_TIMEOUT_MS = 120_000;
+
+/**
+ * Run a git or gh tool as argv: the binary and an args array, no shell. Model
+ * text is one argument each and is never parsed for `;`, `$( )`, backticks,
+ * pipes or newlines (#3998). The same permission, System One and approval
+ * gates as run_command judge the quoted display line first.
+ */
+async function runArgv(bin: string, args: string[]): Promise<string> {
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runArgv(bin, args));
+	const display = argvDisplay(bin, args);
+	const refusal = await commandRefusal(display);
+	if (refusal !== null) return refusal;
+
+	const { getHookManager } = await import("../hooks");
+	const hookManager = getHookManager();
+	const startTime = Date.now();
+	await hookManager.executeHooks("beforeCommand", { command: display, workingDirectory: cwd });
+
+	const { spawn } = await import("node:child_process");
+	return new Promise((resolve) => {
+		const proc = spawn(bin, args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
+			shell: false,
+			env: { ...process.env, ...ARGV_NON_INTERACTIVE_ENV },
+		});
+		let stdout = "";
+		let stderr = "";
+		let settled = false;
+		proc.stdout?.on("data", (d: Buffer) => {
+			stdout += d.toString();
+		});
+		proc.stderr?.on("data", (d: Buffer) => {
+			stderr += d.toString();
+		});
+		const timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			killProcessTree(proc.pid, "SIGKILL");
+			resolve(`TIMEOUT after ${ARGV_TIMEOUT_MS / 1000}s. Partial output:\n${stdout}\n${stderr}`);
+		}, ARGV_TIMEOUT_MS);
+		proc.on("close", (code) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("afterCommand", {
+				command: display,
+				exitCode: code ?? 0,
+				stdout,
+				stderr,
+				duration: Date.now() - startTime,
+				workingDirectory: cwd,
+			});
+			resolve(
+				code === 0
+					? stdout || stderr || "Command completed successfully."
+					: `Exit code ${code}:\n${stdout}\n${stderr}`,
+			);
+		});
+		proc.on("error", (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("onError", {
+				command: display,
+				error: err.message,
+				workingDirectory: cwd,
 			});
 			resolve(`Error: ${err.message}`);
 		});
