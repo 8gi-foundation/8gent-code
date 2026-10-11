@@ -160,7 +160,7 @@ describe("thresholds (code owns them, not the model)", () => {
 		const out = await chooseElement({
 			elements: two,
 			intent: "click Home",
-			decider: fixed([0.46, 0.44, 0.1]),
+			decider: fixed([0.52, 0.48, 0]),
 		});
 		expect(out.status).toBe("NEEDS_AGENT");
 		if (out.status === "NEEDS_AGENT") expect(out.reason).toContain(`${MIN_MARGIN}`);

@@ -95,11 +95,13 @@ export const MAX_ELEMENTS = MAX_OPTIONS - 1;
 export const NONE_OPTION = "None of these: the target is not in the list";
 /**
  * Keep the model's pick only when its probability clears MIN_CONFIDENCE and
- * beats the runner-up by MIN_MARGIN. Uniform over 26 options is 0.038, so
- * 0.35 means the mass has collapsed onto one letter. Fitted on the 12 Oct
- * labelled set (eval/run.ts); see the PR for the sweep.
+ * beats the runner-up by MIN_MARGIN. Uniform over 26 options is 0.038.
+ * Fitted on the 12 Oct labelled set (eval/run.ts, Selene 8B, 45 DOM
+ * targets): at 0.5 every kept pick was right (21/21); at 0.35 two wrong
+ * picks got through at 0.38 for three more hits. A wrong click costs more
+ * than an escalation, so the stricter cut ships.
  */
-export const MIN_CONFIDENCE = 0.35;
+export const MIN_CONFIDENCE = 0.5;
 export const MIN_MARGIN = 0.1;
 
 export const RISKY =
