@@ -10,7 +10,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
 import { runExtCommand } from "./ext-cli";
@@ -465,9 +465,22 @@ describe("guards around imported code", () => {
 			"#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null",
 		);
 		expect(cli).toContain('["--no-install", "run", tuiPath');
-		expect(readFileSync(path.join(repo, "bin", "8gent-run.js"), "utf8")).toContain(
-			'["--no-install", cli',
+		const wrapper = readFileSync(path.join(repo, "bin", "8gent-run.js"), "utf8");
+		expect(wrapper).toContain(
+			'const SAFE_BUN_FLAGS = ["--no-install", "--no-env-file", `--config=${devNull}`];',
 		);
+		expect(wrapper).toContain('spawnSync("bun", [...SAFE_BUN_FLAGS, cli');
+		// Bun accepts exactly those flags (a typo would make every launch fail).
+		const probe = Bun.spawnSync([
+			process.execPath,
+			"--no-install",
+			"--no-env-file",
+			`--config=${devNull}`,
+			"-e",
+			"console.log(process.execArgv.join(' '))",
+		]);
+		expect(probe.exitCode).toBe(0);
+		expect(probe.stdout.toString()).toContain("--no-install");
 		expect(cli).toContain('["--no-install", "run", benchmarkPath');
 		expect(cli).toContain('["--no-install", "run", demoPath');
 		expect(cli).not.toMatch(/spawn\("bun", \["run"/);
