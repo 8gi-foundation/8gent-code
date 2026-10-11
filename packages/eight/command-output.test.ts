@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { HEAD_BYTES, TAIL_BYTES, formatCommandOutput } from "./command-output";
+import { HEAD_BYTES, TAIL_BYTES, formatCommandOutput, writtenFiles } from "./command-output";
 
 describe("formatCommandOutput (#3373)", () => {
 	test("exit 0 with both streams keeps stderr and labels it", () => {
@@ -95,5 +95,30 @@ describe("formatCommandOutput (#3373)", () => {
 		const out = formatCommandOutput(0, stdout, "");
 		expect(out).toContain("[REDACTED:github_token]");
 		assertNoFragment(out);
+	});
+});
+
+describe("silent success names the file it wrote (browser_operation pilot)", () => {
+	const cwd = "/work/run";
+	test("curl -o inside the working directory points at read_file", () => {
+		const r = formatCommandOutput(0, "", "", "curl -s -c cj.txt http://127.0.0.1:1/ -o login.html", cwd);
+		expect(r).toContain("wrote cj.txt, login.html");
+		expect(r).toContain("read_file");
+		expect(r).not.toContain("inside the working directory");
+	});
+	test("a /tmp target is called out as unreadable", () => {
+		const r = formatCommandOutput(0, "", "", "curl -s -o /tmp/a.html http://x/", cwd);
+		expect(r).toContain("/tmp/a.html");
+		expect(r).toContain("inside the working directory");
+	});
+	test("redirects count, /dev/null and 2>&1 do not", () => {
+		expect(writtenFiles("echo hi > out.txt")).toEqual(["out.txt"]);
+		expect(writtenFiles("cmd >/dev/null 2>&1")).toEqual([]);
+	});
+	test("no file, no note change", () => {
+		expect(formatCommandOutput(0, "", "", "mkdir -p .tmp", cwd)).toBe("Command completed successfully.");
+	});
+	test("real output is never touched", () => {
+		expect(formatCommandOutput(0, "hi\n", "", "curl -o a.txt x", cwd)).toBe("hi");
 	});
 });

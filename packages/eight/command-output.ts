@@ -43,12 +43,49 @@ export function capOutput(text: string): string {
 	return `${buf.subarray(0, headEnd)}\n[${tailStart - headEnd} bytes omitted]\n${buf.subarray(tailStart)}`;
 }
 
-export function formatCommandOutput(code: number | null, stdout: string, stderr: string): string {
+/**
+ * Files a silent command wrote on purpose: curl/wget -o, --output, -c, -D and shell `>` redirects.
+ * (browser_operation pilot, 11 Oct: curl -o printed nothing, the model could not tell it had
+ * worked, repeated the identical call and ran out its 600 s turn. Its fallback paths in /tmp
+ * were then refused by read_file.)
+ */
+export function writtenFiles(command: string): string[] {
+	const files: string[] = [];
+	const add = (f?: string) => {
+		const t = f?.replace(/^["']|["']$/g, "");
+		if (t && t !== "-" && !t.startsWith("/dev/") && !t.startsWith("&") && !files.includes(t)) files.push(t);
+	};
+	if (/\b(curl|wget)\b/.test(command)) {
+		for (const m of command.matchAll(/(?:^|\s)(?:-o|-c|-D|-O|--output|--cookie-jar|--dump-header)(?:\s+|=)(\S+)/g)) add(m[1]);
+	}
+	for (const m of command.matchAll(/(?:^|[^>\d&])\d?>>?\s*([^\s&|;<>]+)/g)) add(m[1]);
+	return files;
+}
+
+export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
+	const base = "Command completed successfully.";
+	const files = command ? writtenFiles(command) : [];
+	if (files.length === 0) return base;
+	const outside = files.filter((f) => f.startsWith("/") && workingDirectory && !f.startsWith(`${workingDirectory}/`));
+	let note = `${base} It printed nothing; it wrote ${files.join(", ")}. Run read_file on that file to see the result, do not repeat the command.`;
+	if (outside.length > 0) {
+		note += ` read_file can only open files inside the working directory, so write ${outside.join(", ")} somewhere under it (for example ./name) next time.`;
+	}
+	return note;
+}
+
+export function formatCommandOutput(
+	code: number | null,
+	stdout: string,
+	stderr: string,
+	command?: string,
+	workingDirectory?: string,
+): string {
 	if (code === 0) {
 		const out = stdout.trimEnd();
 		const err = stderr.trimEnd();
 		if (out && err) return capOutput(`${out}\n[stderr]\n${err}`);
-		return capOutput(out || err) || "Command completed successfully.";
+		return capOutput(out || err) || silentSuccessNote(command, workingDirectory);
 	}
 	return `Exit code ${code}:\n${stdout}\n${stderr}`;
 }
