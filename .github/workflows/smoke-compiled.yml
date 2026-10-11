@@ -1,0 +1,50 @@
+name: Compiled smoke
+
+# Runs scripts/smoke-compiled.sh (including the TUI first-frame check) against the
+# host-built binary on all three hosted OSes whenever the script or this workflow
+# changes. macOS is not in platforms.yml, and the first-frame check once hung
+# there for 30 minutes (#4011), so this is the PR-time proof.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/smoke-compiled.sh
+      - .github/workflows/smoke-compiled.yml
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-compiled-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: 8gent-linux-x64
+          - os: macos-latest
+            binary: 8gent-darwin-arm64
+          - os: windows-latest
+            binary: 8gent-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - name: Install dependencies
+        run: bun install
+      - name: Compile host binary
+        run: bun run build:binaries:host
+      - name: Compiled binary smoke
+        timeout-minutes: 5
+        run: bash scripts/smoke-compiled.sh "dist/bin/${{ matrix.binary }}"
