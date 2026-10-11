@@ -9,6 +9,7 @@ import {
 	SessionStore,
 	latestSessionForCwd,
 	listSessions,
+	trashSession,
 	treeDir,
 } from "./session-store";
 
@@ -601,5 +602,27 @@ describe("review fixes (#3986)", () => {
 			}),
 		).toThrow(/too long/);
 		expect(SessionStore.exists("cap1", dir)).toBe(false);
+	});
+});
+
+describe("trashSession", () => {
+	test("moves tree and old files to trash/, so the session leaves every list but is recoverable", () => {
+		const s = SessionStore.create({ cwd: "/work/a" }, dir);
+		s.append(user("q"));
+		fs.writeFileSync(
+			path.join(dir, `${s.id}.json`),
+			JSON.stringify({
+				id: s.id,
+				cwd: "/work/a",
+				messageCount: 1,
+				createdAt: "x",
+				lastActiveAt: "x",
+			}),
+		);
+		expect(trashSession(s.id, dir)).toBe(true);
+		expect(listSessions({ sessionsDir: dir, includeEmpty: true })).toEqual([]);
+		expect(fs.readdirSync(path.join(dir, "trash"))).toHaveLength(2);
+		expect(trashSession(s.id, dir)).toBe(false);
+		expect(trashSession("../x", dir)).toBe(false);
 	});
 });
