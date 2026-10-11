@@ -89,6 +89,18 @@ export function hasUnquotedSemicolon(
 	command: string,
 	platform: NodeJS.Platform = process.platform,
 ): boolean {
+	return scanSemicolon(command, platform) !== null;
+}
+
+/**
+ * Scanner behind hasUnquotedSemicolon. On POSIX, bash `$'...'` and `$"..."`
+ * quote differently (`\'` is an escaped quote inside `$'...'`), so this scanner
+ * cannot track them; any `$'` or `$"` outside quotes is refused outright.
+ */
+function scanSemicolon(
+	command: string,
+	platform: NodeJS.Platform,
+): "semicolon" | "dollar-quote" | null {
 	const win = platform === "win32";
 	let inSingle = false;
 	let inDouble = false;
@@ -121,10 +133,13 @@ export function hasUnquotedSemicolon(
 			inSingle = true;
 			continue;
 		}
-		if (ch === ";") return true;
+		if (!win && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) {
+			return "dollar-quote";
+		}
+		if (ch === ";") return "semicolon";
 	}
 	// An unterminated quote is a malformed command; refuse it rather than guess.
-	return inSingle || inDouble;
+	return inSingle || inDouble ? "semicolon" : null;
 }
 
 /**
@@ -151,7 +166,14 @@ export function sanitizeShellCommand(
 
 	// Block semicolon chaining: ; cmd. A `;` inside POSIX quotes is data, not a
 	// separator (e.g. magick -annotate 'a;b'), so only an unquoted one blocks.
-	if (hasUnquotedSemicolon(command, platform)) {
+	const semi = scanSemicolon(command, platform);
+	if (semi === "dollar-quote") {
+		return {
+			safe: false,
+			reason: "Bash $'...' and $\"...\" quoting is not allowed. Use plain quotes instead",
+		};
+	}
+	if (semi) {
 		return {
 			safe: false,
 			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",

@@ -198,3 +198,16 @@ describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-vid
 		expect(hasUnquotedSemicolon('echo "a;b"', "win32")).toBe(false);
 	});
 });
+
+describe("sanitizeShellCommand: bash $'...' quoting is refused (8SO)", () => {
+	test("ANSI-C quote smuggling is blocked on POSIX", () => {
+		expect(sanitizeShellCommand("echo $'\\'';id;#'", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo $'\\'';id;echo '", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand('echo $"x"', "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo $'a'", "linux").reason).toContain("$'");
+	});
+	test("a $ inside quotes or before other chars still passes", () => {
+		expect(sanitizeShellCommand("echo '$'", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand('echo "cost $5"', "linux").safe).toBe(true);
+	});
+});
