@@ -448,6 +448,46 @@ describe.skipIf(WIN)("rename then rewrite does not launder a file (8SO F1)", () 
 		expect(own("t4.ts")).toBe(false);
 	});
 
+	test("8SO F2: .env laundered by a command the word list cannot see stays judged", () => {
+		writeFileSync(join(ws, "sc.sh"), "mv .env cfg.txt\n");
+		const rows: Array<[string, string]> = [
+			["m''v .env cfg.txt && sed -i.bak s/S/T/ cfg.txt", "cfg.txt"],
+			["bash sc.sh && sed -i.bak s/S/T/ cfg.txt", "cfg.txt"],
+			["x=$(echo m)v; $x .env cfg.txt && sed -i.bak s/S/T/ cfg.txt", "cfg.txt"],
+			[
+				`python3 -c "import shutil;shutil.move('.env','cfg.txt')" && sed -i.bak s/S/T/ cfg.txt`,
+				"cfg.txt",
+			],
+		];
+		for (const [cmd, target] of rows) {
+			rmSync(join(ws, target), { force: true });
+			writeFileSync(join(ws, ".env"), "SECRET=1\n");
+			const rec2 = new CreatedFiles();
+			const done = rec2.watchCommand(ws, cmd);
+			execSync(cmd, { cwd: ws, stdio: "ignore", shell: "/bin/sh" });
+			done();
+			expect(rec2.createdBySession(join(ws, target))).toBe(false);
+			expect(rmOfNothingOrOwn(`rm -f ${target}`, ws, rec2)).toBeNull();
+			rmSync(join(ws, ".env.bak"), { force: true });
+		}
+	});
+
+	test("8SO F2: os.rename, renameSync, shutil.move, rename( are rename-class words", () => {
+		for (const cmd of [
+			`python3 -c "import os;os.rename('.env','c.txt')"`,
+			`node -e "require('fs').renameSync('.env','c.txt')"`,
+			`python3 -c "import shutil;shutil.move('.env','c.txt')"`,
+			`node -e "rename('.env','c.txt')"`,
+		]) {
+			const rec2 = new CreatedFiles();
+			const done = rec2.watchCommand(ws, cmd);
+			writeFileSync(join(ws, "c.txt"), "new");
+			done();
+			expect(rec2.createdBySession(join(ws, "c.txt"))).toBe(false);
+			rmSync(join(ws, "c.txt"), { force: true });
+		}
+	});
+
 	test("controls: an honest new file and a pre-existing user file", () => {
 		writeFileSync(join(ws, "user.txt"), "theirs");
 		child("echo ok > honest.txt");

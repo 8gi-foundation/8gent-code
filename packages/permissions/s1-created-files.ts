@@ -26,8 +26,8 @@
  *     stash -u then pop recreates it), a gitignored name (.env), a file moved
  *     in (mv keeps its mtime and birth time), a hard link, anything from a
  *     command during which an untracked name that was not this session's
- *     vanished, or a tracked file newly went missing (`git ls-files -o -d`,
- *     one call each side); anything from a command whose text holds a
+ *     vanished, a tracked file newly went missing, or a gitignored name
+ *     vanished (`git ls-files -o -d -t`, and `-o -i --directory`, each side); anything from a command whose text holds a
  *     rename-class word (mv, rename, install, rsync, ln, cp, ditto, git mv/rm/
  *     reset/stash/checkout/restore/clean/apply/...: "mv t.ts t2.ts && touch
  *     t2.ts" must not launder a file), is backgrounded (&, nohup, setsid), or
@@ -135,6 +135,8 @@ const MAX_SEEN = 20_000;
 interface Snapshot {
 	untracked: string[];
 	missing: Set<string>;
+	/** Gitignored names, whole ignored directories collapsed to one entry. */
+	ignored: Set<string>;
 }
 
 /**
@@ -159,7 +161,25 @@ function snapshot(cwd: string): Snapshot | null {
 		if (r.error || r.status !== 0) return null;
 		const entries = r.stdout.split("\0").filter(Boolean);
 		if (entries.length > MAX_UNTRACKED) return null;
-		const out: Snapshot = { untracked: [], missing: new Set() };
+		// Ignored names (.env, build output): nothing else watches them (8SO F2).
+		const ig = spawnSync(
+			"git",
+			["-C", root, "ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"],
+			{
+				encoding: "utf8",
+				timeout: 5_000,
+				maxBuffer: 16 * 1024 * 1024,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
+		if (ig.error || ig.status !== 0) return null;
+		const ignored = ig.stdout.split("\0").filter(Boolean);
+		if (ignored.length > MAX_UNTRACKED) return null;
+		const out: Snapshot = {
+			untracked: [],
+			missing: new Set(),
+			ignored: new Set(ignored.map((n) => path.resolve(root, n))),
+		};
 		for (const e of entries) {
 			const abs = path.resolve(root, e.slice(2));
 			// "? name" untracked; "R name" (or "C") a tracked file missing from the worktree.
@@ -180,6 +200,9 @@ function snapshot(cwd: string): Snapshot | null {
  */
 const RENAME_CLASS =
 	/(^|[^\w.-])(mv|rename|install|rsync|ln|cp|ditto|git\s+(mv|rm|reset|stash|checkout|restore|clean|apply|switch|merge|rebase|pull|revert|cherry-pick|worktree|read-tree|update-index))(?![\w.-])/;
+
+/** Rename calls inside a script argument: os.rename(, fs.renameSync(, shutil.move. No word boundary (`.rename(`). */
+const RENAME_CALL = /rename(Sync)?\s*\(|shutil\.(move|copy)/;
 
 /** True when the command is backgrounded or detached (a `&` that is not `&&`, `>&` or `&>`, nohup, setsid, disown). */
 function backgrounded(command: string): boolean {
@@ -264,7 +287,8 @@ export class CreatedFiles {
 	 */
 	watchCommand(cwd: string, command = ""): () => void {
 		if (this.tripped) return () => {};
-		if (RENAME_CLASS.test(command) || backgrounded(command)) return () => {};
+		if (RENAME_CLASS.test(command) || RENAME_CALL.test(command) || backgrounded(command))
+			return () => {};
 		const start = (BigInt(Date.now()) + 1n) * 1_000_000n;
 		const t0 = Date.now();
 		const before = snapshot(cwd);
@@ -295,6 +319,8 @@ export class CreatedFiles {
 			if (before.untracked.some((abs) => !ours.has(abs) && !now.has(abs))) return;
 			// A tracked file newly missing: it may have been renamed to a new untracked name.
 			for (const abs of after.missing) if (!before.missing.has(abs)) return;
+			// An ignored name vanished (.env moved by a script, a quoted or computed mv): same reason.
+			for (const abs of before.ignored) if (!after.ignored.has(abs)) return;
 			for (const [abs, id] of ours) {
 				// In place (same inode), or a fresh file the command wrote over it.
 				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);
