@@ -146,19 +146,26 @@ describe("ExtensionHost", () => {
 		expect(await host.checkToolCall("run_command", {})).toContain("v2");
 	});
 
-	test("F4a: a file that breaks on reload keeps its last good version; a removed file is dropped", async () => {
+	test("F4a: a file that breaks on reload keeps only its old checks; its tools and commands go", async () => {
 		const file = join(dir, "guard.ts");
 		writeFileSync(
 			file,
-			`export default (api) => api.on("tool_call", () => ({ block: true, reason: "good" }));`,
+			`export default (api) => {
+				api.on("tool_call", () => ({ block: true, reason: "good" }));
+				api.registerCommand({ name: "hello", run: () => "hi" });
+				api.registerTool({ name: "shout", description: "x", parameters: { type: "object", properties: {} }, execute: () => "X" });
+			};`,
 		);
 		const host = new ExtensionHost(dir);
 		await host.load();
+		expect(host.hasCommand("hello")).toBe(true);
 		writeFileSync(file, "export default (api) => { syntax error here");
 		const [r] = await host.load();
 		expect(r.ok).toBe(false);
-		expect(r.error).toContain("kept the previously loaded version");
+		expect(r.error).toContain("kept previous version of guard.ts");
 		expect(await host.checkToolCall("x", {})).toContain("good");
+		expect(host.hasCommand("hello")).toBe(false);
+		expect(host.getTool("shout")).toBeUndefined();
 		rmSync(file);
 		await host.load();
 		expect(await host.checkToolCall("x", {})).toBeNull();

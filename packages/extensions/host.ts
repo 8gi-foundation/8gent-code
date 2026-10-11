@@ -187,8 +187,10 @@ export class ExtensionHost {
 	 * Load every extension (this is also reload, D12). Everything is imported
 	 * and registered into new maps first; the live maps are swapped in one step
 	 * only after every import settled, so a tool_call block is never missing
-	 * while a reload runs. A file that fails to load keeps its last good
-	 * version (its error says so); a file that is gone is dropped. The module
+	 * while a reload runs. A file that fails to load keeps only the tool_call
+	 * handlers of its last good version (they can only refuse), not its tools
+	 * or commands, and its result says "kept previous version of <file>"; a
+	 * file that is gone is dropped. The module
 	 * cache is cleared by real path first, so an edited file takes effect even
 	 * through a symlinked folder.
 	 */
@@ -208,10 +210,12 @@ export class ExtensionHost {
 			if (reg) {
 				next.set(real, reg);
 			} else {
+				// A broken edit keeps only the old tool_call handlers, which can
+				// only refuse; its old tools and commands are dropped.
 				const previous = this.byFile.get(real);
-				if (previous) {
-					next.set(real, previous);
-					result.error = `${result.error}; kept the previously loaded version`;
+				if (previous && previous.handlers.length > 0) {
+					next.set(real, { tools: [], commands: [], handlers: previous.handlers });
+					result.error = `${result.error}; kept previous version of ${path.basename(real)} (its tool_call checks only; its tools and commands are off until it loads)`;
 				}
 			}
 			results.push(result);

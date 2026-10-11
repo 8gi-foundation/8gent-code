@@ -613,6 +613,9 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 	return { ...args, actions };
 }
 
+/** Policy action class for every one-file extension tool call (G1). */
+export const EXTENSION_POLICY_ACTION = "extension_call" as const;
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -1722,6 +1725,8 @@ export class ToolExecutor {
 
 	/**
 	 * Map tool names to policy action types for ToolG8 gate evaluation.
+	 * Extension tools (G1) are not listed: their names are dynamic, so
+	 * executeRaw maps any tool the extension runner has to EXTENSION_POLICY_ACTION.
 	 */
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
@@ -1870,18 +1875,24 @@ export class ToolExecutor {
 		const writeTarget = (
 			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
 		) as string | undefined;
+		// A one-file extension tool (G1) has a dynamic name, so it maps by
+		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
+		const isExtension = this.extensionRunner?.has(toolName) === true;
 		const mappedAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
-					: undefined);
+					: isExtension
+						? (EXTENSION_POLICY_ACTION as PolicyActionType)
+						: undefined);
 		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
+				...(isExtension ? { tool: toolName } : {}),
 				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
