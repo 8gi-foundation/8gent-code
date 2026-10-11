@@ -44,13 +44,13 @@ import {
 } from "./routes/store/index";
 import { handleStageHttp } from "./huddle-stage";
 import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
-import { SessionManager } from "../eight/session-manager";
-import * as nodePath from "node:path";
+import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
 import {
 	type SharedPool,
 	type SharedSessionInbound,
 	type SharedSessionOutbound,
 	type SharedStore,
+	handleResume,
 	handleSharedSession,
 	isSharedSessionType,
 	persistSession,
@@ -104,6 +104,8 @@ interface ClientState {
 	participantId?: string;
 	/** Peer address captured at open, for the Table per-frame loopback guard (F1). */
 	remoteAddress?: string;
+	/** Times of this connection's restores from disk, for the rate limit (#3929). */
+	restores?: number[];
 }
 
 type InboundMessage =
@@ -186,13 +188,27 @@ function broadcastToChannel(channelId: string, frame: unknown): void {
  */
 let sessionStore: { dir: string; store: SessionManager } | null = null;
 function getSessionStore(): SharedStore {
-	// The TUI's store is $HOME/.8gent/sessions (SessionManager's default).
-	// Resolved per call: EIGHT_DATA_DIR and HOME can differ between test files.
-	const dir = process.env.EIGHT_DATA_DIR
-		? nodePath.join(process.env.EIGHT_DATA_DIR, "sessions")
-		: nodePath.join(process.env.HOME || "~", ".8gent", "sessions");
+	// The same directory the TUI uses (SessionManager's default, which honours
+	// EIGHT_DATA_DIR). Resolved per call: it can differ between test files.
+	const dir = defaultSessionsDir();
 	if (sessionStore?.dir !== dir) sessionStore = { dir, store: new SessionManager(dir) };
 	return sessionStore.store as unknown as SharedStore;
+}
+
+/**
+ * Sessions whose store file this daemon may write (#3929): restored from it,
+ * or shared when no file existed. See SharedSessionDeps.persistable.
+ */
+const persistable = new Set<string>();
+
+/** Most restores from disk one connection may make per minute. */
+const RESTORES_PER_MINUTE = 5;
+function allowRestore(state: ClientState): boolean {
+	const now = Date.now();
+	state.restores = (state.restores ?? []).filter((t) => now - t < 60_000);
+	if (state.restores.length >= RESTORES_PER_MINUTE) return false;
+	state.restores.push(now);
+	return true;
 }
 
 /** Connections bound to a session (shared sessions, #3929). */
@@ -331,6 +347,8 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			store: getSessionStore(),
 			boundSessionId: state.sessionId,
 			clientsOn: (id) => clientsOn(id),
+			persistable,
+			allowRestore: () => allowRestore(state),
 		});
 		if (bind !== undefined) state.sessionId = bind;
 		if (surface) state.channel = surface;
@@ -376,21 +394,33 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		}
 
 		case "session:resume": {
-			state.sessionId = msg.sessionId;
 			// A resume on a fresh socket would otherwise default to "api" (#3538).
 			// session:create already takes the channel from the client.
-			state.channel = msg.channel || state.channel;
-
-			// If pool doesn't have this session, create a new agent for it
-			if (!pool.hasSession(msg.sessionId)) {
-				pool.createSession(msg.sessionId, state.channel);
+			const channel = msg.channel || state.channel;
+			// Shared-session rules (#3929): private channels stay private, a saved
+			// session is restored with its history, never recreated empty.
+			const { reply, bind, surface } = handleResume(msg.sessionId, {
+				pool: pool as unknown as SharedPool,
+				store: getSessionStore(),
+				boundSessionId: state.sessionId,
+				clientsOn: (id) => clientsOn(id, ws),
+				persistable,
+				allowRestore: () => allowRestore(state),
+				isBridge: state.approvalBridge === true,
+				loopback: isLoopbackAddress(state.remoteAddress),
+				channel,
+			});
+			if (reply.type === "error") {
+				send(ws, reply);
+				break;
 			}
-
+			state.sessionId = bind ?? state.sessionId;
+			state.channel = surface ?? channel;
 			bus.emit("session:start", {
 				sessionId: msg.sessionId,
 				channel: state.channel,
 			});
-			send(ws, { type: "session:resumed", sessionId: msg.sessionId });
+			send(ws, reply);
 			break;
 		}
 
@@ -403,6 +433,17 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 		case "session:destroy": {
 			if (msg.sessionId) {
+				// Only the session this connection is on (#3929).
+				if (msg.sessionId !== state.sessionId) {
+					send(ws, { type: "error", message: "can only end the session you are on" });
+					break;
+				}
+				// Others are still on it: this client leaves, the session goes on.
+				if (clientsOn(msg.sessionId, ws) > 0) {
+					state.sessionId = null;
+					break;
+				}
+				persistable.delete(msg.sessionId);
 				// Only the bridge's own socket may cancel its live prompt.
 				if (state.approvalBridge) channelApprovals.endSession(msg.sessionId);
 				pool.destroySession(msg.sessionId);
@@ -445,7 +486,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				.finally(() => {
 					// Shareable sessions are saved after every turn so the TUI and a
 					// later session:attach can resume them (#3929).
-					persistSession(pool as unknown as SharedPool, getSessionStore, sid);
+					persistSession(pool as unknown as SharedPool, getSessionStore, sid, persistable);
 				});
 			break;
 		}
@@ -628,6 +669,8 @@ async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<R
 
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
 	subscribeToBus();
+	// An attached session is never evicted from under its clients (#3929).
+	config.pool.setInUse?.((id) => clientsOn(id) > 0);
 
 	// Install the Table deny-by-default policy set once (idempotent). Table
 	// agents bind under the "__table__" scope; these rules block

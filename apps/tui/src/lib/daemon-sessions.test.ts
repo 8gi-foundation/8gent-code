@@ -96,6 +96,9 @@ class EchoPool {
 	getStatus() {
 		return {};
 	}
+	canCreate() {
+		return true;
+	}
 	abort() {
 		return false;
 	}

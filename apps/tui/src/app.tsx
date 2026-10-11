@@ -2246,16 +2246,25 @@ export function App({
 		setMessagesLatest.current((prev) => [...prev, { id, role, content, timestamp: new Date() }]);
 	}, []);
 
-	const unlinkDaemon = useCallback(async (): Promise<string | null> => {
-		const link = daemonLinkRef.current;
-		if (!link) return null;
-		daemonLinkRef.current = null;
-		const sid = link.client.sessionId;
-		link.off();
-		await link.client.detach().catch(() => {});
-		link.client.close();
-		return sid;
-	}, []);
+	/**
+	 * Leave the shared session. The daemon owns that session's file now, so the
+	 * TUI's autosave moves to a fresh local session instead of writing over it
+	 * (unless `startFresh` is false: the TUI is closing).
+	 */
+	const unlinkDaemon = useCallback(
+		async (startFresh = true): Promise<string | null> => {
+			const link = daemonLinkRef.current;
+			if (!link) return null;
+			daemonLinkRef.current = null;
+			const sid = link.client.sessionId;
+			link.off();
+			await link.client.detach().catch(() => {});
+			link.client.close();
+			if (startFresh) setActiveSessionId(sessionMgr.create().id);
+			return sid;
+		},
+		[sessionMgr],
+	);
 
 	/** Join a daemon session (live, or past and restored), replacing the chat with its transcript. */
 	const linkDaemonSession = useCallback(
@@ -2316,7 +2325,7 @@ export function App({
 		},
 		[addSystemMessage, pushShared, setMessages, unlinkDaemon],
 	);
-	useEffect(() => () => void unlinkDaemon(), [unlinkDaemon]);
+	useEffect(() => () => void unlinkDaemon(false), [unlinkDaemon]);
 	// EIGHT_TUI_SHARE=1: share this TUI's session through the daemon from the
 	// start, so the 8gent Browser panel can pick "the TUI session" right away.
 	const autoSharedRef = useRef(false);

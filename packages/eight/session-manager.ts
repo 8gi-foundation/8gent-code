@@ -35,12 +35,24 @@ interface SessionFile extends SessionInfo {
 	messages: Array<{ role: string; content: string }>;
 }
 
+/**
+ * Where sessions live: $EIGHT_DATA_DIR/sessions when set, else
+ * ~/.8gent/sessions. The TUI and the daemon both use this, so a session
+ * shared through the daemon is the same file the TUI resumes (#3929).
+ */
+export function defaultSessionsDir(): string {
+	const dataDir = process.env.EIGHT_DATA_DIR;
+	return dataDir
+		? path.join(dataDir, "sessions")
+		: path.join(process.env.HOME || "~", ".8gent", "sessions");
+}
+
 export class SessionManager {
 	private dir: string;
 
 	constructor(dataDir?: string) {
-		this.dir = dataDir || path.join(process.env.HOME || "~", ".8gent", "sessions");
-		fs.mkdirSync(this.dir, { recursive: true });
+		this.dir = dataDir || defaultSessionsDir();
+		fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
 	}
 
 	/** Create a new session and persist it. */
@@ -169,7 +181,10 @@ export class SessionManager {
 	}
 
 	private write(id: string, data: SessionFile): void {
-		fs.writeFileSync(this.filePath(id), JSON.stringify(data, null, 2));
+		// Owner-only: transcripts carry whatever was said and pasted (#3929).
+		const file = this.filePath(id);
+		fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+		fs.chmodSync(file, 0o600);
 	}
 
 	private readFile(id: string): SessionFile | null {

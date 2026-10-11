@@ -18,6 +18,8 @@
  */
 
 import * as fs from "node:fs";
+import { CONTEXT_NOTE_HEADER } from "../eight/context-note";
+import { PLANNING_GATE_INSTRUCTION } from "../eight/prompt";
 import { isSessionId } from "../eight/session-manager";
 
 export const SHAREABLE_CHANNELS: ReadonlySet<string> = new Set([
@@ -66,6 +68,8 @@ export interface SharedPool {
 	} | null;
 	getActiveSessions(): Array<{ sessionId: string; channel: string }>;
 	abort(sessionId: string): boolean;
+	/** False when a new session on `channel` would push the pool past its caps. */
+	canCreate(channel: string): boolean;
 }
 
 export interface PastSessionFile {
@@ -120,6 +124,7 @@ export interface PastSession {
 }
 
 export type SharedSessionOutbound =
+	| { type: "session:resumed"; sessionId: string; restored?: boolean; messageCount?: number }
 	| { type: "session:list"; live: LiveSession[]; past: PastSession[] }
 	| {
 			type: "session:attached";
@@ -152,24 +157,45 @@ export interface SharedSessionDeps {
 	boundSessionId: string | null;
 	/** How many connections are bound to a session. */
 	clientsOn(sessionId: string): number;
+	/**
+	 * Sessions whose file in the store this daemon may write: restored from it,
+	 * or shared when no file existed. Anything else is never saved, so a
+	 * session can never overwrite a transcript it was not restored from.
+	 */
+	persistable: Set<string>;
+	/** Per-connection rate limit for restores from disk. False = refuse. */
+	allowRestore(): boolean;
 }
 
 export interface SharedSessionResult {
 	reply: SharedSessionOutbound;
 	/** Rebind the connection: a session id, null to unbind, undefined to leave as is. */
 	bind?: string | null;
-	/** The surface the connection declared on attach, when it is a shareable one. */
+	/** The surface the connection declared, when it is a shareable one. */
 	surface?: string;
 }
 
-/** User and assistant turns with text content: what a person reads. */
+/** The planning gate is injected after the user's words; any depth's variant starts the same. */
+const PLANNING_GATE_PREFIX = PLANNING_GATE_INSTRUCTION.slice(0, 60);
+
+/**
+ * True for the harness's own user-role notes: session context, vision and
+ * clarification notes (CONTEXT_NOTE_HEADER) and the planning gate. They sit in
+ * the agent's history as role "user" but no person typed them.
+ */
+export function isHarnessNote(content: string): boolean {
+	return content.startsWith(CONTEXT_NOTE_HEADER) || content.startsWith(PLANNING_GATE_PREFIX);
+}
+
+/** User and assistant turns with text content that a person wrote or reads. */
 export function chatMessages(history: Array<{ role: string; content: unknown }>): ChatMessage[] {
 	const out: ChatMessage[] = [];
 	for (const m of history) {
 		if (
 			(m.role === "user" || m.role === "assistant") &&
 			typeof m.content === "string" &&
-			m.content
+			m.content &&
+			!(m.role === "user" && isHarnessNote(m.content))
 		) {
 			out.push({ role: m.role, content: m.content });
 		}
@@ -200,6 +226,43 @@ function isDirectory(p: unknown): p is string {
 	}
 }
 
+type Fail = { error: string };
+
+/**
+ * Bring a saved session back into the pool: its channel (a file with none was
+ * written by the TUI, so "tui"), its directory when it still exists, and its
+ * messages. Refused when the pool has no room or the connection restores too
+ * often. Marks the session persistable: it now owns that file.
+ */
+function restoreFromStore(
+	sessionId: string,
+	deps: SharedSessionDeps,
+): { channel: string; messages: ChatMessage[] } | Fail | null {
+	const past = deps.store.get(sessionId);
+	if (!past) return null;
+	const channel = typeof past.channel === "string" ? past.channel : "tui";
+	if (!SHAREABLE_CHANNELS.has(channel)) return { error: "session cannot be shared" };
+	if (!deps.pool.canCreate(channel)) {
+		return { error: "too many 8gent sessions are open; close one, then try again" };
+	}
+	if (!deps.allowRestore()) return { error: "too many restores; wait a minute, then try again" };
+	// The directory comes from the local file, never the wire, and must exist.
+	const workingDirectory = isDirectory(past.cwd) ? past.cwd : undefined;
+	deps.pool.createSession(sessionId, channel, workingDirectory ? { workingDirectory } : undefined);
+	const agent = deps.pool.getAgent(sessionId);
+	if (!agent) return { error: "session could not be restored" };
+	const messages = chatMessages(Array.isArray(past.messages) ? past.messages : []);
+	agent.restoreFromCheckpoint(messages);
+	deps.persistable.add(sessionId);
+	return { channel, messages };
+}
+
+/** Saving a live session the first time it is shared: only when no file is in the way. */
+function markShared(sessionId: string, deps: SharedSessionDeps): void {
+	if (!deps.persistable.has(sessionId) && !deps.store.get(sessionId))
+		deps.persistable.add(sessionId);
+}
+
 function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionResult {
 	const info = deps.pool.getSessionInfo(sessionId);
 	const agent = deps.pool.getAgent(sessionId);
@@ -207,6 +270,7 @@ function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionRe
 	if (!SHAREABLE_CHANNELS.has(info.channel)) {
 		return { reply: { type: "error", message: "session cannot be shared" } };
 	}
+	markShared(sessionId, deps);
 	return {
 		bind: sessionId,
 		reply: {
@@ -221,29 +285,18 @@ function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionRe
 }
 
 function attachPast(sessionId: string, deps: SharedSessionDeps): SharedSessionResult {
-	const past = deps.store.get(sessionId);
-	if (!past) return { reply: { type: "error", message: "session not found" } };
-	// A file with no channel was written by the TUI's own autosave.
-	const channel = typeof past.channel === "string" ? past.channel : "tui";
-	if (!SHAREABLE_CHANNELS.has(channel)) {
-		return { reply: { type: "error", message: "session cannot be shared" } };
-	}
-	// The directory comes from the local file, never the wire, and must exist.
-	const workingDirectory = isDirectory(past.cwd) ? past.cwd : undefined;
-	deps.pool.createSession(sessionId, channel, workingDirectory ? { workingDirectory } : undefined);
-	const agent = deps.pool.getAgent(sessionId);
-	if (!agent) return { reply: { type: "error", message: "session could not be restored" } };
-	const messages = chatMessages(Array.isArray(past.messages) ? past.messages : []);
-	agent.restoreFromCheckpoint(messages);
+	const r = restoreFromStore(sessionId, deps);
+	if (!r) return { reply: { type: "error", message: "session not found" } };
+	if ("error" in r) return { reply: { type: "error", message: r.error } };
 	return {
 		bind: sessionId,
 		reply: {
 			type: "session:attached",
 			sessionId,
-			channel,
+			channel: r.channel,
 			busy: false,
 			restored: true,
-			...capTranscript(messages),
+			...capTranscript(r.messages),
 		},
 	};
 }
@@ -323,9 +376,12 @@ export function handleSharedSession(
 				return { bind: null, reply: { type: "session:detached", sessionId: deps.boundSessionId } };
 
 			case "session:abort": {
-				const sessionId = msg.sessionId ?? deps.boundSessionId;
-				if (!isSessionId(sessionId)) {
-					return { reply: { type: "error", message: "no session to stop" } };
+				// Only the connection's own session: a client cannot stop a turn on a
+				// session it is not on.
+				const sessionId = deps.boundSessionId;
+				if (!sessionId) return { reply: { type: "error", message: "no session to stop" } };
+				if (msg.sessionId !== undefined && msg.sessionId !== sessionId) {
+					return { reply: { type: "error", message: "can only stop the session you are on" } };
 				}
 				const info = deps.pool.getSessionInfo(sessionId);
 				if (!info) return { reply: { type: "error", message: "session not found" } };
@@ -343,18 +399,85 @@ export function handleSharedSession(
 	return { reply: { type: "error", message: "unknown message type" } };
 }
 
+export interface ResumeDeps extends SharedSessionDeps {
+	/** The connection is the registered Telegram approval bridge. */
+	isBridge: boolean;
+	/** The connection's peer is loopback. */
+	loopback: boolean;
+	/** The channel this connection would use (from the frame or its state). */
+	channel: string;
+}
+
 /**
- * Write a shareable session's user/assistant history to the session store so
- * the TUI and a later session:attach can resume it. Never throws.
+ * session:resume (v1.0) with the shared-session rules applied (#3929):
+ *
+ * - a live session on a private channel (telegram, table, delegation, computer)
+ *   is only resumed by the approval bridge, and only a telegram one;
+ * - joining a live session other clients are on is a share: loopback only;
+ * - a saved session that is not live is restored from the store, with its
+ *   history, exactly like session:attach (loopback only), never recreated empty
+ *   under its id, which let the next save overwrite the file;
+ * - anything else is the old behaviour: a new session under that id.
+ */
+export function handleResume(sessionId: unknown, deps: ResumeDeps): SharedSessionResult {
+	try {
+		if (!isSessionId(sessionId)) return { reply: { type: "error", message: "invalid session id" } };
+		const fail = (message: string): SharedSessionResult => ({ reply: { type: "error", message } });
+
+		if (deps.pool.hasSession(sessionId)) {
+			const info = deps.pool.getSessionInfo(sessionId);
+			const channel = info?.channel ?? deps.channel;
+			if (!SHAREABLE_CHANNELS.has(channel)) {
+				if (!(deps.isBridge && channel === "telegram")) return fail("session cannot be shared");
+			} else if (deps.clientsOn(sessionId) > 0 && !deps.loopback) {
+				return fail("shared sessions are loopback-only");
+			}
+			return { bind: sessionId, reply: { type: "session:resumed", sessionId } };
+		}
+
+		if (deps.store.get(sessionId)) {
+			if (!deps.loopback) return fail("shared sessions are loopback-only");
+			const r = restoreFromStore(sessionId, deps);
+			if (!r) return fail("session not found");
+			if ("error" in r) return fail(r.error);
+			return {
+				bind: sessionId,
+				surface: r.channel,
+				reply: {
+					type: "session:resumed",
+					sessionId,
+					restored: true,
+					messageCount: r.messages.length,
+				},
+			};
+		}
+
+		if (!SHAREABLE_CHANNELS.has(deps.channel) && !(deps.isBridge && deps.channel === "telegram")) {
+			return fail("session cannot be shared");
+		}
+		deps.pool.createSession(sessionId, deps.channel);
+		return { bind: sessionId, reply: { type: "session:resumed", sessionId } };
+	} catch (err) {
+		return { reply: { type: "error", message: `resume: ${(err as Error).message}` } };
+	}
+}
+
+/**
+ * Write a shared session's user/assistant history to the session store so the
+ * TUI and a later session:attach can resume it. Only sessions in
+ * `persistable` (restored from their file, or shared with no file in the way)
+ * are written. Never throws.
  */
 export function persistSession(
 	pool: SharedPool,
 	store: () => SharedStore,
 	sessionId: string,
+	persistable: ReadonlySet<string>,
 ): boolean {
 	try {
+		if (!persistable.has(sessionId) || !isSessionId(sessionId)) return false;
 		// Stand-in pools without session info have nothing to save.
-		if (!isSessionId(sessionId) || typeof pool.getSessionInfo !== "function") return false;
+		if (typeof pool.getSessionInfo !== "function") return false;
 		const info = pool.getSessionInfo(sessionId);
 		const agent = pool.getAgent(sessionId);
 		if (!info || !agent || !SHAREABLE_CHANNELS.has(info.channel)) return false;

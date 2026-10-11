@@ -181,12 +181,28 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
 
 - A client disconnecting emits `session:end { reason: "client-disconnect" }` only when no
   other client is still bound to that session.
-- After every turn on a shareable channel the daemon saves the user/assistant history to the
-  session store (SessionManager format plus `channel`), so the TUI and a later `session:attach`
-  can resume it after a daemon restart.
+- After every turn on a shared session the daemon saves the user/assistant history to the
+  session store (SessionManager format plus `channel`; harness notes and the planning gate are
+  left out), so the TUI and a later `session:attach` can resume it after a daemon restart.
 - Approvals are unchanged: `approval:*` still reaches only the registered approval bridge, and a
   prompt from an attached client runs with no approval turn.
 - `sessions:list` (v1.0) is unchanged.
+- `session:resume` follows the same rules. A live telegram session is resumed only by the
+  registered approval bridge; table, delegation and computer sessions never. Joining a live
+  session other clients are on needs a loopback peer. A session that is not live but has a
+  saved file is restored from it, with its history and channel (loopback only), instead of
+  being recreated empty under that id.
+- `session:destroy` only ends the session the connection is on
+  (`can only end the session you are on` otherwise). When other clients are on it, it only
+  takes this client off, like `session:detach`.
+- `session:abort` only stops the connection's own session.
+- Only shared sessions are saved: restored from a file, or attached to when no file with
+  that id exists. A session never writes over a file it was not restored from. Files are 0600.
+- A restore from disk is refused when the pool has no room (no idle, unattached session to
+  make way), and is limited to 5 per connection per minute. A session with a client attached
+  is never evicted for idleness or room, and a cap eviction always emits `session:end`.
+- The store is `$EIGHT_DATA_DIR/sessions` when set, else `~/.8gent/sessions`, for both the
+  daemon and the TUI.
 
 ## Session Time-Travel
 

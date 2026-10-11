@@ -6,9 +6,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionManager } from "../eight/session-manager";
 import type { AgentPool } from "./agent-pool";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
@@ -68,6 +69,9 @@ class EchoPool {
 	}
 	getStatus() {
 		return {};
+	}
+	canCreate() {
+		return true;
 	}
 	abort() {
 		return false;
@@ -242,6 +246,90 @@ describe("shared sessions over the gateway", () => {
 		c.send({ type: "session:list" });
 		const list = await c.next((f) => f.type === "session:list");
 		expect(list.live.map((l: Frame) => l.sessionId)).not.toContain("s_tg");
+		c.close();
+	});
+
+	it("8PO repro: session:resume of a saved TUI session keeps its history and channel", async () => {
+		const store = new SessionManager(join(dataDir, "sessions"));
+		const tui = store.create({ cwd: dataDir });
+		store.update(tui.id, [
+			{ role: "user", content: "one" },
+			{ role: "assistant", content: "two" },
+			{ role: "user", content: "three" },
+			{ role: "assistant", content: "four" },
+		]);
+		const browser = new Client(server.port as number);
+		await browser.ready;
+		browser.send({ type: "session:resume", sessionId: tui.id, channel: "browser" });
+		const resumed = await browser.next((f) => f.type === "session:resumed");
+		expect(resumed).toMatchObject({ restored: true, messageCount: 4 });
+		browser.send({ type: "prompt", text: "five" });
+		await browser.next((f) => f.event === "agent:stream" && f.payload.final);
+		await settle();
+		const file = join(dataDir, "sessions", `${tui.id}.json`);
+		const saved = JSON.parse(readFileSync(file, "utf8"));
+		expect(saved.messages.map((m: Frame) => m.content)).toEqual([
+			"one",
+			"two",
+			"three",
+			"four",
+			"five",
+			"echo: five",
+		]);
+		expect(saved.channel).toBe("tui");
+		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+		browser.close();
+	});
+
+	it("a plain session that was never shared is not saved", async () => {
+		const c = new Client(server.port as number);
+		await c.ready;
+		c.send({ type: "session:resume", sessionId: "s_private_browser", channel: "browser" });
+		await c.next((f) => f.type === "session:resumed");
+		c.send({ type: "prompt", text: "nobody else sees this" });
+		await c.next((f) => f.event === "agent:stream" && f.payload.final);
+		await settle();
+		expect(existsSync(join(dataDir, "sessions", "s_private_browser.json"))).toBe(false);
+		c.close();
+	});
+
+	it("destroy only ends your own session, and only when nobody else is on it", async () => {
+		pool.createSession("s_two", "tui");
+		pool.createSession("s_else", "tui");
+		const a = new Client(server.port as number);
+		const b = new Client(server.port as number);
+		await Promise.all([a.ready, b.ready]);
+		a.send({ type: "session:attach", sessionId: "s_two" });
+		b.send({ type: "session:attach", sessionId: "s_two" });
+		await a.next((f) => f.type === "session:attached");
+		await b.next((f) => f.type === "session:attached");
+
+		a.send({ type: "session:destroy", sessionId: "s_else" });
+		await a.next((f) => f.type === "error" && f.message === "can only end the session you are on");
+		expect(pool.hasSession("s_else")).toBe(true);
+
+		// b is still on it: a's destroy only takes a off.
+		a.send({ type: "session:destroy", sessionId: "s_two" });
+		await settle();
+		expect(pool.hasSession("s_two")).toBe(true);
+		expect(b.events("session:end")).toEqual([]);
+		a.send({ type: "prompt", text: "x" });
+		await a.next((f) => f.type === "error" && f.message === "no active session");
+
+		// The last one on it may end it.
+		b.send({ type: "session:destroy", sessionId: "s_two" });
+		await b.next((f) => f.event === "session:end" && f.payload.reason === "client-destroy");
+		expect(pool.hasSession("s_two")).toBe(false);
+		a.close();
+		b.close();
+	});
+
+	it("abort is refused for a session the client is not on", async () => {
+		pool.createSession("s_abort", "tui");
+		const c = new Client(server.port as number);
+		await c.ready;
+		c.send({ type: "session:abort", sessionId: "s_abort" });
+		await c.next((f) => f.type === "error");
 		c.close();
 	});
 });

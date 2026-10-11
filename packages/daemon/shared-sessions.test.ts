@@ -3,9 +3,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONTEXT_NOTE_HEADER, harnessNote } from "../eight/context-note";
+import { planningGateInstruction } from "../eight/local-tool-scope";
 import { SessionManager } from "../eight/session-manager";
 import {
 	type ChatMessage,
@@ -15,7 +17,10 @@ import {
 	type SharedStore,
 	TRANSCRIPT_MAX_CHARS,
 	TRANSCRIPT_MAX_MESSAGES,
+	type ResumeDeps,
 	capTranscript,
+	chatMessages,
+	handleResume,
 	handleSharedSession,
 	persistSession,
 } from "./shared-sessions";
@@ -67,6 +72,10 @@ class FakePool implements SharedPool {
 	getActiveSessions() {
 		return [...this.live].map(([sessionId, e]) => ({ sessionId, channel: e.channel }));
 	}
+	room = true;
+	canCreate() {
+		return this.room;
+	}
 	abort(id: string) {
 		const e = this.live.get(id);
 		if (!e?.busy) return false;
@@ -78,17 +87,32 @@ class FakePool implements SharedPool {
 let dir: string;
 let store: SessionManager;
 let pool: FakePool;
+let persistable: Set<string>;
+let restoresAllowed: boolean;
 const deps = (bound: string | null = null): SharedSessionDeps => ({
 	pool,
 	store: store as unknown as SharedStore,
 	boundSessionId: bound,
 	clientsOn: () => 2,
+	persistable,
+	allowRestore: () => restoresAllowed,
 });
+const resumeDeps = (over: Partial<ResumeDeps> = {}): ResumeDeps => ({
+	...deps(),
+	clientsOn: () => 0,
+	isBridge: false,
+	loopback: true,
+	channel: "browser",
+	...over,
+});
+const saveStore = () => store as unknown as SharedStore;
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "shared-sessions-"));
 	store = new SessionManager(join(dir, "sessions"));
 	pool = new FakePool();
+	persistable = new Set();
+	restoresAllowed = true;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -210,9 +234,19 @@ describe("session:detach and session:abort", () => {
 
 	it("abort refuses a session it may not share", () => {
 		const agent = pool.add("s_tg", "telegram", true);
-		const r = handleSharedSession({ type: "session:abort", sessionId: "s_tg" }, deps());
+		const r = handleSharedSession({ type: "session:abort" }, deps("s_tg"));
 		expect(r.reply).toEqual({ type: "error", message: "session cannot be shared" });
 		expect(agent.aborted).toBe(0);
+	});
+
+	it("abort only stops the session this connection is on", () => {
+		const other = pool.add("s_other", "tui", true);
+		pool.add("s_mine", "tui");
+		for (const bound of ["s_mine", null]) {
+			const r = handleSharedSession({ type: "session:abort", sessionId: "s_other" }, deps(bound));
+			expect(r.reply.type).toBe("error");
+		}
+		expect(other.aborted).toBe(0);
 	});
 });
 
@@ -220,7 +254,7 @@ describe("persistSession", () => {
 	it("writes a shareable session in the TUI's format and the TUI can resume it", () => {
 		const agent = pool.add("s_p", "browser");
 		agent.history.push({ role: "user", content: "q" }, { role: "assistant", content: "a" });
-		expect(persistSession(pool, () => store as unknown as SharedStore, "s_p")).toBe(true);
+		expect(persistSession(pool, saveStore, "s_p", new Set(["s_p"]))).toBe(true);
 		const file = JSON.parse(readFileSync(join(dir, "sessions", "s_p.json"), "utf8"));
 		expect(file).toMatchObject({
 			id: "s_p",
@@ -237,8 +271,139 @@ describe("persistSession", () => {
 	it("never writes telegram or table transcripts", () => {
 		const agent = pool.add("s_tg", "telegram");
 		agent.history.push({ role: "user", content: "secret" });
-		expect(persistSession(pool, () => store as unknown as SharedStore, "s_tg")).toBe(false);
+		expect(persistSession(pool, saveStore, "s_tg", new Set(["s_tg"]))).toBe(false);
 		expect(store.get("s_tg")).toBeNull();
+	});
+});
+
+describe("persistence ownership", () => {
+	it("never saves a session that is not persistable", () => {
+		const agent = pool.add("s_q", "browser");
+		agent.history.push({ role: "user", content: "q" });
+		expect(persistSession(pool, saveStore, "s_q", new Set())).toBe(false);
+		expect(store.get("s_q")).toBeNull();
+	});
+
+	it("attaching to a live session never claims a file it was not restored from", () => {
+		store.save("s_clash", [{ role: "user", content: "older" }], { channel: "tui" });
+		pool.add("s_clash", "browser");
+		handleSharedSession({ type: "session:attach", sessionId: "s_clash" }, deps());
+		expect(persistable.has("s_clash")).toBe(false);
+		pool.add("s_free", "browser");
+		handleSharedSession({ type: "session:attach", sessionId: "s_free" }, deps());
+		expect(persistable.has("s_free")).toBe(true);
+	});
+
+	it("session files are owner-only", () => {
+		store.save("s_mode", [{ role: "user", content: "x" }], {});
+		expect(statSync(join(dir, "sessions", "s_mode.json")).mode & 0o777).toBe(0o600);
+	});
+});
+
+describe("harness notes", () => {
+	it("are dropped from transcripts, the store and restores", () => {
+		const history = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: `${CONTEXT_NOTE_HEADER}\n\nmemory: James likes tea` },
+			{ role: "user", content: "fix the build" },
+			{ role: "user", content: planningGateInstruction(0) },
+			{ role: "user", content: planningGateInstruction(3) },
+			{ role: "user", content: harnessNote("vision: a screenshot of a terminal") },
+			{ role: "assistant", content: "done" },
+		];
+		const want = [
+			{ role: "user", content: "fix the build" },
+			{ role: "assistant", content: "done" },
+		];
+		expect(chatMessages(history)).toEqual(want);
+
+		// Disk: a live session's save holds only what was typed and answered.
+		const agent = pool.add("s_notes", "browser");
+		agent.history = history;
+		expect(persistSession(pool, saveStore, "s_notes", new Set(["s_notes"]))).toBe(true);
+		expect(store.get("s_notes")?.messages).toEqual(want);
+
+		// Restore: a file that still carries notes (an older save) restores without them.
+		store.save("s_old", history.slice(1), { channel: "tui" });
+		const r = handleSharedSession({ type: "session:attach", sessionId: "s_old" }, deps());
+		expect(r.reply).toMatchObject({ transcript: want });
+		expect(pool.getAgent("s_old")!.getMessageHistory().slice(1)).toEqual(want);
+	});
+});
+
+describe("session:resume (v1.0) under the shared-session rules", () => {
+	it("restores a saved TUI session instead of recreating it empty (8PO repro)", () => {
+		// The repro: a 4-message TUI file, resumed by a browser client while not live.
+		const tui = store.create({ cwd: dir });
+		const four = [
+			{ role: "user", content: "one" },
+			{ role: "assistant", content: "two" },
+			{ role: "user", content: "three" },
+			{ role: "assistant", content: "four" },
+		];
+		store.update(tui.id, four);
+		const r = handleResume(tui.id, resumeDeps({ channel: "browser" }));
+		expect(r.reply).toEqual({
+			type: "session:resumed",
+			sessionId: tui.id,
+			restored: true,
+			messageCount: 4,
+		});
+		expect(r.surface).toBe("tui");
+		const agent = pool.getAgent(tui.id)!;
+		expect(agent.getMessageHistory().slice(1)).toEqual(four);
+		// One more turn, then the save keeps all of it and the channel stays tui.
+		agent.history.push({ role: "user", content: "five" }, { role: "assistant", content: "six" });
+		expect(persistSession(pool, saveStore, tui.id, persistable)).toBe(true);
+		const file = store.get(tui.id)!;
+		expect(file.messages.length).toBe(6);
+		expect(file.channel).toBe("tui");
+	});
+
+	it("restoring from disk is loopback-only, capped and rate-limited", () => {
+		const a = store.create();
+		expect(handleResume(a.id, resumeDeps({ loopback: false })).reply).toEqual({
+			type: "error",
+			message: "shared sessions are loopback-only",
+		});
+		pool.room = false;
+		expect(handleResume(a.id, resumeDeps()).reply).toMatchObject({ type: "error" });
+		expect(
+			handleSharedSession({ type: "session:attach", sessionId: a.id }, deps()).reply.type,
+		).toBe("error");
+		pool.room = true;
+		restoresAllowed = false;
+		expect(handleResume(a.id, resumeDeps()).reply).toMatchObject({ type: "error" });
+		expect(pool.hasSession(a.id)).toBe(false);
+	});
+
+	it("keeps private sessions private: only the bridge resumes a telegram one", () => {
+		pool.add("s_tg", "telegram");
+		pool.add("s_tab", "table");
+		expect(handleResume("s_tg", resumeDeps({ channel: "telegram" })).reply.type).toBe("error");
+		expect(handleResume("s_tab", resumeDeps({ isBridge: true })).reply.type).toBe("error");
+		const ok = handleResume("s_tg", resumeDeps({ isBridge: true, channel: "telegram" }));
+		expect(ok).toMatchObject({ bind: "s_tg", reply: { type: "session:resumed" } });
+		// A new telegram-channel session under a fresh id: the bridge only.
+		expect(handleResume("s_new", resumeDeps({ channel: "telegram" })).reply.type).toBe("error");
+		expect(handleResume("s_new", resumeDeps({ channel: "telegram", isBridge: true })).bind).toBe(
+			"s_new",
+		);
+	});
+
+	it("joining a live session others are on is loopback-only; reconnecting to your own is not", () => {
+		pool.add("s_b", "browser");
+		expect(
+			handleResume("s_b", resumeDeps({ loopback: false, clientsOn: () => 1 })).reply.type,
+		).toBe("error");
+		expect(handleResume("s_b", resumeDeps({ loopback: false })).bind).toBe("s_b");
+	});
+
+	it("rejects ids that are not plain", () => {
+		expect(handleResume("../x", resumeDeps()).reply).toEqual({
+			type: "error",
+			message: "invalid session id",
+		});
 	});
 });
 
