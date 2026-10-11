@@ -122,6 +122,16 @@ export function isLocalTurnFailureReply(text: string): boolean {
 	);
 }
 
+/**
+ * True when a headless run's final reply means the task did not happen: a
+ * local-turn failure (unreachable, timeout, model error) or the honesty gate's
+ * refusal after every action tool failed (honesty.ts buildHonestFailureReply).
+ * `8gent run` maps this to a non-zero exit (#3899).
+ */
+export function isFailedTurnReply(text: string): boolean {
+	return isLocalTurnFailureReply(text) || text.trimStart().startsWith("I could not complete that action.");
+}
+
 /** The runs.jsonl record for a turn that ended in an error. */
 export function failedTurnRunEntry(opts: {
 	model: string;
