@@ -80,7 +80,6 @@ jobs:
             --cpus "$(nproc)" --memory 6g --memory-swap 6g --pids-limit 4096 \
             -v "$GITHUB_WORKSPACE":/src:ro \
             -v "$PACK_DIR":/out \
-            -v 8gent-linux-ci-bun-cache:/home/ci/.bun/install/cache \
             "$IMAGE" bash /src/.github/docker/linux-ci/run.sh
 
       # #3256: install the packed tarball the way a stranger does, install

@@ -74,6 +74,7 @@ import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
+import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -327,6 +328,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	private turnTask = "";
+	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -1487,7 +1490,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
 	private turnEndNudge(): string | null {
-		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
+		return (
+			verifyNudgeFor(this.turnToolLedger) ??
+			this.executor.retiredTurnEndNudge() ??
+			completionSelfCheckNudge({
+				task: this.turnTask,
+				gitBaseline: this.turnGitBaseline,
+				cwd: this.config.workingDirectory || process.cwd(),
+				ledger: this.turnToolLedger,
+			})
+		);
 	}
 
 	private async runTurn(
@@ -1499,6 +1511,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnTask = userMessage;
+		this.turnGitBaseline = asksForCommit(userMessage)
+			? gitSnapshot(this.config.workingDirectory || process.cwd())
+			: null;
 		// write_file may open each deliverable once per turn (#3107).
 		this.executor.beginTurn();
 
@@ -2662,7 +2678,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
 			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
-				console.log("[verify-gate] change not checked yet - asking for one targeted check");
+				console.log(
+					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
+				);
 				// agentConfig already holds the provider that answered (chain step
 				// or hedge winner), so the follow-up goes to the same one.
 				const verifyAgent = createEightAgent(agentConfig);
