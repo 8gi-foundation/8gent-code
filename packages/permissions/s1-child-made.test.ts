@@ -48,7 +48,7 @@ let rec: CreatedFiles;
 
 /** Run `cmd` in `cwd` as a child of a watched command, like run_command does. */
 function child(cmd: string, cwd = ws, record = rec): void {
-	const done = record.watchCommand(cwd);
+	const done = record.watchCommand(cwd, cmd);
 	execSync(cmd, { cwd, stdio: "ignore", shell: "/bin/sh" });
 	done();
 }
@@ -84,9 +84,11 @@ describe.skipIf(WIN)("a file a child of the command made", () => {
 		child("mkdir -p .tmp && echo a > .tmp/td.json");
 		child("echo b >> .tmp/td.json");
 		expect(own(".tmp/td.json")).toBe(true);
-		child("echo c > .tmp/td.new && mv .tmp/td.new .tmp/td.json");
-		expect(own(".tmp/td.json")).toBe(true);
 		expect(rmOwn("rm -f .tmp/td.json")).toBe("own-scratch");
+		// An atomic rewrite through mv is a rename-class command: not watched, so the entry lapses to the judge.
+		child("echo c > .tmp/td.new && mv .tmp/td.new .tmp/td.json");
+		expect(own(".tmp/td.json")).toBe(false);
+		expect(rmOwn("rm -f .tmp/td.json")).toBeNull();
 	});
 
 	test("is not the session's when something else rewrote it between commands", () => {
@@ -170,6 +172,14 @@ describe.skipIf(WIN)("everything else stays judged", () => {
 		child("rm victim.txt; echo hi > fresh.txt");
 		expect(own("fresh.txt")).toBe(false);
 		expect(rmOwn("rm -f fresh.txt")).toBeNull();
+	});
+
+	test("a tracked file newly missing records nothing, even for a command with no rename word", () => {
+		// Same text as an honest build step; only the tracked deletion shows.
+		const done = rec.watchCommand(ws);
+		execSync("rm notes.md; echo hi > fresh.txt", { cwd: ws });
+		done();
+		expect(own("fresh.txt")).toBe(false);
 	});
 
 	test("a directory is not a file: nothing recorded, rm of it judged", () => {
@@ -374,5 +384,109 @@ describe.skipIf(WIN)("the pilot case through the real tool entry point", () => {
 		expect(judge.rmAsks).toBeGreaterThan(0);
 		expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
 		expect(existsSync(join(ws, "theirs.json"))).toBe(true);
+	});
+});
+
+/**
+ * 8SO F1 (#3875, head a791b4d8): rename a file the session did not make onto a
+ * new name, rewrite it in the same command, then rm it without the judge. Every
+ * row below passed the judge on a791b4d8.
+ */
+describe.skipIf(WIN)("rename then rewrite does not launder a file (8SO F1)", () => {
+	beforeEach(() => {
+		writeFileSync(join(ws, "t.ts"), "export const a = 1;\n");
+		execFileSync("git", ["add", "t.ts"], { cwd: ws });
+		execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "t"], {
+			cwd: ws,
+		});
+		writeFileSync(join(ws, ".gitignore"), ".env\n");
+		writeFileSync(join(ws, ".env"), "SECRET=1\n");
+	});
+
+	const rows: Array<[string, string, string]> = [
+		["mv + touch", "mv t.ts t2.ts && touch t2.ts", "t2.ts"],
+		["mv + sed -i", "mv t.ts t4.ts && sed -i.bak s/a/b/ t4.ts", "t4.ts"],
+		["mv + append", "mv t.ts t5.ts && echo x >> t5.ts", "t5.ts"],
+		["mv .env + append (secrets)", "mv .env cfg.txt && echo x >> cfg.txt", "cfg.txt"],
+		["git rm --cached + touch", "git rm -q --cached t.ts && touch t.ts", "t.ts"],
+		["cp -p + touch", "cp -p t.ts t6.ts && touch t6.ts", "t6.ts"],
+		["install", "install -m 644 t.ts t7.ts && touch t7.ts", "t7.ts"],
+		["ln + touch", "ln t.ts t8.ts && touch t8.ts", "t8.ts"],
+	];
+	for (const [name, cmd, target] of rows) {
+		test(`${name}: the new name stays judged`, () => {
+			child(cmd);
+			expect(own(target)).toBe(false);
+			expect(rmOwn(`rm -f ${target}`)).toBeNull();
+		});
+	}
+
+	test("rows without the command text: tracked and ignored files are still caught by the snapshots and birth time", () => {
+		const rec2 = new CreatedFiles();
+		for (const [cmd, target] of [
+			["mv t.ts t2.ts && touch t2.ts", "t2.ts"],
+			["mv .env cfg.txt && echo x >> cfg.txt", "cfg.txt"],
+			["git rm -q --cached t.ts && touch t.ts", "t.ts"],
+		] as const) {
+			execSync(
+				"git reset -q --hard && git clean -fdq && echo .env > .gitignore && echo S=1 > .env",
+				{
+					cwd: ws,
+				},
+			);
+			const done = rec2.watchCommand(ws);
+			execSync(cmd, { cwd: ws, stdio: "ignore" });
+			done();
+			expect(rec2.createdBySession(join(ws, target))).toBe(false);
+		}
+	});
+
+	test("mv + sed -i of a tracked file without the command text: the tracked deletion catches it", () => {
+		const done = rec.watchCommand(ws);
+		execSync("mv t.ts t4.ts && sed -i.bak s/a/b/ t4.ts", { cwd: ws, stdio: "ignore" });
+		done();
+		expect(own("t4.ts")).toBe(false);
+	});
+
+	test("controls: an honest new file and a pre-existing user file", () => {
+		writeFileSync(join(ws, "user.txt"), "theirs");
+		child("echo ok > honest.txt");
+		expect(own("honest.txt")).toBe(true);
+		expect(rmOwn("rm -f honest.txt")).toBe("own-scratch");
+		expect(own("user.txt")).toBe(false);
+		expect(rmOwn("rm -f user.txt")).toBeNull();
+	});
+});
+
+describe.skipIf(WIN)("long and backgrounded commands record nothing (8SO hardening)", () => {
+	test("a backgrounded command, nohup, setsid", () => {
+		child("echo a > bg1.txt &");
+		child("nohup sh -c 'echo b > bg2.txt' ");
+		// setsid is not on macOS: only its word is under test.
+		const done = rec.watchCommand(ws, "setsid sh -c 'echo c > bg3.txt'");
+		execSync("echo c > bg3.txt", { cwd: ws });
+		done();
+		for (const f of ["bg1.txt", "bg2.txt", "bg3.txt"]) expect(own(f)).toBe(false);
+	});
+
+	test("&& and 2>&1 are not backgrounding", () => {
+		child("echo a > fg1.txt && echo b > fg2.txt 2>&1");
+		expect(own("fg1.txt")).toBe(true);
+		expect(own("fg2.txt")).toBe(true);
+	});
+
+	test("a command that runs over 30 s records nothing", () => {
+		const realNow = Date.now;
+		let skew = 0;
+		Date.now = () => realNow() + skew;
+		try {
+			const done = rec.watchCommand(ws, "slow build");
+			execSync("echo x > long.txt", { cwd: ws });
+			skew = 31_000;
+			done();
+		} finally {
+			Date.now = realNow;
+		}
+		expect(own("long.txt")).toBe(false);
 	});
 });

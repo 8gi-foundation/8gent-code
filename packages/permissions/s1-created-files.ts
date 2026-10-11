@@ -20,21 +20,29 @@
  *     with one hard link and a modification time at or after the command
  *     start, is recorded (pilot: a CLI run as TODO_FILE=.tmp/td.json bun
  *     src/cli.ts add ... makes .tmp/td.json; a child made it, not a redirect).
- *     Not recorded: a name that existed before (sed -i, an atomic save, touch),
- *     a name seen before any earlier command (git stash -u then pop recreates
- *     it), a gitignored name (.env), a file moved in (mv keeps its mtime),
- *     a hard link, anything from a command during which an untracked name
- *     that was not this session's vanished; anything when the snapshot fails (no repository, git missing, a 5 s timeout, more
- *     than 5,000 untracked names, more than 20,000 names seen): fail closed,
- *     and the watch stays off for the rest of the session, as it does after
- *     one snapshot slower than 500 ms.
+ *     Born means the inode too: birth time AND mtime at or after the command
+ *     start, one hard link. Not recorded: a name that existed before (sed -i,
+ *     an atomic save, touch), a name seen before any earlier command (git
+ *     stash -u then pop recreates it), a gitignored name (.env), a file moved
+ *     in (mv keeps its mtime and birth time), a hard link, anything from a
+ *     command during which an untracked name that was not this session's
+ *     vanished, or a tracked file newly went missing (`git ls-files -o -d`,
+ *     one call each side); anything from a command whose text holds a
+ *     rename-class word (mv, rename, install, rsync, ln, cp, ditto, git mv/rm/
+ *     reset/stash/checkout/restore/clean/apply/...: "mv t.ts t2.ts && touch
+ *     t2.ts" must not launder a file), is backgrounded (&, nohup, setsid), or
+ *     ran over 30 s (a long run widens the window for other processes' files);
+ *     anything when the snapshot fails (no repository, git missing, a 5 s
+ *     timeout, more than 5,000 names, more than 20,000 seen): fail closed, and
+ *     the watch stays off for the rest of the session, as it does after one
+ *     snapshot slower than 500 ms.
  *     An own entry is refreshed after a command only when it still names the
  *     same device and inode, or a fresh file written during the command.
  *     Known gap, for 8SO: another process (an editor, another tab) creating a
- *     brand-new untracked file in the workspace while a command runs is
- *     recorded, and so is a file moved in whose mtime a child of the command
- *     reset. The second needs a child process, which can delete files without
- *     System One seeing it anyway.
+ *     brand-new untracked file in the workspace during a command (under 30 s)
+ *     is recorded, and a child process that itself moves a file and resets its
+ *     times is too; that child could delete the file directly without System
+ *     One seeing it anyway.
  * Both tool paths (packages/eight/tools.ts, packages/ai/tools.ts) record into
  * the same object: one per ToolExecutor, which the Agent also hands to its
  * native tool context. A different agent, tab or child has its own record.
@@ -123,34 +131,74 @@ const SLOW_SNAPSHOT_MS = 500;
 /** Names one record may remember as seen (#3514); past this it records nothing new. */
 const MAX_SEEN = 20_000;
 
+/** One `git ls-files -o -d -t` listing: untracked names and tracked names missing from the worktree. */
+interface Snapshot {
+	untracked: string[];
+	missing: Set<string>;
+}
+
 /**
- * The names `git ls-files <args> -z` lists under `cwd`, as absolute paths
- * under its realpath. Null when `cwd` is not in a repository, git fails or
- * times out (5 s), or there are more than MAX_UNTRACKED of them.
+ * Untracked (non-ignored) and tracked-but-deleted names under `cwd`, as absolute
+ * paths under its realpath, from ONE git call. Null when `cwd` is not in a
+ * repository, git fails or times out (5 s), or there are more than
+ * MAX_UNTRACKED names.
  */
-function gitNames(cwd: string, args: string[]): string[] | null {
+function snapshot(cwd: string): Snapshot | null {
 	try {
 		const root = realpathSync(cwd);
-		const r = spawnSync("git", ["-C", root, "ls-files", ...args, "-z"], {
-			encoding: "utf8",
-			timeout: 5_000,
-			maxBuffer: 16 * 1024 * 1024,
-			stdio: ["ignore", "pipe", "ignore"],
-		});
+		const r = spawnSync(
+			"git",
+			["-C", root, "ls-files", "-o", "-d", "-t", "--exclude-standard", "-z"],
+			{
+				encoding: "utf8",
+				timeout: 5_000,
+				maxBuffer: 16 * 1024 * 1024,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
 		if (r.error || r.status !== 0) return null;
-		const names = r.stdout.split("\0").filter(Boolean);
-		if (names.length > MAX_UNTRACKED) return null;
-		return names.map((n) => path.resolve(root, n));
+		const entries = r.stdout.split("\0").filter(Boolean);
+		if (entries.length > MAX_UNTRACKED) return null;
+		const out: Snapshot = { untracked: [], missing: new Set() };
+		for (const e of entries) {
+			const abs = path.resolve(root, e.slice(2));
+			// "? name" untracked; "R name" (or "C") a tracked file missing from the worktree.
+			if (e.startsWith("? ")) out.untracked.push(abs);
+			else out.missing.add(abs);
+		}
+		return out;
 	} catch {
 		return null;
 	}
 }
 
-/** True when `abs` is a regular file (lstat) with one link, written at or after `startNs`. */
+/**
+ * Words that move, copy, link or rewrite files already on disk, or change what
+ * git tracks (#3514, 8SO F1): a command containing one records nothing, since
+ * "mv t.ts t2.ts && touch t2.ts" would otherwise launder an existing file into
+ * a "new" one. Tested on the raw text, quoted parts included (over-blocks).
+ */
+const RENAME_CLASS =
+	/(^|[^\w.-])(mv|rename|install|rsync|ln|cp|ditto|git\s+(mv|rm|reset|stash|checkout|restore|clean|apply|switch|merge|rebase|pull|revert|cherry-pick|worktree|read-tree|update-index))(?![\w.-])/;
+
+/** True when the command is backgrounded or detached (a `&` that is not `&&`, `>&` or `&>`, nohup, setsid, disown). */
+function backgrounded(command: string): boolean {
+	const bare = maskQuotes(command).replace(/&&|\d*>&\d*|&>>?/g, " ");
+	return bare.includes("&") || /(^|[^\w.-])(nohup|setsid|disown)(?![\w.-])/.test(bare);
+}
+
+/** A command that ran longer than this (ms) records nothing: a long run widens the window for others' files (#3514). */
+const MAX_COMMAND_MS = 30_000;
+
+/**
+ * True when `abs` is a regular file (lstat) with one link, whose inode was born and
+ * whose contents were written at or after `startNs`. A moved file keeps its birth
+ * time; a missing birth time (0) fails closed.
+ */
 function writtenSince(abs: string, startNs: bigint): boolean {
 	try {
 		const st = lstatSync(abs, { bigint: true });
-		return st.isFile() && st.nlink === 1n && st.mtimeNs >= startNs;
+		return st.isFile() && st.nlink === 1n && st.mtimeNs >= startNs && st.birthtimeNs >= startNs;
 	} catch {
 		return false;
 	}
@@ -214,42 +262,45 @@ export class CreatedFiles {
 	 * entries that survive the command are refreshed. Any snapshot failure, or
 	 * a vanished name, records and refreshes nothing.
 	 */
-	watchCommand(cwd: string): () => void {
+	watchCommand(cwd: string, command = ""): () => void {
 		if (this.tripped) return () => {};
+		if (RENAME_CLASS.test(command) || backgrounded(command)) return () => {};
 		const start = (BigInt(Date.now()) + 1n) * 1_000_000n;
 		const t0 = Date.now();
-		const before = gitNames(cwd, ["-o", "--exclude-standard"]);
+		const before = snapshot(cwd);
 		if (Date.now() - t0 > SLOW_SNAPSHOT_MS) return this.trip();
 		if (!before) return this.trip();
 		const ours = new Map<string, string>();
-		for (const abs of before) {
+		for (const abs of before.untracked) {
 			const id = this.createdBySession(abs) ? inodeOf(abs) : null;
 			if (id) ours.set(abs, id);
 		}
-		for (const abs of before) this.seen.add(abs);
+		for (const abs of before.untracked) this.seen.add(abs);
 		if (this.seen.size > MAX_SEEN) this.seenFull = true;
 		let open = true;
 		return () => {
 			if (!open) return;
 			open = false;
 			const t1 = Date.now();
-			const after = gitNames(cwd, ["-o", "--exclude-standard"]);
+			const after = snapshot(cwd);
 			if (Date.now() - t1 > SLOW_SNAPSHOT_MS) this.trip();
 			if (!after) {
 				this.trip();
 				return;
 			}
-			if (this.tripped) return;
+			if (this.tripped || Date.now() - t0 > MAX_COMMAND_MS) return;
 			// A name that was not ours vanished: something was moved or deleted,
 			// so a new name may be that file.
-			const now = new Set(after);
-			if (before.some((abs) => !ours.has(abs) && !now.has(abs))) return;
+			const now = new Set(after.untracked);
+			if (before.untracked.some((abs) => !ours.has(abs) && !now.has(abs))) return;
+			// A tracked file newly missing: it may have been renamed to a new untracked name.
+			for (const abs of after.missing) if (!before.missing.has(abs)) return;
 			for (const [abs, id] of ours) {
 				// In place (same inode), or a fresh file the command wrote over it.
 				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);
 			}
 			if (this.seenFull) return;
-			for (const abs of after)
+			for (const abs of after.untracked)
 				if (!this.seen.has(abs) && writtenSince(abs, start)) this.record(abs);
 		};
 	}
@@ -394,7 +445,7 @@ export function watchRedirects(
 			watches.push(pinTarget(abs, root, record));
 		}
 		// After the pins, so a redirect target they pre-created is already "seen" here.
-		watches.push(record.watchCommand(cwd));
+		watches.push(record.watchCommand(cwd, command));
 	} catch {
 		// Fall through with what was pinned, so every descriptor is closed.
 	}
