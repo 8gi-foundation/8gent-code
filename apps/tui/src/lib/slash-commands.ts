@@ -1,5 +1,6 @@
 export type SlashCommand =
 	| "help"
+	| "hotkeys"
 	| "kanban"
 	| "predict"
 	| "avenues"
@@ -74,6 +75,12 @@ export interface BuiltInSlashCommandDef {
 
 export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{ name: "help", aliases: ["h", "?"], description: "Show available commands" },
+	{
+		name: "hotkeys",
+		aliases: ["keys", "shortcuts"],
+		description: "List every keyboard shortcut",
+		usage: "/hotkeys",
+	},
 	{
 		name: "kanban",
 		aliases: ["k", "board"],
