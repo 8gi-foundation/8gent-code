@@ -291,6 +291,8 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
+	/** Steering messages (D1) waiting for the running turn's next model call. */
+	private steerQueue: string[] = [];
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -1125,6 +1127,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
+				// Steering (D1): delivered after the running tool calls.
+				steer: () => this.drainSteers(),
 			});
 		};
 
@@ -1862,6 +1866,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
 			tools: effectiveTools,
+			// Steering (D1): delivered after the running tool calls.
+			steer: () => this.drainSteers(),
 
 			onToolCallStart: async (event) => {
 				const modeRefusal = this.modeRefusal(event.toolName);
@@ -2933,6 +2939,45 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			throw err;
 		}
+	}
+
+	/**
+	 * Steer the running turn (D1). The message joins the conversation as a user
+	 * message after the tool calls running now finish, before the next model
+	 * call, on both the text-tool and the native path. A message sent when no
+	 * further model call comes (the turn is answering, or no turn runs) stays
+	 * queued: read it with takeQueuedSteers() and send it as the next chat().
+	 * Blank text is ignored.
+	 */
+	steer(text: string): void {
+		if (text.trim() === "") return;
+		this.steerQueue.push(text);
+	}
+
+	/** Steering messages not delivered yet, in the order they were sent. */
+	queuedSteers(): readonly string[] {
+		return this.steerQueue.slice();
+	}
+
+	/**
+	 * Take the undelivered steering messages and clear the queue. Call it after
+	 * chat() resolves (send them as the follow-up turn) or after abort() (give
+	 * the text back to the person to edit).
+	 */
+	takeQueuedSteers(): string[] {
+		return this.steerQueue.splice(0);
+	}
+
+	/** Deliver queued steers into the running turn: history, session file, event. */
+	private drainSteers(): string[] {
+		if (this.steerQueue.length === 0) return [];
+		const texts = this.steerQueue.splice(0);
+		for (const text of texts) {
+			this.messageHistory.push({ role: "user", content: text });
+			this.sessionWriter.writeUserMessage(text);
+			this.events.onSteer?.({ text });
+		}
+		return texts;
 	}
 
 	/**
