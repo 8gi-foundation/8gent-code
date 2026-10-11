@@ -16,3 +16,9 @@ test("@ lists matching files; Tab inserts the picked one; Down picks the next", 
 	// The paths are real, relative to where the TUI runs.
 	for (const p of [first, second]) expect(fs.existsSync(path.resolve(process.cwd(), p))).toBeTrue();
 }, 90000);
+
+test("outside git the @ list walks the folder and reloads when a mention opens", async () => {
+	const events = await runAppHarness(path.join(import.meta.dir, "at-mention-refresh.harness.tsx"));
+	expect(events.find((e) => e.phase === "error")).toBeUndefined();
+	expect(events.find((e) => e.phase === "refresh")?.ok).toBeTrue();
+}, 90000);

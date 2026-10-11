@@ -7,8 +7,9 @@
  * minus ignored), or a bounded walk outside a git repo.
  */
 
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 /** The `@token` being typed at the end of the input, or null. */
@@ -74,23 +75,36 @@ export function rankFiles(files: readonly string[], query: string, limit = 8): s
 }
 
 const MAX_FILES = 50_000;
-const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", "target", ".venv"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", "build", "target"]);
+// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
+const CONTROL = /[\x00-\x1f\x7f]/;
 
-function walk(root: string): string[] {
+/** Keep names a terminal can draw safely: no ESC or other control bytes. */
+export function safeNames(names: Iterable<string>): string[] {
+	const out: string[] = [];
+	for (const n of names) {
+		if (n && !CONTROL.test(n)) out.push(n);
+		if (out.length >= MAX_FILES) break;
+	}
+	return out;
+}
+
+/** Files under `root` (no dot-directories, no build output), bounded. */
+async function walk(root: string): Promise<string[]> {
 	const out: string[] = [];
 	const stack = [""];
 	while (stack.length > 0 && out.length < MAX_FILES) {
 		const rel = stack.pop() as string;
 		let entries: fs.Dirent[];
 		try {
-			entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
+			entries = await fs.promises.readdir(path.join(root, rel), { withFileTypes: true });
 		} catch {
 			continue;
 		}
 		for (const e of entries) {
 			const child = rel ? `${rel}/${e.name}` : e.name;
 			if (e.isDirectory()) {
-				if (!SKIP_DIRS.has(e.name)) stack.push(child);
+				if (!e.name.startsWith(".") && !SKIP_DIRS.has(e.name)) stack.push(child);
 			} else if (e.isFile()) {
 				out.push(child);
 			}
@@ -99,21 +113,29 @@ function walk(root: string): string[] {
 	return out;
 }
 
-/** The project's files, relative to `cwd`, with `/` separators. */
-export function listProjectFiles(cwd: string): string[] {
-	try {
-		const r = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
-			cwd,
-			encoding: "utf8",
-			maxBuffer: 64 * 1024 * 1024,
-			timeout: 5000,
-			windowsHide: true,
-		});
-		if (r.status === 0 && r.stdout) {
-			return r.stdout.split("\n").filter(Boolean).slice(0, MAX_FILES);
+function gitLsFiles(cwd: string): Promise<string[] | null> {
+	return new Promise((resolve) => {
+		try {
+			execFile(
+				"git",
+				["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+				{ cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 5000, windowsHide: true },
+				(err, stdout) => resolve(err ? null : stdout.split("\0")),
+			);
+		} catch {
+			resolve(null);
 		}
-	} catch {
-		/* no git: walk instead */
-	}
-	return walk(cwd);
+	});
+}
+
+/**
+ * The project's files, relative to `cwd`, with `/` separators: `git ls-files`
+ * in a repo, else a bounded walk. Never walks the home directory itself.
+ * Names with control characters are dropped.
+ */
+export async function listProjectFiles(cwd: string, home = os.homedir()): Promise<string[]> {
+	const fromGit = await gitLsFiles(cwd);
+	if (fromGit) return safeNames(fromGit);
+	if (path.resolve(cwd) === path.resolve(home)) return [];
+	return safeNames(await walk(cwd));
 }

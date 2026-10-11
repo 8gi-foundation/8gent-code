@@ -6766,6 +6766,7 @@ export function App({
 
 						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
 							<CommandInput
+								cwd={projectCwd}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={

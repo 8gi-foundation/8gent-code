@@ -7,6 +7,7 @@ import {
 	listProjectFiles,
 	mentionAtEnd,
 	rankFiles,
+	safeNames,
 	scoreFile,
 } from "./file-mention.js";
 
@@ -40,24 +41,46 @@ describe("@ file mention (#3918 D2)", () => {
 		expect(scoreFile("README.md", "rdme")).not.toBeNull();
 	});
 
-	test("listProjectFiles walks a folder that is not a git repo", () => {
+	test("listProjectFiles walks a folder that is not a git repo, skipping dot and build folders", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-mention-"));
 		try {
 			fs.mkdirSync(path.join(dir, "src"));
 			fs.mkdirSync(path.join(dir, "node_modules", "x"), { recursive: true });
+			fs.mkdirSync(path.join(dir, ".ssh"));
 			fs.writeFileSync(path.join(dir, "src", "main.ts"), "");
+			fs.writeFileSync(path.join(dir, ".env"), "");
 			fs.writeFileSync(path.join(dir, "node_modules", "x", "index.js"), "");
-			const files = listProjectFiles(dir);
+			fs.writeFileSync(path.join(dir, ".ssh", "id_ed25519"), "");
+			fs.writeFileSync(path.join(dir, "bad\x1b[2Jname.ts"), "");
+			const files = await listProjectFiles(dir, "/nowhere");
 			expect(files).toContain("src/main.ts");
+			expect(files).toContain(".env");
 			expect(files.some((f) => f.startsWith("node_modules"))).toBeFalse();
+			expect(files.some((f) => f.startsWith(".ssh"))).toBeFalse();
+			expect(files.some((f) => f.includes("\x1b"))).toBeFalse();
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("listProjectFiles uses git in a repo", () => {
-		const files = listProjectFiles(path.join(import.meta.dir, "../../../.."));
+	test("listProjectFiles never walks the home directory", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-home-"));
+		try {
+			fs.writeFileSync(path.join(dir, "notes.txt"), "");
+			expect(await listProjectFiles(dir, dir)).toEqual([]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("safeNames drops control characters and empties", () => {
+		expect(safeNames(["a.ts", "", "b\x07.ts", "c\x7f", "d/e.ts"])).toEqual(["a.ts", "d/e.ts"]);
+	});
+
+	test("listProjectFiles uses git -z in a repo", async () => {
+		const files = await listProjectFiles(path.join(import.meta.dir, "../../../.."));
 		expect(files).toContain("apps/tui/src/lib/file-mention.ts");
 		expect(files.some((f) => f.includes("node_modules/"))).toBeFalse();
+		expect(files).not.toContain("");
 	});
 });
