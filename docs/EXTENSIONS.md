@@ -101,3 +101,36 @@ Fails with the name of what is missing: session control (`sendMessage`,
 `sendUserMessage`, `appendEntry`, `exec`, `setActiveTools`, `setModel`,
 `events`), terminal UI components (`@earendil-works/pi-tui`, `CustomEditor`),
 changing a tool call's input from `tool_call`, and npm dependencies.
+
+## Bring Claude Code commands and MCP servers
+
+The same command reads other tools. Nothing is fetched, and nothing is
+translated by a model: each item maps across as it is, or the report says
+exactly what does not carry over. Every item records its source, path and
+sha256 in `~/.8gent/imports.json`.
+
+```sh
+8gent ext import claude-code            # stage ~/.claude/commands as /claude-<name>
+8gent ext import claude-code --enable   # and turn them on
+8gent ext import mcp                    # MCP servers from Claude Code and Pi, pending
+8gent ext import mcp --from pi          # only Pi's mcp.json
+8gent ext approve-mcp github            # let one pending server start
+```
+
+- **Claude Code commands** (`~/.claude/commands/*.md`) become prompt
+  templates named `/claude-<name>`. They are staged in
+  `~/.8gent/imports/claude-code/prompts` and only used once you pass
+  `--enable`. `$ARGUMENTS` and `$1` work. The report names what does not
+  carry over: `allowed-tools` and `model` front matter, `` !`command` ``
+  lines and `@file` references stay as plain text.
+- **Claude Code skills** (`~/.claude/skills/*/SKILL.md`) need no import:
+  8gent already reads that folder. The import records their hashes.
+- **MCP servers** from `~/.claude.json` (yours and this project's),
+  `./.mcp.json` and Pi's `mcp.json` are added to `~/.8gent/mcp.json` under
+  `pendingServers`. A pending server never starts. `8gent ext approve-mcp
+  <name>` moves it into your server list, and it starts the next time 8gent
+  starts. Environment values and headers are copied but never printed.
+- **Anything else** is refused with the reason, and nothing is imported.
+
+In the TUI the same commands work as `/extensions import claude-code`,
+`/extensions import mcp` and `/extensions approve-mcp <name>`.

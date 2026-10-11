@@ -15,12 +15,20 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ExtensionHost, type ExtensionLoadResult, defaultExtensionsDir } from "./host";
+import {
+	type ImportPaths,
+	approveMcp,
+	defaultImportPaths,
+	importFromSource,
+} from "./import-sources";
 import { copyPiExtensions, defaultPiExtensionsDir } from "./pi-compat";
 
 export interface ExtCommandOptions {
 	/** Destination; default ~/.8gent/extensions. */
 	extensionsDir?: string;
 	env?: NodeJS.ProcessEnv;
+	/** Overrides for the other import sources' paths (tests). */
+	paths?: Partial<ImportPaths>;
 }
 
 export interface ExtCommandResult {
@@ -32,6 +40,11 @@ const USAGE = [
 	"Usage: 8gent ext import-pi [path] [--to <dir>]",
 	"  Copies Pi extensions into ~/.8gent/extensions as pi-<name> and checks each one.",
 	"  path defaults to $PI_CODING_AGENT_DIR/extensions or ~/.pi/agent/extensions.",
+	"       8gent ext import <pi|claude-code|mcp> [path] [--from claude-code|pi] [--enable]",
+	"  pi: same as import-pi. claude-code: ~/.claude/commands become /claude-<name> prompt",
+	"  templates (staged; --enable turns them on); ~/.claude/skills are already read in place.",
+	"  mcp: MCP servers from Claude Code or Pi are added as pending; none starts until approved.",
+	"       8gent ext approve-mcp <name>",
 ].join("\n");
 
 /** A host that loads only the given files, to check them in isolation. */
@@ -88,11 +101,33 @@ export async function runExtCommand(
 	// --to <dir> imports somewhere other than ~/.8gent/extensions.
 	const rest: string[] = [];
 	let toFlag: string | undefined;
+	let fromFlag: string | undefined;
+	let enable = false;
 	for (let i = 0; i < raw.length; i++) {
 		if (raw[i] === "--to" && raw[i + 1]) toFlag = path.resolve(raw[++i]);
+		else if (raw[i] === "--from" && raw[i + 1]) fromFlag = raw[++i];
+		else if (raw[i] === "--enable") enable = true;
 		else rest.push(raw[i]);
 	}
-	if (sub !== "import-pi") return { code: sub ? 1 : 0, output: USAGE };
+	if (sub === "approve-mcp") {
+		if (!rest[0]) return { code: 1, output: "Usage: 8gent ext approve-mcp <name>" };
+		const paths = { ...defaultImportPaths(opts.env), ...opts.paths };
+		return approveMcp(rest[0], paths);
+	}
+	if (sub === "import") {
+		const [source, ...more] = rest;
+		if (!source) return { code: 1, output: USAGE };
+		if (source !== "pi") {
+			return importFromSource(
+				source,
+				{ from: fromFlag, enable },
+				{ paths: opts.paths, env: opts.env },
+			);
+		}
+		rest.splice(0, rest.length, ...more);
+	} else if (sub !== "import-pi") {
+		return { code: sub ? 1 : 0, output: USAGE };
+	}
 	let from: string;
 	let to: string;
 	try {
