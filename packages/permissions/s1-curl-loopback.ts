@@ -53,13 +53,14 @@
  * Synchronous, never throws.
  */
 
+import { lstatSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
-import { SECRET, WRITE_BAD_NAME, canon } from "./s1-run-in-project";
+import { SECRET, WRITE_BAD_NAME, canon, symlinkBelow } from "./s1-run-in-project";
 
 export type CurlLoopback = { ok: true; reason: string } | { ok: false };
 const NO: CurlLoopback = { ok: false };
@@ -168,7 +169,10 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 	if (p === "-") return write;
 	if (write && p === "/dev/null") return true;
 	if (!p || p.includes("{") || p.includes("}") || SECRET.test(p)) return false;
-	const abs = canon(path.isAbsolute(p) ? path.normalize(p) : path.resolve(st.root, p));
+	// A ".." after a symlink means something else to the OS than to path.resolve.
+	if (p.split("/").includes("..")) return false;
+	const lexical = path.isAbsolute(p) ? path.normalize(p) : path.resolve(st.root, p);
+	const abs = canon(lexical);
 	if (!inside(abs, st.root)) return false;
 	const rel = path.relative(st.root, abs);
 	if (rel === "" || SECRET.test(rel) || protectedRel(rel)) return false;
@@ -178,6 +182,13 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 		// Outputs only under the workspace's .tmp/ directory.
 		if (segs[0] !== ".tmp" || segs.length < 2 || segs.includes("node_modules")) return false;
 		if (WRITE_BAD_NAME.test(path.basename(abs))) return false;
+		// .tmp must be a real directory inside the workspace (absent is fine: nothing to redirect),
+		// and no component under it, a dangling final one included, may be a symlink.
+		const tmp = path.join(st.root, ".tmp");
+		const tst = lstatSync(tmp, { throwIfNoEntry: false });
+		if (tst && (tst.isSymbolicLink() || !tst.isDirectory() || realpathSync(tmp) !== tmp))
+			return false;
+		if (!inside(lexical, st.root) || symlinkBelow(st.root, lexical)) return false;
 	}
 	return true;
 }

@@ -6,7 +6,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -167,7 +167,7 @@ describe("curlToLoopback allows", () => {
 		}
 	});
 	test("an absolute path inside the workspace", () => {
-		expect(ok(`curl -s -c ${ws}/.tmp/jar.txt http://127.0.0.1:8080/`)).toBe(true);
+		expect(ok(`curl -s -c ${realpathSync(ws)}/.tmp/jar.txt http://127.0.0.1:8080/`)).toBe(true);
 	});
 });
 
@@ -383,6 +383,38 @@ describe("-F options and writes (8SO)", () => {
 		]) {
 			expect(ok(c), c).toBe(false);
 		}
+	});
+});
+
+describe("symlinks under .tmp (8SO)", () => {
+	test("a dangling symlink as the final component is refused", () => {
+		put(".tmp/keep.txt");
+		symlinkSync("../src/pwn.txt", join(ws, ".tmp", "linkfile"));
+		expect(ok("curl -s -o .tmp/linkfile http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -c .tmp/linkfile http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -D .tmp/linkfile http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -o .tmp/fresh.txt http://127.0.0.1:8080/")).toBe(true);
+	});
+	test("a symlinked directory below .tmp is refused", () => {
+		symlinkSync("../src", join(ws, ".tmp", "sub"));
+		expect(ok("curl -s -o .tmp/sub/a.txt http://127.0.0.1:8080/")).toBe(false);
+	});
+	test(".tmp itself a symlink refuses every write", () => {
+		rmSync(join(ws, ".tmp"), { recursive: true, force: true });
+		symlinkSync("src", join(ws, ".tmp"));
+		expect(ok("curl -s -o .tmp/a.txt http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -c .tmp/j.txt http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -D .tmp/h.txt http://127.0.0.1:8080/")).toBe(false);
+		expect(ok("curl -s -o /dev/null http://127.0.0.1:8080/")).toBe(true);
+	});
+	test(".tmp that is a file refuses writes", () => {
+		rmSync(join(ws, ".tmp"), { recursive: true, force: true });
+		writeFileSync(join(ws, ".tmp"), "x");
+		expect(ok("curl -s -o .tmp/a.txt http://127.0.0.1:8080/")).toBe(false);
+	});
+	test("a .. after a link is refused", () => {
+		symlinkSync("../src", join(ws, ".tmp", "sub"));
+		expect(ok("curl -s -o .tmp/sub/../a.txt http://127.0.0.1:8080/")).toBe(false);
 	});
 });
 

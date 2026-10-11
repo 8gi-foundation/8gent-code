@@ -189,6 +189,18 @@ describe("runInProject allows the pilot's real CLI", () => {
 	});
 });
 
+describe("runInProject write targets that are symlinks (8SO)", () => {
+	test("a dangling symlink as the final component is refused", () => {
+		symlinkSync("src/pwn.txt", join(ws, "dangling.json"));
+		expect(runInProject("TODO_FILE=dangling.json bun src/cli.ts done 1", ws).ok).toBe(false);
+		expect(runInProject("TODO_FILE=other.json bun src/cli.ts done 1", ws).ok).toBe(true);
+	});
+	test("a symlinked directory on the way is refused", () => {
+		symlinkSync("src", join(ws, "data"));
+		expect(runInProject("TODO_FILE=data/t.json bun src/cli.ts done 1", ws).ok).toBe(false);
+	});
+});
+
 describe("runInProject refuses", () => {
 	const base = "TODO_FILE=/tmp/todo-test.json";
 	test("command shapes", () => {

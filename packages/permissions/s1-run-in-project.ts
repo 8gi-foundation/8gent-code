@@ -385,6 +385,19 @@ export function canon(p: string): string {
 	}
 }
 
+/** True when any existing component of `abs` below `root` is a symlink (a dangling final one included). */
+export function symlinkBelow(root: string, abs: string): boolean {
+	let cur = root;
+	for (const seg of path.relative(root, abs).split("/")) {
+		if (seg === "") continue;
+		cur = path.join(cur, seg);
+		const st = lstatOrNull(cur);
+		if (!st) return false;
+		if (st.isSymbolicLink()) return true;
+	}
+	return false;
+}
+
 function writeTargetOk(p: string, root: string): boolean {
 	if (SECRET.test(p)) return false;
 	const abs = canon(path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p));
@@ -393,6 +406,11 @@ function writeTargetOk(p: string, root: string): boolean {
 	const rel = path.relative(root, abs);
 	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
 	if (rel.split("/").includes("node_modules")) return false;
+	// canon() falls back to the nearest existing parent, so a dangling symlink as
+	// the final part, or one in the middle, would pass; refuse any symlink.
+	if (p.split("/").includes("..")) return false;
+	const lexical = path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p);
+	if (inside(lexical, root) && symlinkBelow(root, lexical)) return false;
 	return !WRITE_BAD_NAME.test(path.basename(abs));
 }
 
