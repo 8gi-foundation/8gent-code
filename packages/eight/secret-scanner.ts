@@ -22,6 +22,14 @@
  * Every regex has bounded quantifiers or a fixed shape so a hostile 1 MB
  * input cannot cause catastrophic backtracking.
  *
+ * Short values are a deliberate trade (8SO ruling on #4018): key, token and
+ * auth names redact only values of 16+ chars or with a letter/digit mix, so
+ * TOKEN=123456 or sort_key=asc stay readable. Password, passwd, pwd, secret
+ * and private names always redact any non-placeholder value.
+ *
+ * Values longer than MAX_VALUE are redacted to the end of the token, never
+ * cut with the tail left in the clear.
+ *
  * Known limit, AWS secret access keys: a secret key is 40 chars of base64
  * with no prefix, so it cannot be told apart from other 40-char tokens.
  * It is caught only (a) after an aws-named assignment, (b) after any
@@ -97,6 +105,7 @@ const RULES: Rule[] = [
 	{ id: "xai_api_key", pattern: /\bxai-[A-Za-z0-9]{70,100}\b/g },
 	{ id: "sendgrid_api_key", pattern: /\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}(?![\w-])/g },
 	{ id: "twilio_api_key", pattern: /\bSK[0-9a-fA-F]{32}\b/g },
+	{ id: "discord_token", pattern: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}\b/g },
 	{ id: "telegram_bot_token", pattern: /(?<![\w])\d{8,10}:[A-Za-z0-9_\-]{35}(?![\w\-])/g },
 	{ id: "jwt", pattern: /\beyJ[A-Za-z0-9_\-]{8,4096}\.eyJ[A-Za-z0-9_\-]{8,8192}\.[A-Za-z0-9_\-]{8,4096}/g },
 	// Azure SAS signature in a query string.
@@ -191,6 +200,11 @@ function hasLetterDigit(v: string): boolean {
 	return /[A-Za-z]/.test(v) && /\d/.test(v);
 }
 
+/** True when any . / ? & = : separated segment is 16+ chars with letters and digits. */
+function hasKeyLikeSegment(v: string): boolean {
+	return v.split(/[.\/?&=:]/).some((seg) => seg.length >= 16 && hasLetterDigit(seg));
+}
+
 /** Decide whether a value under a secret name should be redacted. */
 function shouldRedact(value: string, fam: Family): boolean {
 	const v = value.trim();
@@ -198,7 +212,10 @@ function shouldRedact(value: string, fam: Family): boolean {
 	if (v.includes("[REDACTED:")) return false;
 	if (isPlaceholder(v) || isCode(v)) return false;
 	if (fam === "strong") return true; // password, secret, private: any real value
-	if (DOTTED_IDENT.test(v) || FILE_PATH.test(v) || PLAIN_URL.test(v)) return false;
+	// Dotted refs, paths and plain URLs are exempt only when no segment looks
+	// like a key, so API_KEY=/<secret> and ?k=<secret> still redact.
+	if ((DOTTED_IDENT.test(v) || FILE_PATH.test(v)) && !hasKeyLikeSegment(v)) return false;
+	if (PLAIN_URL.test(v) && !hasKeyLikeSegment(v.slice(v.indexOf("?") + 1 || v.length))) return false;
 	// kebab cache keys: build-linux-x64-abc123, node-modules-8f3a9c1e
 	if (/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/.test(v) && (v.match(/(?:^|-)[a-z]{3,}(?=-|$)/g)?.length ?? 0) >= 2) return false;
 	if (fam === "auth") return v.length >= 16 || (hasLetterDigit(v) && v.length >= 8);
@@ -222,6 +239,14 @@ interface ValueSpan {
 	start: number; // index of first value char (after opening quote)
 	end: number; // index after last value char
 	resume: number; // where scanning continues
+	truncated?: boolean; // ran past MAX_VALUE: always redacted (fail closed)
+}
+
+/** Past the scan window, extend to the end of the token so no tail leaks. */
+function overrun(text: string, q: number, quote: string | null): number {
+	if (quote) while (q < text.length && text[q] !== quote && text[q] !== "\n") q++;
+	else while (q < text.length && !/\s/.test(text[q])) q++;
+	return q;
 }
 
 /**
@@ -249,6 +274,10 @@ function parseValue(text: string, pos: number, fam: Family, sep: string, flow: b
 			if (text[q] === "\\") q++;
 			q++;
 		}
+		if (q >= limit && limit < text.length) {
+			const e = overrun(text, q, ch);
+			return { start: p + 1, end: e, resume: text[e] === ch ? e + 1 : e, truncated: true };
+		}
 		const closed = text[q] === ch;
 		return { start: p + 1, end: Math.min(q, limit), resume: closed ? q + 1 : Math.min(q, limit) };
 	}
@@ -257,6 +286,10 @@ function parseValue(text: string, pos: number, fam: Family, sep: string, flow: b
 	if (fam === "strong" && !oneToken) {
 		if (flow) while (eol() && !",;)]}".includes(text[q])) q++;
 		else while (eol()) q++;
+		if (q >= limit && limit < text.length) {
+			const e = overrun(text, q, null);
+			return { start: p, end: e, resume: e, truncated: true };
+		}
 		let e = q;
 		while (e > p && (text[e - 1] === " " || text[e - 1] === "\t")) e--;
 		return { start: p, end: e, resume: q };
@@ -265,6 +298,10 @@ function parseValue(text: string, pos: number, fam: Family, sep: string, flow: b
 		if (sep === ":" && ",;{}()[]".includes(text[q])) break;
 		if (text[q] === "&" && /^&[\w.\-]{1,64}=/.test(text.slice(q, q + 66))) break;
 		q++;
+	}
+	if (q >= limit && limit < text.length) {
+		const e = overrun(text, q, null);
+		return { start: p, end: e, resume: e, truncated: true };
 	}
 	return { start: p, end: q, resume: q };
 }
@@ -448,7 +485,7 @@ function redactAssignments(text: string, re: RegExp, fire: (id: string) => void,
 		const span = parseValue(text, valPos, fam, sep, flow, isFlag);
 		if (!span || span.end <= span.start) continue;
 		const value = text.slice(span.start, span.end);
-		if (!shouldRedact(value, fam)) continue;
+		if (!span.truncated && !shouldRedact(value, fam)) continue;
 		parts.push(text.slice(last, span.start), "[REDACTED:secret_assignment]");
 		fire("secret_assignment");
 		last = span.end;
