@@ -332,4 +332,53 @@ describe("shared sessions over the gateway", () => {
 		await c.next((f) => f.type === "error");
 		c.close();
 	});
+
+	it("persist: true saves a panel-only session, owner-only, and it survives a restart", async () => {
+		const c = new Client(server.port as number);
+		await c.ready;
+		c.send({ type: "session:create", channel: "browser", persist: true });
+		const created = await c.next((f) => f.type === "session:created");
+		expect(created.resumeSecret).toMatch(/^[0-9a-f]{32}$/);
+		const id = created.sessionId as string;
+		await settle(); // the pool creates the agent on the next tick
+		c.send({ type: "prompt", text: "remember the panel" });
+		await c.next((f) => f.event === "agent:stream" && f.payload.final);
+		await settle();
+		const file = join(dataDir, "sessions", `${id}.json`);
+		expect(existsSync(file)).toBe(true);
+		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+		c.close();
+
+		// Daemon restart: the pool is empty, the gateway is new.
+		server.stop(true);
+		pool.live.clear();
+		server = startGateway({ port: 0, authToken: null, pool: pool as unknown as AgentPool });
+		const again = new Client(server.port as number);
+		await again.ready;
+		again.send({ type: "session:resume", sessionId: id, channel: "browser" });
+		const resumed = await again.next((f) => f.type === "session:resumed");
+		expect(resumed).toMatchObject({ restored: true, messageCount: 2 });
+		expect(resumed.resumeSecret).toMatch(/^[0-9a-f]{32}$/);
+		expect(pool.getAgent(id)!.getMessageHistory().slice(1)).toEqual([
+			{ role: "user", content: "remember the panel" },
+			{ role: "assistant", content: "echo: remember the panel" },
+		]);
+		again.send({ type: "session:attach", sessionId: id });
+		const att = await again.next((f) => f.type === "session:attached");
+		expect(att.resumeSecret).toBe(resumed.resumeSecret);
+		again.close();
+	});
+
+	it("a session created without persist (older clients) is still not saved", async () => {
+		const c = new Client(server.port as number);
+		await c.ready;
+		c.send({ type: "session:create", channel: "browser" });
+		const created = await c.next((f) => f.type === "session:created");
+		await settle();
+		c.send({ type: "prompt", text: "not kept" });
+		await c.next((f) => f.event === "agent:stream" && f.payload.final);
+		await settle();
+		expect(existsSync(join(dataDir, "sessions", `${created.sessionId}.json`))).toBe(false);
+		c.close();
+	});
 });

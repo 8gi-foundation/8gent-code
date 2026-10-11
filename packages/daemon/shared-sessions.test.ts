@@ -18,6 +18,7 @@ import {
 	TRANSCRIPT_MAX_CHARS,
 	TRANSCRIPT_MAX_MESSAGES,
 	type ResumeDeps,
+	ResumeSecrets,
 	capTranscript,
 	chatMessages,
 	handleResume,
@@ -103,6 +104,7 @@ const resumeDeps = (over: Partial<ResumeDeps> = {}): ResumeDeps => ({
 	isBridge: false,
 	loopback: true,
 	channel: "browser",
+	resumeSecretOk: false,
 	...over,
 });
 const saveStore = () => store as unknown as SharedStore;
@@ -391,12 +393,19 @@ describe("session:resume (v1.0) under the shared-session rules", () => {
 		);
 	});
 
-	it("joining a live session others are on is loopback-only; reconnecting to your own is not", () => {
+	it("joining a live session others are on is loopback-only; a remote reconnect needs the secret", () => {
 		pool.add("s_b", "browser");
 		expect(
 			handleResume("s_b", resumeDeps({ loopback: false, clientsOn: () => 1 })).reply.type,
 		).toBe("error");
-		expect(handleResume("s_b", resumeDeps({ loopback: false })).bind).toBe("s_b");
+		// A remote reconnect needs the session's resume secret, even with nobody on it.
+		expect(handleResume("s_b", resumeDeps({ loopback: false })).reply).toEqual({
+			type: "error",
+			message: "resume secret required",
+		});
+		expect(handleResume("s_b", resumeDeps({ loopback: false, resumeSecretOk: true })).bind).toBe(
+			"s_b",
+		);
 	});
 
 	it("rejects ids that are not plain", () => {
@@ -404,6 +413,23 @@ describe("session:resume (v1.0) under the shared-session rules", () => {
 			type: "error",
 			message: "invalid session id",
 		});
+	});
+});
+
+describe("ResumeSecrets", () => {
+	it("issues one secret per session and only that secret matches", () => {
+		const secrets = new ResumeSecrets();
+		const a = secrets.issue("s_a");
+		expect(a).toMatch(/^[0-9a-f]{32}$/);
+		expect(secrets.issue("s_a")).toBe(a);
+		expect(secrets.issue("s_b")).not.toBe(a);
+		expect(secrets.matches("s_a", a)).toBe(true);
+		expect(secrets.matches("s_b", a)).toBe(false);
+		expect(secrets.matches("s_a", undefined)).toBe(false);
+		expect(secrets.matches("s_a", `${a}x`)).toBe(false);
+		expect(secrets.matches("s_unknown", a)).toBe(false);
+		secrets.forget("s_a");
+		expect(secrets.matches("s_a", a)).toBe(false);
 	});
 });
 

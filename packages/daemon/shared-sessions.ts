@@ -17,6 +17,7 @@
  * their own surface.
  */
 
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import { CONTEXT_NOTE_HEADER } from "../eight/context-note";
 import { PLANNING_GATE_INSTRUCTION } from "../eight/prompt";
@@ -124,10 +125,18 @@ export interface PastSession {
 }
 
 export type SharedSessionOutbound =
-	| { type: "session:resumed"; sessionId: string; restored?: boolean; messageCount?: number }
+	| {
+			type: "session:resumed";
+			sessionId: string;
+			restored?: boolean;
+			messageCount?: number;
+			/** Proves a later remote resume is this client's (#3929). */
+			resumeSecret?: string;
+	  }
 	| { type: "session:list"; live: LiveSession[]; past: PastSession[] }
 	| {
 			type: "session:attached";
+			resumeSecret?: string;
 			sessionId: string;
 			channel: string;
 			busy: boolean;
@@ -406,6 +415,8 @@ export interface ResumeDeps extends SharedSessionDeps {
 	loopback: boolean;
 	/** The channel this connection would use (from the frame or its state). */
 	channel: string;
+	/** The frame carried this session's resume secret. */
+	resumeSecretOk: boolean;
 }
 
 /**
@@ -432,6 +443,9 @@ export function handleResume(sessionId: unknown, deps: ResumeDeps): SharedSessio
 			} else if (deps.clientsOn(sessionId) > 0 && !deps.loopback) {
 				return fail("shared sessions are loopback-only");
 			}
+			// A remote client proves the session is its own with the secret it was
+			// given at create/attach/resume; holding a live id is not enough.
+			if (!deps.loopback && !deps.resumeSecretOk) return fail("resume secret required");
 			return { bind: sessionId, reply: { type: "session:resumed", sessionId } };
 		}
 
@@ -493,5 +507,34 @@ export function persistSession(
 	} catch (err) {
 		console.error(`[shared-sessions] could not save session ${sessionId}: ${String(err)}`);
 		return false;
+	}
+}
+
+/**
+ * Per-session resume secrets (#3929). Handed out in session:created,
+ * session:attached and session:resumed as `resumeSecret`; a non-loopback
+ * session:resume of a live session must send it back.
+ */
+export class ResumeSecrets {
+	private secrets = new Map<string, string>();
+
+	/** The session's secret, made on first use. */
+	issue(sessionId: string): string {
+		let secret = this.secrets.get(sessionId);
+		if (!secret) {
+			secret = randomBytes(16).toString("hex");
+			this.secrets.set(sessionId, secret);
+		}
+		return secret;
+	}
+
+	matches(sessionId: string, given: unknown): boolean {
+		const want = this.secrets.get(sessionId);
+		if (!want || typeof given !== "string" || given.length !== want.length) return false;
+		return timingSafeEqual(Buffer.from(given), Buffer.from(want));
+	}
+
+	forget(sessionId: string): void {
+		this.secrets.delete(sessionId);
 	}
 }

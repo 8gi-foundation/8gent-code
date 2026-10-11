@@ -8,7 +8,13 @@
 import { telegramBridgeHealth } from "./bridge-health";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
-import { SPEAK_URL_RE, TableStore, handleTableAudioHttp, handleTableSpeakHttp, installTablePolicies } from "../table/index";
+import {
+	SPEAK_URL_RE,
+	TableStore,
+	handleTableAudioHttp,
+	handleTableSpeakHttp,
+	installTablePolicies,
+} from "../table/index";
 import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
@@ -50,17 +56,14 @@ import {
 	type SharedSessionInbound,
 	type SharedSessionOutbound,
 	type SharedStore,
+	ResumeSecrets,
+	SHAREABLE_CHANNELS,
 	handleResume,
 	handleSharedSession,
 	isSharedSessionType,
 	persistSession,
 } from "./shared-sessions";
-import {
-	bindParticipant,
-	handleTableFrame,
-	isLoopbackAddress,
-	isTableFrame,
-} from "./table-routes";
+import { bindParticipant, handleTableFrame, isLoopbackAddress, isTableFrame } from "./table-routes";
 import {
 	type TimeTravelInbound,
 	type TimeTravelOutbound,
@@ -110,8 +113,9 @@ interface ClientState {
 
 type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
-	| { type: "session:create"; channel: string }
-	| { type: "session:resume"; sessionId: string; channel?: string }
+	/** persist: true saves the session after every turn (#3929), so it can be resumed later. */
+	| { type: "session:create"; channel: string; persist?: boolean }
+	| { type: "session:resume"; sessionId: string; channel?: string; resumeSecret?: string }
 	| { type: "session:compact"; sessionId: string }
 	| { type: "session:destroy"; sessionId: string }
 	/** `turn` counts only from the registered approval bridge (#3621). */
@@ -139,7 +143,7 @@ type InboundMessage =
 type OutboundMessage =
 	| { type: "auth:ok" }
 	| { type: "auth:fail" }
-	| { type: "session:created"; sessionId: string }
+	| { type: "session:created"; sessionId: string; resumeSecret?: string }
 	| { type: "session:resumed"; sessionId: string }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
@@ -200,6 +204,9 @@ function getSessionStore(): SharedStore {
  * or shared when no file existed. See SharedSessionDeps.persistable.
  */
 const persistable = new Set<string>();
+
+/** Resume secrets for remote session:resume (#3929). */
+const resumeSecrets = new ResumeSecrets();
 
 /** Most restores from disk one connection may make per minute. */
 const RESTORES_PER_MINUTE = 5;
@@ -352,7 +359,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		});
 		if (bind !== undefined) state.sessionId = bind;
 		if (surface) state.channel = surface;
-		send(ws, reply);
+		send(
+			ws,
+			reply.type === "session:attached"
+				? { ...reply, resumeSecret: resumeSecrets.issue(reply.sessionId) }
+				: reply,
+		);
 		return;
 	}
 
@@ -383,9 +395,16 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			const sessionId = generateSessionId();
 			state.sessionId = sessionId;
 			state.channel = msg.channel || "api";
+			// Opt-in save after every turn, so a panel-only chat can be resumed
+			// later, also after a daemon restart (#3929). Shareable channels only.
+			if (msg.persist === true && SHAREABLE_CHANNELS.has(state.channel)) persistable.add(sessionId);
 
 			// Respond to the client first, then emit events and create agent
-			send(ws, { type: "session:created", sessionId });
+			send(ws, {
+				type: "session:created",
+				sessionId,
+				resumeSecret: resumeSecrets.issue(sessionId),
+			});
 			bus.emit("session:start", { sessionId, channel: state.channel });
 
 			// Create Agent instance async (constructor does blocking AST indexing)
@@ -409,6 +428,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				isBridge: state.approvalBridge === true,
 				loopback: isLoopbackAddress(state.remoteAddress),
 				channel,
+				resumeSecretOk: resumeSecrets.matches(msg.sessionId, msg.resumeSecret),
 			});
 			if (reply.type === "error") {
 				send(ws, reply);
@@ -420,7 +440,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				sessionId: msg.sessionId,
 				channel: state.channel,
 			});
-			send(ws, reply);
+			send(
+				ws,
+				reply.type === "session:resumed"
+					? { ...reply, resumeSecret: resumeSecrets.issue(msg.sessionId) }
+					: reply,
+			);
 			break;
 		}
 
@@ -444,6 +469,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					break;
 				}
 				persistable.delete(msg.sessionId);
+				resumeSecrets.forget(msg.sessionId);
 				// Only the bridge's own socket may cancel its live prompt.
 				if (state.approvalBridge) channelApprovals.endSession(msg.sessionId);
 				pool.destroySession(msg.sessionId);

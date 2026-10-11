@@ -192,6 +192,13 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   session other clients are on needs a loopback peer. A session that is not live but has a
   saved file is restored from it, with its history and channel (loopback only), instead of
   being recreated empty under that id.
+- Resume secrets: `session:created`, `session:attached` and `session:resumed` carry
+  `"resumeSecret": "<32 hex>"`, one per session. A `session:resume` from a non-loopback peer
+  of a live session must send it back as `"resumeSecret"`, otherwise
+  `{ "type": "error", "message": "resume secret required" }`. Loopback clients may omit it.
+- `session:create` takes an optional `"persist": true` (shareable channels only): the session
+  is saved after every turn from the start, so a chat only one surface ever had can be resumed
+  later, also after a daemon restart. Without it (older clients) nothing changes.
 - `session:destroy` only ends the session the connection is on
   (`can only end the session you are on` otherwise). When other clients are on it, it only
   takes this client off, like `session:detach`.
