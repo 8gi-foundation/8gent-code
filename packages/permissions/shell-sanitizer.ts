@@ -6,6 +6,12 @@
  * Blocks command substitution and command chaining, while allowing safe
  * operators like pipes and redirects. One function, so the two paths cannot
  * drift apart.
+ *
+ * Quoted text is data (#3879), so a string passed to `bash -c`, `sh -c` or
+ * `eval` in quotes now passes this check even when it holds `;` or `&&`. This
+ * layer does not read inside those strings; System One (packages/decide
+ * rules) does recurse into `bash -c`, `sh -c` and `eval`, and carries that
+ * check.
  */
 
 export interface ShellSanitizeResult {
@@ -79,12 +85,19 @@ export function hasUnquotedAmpersand(
 	return false;
 }
 
+const NEWLINE_REASON =
+	"A new line outside quotes starts another command. Use separate run_command calls, or put the steps in a script file and run it with bash <file>";
+
 interface QuoteScan {
 	balanced: boolean;
 	/** The command with quoted content removed (the quote marks stay). */
 	outside: string;
 	/** Content of each double-quoted span: bash still expands `$(` and backticks there. */
 	doubled: string[];
+	/** An unquoted `$'...'` span held a backslash: its end cannot be read reliably, so the command is refused. */
+	ansiEscape: boolean;
+	/** An unquoted newline or carriage return, outside the quotes: a second command on the next line. */
+	lineBreak: boolean;
 }
 
 /**
@@ -92,14 +105,20 @@ interface QuoteScan {
  * or a backtick inside SINGLE quotes is data; inside double quotes bash still
  * expands them, so the caller keeps refusing those. A backslash only escapes a
  * quote mark or another backslash here, so `\;` and `\$(` stay refused as before.
- * `$'...'` (ANSI-C) is a single-quote span in which `\'` does not close it.
- * An unterminated quote makes `balanced` false and the command is refused.
+ * An unquoted `$'...'` (ANSI-C) span with a backslash in it is refused: bash
+ * ends it differently from a plain quote, and a wrong guess hides a command.
+ * `#` at the start of a word, outside quotes, is a comment to the end of the
+ * line and is not scanned (a quote inside a comment opens nothing). An
+ * unquoted newline or carriage return is reported in `lineBreak` (a second
+ * command). An unterminated quote makes `balanced` false.
  */
 function scanQuotes(command: string): QuoteScan {
 	let outside = "";
 	const doubled: string[] = [];
 	let mode: "none" | "single" | "ansi" | "double" = "none";
 	let dq = "";
+	let ansiEscape = false;
+	let lineBreak = false;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (mode === "single") {
@@ -110,8 +129,10 @@ function scanQuotes(command: string): QuoteScan {
 			continue;
 		}
 		if (mode === "ansi") {
-			if (ch === "\\") i++;
-			else if (ch === "'") {
+			if (ch === "\\") {
+				ansiEscape = true;
+				i++;
+			} else if (ch === "'") {
 				mode = "none";
 				outside += ch;
 			}
@@ -136,8 +157,17 @@ function scanQuotes(command: string): QuoteScan {
 			i++;
 			continue;
 		}
+		if (ch === "\n" || ch === "\r") {
+			lineBreak = true;
+			outside += ch;
+			continue;
+		}
+		if (ch === "#" && (i === 0 || /[\s;|&(]/.test(command[i - 1]))) {
+			while (i + 1 < command.length && command[i + 1] !== "\n" && command[i + 1] !== "\r") i++;
+			continue;
+		}
 		if (ch === "'") {
-			mode = command[i - 1] === "$" ? "ansi" : "single";
+			mode = command[i - 1] === "$" && command[i - 2] !== "$" && command[i - 2] !== "\\" ? "ansi" : "single";
 			outside += ch;
 			continue;
 		}
@@ -148,16 +178,28 @@ function scanQuotes(command: string): QuoteScan {
 		}
 		outside += ch;
 	}
-	return { balanced: mode === "none", outside, doubled };
+	return { balanced: mode === "none", outside, doubled, ansiEscape, lineBreak };
 }
 
-/** The first heredoc starts a body that is not shell text; split it off so its apostrophes do not unbalance the scan. */
-function splitHeredoc(command: string): { head: string; body: string } {
-	const m = /<<-?\s*(['"]?)[A-Za-z_]\w*\1/.exec(command);
-	if (!m) return { head: command, body: "" };
+/**
+ * The first heredoc (`<<WORD`, not the here-string `<<<`) starts a body that is
+ * not shell text: split it off so its apostrophes do not unbalance the scan.
+ * `rest` is whatever follows the terminator line: another command, so it is refused.
+ */
+function splitHeredoc(command: string): { head: string; body: string; rest: string } {
+	const m = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1/.exec(command);
+	if (!m) return { head: command, body: "", rest: "" };
 	const nl = command.indexOf("\n", m.index);
-	if (nl < 0) return { head: command, body: "" };
-	return { head: command.slice(0, nl), body: command.slice(nl) };
+	if (nl < 0) return { head: command, body: "", rest: "" };
+	const lines = command.slice(nl + 1).split("\n");
+	const stripTabs = m[0].startsWith("<<-");
+	const end = lines.findIndex((l) => (stripTabs ? l.replace(/^\t+/, "") : l) === m[2]);
+	if (end < 0) return { head: command.slice(0, nl), body: command.slice(nl), rest: "" };
+	return {
+		head: command.slice(0, nl),
+		body: `\n${lines.slice(0, end + 1).join("\n")}`,
+		rest: lines.slice(end + 1).join("\n"),
+	};
 }
 
 /**
@@ -171,10 +213,23 @@ export function sanitizeShellCommand(
 	// POSIX: text inside quotes is data (#3879). Windows keeps the strict whole-line rules.
 	let text = command;
 	if (platform !== "win32") {
-		const { head, body } = splitHeredoc(command);
+		const { head, body, rest } = splitHeredoc(command);
 		const scan = scanQuotes(head);
 		if (!scan.balanced) {
-			return { safe: false, reason: "Unbalanced quotes in the command, so it cannot be checked" };
+			return {
+				safe: false,
+				reason:
+					"Unbalanced quotes in the command, so it cannot be checked. Close the quote or escape the apostrophe, or put the text in a file",
+			};
+		}
+		if (scan.ansiEscape) {
+			return {
+				safe: false,
+				reason: "A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
+			};
+		}
+		if (scan.lineBreak) {
+			return { safe: false, reason: NEWLINE_REASON };
 		}
 		// Bash still expands these inside double quotes.
 		if (scan.doubled.some((d) => /\$\(/.test(d))) {
@@ -183,6 +238,7 @@ export function sanitizeShellCommand(
 		if (scan.doubled.some((d) => d.includes("`"))) {
 			return { safe: false, reason: "Command substitution via backticks is not allowed" };
 		}
+		if (rest.trim() !== "") return { safe: false, reason: NEWLINE_REASON };
 		text = scan.outside + body;
 	}
 

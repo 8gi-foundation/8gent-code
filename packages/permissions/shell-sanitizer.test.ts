@@ -231,12 +231,40 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 		no('echo \\"; id', "Semicolon");
 		ok("echo it\\'s fine");
 	});
-	test("ANSI-C $'...' keeps \\' inside the span", () => {
-		ok("echo $'it\\'s; fine'");
+	test("ANSI-C $'...' with a backslash is refused; without one it is a plain span", () => {
+		no("echo $'it\\'s; fine'", "backslash");
+		no("echo $'a\\nb'", "backslash");
+		ok("echo $'a; b'");
 		no("echo $'a'; id", "Semicolon");
 	});
-	test("unbalanced quotes fail closed", () => {
-		no("echo 'abc", "Unbalanced");
+	// 8SO review of #3880: payloads that ran a second command in bash.
+	test("a backslash-escaped or doubled dollar does not open an ANSI span", () => {
+		no("echo \\$'a\\'; touch PWN #'", "Semicolon");
+		no("echo $$'a\\'; touch PWN #'", "Semicolon");
+		no("echo $$$'a\\'; touch PWN #'");
+	});
+	test("a quote inside a # comment opens nothing, and the next line is refused", () => {
+		no("echo hi # '\ntouch PWN; echo \\'", "new line");
+		ok("echo hi # it's a comment");
+		ok("echo hi # a; b");
+		no("echo hi # c\ntouch PWN", "new line");
+		no("echo a#b; id", "Semicolon");
+		ok("echo ${#PATH}");
+	});
+	test("an unquoted newline or carriage return is a second command", () => {
+		no("echo a\ntouch x", "new line");
+		no("echo a\r\ntouch x", "new line");
+		ok('echo "a\nb"');
+		ok("echo 'a\nb'");
+	});
+	test("heredocs: here-string is not a heredoc, a command after the terminator is checked", () => {
+		no("cat <<<x\ntouch y", "new line");
+		ok("cat <<'EOF'\nit's fine\nEOF");
+		no("cat <<'EOF'\nbody\nEOF\ntouch y", "new line");
+		ok("cat <<-EOF\n\tbody\n\tEOF");
+	});
+	test("unbalanced quotes fail closed and say how to fix it", () => {
+		no("echo 'abc", "escape the apostrophe");
 		no('echo "abc', "Unbalanced");
 		no("echo $'abc", "Unbalanced");
 		no("echo it's", "Unbalanced");
