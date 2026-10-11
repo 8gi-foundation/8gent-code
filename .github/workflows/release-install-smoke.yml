@@ -1,0 +1,267 @@
+# release-install-smoke.yml - run the one-line installers on real Windows,
+# macOS and Linux machines.
+#
+#   fixture  (pull requests touching the installers, or by hand): a fake
+#            release site served on 127.0.0.1 with compiled stand-in binaries.
+#            Proves install.ps1 under Windows PowerShell 5.1 and PowerShell 7
+#            via the literal `irm ... | iex`, and install.sh via `curl ... | sh`:
+#            newest release with the binary wins, a pinned version installs,
+#            and a newer installed 8gent is never replaced by an older one.
+#            The fake release is signed by the real minisign 0.12 (pinned by
+#            SHA256, kept off PATH), so the installers take their real pinned-
+#            verifier path: download minisign from GitHub, check, verify.
+#   live     (called by release-binaries.yml once a release is public): installs
+#            that real release from GitHub with the real installers and checks
+#            `8gent --version` names the tag.
+#
+# Read-only: no secrets, no writes to the repository or releases.
+
+name: Release install smoke
+
+on:
+  pull_request:
+    paths:
+      - scripts/install.sh
+      - scripts/install.ps1
+      - scripts/lib/install-fixture.ts
+      - .github/workflows/release-install-smoke.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install for real (vX.Y.Z); empty runs the fixture checks"
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-windows:
+    name: install.ps1 (fixture, Windows)
+    if: inputs.tag == '' || inputs.tag == null
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Build, sign and serve the fake release site
+        shell: pwsh
+        run: |
+          # The real minisign, pinned, kept off PATH: it only signs the fixture.
+          $zip = Join-Path $env:RUNNER_TEMP 'minisign.zip'
+          Invoke-WebRequest https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip -OutFile $zip -UseBasicParsing
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479') { throw 'minisign zip hash mismatch' }
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'minisign')
+          $env:FIXTURE_MINISIGN = Join-Path $env:RUNNER_TEMP 'minisign\minisign-win64\x86_64\minisign.exe'
+          $srv = Join-Path $env:RUNNER_TEMP 'srv'
+          bun scripts/lib/install-fixture.ts $srv 'http://127.0.0.1:8765'
+          if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
+          Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory',$srv -WindowStyle Hidden
+          for ($i = 0; $i -lt 30; $i++) {
+            try { Invoke-WebRequest http://127.0.0.1:8765/releases.json -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 }
+          }
+      - name: Windows PowerShell 5.1, irm | iex, then pin, then no downgrade
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command minisign -ErrorAction SilentlyContinue) { throw 'minisign must not be on PATH here' }
+          $env:EIGHT_TEST_SIGNING_KEY = (Get-Content (Join-Path $env:RUNNER_TEMP 'srv\signing-key.txt') -Raw).Trim()
+          $dir = Join-Path $env:RUNNER_TEMP 'bin51'
+          $exe = Join-Path $dir '8gent.exe'
+          $env:EIGHT_INSTALL_DIR = $dir
+          # A %VAR% entry in the user PATH must survive (REG_EXPAND_SZ).
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+          $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $k.SetValue('Path', ($raw.TrimEnd(';') + ';%USERPROFILE%\eight-expand-check'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+          $k.Close()
+
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases.json'
+          $out = irm http://127.0.0.1:8765/install-ps1.txt | iex *>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'signature on SHA256SUMS: verified') { throw 'the release signature was not verified' }
+          if ($out -notmatch 'pinned signature verifier') { throw 'the pinned verifier was not used' }
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "newest: got $v" }
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $kind = $k.GetValueKind('Path')
+          $k.Close()
+          if ($kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw "user PATH became $kind" }
+          if ($raw -notmatch '%USERPROFILE%\\eight-expand-check') { throw "a %VAR% PATH entry was expanded or lost: $raw" }
+          if (-not ($raw -split ';' | Where-Object { $_ -ieq $dir })) { throw "user PATH does not contain $dir" }
+          if (($raw -split ';')[0] -ine $dir) { throw "$dir is not first on the user PATH" }
+
+          # SHA256SUMS changed after signing: refused, nothing changes.
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-badsig.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = ("$_" -match 'valid release signature'); Write-Host "refused: $_" }
+          if (-not $refused) { throw 'a tampered SHA256SUMS was not refused by the signature check' }
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "changed after a refused install: got $v" }
+
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "downgraded without asking: got $v" }
+
+          $env:EIGHT_VERSION = '0.0.1'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "pinned: got $v" }
+          Remove-Item Env:EIGHT_VERSION
+
+          # A binary URL off the allowed host must be refused, leaving v0.0.1 in place.
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-evil.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = ("$_" -match 'Refusing'); Write-Host "refused: $_" }
+          if (-not $refused) { throw 'an off-host download URL was not refused by the URL check' }
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "changed after a refused install: got $v" }
+
+          # A non-https releases URL is refused.
+          $env:EIGHT_RELEASES_URL = 'http://example.com/releases.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = $true }
+          if (-not $refused) { throw 'a non-https releases URL was accepted' }
+          Write-Host 'Windows PowerShell 5.1: PASS'
+      - name: PowerShell 7, irm | iex, upgrade over an older install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'bin7'
+          $exe = Join-Path $dir '8gent.exe'
+          $env:EIGHT_TEST_SIGNING_KEY = (Get-Content (Join-Path $env:RUNNER_TEMP 'srv\signing-key.txt') -Raw).Trim()
+          $env:EIGHT_INSTALL_DIR = $dir
+          $env:EIGHT_NO_MODIFY_PATH = '1'
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "old: got $v" }
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "upgrade: got $v" }
+          Write-Host 'PowerShell 7: PASS'
+
+  fixture-unix:
+    name: install.sh (fixture, ${{ matrix.os }})
+    if: inputs.tag == '' || inputs.tag == null
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      # The real minisign 0.12, pinned by SHA256 and kept off PATH: it signs the
+      # fixture and runs the interop tests; the installer must fetch its own.
+      - name: Pinned minisign (off PATH)
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/minisign"; mkdir -p "$d"
+          if [ "$RUNNER_OS" = Linux ]; then
+            curl -fsSL --proto =https -o "$d/m.tgz" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+            echo "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  $d/m.tgz" | sha256sum -c -
+            tar -xzf "$d/m.tgz" -C "$d"
+            echo "MINISIGN_BIN=$d/minisign-linux/x86_64/minisign" >> "$GITHUB_ENV"
+          else
+            curl -fsSL --proto =https -o "$d/m.zip" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
+            echo "89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63  $d/m.zip" | shasum -a 256 -c -
+            unzip -q -o "$d/m.zip" minisign -d "$d"
+            echo "MINISIGN_BIN=$d/minisign" >> "$GITHUB_ENV"
+          fi
+          if command -v minisign; then echo "::error::minisign must not be on PATH"; exit 1; fi
+
+      - name: Unit and real-minisign interop tests for install.sh
+        run: bun test scripts/lib/install-sh.test.ts
+
+      - name: curl | sh, then no downgrade, then pin
+        run: |
+          set -eu
+          srv="$RUNNER_TEMP/srv"
+          FIXTURE_MINISIGN="$MINISIGN_BIN" bun scripts/lib/install-fixture.ts "$srv" http://127.0.0.1:8765
+          export EIGHT_TEST_SIGNING_KEY="$(cat "$srv/signing-key.txt")"
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$srv" >/dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/releases.json >/dev/null && break; sleep 1; done
+          export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
+          bin="$EIGHT_INSTALL_DIR/8gent"
+
+          out="$(EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh' 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q 'pinned signature verifier' || { echo "::error::the pinned verifier was not used"; exit 1; }
+          echo "$out" | grep -q 'signature on SHA256SUMS: verified' || { echo "::error::the release signature was not verified"; exit 1; }
+          "$bin" --version | grep -q 'v0\.0\.2'
+
+          # SHA256SUMS changed after signing: refused, nothing changes.
+          if EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-badsig.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::a tampered SHA256SUMS was accepted"; exit 1
+          fi
+          "$bin" --version | grep -q 'v0\.0\.2'
+
+          EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-old.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          "$bin" --version | grep -q 'v0\.0\.2' || { echo "::error::downgraded without asking"; exit 1; }
+
+          EIGHT_VERSION=0.0.1 EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          "$bin" --version | grep -q 'v0\.0\.1'
+
+          # A binary URL off the allowed host is refused and nothing changes.
+          if EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-evil.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::an off-host download URL was accepted"; exit 1
+          fi
+          "$bin" --version | grep -q 'v0\.0\.1'
+          # A non-https releases URL is refused.
+          if EIGHT_RELEASES_URL=http://example.com/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::a non-https releases URL was accepted"; exit 1
+          fi
+          echo "install.sh on ${RUNNER_OS}: PASS"
+
+  live-windows:
+    name: install.ps1 (live ${{ inputs.tag }}, Windows)
+    if: inputs.tag != '' && inputs.tag != null
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install the published release with the one-liner's script
+        shell: powershell
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'bin'
+          $env:EIGHT_INSTALL_DIR = $dir
+          $env:EIGHT_NO_MODIFY_PATH = '1'
+          $env:EIGHT_RELEASES_URL = "https://api.github.com/repos/$env:REPO/releases/tags/$env:TAG"
+          Get-Content scripts/install.ps1 -Raw | Invoke-Expression
+          $v = & (Join-Path $dir '8gent.exe') --version
+          Write-Host $v
+          if ($v -notmatch [regex]::Escape("8gent Code $env:TAG")) { throw "expected 8gent Code $env:TAG, got $v" }
+
+  live-unix:
+    name: install.sh (live ${{ inputs.tag }}, ${{ matrix.os }})
+    if: inputs.tag != '' && inputs.tag != null
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install the published release with the one-liner's script
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
+          export EIGHT_RELEASES_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+          sh scripts/install.sh
+          out="$("$EIGHT_INSTALL_DIR/8gent" --version)"
+          echo "$out"
+          case "$out" in *"8gent Code ${TAG}"*) ;; *) echo "::error::expected 8gent Code ${TAG}, got ${out}"; exit 1 ;; esac
