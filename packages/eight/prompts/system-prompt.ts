@@ -289,6 +289,10 @@ export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**"
 export const SCRATCH_DIR_NOTE =
 	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
 
+/** Review focus (#3920): a review that cites every line it read buries the defect. */
+export const REVIEW_FOCUS_NOTE =
+	"**Reviews: cite only the lines that must change, not context or harmless edits.**";
+
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
@@ -342,7 +346,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
 	);
-	lines.push(SLIDES_TO_VIDEO_NOTE);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 
 	return lines.join("\n");
 }

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
-import { SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
+import { REVIEW_FOCUS_NOTE, SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {
@@ -57,10 +57,10 @@ describe("buildToolCatalogSegment", () => {
 		expect(TOOL_CATALOG_SEGMENT).not.toContain("discover_tools");
 	});
 
-	it("fits in a reasonable token budget (< 4KB default, < 2KB concise)", () => {
+	it("fits in a reasonable token budget (< 4KB default, < 2.2KB concise; was 2KB until #3920 added the review note)", () => {
 		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4096);
 		const concise = buildToolCatalogSegment({ concise: true });
-		expect(concise.length).toBeLessThan(2048);
+		expect(concise.length).toBeLessThan(2200);
 	});
 
 	it("tells the local model to keep scratch files inside the project (#3865)", () => {
@@ -82,12 +82,22 @@ describe("slides-to-video join guidance (#3862)", () => {
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(concise).toContain("segment count equals slide count");
 		expect(concise).toContain("trailing newline");
-		expect(concise.length).toBeLessThan(2048);
+		expect(concise.length).toBeLessThan(2200);
 	});
 
 	it("appears exactly once in each catalog variant", () => {
 		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
 			expect(seg.split(SLIDES_TO_VIDEO_NOTE).length - 1).toBe(1);
 		}
+	});
+});
+
+describe("review focus guidance (#3920)", () => {
+	it("is in both catalog variants exactly once, within the concise budget", () => {
+		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(seg.split(REVIEW_FOCUS_NOTE).length - 1).toBe(1);
+		}
+		expect(buildToolCatalogSegment({ concise: true }).length).toBeLessThan(2200);
+		expect(REVIEW_FOCUS_NOTE).toContain("cite only the lines that must change");
 	});
 });
