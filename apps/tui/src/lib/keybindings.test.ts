@@ -15,10 +15,13 @@ const OTHER_BINDERS: Record<string, string> = { r: "hooks/useVoiceInput.ts" };
  */
 const UNLISTED: Record<string, string> = {
 	m: "alias of Ctrl+L; most terminals send Ctrl+M as Enter",
-	M: "Ctrl+Shift+M, listed as such",
-	o: "sets expandedView, which no view has drawn since #2350",
-	k: "kanban overlay draws nothing visible (footer-clicks.test.tsx)",
-	b: "process sidebar draws nothing visible (footer-clicks.test.tsx)",
+	M: "Ctrl+Shift+M: terminals send it as Ctrl+M, which most send as Enter; /provider is listed",
+	o: "sets expandedView, which no view has drawn since #2350 (#4008)",
+	k: "kanban view not drawn since #2350 (#4008)",
+	b: "process sidebar draws nothing visible since #2350 (#4008)",
+	e: "predict view not drawn since #2350 (#4008)",
+	n: "Notes tab: utility tabs not drawn since #2350 (#4008)",
+	j: "background jobs panel not drawn since #2350 (#4008)",
 };
 
 function ctrlLettersIn(src: string): Set<string> {
@@ -66,3 +69,24 @@ describe("keybindings table (#3918 D8)", () => {
 		expect(new Set(KEYBINDINGS.map((b) => b.keys)).size).toBe(KEYBINDINGS.length);
 	});
 });
+
+/** Listed Ctrl keys the screen test cannot press, and why. */
+const NOT_PRESSED: Record<string, string> = {
+	"Ctrl+C": "quits the App",
+	"Ctrl+R": "opens the microphone",
+	"Ctrl+D": "acts only with a DJ track loaded",
+};
+
+test("every listed Ctrl key changes the screen in the real App", async () => {
+	const { runAppHarness } = await import("../__tests__/app-driver.js");
+	const harness = path.join(import.meta.dir, "../__tests__/keys-screen.harness.tsx");
+	const events = await runAppHarness(harness);
+	expect(events.find((e) => e.phase === "error")).toBeUndefined();
+	const changed = new Map(
+		events.filter((e) => e.phase === "probe").map((e) => [e.key as string, e.changed as boolean]),
+	);
+	for (const b of KEYBINDINGS) {
+		if (!/^Ctrl\+[A-Z]$/.test(b.keys) || b.keys in NOT_PRESSED) continue;
+		expect({ key: b.keys, changed: changed.get(b.keys) }).toEqual({ key: b.keys, changed: true });
+	}
+}, 90000);

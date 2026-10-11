@@ -3,7 +3,9 @@
  * list a person reads is the list the code keeps (#3918, Pi gap D8).
  *
  * When you bind a key in app.tsx (or a component that owns a global key),
- * add its row here; keybindings.test.ts checks app.tsx against this table.
+ * add its row here; keybindings.test.ts checks app.tsx against this table and
+ * presses each Ctrl key in the real App to see the screen change. A key whose
+ * view is not drawn stays out of the table until it is (#4008).
  */
 
 export type KeyGroup = "core" | "tabs" | "views" | "extras";
@@ -22,20 +24,21 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Up / Down", action: "Previous / next message you sent", group: "core" },
 	{ keys: "Shift+Tab", action: "Permission mode: Plan, Ask, Guarded, Infinite", group: "core" },
 	{ keys: "Ctrl+L", action: "Model picker", group: "core" },
-	{ keys: "Ctrl+Shift+M", action: "Provider picker", group: "core" },
+	{ keys: "/provider", action: "Provider picker", group: "core" },
 	{ keys: "Ctrl+P", action: "Command palette", group: "core" },
 	{ keys: "Ctrl+C", action: "Save the session and quit", group: "core" },
 	{ keys: "Ctrl+T", action: "New chat tab", group: "tabs" },
 	{ keys: "Ctrl+W", action: "Close the current tab", group: "tabs" },
 	{ keys: "Ctrl+1-9", action: "Switch to tab by number", group: "tabs" },
-	{ keys: "Ctrl+N", action: "Notes tab", group: "tabs" },
 	{ keys: "Ctrl+X", action: "Open or close the PLAN column", group: "views" },
 	{ keys: "Ctrl+Y", action: "Cycle the work mode", group: "views" },
 	{ keys: "Ctrl+G", action: "Send the running task to the background", group: "views" },
-	{ keys: "Ctrl+J", action: "Background jobs", group: "views" },
-	{ keys: "Ctrl+E", action: "Predicted next steps", group: "views" },
 	{ keys: "Ctrl+R", action: "Start or stop voice input", group: "extras" },
-	{ keys: "Ctrl+D", action: "Hand the keyboard to the DJ deck (with a track loaded)", group: "extras" },
+	{
+		keys: "Ctrl+D",
+		action: "Hand the keyboard to the DJ deck (with a track loaded)",
+		group: "extras",
+	},
 	{ keys: "Ctrl+A", action: "Animations on or off", group: "extras" },
 	{ keys: "Ctrl+S", action: "Sound on or off", group: "extras" },
 ];
