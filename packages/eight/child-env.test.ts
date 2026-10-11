@@ -222,6 +222,25 @@ describe("default toolchain and proxy allowlist", () => {
 		]);
 	});
 
+	test("language-manager, Go, Rust, display, editor and CA-dir names pass", () => {
+		const names = [
+			"PYENV_ROOT",
+			"ASDF_DIR",
+			"ASDF_DATA_DIR",
+			"GOPATH",
+			"GOROOT",
+			"CARGO_HOME",
+			"RUSTUP_HOME",
+			"DISPLAY",
+			"WAYLAND_DISPLAY",
+			"EDITOR",
+			"SSL_CERT_DIR",
+			"CURL_CA_BUNDLE",
+		];
+		const e = buildChildEnv(Object.fromEntries(names.map((n) => [n, "/v"])));
+		expect(Object.keys(e).sort()).toEqual([...names].sort());
+	});
+
 	test("proxy with credentials is dropped, without is kept, either case", () => {
 		const e = buildChildEnv({
 			HTTP_PROXY: "http://user:pw@proxy:3128",

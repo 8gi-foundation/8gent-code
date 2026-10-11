@@ -57,6 +57,18 @@ const BASE_NAMES = new Set([
 	"SSL_CERT_FILE",
 	"NODE_EXTRA_CA_CERTS",
 	"REQUESTS_CA_BUNDLE",
+	"CURL_CA_BUNDLE",
+	"SSL_CERT_DIR",
+	"PYENV_ROOT",
+	"ASDF_DIR",
+	"ASDF_DATA_DIR",
+	"GOPATH",
+	"GOROOT",
+	"CARGO_HOME",
+	"RUSTUP_HOME",
+	"DISPLAY",
+	"WAYLAND_DISPLAY",
+	"EDITOR",
 ]);
 
 /** Proxy settings: passed by default only when the value carries no user:pass@. */
