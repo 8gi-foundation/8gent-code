@@ -13,22 +13,25 @@ on:
 # the binaries on the GitHub Release. npm is an optional extra channel: when
 # npm auth works the package is published there too, and when it does not the
 # release still ships (#3981).
-# contents: write creates the draft release. id-token: write lets the optional
-# npm publish use trusted publishing (OIDC) with provenance instead of a token.
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 jobs:
   release:
     name: Release to GitHub + npm
     runs-on: ubuntu-latest
+    # contents: write creates the draft release. id-token: write is only for
+    # the optional npm publish (trusted publishing with provenance); this is
+    # the only job that holds it.
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -41,13 +44,11 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing needs npm 11.5.1 or newer.
-      - name: npm new enough for trusted publishing
+      # Trusted publishing needs npm 11.5.1 or newer; pinned to one exact version.
+      - name: npm (pinned)
         run: |
-          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)"; then
-            npm install -g npm@11
-          fi
-          npm --version
+          npm install -g npm@11.6.2
+          test "$(npm --version)" = "11.6.2"
 
       # Fail before anything is built if the tag or version is wrong. Then
       # decide whether the optional npm channel can publish: trusted publishing
@@ -95,8 +96,10 @@ jobs:
           fi
           echo "npm=${NPM}" >> "$GITHUB_OUTPUT"
 
+      # The npm build only bundles JavaScript, so no dependency install script
+      # needs to run here.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build
         run: bun run build
@@ -164,6 +167,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           # A re-run finds the draft from the failed run and replaces its files.
+          # A release that is already public is never touched (#3981).
+          bash scripts/release-require-draft.sh "$TAG" --allow-missing
           if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
             gh release upload "$TAG" release-assets/* --clobber
           else
@@ -227,6 +232,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Open or update the release-failure issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

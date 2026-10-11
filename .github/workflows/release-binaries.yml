@@ -48,9 +48,21 @@ jobs:
   build:
     name: Build macOS, Linux and Windows
     runs-on: macos-latest
+    # id-token + attestations: write sign the build provenance attestation for
+    # every built file (checked by `gh attestation verify` in the installers).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      # A step's own env is not visible to its `if:`, so the notarization
+      # switch lives here.
+      HAS_NOTARY_KEY: ${{ secrets.AC_API_KEY_ID != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -65,14 +77,27 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Toolchain (nfpm, makensis)
+      # nfpm: an exact release, checked against its published SHA256.
+      # makensis: Homebrew checks the bottle's SHA256 against its formula;
+      # the version is asserted so a formula bump is a visible change here.
+      - name: Toolchain (nfpm 2.47.0, makensis 3.12, pinned)
+        env:
+          NFPM_URL: https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Darwin_arm64.tar.gz
+          NFPM_SHA256: e8c9d1d9ac218eeed479375143dc46b8d51a2b8dbba8e2f9f15ecc8faa2e404b
         run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -fsSL --proto =https -o "$RUNNER_TEMP/nfpm.tgz" "$NFPM_URL"
+          echo "${NFPM_SHA256}  $RUNNER_TEMP/nfpm.tgz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/nfpm.tgz" -C "$RUNNER_TEMP/tools" nfpm
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
           brew install makensis
-          brew install nfpm || brew install goreleaser/tap/nfpm
-          bun --version
-          nfpm --version
+          test "$(brew list --versions makensis)" = "makensis 3.12" || { echo "::error::makensis is $(brew list --versions makensis), pinned 3.12"; exit 1; }
+          "$RUNNER_TEMP/tools/nfpm" --version
           makensis -VERSION
 
+      # Scripts stay on here: better-sqlite3 must build its native addon for
+      # the compiled binary's memory store, so --ignore-scripts would ship a
+      # broken binary.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -89,7 +114,7 @@ jobs:
         run: bash scripts/smoke-compiled.sh dist/bin/8gent-darwin-arm64
 
       - name: Notarize macOS binaries (opt-in)
-        if: env.AC_API_KEY_ID != ''
+        if: env.HAS_NOTARY_KEY == 'true'
         env:
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
           AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
@@ -151,6 +176,14 @@ jobs:
           ls | grep -v '^installers.sha256$' | xargs shasum -a 256 | LC_ALL=C sort -k2 > installers.sha256
           cat installers.sha256
 
+      # GitHub build provenance for every file attached to the release:
+      # `gh attestation verify <file> --repo 8gi-foundation/8gent-code` proves
+      # it was built by this workflow from this repository.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/installers/installers.sha256
+
       - name: Upload artifacts to workflow
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -204,6 +237,8 @@ jobs:
     steps:
       - name: Checkout (smoke-compiled.sh)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -234,6 +269,8 @@ jobs:
 
       - name: Checkout (release-guard.sh)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -250,6 +287,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
           for i in $(seq 1 60); do
             gh release view "$TAG" --repo "$REPO" --json isDraft >/dev/null 2>&1 && break
@@ -259,6 +297,9 @@ jobs:
             fi
             sleep 30
           done
+          # --clobber repairs this run's own draft; a public release is never
+          # touched (#3981).
+          bash scripts/release-require-draft.sh "$TAG"
           # installers.sha256 is a build-time input, not a release asset.
           mv upload/installers.sha256 "$RUNNER_TEMP/installers.sha256"
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
@@ -272,7 +313,18 @@ jobs:
           cat "$RUNNER_TEMP/installers.sha256" >> "$RUNNER_TEMP/merged"
           LC_ALL=C sort -k2 "$RUNNER_TEMP/merged" > "$RUNNER_TEMP/sums/SHA256SUMS"
           cat "$RUNNER_TEMP/sums/SHA256SUMS"
+
+          # Sign the final SHA256SUMS with the release key the installers and
+          # self-update embed (scripts/release-signing.pub). No key configured
+          # yet: ships unsigned with a notice.
+          if [ -n "${MINISIGN_SECRET_KEY}" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          fi
+          bash scripts/release-sign.sh "$RUNNER_TEMP/sums/SHA256SUMS" "$TAG"
           gh release upload "$TAG" "$RUNNER_TEMP/sums/SHA256SUMS" --repo "$REPO" --clobber
+          if [ -f "$RUNNER_TEMP/sums/SHA256SUMS.minisig" ]; then
+            gh release upload "$TAG" "$RUNNER_TEMP/sums/SHA256SUMS.minisig" --repo "$REPO" --clobber
+          fi
 
       # #3803: the release goes public only when it carries the Windows .exe,
       # the Windows installer, the macOS and Linux binaries, and release.yml's
@@ -284,7 +336,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          bash scripts/release-guard.sh publish-complete "$TAG" \
+          # With a release key configured, the signature is a required asset too.
+          SIG=()
+          if grep -v '^#' scripts/release-signing.pub | grep -q '[^[:space:]]'; then SIG=('^SHA256SUMS\.minisig$'); fi
+          bash scripts/release-guard.sh publish-complete "$TAG" "${SIG[@]}" \
             '^8gent-windows-x64\.exe$' \
             '^8gent-windows-x64-baseline\.exe$' \
             '^8gent-setup-.*-x64\.exe$' \
@@ -319,6 +374,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Open or update the release-failure issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
