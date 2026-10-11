@@ -65,10 +65,13 @@ import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validati
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
+	CompactionRecorder,
 	type CompressionStage,
 	DEFAULT_PROACTIVE_CONFIG,
 	ProactiveCompression,
 	type ProactiveResult,
+	compactHistory,
+	estimateMessageTokens,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
@@ -90,6 +93,7 @@ import {
 	buildToolCatalogSegment,
 } from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
+import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -108,14 +112,6 @@ import {
 } from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
-import {
-	type CheckpointEntry,
-	type Summarizer,
-	type AgentState as TwoStageAgentState,
-	TwoStageCompactor,
-	estimateMessageTokens,
-	twoStageCheckpointPrompt,
-} from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
@@ -309,8 +305,8 @@ export class Agent {
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
-	private twoStageCompactor: TwoStageCompactor | null = null;
-	private twoStageCheckpoints: CheckpointEntry[] = [];
+	/** Where compactions are recorded (originals stay, undo works); null = not persisted. */
+	private compactionRecorder: CompactionRecorder | null = null;
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
@@ -423,13 +419,6 @@ export class Agent {
 			};
 		}
 
-		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
-		// rather than replacing it: the legacy single-threshold engine still
-		// guards hard limits; the two-stage path produces cheap mid-pressure
-		// checkpoints so context loss is gradual instead of cliff-edged.
-		// Summariser is a thin wrapper around the active provider's chat client;
-		// constructed lazily on first observe so providerConfig is in scope.
-		this.twoStageCompactor = null;
 
 		// AST index for AST-first retrieval. ensureIndexed returns the build the
 		// ToolExecutor above already started for this folder, so this only
@@ -1912,6 +1901,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				chatStartTime,
 				textForAgent,
 			});
+			await this.readServerContextWindow();
+			await this.compactIfNeeded(providerConfig);
 			if (sessionWatchdog) {
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
@@ -2813,31 +2804,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			await this.readServerContextWindow();
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
-				try {
-					const stage = this.compaction.getStage(this.messageHistory);
-					const compactModel = createModel(providerConfig);
-					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
-					this.messageHistory = compacted;
-					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
-					);
-					this.events.onCompaction?.(compactionResult);
-				} catch (err) {
-					console.error("  [COMPRESSION] Failed:", (err as Error).message);
-				}
-			}
-
-			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%.
-			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				await this.observeTwoStage(providerConfig);
-			}
+			await this.compactIfNeeded(providerConfig);
 
 			// Move BMAD task to review/done if we had one
 			if (this.currentBmadTask) {
@@ -3194,51 +3161,45 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * One pass of the two-stage compactor (#2467) after a turn. Thresholds
-	 * resolve against the provider's known context window, the same one
-	 * ProactiveCompression uses (#3237: this used to read a `contextSize` that
-	 * ProviderConfig never carries, so every model was treated as 32,768).
+	 * The one compaction path (Pi parity E5): both the native and the text-tool
+	 * turn end here. ProactiveCompression decides and rewrites the history; a
+	 * summary is recorded in the session store as a compaction entry, so the
+	 * original messages stay in the file and undo works.
 	 */
-	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
+	private async compactIfNeeded(providerConfig: ProviderConfig): Promise<void> {
 		try {
-			if (!this.twoStageCompactor) {
-				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
-					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
-				this.twoStageCompactor = new TwoStageCompactor({
-					checkpointPct: 0.65,
-					compactPct: 0.8,
-					keepLastN: 4,
-					summarizer,
-				});
-			}
-			const state: TwoStageAgentState = {
-				messages: this.messageHistory,
-				checkpoints: this.twoStageCheckpoints,
-				provider: { contextSize: this.compactionContextWindow },
-			};
-			const result = await this.twoStageCompactor.observe(state);
-			if (result.action !== "none") {
-				console.log(
-					`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
+			// A headless run has no host saving its session: it keeps its own file.
+			if (!this.compactionRecorder && this.config.headless && this.compaction.shouldCompact(this.messageHistory)) {
+				this.attachCompactionStore(
+					SessionStore.create({
+						id: this.sessionId,
+						cwd: this.config.workingDirectory || process.cwd(),
+						model: this.config.model,
+						provider: this.config.runtime,
+					}),
 				);
 			}
+			const pass = await compactHistory({
+				engine: this.compaction,
+				history: this.messageHistory,
+				model: createModel(providerConfig),
+				recorder: this.compactionRecorder,
+			});
+			if (!pass) return;
+			this.messageHistory = pass.messages;
+			const r = pass.result;
+			console.log(
+				`  [COMPRESSION:${r.stage}] ${r.messagesRemoved} messages compressed, ${r.tokensBefore} -> ${r.tokensAfter} tokens`,
+			);
+			this.events.onCompaction?.(r);
 		} catch (err) {
-			console.error("  [TWO_STAGE] Failed:", (err as Error).message);
+			console.error("  [COMPRESSION] Failed:", (err as Error).message);
 		}
 	}
 
-	/** The model call behind a two-stage checkpoint. A method so tests can stand in for it. */
-	private async generateCheckpoint(
-		providerConfig: ProviderConfig,
-		prompt: string,
-	): Promise<string> {
-		const { generateText } = await import("ai");
-		const { text } = await generateText({
-			model: createModel(providerConfig),
-			prompt,
-			maxOutputTokens: 800,
-		});
-		return text;
+	/** Record this agent's compactions in `store` (a host that owns the session file). */
+	attachCompactionStore(store: SessionStore | null): void {
+		this.compactionRecorder = store ? new CompactionRecorder(store) : null;
 	}
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
