@@ -241,6 +241,31 @@ describe("default toolchain and proxy allowlist", () => {
 		expect(Object.keys(e).sort()).toEqual([...names].sort());
 	});
 
+	test("DOCKER_HOST follows the userinfo rule", () => {
+		expect(buildChildEnv({ DOCKER_HOST: "tcp://u:p@h:2375" }).DOCKER_HOST).toBeUndefined();
+		expect(buildChildEnv({ DOCKER_HOST: "unix:///var/run/docker.sock" }).DOCKER_HOST).toBe(
+			"unix:///var/run/docker.sock",
+		);
+		expect(buildChildEnv({ DOCKER_HOST: "tcp://h:2375" }).DOCKER_HOST).toBe("tcp://h:2375");
+	});
+
+	test("XDG is a named list, not a wildcard", () => {
+		const e = buildChildEnv({
+			XDG_APIKEY: "k",
+			XDG_STUFF_PASSWD: "p",
+			XDG_STUFF: "s",
+			XDG_RUNTIME_DIR: "/r",
+			XDG_DATA_DIRS: "/d",
+		});
+		expect(Object.keys(e).sort()).toEqual(["XDG_DATA_DIRS", "XDG_RUNTIME_DIR"]);
+	});
+
+	test("no default name matches the secret pattern", () => {
+		for (const n of BASE_NAMES) expect(SECRETISH.test(n)).toBe(false);
+		for (const n of ["MY_PASSPHRASE", "CLOUD_CREDENTIALS", "X_AUTH", "APIKEY", "DB_PASSWD"])
+			expect(buildChildEnv({ [n]: "v" })[n]).toBeUndefined();
+	});
+
 	test("proxy with credentials is dropped, without is kept, either case", () => {
 		const e = buildChildEnv({
 			HTTP_PROXY: "http://user:pw@proxy:3128",

@@ -10,7 +10,7 @@
 type Env = Record<string, string | undefined>;
 
 /** Exact names (compared upper-case, so Windows casing works). */
-const BASE_NAMES = new Set([
+export const BASE_NAMES = new Set([
 	"PATH",
 	"HOME",
 	"USER",
@@ -52,12 +52,18 @@ const BASE_NAMES = new Set([
 	"VOLTA_HOME",
 	"PNPM_HOME",
 	"BUN_INSTALL",
-	"DOCKER_HOST",
 	"KUBECONFIG",
 	"SSL_CERT_FILE",
 	"NODE_EXTRA_CA_CERTS",
 	"REQUESTS_CA_BUNDLE",
 	"CURL_CA_BUNDLE",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+	"XDG_STATE_HOME",
+	"XDG_RUNTIME_DIR",
+	"XDG_CONFIG_DIRS",
+	"XDG_DATA_DIRS",
 	"SSL_CERT_DIR",
 	"PYENV_ROOT",
 	"ASDF_DIR",
@@ -71,11 +77,11 @@ const BASE_NAMES = new Set([
 	"EDITOR",
 ]);
 
-/** Proxy settings: passed by default only when the value carries no user:pass@. */
-const PROXY_NAMES = new Set(["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"]);
+/** Proxy and docker-host settings: passed by default only when the value carries no user:pass@. */
+const PROXY_NAMES = new Set(["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "DOCKER_HOST"]);
 
 /** A default-allowlist match is refused when the name looks like a credential. */
-const SECRETISH = /(_TOKEN|_KEY|_SECRET|PASSWORD|_AUTH)/i;
+export const SECRETISH = /(TOKEN|KEY|SECRET|PASSW|PASSPHRASE|CREDENTIAL|_AUTH)/i;
 
 const hasUserinfo = (value: string): boolean =>
 	/\/\/[^/@\s]*@/.test(value) || /^[^/@\s]*:[^/@\s]*@/.test(value);
@@ -84,7 +90,7 @@ const isBase = (name: string, value: string): boolean => {
 	const upper = name.toUpperCase();
 	if (SECRETISH.test(upper)) return false;
 	if (PROXY_NAMES.has(upper)) return !hasUserinfo(value);
-	return BASE_NAMES.has(upper) || upper.startsWith("LC_") || upper.startsWith("XDG_");
+	return BASE_NAMES.has(upper) || upper.startsWith("LC_");
 };
 
 /** Names listed in EIGHT_SHELL_ENV_PASS ("A,B C"), trimmed, empties dropped. */

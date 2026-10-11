@@ -5,9 +5,9 @@ Commands run through `run_command`, `background_start`, the browser-use fallback
 ## What is passed by default
 
 - Shell basics: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `TZ`, `PWD`, `CI`, `NO_COLOR`, `COLORTERM`, `EIGHT_HEADLESS`, and the Windows equivalents (`ComSpec`, `SystemRoot`, `PATHEXT`, `TEMP` and similar).
-- Toolchain paths: `VIRTUAL_ENV`, `CONDA_PREFIX`, `CONDA_DEFAULT_ENV`, `PYTHONPATH`, `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `NODE_ENV`, `NVM_DIR`, `VOLTA_HOME`, `PNPM_HOME`, `BUN_INSTALL`, `XDG_*`, `DOCKER_HOST`, `KUBECONFIG`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`.
-- Proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) when the value has no `user:pass@` part.
-- Any name ending in `_TOKEN`, `_KEY`, `_SECRET`, `_AUTH`, or containing `PASSWORD`, is not passed by default.
+- Toolchain paths: `VIRTUAL_ENV`, `CONDA_PREFIX`, `CONDA_DEFAULT_ENV`, `PYTHONPATH`, `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `NODE_ENV`, `NVM_DIR`, `VOLTA_HOME`, `PNPM_HOME`, `BUN_INSTALL`, `the named XDG_ variables`, `DOCKER_HOST`, `KUBECONFIG`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`.
+- Proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) (and `DOCKER_HOST`) when the value has no `user:pass@` part.
+- Any name ending in `_TOKEN`, `_KEY`, `_SECRET`, `_AUTH`, or containing `PASSW`, `PASSPHRASE`, `CREDENTIAL`, `TOKEN`, `KEY` or `SECRET`, is not passed by default.
 
 ## Passing more by name
 
