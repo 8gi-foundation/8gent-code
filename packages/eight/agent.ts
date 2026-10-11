@@ -1675,6 +1675,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.toolRegistry.loadCategory("orchestration");
 			}
 		}
+		// Native providers cannot pick up discover_tools mid-turn (#3881).
+		if (!isLocalProvider) this.toolRegistry.preloadForNative();
 		// Load computer category when cua:setup has been run, regardless of provider.
 		const { existsSync } = await import("node:fs");
 		const { homedir } = await import("node:os");

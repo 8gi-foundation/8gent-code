@@ -193,6 +193,17 @@ export class ToolRegistry {
 	}
 
 	/**
+	 * Native tool-calling providers hand the SDK one fixed tool object at turn
+	 * start, so a mid-turn discover_tools call reports "loaded" but the tool
+	 * never reaches the model (#3881: spawn_agent missing on OpenRouter).
+	 * Load what the prompt promises before the first request. Append-only, so
+	 * the #3222 byte-stable prefix holds. Text-tool providers are left alone.
+	 */
+	preloadForNative(): void {
+		this.loadCategory("orchestration");
+	}
+
+	/**
 	 * Get the current active tool set for AI SDK. The set is append-only
 	 * (#3222): Map order is insertion order, loadCategory only adds names it
 	 * does not have, and registerExternalTool never redefines one. A loaded
