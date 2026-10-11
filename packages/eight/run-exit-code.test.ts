@@ -260,6 +260,13 @@ describe("denial classifier and redaction edge cases", () => {
 		expect(denialIsCause([{ name: "read_file", result: "permission denied inside the file" }])).toBe(false);
 		expect(denialIsCause([])).toBe(false);
 	});
+	test("scheme-less userinfo needs a host-looking part; prose like Error:x@y is untouched", () => {
+		expect(redactUrlsIn("dial user:pass@host.example:11434 failed")).toBe("dial host.example:11434 failed");
+		expect(redactUrlsIn("dial user:pass@localhost failed")).toBe("dial localhost failed");
+		expect(redactUrlsIn("dial user:pass@10.0.0.5 failed")).toBe("dial 10.0.0.5 failed");
+		expect(redactUrlsIn("Error:x@y")).toBe("Error:x@y");
+		expect(redactUrlsIn("Note: mail me@home soon")).toBe("Note: mail me@home soon");
+	});
 	test("scheme-less credentials in a raw error are redacted", () => {
 		const out = redactUrlsIn("connect ECONNREFUSED user:hunter2@127.0.0.1:11434 and http://a:b@h/x?t=1");
 		expect(out).not.toContain("hunter2");

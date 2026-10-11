@@ -95,7 +95,7 @@ export function redactUrlsIn(text: string): string {
 		text
 			.replace(/https?:\/\/[^\s)"']+/g, (m) => redactEndpoint(m))
 			// Scheme-less userinfo, e.g. "user:pass@host:11434" in a raw error.
-			.replace(/\b[\w.~%+-]+:[^\s@/:]+@(?=[\w.-]+)/g, "")
+			.replace(/\b[\w.~%+-]+:[^\s@/:]+@(?=localhost\b|[\w-]+(?:\.[\w-]+)+|[\w.-]+:\d+)/g, "")
 	);
 }
 
