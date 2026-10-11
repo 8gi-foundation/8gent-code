@@ -167,6 +167,7 @@ import {
 	logError,
 	logMessage,
 	logStep,
+	logStepStart,
 	logTabSwitch,
 	logToolEnd,
 	logToolStart,
@@ -2455,6 +2456,9 @@ export function App({
 					toolSuccess: !isRealFailure,
 					toolTrail: toTrailEntry(event),
 				});
+			},
+			onStepStart: (event) => {
+				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
 			onStepFinish: (event: AgentStepEvent) => {
 				const isActive = tabId === activeTabId;

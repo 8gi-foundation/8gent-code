@@ -1041,6 +1041,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// the run log + journal. Nothing fires when the endpoint omits usage -
 		// no fabricated numbers, ever.
 		let usageStepNumber = 0;
+		// Model calls begun so far on this text-tools path; step_start fires per call.
+		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
@@ -1078,7 +1080,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					usageTotals.completionTokens += usage.completionTokens;
 					usageTotals.totalTokens += usage.totalTokens;
 					this.events.onStepFinish?.({
-						stepNumber: usageStepNumber++,
+						// Close the step the last call opened; fall back to a counter
+						// when no call was announced.
+						stepNumber: startedSteps > 0 ? startedSteps - 1 : usageStepNumber++,
 						finishReason: "stop",
 						text: "",
 						toolCalls: [],
@@ -1090,6 +1094,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const packer = observations ? new ObservationPacker(observations) : null;
 			const call = (msgs: Parameters<typeof rawCall>[0]) => {
 				const sent = packer ? packer.pack(msgs) : msgs;
+				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({ stepNumber: startedSteps++, provider, model });
 				return withTurnTimeout(
 					() => rawCall(withStyleReminder(sent, this.styleReminder)),
 					attemptTimeoutMs,
@@ -2106,6 +2112,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			onStepStart: ({ stepNumber }) => {
 				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({
+					stepNumber,
+					provider: String(providerConfig.name),
+					model: String(providerConfig.model),
+				});
 				this.sessionWriter.writeStepStart(stepNumber, {
 					provider: String(providerConfig.name),
 					modelId: String(providerConfig.model),
