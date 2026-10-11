@@ -180,6 +180,7 @@ import {
 	type SlashCommand,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
@@ -692,6 +693,14 @@ type ViewMode =
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
+// Pickers drawn over the chat, above the input, as the palette is. Since #2350
+// no other viewMode is drawn, so /model, /provider, /theme, Ctrl+L and
+// Ctrl+Shift+M set a view nobody saw (#3918 D3).
+const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
+	"model-select",
+	"provider-select",
+	"theme-select",
+]);
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
@@ -1161,7 +1170,8 @@ export function App({
 	// View state — now driven by workspace tabs
 	const [viewMode, setViewMode] = useState<ViewMode>("chat");
 
-	// Bubble navigation state (Ctrl+L enters, Esc/Ctrl+L exits)
+	// Bubble navigation state. No key enters it: the bubble strip is not drawn
+	// since #2350, so its old Ctrl+L only took focus from the input (#3918).
 	const [isBubbleNavMode, setIsBubbleNavMode] = useState(false);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1972,18 +1982,6 @@ export function App({
 			return;
 		}
 
-		// Ctrl+L: toggle bubble navigation mode
-		if (key.ctrl && input === "l") {
-			setIsBubbleNavMode((prev) => {
-				if (!prev) {
-					const chatMsgs = messages.filter((m) => m.role !== "tool");
-					setSelectedBubbleIndex(Math.max(0, chatMsgs.length - 1));
-				}
-				return !prev;
-			});
-			return;
-		}
-
 		// Ctrl+N: toggle Notes tab
 		if (key.ctrl && input === "n") {
 			const notesTab = workspaceTabs.tabs.find((t) => t.type === "notes");
@@ -2084,9 +2082,11 @@ export function App({
 			setExpandedView((prev) => !prev);
 		}
 
-		// Ctrl+M: open model picker overlay
-		if (key.ctrl && input === "m" && !key.shift) {
+		// Ctrl+L: open the model picker overlay (#3918 D3). Ctrl+M stays bound,
+		// but most terminals, Windows Terminal included, send it as Enter (B4).
+		if (key.ctrl && (input === "l" || (input === "m" && !key.shift))) {
 			setViewMode("model-select");
+			return;
 		}
 
 		// Ctrl+Shift+M: open provider picker overlay
@@ -3117,19 +3117,12 @@ export function App({
 							"  /skills - List loaded skills (optional)\n" +
 							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
 							"Keyboard shortcuts:\n" +
-							"  Tab - Accept ghost suggestion\n" +
-							"  Ctrl+T - New chat tab\n" +
-							"  Ctrl+W - Close current tab\n" +
-							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Permission mode: Plan, Ask, Guarded, Infinite\n" +
-							"  Ctrl+A - Toggle animations\n" +
-							"  Ctrl+S - Toggle sound\n" +
-							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header\n" +
-							"  Ctrl+X - Open or close the PLAN column\n" +
-							"  Ctrl+M - Model picker\n" +
-							"  Ctrl+Shift+M - Provider picker",
+							formatHotkeyRows(),
 					);
+					break;
+
+				case "hotkeys":
+					addSystemMessage(formatHotkeys());
 					break;
 
 				case "kanban":
@@ -6756,6 +6749,10 @@ export function App({
 							</Box>
 						)}
 
+						{PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && (
+							<Box flexShrink={0}>{renderMainContent()}</Box>
+						)}
+
 						{approvalPending && (
 							<InlineApprovalPrompt
 								target={approvalPending.target}
@@ -6764,7 +6761,10 @@ export function App({
 							/>
 						)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
+						<Box
+							flexShrink={0}
+							display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
+						>
 							<CommandInput
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
