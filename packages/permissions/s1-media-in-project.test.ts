@@ -16,8 +16,22 @@ beforeAll(() => {
 	ws = realpathSync(mkdtempSync(join(tmpdir(), "s1-media-")));
 	mkdirSync(join(ws, "video"));
 	mkdirSync(join(ws, ".hidden"));
-	for (const f of ["video/slide1.png", "video/brief.mp4", "t.txt", "font.ttf", "tile.png", "src.ts"]) writeFileSync(join(ws, f), "x");
-	writeFileSync(join(ws, "video/exists.png"), "x");
+	const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(8)]);
+	for (const f of ["video/slide1.png", "tile.png", "video/exists.png"]) writeFileSync(join(ws, f), PNG);
+	for (const f of ["video/brief.mp4", "t.txt", "src.ts"]) writeFileSync(join(ws, f), "x");
+	writeFileSync(join(ws, "font.ttf"), Buffer.from([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+	writeFileSync(join(ws, "ok.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+	writeFileSync(join(ws, "ok.gif"), "GIF89a......");
+	writeFileSync(join(ws, "ok.webp"), "RIFF....WEBPVP8 ");
+	writeFileSync(join(ws, "ok.bmp"), "BM......");
+	writeFileSync(join(ws, "ok.tif"), Buffer.from([0x49, 0x49, 0x2a, 0, 0, 0, 0, 0]));
+	writeFileSync(join(ws, "ok.ppm"), "P6\n1 1\n255\n");
+	writeFileSync(join(ws, "evil-svg.png"), `<svg xmlns="http://www.w3.org/2000/svg"><text>text:/etc/hosts</text></svg>`);
+	writeFileSync(join(ws, "evil-ws.png"), `\n  <svg/>`);
+	writeFileSync(join(ws, "evil-mvg.png"), "push graphic-context\nviewbox 0 0 10 10\n");
+	writeFileSync(join(ws, "evil-msl.png"), `<?xml version="1.0"?><image/>`);
+	writeFileSync(join(ws, "evil-text.png"), "hello world, not an image");
+	writeFileSync(join(ws, "evil-font.ttf"), "<svg/>.........");
 	symlinkSync("/etc/hosts", join(ws, "link.png"));
 	symlinkSync("/etc/hosts", join(ws, "link.mp4"));
 	symlinkSync("/nonexistent", join(ws, "dangling.png"));
@@ -39,6 +53,8 @@ const PASS = [
 	"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of default=noprint_wrappers=1:nokey=1 video/brief.mp4",
 	"ffprobe -show_format -i video/brief.mp4",
 	"ffprobe video/brief.mp4",
+	"magick ok.jpg ok.gif ok.webp ok.bmp ok.tif ok.ppm -append out5.png",
+	"magick -size 1280x720 xc:red -blur 0x8 -pointsize 96 -resize 50% out6.png",
 ];
 
 const REFUSE = [
@@ -97,6 +113,26 @@ const REFUSE = [
 	"magick xc:red `whoami`.png",
 	"magick xc:red $HOME.png",
 	"magick -size 100x100 xc:red",
+	// content sniffing
+	"magick evil-svg.png out7.png",
+	"magick xc:red evil-svg.png -append out7.png",
+	"magick xc:red evil-ws.png -append out7.png",
+	"magick xc:red evil-mvg.png -append out7.png",
+	"magick xc:red evil-msl.png -append out7.png",
+	"magick xc:red evil-text.png -append out7.png",
+	"magick -size 100x100 xc:red -tile evil-svg.png out7.png",
+	"magick -size 100x100 xc:red -font evil-font.ttf out7.png",
+	"magick xc:red video/slide1.png evil-svg.png -composite out7.png",
+	// caps
+	"magick -size 100x100 xc:red -blur 0x9999 out7.png",
+	"magick -size 100x100 xc:red -gaussian-blur 500 out7.png",
+	"magick -size 100x100 xc:red -pointsize 99999 out7.png",
+	"magick -size 100x100 xc:red -page 99999x99999 out7.png",
+	"magick -size 100x100 xc:red -resize 8000x8000 out7.png",
+	"magick -size 100x100 xc:red -resize 5000% out7.png",
+	"magick -size 100x100 xc:red -background 'url(http://x/a.png)' out7.png",
+	"magick -size 100x100 xc:red -fill 'url(file.png)' out7.png",
+	"ffprobe -show_entries 'format=x|y' video/brief.mp4",
 	// ffprobe
 	"ffprobe -i 'subfile,,start,0,end,0,,:/etc/hosts'",
 	"ffprobe 'subfile,,start,0,end,0,,:/etc/hosts'",
