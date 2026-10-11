@@ -53,7 +53,8 @@ describe("@ file mention (#3918 D2)", () => {
 			fs.writeFileSync(path.join(dir, ".env"), "");
 			fs.writeFileSync(path.join(dir, "node_modules", "x", "index.js"), "");
 			fs.writeFileSync(path.join(dir, ".ssh", "id_ed25519"), "");
-			fs.writeFileSync(path.join(dir, "bad\x1b[2Jname.ts"), "");
+			// Windows refuses control characters in file names; safeNames covers them there.
+			if (process.platform !== "win32") fs.writeFileSync(path.join(dir, "bad\x1b[2Jname.ts"), "");
 			const files = await listProjectFiles(dir, "/nowhere");
 			expect(files).toContain("src/main.ts");
 			expect(files).toContain(".env");
