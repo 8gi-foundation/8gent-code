@@ -82,8 +82,8 @@ jobs:
           # A binary URL off the allowed host must be refused, leaving v0.0.1 in place.
           $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-evil.json'
           $refused = $false
-          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = $true; Write-Host "refused as expected: $_" }
-          if (-not $refused) { throw 'an off-host download URL was accepted' }
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = ("$_" -match 'Refusing'); Write-Host "refused: $_" }
+          if (-not $refused) { throw 'an off-host download URL was not refused by the URL check' }
           $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "changed after a refused install: got $v" }
 
           # A non-https releases URL is refused.
