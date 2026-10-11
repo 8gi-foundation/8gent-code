@@ -67,3 +67,24 @@ describe("ModelFailover.nextHop", () => {
 		expect(fo.isDown("ornith-1.0-9b", "lmstudio")).toBe(false);
 	});
 });
+
+describe("apfel behind a hosted base URL (#3908)", () => {
+	test("is dropped from chains without the hosted opt-in, kept on loopback", () => {
+		const saved = process.env.APFEL_BASE_URL;
+		try {
+			process.env.APFEL_BASE_URL = "https://api.minimax.io/v1";
+			const hosted = new ModelFailover(chains, { allowHosted: false });
+			hosted.markDown("ornith-1.0-9b", "lmstudio");
+			// apfel is gone, so with lmstudio down nothing hosted is reached.
+			expect(hosted.resolve("ornith-1.0-9b").provider).toBe("lmstudio");
+
+			process.env.APFEL_BASE_URL = "http://127.0.0.1:11500/v1";
+			const local = new ModelFailover(chains, { allowHosted: false });
+			local.markDown("ornith-1.0-9b", "lmstudio");
+			expect(local.resolve("ornith-1.0-9b")).toEqual({ model: "MiniMax-M2.7", provider: "apfel" });
+		} finally {
+			if (saved === undefined) delete process.env.APFEL_BASE_URL;
+			else process.env.APFEL_BASE_URL = saved;
+		}
+	});
+});

@@ -98,6 +98,17 @@ describe("hosted opt-in flag", () => {
 		for (const p of ["openrouter", "anthropic", "deepseek", "openai", "groq"])
 			expect(isHostedProvider(p)).toBe(true);
 	});
+
+	test("apfel is hosted when its base URL is not loopback (#3908)", () => {
+		expect(isHostedProvider("apfel", {})).toBe(false);
+		expect(isHostedProvider("apfel", { APFEL_BASE_URL: "http://localhost:11500/v1" })).toBe(false);
+		expect(isHostedProvider("apfel", { APFEL_BASE_URL: "http://127.0.0.1:11435/v1" })).toBe(false);
+		expect(isHostedProvider("apfel", { APFEL_BASE_URL: "https://api.minimax.io/v1" })).toBe(true);
+		expect(isHostedProvider("apfel", { APFEL_BASE_URL: "http://localhost.evil.example/v1" })).toBe(
+			true,
+		);
+		expect(isHostedProvider("apfel", { APFEL_BASE_URL: "not a url" })).toBe(true);
+	});
 });
 
 describe("spawn_agent without the opt-in", () => {

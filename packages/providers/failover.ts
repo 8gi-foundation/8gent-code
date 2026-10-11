@@ -91,9 +91,31 @@ export const LOCAL_FAILOVER_PROVIDERS: readonly string[] = [
 	"apple-foundation",
 ];
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * apfel is a generic OpenAI-compatible slot: APFEL_BASE_URL can point at a
+ * hosted API (a launcher once pointed it at MiniMax). It only counts as local
+ * while its base URL is unset (the loopback default) or has a loopback host (#3908).
+ */
+function apfelIsLocal(env: Record<string, string | undefined>): boolean {
+	const base = env.APFEL_BASE_URL?.trim();
+	if (!base) return true;
+	try {
+		return LOOPBACK_HOSTS.has(new URL(base).hostname.toLowerCase());
+	} catch {
+		return false;
+	}
+}
+
 /** True when `provider` is not a local runtime: using it sends work off the machine. */
-export function isHostedProvider(provider: string): boolean {
-	return !LOCAL_FAILOVER_PROVIDERS.includes(provider.trim().toLowerCase());
+export function isHostedProvider(
+	provider: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	const p = provider.trim().toLowerCase();
+	if (p === "apfel") return !apfelIsLocal(env);
+	return !LOCAL_FAILOVER_PROVIDERS.includes(p);
 }
 
 /**
