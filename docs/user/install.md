@@ -1,6 +1,28 @@
 # Install and first run
 
-## Windows
+## One-line install
+
+These install the newest published release of the standalone `8gent` binary. They do not install the code on `main`, so a feature merged today may not be in it until the next release. If no release carries a binary for your machine yet, the script says so and stops with nothing changed.
+
+Windows (PowerShell 5.1 or 7, no admin rights, no Bun or Node needed):
+
+```powershell
+irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex
+```
+
+It puts `8gent.exe` in `%LOCALAPPDATA%\Programs\8gent\bin` and adds that folder to your user PATH. Open a new terminal afterwards.
+
+macOS and Linux (x64 and arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh
+```
+
+It puts `8gent` in `~/.local/bin`; make sure that folder is on your PATH.
+
+Both scripts check the download against the release's `SHA256SUMS`, check that the new binary reports the release version, and only then replace anything. Settings, all optional: `EIGHT_VERSION` (install that version instead of the newest), `EIGHT_INSTALL_DIR`, and on Windows `EIGHT_NO_MODIFY_PATH=1`. Neither script replaces a newer 8gent with an older one unless you name the older version in `EIGHT_VERSION`. To update a binary install, run the same line again.
+
+## From source on Windows
 
 ```powershell
 powershell -c "irm bun.sh/install.ps1 | iex"   # or download Bun from bun.sh/docs/installation
@@ -23,7 +45,7 @@ Update: `git fetch --depth 1 origin main`, `git reset --hard origin/main`, `bun 
 
 WSL and the compiled `.exe` are covered in [ARTALE-WINDOWS.md](../ARTALE-WINDOWS.md).
 
-## macOS and Linux
+## From source on macOS and Linux
 
 Same clone steps. npm is an optional channel:
 
@@ -44,4 +66,4 @@ ollama pull qwen3.5
 
 LM Studio on `localhost:1234` is found too. Use `OLLAMA_BASE_URL` or `LM_STUDIO_HOST` for another host.
 
-Pick a model with `/model` (Ctrl+M) and a provider with `/provider`. Save a default: `8gent preferences set model qwen3:14b`. Provider keys: `8gent keys`.
+Pick a model with `/model` (or Ctrl+L) and a provider with `/provider`. Save a default: `8gent preferences set model qwen3:14b`. Provider keys: `8gent keys`.
