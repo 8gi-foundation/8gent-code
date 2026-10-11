@@ -104,7 +104,7 @@ less, pick a smaller model in step 2.
 ### 1. Get the 8gent exe
 
 Downloading from GitHub Actions needs a GitHub account. **If you do not have
-one, ask James for the zip** and skip to the hash check. James downloads it and
+one, ask James for the zip** (the exe and its `.sha256`) and skip to the hash check. James downloads it and
 sends it to you directly or through a Forgejo release.
 
 - Release builds: from v0.20.0 on, `8gent-windows-x64.exe` will be on the
@@ -114,12 +114,11 @@ sends it to you directly or through a Forgejo release.
   [Windows Smoke run](https://github.com/8gi-foundation/8gent-code/actions/workflows/windows-smoke.yml),
   **Artifacts**, `8gent-windows-x64`. Artifacts expire after 14 days.
 
-The zip holds three files. Keep all three together in the folder the exe will
-live in, for example `%USERPROFILE%\8gent`:
+The zip holds two files. Keep both together in the folder the exe will live
+in, for example `%USERPROFILE%\8gent` (the TUI is inside the exe):
 
 - `8gent-windows-x64.exe`
 - `8gent-windows-x64.exe.sha256`
-- `tui.js`
 
 Check the exe is the one CI built. In PowerShell, in that folder:
 
