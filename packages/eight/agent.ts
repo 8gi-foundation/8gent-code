@@ -384,7 +384,7 @@ export class Agent {
 					: true;
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
-		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
+		this.toolRegistry = new ToolRegistry(config.allTools ?? false, config.role);
 		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
 		// compaction instead of the hardcoded 32k. A large-context cloud model
 		// (e.g. anthropic 200k) compacts far later; a small local model compacts

@@ -162,7 +162,11 @@ export class ToolRegistry {
 	 */
 	readonly resultCache: ToolResultCache = new ToolResultCache();
 
-	constructor(allTools = false) {
+	/** Role of the session that owns this registry; gates orchestration tools. */
+	private readonly role: string | undefined;
+
+	constructor(allTools = false, role?: string) {
+		this.role = role;
 		if (allTools) {
 			for (const [name, def] of Object.entries(agentTools)) {
 				this.activeTools.set(name, def);
@@ -248,6 +252,12 @@ export class ToolRegistry {
 				if (!TOOL_CATEGORIES[category]) {
 					return {
 						error: `Unknown category "${category}". Available: ${CATEGORY_NAMES.join(", ")}`,
+					};
+				}
+				// Orchestration tools are orchestrator-only here too (same rule as preloadForNative).
+				if (category === "orchestration" && this.role !== "orchestrator") {
+					return {
+						error: "The orchestration category is available to the orchestrator role only.",
 					};
 				}
 				const loaded = this.loadCategory(category);
