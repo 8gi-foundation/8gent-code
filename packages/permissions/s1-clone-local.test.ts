@@ -463,3 +463,69 @@ describe("systemOneGate end to end with a judge that says dangerous", () => {
 		expect(r.run).toBe(false);
 	});
 });
+
+describe("cloneLocalIntoProject tree review (8SO, #3827)", () => {
+	/** A bare sibling whose one commit holds the given files (path -> content). */
+	function bareWith(name: string, files: Record<string, string>): void {
+		const tmp = join(container, `${name}.seed`);
+		mkdirSync(tmp, { recursive: true });
+		git(tmp, "init", "-q", "-b", "main");
+		for (const [p, c] of Object.entries(files)) {
+			mkdirSync(join(tmp, p, ".."), { recursive: true });
+			writeFileSync(join(tmp, p), c);
+		}
+		git(tmp, "add", "-A");
+		git(tmp, "commit", "-q", "-m", "init");
+		git(container, "clone", "-q", "--bare", tmp, join(container, name));
+		rmSync(tmp, { recursive: true, force: true });
+	}
+
+	test("a replace ref cannot hide a symlink from the scan", () => {
+		const tmp = join(container, "rep.seed");
+		workRepo(tmp, true);
+		const real = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmp, encoding: "utf8" }).stdout.trim();
+		git(tmp, "rm", "-q", "--cached", "l");
+		git(tmp, "commit", "-q", "-m", "fake");
+		const fake = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmp, encoding: "utf8" }).stdout.trim();
+		git(tmp, "reset", "-q", "--hard", real);
+		git(tmp, "replace", real, fake);
+		git(container, "clone", "-q", "--bare", tmp, join(container, "rep.git"));
+		mkdirSync(join(container, "rep.git", "refs", "replace"), { recursive: true });
+		writeFileSync(join(container, "rep.git", "refs", "replace", real), `${fake}\n`);
+		rmSync(tmp, { recursive: true, force: true });
+		expect(cloneLocalIntoProject("git clone ../rep.git notes", ws).ok).toBe(false);
+	});
+
+	for (const [name, file] of [
+		[".gitattributes (filters, LFS)", ".gitattributes"],
+		[".lfsconfig", ".lfsconfig"],
+		[".gitmodules", ".gitmodules"],
+		[".claude directory", ".claude/settings.json"],
+		[".envrc", ".envrc"],
+		[".husky hook", ".husky/pre-commit"],
+		[".vscode directory", ".vscode/tasks.json"],
+		["a nested dot segment", "src/.hidden/x.txt"],
+		["a protected name", "package.json"],
+		["a nested protected name", "lib/Makefile"],
+		["CLAUDE.md", "CLAUDE.md"],
+		["a protected path under the landing directory", "x.txt"],
+	] as const) {
+		test(`a repository tracking ${name} is refused`, () => {
+			bareWith("tree.git", { [file]: "x", "ok.txt": "x" });
+			const dest = name.startsWith("a protected path") ? "packages/permissions" : "notes";
+			expect(cloneLocalIntoProject(`git clone ../tree.git ${dest}`, ws).ok).toBe(false);
+		});
+	}
+
+	test("a repository with more than MAX_TREE entries is refused", () => {
+		const files: Record<string, string> = {};
+		for (let i = 0; i < 2100; i++) files[`d/f${i}.txt`] = "x";
+		bareWith("big.git", files);
+		expect(cloneLocalIntoProject("git clone ../big.git notes", ws).ok).toBe(false);
+	});
+
+	test("a plain repository is still allowed", () => {
+		bareWith("plain.git", { "README.md": "x", "docs/a.txt": "x" });
+		expect(cloneLocalIntoProject("git clone ../plain.git notes", ws).ok).toBe(true);
+	});
+});

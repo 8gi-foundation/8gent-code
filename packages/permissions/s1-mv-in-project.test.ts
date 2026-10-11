@@ -95,6 +95,10 @@ beforeEach(() => {
 	mkdirSync(join(ws, ".claude"));
 	mkdirSync(join(ws, "nested", ".git"), { recursive: true });
 	mkdirSync(join(ws, "deep", "sub", ".git"), { recursive: true });
+	// a submodule: its .git is a file pointing at the superproject's modules dir
+	mkdirSync(join(ws, "sub-module"));
+	writeFileSync(join(ws, "sub-module", ".git"), "gitdir: ../.git/modules/sub-module\n");
+	writeFileSync(join(ws, "sub-module", "a.txt"), "x");
 	mkdirSync(join(ws, "packages", "permissions"), { recursive: true });
 	writeFileSync(join(ws, "packages", "permissions", "policy-engine.ts"), "x");
 	mkdirSync(join(ws, "hooks"));
@@ -248,6 +252,12 @@ describe("moveInProject refuses", () => {
 		["moving into .claude", "mv inbox/note-1.txt .claude/"],
 		["moving .git", "mv .git inbox/notes/"],
 		["moving a nested repository", "mv nested inbox/notes/"],
+		["git mv of a submodule directory", "git mv sub-module inbox/notes/"],
+		["mv of a submodule directory", "mv sub-module inbox/notes/"],
+		["git mv onto CLAUDE.md", "git mv inbox/note-1.txt CLAUDE.md"],
+		["mv onto CLAUDE.md", "mv inbox/note-1.txt CLAUDE.md"],
+		["mv onto lower-case agents.md", "mv inbox/note-1.txt agents.md"],
+		["mv onto Gemini.md in a folder", "mv inbox/note-1.txt inbox/notes/Gemini.md"],
 		["a variable target", "mv inbox/note-1.txt $HOME/"],
 		["a variable source", "mv $F inbox/notes/"],
 		["a glob source", "mv inbox/note-*.txt inbox/notes/"],

@@ -97,6 +97,10 @@ const PROTECTED_NAMES = new Set([
 	"go.sum",
 	"makefile",
 	"dockerfile",
+	// Instruction files an assistant reads as orders (8SO, #3827).
+	"claude.md",
+	"agents.md",
+	"gemini.md",
 ]);
 /**
  * ONE sensitive-name set for the mv and rm lanes (#3944): the union of what each
@@ -123,7 +127,7 @@ function badDot(rel: string): boolean {
 /** Security-bearing source: never moved, never a landing place (workspace-relative). */
 const PROTECTED_PREFIXES = ["packages/permissions", "packages/decide", "hooks"];
 /** Most entries a moved directory may hold before it goes to review. */
-const MAX_TREE = 2000;
+export const MAX_TREE = 2000;
 
 export type MoveInProject = { ok: true; reason: string } | { ok: false };
 

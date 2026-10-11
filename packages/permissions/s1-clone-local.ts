@@ -51,6 +51,7 @@ import { decideRules } from "../decide/rules";
 import {
 	lstatOrNull,
 	plainRelative,
+	MAX_TREE,
 	protectedName,
 	protectedRel,
 	stripDot,
@@ -93,21 +94,48 @@ function looksLikeRepo(dir: string): boolean {
 	);
 }
 
-/** True when `dir` has no symlink in its tracked tree. False when the scan cannot run. */
-function noTrackedSymlinks(dir: string): boolean {
+/**
+ * True when the tracked tree of `dir` at HEAD is safe to copy in without
+ * review (8SO, #3827). Replace refs are ignored so the scan sees the objects
+ * the clone will really fetch, not a doctored view of them. A tree is refused
+ * when it holds a symlink or a submodule, any dot-leading segment (.gitattributes,
+ * .lfsconfig, .gitmodules, .claude, .envrc, .husky, .vscode: filters and LFS
+ * make a "local" clone reach any URL), a protected name, a protected path under
+ * the landing directory, or more than MAX_TREE entries. False when the scan
+ * cannot run.
+ */
+function cloneTreeSafe(dir: string, destRel: string): boolean {
 	try {
-		const out = execFileSync("git", ["-C", dir, "ls-tree", "-r", "HEAD"], {
-			encoding: "utf8",
-			timeout: 5000,
-			maxBuffer: 64 * 1024 * 1024,
-			stdio: ["ignore", "pipe", "ignore"],
-			env: {
-				PATH: process.env.PATH ?? "/usr/bin:/bin",
-				GIT_CONFIG_NOSYSTEM: "1",
-				HOME: "/nonexistent",
-			} as unknown as NodeJS.ProcessEnv,
-		});
-		return !out.split("\n").some((l) => l.startsWith("120000"));
+		const out = execFileSync(
+			"git",
+			["--no-replace-objects", "-C", dir, "ls-tree", "-r", "-z", "HEAD"],
+			{
+				encoding: "utf8",
+				timeout: 5000,
+				maxBuffer: 64 * 1024 * 1024,
+				stdio: ["ignore", "pipe", "ignore"],
+				env: {
+					PATH: process.env.PATH ?? "/usr/bin:/bin",
+					GIT_CONFIG_NOSYSTEM: "1",
+					GIT_NO_REPLACE_OBJECTS: "1",
+					HOME: "/nonexistent",
+				} as unknown as NodeJS.ProcessEnv,
+			},
+		);
+		let count = 0;
+		for (const entry of out.split("\0")) {
+			if (entry === "") continue;
+			if (++count > MAX_TREE) return false;
+			const tab = entry.indexOf("\t");
+			if (tab < 0) return false;
+			const mode = entry.slice(0, entry.indexOf(" "));
+			if (mode === "120000" || mode === "160000") return false;
+			const rel = entry.slice(tab + 1);
+			const segs = rel.split("/");
+			if (segs.some((seg) => seg.startsWith(".") || protectedName(seg))) return false;
+			if (protectedRel(path.join(destRel, rel))) return false;
+		}
+		return true;
 	} catch {
 		return false;
 	}
@@ -236,7 +264,6 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 			if (realSrc.toLowerCase() !== path.join(parentOfRoot, name).toLowerCase()) return NO;
 			if (!bareRepo(realSrc)) return NO;
 		}
-		if (!noTrackedSymlinks(realSrc)) return NO;
 
 		const destAbs = path.resolve(root, destArg);
 		if (!inside(destAbs, root) || destAbs === root) return NO;
@@ -256,6 +283,7 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		if (protectedName(path.basename(finalAbs))) return NO;
 		if (protectedRel(path.relative(root, finalAbs))) return NO;
 		if (inside(finalAbs, realSrc)) return NO;
+		if (!cloneTreeSafe(realSrc, path.relative(root, finalAbs))) return NO;
 		return {
 			ok: true,
 			reason: "git clone of a local repository into a new directory inside the workspace",
