@@ -115,11 +115,46 @@ function protectedName(name: string): boolean {
 	);
 }
 
-function protectedRel(relIn: string): boolean {
-	// path.relative() is backslash-separated on Windows; the prefixes are not.
-	const rel = path.sep === "/" ? relIn : relIn.split(path.sep).join("/");
+/** Platforms whose file systems fold case by default: a differently-cased path is the same path. */
+const CASE_FOLDING = new Set<NodeJS.Platform>(["win32", "darwin"]);
+
+/**
+ * The segments of a workspace-relative path as path.relative() produced it on
+ * `platform`: split on both separators on win32 (backslash, and the "/" an
+ * operand was written with), on "/" elsewhere. Exported for the cross-OS tests.
+ */
+export function relSegments(rel: string, platform: NodeJS.Platform = process.platform): string[] {
+	return platform === "win32" ? rel.split(/[\\/]/) : rel.split("/");
+}
+
+/** True when any segment of `rel` is a dot entry (.git, .claude, .env, ...). */
+export function hasDotSegment(rel: string, platform: NodeJS.Platform = process.platform): boolean {
+	return relSegments(rel, platform).some((s) => s.startsWith("."));
+}
+
+/** Security-bearing path: equal to, below, or a parent of a protected prefix. Case-folded on win32 and darwin. */
+export function protectedRel(relIn: string, platform: NodeJS.Platform = process.platform): boolean {
+	let rel = relSegments(relIn, platform).join("/");
+	if (CASE_FOLDING.has(platform)) rel = rel.toLowerCase();
 	return PROTECTED_PREFIXES.some(
 		(p) => rel === p || rel.startsWith(`${p}/`) || p.startsWith(`${rel}/`),
+	);
+}
+
+/**
+ * Windows names that mean something other than what they spell: an alternate
+ * data stream (`a:b`), a trailing dot or space (`hooks.` is `hooks`), and an
+ * 8.3 short name (`PACKAGE~1` is `packages`). Refused outright on win32 so none
+ * of them can reach a protected path unseen; never true elsewhere.
+ */
+export function windowsAliasOperand(operand: string, platform: NodeJS.Platform = process.platform): boolean {
+	if (platform !== "win32") return false;
+	return (
+		operand.includes(":") ||
+		/~\d/.test(operand) ||
+		operand
+			.split(/[\\/]/)
+			.some((seg) => seg !== "" && seg !== "." && seg !== ".." && /[. ]$/.test(seg))
 	);
 }
 
@@ -178,6 +213,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 		const operands = args.filter((a) => !a.startsWith("-")).map(stripDot);
 		if (flags.some((f) => !MV_FLAG.test(f))) return NO;
 		if (operands.length < 2 || !operands.every(plainRelative)) return NO;
+		if (operands.some((o) => windowsAliasOperand(o))) return NO;
 
 		const root = realpathSync(cwd);
 		const srcs = operands.slice(0, -1).map((s) => s.replace(/\/+$/, ""));
@@ -193,13 +229,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!destStat.isDirectory()) return NO;
 			const realDest = realpathSync(destAbs);
 			if (!inside(realDest, root)) return NO;
-			if (
-				path
-					.relative(root, realDest)
-					.split("/")
-					.some((s) => s.startsWith("."))
-			)
-				return NO;
+			if (hasDotSegment(path.relative(root, realDest))) return NO;
 			for (const s of srcs)
 				moves.push([path.resolve(root, s), path.join(realDest, path.basename(s))]);
 		} else {
@@ -207,13 +237,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (srcs.length !== 1 || destArg.endsWith("/")) return NO;
 			const realParent = realpathSync(path.dirname(destAbs));
 			if (!inside(realParent, root)) return NO;
-			if (
-				path
-					.relative(root, realParent)
-					.split("/")
-					.some((s) => s.startsWith("."))
-			)
-				return NO;
+			if (hasDotSegment(path.relative(root, realParent))) return NO;
 			moves.push([path.resolve(root, srcs[0]), path.join(realParent, path.basename(destAbs))]);
 		}
 
@@ -226,7 +250,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!inside(realParent, root)) return NO;
 			const realSrc = path.join(realParent, path.basename(srcAbs));
 			const relSrc = path.relative(root, realSrc);
-			if (relSrc.split(path.sep).some((s) => s.startsWith("."))) return NO;
+			if (hasDotSegment(relSrc)) return NO;
 			if (protectedRel(relSrc) || protectedRel(path.relative(root, finalAbs))) return NO;
 			if (protectedName(path.basename(realSrc)) || protectedName(path.basename(finalAbs)))
 				return NO;

@@ -15,7 +15,13 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { moveInProject } from "./s1-mv-in-project";
+import {
+	hasDotSegment,
+	moveInProject,
+	protectedRel,
+	relSegments,
+	windowsAliasOperand,
+} from "./s1-mv-in-project";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -193,6 +199,54 @@ describe("moveInProject refuses", () => {
 
 	test("no working directory", () => {
 		expect(moveInProject("mv inbox/note-1.txt inbox/notes/", undefined).ok).toBe(false);
+	});
+});
+
+// The helpers take the platform, so these run the Windows and macOS rules on any runner (#3814).
+describe("moveInProject path rules on any OS", () => {
+	test("win32 relative paths split on backslash and slash", () => {
+		expect(relSegments("sub\\.claude", "win32")).toEqual(["sub", ".claude"]);
+		expect(relSegments("sub/.claude", "win32")).toEqual(["sub", ".claude"]);
+		expect(relSegments("sub\\x", "linux")).toEqual(["sub\\x"]);
+	});
+
+	test("a dot directory below a win32 path is seen", () => {
+		expect(hasDotSegment("sub\\.claude", "win32")).toBe(true);
+		expect(hasDotSegment("a\\b\\.git\\hooks", "win32")).toBe(true);
+		expect(hasDotSegment("sub\\notes", "win32")).toBe(false);
+	});
+
+	test("protected prefixes match with backslashes on win32", () => {
+		for (const rel of [
+			"packages\\permissions",
+			"packages\\permissions\\policy-engine.ts",
+			"packages\\decide\\x",
+			"hooks",
+			"hooks\\pre-push",
+			"packages",
+		])
+			expect(protectedRel(rel, "win32"), rel).toBe(true);
+		expect(protectedRel("inbox\\notes", "win32")).toBe(false);
+		expect(protectedRel("packages\\tools", "win32")).toBe(false);
+	});
+
+	test("protected prefixes are case-folded on win32 and darwin, not on linux", () => {
+		for (const platform of ["win32", "darwin"] as const) {
+			expect(protectedRel("Hooks", platform), platform).toBe(true);
+			expect(protectedRel("HOOKS/x", platform), platform).toBe(true);
+			expect(protectedRel("Packages/Permissions", platform), platform).toBe(true);
+			expect(protectedRel("PACKAGES\\DECIDE", platform), platform).toBe(platform === "win32");
+		}
+		expect(protectedRel("Hooks", "linux")).toBe(false);
+	});
+
+	test("win32 alias operands are refused: stream, trailing dot, 8.3 short name", () => {
+		for (const o of ["hooks.", "sub/hooks.", "a:b", "x.txt:stream", "PACKAGE~1/x", "PERMIS~1"])
+			expect(windowsAliasOperand(o, "win32"), o).toBe(true);
+		for (const o of ["inbox/notes", "inbox/note-1.txt", "a.b/c"])
+			expect(windowsAliasOperand(o, "win32"), o).toBe(false);
+		expect(windowsAliasOperand("hooks.", "linux")).toBe(false);
+		expect(windowsAliasOperand("PACKAGE~1", "darwin")).toBe(false);
 	});
 });
 

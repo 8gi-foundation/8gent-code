@@ -39,7 +39,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned to what windows-task.yml uses; `latest` moved to 1.4.3, which segfaults mid-run
+          # on windows-latest (#3820). Sharding below is the mitigation, not a fix for the crash.
+          bun-version: 1.4.2
 
       - name: Checkout has LF line endings
         run: |

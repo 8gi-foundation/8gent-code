@@ -17,6 +17,7 @@ import {
 	browserProfile,
 	browserProfileWarning,
 	createEightBrowser,
+	secretsPathInHome,
 	localBrowserTools,
 	touchesBrowserSecrets,
 	browserWithheldNote,
@@ -1220,6 +1221,32 @@ describe("browser destinations go through the net guard in every profile (#3603)
 		});
 		expect(await b.open(at("http", "192.168.1.1:80/"))).toMatch(/Refused/);
 		expect(await b.open(at("http", "169.254.169.254:80/"))).toMatch(/Refused/);
+	});
+});
+
+describe("secretsPathInHome: the Windows secrets-file rule, run on any OS (#3814)", () => {
+	const home = "C:\\Users\\james";
+	test("inside the home folder is accepted, case-insensitively", () => {
+		expect(secretsPathInHome("C:\\Users\\james\\.8gent\\secrets.json", home, "win32")).toBe(true);
+		expect(secretsPathInHome("c:\\users\\JAMES\\AppData\\Local\\Temp\\s.json", home, "win32")).toBe(
+			true,
+		);
+	});
+	test("outside the home folder is refused", () => {
+		for (const f of [
+			"C:\\ProgramData\\secrets.json",
+			"D:\\shared\\secrets.json",
+			"C:\\Users\\other\\secrets.json",
+			"C:\\Users\\james-old\\secrets.json",
+			"C:\\Users\\james\\..\\other\\secrets.json",
+			"\\\\server\\share\\secrets.json",
+			"C:\\Users\\james",
+		])
+			expect(secretsPathInHome(f, home, "win32"), f).toBe(false);
+	});
+	test("posix rules are unchanged by the helper", () => {
+		expect(secretsPathInHome("/home/a/s.json", "/home/a", "linux")).toBe(true);
+		expect(secretsPathInHome("/tmp/s.json", "/home/a", "linux")).toBe(false);
 	});
 });
 
