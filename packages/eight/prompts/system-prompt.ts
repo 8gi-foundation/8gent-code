@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../core/home";
 import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
+import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
@@ -424,7 +425,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request.
+${LOCAL_SERVER_CURL_NOTE}
 
 ### Git Flow
 \`\`\`json
