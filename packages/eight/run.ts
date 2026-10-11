@@ -28,6 +28,7 @@ import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
 import { scrub } from "./secret-scanner";
 import type { AgentEventCallbacks } from "./types";
+import { extensionsWanted } from "../extensions/index";
 
 export type { RunEvent } from "./run-events";
 
@@ -811,6 +812,8 @@ export async function runRunCommand(
 			model,
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
 			workingDirectory: opts.cwd || process.cwd(),
+			// Extensions on unless --no-extensions (G1 wiring contract).
+			extensions: extensionsWanted(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
 			// --provider names the provider: a provider error ends the run
