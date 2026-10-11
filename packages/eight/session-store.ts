@@ -1009,3 +1009,28 @@ export function listSessions(
 export function latestSessionForCwd(cwd: string, sessionsDir?: string): SessionListItem | null {
 	return listSessions({ cwd, sessionsDir, limit: 1 })[0] ?? null;
 }
+
+/**
+ * Delete from the picker. Moves the session file to <sessions dir>/trash/
+ * rather than unlinking it, so a slip of the key can be undone by hand. An old
+ * .json session is moved the same way. Returns false when there was nothing to move.
+ *
+ * Nothing ever empties trash/: deleted sessions stay on disk until someone
+ * removes them by hand. The agent's per-run event log (<sessions dir>/<run
+ * id>.jsonl, written by SessionWriter) is a separate file and is not touched.
+ */
+export function trashSession(id: string, sessionsDir: string = defaultSessionsDir()): boolean {
+	if (!isSessionId(id)) return false;
+	const trash = path.join(sessionsDir, "trash");
+	let moved = false;
+	for (const [from, name] of [
+		[path.join(treeDir(sessionsDir), `${id}.jsonl`), `${id}.jsonl`],
+		[path.join(sessionsDir, `${id}.json`), `${id}.json`],
+	] as const) {
+		if (!fs.existsSync(from)) continue;
+		fs.mkdirSync(trash, { recursive: true, mode: 0o700 });
+		fs.renameSync(from, path.join(trash, `${Date.now()}-${name}`));
+		moved = true;
+	}
+	return moved;
+}
