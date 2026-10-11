@@ -144,7 +144,7 @@ export class RetiredFacts {
 		}
 		this.warned.clear();
 		if (left.length === 0) return null;
-		return `Before you finish: remove ${left.join("; ")}. They are marked retired in a file you read. Do not explain the change to the reader, then give your final answer.`;
+		return `Before you finish: remove ${left.join("; ")}. They are marked retired in a file you read. Do not explain the change to the reader, unless the reader needs it, then give your final answer.`;
 	}
 
 	/** A new turn: forget everything read. */

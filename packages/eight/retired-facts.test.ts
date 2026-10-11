@@ -181,6 +181,7 @@ describe("turn-end nudge (#3811 step 2)", () => {
 		const n = r.turnEndNudge(() => draft);
 		expect(n).toContain('"3 November 2026"');
 		expect(n).toContain("d.txt");
+		expect(n).toContain("unless the reader needs it");
 		expect(n?.includes("/w/")).toBe(false);
 		expect(r.turnEndNudge(() => draft)).toBeNull();
 	});
