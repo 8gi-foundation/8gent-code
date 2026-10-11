@@ -33,6 +33,7 @@ import {
 	RunCommandSandboxRequired,
 	runCommandSandboxRefusal,
 	runCommandSandboxStatus,
+	sandboxFooterReason,
 	snapshotSecurityEnv,
 	wrapRunCommand,
 } from "./run-command-sandbox";
@@ -124,24 +125,37 @@ describe("protected set", () => {
 });
 
 describe("security env snapshot", () => {
-	test("a key declared in a .env file is ignored, others kept", () => {
+	const dotenv = (o: Record<string, string[]>) => new Map(Object.entries(o).map(([k, v]) => [k, new Set(v)]));
+
+	test("a key whose live value came from a .env file is ignored, others kept", () => {
 		const snap = snapshotSecurityEnv(
 			{ EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" },
-			new Set(["EIGHT_SEATBELT"]),
+			dotenv({ EIGHT_SEATBELT: ["0"] }),
 		);
 		expect(snap.values).toEqual({ EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" });
 		expect(snap.ignored).toEqual(["EIGHT_SEATBELT"]);
 	});
 
+	test("a value the user really set (differs from .env) is kept", () => {
+		const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: "0", EIGHT_HOME: "/real" }, dotenv({ EIGHT_SEATBELT: ["1"], EIGHT_HOME: ["/x"] }));
+		expect(snap.values).toEqual({ EIGHT_SEATBELT: "0", EIGHT_HOME: "/real" });
+		expect(snap.ignored).toEqual([]);
+	});
+
+	test("EIGHT_SEATBELT keeps the stricter value: require survives even from .env", () => {
+		const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: "require" }, dotenv({ EIGHT_SEATBELT: ["require"] }));
+		expect(snap.values).toEqual({ EIGHT_SEATBELT: "require" });
+	});
+
 	test("dotenv keys are parsed, with and without export", () => {
 		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
 		try {
-			fs.writeFileSync(path.join(dir, ".env"), "# c\nEIGHT_SEATBELT=0\n export NODE_ENV=test\nX = 1\n");
-			expect([...dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, "missing")])].sort()).toEqual([
-				"EIGHT_SEATBELT",
-				"NODE_ENV",
-				"X",
-			]);
+			fs.writeFileSync(path.join(dir, ".env"), "# c\nEIGHT_SEATBELT=0\n export NODE_ENV=\"test\"\nX = 1\n");
+			fs.writeFileSync(path.join(dir, ".env.local"), "EIGHT_SEATBELT='require'\n");
+			const keys = dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, ".env.local"), path.join(dir, "missing")]);
+			expect([...keys.keys()].sort()).toEqual(["EIGHT_SEATBELT", "NODE_ENV", "X"]);
+			expect([...(keys.get("EIGHT_SEATBELT") ?? [])].sort()).toEqual(["0", "require"]);
+			expect([...(keys.get("NODE_ENV") ?? [])]).toEqual(["test"]);
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
@@ -151,7 +165,7 @@ describe("security env snapshot", () => {
 		expect(isTestMode({ NODE_ENV: "test" })).toBe(true);
 		expect(isTestMode({ BUN_ENV: "test" })).toBe(true);
 		expect(isTestMode({ NODE_ENV: "production" })).toBe(false);
-		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, new Set(["NODE_ENV"]));
+		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, dotenv({ NODE_ENV: ["test"] }));
 		expect(isTestMode(fromDotenv.values)).toBe(false);
 	});
 });
@@ -253,7 +267,14 @@ describe("wrapping", () => {
 		}
 	});
 
-	test("bwrap args bind only protected paths that exist, read-only", () => {
+	test("the footer reason is the short clause", () => {
+		expect(sandboxFooterReason("host already sandboxes this process (sandbox-exec cannot nest)")).toBe(
+			"host already sandboxes this process",
+		);
+		expect(sandboxFooterReason("EIGHT_SEATBELT=0")).toBe("EIGHT_SEATBELT=0");
+	});
+
+		test("bwrap args bind only protected paths that exist, read-only", () => {
 		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-bw-")));
 		fs.mkdirSync(path.join(home, ".8gent", "extensions"), { recursive: true });
 		try {

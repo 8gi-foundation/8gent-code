@@ -265,3 +265,22 @@ describe("footer key caps (#3238)", () => {
 		expect(hintWidth("^X plan")).toBe("[^X] plan".length);
 	});
 });
+
+describe("run_command without its OS sandbox is a footer segment (#4013)", () => {
+	test("no segment when the sandbox applies", () => {
+		expect(buildFooterSegments({ mode: "Planning" }).find((s) => s.key === "sandbox")).toBeUndefined();
+	});
+
+	test("'sandbox off' with the reason, in the look-here colour", () => {
+		const seg = buildFooterSegments({ mode: "Planning", sandboxOff: "EIGHT_SEATBELT=0" }).find(
+			(s) => s.key === "sandbox",
+		);
+		const infinite = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
+			(s) => s.key === "perm",
+		);
+		expect(seg?.label).toBe("sandbox");
+		expect(seg?.value).toBe("off");
+		expect(seg?.note).toBe("EIGHT_SEATBELT=0");
+		expect(seg?.color).toBe(infinite?.color);
+	});
+});

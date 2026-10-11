@@ -17,8 +17,8 @@
  *   in the hint row. The hints fill the columns the status leaves, right-
  *   aligned, most used first; [^P] palette leads because the palette lists
  *   every command.
- * - Orange means "look here": Infinite, and a System One judge that failed
- *   to load (shell commands fail closed).
+ * - Orange means "look here": Infinite, a System One judge that failed
+ *   to load (shell commands fail closed), and a shell with no OS sandbox.
  */
 
 import { Box, Text } from "ink";
@@ -87,6 +87,8 @@ export interface FooterData {
 	providersTotal?: number;
 	user?: string;
 	judge?: JudgeState;
+	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
+	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
 }
@@ -152,6 +154,17 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			label: "judge",
 			value: d.judge,
 			color: d.judge === "failed" ? ui.orange : ui.muted,
+			priority: 1,
+		});
+	}
+	if (d.sandboxOff) {
+		out.push({
+			key: "sandbox",
+			label: "sandbox",
+			value: "off",
+			note: d.sandboxOff,
+			// Shell commands can write 8gent's startup files: a state a person must not miss.
+			color: ui.orange,
 			priority: 1,
 		});
 	}

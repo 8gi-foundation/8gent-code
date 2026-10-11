@@ -32,9 +32,11 @@
  *
  * The env keys that steer this (EIGHT_SEATBELT, EIGHT_DATA_DIR, EIGHT_HOME,
  * HOME) are snapshotted when this module loads, before the TUI's own .env
- * loader runs, and a key declared in any .env file 8gent or Bun would load is
- * ignored: a command that writes `EIGHT_SEATBELT=0` into ./.env must not turn
- * the boundary off for the next launch. EIGHT_FAKE_HOME is a test hook and is
+ * loader runs. A key whose live value equals what a .env file 8gent or Bun
+ * would load declares for it is ignored (it came from that file): a command
+ * that writes `EIGHT_SEATBELT=0` into ./.env must not turn the boundary off for
+ * the next launch. A value the user really exported is kept, and
+ * EIGHT_SEATBELT=require, the stricter setting, is always kept. EIGHT_FAKE_HOME is a test hook and is
  * honoured only under NODE_ENV=test or BUN_ENV=test (themselves not from .env).
  */
 
@@ -96,7 +98,7 @@ type SecurityKey = (typeof SECURITY_ENV_KEYS)[number];
 
 export interface SecurityEnv {
 	values: Partial<Record<SecurityKey, string>>;
-	/** Keys present in the environment but declared in a .env file, so ignored. */
+	/** Keys whose live value matches a .env declaration, so ignored. */
 	ignored: SecurityKey[];
 }
 
@@ -111,9 +113,9 @@ export function dotenvCandidates(cwd: string = process.cwd(), home: string = os.
 	];
 }
 
-/** Keys declared (KEY=... or export KEY=...) in the given dotenv files. */
-export function dotenvDeclaredKeys(files: string[]): Set<string> {
-	const keys = new Set<string>();
+/** Every value each key is given (KEY=... or export KEY=...) across the given dotenv files. */
+export function dotenvDeclaredKeys(files: string[]): Map<string, Set<string>> {
+	const keys = new Map<string, Set<string>>();
 	for (const f of files) {
 		let text: string;
 		try {
@@ -121,19 +123,30 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
 		} catch {
 			continue;
 		}
-		for (const m of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) keys.add(m[1] as string);
+		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(.*)$/gm)) {
+			let v = (m[2] as string).trim();
+			const q = v[0];
+			if ((q === '"' || q === "'") && v.length >= 2 && v.endsWith(q)) v = v.slice(1, -1);
+			const set = keys.get(m[1] as string) ?? new Set<string>();
+			set.add(v);
+			keys.set(m[1] as string, set);
+		}
 	}
 	return keys;
 }
 
-/** Pure: keep each security key unless a .env file declares it. */
-export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Set<string>): SecurityEnv {
+/**
+ * Pure: keep each security key unless its live value is one a .env file gives
+ * it. EIGHT_SEATBELT=require is kept regardless: dropping it could only weaken.
+ */
+export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Map<string, Set<string>>): SecurityEnv {
 	const values: SecurityEnv["values"] = {};
 	const ignored: SecurityKey[] = [];
 	for (const k of SECURITY_ENV_KEYS) {
 		const v = env[k];
 		if (v === undefined || v === "") continue;
-		if (declared.has(k)) ignored.push(k);
+		const fromDotenv = declared.get(k)?.has(v) ?? false;
+		if (fromDotenv && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
 		else values[k] = v;
 	}
 	return { values, ignored };
@@ -426,6 +439,12 @@ function reportUnsandboxed(status: Extract<RunCommandSandbox, { applied: false }
 			l(status);
 		} catch {}
 	}
+}
+
+/** Short form of a status reason for the TUI footer: the part before any "(...)". */
+export function sandboxFooterReason(reason: string): string {
+	const short = reason.split(" (")[0]?.trim() || reason;
+	return short.length > 40 ? `${short.slice(0, 39)}…` : short;
 }
 
 /**

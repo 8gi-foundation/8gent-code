@@ -16,6 +16,7 @@
     "dist/skills",
     "dist/sounds",
     "bin/8gent-run.js",
+    "bin/bunfig.empty.toml",
     "scripts/postinstall.js",
     "README.md",
     "LICENSE"

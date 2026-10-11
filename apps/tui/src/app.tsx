@@ -237,6 +237,11 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import {
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
@@ -2372,6 +2377,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -6843,6 +6856,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>
