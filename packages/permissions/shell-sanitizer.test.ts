@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand, sanitizeShellCommand } from "./shell-sanitizer";
+import { hasUnquotedAmpersand, hasUnquotedSemicolon, sanitizeShellCommand } from "./shell-sanitizer";
 
 const AMP_REASON =
 	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
@@ -177,5 +177,24 @@ describe("run_command entry points route through the shared sanitizer", () => {
 		expect(a).toContain("amp&ok");
 		const b = await callSdk({ command: 'echo "amp&ok"' });
 		expect(b).toContain("amp&ok");
+	});
+});
+
+describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-video)", () => {
+	test("quoted ; passes on POSIX (single, double, escaped)", () => {
+		expect(sanitizeShellCommand("magick xc:red -annotate +0+0 'a;b' out.png", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand('echo "a;b"', "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo a\\;b", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo 'it\"s;ok'", "linux").safe).toBe(true);
+	});
+	test("unquoted ; still blocked, including after a closed quote", () => {
+		expect(sanitizeShellCommand("which a; mkdir video", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo 'a'; id", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand('echo "a\\";id', "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo 'unterminated; id", "linux").safe).toBe(false);
+	});
+	test("win32: single quotes are not quoting", () => {
+		expect(hasUnquotedSemicolon("echo 'a;b'", "win32")).toBe(true);
+		expect(hasUnquotedSemicolon('echo "a;b"', "win32")).toBe(false);
 	});
 });

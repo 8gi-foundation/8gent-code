@@ -80,6 +80,54 @@ export function hasUnquotedAmpersand(
 }
 
 /**
+ * Find a `;` that separates commands. On POSIX a `;` inside single or double
+ * quotes, or escaped with a backslash, is plain text. cmd.exe does not treat
+ * single quotes or `\\` as quoting, so on win32 any `;` outside double quotes
+ * (and not `^`-escaped) counts.
+ */
+export function hasUnquotedSemicolon(
+	command: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	const win = platform === "win32";
+	let inSingle = false;
+	let inDouble = false;
+
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+
+		if (inSingle) {
+			if (ch === "'") inSingle = false;
+			continue;
+		}
+		if (inDouble) {
+			if (!win && ch === "\\") {
+				i++;
+				continue;
+			}
+			if (ch === '"') inDouble = false;
+			continue;
+		}
+
+		if (win ? ch === "^" : ch === "\\") {
+			i++;
+			continue;
+		}
+		if (ch === '"') {
+			inDouble = true;
+			continue;
+		}
+		if (ch === "'" && !win) {
+			inSingle = true;
+			continue;
+		}
+		if (ch === ";") return true;
+	}
+	// An unterminated quote is a malformed command; refuse it rather than guess.
+	return inSingle || inDouble;
+}
+
+/**
  * Validate a command before it reaches the shell.
  * Returns { safe: false, reason } for a blocked command.
  */
@@ -101,8 +149,9 @@ export function sanitizeShellCommand(
 		};
 	}
 
-	// Block semicolon chaining: ; cmd
-	if (/;/.test(command)) {
+	// Block semicolon chaining: ; cmd. A `;` inside POSIX quotes is data, not a
+	// separator (e.g. magick -annotate 'a;b'), so only an unquoted one blocks.
+	if (hasUnquotedSemicolon(command, platform)) {
 		return {
 			safe: false,
 			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
