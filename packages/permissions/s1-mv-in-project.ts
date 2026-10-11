@@ -97,7 +97,12 @@ const PROTECTED_NAMES = new Set([
 	"makefile",
 	"dockerfile",
 ]);
-const SENSITIVE_NAME = /\.(pem|key|p12|db)$|\.sqlite|^(credential|secret|id_)/i;
+/**
+ * ONE sensitive-name set for the mv and rm lanes (#3944): the union of what each
+ * had, plus .env*, .npmrc, .netrc and credential/secret anywhere in the name.
+ */
+export const SENSITIVE_NAME =
+	/^\.env(\.|$)|^\.(npmrc|netrc)$|\.(pem|key|p12|db)$|\.sqlite|^id_|credential|secret/i;
 /** Names that run or configure tooling on their own (bun, jest, pytest, git hooks): never a landing name. */
 const AUTO_EXEC_NAME =
 	/\.config\.[cm]?[jt]s$|^bunfig\.toml$|^tsconfig[\w.-]*\.json$|^(conftest\.py|setup\.py|setup\.cfg|justfile|pre-commit|pre-push|commit-msg|post-[\w-]+)$|\.sh$/i;
@@ -110,7 +115,7 @@ function badDot(rel: string): boolean {
 	return segs.some((seg, i) => {
 		if (!seg.startsWith(".")) return false;
 		if (seg === ".tmp" && i === 0) return false;
-		return !(i === segs.length - 1 && GEN_DOT.test(seg));
+		return !(i === segs.length - 1 && generatedDataName(seg));
 	});
 }
 
@@ -124,29 +129,46 @@ export type MoveInProject = { ok: true; reason: string } | { ok: false };
 const NO: MoveInProject = { ok: false };
 
 /**
- * A dot-named data file a task writes for itself (`.todo-e2e.json`): one dot,
- * a plain stem, and a data extension. Dot names that configure tooling or
- * hold credentials (.eslintrc.json, .mcp.json, .claude.json, .env.json, ...)
- * never match. Only file endpoints may use it, never a directory or a tree.
+ * A data file a task writes for itself (`e2e.json`, `.todo-e2e.json`,
+ * `.tmp/result.json`): a POSITIVE allowlist (8SO, #3944). The stem, split on
+ * `.`, `-` and `_`, must contain a token that is exactly e2e, todo, tmp, out
+ * or result (optionally plural and numbered), must not end in `rc` or
+ * `config`, and the name must end in .json with at most one leading dot.
+ * Tooling config such as .mocharc.json, nodemon.json, ecosystem.config.json,
+ * wrangler.json or bower.json has none of those tokens, so it never matches,
+ * and the protected, sensitive and auto-exec name lists still apply on top.
+ * Only file endpoints may use it, never a directory or a tree.
  */
-const GEN_DOT =
-	/^\.(?!(?:eslintrc|prettierrc|babelrc|stylelintrc|swcrc|mcp|claude|env|git|npm|yarn|netrc|ssh|aws|bun|node|nvm|vscode|idea|cursor|husky|github|gitlab|editorconfig|dockerignore|tool-versions|python-version)(?![a-z0-9]))[a-z0-9][a-z0-9_-]*\.json$/i;
-/** Data-file extension a task generates; the names below are never "generated data". */
-const DATA_EXT = /\.json$/i;
-const CONFIG_DATA_NAME =
-	/^(?:requirements[\w.-]*\.txt|cmakelists\.txt|manifest\.json|deno\.jsonc?|jsr\.json|biome\.jsonc?|components\.json|vercel\.json|firebase\.json|turbo\.json|nx\.json|lerna\.json|renovate\.json|app\.json|eas\.json|babel\.config\.json|jest\.config\.json)$/i;
+const GEN_TOKEN = /^(?:e2e|todo|tmp|out|result)s?\d*$/;
+const CONFIG_STEM = /(?:rc|config)$/i;
 
-/** True for a plain data-file name (`e2e.json`, `.todo-e2e.json`, `out.txt`) that is not a manifest or config. */
 export function generatedDataName(name: string): boolean {
-	if (!DATA_EXT.test(name)) return false;
-	if (name.startsWith(".") && !GEN_DOT.test(name)) return false;
+	if (!/\.json$/i.test(name)) return false;
+	const stem = name.slice(name.startsWith(".") ? 1 : 0, -".json".length);
+	if (stem === "" || stem.startsWith(".") || !/^[A-Za-z0-9._-]+$/.test(stem)) return false;
+	if (CONFIG_STEM.test(stem)) return false;
+	if (!stem.toLowerCase().split(/[._-]+/).some((t) => GEN_TOKEN.test(t))) return false;
+	return !(
+		PROTECTED_NAMES.has(name.toLowerCase()) ||
+		SENSITIVE_NAME.test(name) ||
+		AUTO_EXEC_NAME.test(name)
+	);
+}
+
+/** A non-dot .json name that is not tooling config: allowed to sit in .tmp/ for the rm lane. */
+export function plainJsonName(name: string): boolean {
+	if (!/\.json$/i.test(name) || name.startsWith(".")) return false;
+	if (CONFIG_STEM.test(name.slice(0, -".json".length))) return false;
 	return !(
 		PROTECTED_NAMES.has(name.toLowerCase()) ||
 		SENSITIVE_NAME.test(name) ||
 		AUTO_EXEC_NAME.test(name) ||
-		CONFIG_DATA_NAME.test(name)
+		CONFIG_JSON.test(name)
 	);
 }
+/** Well-known tooling .json names; plainJsonName is only used under .tmp/, where this is defence in depth. */
+const CONFIG_JSON =
+	/^(?:nodemon|bower|composer|manifest|deno|jsr|biome|components|vercel|firebase|turbo|nx|lerna|renovate|app|eas|wrangler|jsconfig|cspell|lighthouse|tslint|jest|babel|tailwind|postcss|vite|pyrightconfig|ecosystem)[\w.-]*\.json$/i;
 
 function protectedName(name: string, fileEndpoint = false): boolean {
 	return (
@@ -295,6 +317,9 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (badDot(relSrc)) return NO;
 			if (protectedRel(relSrc) || protectedRel(path.relative(root, finalAbs))) return NO;
 			const isFile = st.isFile();
+			// Any .json endpoint must be a generated-data name: json is where tooling config hides.
+			for (const n of [path.basename(realSrc), path.basename(finalAbs)])
+				if (isFile && /\.json$/i.test(n) && !generatedDataName(n)) return NO;
 			if (
 				protectedName(path.basename(realSrc), isFile) ||
 				protectedName(path.basename(finalAbs), isFile)

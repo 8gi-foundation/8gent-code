@@ -442,6 +442,33 @@ describe("fresh generated-data files (#3943)", () => {
 		});
 	}
 
+	test("a future mtime or a touched old file is not fresh by mtime (birth time rules)", () => {
+		const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+		utimesSync(join(ws, "stale.json"), new Date(), new Date());
+		// stale.json was just touched (fresh mtime) but is named like plain data, not generated data
+		expect(singleFileDelete("rm -f stale.json", ws).ok).toBe(false);
+		writeFileSync(join(ws, "todo-old.json"), "[]");
+		utimesSync(join(ws, "todo-old.json"), future, future);
+		// Born just now, future mtime: still fresh by birth time, which is the point of using it.
+		expect(singleFileDelete("rm -f todo-old.json", ws).ok).toBe(true);
+	});
+
+	test("a plain data json under .tmp/ passes; tooling config under .tmp/ does not", () => {
+		writeFileSync(join(ws, ".tmp", "state.json"), "[]");
+		writeFileSync(join(ws, ".tmp", "nodemon.json"), "{}");
+		writeFileSync(join(ws, ".tmp", "app.config.json"), "{}");
+		expect(singleFileDelete("rm -f .tmp/state.json", ws).ok).toBe(true);
+		expect(singleFileDelete("rm -f .tmp/nodemon.json", ws).ok).toBe(false);
+		expect(singleFileDelete("rm -f .tmp/app.config.json", ws).ok).toBe(false);
+	});
+
+	test("config laundered through json is judged", () => {
+		for (const n of [".mocharc.json", ".huskyrc.json", "nodemon.json", "vite.config.json", "bower.json", "wrangler.json"]) {
+			writeFileSync(join(ws, n), "{}");
+			expect(singleFileDelete(`rm -f ${n}`, ws).ok, n).toBe(false);
+		}
+	});
+
 	test("a tracked json is judged", () => {
 		rmSync(join(ws, ".git", "index.lock"));
 		git(ws, "add", "e2e.json");

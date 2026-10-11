@@ -32,9 +32,11 @@
  *     real relative path has no `.git` segment either;
  *   - it is scratch-style: a directory segment of the real relative path is
  *     one of run, tmp, .cache, or the base name ends in .lock or .pid; or
- *     (#3943) it is a generated-data file written in the last two hours: name
- *     ending .json, not a manifest or config name (see
- *     generatedDataName in s1-mv-in-project.ts), no dot directory above it
+ *     (#3943) it is a generated-data file born in the last two hours (birth time,
+ *     not mtime; unavailable or future birth time fails closed): a .json under
+ *     .tmp/ that is not tooling config, or a name that passes the positive
+ *     generatedDataName allowlist in s1-mv-in-project.ts (e2e, todo, tmp, out
+ *     or result in the stem; never *rc or *config); no dot directory above it
  *     other than a leading .tmp. `rm -f e2e.json` passes; an untracked
  *     old.log, a .txt, or a json older than that, still goes to the judge;
  *   - its base name is not a dependency lockfile (bun.lock, yarn.lock,
@@ -55,7 +57,7 @@
  * unrecoverable, and s1-rm-nothing.test.ts already requires `rm -f old.log`
  * at the root to be judged); any tracked file, under run/ or not.
  *
- * Known window, the same as #3177: a process of this uid could swap the
+ * Known window (TOCTOU, accepted by 8SO), the same as #3177: a process of this uid could swap the
  * parent directory for a symlink between this check and the spawn. The leaf
  * cannot be used for that: rm of a symlink removes the link, not its target.
  *
@@ -67,7 +69,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
-import { generatedDataName } from "./s1-mv-in-project";
+import { SENSITIVE_NAME, generatedDataName, plainJsonName } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
@@ -76,6 +78,7 @@ const SCRATCH_DIRS = new Set(["run", "tmp", ".cache"]);
 const SCRATCH_NAME = /\.(lock|pid)$/;
 /** A generated-data file (#3943) counts as scratch only while it is this fresh. */
 const RECENT_MS = 2 * 60 * 60 * 1000;
+const SKEW_MS = 1000;
 /** Dependency lockfiles end in .lock too, but they are project state, not scratch (compared lower-cased). */
 const LOCKFILES = new Set([
 	"bun.lock",
@@ -93,8 +96,6 @@ const LOCKFILES = new Set([
 	"flake.lock",
 	"deno.lock",
 ]);
-/** Names that are never scratch, whatever directory they sit in. */
-const SENSITIVE_NAME = /^\.env(\.|$)|\.(pem|key|p12|db)$|\.sqlite/i;
 /** Inherited git env that would point the tracked check at a different repository. */
 const GIT_REDIRECT_ENV = new Set([
 	"GIT_DIR",
@@ -122,6 +123,23 @@ function no(hint?: string): SingleFileDelete {
 
 function hasGitSegment(rel: string): boolean {
 	return rel.split("/").some((s) => s.toLowerCase() === ".git");
+}
+
+/**
+ * Created within RECENT_MS, by BIRTH time. mtime is useless here: `touch` makes
+ * any file look fresh and a future mtime gives a negative age. Fails closed
+ * (to the judge) when birth time is unavailable: some file systems and Node
+ * builds report 0, or fall back to ctime, notably Linux ext4 without statx
+ * birth support; a ctime fallback is also reset by chmod/rename, so a zero,
+ * non-finite or future value is never trusted.
+ */
+function freshlyBorn(st: ReturnType<typeof lstatSync>): boolean {
+	const born = st.birthtimeMs;
+	if (!Number.isFinite(born) || born <= 0) return false;
+	const age = Date.now() - born;
+	// A file written this instant can read a hair ahead of Date.now() (timestamp granularity);
+	// anything more than a second ahead is a forged clock and fails closed.
+	return age >= -SKEW_MS && age < RECENT_MS;
 }
 
 /** A dot directory anywhere above the file, other than a leading .tmp. */
@@ -214,8 +232,11 @@ export function singleFileDelete(command: string, cwd: string | undefined): Sing
 		const rel = path.relative(root, path.join(realParent, base)).split(path.sep).join("/");
 		if (hasGitSegment(rel)) return no();
 		// A data file the task just wrote (`e2e.json`) is scratch while it is fresh, untracked and
-		// not a manifest or config; an older or unfamiliar untracked file still goes to the judge.
-		const fresh = generatedDataName(base) && Date.now() - st.mtimeMs < RECENT_MS && !hasDotDir(rel);
+		// either under .tmp/ (and not tooling config) or named like generated data.
+		const fresh =
+			freshlyBorn(st) &&
+			!hasDotDir(rel) &&
+			((rel.startsWith(".tmp/") && plainJsonName(base)) || generatedDataName(base));
 		if (!scratchStyle(rel) && !fresh) return no("That file is not a scratch file.");
 		if (LOCKFILES.has(base.toLowerCase()))
 			return no("That is a dependency lockfile, not a scratch file.");
