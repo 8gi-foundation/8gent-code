@@ -748,3 +748,42 @@ describe("SecretScanner - 8SO: ReDoS and input cap", () => {
 		expect(out.rules).toContain("input_cap");
 	});
 });
+
+// 8SO round 3 on #4018 (#3203).
+describe("SecretScanner - 8SO round 3", () => {
+	const V = "Zq9xLm2pRt7vWk4nBc8dJQX4bipwDKRY";
+
+	it("dotted, path and URL exemptions still check each segment", () => {
+		for (const input of [`API_KEY=${V}.${V}`, `API_KEY=/${V}`, `API_TOKEN=https://x/?k=${V}`, `DB_PASSWORD=/etc/${V}`]) {
+			expectHidden(input, V);
+		}
+		for (const input of ["const apiKey = process.env.OPENAI_API_KEY;", "API_KEY=/etc/secret/key", "auth_url=https://example.com/login?next=/home"]) {
+			expect(scrub(input).scrubbed).toBe(input);
+		}
+	});
+
+	it("redacts a value longer than the scan window to the end of the token", () => {
+		const long = `${"a".repeat(5000)}SECRETTAIL`;
+		const out = scrub(`PASSWORD=${long} next`).scrubbed;
+		expect(out).not.toContain("SECRETTAIL");
+		expect(out).not.toContain("aaaa");
+		const q = scrub(`API_KEY="${"b1".repeat(3000)}TAIL"`).scrubbed;
+		expect(q).not.toContain("TAIL");
+	});
+
+	// 8SO ruling (#4018 review): key/token names need 16+ chars or a
+	// letter/digit mix, so short numeric values such as counts and PINs-looking
+	// ids are intentionally kept. Password, passwd, pwd and secret names always redact.
+	it("pins the short-value rule for key/token names", () => {
+		expectHidden("TOKEN=abc12345", "abc12345");
+		expect(scrub("TOKEN=123456").scrubbed).toBe("TOKEN=123456");
+		expectHidden("SECRET_KEY=short1", "short1");
+	});
+
+	it("redacts a Discord bot token", () => {
+		// Assembled at runtime so push protection does not flag a fake token.
+		const tok = ["MTIzNDU2Nzg5MDEyMzQ1Njc4", "GhYtRe", "abcdefghijklmnopqrstuvwxyz1"].join(".");
+		const out = scrub(`discord ${tok}`);
+		expect(out.scrubbed).toBe("discord [REDACTED:discord_token]");
+	});
+});
