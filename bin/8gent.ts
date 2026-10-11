@@ -225,6 +225,25 @@ MACHINE INTEGRATION:
   Exit codes: 0=success, 1=error, 2=auth required.
   Designed for orchestration by Claude Code, Cursor, aider, etc.
 
+RUN DONE GATE (8gent run):
+  Before and after a run, 8gent runs the project's check (Cargo.toml: cargo test;
+  package.json test script; go.mod: go test ./...). If the run made it worse (green
+  before and red after, or new failures), the failure goes back to the agent to fix;
+  still worse ends the run with exit 1 and a result/error event. Failures that were
+  already there before the run are reported as pre-existing, exit 0. A check that
+  times out or cannot run is reported as NOT VERIFIED in the final message.
+  Trade-off: failures are only told apart for cargo/rustc, bun, go and tsc output.
+  If the project was already red and its runner prints anything else (jest, vitest,
+  mocha, free text), the run is NOT VERIFIED, exit 0: new failures are not caught.
+  The check runs the project's own build and test code, so it runs only with --yes
+  (until run_command has an OS sandbox) and with credential variables (*_KEY,
+  *_TOKEN, *_SECRET, *_PASSWORD, npm _auth settings, URLs with user:pass@)
+  removed from its environment. Without --yes
+  the result says "done gate skipped (needs --yes)".
+  EIGHT_DONE_GATE=0              Turn the gate off (old behaviour, nothing checked)
+  EIGHT_DONE_GATE_ATTEMPTS=<n>   Fix rounds sent back to the agent (default 2, max 5)
+  EIGHT_DONE_GATE_TIMEOUT_SEC=<s>  Bound on each check run (default and max 300)
+
 Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
