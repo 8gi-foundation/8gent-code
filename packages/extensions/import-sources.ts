@@ -250,6 +250,18 @@ function mcpSources(
 const SECRET_FLAG =
 	/^(?:--?[\w-]*(?:key|token|secret|password|passwd|pass|pw|auth|cred)[\w-]*|-p)$/i;
 const HEADER_FLAG = /^(?:-H|--header)$/;
+/** Programs whose -k / -K value is masked (HTTP clients). */
+const HTTP_CLIENTS = new Set([
+	"curl",
+	"curl.exe",
+	"wget",
+	"http",
+	"https",
+	"xh",
+	"httpie",
+	"grpcurl",
+	"websocat",
+]);
 
 /** Path segments that hold a secret in an MCP or webhook URL: after /sse/, /token/ and so on, or random-looking. */
 function redactUrl(url: string): string {
@@ -287,13 +299,20 @@ function redactUrl(url: string): string {
 
 /** abc.def.ghi with 20+ characters, a digit and a long segment: a signed or dotted token, not a host name. */
 function isDottedToken(s: string): boolean {
-	if (s.length < 20 || !/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}$/.test(s)) return false;
-	return /[0-9]/.test(s) && Math.max(...s.split(".").map((x) => x.length)) >= 10;
+	if (s.length < 20 || !/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/.test(s)) return false;
+	const parts = s.split(".");
+	// Two segments (id.secret): both must look random, so host names stay readable.
+	if (parts.length === 2) {
+		return parts.every(
+			(x) => x.length >= 6 && /[A-Za-z]/.test(x) && /[0-9]/.test(x) && entropy(x) >= 2.5,
+		);
+	}
+	return /[0-9]/.test(s) && Math.max(...parts.map((x) => x.length)) >= 10;
 }
 
 export function redact(text: string): string {
 	return text
-		.replace(/\bhttps?:\/\/[^\s"']+/g, (m) => redactUrl(m))
+		.replace(/\b(?:https?|wss?):\/\/[^\s"']+/g, (m) => redactUrl(m))
 		.replace(/(?<![\w.])[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}(?![\w.])/g, (m) =>
 			isDottedToken(m) ? "***" : m,
 		)
@@ -313,6 +332,10 @@ export function redact(text: string): string {
 			"$1$2***",
 		)
 		.replace(/((?:^|\s)(?:-H|--header))(\s+)("[^"]*"|'[^']*'|\S+)/g, "$1$2***")
+		.replace(
+			/^((?:\S*[\\/])?(?:curl|curl\.exe|wget|https?|xh|httpie|grpcurl|websocat)\b.*?\s-[kK])(\s+)("[^"]*"|'[^']*'|\S+)/,
+			"$1$2***",
+		)
 		.replace(/(\/\/)[^/@\s]+@/g, "$1***@")
 		.replace(/([?&][^=&\s]+=)[^&\s]+/g, "$1***")
 		.replace(/\b([A-Za-z_][\w.-]*)=(\S+)/g, "$1=***");
@@ -343,13 +366,17 @@ function looksLikeSecret(arg: string): boolean {
  * masked; every argument also goes through redact(), and a long random-looking
  * argument is masked whole.
  */
-export function redactArgs(args: readonly unknown[]): string[] {
+export function redactArgs(args: readonly unknown[], command?: string): string[] {
+	// For HTTP clients (curl and the like) -k and -K are masked too: some take a
+	// key there, and curl's -K names a config file that can hold credentials.
+	const httpClient = command !== undefined && HTTP_CLIENTS.has(programName(command));
 	const out: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = String(args[i]);
 		const prev = i > 0 ? String(args[i - 1]) : "";
-		if (SECRET_FLAG.test(prev) || HEADER_FLAG.test(prev)) out.push("***");
-		else if (looksLikeSecret(arg) || isDottedToken(arg)) out.push("***");
+		if (SECRET_FLAG.test(prev) || HEADER_FLAG.test(prev) || (httpClient && /^-[kK]$/.test(prev))) {
+			out.push("***");
+		} else if (looksLikeSecret(arg) || isDottedToken(arg)) out.push("***");
 		else out.push(redact(arg));
 	}
 	return out;
@@ -381,7 +408,7 @@ function summarizeServer(e: McpEntry): string {
 function fullServer(e: McpEntry): string {
 	if (e.url)
 		return `url ${redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
-	const args = redactArgs(e.args ?? []).map((a) => JSON.stringify(a));
+	const args = redactArgs(e.args ?? [], String(e.command ?? "")).map((a) => JSON.stringify(a));
 	const envKeys = Object.keys(e.env ?? {});
 	return `command ${redact(String(e.command))}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
 }
@@ -394,7 +421,7 @@ function fullServer(e: McpEntry): string {
 function serverHash(e: McpEntry): string {
 	const shape = {
 		command: e.command ? redact(String(e.command)) : undefined,
-		args: redactArgs(e.args ?? []),
+		args: redactArgs(e.args ?? [], String(e.command ?? "")),
 		env: Object.keys(e.env ?? {}).sort(),
 		url: e.url ? redact(String(e.url)) : undefined,
 		headers: Object.keys(e.headers ?? {}).sort(),

@@ -388,6 +388,61 @@ describe("approval and redaction (8SO round 3)", () => {
 	});
 });
 
+describe("redaction (8SO round 4)", () => {
+	test("two-segment dotted tokens are masked when both halves look random; host names stay", () => {
+		const twoPart = "a1B2c3D4e5.F6g7H8i9J0k1";
+		expect(redactArgs([twoPart, "example.com", "api.github.com", "v1.2"])).toEqual([
+			"***",
+			"example.com",
+			"api.github.com",
+			"v1.2",
+		]);
+		expect(redact(`token ${twoPart} end`)).toBe("token *** end");
+	});
+
+	test("ws:// and wss:// URL paths are masked like http ones", () => {
+		expect(redact("wss://mcp.example.com/sse/plainword")).toBe("wss://mcp.example.com/sse/***");
+		expect(redact("ws://127.0.0.1:9000/abcdEFGH1234ijklMNOP5678/stream")).toBe(
+			"ws://127.0.0.1:9000/***/stream",
+		);
+		expect(redact("wss://mcp.example.com/v1/tools")).toBe("wss://mcp.example.com/v1/tools");
+	});
+
+	test("-k and -K values are masked for curl and similar, not for other programs", () => {
+		expect(redactArgs(["-k", "abc123", "-K", "creds.cfg", "https://h/x"], "curl")).toEqual([
+			"-k",
+			"***",
+			"-K",
+			"***",
+			"https://h/x",
+		]);
+		expect(redactArgs(["-k", "keepme"], "/usr/bin/wget")).toEqual(["-k", "***"]);
+		expect(redactArgs(["-k", "keepme"], "node")).toEqual(["-k", "keepme"]);
+		expect(redact("curl -s -k shortkey https://h")).toBe("curl -s -k *** https://h");
+		expect(redact("node -k shortkey")).toBe("node -k shortkey");
+	});
+
+	test("approve-mcp output applies all three", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({
+				mcpServers: {
+					tunnel: {
+						command: "curl",
+						args: ["-k", "k3y", "wss://h.example.com/sse/zz9secret", "a1B2c3D4e5.F6g7H8i9J0k1"],
+					},
+				},
+			}),
+		);
+		await run(p, "import", "mcp");
+		const look = await run(p, "approve-mcp", "tunnel");
+		for (const secret of ["k3y", "zz9secret", "a1B2c3D4e5.F6g7H8i9J0k1"])
+			expect(look.output).not.toContain(secret);
+		expect(look.output).toContain('command curl "-k" "***" "wss://h.example.com/sse/***" "***"');
+	});
+});
+
 describe("8gent ext import <unknown>", () => {
 	test("refuses with the reason and the supported sources; imports nothing", async () => {
 		const p = world();
