@@ -101,9 +101,11 @@ interface QuoteScan {
 	ansiEscape: boolean;
 	/** An unquoted `$'` or `$"` opened a quote span (bash quotes these differently; refused after the chaining checks). */
 	dollarQuote: boolean;
+	/** An unquoted word-start `#` is followed by a quote mark or line break: bash may read it as a comment, so the quote scan cannot be trusted. */
+	commentAmbiguous: boolean;
 	/** An unquoted newline or carriage return, outside the quotes: a second command on the next line. */
 	lineBreak: boolean;
-	/** A heredoc marker found outside quotes and outside a comment; the scan stopped at the end of its line. */
+	/** A heredoc marker found outside quotes; the scan stopped at the end of its line. */
 	heredoc?: { word: string; dash: boolean };
 	/** Index just past the scanned head (the newline that ends a heredoc line, else the command length). */
 	headEnd: number;
@@ -116,8 +118,9 @@ interface QuoteScan {
  * quote mark, `;` (#3932) or another backslash here, so `\;` and `\$(` stay refused as before.
  * An unquoted `$'...'` (ANSI-C) span with a backslash in it is refused: bash
  * ends it differently from a plain quote, and a wrong guess hides a command.
- * `#` at the start of a word, outside quotes, is a comment to the end of the
- * line and is not scanned (a quote inside a comment opens nothing). An
+ * `#` is NOT treated as a comment start (8SO round 3): comment skipping was a
+ * recurring bypass (`\;#`, `${x:- #}`), so the rest of the line is always scanned
+ * and a comment containing `;`, `&&` or a stray quote is refused, as on main. An
  * unquoted newline or carriage return is reported in `lineBreak` (a second
  * command). An unterminated quote makes `balanced` false.
  */
@@ -129,8 +132,9 @@ function scanQuotes(command: string): QuoteScan {
 	let ansiEscape = false;
 	let lineBreak = false;
 	let dollarQuote = false;
+	let commentAmbiguous = false;
 	let escapedDollarAt = -1;
-	/** Index of the character an unquoted backslash just escaped; a `#` after it is not a comment. */
+	/** Index of the character an unquoted backslash just escaped; an escaped `<` starts no heredoc. */
 	let escapedAt = -1;
 	let heredoc: { word: string; dash: boolean } | undefined;
 	let headEnd = command.length;
@@ -168,13 +172,13 @@ function scanQuotes(command: string): QuoteScan {
 			dq += ch;
 			continue;
 		}
-		// Unquoted, a backslash always takes the next character (bash); a `#` after it is no comment.
+		// Unquoted, a backslash always takes the next character (bash).
 		if (ch === "\\") escapedAt = i + 1;
 		if (ch === "\\" && (command[i + 1] === '"' || command[i + 1] === "'" || command[i + 1] === "\\" || command[i + 1] === ";")) {
 			i++;
 			continue;
 		}
-		if (ch === "<" && !heredoc && command[i + 1] === "<" && command[i - 1] !== "<" && command[i + 2] !== "<") {
+		if (ch === "<" && !heredoc && command[i + 1] === "<" && command[i - 1] !== "<" && command[i + 2] !== "<" && escapedAt !== i) {
 			const m = /^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(command.slice(i));
 			if (m) heredoc = { word: m[3], dash: m[1] === "-" };
 		}
@@ -187,10 +191,7 @@ function scanQuotes(command: string): QuoteScan {
 			outside += ch;
 			continue;
 		}
-		if (ch === "#" && (i === 0 || (escapedAt !== i - 1 && /[\s;|&(]/.test(command[i - 1])))) {
-			while (i + 1 < command.length && command[i + 1] !== "\n" && command[i + 1] !== "\r") i++;
-			continue;
-		}
+		if (ch === "#" && (i === 0 || (escapedAt !== i - 1 && /\s/.test(command[i - 1]))) && /['"\n\r]/.test(command.slice(i))) commentAmbiguous = true;
 		if (ch === "\\" && command[i + 1] === "$") escapedDollarAt = i + 1;
 		if ((ch === "'" || ch === '"') && command[i - 1] === "$" && escapedDollarAt !== i - 1) dollarQuote = true;
 		if (ch === "'") {
@@ -205,7 +206,7 @@ function scanQuotes(command: string): QuoteScan {
 		}
 		outside += ch;
 	}
-	return { balanced: mode === "none", outside, doubled, ansiEscape, dollarQuote, lineBreak, heredoc, headEnd };
+	return { balanced: mode === "none", outside, doubled, ansiEscape, dollarQuote, commentAmbiguous, lineBreak, heredoc, headEnd };
 }
 
 /**
@@ -234,6 +235,12 @@ export function sanitizeShellCommand(
 				reason: "A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
 			};
 		}
+		if (scan.commentAmbiguous) {
+			return {
+				safe: false,
+				reason: "A # followed by a quote mark or new line cannot be checked. Remove the comment, or put the steps in a script file",
+			};
+		}
 		if (scan.lineBreak) {
 			return { safe: false, reason: NEWLINE_REASON };
 		}
@@ -246,7 +253,7 @@ export function sanitizeShellCommand(
 		}
 		let body = "";
 		if (scan.heredoc) {
-			// The marker is real (outside quotes and comments). Its body must end with its own
+			// The marker is real (outside quotes). Its body must end with its own
 			// terminator line, and nothing may follow that line: that would be another command.
 			const lines = command.slice(scan.headEnd + 1).split("\n");
 			const word = scan.heredoc.word;

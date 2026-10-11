@@ -239,14 +239,14 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 	});
 	// 8SO review of #3880: payloads that ran a second command in bash.
 	test("a backslash-escaped or doubled dollar does not open an ANSI span", () => {
-		no("echo \\$'a\\'; touch PWN #'", "Semicolon");
-		no("echo $$'a\\'; touch PWN #'", "Semicolon");
+		no("echo \\$'a\\'; touch PWN #'");
+		no("echo $$'a\\'; touch PWN #'");
 		no("echo $$$'a\\'; touch PWN #'");
 	});
-	test("a quote inside a # comment opens nothing, and the next line is refused", () => {
-		no("echo hi # '\ntouch PWN; echo \\'", "new line");
-		ok("echo hi # it's a comment");
-		ok("echo hi # a; b");
+	test("# is never a comment: the rest of the line is still checked (fail closed)", () => {
+		no("echo hi # '\ntouch PWN; echo \\'", "cannot be checked");
+		no("echo hi # it's a comment", "Unbalanced");
+		no("echo hi # a; b", "Semicolon");
 		no("echo hi # c\ntouch PWN", "new line");
 		no("echo a#b; id", "Semicolon");
 		ok("echo ${#PATH}");
@@ -320,9 +320,16 @@ describe("backslash-escaped char before # is not a comment (8SO #3880)", () => {
 		no("echo \\(# && echo PWNED");
 		no("echo \\|# && id");
 	});
+	test("8SO round 3: # inside ${...} and an escaped < heredoc marker", () => {
+		no("echo ${x:- #} && echo PWNED");
+		no("echo ${x:-(#} && echo PWNED");
+		no("echo ${x/ #/} $(echo PWNED)");
+		no("echo ${x:-|#} && echo PWNED");
+		no("cat \\<<EOF\nid\nEOF");
+	});
 	test("find -exec \\; stays allowed, a real comment still is one", () => {
 		expect(sanitizeShellCommand("find . -name x -exec echo {} \\;", "linux").safe).toBe(true);
-		expect(sanitizeShellCommand("echo hi # a; b", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo ${#PATH}", "linux").safe).toBe(true);
 	});
 });
 
