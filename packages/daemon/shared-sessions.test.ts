@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTEXT_NOTE_HEADER, harnessNote } from "../eight/context-note";
@@ -257,7 +257,7 @@ describe("persistSession", () => {
 		const agent = pool.add("s_p", "browser");
 		agent.history.push({ role: "user", content: "q" }, { role: "assistant", content: "a" });
 		expect(persistSession(pool, saveStore, "s_p", new Set(["s_p"]))).toBe(true);
-		const file = JSON.parse(readFileSync(join(dir, "sessions", "s_p.json"), "utf8"));
+		const file = store.get("s_p");
 		expect(file).toMatchObject({
 			id: "s_p",
 			channel: "browser",
@@ -268,6 +268,23 @@ describe("persistSession", () => {
 			{ role: "user", content: "q" },
 			{ role: "assistant", content: "a" },
 		]);
+	});
+
+	it("a session past 1000 messages keeps appending one turn at a time (#3986 review)", () => {
+		const agent = pool.add("s_long", "browser");
+		for (let i = 0; i < 1100; i++) {
+			agent.history.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
+		}
+		const persistable = new Set(["s_long"]);
+		expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
+		for (let t = 0; t < 3; t++) {
+			agent.history.push({ role: "user", content: `n${t}` }, { role: "assistant", content: `r${t}` });
+			expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
+		}
+		const tree = store.store("s_long")!;
+		expect(tree.allEntries()).toHaveLength(1106);
+		expect(tree.tree()).toHaveLength(1);
+		expect(store.get("s_long")?.messageCount).toBe(1106);
 	});
 
 	it("never writes telegram or table transcripts", () => {
@@ -298,7 +315,7 @@ describe("persistence ownership", () => {
 
 	it("session files are owner-only", () => {
 		store.save("s_mode", [{ role: "user", content: "x" }], {});
-		expect(statSync(join(dir, "sessions", "s_mode.json")).mode & 0o777).toBe(0o600);
+		expect(statSync(join(dir, "sessions", "tree", "s_mode.jsonl")).mode & 0o777).toBe(0o600);
 	});
 });
 
