@@ -28,6 +28,7 @@ import {
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
@@ -553,7 +554,7 @@ const gitAdd = tool({
 		const paths = String(files || "")
 			.split(/\s+/)
 			.filter(Boolean);
-		return runArgv("git", ["add", "--", ...(paths.length ? paths : ["."])]);
+		return runArgv("git", ["add", "--", ...(paths.length ? paths : ["."]).map(val)]);
 	},
 });
 
@@ -562,7 +563,7 @@ const gitCommit = tool({
 	inputSchema: z.object({
 		message: z.string().describe("Commit message"),
 	}),
-	execute: async ({ message }) => runArgv("git", ["commit", "-m", String(message)]),
+	execute: async ({ message }) => runArgv("git", ["commit", "-m", val(message)]),
 });
 
 const gitPush = tool({
@@ -587,7 +588,7 @@ const gitCheckout = tool({
 	}),
 	// No "--" here: after it git checkout reads paths, not a branch. Refuse instead.
 	execute: async ({ branch }) =>
-		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", String(branch)]),
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", val(branch)]),
 });
 
 const gitCreateBranch = tool({
@@ -596,7 +597,7 @@ const gitCreateBranch = tool({
 		branch: z.string().describe("New branch name"),
 	}),
 	execute: async ({ branch }) =>
-		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", "-b", String(branch)]),
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", "-b", val(branch)]),
 });
 
 // ============================================
@@ -616,7 +617,7 @@ const ghPrCreate = tool({
 		body: z.string().optional().describe("PR description"),
 	}),
 	execute: async ({ title, body }) =>
-		runArgv("gh", ["pr", "create", "--title", String(title), "--body", String(body || "")]),
+		runArgv("gh", ["pr", "create", "--title", val(title), "--body", val(body || "")]),
 });
 
 const ghPrView = tool({
@@ -624,11 +625,14 @@ const ghPrView = tool({
 	inputSchema: z.object({
 		number: z.number().optional().describe("PR number (default: current branch PR)"),
 	}),
-	execute: async ({ number }) =>
-		runArgv(
-			"gh",
-			number ? ["pr", "view", String(Math.floor(Math.abs(Number(number))))] : ["pr", "view"],
-		),
+	execute: async ({ number }) => {
+		if (number === undefined || number === null) return runArgv("gh", ["pr", "view"]);
+		// A PR number is a positive integer; anything else is refused, never sent as NaN.
+		const n = Number(number);
+		if (!Number.isSafeInteger(n) || n <= 0)
+			return `[BLOCKED] PR number must be a positive integer. Got: ${String(number)}`;
+		return runArgv("gh", ["pr", "view", String(n)]);
+	},
 });
 
 const ghIssueList = tool({
@@ -653,11 +657,11 @@ const ghIssueCreate = tool({
 			"issue",
 			"create",
 			"--title",
-			String(title),
+			val(title),
 			"--body",
-			String(body || ""),
+			val(body || ""),
 			"--assignee",
-			String(who),
+			val(who),
 		]);
 	},
 });
@@ -673,7 +677,9 @@ const runCommand = tool({
 		command: z.string().describe("Command to run"),
 	}),
 	execute: async ({ command }) => {
-		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
+		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
+		const backstop = preSpawnRefusal(command);
+		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const startedAt = Date.now();
@@ -1320,12 +1326,16 @@ const backgroundOutput = tool({
 // ============================================
 
 /**
- * The gates every command passes before it runs: the permission policy, System
- * One and the approval card. Returns the refusal to show, or null to run.
+ * The gates every command passes before it runs: the text path's pre-spawn
+ * backstops (#3993), the permission policy, System One and the approval card. Returns the refusal to show, or null to run.
  * Shared by the shell runner and the argv runner, so a git or gh tool is
  * judged exactly as the same command typed into run_command would be.
  */
 async function commandRefusal(command: string): Promise<string | null> {
+	// The text path's pre-spawn backstops (#3993): protected files such as
+	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
+	const backstop = preSpawnRefusal(command);
+	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const ctx = getToolContext();
 	const mode = currentPermissionMode();
@@ -1515,13 +1525,29 @@ async function runShellCommand(command: string): Promise<string> {
 // ============================================
 
 /** Quote one argv word for display, so the gates read what actually runs. */
-function quoteWord(word: string): string {
-	if (word !== "" && /^[A-Za-z0-9_./:@%+=,-]+$/.test(word)) return word;
-	return `'${word.replace(/'/g, `'\\''`)}'`;
+/** A word the model supplied, as opposed to a flag the tool wrote itself. */
+export class ModelValue {
+	constructor(readonly text: string) {}
+}
+const val = (x: unknown) => new ModelValue(String(x));
+export type ArgvWord = string | ModelValue;
+
+const argvText = (w: ArgvWord) => (w instanceof ModelValue ? w.text : w);
+
+/**
+ * Quote one argv word for display, so the gates read what actually runs. A
+ * model value that starts with "-" is always quoted: on the approval card it
+ * must read as data, never pass for one of the tool's own flags.
+ */
+function quoteWord(word: ArgvWord): string {
+	const text = argvText(word);
+	const looksLikeFlag = word instanceof ModelValue && text.startsWith("-");
+	if (!looksLikeFlag && text !== "" && /^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
+	return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The command line an argv call is judged and shown as. Display only, never run. */
-export function argvDisplay(bin: string, args: readonly string[]): string {
+export function argvDisplay(bin: string, args: readonly ArgvWord[]): string {
 	return [bin, ...args].map(quoteWord).join(" ");
 }
 
@@ -1551,10 +1577,11 @@ const ARGV_TIMEOUT_MS = 120_000;
  * pipes or newlines (#3998). The same permission, System One and approval
  * gates as run_command judge the quoted display line first.
  */
-async function runArgv(bin: string, args: string[]): Promise<string> {
+async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 	const cwd = getToolContext().workingDirectory;
-	if (commandDir() !== cwd) return withCommandDir(cwd, () => runArgv(bin, args));
-	const display = argvDisplay(bin, args);
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runArgv(bin, words));
+	const display = argvDisplay(bin, words);
+	const args = words.map(argvText);
 	const refusal = await commandRefusal(display);
 	if (refusal !== null) return refusal;
 

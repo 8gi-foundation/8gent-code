@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getPermissionManager, resetPermissionManager } from "../permissions";
-import { agentTools, argvDisplay, optionRefusal, setToolContext } from "./tools";
+import { ModelValue, agentTools, argvDisplay, optionRefusal, setToolContext } from "./tools";
 
 const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "native-git-argv-")));
 const saved = {
@@ -185,6 +185,14 @@ describe("option injection is refused or neutralised (#3998)", () => {
 		expect(optionRefusal("Branch", "--upload-pack=x")).toContain("[BLOCKED]");
 		expect(argvDisplay("git", ["commit", "-m", "it's $(x)"])).toBe(`git commit -m 'it'\\''s $(x)'`);
 	});
+
+	test("the approval card quotes a model value that starts with -, not the tool's own flags", () => {
+		expect(argvDisplay("git", ["commit", "-m", new ModelValue("--amend")])).toBe(
+			"git commit -m '--amend'",
+		);
+		expect(argvDisplay("git", ["add", "--", new ModelValue("-c")])).toBe("git add -- '-c'");
+		expect(argvDisplay("git", ["diff", "--staged"])).toBe("git diff --staged");
+	});
 });
 
 describe("normal operations still work against a real repo", () => {
@@ -225,4 +233,50 @@ describe("normal operations still work against a real repo", () => {
 		expect(pushed).toContain("feature/argv");
 		git("checkout", "-q", "main");
 	});
+});
+
+describe("gh_pr_view refuses a number that is not a positive integer", () => {
+	for (const bad of ["abc", Number.NaN, -3, 1.5, 0, "12; touch x"]) {
+		test(`refuses ${JSON.stringify(String(bad))}`, async () => {
+			fs.rmSync(ghLog, { force: true });
+			const out = await call("gh_pr_view", { number: bad });
+			expect(out).toContain("[BLOCKED]");
+			expect(fs.existsSync(ghLog)).toBe(false);
+		});
+	}
+});
+
+// 8SO on #4001: with the workspace at HOME, native git_add staged
+// ~/.8gent/settings.json and the browser control token, and git_checkout
+// overwrote settings.json. The pre-spawn backstops (#3993) now gate argv too.
+describe("protected ~/.8gent files are refused through the argv runner", () => {
+	const settings = ".8gent/settings.json";
+	const token = ".8gent/browser-control.token";
+
+	beforeAll(() => {
+		git("checkout", "-q", "main");
+		fs.mkdirSync(path.join(repo, ".8gent"), { recursive: true });
+		fs.writeFileSync(path.join(repo, settings), '{"v":1}\n');
+		fs.writeFileSync(path.join(repo, token), "secret-1\n");
+		// Committed with plain git, so a checkout could restore the old bytes.
+		execFileSync("git", ["add", "-f", settings, token], { cwd: repo });
+		execFileSync("git", ["commit", "-q", "-m", "protected"], { cwd: repo });
+		fs.writeFileSync(path.join(repo, settings), '{"v":2}\n');
+		fs.writeFileSync(path.join(repo, token), "secret-2\n");
+	});
+
+	for (const file of [settings, token]) {
+		test(`git_add ${file} is refused and nothing is staged`, async () => {
+			const out = await call("git_add", { files: file });
+			expect(out).toContain("[PERMISSION DENIED]");
+			expect(git("diff", "--cached", "--name-only")).toBe("");
+		});
+
+		test(`git_checkout ${file} is refused and the file is untouched`, async () => {
+			const before = fs.readFileSync(path.join(repo, file), "utf8");
+			const out = await call("git_checkout", { branch: file });
+			expect(out).toContain("[PERMISSION DENIED]");
+			expect(fs.readFileSync(path.join(repo, file), "utf8")).toBe(before);
+		});
+	}
 });
