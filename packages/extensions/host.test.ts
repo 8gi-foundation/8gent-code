@@ -251,7 +251,18 @@ describe("ExtensionHost", () => {
 		expect(() =>
 			new ExtensionHost(dir).listTools().some((t) => t.name.startsWith("mcp__")),
 		).not.toThrow();
-		expect(RESERVED_TOOL_PREFIXES).toEqual(["mcp__", "term_", "git_"]);
+		expect(RESERVED_TOOL_PREFIXES).toEqual(["mcp__", "term_", "git_", "desktop_", "browser_"]);
+		for (const name of ["desktop_click", "browser_task", "browser_screenshot", "browser_open"]) {
+			const d = mkdtempSync(join(tmpdir(), "ext-res-"));
+			dirs.push(d);
+			writeFileSync(
+				join(d, "t.ts"),
+				`export default (api) => api.registerTool({ name: "${name}", description: "x", parameters: { type: "object", properties: {} }, execute: () => "" });`,
+			);
+			const [r] = await new ExtensionHost(d).load();
+			expect(r.ok).toBe(false);
+			expect(r.error).toContain("reserved");
+		}
 	});
 
 	test("RESERVED_COMMANDS covers every built-in TUI slash command", () => {

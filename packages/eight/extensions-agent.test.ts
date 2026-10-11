@@ -144,6 +144,8 @@ for (const [label, textTools, p] of [
 			extra: Record<string, unknown> = {
 				extensions: true,
 				extensionsDir: join(home, ".8gent", "extensions"),
+				// A person at the keyboard, as in the TUI (tests have no TTY).
+				attended: true,
 			},
 		) =>
 			new Agent({

@@ -11,12 +11,12 @@ import { join } from "node:path";
 import { addPolicy } from "../permissions/policy-engine";
 import { EXTENSION_POLICY_ACTION, ToolExecutor } from "./tools";
 
-function executor(agentId: string) {
+function executor(agentId: string, attended = true) {
 	const cwd = mkdtempSync(join(tmpdir(), "ext-policy-"));
-	const ex = new ToolExecutor(cwd, agentId);
+	const ex = new ToolExecutor(cwd, agentId, undefined, { attended });
 	const ran: string[] = [];
 	ex.setExtensionRunner({
-		has: (name) => name === "shout",
+		has: (name) => name === "shout" || name === "desktop_click",
 		run: async (name, args) => {
 			ran.push(name);
 			return `SHOUTED ${String(args.text)}`;
@@ -65,6 +65,44 @@ describe("extension tools go through the ToolG8 policy gate", () => {
 			const out = await ex.execute("shout", { text: "hi" });
 			expect(out).toContain("shadow");
 			expect(ran).toEqual([]);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("an unattended session needs approval, so the extension tool does not run", async () => {
+		const { ex, ran, cwd } = executor("primary", false);
+		try {
+			const out = await ex.execute("shout", { text: "hi" });
+			expect(out).toContain("needs a person at the keyboard");
+			expect(ran).toEqual([]);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("unset, attended follows the terminal: a test run has no TTY, so it asks", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "ext-policy-"));
+		const ex = new ToolExecutor(cwd, "primary");
+		let ran = 0;
+		ex.setExtensionRunner({ has: (n) => n === "shout", run: async () => `${++ran}` });
+		try {
+			const out = await ex.execute("shout", {});
+			if (process.stdin.isTTY && process.stdout.isTTY) expect(ran).toBe(1);
+			else expect(out).toContain("needs a person at the keyboard");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("an unattended runner flag forces asking even with a terminal", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "ext-policy-"));
+		const ex = new ToolExecutor(cwd, "primary", undefined, { unattended: true });
+		let ran = 0;
+		ex.setExtensionRunner({ has: (n) => n === "shout", run: async () => `${++ran}` });
+		try {
+			expect(await ex.execute("shout", {})).toContain("needs a person at the keyboard");
+			expect(ran).toBe(0);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

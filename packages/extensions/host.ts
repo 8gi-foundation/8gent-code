@@ -22,7 +22,7 @@
  * handler gets a frozen copy of the call; one that throws or takes longer
  * than HANDLER_TIMEOUT_MS refuses the call (fail closed). Extension tools run
  * through the agent's executor like built-ins and cannot take a built-in
- * name or a reserved prefix (mcp__, term_, git_); commands cannot take a
+ * name or a reserved prefix (mcp__, term_, git_, desktop_, browser_); commands cannot take a
  * built-in slash command. The agent loads extensions only when its host opts
  * in, and never in a no-tool or Table session.
  */
@@ -94,8 +94,12 @@ export interface ExtensionLoadResult {
 
 const NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const EXTENSIONS = new Set([".ts", ".js", ".mjs", ".mts"]);
-/** Tool name prefixes that belong to built-in families (MCP, terminal, git). */
-export const RESERVED_TOOL_PREFIXES = ["mcp__", "term_", "git_"];
+/**
+ * Tool name prefixes that belong to built-in families (MCP, terminal, git,
+ * desktop, browser). The executor gives those families their own policy
+ * class by name, so an extension tool there would escape extension_call.
+ */
+export const RESERVED_TOOL_PREFIXES = ["mcp__", "term_", "git_", "desktop_", "browser_"];
 /** A tool_call handler that takes longer than this refuses the call. */
 export const HANDLER_TIMEOUT_MS = 2000;
 /**

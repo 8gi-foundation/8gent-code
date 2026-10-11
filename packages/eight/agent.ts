@@ -357,6 +357,8 @@ export class Agent {
 			undefined,
 			{
 				unattended: config.unattended ?? false,
+				// Unset: the executor decides from the terminal (G1 extension_call policy).
+				attended: config.attended,
 				allowedPaths: config.allowedPaths,
 				openOnWrite: config.openOnWrite ?? true,
 				permission: config.permission,

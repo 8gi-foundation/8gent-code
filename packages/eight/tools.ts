@@ -687,6 +687,11 @@ export class ToolExecutor {
 			permission?: PermissionModeHolder;
 			visionCapable?: () => Promise<boolean>;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
+			/**
+			 * A person is at the keyboard (G1 extension_call policy). Default: not
+			 * unattended and both stdin and stdout are terminals.
+			 */
+			attended?: boolean;
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
@@ -697,6 +702,9 @@ export class ToolExecutor {
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
+		this.attended =
+			options.attended ??
+			(!this.unattended && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY));
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
 		this.openOnWrite = options.openOnWrite ?? true;
 		this.commitGate = new CommitGate(workingDirectory, (command, timeoutSec) =>
@@ -1708,6 +1716,9 @@ export class ToolExecutor {
 
 	private rateLimiter = new RateLimiter();
 
+	/** Is a person at the keyboard? Decides the extension_call default policy (G1). */
+	private readonly attended: boolean;
+
 	/** One-file extension tools (G1), set by the agent that owns this executor. */
 	private extensionRunner: {
 		has(name: string): boolean;
@@ -1892,7 +1903,8 @@ export class ToolExecutor {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
-				...(isExtension ? { tool: toolName } : {}),
+				// Unattended sessions ask before an extension tool runs (default policy).
+				...(isExtension ? { tool: toolName, attended: this.attended } : {}),
 				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
