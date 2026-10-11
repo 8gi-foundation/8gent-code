@@ -65,7 +65,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { type Stats, lstatSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -133,8 +133,8 @@ function hasGitSegment(rel: string): boolean {
  * birth support; a ctime fallback is also reset by chmod/rename, so a zero,
  * non-finite or future value is never trusted.
  */
-function freshlyBorn(st: ReturnType<typeof lstatSync>): boolean {
-	const born = st.birthtimeMs;
+function freshlyBorn(st: Stats): boolean {
+	const born = Number(st.birthtimeMs);
 	if (!Number.isFinite(born) || born <= 0) return false;
 	const age = Date.now() - born;
 	// A file written this instant can read a hair ahead of Date.now() (timestamp granularity);
@@ -216,7 +216,7 @@ export function singleFileDelete(command: string, cwd: string | undefined): Sing
 		const root = realpathSync(cwd);
 		const abs = path.resolve(root, p);
 		if (!inside(abs, root)) return no();
-		let st: ReturnType<typeof lstatSync>;
+		let st: Stats;
 		try {
 			st = lstatSync(abs);
 		} catch {
