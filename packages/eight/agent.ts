@@ -182,6 +182,7 @@ import {
 } from "../ai";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { isShellToolName } from "../permissions/shell-tools";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
@@ -197,9 +198,11 @@ let browserProfileWarned = false;
  * runCommand). Every other refusal still counts as a call, as before #3409.
  */
 export function refusedBeforeRun(toolName: string, args: Record<string, unknown>): boolean {
-	if (toolName !== "run_command" && toolName !== "powershell") return false;
+	if (!isShellToolName(toolName)) return false;
 	const command = args.command;
-	return typeof command === "string" && !sanitizeShellCommand(command).safe;
+	if (typeof command !== "string") return false;
+	const kind = toolName === "powershell" ? "powershell" : undefined;
+	return !sanitizeShellCommand(command, process.platform, kind).safe;
 }
 
 /**

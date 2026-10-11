@@ -93,8 +93,4 @@ export const DEFAULT_SETTINGS: Settings = {
 		path: "",
 		powershellTool: false,
 	},
-	retry: {
-		maxRetries: 3,
-		freeModelMaxRetries: 8,
-	},
 };

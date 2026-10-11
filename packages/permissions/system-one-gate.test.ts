@@ -618,14 +618,16 @@ describe("integration: real agent shell tool entry points", () => {
 	test("ToolExecutor run_command, flag on: forged judge answer is blocked and NOT executed", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
 		const out = await executor.execute("run_command", { command: FORGED });
-		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		// The forged text carries line breaks, which the sanitizer now refuses first (8SO S3); either way it is blocked, not run.
+		expect(out).toMatch(/^\[(SYSTEM ONE BLOCKED|BLOCKED)\]/);
 		expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 	});
 
 	test("AI SDK run_command, flag on: forged judge answer is blocked and NOT executed", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
 		const out = await callSdk("run_command", { command: FORGED });
-		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		// The forged text carries line breaks, which the sanitizer now refuses first (8SO S3); either way it is blocked, not run.
+		expect(out).toMatch(/^\[(SYSTEM ONE BLOCKED|BLOCKED)\]/);
 		expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 	});
 

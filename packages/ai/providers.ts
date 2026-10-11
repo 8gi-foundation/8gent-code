@@ -8,7 +8,6 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { modelFetchAsFetch } from "./model-fetch";
-import { loadSettings } from "../settings/store";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 
@@ -146,28 +145,14 @@ function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
 	}) as unknown as typeof fetch;
 }
 
-function retryCount(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 20 ? value : fallback;
-}
-
-function retrySettings(): { maxRetries: number; freeModelMaxRetries: number } {
-	try {
-		const r = loadSettings().retry;
-		return { maxRetries: retryCount(r?.maxRetries, 3), freeModelMaxRetries: retryCount(r?.freeModelMaxRetries, 8) };
-	} catch {
-		return { maxRetries: 3, freeModelMaxRetries: 8 };
-	}
-}
-
 /**
- * Get retry config. settings.retry sets the counts (defaults 3, and 8 for free models).
+ * Get retry config for free models.
  * Free models allow 1000 calls/day but have per-minute rate limits.
  * Use exponential backoff: 2s, 4s, 8s, 16s, 32s across 8 attempts.
  */
 export function getRetryConfig(config: ProviderConfig): { maxRetries: number } {
 	const isFreeModel = typeof config.model === "string" && config.model.includes(":free");
-	const { maxRetries, freeModelMaxRetries } = retrySettings();
-	return { maxRetries: isFreeModel ? freeModelMaxRetries : maxRetries };
+	return { maxRetries: isFreeModel ? 8 : 3 };
 }
 
 function getApiKeyFromEnv(name: ProviderName): string | undefined {

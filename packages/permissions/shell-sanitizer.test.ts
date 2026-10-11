@@ -211,3 +211,57 @@ describe("sanitizeShellCommand: bash $'...' quoting is refused (8SO)", () => {
 		expect(sanitizeShellCommand('echo "cost $5"', "linux").safe).toBe(true);
 	});
 });
+
+describe("sanitizer follows the resolved shell (8SO S1 S2 S3)", () => {
+	const refused = (c: string, kind: "git-bash" | "cmd" | "powershell" | "posix") =>
+		sanitizeShellCommand(c, "win32", kind).safe === false;
+
+	test("Git Bash uses POSIX rules: ^ is not an escape", () => {
+		expect(refused("echo hi ^; touch PWNED", "git-bash")).toBe(true);
+		expect(refused("echo hi ^& touch PWNED", "git-bash")).toBe(true);
+	});
+
+	test("Git Bash single quotes count as quotes, so a quoted double quote does not hide a chain", () => {
+		expect(refused(`echo '"'; touch PWNED; echo '"'`, "git-bash")).toBe(true);
+		expect(refused(`echo 'a;b'`, "git-bash")).toBe(false);
+	});
+
+	test("cmd.exe keeps its own rules", () => {
+		expect(refused("echo hi ^; touch PWNED", "cmd")).toBe(false);
+		expect(refused("echo 'a'; touch PWNED", "cmd")).toBe(true);
+	});
+
+	test("an unquoted CR or LF is refused for every shell kind", () => {
+		for (const kind of ["git-bash", "cmd", "powershell", "posix"] as const) {
+			expect(refused("ls\ntouch PWNED", kind)).toBe(true);
+			expect(refused("ls\r\ntouch PWNED", kind)).toBe(true);
+		}
+	});
+
+	test("a quoted line break is data in POSIX and PowerShell", () => {
+		expect(refused("git commit -m 'a\nb'", "git-bash")).toBe(false);
+		expect(refused("echo 'a\nb'", "powershell")).toBe(false);
+	});
+
+	test("PowerShell refuses sub-expressions, script blocks, call operator and iex", () => {
+		for (const c of [
+			"ls (Remove-Item -Recurse -Force src)",
+			"echo (New-Item PWNED)",
+			"cat @(Set-Content PWNED x)",
+			"ls ${function:x}",
+			"ls .{ echo hi }",
+			"& calc",
+			"cat x.txt | iex",
+			"[IO.File]::Delete('x')",
+			"git log --% & calc",
+		]) {
+			expect(refused(c, "powershell")).toBe(true);
+		}
+	});
+
+	test("PowerShell allows plain commands, quoted parens and 2>&1", () => {
+		expect(refused("Get-ChildItem -Name src", "powershell")).toBe(false);
+		expect(refused("echo '(not code)'", "powershell")).toBe(false);
+		expect(refused("git status 2>&1", "powershell")).toBe(false);
+	});
+});

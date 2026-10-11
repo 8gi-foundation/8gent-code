@@ -36,7 +36,7 @@ import { writeShapeLine } from "../ai/write-shape";
 import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import { loadSettings } from "../settings/store";
-import { type ResolvedShell, killProcessTree, resolvePowerShell, spawnShell } from "../core/shell";
+import { type ResolvedShell, killProcessTree, activeShellKind, resolvePowerShell, spawnShell, withForcedShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -2098,7 +2098,9 @@ export class ToolExecutor {
 			case "powershell": {
 				const shell = powershellToolShell();
 				if (!shell) return "Error: the powershell tool is off. Use run_command.";
-				return this.runCommand(args.command as string, args.timeout as number | undefined, undefined, shell);
+				return withForcedShell(shell, () =>
+					this.runCommand(args.command as string, args.timeout as number | undefined, undefined, shell),
+				);
 			}
 
 			// Multi-agent orchestration
@@ -2839,7 +2841,7 @@ export class ToolExecutor {
 		if (touchesBrowserSecrets(command))
 			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
 		const mode = currentPermissionMode();
-		const permissionCheck = this.permissionManager.checkPermission(command);
+		const permissionCheck = this.permissionManager.checkPermission(command, activeShellKind(windowsShell));
 
 		if (permissionCheck === "denied") {
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
@@ -2848,7 +2850,7 @@ export class ToolExecutor {
 		// Validate command for shell injection before asking anyone: a command
 		// the sanitizer will refuse must not raise an approval card, or the
 		// person approves it and then sees it blocked anyway (#3055).
-		const validation = sanitizeShellCommand(command);
+		const validation = sanitizeShellCommand(command, process.platform, activeShellKind(windowsShell));
 		if (!validation.safe) {
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		}

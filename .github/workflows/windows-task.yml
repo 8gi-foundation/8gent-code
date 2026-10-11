@@ -119,6 +119,40 @@ jobs:
           if ($got -notmatch '^\d+\.\d+') { throw "bash did not run the command; bash-proof.txt was: '$got'" }
           "bash-style command ran in Git Bash: BASH_VERSION = $got"
 
+      - name: Chained commands are refused under Git Bash (negative cases)
+        shell: pwsh
+        run: |
+          # 8SO S2: Git Bash parses POSIX quoting, so `^` is not an escape and a
+          # single-quoted double quote does not hide a `;`. Each line below would
+          # create PWNED if the sanitizer judged it as cmd.exe. None may.
+          $bun = (Get-Command bun).Source
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $cases = @(
+            'echo hi ^; touch PWNED',
+            'echo hi ^& touch PWNED',
+            "echo '`"'; touch PWNED; echo '`"'"
+          )
+          $port = 8191
+          foreach ($cmd in $cases) {
+            $env:STUB_COMMAND = $cmd
+            $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","$port" -NoNewWindow -PassThru -RedirectStandardOutput "stub-neg-$port.out" -RedirectStandardError "stub-neg-$port.err"
+            Remove-Item Env:STUB_COMMAND
+            $up = $false
+            for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+              try { Invoke-RestMethod "http://127.0.0.1:$port/v1/models" | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $up) { throw "stub model server did not come up on $port" }
+            $work = Join-Path $env:RUNNER_TEMP "neg-work-$port"
+            New-Item -ItemType Directory -Force $work | Out-Null
+            $env:OLLAMA_HOST = "http://127.0.0.1:$port"
+            & $exe run --yes --provider ollama --model stub --cwd $work "Run the command" 2>&1 | Tee-Object -FilePath "neg-task-$port.log"
+            Stop-Process -Id $stub.Id -Force -ErrorAction SilentlyContinue
+            if (Test-Path (Join-Path $work "PWNED")) { throw "chained command ran and created PWNED: $cmd" }
+            "refused (no PWNED): $cmd"
+            $port++
+          }
+
       - name: Logs
         if: always()
         shell: pwsh
@@ -138,6 +172,9 @@ jobs:
           path: |
             task.log
             bash-task.log
+            neg-task-*.log
+            stub-neg-*.out
+            stub-neg-*.err
             stub.out
             stub.err
             stub2.out
