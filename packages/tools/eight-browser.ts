@@ -605,7 +605,21 @@ export function touchesBrowserSecrets(command: string): boolean {
 			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
 			if (lists) return true;
 		}
-		for (const token of flat.split(/[\s;|&()<>=]+/)) {
+		// A quoted pattern given to a text-search tool is a regex, not a shell glob: grep 'value=[a-f0-9]*'
+		// must not read as a glob over browser-control.token. Per pipeline segment, for grep/rg/sed/awk
+		// only, drop quoted spans that name no path or secret ("/", ".8" or "browser"). find -name 'b*'
+		// and every other binary keep their quoted globs.
+		const shellView = view
+			.split(/(?<=[;|&\n])/)
+			.map((seg) =>
+				/^[\s;|&]*(?:e?grep|fgrep|rg|sed|awk)\b/.test(seg)
+					? seg.replace(/'[^']*'|"[^"]*"/g, (q) => (/\/|\.8|browser/i.test(q) ? q : " "))
+					: seg,
+			)
+			.join("")
+			.replace(/["'`\\]/g, "")
+			.replace(/\s*\+\s*/g, "");
+		for (const token of shellView.split(/[\s;|&()<>=]+/)) {
 			if (!/[*?[{]/.test(token)) continue;
 			for (const seg of token.split("/")) {
 				if (seg === "*" || !/[*?[{]/.test(seg)) continue;

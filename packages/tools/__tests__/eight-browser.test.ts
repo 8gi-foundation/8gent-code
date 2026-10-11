@@ -1069,6 +1069,8 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		"cat ~/.{8,9}gent/x",
 		"find ~ -name 'browser-*'",
 		"find ~ -name 'b*'",
+		"grep -r 'b*' ~/.8*/",
+		"echo ok; find ~ -name 'b*'",
 		'cat ~/".8"gent/browser-control.token',
 		"cat ~/'.8gent'/'browser'-'control'.token",
 		"cat ~/.8gent/browser-control.token",
@@ -1099,6 +1101,9 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		"echo hello | base64",
 		"grep -r browser packages/tools",
 		'node -e "console.log(1+1)"',
+		// #3589: pulling a csrf token out of a login page is not a glob over the token file
+		"grep -o 'name=csrf value=[a-f0-9]*' page.html",
+		"curl -s -c jar.txt http://127.0.0.1:8080/ | grep -o 'value=[a-f0-9]*'",
 	];
 	for (const cmd of allowed)
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
