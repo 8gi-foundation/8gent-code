@@ -93,6 +93,11 @@ const SECRET_PAYLOADS: Array<{ cmd: string; secrets: string[] }> = [
 		secrets: ["ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
 	},
 	{ cmd: "AKIAIOSFODNN7EXAMPLE", secrets: ["AKIAIOSFODNN7EXAMPLE"] },
+	{ cmd: "AKIAIOSFODNN7EXAMPLE=1 run", secrets: ["AKIAIOSFODNN7EXAMPLE"] },
+	{
+		cmd: "ghp_abcdefghijklmnopqrstuvwxyz0123456789=1 run",
+		secrets: ["ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+	},
 ];
 
 describe("record helpers", () => {
@@ -110,6 +115,12 @@ describe("record helpers", () => {
 		expect(describeCommand("A=1 B=2 /bin/ls -la")).toEqual({ program: "ls", envNames: ["A", "B"], argc: 1 });
 		expect(describeCommand("").program).toBe("?");
 		expect(describeCommand('"quoted secret" x').program).toBe("?");
+	});
+	test("a secret used as an env NAME is logged as ?, a normal name is kept", () => {
+		expect(describeCommand("AKIAIOSFODNN7EXAMPLE=1 run").envNames).toEqual(["?"]);
+		expect(describeCommand("ghp_abcdefghijklmnopqrstuvwxyz0123456789=1 run").envNames).toEqual(["?"]);
+		expect(describeCommand("lower=1 A_B=2 run").envNames).toEqual(["?", "A_B"]);
+		expect(describeCommand(`${"A".repeat(33)}=1 run`).envNames).toEqual(["?"]);
 	});
 	test("log is off under bun test without EIGHT_DATA_DIR", () => {
 		expect(systemOneLogPath({ NODE_ENV: "test" })).toBeNull();
