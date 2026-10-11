@@ -18,6 +18,7 @@
     "bin/8gent-run.js",
     "scripts/postinstall.js",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

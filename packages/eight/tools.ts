@@ -111,11 +111,12 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
+import { validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
@@ -159,7 +160,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
+import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -2825,21 +2826,9 @@ export class ToolExecutor {
 		if (commandDir() !== this.workingDirectory) {
 			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env, windowsShell));
 		}
-		// Backstop (#3595): the file that lists post_message recipients is not
-		// for the shell. A minimum, not a parser: the allowlist is also frozen
-		// at process start, so an edit that slips past this cannot take effect.
-		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
-			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
-		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
-		if (commandTouchesAuditFiles(command))
-			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
-		// The session's own records are read-only to the shell too.
-		if (commandMutatesSessionRecords(command))
-			return `[PERMISSION DENIED] Command would change session records, which agent tools may not do: ${command}`;
-		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
-		// bump only; the boundary is seatbelting run_command (#3612).
-		if (touchesBrowserSecrets(command))
-			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
+		// The four pre-spawn backstops, shared with the native path (#3993).
+		const backstop = preSpawnRefusal(command);
+		if (backstop) return backstop;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command, activeShellKind(windowsShell));
 

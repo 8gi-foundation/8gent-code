@@ -16,7 +16,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand, hasUnquotedSemicolon, sanitizeShellCommand } from "./shell-sanitizer";
+import { hasUnquotedAmpersand as rawAmp, sanitizeShellCommand as rawSanitize } from "./shell-sanitizer";
+
+// A test that names platform "win32" means cmd.exe. On a real Windows host with Git Bash the
+// resolved shell is POSIX, so say "cmd" explicitly instead of leaning on the host.
+type SanitizeKind = Parameters<typeof rawSanitize>[2];
+const sanitizeShellCommand = (c: string, p?: NodeJS.Platform, k?: SanitizeKind) =>
+	rawSanitize(c, p, k ?? (p === "win32" ? "cmd" : undefined));
+const hasUnquotedAmpersand = (c: string, p?: NodeJS.Platform, k?: SanitizeKind) =>
+	rawAmp(c, p, k ?? (p === "win32" ? "cmd" : undefined));
 
 const AMP_REASON =
 	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
@@ -110,8 +118,8 @@ describe("sanitizeShellCommand: other rules unchanged", () => {
 			);
 		}
 	});
-	test("&& inside quotes is still blocked (rule is unchanged)", () => {
-		expect(sanitizeShellCommand('echo "a&&b"', "linux").safe).toBe(false);
+	test("&& inside quotes is data (#3879)", () => {
+		expect(sanitizeShellCommand('echo "a&&b"', "linux").safe).toBe(true);
 	});
 	test("|| ; $() and backticks still blocked", () => {
 		expect(sanitizeShellCommand("a || b").reason).toContain("||");
@@ -180,6 +188,115 @@ describe("run_command entry points route through the shared sanitizer", () => {
 	});
 });
 
+describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
+	const ok = (c: string) => expect(sanitizeShellCommand(c, "linux")).toEqual({ safe: true });
+	const no = (c: string, why?: string) => {
+		const r = sanitizeShellCommand(c, "linux");
+		expect(r.safe).toBe(false);
+		if (why) expect(r.reason).toContain(why);
+	};
+
+	test("the 04:46:33 pilot shape passes", () => {
+		ok(
+			'curl -sS -X POST "$B/sendMessage" --data-urlencode "chat_id=-100" --data-urlencode "text=$\'Run done.\\nChecks 11/12 passed; 487 seconds.\\nOld backups prune failed.\'"',
+		);
+	});
+	test("; && || inside double or single quotes are data", () => {
+		ok('echo "a; b"');
+		ok("echo 'a; b'");
+		ok('echo "a && b || c"');
+		ok("echo 'a && b || c'");
+		ok("grep 'x;y' file | wc -l");
+	});
+	test("$( and backticks inside single quotes are data", () => {
+		ok("echo '$(id)'");
+		ok("echo '`id`'");
+		ok("echo '$(id) ; x'");
+	});
+	test("$( and backticks inside double quotes are still refused (bash expands them)", () => {
+		no('echo "$(id)"', "$(...)");
+		no('echo "x `id` y"', "backticks");
+		no('echo "a; $(id)"', "$(...)");
+	});
+	test("real chaining outside quotes is still refused", () => {
+		no("a; b", "Semicolon");
+		no("a && b", "&&");
+		no("a || b", "||");
+		no("echo $(id)", "$(...)");
+		no("echo `id`", "backticks");
+		no('echo "ok"; id', "Semicolon");
+		no("echo 'ok' && id", "&&");
+		no('echo "ok" || id', "||");
+		no("echo 'x'$(id)", "$(...)");
+	});
+	test("a quote mark does not hide chaining after it closes", () => {
+		no("echo 'a'; rm x", "Semicolon");
+		no('echo "a";rm x', "Semicolon");
+	});
+	test("escaped quotes do not open or close a span", () => {
+		ok('echo "say \\"hi; there\\""');
+		no("echo \\'; id", "Semicolon");
+		no('echo \\"; id', "Semicolon");
+		ok("echo it\\'s fine");
+	});
+	test("ANSI-C $'...' with a backslash is refused; without one it is a plain span", () => {
+		no("echo $'it\\'s; fine'", "backslash");
+		no("echo $'a\\nb'", "backslash");
+		no("echo $'a; b'", "$'");
+		no("echo $'a'; id", "Semicolon");
+	});
+	// 8SO review of #3880: payloads that ran a second command in bash.
+	test("a backslash-escaped or doubled dollar does not open an ANSI span", () => {
+		no("echo \\$'a\\'; touch PWN #'");
+		no("echo $$'a\\'; touch PWN #'");
+		no("echo $$$'a\\'; touch PWN #'");
+	});
+	test("# is never a comment: the rest of the line is still checked (fail closed)", () => {
+		no("echo hi # '\ntouch PWN; echo \\'", "cannot be checked");
+		no("echo hi # it's a comment", "Unbalanced");
+		no("echo hi # a; b", "Semicolon");
+		no("echo hi # c\ntouch PWN", "new line");
+		no("echo a#b; id", "Semicolon");
+		ok("echo ${#PATH}");
+	});
+	test("an unquoted newline or carriage return is a second command", () => {
+		no("echo a\ntouch x", "new line");
+		no("echo a\r\ntouch x", "new line");
+		ok('echo "a\nb"');
+		ok("echo 'a\nb'");
+	});
+	test("heredocs: here-string is not a heredoc, a command after the terminator is checked", () => {
+		no("cat <<<x\ntouch y", "new line");
+		ok("cat <<'EOF'\nit's fine\nEOF");
+		no("cat <<'EOF'\nbody\nEOF\ntouch y", "new line");
+		ok("cat <<-EOF\n\tbody\n\tEOF");
+	});
+	test("unbalanced quotes fail closed and say how to fix it", () => {
+		no("echo 'abc", "escape the apostrophe");
+		no('echo "abc', "Unbalanced");
+		no("echo $'abc", "Unbalanced");
+		no("echo it's", "Unbalanced");
+	});
+	test("a heredoc body is not quote-scanned, but its text keeps the strict rules", () => {
+		ok("cat <<'EOF'\nit's fine\nEOF");
+		no("cat <<'EOF'\nrun; id\nEOF", "Semicolon");
+	});
+	// 8SO review of #3880 (MED-4): a heredoc marker inside quotes or a comment is not a heredoc.
+	test("a heredoc marker inside quotes or after # does not hide the next line", () => {
+		no('echo "<<EOF"\ntouch PWN', "new line");
+		no("echo '<<EOF'\ntouch PWN", "new line");
+		no("echo hi # <<EOF\ntouch PWN", "new line");
+	});
+	test("a heredoc without its closing line is refused", () => {
+		no("cat <<EOF\nbody only", "closing line");
+		no("cat <<EOF", "closing line");
+		ok("cat <<EOF\nbody\nEOF");
+	});
+	test("Windows keeps the strict whole-line rules", () => {
+		expect(sanitizeShellCommand('echo "a; b"', "win32").safe).toBe(false);
+	});
+});
+
 describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-video)", () => {
 	test("quoted ; passes on POSIX (single, double, escaped)", () => {
 		expect(sanitizeShellCommand("magick xc:red -annotate +0+0 'a;b' out.png", "linux").safe).toBe(true);
@@ -193,9 +310,40 @@ describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-vid
 		expect(sanitizeShellCommand('echo "a\\";id', "linux").safe).toBe(false);
 		expect(sanitizeShellCommand("echo 'unterminated; id", "linux").safe).toBe(false);
 	});
-	test("win32: single quotes are not quoting", () => {
-		expect(hasUnquotedSemicolon("echo 'a;b'", "win32")).toBe(true);
-		expect(hasUnquotedSemicolon('echo "a;b"', "win32")).toBe(false);
+	test("win32 keeps the strict whole-line rule", () => {
+		expect(sanitizeShellCommand("echo 'a;b'", "win32").safe).toBe(false);
+	});
+});
+
+describe("backslash-escaped char before # is not a comment (8SO #3880)", () => {
+	const no = (c: string) => expect(sanitizeShellCommand(c, "linux").safe).toBe(false);
+	test("nine PoCs are refused", () => {
+		no("echo \\;# && echo PWNED");
+		no("echo \\;# ; echo PWNED");
+		no("echo \\;# $(echo PWNED)");
+		no("echo \\;# || id");
+		no("echo \\;# `id`");
+		no("echo \\;#'; echo PWNED");
+		no("echo a\\ # && echo PWNED");
+		no("echo \\(# && echo PWNED");
+		no("echo \\|# && id");
+	});
+	test("8SO round 3: # inside ${...} and an escaped < heredoc marker", () => {
+		no("echo ${x:- #} && echo PWNED");
+		no("echo ${x:-(#} && echo PWNED");
+		no("echo ${x/ #/} $(echo PWNED)");
+		no("echo ${x:-|#} && echo PWNED");
+		no("cat \\<<EOF\nid\nEOF");
+	});
+	test("8SO hardening: ${x@P} prompt expansion is refused", () => {
+		no("echo ${x:='$(id)'}${x@P}");
+		no("echo ${x:='`id`'}${x@P}");
+		no("echo ${x:=\\$\\(id\\)}${x@P}");
+		no('echo "${x@P}"');
+	});
+	test("find -exec \\; stays allowed, a real comment still is one", () => {
+		expect(sanitizeShellCommand("find . -name x -exec echo {} \\;", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo ${#PATH}", "linux").safe).toBe(true);
 	});
 });
 

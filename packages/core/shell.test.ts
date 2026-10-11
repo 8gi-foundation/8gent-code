@@ -216,8 +216,8 @@ describe("resolveWindowsShell", () => {
 
 describe("withoutShellStartupVars", () => {
 	test("drops BASH_ENV and ENV in any case, keeps the rest", () => {
-		const out = withoutShellStartupVars({ BASH_ENV: "C:\\evil.sh", env: "x", PATH: "p", Home: "h" });
-		expect(out).toEqual({ PATH: "p", Home: "h" });
+		const out = withoutShellStartupVars({ BASH_ENV: "C:\\evil.sh", env: "x", PATH: "p", Home: "h" } as unknown as NodeJS.ProcessEnv);
+		expect(out as Record<string, string | undefined>).toEqual({ PATH: "p", Home: "h" });
 	});
 });
 
