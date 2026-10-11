@@ -2,9 +2,11 @@
 
 8gent needs a model to answer. It finds Ollama at `http://localhost:11434` on its own and LM Studio at `http://localhost:1234`.
 
+On Windows from a clone, type `bun bin/8gent.ts` where these pages say `8gent`, or add the profile function from [Install](install.md).
+
 ## 1. Get a model
 
-Ollama (https://ollama.com/download):
+Ollama (https://ollama.com/download; on Windows, use the Windows installer):
 
 ```bash
 ollama pull qwen3.5

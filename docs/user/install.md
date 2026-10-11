@@ -2,10 +2,12 @@
 
 ## Windows (PowerShell 7 or Windows PowerShell)
 
-The npm package is behind (0.17.0, and `8gent run` fails there), so on Windows install from a clone. This path is run on every relevant change by the `windows-smoke` workflow on a GitHub Windows runner.
+The npm package is behind (0.17.0, and `8gent run` fails there), so on Windows install from a clone. This path is run on every relevant pull request by the `windows-smoke` workflow on a GitHub Windows runner.
 
 ```powershell
+# Bun: the one-liner below, or download Bun from bun.sh/docs/installation and inspect it first
 powershell -c "irm bun.sh/install.ps1 | iex"     # then open a NEW terminal
+bun --version                                    # first check, in the new terminal
 git config --global core.longpaths true
 git clone --depth 1 https://github.com/8gi-foundation/8gent-code.git
 cd 8gent-code
@@ -22,7 +24,7 @@ Start the interface:
 bun run tui
 ```
 
-To type `8gent` from any folder, add this to your profile (`notepad $PROFILE`):
+To type `8gent` from any folder, add this to your profile (`notepad $PROFILE`). If you cloned elsewhere, change the path:
 
 ```powershell
 function 8gent { bun run "$HOME\8gent-code\bin\8gent.ts" @args }

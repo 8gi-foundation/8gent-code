@@ -14,4 +14,8 @@ For a developer who already uses a terminal coding tool such as Pi and wants to 
 
 Every command named in these pages is checked against the code by `docs/user/docs.test.ts`. Run `bun test docs/user` after editing a page.
 
+On Windows from a clone, type `bun bin/8gent.ts` where these pages say `8gent`, or add the profile function from [Install](install.md).
+
 A line marked **coming soon** names an open pull request. It does not work on `main` today.
+
+Want to change 8gent itself? See [CONTRIBUTING.md](../../CONTRIBUTING.md).
