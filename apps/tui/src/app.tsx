@@ -176,8 +176,9 @@ import {
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import {
-	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
+	builtInCommandsCoreFirst,
+	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
@@ -3082,40 +3083,7 @@ export function App({
 			switch (command) {
 				case "help":
 					addSystemMessage(
-						"Available commands:\n" +
-							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+E) - Show predicted next steps\n" +
-							"  /avenues - Show planned avenues\n" +
-							"  /design [task] - Get design system suggestions\n" +
-							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
-							"  /evidence - Show full evidence breakdown\n" +
-							"  /notes - Open scratchpad notes tab\n" +
-							"  /ideas - Open idea capture tab\n" +
-							"  /btw - Open sidequest queue tab\n" +
-							"  /questions - Open research questions tab\n" +
-							"  /projects - Open project overview tab\n" +
-							"  /terminal - Open a live terminal tab (PTY shell)\n" +
-							"  /auth [login|logout|status] - Authentication\n" +
-							"  /github [issues|pr|repos] - GitHub integration\n" +
-							"  /deploy - Trigger Vercel deploy\n" +
-							"  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
-							"  /pet [start|stop|deck|card] - Lil Eight companion\n" +
-							"  /voice record - Toggle voice input (Ctrl+R)\n" +
-							"  /vision - Vision & OCR model settings\n" +
-							"  /telegram - Connect a Telegram bot\n" +
-							"  /router - Task router settings\n" +
-							"  /plan - Show current plan status\n" +
-							"  /session [name|list|resume] - Named session management\n" +
-							"  /sessions [share|attach|stop|detach] - Shared sessions (with the 8gent Browser panel)\n" +
-							"  /fork [label] - Fork conversation at current message\n" +
-							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
-							"  /branch [list|switch <id>] - List or switch branches\n" +
-							"  /status - Show session status\n" +
-							"  /export - Export session as HTML\n" +
-							"  /clear - Clear messages\n" +
-							"  /quit - Exit 8gent Code\n" +
-							"  /skills - List loaded skills (optional)\n" +
-							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
+						`${formatSlashHelp(args[0]?.toLowerCase() === "all")}\n\n` +
 							"Keyboard shortcuts:\n" +
 							"  Tab - Accept ghost suggestion\n" +
 							"  Ctrl+T - New chat tab\n" +
@@ -6748,7 +6716,7 @@ export function App({
 									onExecute={(name) => {
 										void handleSlashCommand(name as SlashCommand, []);
 									}}
-									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+									commands={builtInCommandsCoreFirst().map((c) => ({
 										name: c.name,
 										description: c.description,
 									}))}
