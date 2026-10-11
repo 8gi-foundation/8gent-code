@@ -39,17 +39,28 @@ check "mcp-server initialize" '"serverInfo"' \
 	"$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | run 30 "$BIN" mcp-server 2>&1)"
 
 # The TUI is inside the binary (#2975). Launch `8gent tui` under a real pty with
-# no Bun on PATH and a throwaway HOME, and require the first frame to render.
-# Windows has no pty module here; windows-smoke.yml covers the .exe launch.
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import pty, fcntl, termios' 2>/dev/null; then
-	tui_out="$(HOME="$TMP_HOME" python3 - "$BIN" <<'PY' 2>&1
+# no Bun on PATH, a throwaway HOME and a HOSTILE working directory (bunfig.toml
+# preload + .env), and require the first frame to render and the preload not to
+# run (#3894). Windows has no pty module; windows-smoke.yml covers the .exe via
+# scripts/tui-first-frame.mjs (ConPTY), so the Windows bash runner skips here.
+case "$(uname -s)" in
+	MINGW*|MSYS*|CYGWIN*) echo "SKIP  tui first frame (Windows: see windows-smoke.yml)" ;;
+	*)
+		if command -v python3 >/dev/null 2>&1 && python3 -c 'import pty, fcntl, termios' 2>/dev/null; then
+			HOSTILE="$(mktemp -d)"
+			PWNED="$TMP_HOME/PWNED"
+			printf 'require("fs").writeFileSync(%s, "x");\n' "\"$PWNED\"" > "$HOSTILE/evil.js"
+			printf 'preload = ["./evil.js"]\n' > "$HOSTILE/bunfig.toml"
+			printf 'HOSTILE=from-dotenv\n' > "$HOSTILE/.env"
+			tui_out="$(HOME="$TMP_HOME" TUI_CWD="$HOSTILE" python3 - "$BIN" <<'PY' 2>&1
 import os, pty, re, select, signal, struct, sys, time, fcntl, termios
 bin_ = sys.argv[1]
-# No CI variables: Ink detects CI and suppresses rendering (see pack-smoke.ts).
-env = {k: v for k, v in os.environ.items() if k not in ("CI", "GITHUB_ACTIONS", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID")}
-env.update(PATH="/usr/bin:/bin", TERM="xterm-256color", LANG="en_US.UTF-8")
+# Allowlist, not a filtered copy of os.environ: nothing else reaches the binary
+# (no CI variables either: Ink suppresses rendering under CI, see pack-smoke.ts).
+env = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin", "TERM": "xterm-256color", "LANG": "en_US.UTF-8"}
 pid, fd = pty.fork()
 if pid == 0:
+    os.chdir(os.environ["TUI_CWD"])
     os.execve(bin_, [bin_, "tui", "--no-pet"], env)
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
 buf, deadline = b"", time.time() + 60
@@ -69,9 +80,16 @@ while time.time() < deadline:
             os.write(fd, b"\x1b]11;rgb:0000/0000/0000\x1b\\")
         if first.search(buf):
             break
+# pty.fork() made the child a session leader: kill its whole process group.
+for sig in (signal.SIGTERM, signal.SIGKILL):
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        break
+    time.sleep(0.3)
 try:
-    os.kill(pid, signal.SIGKILL)
-except ProcessLookupError:
+    os.waitpid(pid, 0)
+except ChildProcessError:
     pass
 text = re.sub(rb"\x1b\[[0-9;?]*[ -/]*[@-~]", b"", buf).decode("utf-8", "replace")
 if "TUI entry not found" in text or "Could not start the TUI" in text:
@@ -82,9 +100,14 @@ else:
     print("TUI_NO_FRAME"); print(text[-600:])
 PY
 )"
-	check "tui renders first frame (no bun on PATH)" "TUI_FIRST_FRAME" "$tui_out"
-else
-	echo "SKIP  tui first frame (no python3 pty)"
-fi
+			check "tui renders first frame (no bun on PATH, hostile cwd)" "TUI_FIRST_FRAME" "$tui_out"
+			if [ -e "$PWNED" ]; then echo "FAIL  cwd bunfig.toml preload ran inside the TUI child"; fail=1; else echo "PASS  cwd bunfig.toml and .env were not loaded"; fi
+			rm -rf "$HOSTILE"
+		else
+			echo "FAIL  python3 with the pty module is required for the TUI first-frame check"
+			fail=1
+		fi
+		;;
+esac
 
 exit "$fail"

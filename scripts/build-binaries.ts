@@ -142,7 +142,19 @@ function build(target: Target): boolean {
 	console.log(`\n-> ${target.triple}  ->  dist/bin/${target.artifact}`);
 	const res = spawnSync(
 		"bun",
-		["build", "--compile", `--target=${target.triple}`, COMPILE_ENTRY, "--outfile", outfile],
+		[
+			"build",
+			"--compile",
+			// A compiled binary otherwise loads $cwd/bunfig.toml (preload = code) and .env
+			// on every launch, even `--version`, so running 8gent inside an untrusted
+			// clone would execute that repo's code (#3894). Config is never read from cwd.
+			"--no-compile-autoload-bunfig",
+			"--no-compile-autoload-dotenv",
+			`--target=${target.triple}`,
+			COMPILE_ENTRY,
+			"--outfile",
+			outfile,
+		],
 		{ stdio: "inherit", cwd: ROOT },
 	);
 	if (res.status !== 0) {
