@@ -9,7 +9,13 @@
 
 import { describe, expect, it } from "bun:test";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
-import { REVIEW_FOCUS_NOTE, SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
+import {
+	REVIEW_FOCUS_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+	TOOL_CATALOG_SEGMENT,
+	TOOL_PATTERNS_SEGMENT,
+	buildToolCatalogSegment,
+} from "./system-prompt.js";
 
 /**
  * Size cap for the concise catalog the local TUI sends on every request.
@@ -107,5 +113,14 @@ describe("review focus guidance (#3920)", () => {
 		expect(Buffer.byteLength(buildToolCatalogSegment({ concise: true }))).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 		expect(REVIEW_FOCUS_NOTE).toContain("cite only lines that must change");
 		expect(REVIEW_FOCUS_NOTE).toContain("security-relevant");
+	});
+});
+
+describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
+	it("tells the model to use plain loopback curl, files under .tmp/, no -L, and a second request on a 302", () => {
+		expect(TOOL_PATTERNS_SEGMENT).toContain("plain curl to 127.0.0.1");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("under .tmp/");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("do not pass -L");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("second loopback request");
 	});
 });

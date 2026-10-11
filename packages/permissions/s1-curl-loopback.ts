@@ -47,8 +47,9 @@
  * second loopback request to the Location it returned; this lane allows that.
  *
  * Known limits, on purpose: only POSIX single or double quoting; no `-d` with
- * `&` unquoted; multiple files in -F `@a,b` are refused; a file can change
- * between this check and the spawn (same window as s1-rm-single.ts).
+ * `&` unquoted; multiple files in -F `@a,b` are refused. TOCTOU (out of scope,
+ * accepted by 8SO): a path can be swapped for a symlink between this check and
+ * the spawn, the same window as s1-rm-single.ts and s1-run-in-project.ts.
  *
  * Synchronous, never throws.
  */
