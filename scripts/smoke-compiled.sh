@@ -62,6 +62,9 @@ while time.time() < deadline:
         if not chunk:
             break
         buf += chunk
+        # Answer the terminal-background query (OSC 11) a real terminal would.
+        if b"\x1b]11;?" in chunk:
+            os.write(fd, b"\x1b]11;rgb:0000/0000/0000\x1b\\")
         if first.search(buf):
             break
 try:
