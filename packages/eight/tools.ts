@@ -5,6 +5,7 @@
  * This is the bridge between LLM tool calls and actual system operations.
  */
 
+import { RetiredFacts } from "./retired-facts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -637,6 +638,8 @@ export class ToolExecutor {
 	private openOnWrite: boolean;
 	/** Paths write_file opened this turn: each opens at most once per turn. */
 	private openedThisTurn = new Set<string>();
+	/** Dates and numbers files read this turn mark as retired (#3811). */
+	private retiredFacts = new RetiredFacts();
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -725,6 +728,7 @@ export class ToolExecutor {
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();
+		this.retiredFacts.reset();
 	}
 
 	/**
@@ -2503,6 +2507,7 @@ export class ToolExecutor {
 		}
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
+		this.retiredFacts.noteRead(absolutePath, content);
 		const lines = content.split("\n");
 		// A trailing newline ends the last line; it does not start another one.
 		if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
@@ -2617,6 +2622,10 @@ export class ToolExecutor {
 		// A new top-folder file while the work lives in one subfolder (#3580).
 		const scope = writeScopeLine(this.createdFiles, this.workingDirectory, absolutePath, wasNew);
 		if (scope) designHint += `\n${scope}`;
+
+		// A date or number a file read this turn marks retired (#3811): warn, never block.
+		const retiredLine = this.retiredFacts.warn(absolutePath, content);
+		if (retiredLine) designHint += `\n${retiredLine}`;
 
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
