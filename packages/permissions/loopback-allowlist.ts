@@ -65,7 +65,10 @@ function fromWorkspace(workspace: string): number[] {
 const frozen = new Map<string, ReadonlySet<number>>();
 
 /** Allowed loopback ports for this workspace: env plus workspace file, read once, then frozen. */
-export function allowedLoopbackPorts(workspace: string, env: Env = process.env): ReadonlySet<number> {
+export function allowedLoopbackPorts(
+	workspace: string,
+	env: Env = process.env,
+): ReadonlySet<number> {
 	const key = `${workspace}\u0000${env.EIGHT_BROWSER_ALLOW_LOOPBACK ?? ""}`;
 	let ports = frozen.get(key);
 	if (!ports) {
@@ -76,7 +79,11 @@ export function allowedLoopbackPorts(workspace: string, env: Env = process.env):
 }
 
 /** True when `url` is http(s) to a loopback host on an allowed port. No userinfo, explicit port only. */
-export function isAllowedLoopbackUrl(url: string, workspace: string, env: Env = process.env): boolean {
+export function isAllowedLoopbackUrl(
+	url: string,
+	workspace: string,
+	env: Env = process.env,
+): boolean {
 	let u: URL;
 	try {
 		u = new URL(url);

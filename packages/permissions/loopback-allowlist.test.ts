@@ -31,7 +31,21 @@ describe("parseLoopbackEntry", () => {
 		expect(parseLoopbackEntry("[::1]:8080")).toBe(8080);
 	});
 	test("never a bare host, wildcard, other host or reserved service port", () => {
-		for (const bad of ["127.0.0.1", "127.0.0.1:*", "127.0.0.2:80", "10.0.0.1:80", "example.com:80", "127.0.0.1:0", "127.0.0.1:70000", "127.0.0.1:7980", "localhost:11434", "127.0.0.1:18789", "127.0.0.1:1234", "", 42])
+		for (const bad of [
+			"127.0.0.1",
+			"127.0.0.1:*",
+			"127.0.0.2:80",
+			"10.0.0.1:80",
+			"example.com:80",
+			"127.0.0.1:0",
+			"127.0.0.1:70000",
+			"127.0.0.1:7980",
+			"localhost:11434",
+			"127.0.0.1:18789",
+			"127.0.0.1:1234",
+			"",
+			42,
+		])
 			expect(parseLoopbackEntry(bad)).toBeNull();
 	});
 });
@@ -42,12 +56,19 @@ describe("allowedLoopbackPorts", () => {
 	});
 	test("env and workspace file are merged; bad entries dropped", () => {
 		const d = ws({ allow: ["127.0.0.1:5173", "127.0.0.1", "localhost:11434"] });
-		expect([...allowedLoopbackPorts(d, { EIGHT_BROWSER_ALLOW_LOOPBACK: "localhost:3000, 0.0.0.0:1" })].sort()).toEqual([3000, 5173]);
+		expect(
+			[
+				...allowedLoopbackPorts(d, { EIGHT_BROWSER_ALLOW_LOOPBACK: "localhost:3000, 0.0.0.0:1" }),
+			].sort(),
+		).toEqual([3000, 5173]);
 	});
 	test("frozen at first read: a file written later does not widen the list", () => {
 		const d = ws({ allow: ["127.0.0.1:5173"] });
 		expect(allowedLoopbackPorts(d, {}).has(5173)).toBe(true);
-		writeFileSync(join(d, ".8gent", "allow-loopback.json"), JSON.stringify({ allow: ["127.0.0.1:4000"] }));
+		writeFileSync(
+			join(d, ".8gent", "allow-loopback.json"),
+			JSON.stringify({ allow: ["127.0.0.1:4000"] }),
+		);
 		expect(allowedLoopbackPorts(d, {}).has(4000)).toBe(false);
 	});
 	test("a malformed file is an empty list", () => {
