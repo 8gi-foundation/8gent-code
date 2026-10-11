@@ -56,13 +56,13 @@
  * fully analysed by tokens, which is why unknown shapes are refused. Python,
  * `bun test`, `bun x`, jsx/tsx, classes that use `this`, regex, division and
  * non-ASCII text all go to the judge. A file can change between this check and
- * the spawn (same window as s1-rm-single.ts). A global ~/.bunfig.toml is not
- * inspected.
+ * the spawn (same window as s1-rm-single.ts). A global ~/.bunfig.toml makes the lane refuse.
  *
  * Synchronous, never throws.
  */
 
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -676,6 +676,10 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		for (let d = path.dirname(realScript); inside(d, root); d = path.dirname(d)) {
 			if (configInDir(d)) return NO;
 			if (d === root) break;
+		}
+		// bun also reads a global ~/.bunfig.toml (a preload there runs code).
+		for (const home of new Set([process.env.HOME, homedir()])) {
+			if (!home || readdirSync(home).some((n) => n === "bunfig.toml" || n === ".bunfig.toml")) return NO;
 		}
 		if (!checkSource(realScript, ctx)) return NO;
 		// Every env name the command sets must be one the source reads.

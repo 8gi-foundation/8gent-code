@@ -388,6 +388,19 @@ describe("8SO bypasses all reach the judge", () => {
 		const d = mk({ "src/cli.ts": 'import "../../outside-file";' });
 		expect(runInProject("bun src/cli.ts", d).ok).toBe(false);
 	});
+	test("a global ~/.bunfig.toml in $HOME", () => {
+		const home = mk({ ".bunfig.toml": 'preload = ["/tmp/p.ts"]\n' });
+		const saved = process.env.HOME;
+		const d = mk({ "src/cli.ts": "console.log(1);" });
+		try {
+			process.env.HOME = home;
+			expect(runInProject("bun src/cli.ts", d).ok).toBe(false);
+			process.env.HOME = mk({ "x.txt": "1" });
+			expect(runInProject("bun src/cli.ts", d).ok).toBe(true);
+		} finally {
+			process.env.HOME = saved;
+		}
+	});
 	test("a clean script is allowed (the lane is not dead)", () => {
 		const d = mk({ "src/cli.ts": "const [a, b] = process.argv.slice(2);\nconsole.log(a, b, [1, 2][0]);" });
 		expect(runInProject("bun src/cli.ts x y", d).ok).toBe(true);
