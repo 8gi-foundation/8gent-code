@@ -151,8 +151,10 @@ export type ResolvedEdit =
 	  }
 	| Exclude<EditTarget, { kind: "ok" }>;
 
-/** Work budget for the whitespace scan (line comparisons); past it, no guess. */
-export const MAX_WS_COMPARISONS = 2_000_000;
+/** Work budget for the whitespace scan, in characters compared plus one per line; past it, no guess. */
+export const MAX_WS_COMPARISONS = 20_000_000;
+/** Lines longer than this are never whitespace-matched (minified or generated text). */
+const MAX_WS_LINE = 4096;
 
 const stripLine = (l: string) => l.replace(/^\s+|\s+$/g, "");
 const leadWs = (l: string) => /^[ \t]*/.exec(l)?.[0] ?? "";
@@ -160,22 +162,20 @@ const leadWs = (l: string) => /^[ \t]*/.exec(l)?.[0] ?? "";
 /**
  * Re-indent newText by the leading-whitespace mapping the matched block
  * implies (oldText line indent -> file line indent). Null when the mapping is
- * not a function or a newText line has an indent it cannot translate.
+ * not a function or a newText line has an indent that is not in the map (no prefix
+ * guessing: nested lines would be shifted once instead of scaled).
  */
 function reindent(oldLines: string[], fileLines: string[], newText: string): string | null {
 	const map = new Map<string, string>();
-	let first: [string, string] | null = null;
 	for (let i = 0; i < oldLines.length; i++) {
 		if (stripLine(oldLines[i]) === "") continue;
 		const a = leadWs(oldLines[i]);
 		const b = leadWs(fileLines[i]);
 		if (map.has(a) && map.get(a) !== b) return null;
 		map.set(a, b);
-		first ??= [a, b];
 	}
-	if (!first) return null;
+	if (map.size === 0) return null;
 	if ([...map].every(([a, b]) => a === b)) return newText;
-	const [a0, b0] = first;
 	const out: string[] = [];
 	for (const line of newText.split("\n")) {
 		if (stripLine(line) === "") {
@@ -186,7 +186,6 @@ function reindent(oldLines: string[], fileLines: string[], newText: string): str
 		const rest = line.slice(l.length);
 		const direct = map.get(l);
 		if (direct !== undefined) out.push(direct + rest);
-		else if (l.startsWith(a0)) out.push(b0 + l.slice(a0.length) + rest);
 		else return null;
 	}
 	return out.join("\n");
@@ -219,18 +218,21 @@ export function resolveEdit(
 	const trailingNewline = want.length > 1 && want[want.length - 1] === "";
 	if (trailingNewline) want.pop();
 	if (want.length === 0 || stripLine(oldText) === "") return t;
+	if (want.some((l) => l.length > MAX_WS_LINE)) return t;
 	const wantS = want.map(stripLine);
-	const fileS = lines.map(stripLine);
+	const fileS = lines.map((l) => (l.length > MAX_WS_LINE ? null : stripLine(l)));
 	const anchored = typeof startLine === "number" && Number.isFinite(startLine);
 
 	let budget = MAX_WS_COMPARISONS;
 	const found: number[] = [];
 	for (let i = 0; i + want.length <= lines.length; i++) {
-		if (--budget < 0) return t;
+		budget -= 1 + wantS[0].length;
+		if (budget < 0) return t;
 		if (fileS[i] !== wantS[0]) continue;
 		let ok = true;
 		for (let j = 1; j < want.length; j++) {
-			if (--budget < 0) return t;
+			budget -= 1 + wantS[j].length;
+			if (budget < 0) return t;
 			if (fileS[i + j] !== wantS[j]) {
 				ok = false;
 				break;
@@ -273,6 +275,8 @@ export function resolveEdit(
 	for (let i = 0; i < at; i++) offset += lines[i].length + 1;
 	let oldLength = fileBlock.reduce((n, l) => n + l.length, 0) + (fileBlock.length - 1);
 	if (trailingNewline) oldLength += 1;
+	// A CR on the block's last line that oldText did not send stays in the file.
+	else if (fileBlock[fileBlock.length - 1].endsWith("\r") && !want[want.length - 1].endsWith("\r")) oldLength -= 1;
 	return { kind: "ok", idx: offset, oldLength, newText: re, matchedLine: at + 1 };
 }
 
@@ -294,8 +298,9 @@ export function applyEdit(
 	oldText: string,
 	newText: string,
 	startLine?: number,
+	filePath?: string,
 ): string | null {
-	const t = resolveEdit(original, oldText, newText, startLine);
+	const t = resolveEdit(original, oldText, newText, startLine, filePath);
 	if (t.kind !== "ok") return null;
 	return applyAt(original, t.idx, t.oldLength, t.newText);
 }

@@ -1,14 +1,52 @@
 import { describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
-import { applyAt, editRefusal, resolveEdit, writtenContentFor } from "./write-content-gate";
+import { applyAt, applyEdit, editRefusal, resolveEdit, writtenContentFor } from "./write-content-gate";
 
 function apply(content: string, oldText: string, newText: string, startLine?: number, file = "a.txt") {
 	const r = resolveEdit(content, oldText, newText, startLine, file);
 	return r.kind === "ok" ? applyAt(content, r.idx, r.oldLength, r.newText) : r;
 }
+
+function parsesAsPython(src: string): boolean {
+	return spawnSync("python3", ["-I", "-c", "import ast,sys;ast.parse(sys.stdin.read())"], { input: src }).status === 0;
+}
+
+/** Result must parse as Python or the edit must be refused. */
+function parsesOrRefused(content: string, oldText: string, newText: string): string | "refused" {
+	const r = apply(content, oldText, newText, undefined, "a.py");
+	if (typeof r !== "string") return "refused";
+	expect(parsesAsPython(r)).toBe(true);
+	return r;
+}
+
+describe("python-safe re-indent (M6)", () => {
+	it("tab file, deeper newText than oldText: parses or refused", () => {
+		const f = "def f():\n\tif x:\n\t\tpass\n";
+		parsesOrRefused(f, "    if x:", "    if x:\n        y()\n            z()");
+		parsesOrRefused(f, "  if x:\n    pass", "  if x:\n    for i in r:\n      pass");
+		parsesOrRefused("\tfoo()\n\t\tbar()\n", "foo()\n  bar()", "foo()\n  bar()\n    baz()");
+	});
+	it("nested lines are refused, not shifted once", () => {
+		const f = "class A:\n    def f(self):\n        if x:\n            return 1\n";
+		expect(parsesOrRefused(f, "  def f(self):\n    if x:\n      return 1", "  def f(self):\n    if x:\n      return 2\n    return 3")).not.toBe("refused-never");
+		parsesOrRefused(f, "  def f(self):\n    if x:", "  def f(self):\n    if y:\n      z()");
+	});
+	it("a newText indent missing from the map is refused", () => {
+		const f = "def f():\n\tif x:\n\t\tpass\n";
+		expect(parsesOrRefused(f, "    if x:", "    if x:\n        y()")).toBe("refused");
+	});
+});
+
+describe("CRLF last line (M7)", () => {
+	it("keeps the block's final CR when oldText omits it", () => {
+		const f = "x\r\n    b\r\n    q\r\n";
+		expect(apply(f, "  b\r\n  q", "  c\r\n  d")).toBe("x\r\n    c\r\n    d\r\n");
+	});
+});
 
 describe("resolveEdit whitespace matching", () => {
 	it("exact matches are untouched", () => {
@@ -55,7 +93,7 @@ describe("resolveEdit whitespace matching", () => {
 		expect(r.kind).toBe("ws-refused");
 		expect(editRefusal(r, "a.py")).toContain("after whitespace matching");
 		// newText indent with no mapping
-		expect(resolveEdit("\ta\n", "  a", "      a", undefined, "a.py").kind).toBe("ok");
+		expect(resolveEdit("\ta\n", "  a", "      a", undefined, "a.py").kind).toBe("ws-refused");
 		expect(resolveEdit("\ta\n", "  a", "a", undefined, "a.py").kind).toBe("ws-refused");
 	});
 
@@ -71,12 +109,29 @@ describe("resolveEdit whitespace matching", () => {
 		expect(apply(f, "line one\nline two", "x\ny", undefined, "R.txt")).toBe("x\ny\n");
 	});
 
-	it("scan is capped: pathological input returns quickly", () => {
-		const f = `${"x\n".repeat(400_000)}y\n`;
-		const old = `${"x\n".repeat(2000)}z`;
+	it("scan is capped by characters: pathological input returns quickly", () => {
+		for (const len of [10, 1000, 4000]) {
+			const base = "x".repeat(len);
+			const f = `${Array(2000).fill(` ${base}a`).join("\n")}\n`;
+			const want = Array(999).fill(`${base}a`).concat([`${base}b`]).join("\n");
+			const t = Date.now();
+			expect(resolveEdit(f, want, "z", undefined, "a.txt").kind).toBe("none");
+			expect(Date.now() - t).toBeLessThan(2000);
+		}
+		const big = Array(3_000_000).fill("a").join("\n");
 		const t = Date.now();
-		expect(resolveEdit(f, old, "q", undefined, "a.txt").kind).toBe("none");
-		expect(Date.now() - t).toBeLessThan(2000);
+		expect(resolveEdit(big, " a\n b\n c", "z").kind).toBe("none");
+		expect(Date.now() - t).toBeLessThan(3000);
+	});
+
+	it("lines over 4 KB are never whitespace-matched", () => {
+		const long = "y".repeat(5000);
+		expect(resolveEdit(`${long}  \n`, `${long}\n`, "z").kind).toBe("none");
+	});
+
+	it("applyEdit passes filePath through for the markdown rule", () => {
+		expect(applyEdit("a  \nb\n", "a\nb", "x\ny", undefined, "R.md")).toBeNull();
+		expect(applyEdit("a  \nb\n", "a\nb", "x\ny", undefined, "R.txt")).toBe("x\ny\n");
 	});
 });
 
