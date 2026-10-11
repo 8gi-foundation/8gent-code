@@ -28,8 +28,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least privilege (#3803 hardening): the build job runs on the self-hosted
+# runner and only reads. Only the job that edits the release gets write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-binaries-${{ github.ref }}
@@ -97,6 +99,35 @@ jobs:
           cp dist/bin/* dist/installers/
           ls -la dist/installers/
 
+      # A truncated cross-compile must not ship: a Bun binary is >= 50 MB, the
+      # NSIS installer wraps one. Floors are far below real sizes, far above a
+      # stub or an empty file.
+      - name: Size floor
+        run: |
+          fail=0
+          for f in dist/installers/*; do
+            case "$f" in
+              *setup*.exe) min=5000000 ;;
+              *.deb|*.rpm|*.tar.gz) min=5000000 ;;
+              *) min=20000000 ;;
+            esac
+            size="$(wc -c < "$f" | tr -d ' ')"
+            if [ "$size" -lt "$min" ]; then
+              echo "::error::$f is $size bytes, below the $min byte floor"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      # Checksums are computed here, from the built files, before anything is
+      # uploaded or leaves this runner. The release job merges them into the
+      # release's SHA256SUMS. Kept out of the release assets themselves.
+      - name: Checksum every built installer
+        run: |
+          cd dist/installers
+          ls | grep -v '^installers.sha256$' | xargs shasum -a 256 | LC_ALL=C sort -k2 > installers.sha256
+          cat installers.sha256
+
       - name: Upload artifacts to workflow
         uses: actions/upload-artifact@v4
         with:
@@ -109,7 +140,18 @@ jobs:
     needs: build
     runs-on: [self-hosted, 8gi, helm]
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
+      - name: Require a strict vX.Y.Z tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release-binaries.yml publishes from a vX.Y.Z tag only, not ${TAG}"
+            exit 1
+          fi
+
       - name: Checkout (release-guard.sh)
         uses: actions/checkout@v4
 
@@ -137,7 +179,20 @@ jobs:
             fi
             sleep 30
           done
+          # installers.sha256 is a build-time input, not a release asset.
+          mv upload/installers.sha256 "$RUNNER_TEMP/installers.sha256"
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
+
+          # Merge the installer checksums into the release's SHA256SUMS so one
+          # file covers every attached asset. release.yml wrote the tarball line;
+          # lines for names we are about to add are replaced, so a re-run is idempotent.
+          mkdir -p "$RUNNER_TEMP/sums"
+          gh release download "$TAG" --repo "$REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/sums" --clobber
+          awk 'NR==FNR { new[$2]=1; next } !($2 in new)' "$RUNNER_TEMP/installers.sha256" "$RUNNER_TEMP/sums/SHA256SUMS" > "$RUNNER_TEMP/merged"
+          cat "$RUNNER_TEMP/installers.sha256" >> "$RUNNER_TEMP/merged"
+          LC_ALL=C sort -k2 "$RUNNER_TEMP/merged" > "$RUNNER_TEMP/sums/SHA256SUMS"
+          cat "$RUNNER_TEMP/sums/SHA256SUMS"
+          gh release upload "$TAG" "$RUNNER_TEMP/sums/SHA256SUMS" --repo "$REPO" --clobber
 
       # #3803: the release goes public only when it carries the Windows .exe,
       # the Windows installer, the macOS and Linux binaries, and release.yml's
