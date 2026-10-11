@@ -1,0 +1,177 @@
+# release-install-smoke.yml - run the one-line installers on real Windows,
+# macOS and Linux machines.
+#
+#   fixture  (pull requests touching the installers, or by hand): a fake
+#            release site served on 127.0.0.1 with compiled stand-in binaries.
+#            Proves install.ps1 under Windows PowerShell 5.1 and PowerShell 7
+#            via the literal `irm ... | iex`, and install.sh via `curl ... | sh`:
+#            newest release with the binary wins, a pinned version installs,
+#            and a newer installed 8gent is never replaced by an older one.
+#   live     (called by release-binaries.yml once a release is public): installs
+#            that real release from GitHub with the real installers and checks
+#            `8gent --version` names the tag.
+#
+# Read-only: no secrets, no writes to the repository or releases.
+
+name: Release install smoke
+
+on:
+  pull_request:
+    paths:
+      - scripts/install.sh
+      - scripts/install.ps1
+      - scripts/lib/install-fixture.ts
+      - .github/workflows/release-install-smoke.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install for real (vX.Y.Z); empty runs the fixture checks"
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-windows:
+    name: install.ps1 (fixture, Windows)
+    if: inputs.tag == '' || inputs.tag == null
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Build and serve the fake release site
+        shell: pwsh
+        run: |
+          $srv = Join-Path $env:RUNNER_TEMP 'srv'
+          bun scripts/lib/install-fixture.ts $srv 'http://127.0.0.1:8765'
+          if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
+          Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory',$srv -WindowStyle Hidden
+          for ($i = 0; $i -lt 30; $i++) {
+            try { Invoke-WebRequest http://127.0.0.1:8765/releases.json -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 }
+          }
+      - name: Windows PowerShell 5.1, irm | iex, then pin, then no downgrade
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'bin51'
+          $exe = Join-Path $dir '8gent.exe'
+          $env:EIGHT_INSTALL_DIR = $dir
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "newest: got $v" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (-not ($userPath -split ';' | Where-Object { $_ -ieq $dir })) { throw "user PATH does not contain $dir" }
+
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "downgraded without asking: got $v" }
+
+          $env:EIGHT_VERSION = '0.0.1'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "pinned: got $v" }
+          Write-Host 'Windows PowerShell 5.1: PASS'
+      - name: PowerShell 7, irm | iex, upgrade over an older install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'bin7'
+          $exe = Join-Path $dir '8gent.exe'
+          $env:EIGHT_INSTALL_DIR = $dir
+          $env:EIGHT_NO_MODIFY_PATH = '1'
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "old: got $v" }
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases.json'
+          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "upgrade: got $v" }
+          Write-Host 'PowerShell 7: PASS'
+
+  fixture-unix:
+    name: install.sh (fixture, ${{ matrix.os }})
+    if: inputs.tag == '' || inputs.tag == null
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: curl | sh, then no downgrade, then pin
+        run: |
+          set -eu
+          srv="$RUNNER_TEMP/srv"
+          bun scripts/lib/install-fixture.ts "$srv" http://127.0.0.1:8765
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$srv" >/dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/releases.json >/dev/null && break; sleep 1; done
+          export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
+          bin="$EIGHT_INSTALL_DIR/8gent"
+
+          EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          "$bin" --version | grep -q 'v0\.0\.2'
+
+          EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-old.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          "$bin" --version | grep -q 'v0\.0\.2' || { echo "::error::downgraded without asking"; exit 1; }
+
+          EIGHT_VERSION=0.0.1 EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          "$bin" --version | grep -q 'v0\.0\.1'
+          echo "install.sh on ${RUNNER_OS}: PASS"
+
+  live-windows:
+    name: install.ps1 (live ${{ inputs.tag }}, Windows)
+    if: inputs.tag != '' && inputs.tag != null
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install the published release with the one-liner's script
+        shell: powershell
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'bin'
+          $env:EIGHT_INSTALL_DIR = $dir
+          $env:EIGHT_NO_MODIFY_PATH = '1'
+          $env:EIGHT_RELEASES_URL = "https://api.github.com/repos/$env:REPO/releases/tags/$env:TAG"
+          Get-Content scripts/install.ps1 -Raw | Invoke-Expression
+          $v = & (Join-Path $dir '8gent.exe') --version
+          Write-Host $v
+          if ($v -notmatch [regex]::Escape("8gent Code $env:TAG")) { throw "expected 8gent Code $env:TAG, got $v" }
+
+  live-unix:
+    name: install.sh (live ${{ inputs.tag }}, ${{ matrix.os }})
+    if: inputs.tag != '' && inputs.tag != null
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install the published release with the one-liner's script
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
+          export EIGHT_RELEASES_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+          sh scripts/install.sh
+          out="$("$EIGHT_INSTALL_DIR/8gent" --version)"
+          echo "$out"
+          case "$out" in *"8gent Code ${TAG}"*) ;; *) echo "::error::expected 8gent Code ${TAG}, got ${out}"; exit 1 ;; esac
