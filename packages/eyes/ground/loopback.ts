@@ -38,7 +38,11 @@ export function assertLoopback(endpoint: string): URL {
 }
 
 /** fetch() that refuses redirects, so a loopback proxy cannot bounce frames elsewhere. */
-export async function loopbackFetch(endpoint: string, path: string, init: RequestInit): Promise<Response> {
+export async function loopbackFetch(
+	endpoint: string,
+	path: string,
+	init: RequestInit,
+): Promise<Response> {
 	const base = assertLoopback(endpoint);
 	const target = new URL(path, base);
 	assertLoopback(target.toString());

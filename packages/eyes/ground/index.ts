@@ -11,12 +11,19 @@
  *
  * Every call re-checks the endpoint is loopback before a byte is sent.
  */
-import { QwenVlBackend, type CoordSpace } from "./backends/qwen-vl.js";
+import { type CoordSpace, QwenVlBackend } from "./backends/qwen-vl.js";
 import { prepareImage, scaleBack } from "./image.js";
 import { assertLoopback } from "./loopback.js";
 import type { BBox, GroundBackend, GroundInput, GroundOutcome } from "./types.js";
 
-export type { BBox, GroundBackend, GroundInput, GroundOutcome, GroundResult, GroundFailure } from "./types.js";
+export type {
+	BBox,
+	GroundBackend,
+	GroundInput,
+	GroundOutcome,
+	GroundResult,
+	GroundFailure,
+} from "./types.js";
 export { assertLoopback, NonLoopbackEndpointError } from "./loopback.js";
 
 interface Preset {
@@ -36,17 +43,26 @@ const LMSTUDIO = "http://127.0.0.1:1234";
  */
 export const GROUND_PRESETS: Record<string, Preset> = {
 	"qwen2.5vl": { model: "qwen2.5vl:7b", endpoint: OLLAMA, transport: "ollama", coords: "absolute" },
-	lmstudio: { model: "ui-tars-1.5-7b", endpoint: LMSTUDIO, transport: "openai", coords: "absolute" },
+	lmstudio: {
+		model: "ui-tars-1.5-7b",
+		endpoint: LMSTUDIO,
+		transport: "openai",
+		coords: "absolute",
+	},
 	"qwen3-vl": { model: "qwen3-vl:8b", endpoint: OLLAMA, transport: "ollama", coords: "norm1000" },
 };
 
 export const DEFAULT_GROUND_BACKEND = "qwen2.5vl";
 
-export function backendFromEnv(env: Record<string, string | undefined> = process.env): GroundBackend {
+export function backendFromEnv(
+	env: Record<string, string | undefined> = process.env,
+): GroundBackend {
 	const name = env.EIGHT_GROUND_BACKEND || DEFAULT_GROUND_BACKEND;
 	const preset = GROUND_PRESETS[name];
 	if (!preset) {
-		throw new Error(`ground: unknown backend "${name}". Known: ${Object.keys(GROUND_PRESETS).join(", ")}`);
+		throw new Error(
+			`ground: unknown backend "${name}". Known: ${Object.keys(GROUND_PRESETS).join(", ")}`,
+		);
 	}
 	const endpoint = env.EIGHT_GROUND_ENDPOINT || preset.endpoint;
 	assertLoopback(endpoint);
@@ -75,7 +91,10 @@ export function shapeConfidence(
 ): number {
 	let c = 1;
 	const inside =
-		modelBox[0] >= -2 && modelBox[1] >= -2 && modelBox[2] <= modelW + 2 && modelBox[3] <= modelH + 2;
+		modelBox[0] >= -2 &&
+		modelBox[1] >= -2 &&
+		modelBox[2] <= modelW + 2 &&
+		modelBox[3] <= modelH + 2;
 	if (!inside) c -= 0.3;
 	const area = Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
 	const frac = area / (w * h);
@@ -121,7 +140,14 @@ export async function ground(
 		x: Math.round((bbox[0] + bbox[2]) / 2),
 		y: Math.round((bbox[1] + bbox[3]) / 2),
 		bbox,
-		confidence: shapeConfidence(bbox, img.origWidth, img.origHeight, out.bbox, img.width, img.height),
+		confidence: shapeConfidence(
+			bbox,
+			img.origWidth,
+			img.origHeight,
+			out.bbox,
+			img.width,
+			img.height,
+		),
 		backend: backend.id,
 		model: backend.model,
 		ms,

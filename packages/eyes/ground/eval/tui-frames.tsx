@@ -3,12 +3,12 @@
  * TTY) and turn each ANSI frame into a terminal-styled HTML page, so the
  * grounding eval can screenshot the TUI exactly as a terminal would draw it.
  * Target strings are wrapped in <span data-t="k"> so the browser can measure
- * their boxes.
+ * their boxes. Frames are monochrome: chalk reads FORCE_COLOR at import, before
+ * this module could set it, so colour depends on the calling shell.
  */
 import { EventEmitter } from "node:events";
-process.env.FORCE_COLOR ??= "3";
 import { render } from "ink";
-import React from "react";
+import type React from "react";
 import { CommandPaletteView } from "../../../../apps/tui/src/components/CommandPalette.js";
 import { InlineApprovalPrompt } from "../../../../apps/tui/src/components/InlineApprovalPrompt.js";
 import { OrchestratorPane } from "../../../../apps/tui/src/components/OrchestratorPane.js";
@@ -145,15 +145,42 @@ export async function tuiFrames(): Promise<TuiFrame[]> {
 		{ name: "model", description: "Switch the active model" },
 		{ name: "memory", description: "Search what 8gent remembers" },
 	];
-	const approve = await frameOf(<InlineApprovalPrompt target="write packages/eyes/ground/index.ts" />);
-	const palette = await frameOf(<CommandPaletteView query="" activeIndex={1} commands={commands} />);
+	const approve = await frameOf(
+		<InlineApprovalPrompt target="write packages/eyes/ground/index.ts" />,
+	);
+	const palette = await frameOf(
+		<CommandPaletteView query="" activeIndex={1} commands={commands} />,
+	);
 	const pane = await frameOf(
 		<OrchestratorPane
 			width={96}
 			rows={[
-				{ id: "t-41", harness: "8gent-local", state: "working", tool: "read_file", tokens: 5120, startedTs: 1, updatedTs: 2 },
-				{ id: "t-42", harness: "claude", state: "blocked", tool: "run_command", tokens: 980, startedTs: 1, updatedTs: 2 },
-				{ id: "t-43", harness: "8gent-local", state: "done", output: "tests pass", startedTs: 1, updatedTs: 2 },
+				{
+					id: "t-41",
+					harness: "8gent-local",
+					state: "working",
+					tool: "read_file",
+					tokens: 5120,
+					startedTs: 1,
+					updatedTs: 2,
+				},
+				{
+					id: "t-42",
+					harness: "claude",
+					state: "blocked",
+					tool: "run_command",
+					tokens: 980,
+					startedTs: 1,
+					updatedTs: 2,
+				},
+				{
+					id: "t-43",
+					harness: "8gent-local",
+					state: "done",
+					output: "tests pass",
+					startedTs: 1,
+					updatedTs: 2,
+				},
 			]}
 		/>,
 	);
@@ -173,10 +200,15 @@ export async function tuiFrames(): Promise<TuiFrame[]> {
 			["[Y] approve", "the Y approve option in the approval prompt"],
 			["[N] deny", "the N deny option"],
 		]),
-		mk("tui-approval-light", approve, [
-			["[E] edit", "the E edit option"],
-			["[S] skip", "the S skip option"],
-		], false),
+		mk(
+			"tui-approval-light",
+			approve,
+			[
+				["[E] edit", "the E edit option"],
+				["[S] skip", "the S skip option"],
+			],
+			false,
+		),
 		mk("tui-palette", palette, [
 			["/kanban", "the kanban command in the command palette"],
 			["/model", "the model command"],

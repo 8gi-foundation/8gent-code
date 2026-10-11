@@ -11,7 +11,11 @@ export interface PageSpec {
 	targets: { instruction: string; selector: string }[];
 }
 
-const base = (title: string, body: string, dark = false) => `<!doctype html><meta charset=utf-8><title>${title}</title>
+const base = (
+	title: string,
+	body: string,
+	dark = false,
+) => `<!doctype html><meta charset=utf-8><title>${title}</title>
 <style>
 :root{--bg:${dark ? "#14161c" : "#f6f5f2"};--card:${dark ? "#1d2029" : "#fff"};--fg:${dark ? "#e4e5e9" : "#1d1f24"};--mut:${dark ? "#9aa0ab" : "#6b6f78"};--line:${dark ? "#2c303b" : "#dedcd6"};--acc:#e8610a}
 *{box-sizing:border-box}body{margin:0;font:15px/1.4 -apple-system,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
@@ -60,7 +64,10 @@ export const PAGES: PageSpec[] = [
 		targets: [
 			{ instruction: "the weekly digest email toggle", selector: "#digest" },
 			{ instruction: "the Save changes button", selector: "#save" },
-			{ instruction: "the Settings link in the top navigation", selector: "header nav a:nth-child(4)" },
+			{
+				instruction: "the Settings link in the top navigation",
+				selector: "header nav a:nth-child(4)",
+			},
 		],
 	},
 	{
@@ -180,12 +187,18 @@ ${Array.from({ length: 31 }, (_, i) => `<div id="d${i + 1}" style="border:1px so
 		html: base(
 			"Search",
 			`${nav("Memory")}<main><div class="card"><div style="display:flex;gap:10px"><input type="text" id="q" value="sovereign grounding"><button class="primary" id="go">Search</button></div>
-${["Grounding notes from the 8TO plan", "Local vision models on a 32 GB Mac", "Why the browser test was 0 of 3"]
+${[
+	"Grounding notes from the 8TO plan",
+	"Local vision models on a 32 GB Mac",
+	"Why the browser test was 0 of 3",
+]
 	.map(
 		(t, i) =>
 			`<div style="padding:14px 0;border-bottom:1px solid var(--line)"><a href="#" id="r${i}" style="font-size:17px;color:var(--acc)">${t}</a><div style="color:var(--mut);font-size:13px">memory - ${i + 2} days ago</div></div>`,
 	)
-	.join("")}<div style="margin-top:12px;display:flex;gap:8px"><button id="p1">1</button><button id="p2">2</button><button id="pnext">Next page</button></div></div></main>`,
+	.join(
+		"",
+	)}<div style="margin-top:12px;display:flex;gap:8px"><button id="p1">1</button><button id="p2">2</button><button id="pnext">Next page</button></div></div></main>`,
 		),
 		targets: [
 			{ instruction: "the result about local vision models", selector: "#r1" },
@@ -196,8 +209,4 @@ ${["Grounding notes from the 8TO plan", "Local vision models on a 32 GB Mac", "W
 ];
 
 // Dark variant of the settings page, same layout, different palette.
-PAGES[2].html = base(
-	"Settings",
-	PAGES[1].html.slice(PAGES[1].html.indexOf("<body>") + 6),
-	true,
-);
+PAGES[2].html = base("Settings", PAGES[1].html.slice(PAGES[1].html.indexOf("<body>") + 6), true);

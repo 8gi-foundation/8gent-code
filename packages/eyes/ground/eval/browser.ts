@@ -10,7 +10,11 @@ import { join } from "node:path";
 
 const PORT = Number(process.env.EIGHT_BROWSER_CONTROL_PORT) || 7980;
 
-export function call<T = any>(cmd: string, args: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<T> {
+export function call<T = unknown>(
+	cmd: string,
+	args: Record<string, unknown> = {},
+	timeoutMs = 60_000,
+): Promise<T> {
 	const token = readFileSync(join(homedir(), ".8gent", "browser-control.token"), "utf8").trim();
 	return new Promise((resolve, reject) => {
 		const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);

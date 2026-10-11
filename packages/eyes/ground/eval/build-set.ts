@@ -9,7 +9,14 @@
  * Output: <outDir>/labels.json plus one PNG per screenshot. Default outDir is
  * ~/.8gent/ground-eval/set. Every tab the build opens is closed again.
  */
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -63,7 +70,9 @@ async function measure(
 ): Promise<void> {
 	const root = await call<{ elements: El[] }>("page.query", { tabId, selector: "html" });
 	const elements = (await call<{ elements: El[] }>("page.query", { tabId })).elements;
-	const shot = await call<{ savedTo: string; width: number; height: number }>("page.screenshot", { tabId });
+	const shot = await call<{ savedTo: string; width: number; height: number }>("page.screenshot", {
+		tabId,
+	});
 	// Viewport width = the html element's box (no horizontal scroll on these pages).
 	const vw = root.elements[0].rect.w;
 	const scale = shot.width / vw;
@@ -79,14 +88,18 @@ async function measure(
 		);
 		labelled.push({
 			instruction: t.instruction,
-			box: [r.x * scale, r.y * scale, (r.x + r.w) * scale, (r.y + r.h) * scale].map(Math.round) as LabelTarget["box"],
+			box: [r.x * scale, r.y * scale, (r.x + r.w) * scale, (r.y + r.h) * scale].map(
+				Math.round,
+			) as LabelTarget["box"],
 			elementIndex: idx,
 		});
 	}
 	const png = `${id}.png`;
 	copyFileSync(shot.savedTo, join(out, png));
 	shots.push({ id, png, source, viewport, scale, targets: labelled, elements });
-	console.log(`${id}: ${shot.width}x${shot.height} scale ${scale.toFixed(2)}, ${labelled.length} targets, ${elements.length} elements`);
+	console.log(
+		`${id}: ${shot.width}x${shot.height} scale ${scale.toFixed(2)}, ${labelled.length} targets, ${elements.length} elements`,
+	);
 }
 
 /** A 1x copy of an existing shot: same targets, boxes halved. Tests a non-retina frame. */
@@ -104,7 +117,10 @@ async function oneX(srcId: string): Promise<void> {
 		id,
 		png: `${id}.png`,
 		scale: 1,
-		targets: s.targets.map((t) => ({ ...t, box: t.box.map((v) => Math.round(v * f)) as LabelTarget["box"] })),
+		targets: s.targets.map((t) => ({
+			...t,
+			box: t.box.map((v) => Math.round(v * f)) as LabelTarget["box"],
+		})),
 	});
 	console.log(`${id}: downscaled copy`);
 }
@@ -113,13 +129,24 @@ const dataUrl = (html: string) => `data:text/html;charset=utf-8,${encodeURICompo
 
 try {
 	for (const p of PAGES) await measure(await open(dataUrl(p.html)), p.id, "test-page", p.targets);
-	for (const f of await tuiFrames()) await measure(await open(dataUrl(f.html)), f.id, "tui", f.targets);
+	for (const f of await tuiFrames())
+		await measure(await open(dataUrl(f.html)), f.id, "tui", f.targets);
 
 	// The pilot's own browser-op fixture site: real server, real login flow.
-	const fixture = join(homedir(), ".8gent", "rishi-pilot", "fixtures", "setup", "browser-op-server.ts");
+	const fixture = join(
+		homedir(),
+		".8gent",
+		"rishi-pilot",
+		"fixtures",
+		"setup",
+		"browser-op-server.ts",
+	);
 	if (existsSync(fixture)) {
 		const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "ground-fixture-"));
-		const proc = Bun.spawn(["bun", fixture, dir, "maeve", "orchard-42"], { stdout: "ignore", stderr: "ignore" });
+		const proc = Bun.spawn(["bun", fixture, dir, "maeve", "orchard-42"], {
+			stdout: "ignore",
+			stderr: "ignore",
+		});
 		for (let i = 0; i < 50 && !existsSync(join(dir, "port")); i++) await sleep(100);
 		const port = readFileSync(join(dir, "port"), "utf8").trim();
 		const tab = await open(`http://127.0.0.1:${port}/`);
@@ -141,7 +168,9 @@ try {
 
 	for (const id of ["contact-form", "file-table", "inbox", "fixture-login"]) await oneX(id);
 	writeFileSync(join(out, "labels.json"), `${JSON.stringify(shots, null, 1)}\n`);
-	console.log(`wrote ${shots.length} screenshots, ${shots.reduce((n, s) => n + s.targets.length, 0)} targets to ${out}`);
+	console.log(
+		`wrote ${shots.length} screenshots, ${shots.reduce((n, s) => n + s.targets.length, 0)} targets to ${out}`,
+	);
 } finally {
 	for (const id of opened) await call("tab.close", { id }).catch(() => {});
 }
