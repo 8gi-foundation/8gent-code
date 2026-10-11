@@ -138,6 +138,84 @@ describe("moveInProject allows", () => {
 	}
 });
 
+describe("moveInProject: generated-data dotfiles and .tmp (#3943)", () => {
+	beforeEach(() => {
+		writeFileSync(join(ws, "e2e.json"), "[]");
+		writeFileSync(join(ws, ".todo-e2e.json"), "[]");
+		writeFileSync(join(ws, ".mcp.json"), "{}");
+		writeFileSync(join(ws, ".eslintrc.json"), "{}");
+		writeFileSync(join(ws, "tsconfig.json"), "{}");
+		mkdirSync(join(ws, ".tmp"));
+		mkdirSync(join(ws, ".other"));
+	});
+
+	test("the exact command from the issue: mv e2e.json .todo-e2e.json .tmp/", () => {
+		expect(moveInProject("mv e2e.json .todo-e2e.json .tmp/", ws).ok).toBe(true);
+	});
+
+	for (const cmd of [
+		"mv e2e.json .tmp",
+		"mv -f e2e.json .tmp/",
+		"mv -fv e2e.json .tmp/",
+		"mv -nf e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/renamed.json",
+		"mv e2e.json .todo-moved.json",
+		"mv inbox/note-1.txt .tmp/",
+	]) {
+		test(`allows: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(true);
+		});
+	}
+
+	for (const cmd of [
+		"mv .mcp.json .tmp/",
+		"mv .eslintrc.json .tmp/",
+		"mv .env .tmp/",
+		"mv e2e.json .mcp.json",
+		"mv e2e.json .tmp/.mcp.json",
+		"mv e2e.json .other/",
+		"mv e2e.json .git/",
+		"mv e2e.json .git/hooks/",
+		"mv e2e.json .claude/",
+		"mv .tmp .other/",
+		"mv .other .tmp/",
+		"mv e2e.json tsconfig.json",
+		"mv e2e.json packages/permissions/x.json",
+		"mv e2e.json ../out.json",
+		"mv e2e.json /tmp/",
+		"mv e2e.json escape/",
+		"mv e2e.json notes-link/",
+		"mv inbox/link.txt .tmp/",
+		"mv -t .tmp e2e.json",
+		"mv --target-directory=.tmp e2e.json",
+		"mv -f e2e.json .tmp/../x",
+		"mv e2e.json *.json",
+		"mv *.json .tmp/",
+		"mv -f e2e.json .todo-e2e.json",
+		"mv e2e.json .tmp/ && rm -rf .",
+	]) {
+		test(`still judged: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(false);
+		});
+	}
+
+	test(".tmp as a symlink is refused", () => {
+		rmSync(join(ws, ".tmp"), { recursive: true });
+		symlinkSync(join(ws, "inbox"), join(ws, ".tmp"));
+		expect(moveInProject("mv e2e.json .tmp/", ws).ok).toBe(false);
+	});
+
+	test("both pilot commands pass the gate without asking the judge", async () => {
+		for (const cmd of ["mv e2e.json .todo-e2e.json .tmp/"]) {
+			const g = await systemOneGate(cmd, process.env, ws);
+			expect(g.run, cmd).toBe(true);
+			expect(g.guard?.backend).toBe("allowlist");
+		}
+		expect(judge.asks).toBe(0);
+	});
+});
+
 describe("moveInProject refuses", () => {
 	const refused: Array<[string, string]> = [
 		["a destination outside the workspace (absolute)", `mv inbox/note-1.txt ${"/tmp"}/x.txt`],
@@ -168,7 +246,7 @@ describe("moveInProject refuses", () => {
 		["a quoted path", 'mv "inbox/note-1.txt" inbox/notes/'],
 		["a command substitution", "mv inbox/note-1.txt $(pwd)/x"],
 		["a chained command", "mv inbox/note-1.txt inbox/notes/ && rm -rf inbox"],
-		["force flag", "mv -f inbox/note-1.txt inbox/notes/"],
+		["force flag over an existing file", "mv -f inbox/note-1.txt inbox/notes/note-9.txt"],
 		["target-directory flag", "mv -t inbox/notes inbox/note-1.txt"],
 		["a missing source", "mv inbox/nope.txt inbox/notes/"],
 		["a new directory by trailing slash", "mv inbox/note-1.txt inbox/fresh/"],

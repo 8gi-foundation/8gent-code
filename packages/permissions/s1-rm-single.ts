@@ -31,7 +31,12 @@
  *     working directory (a symlinked directory that escapes fails), and the
  *     real relative path has no `.git` segment either;
  *   - it is scratch-style: a directory segment of the real relative path is
- *     one of run, tmp, .cache, or the base name ends in .lock or .pid;
+ *     one of run, tmp, .cache, or the base name ends in .lock or .pid; or
+ *     (#3943) it is a generated-data file written in the last two hours: name
+ *     ending .json, not a manifest or config name (see
+ *     generatedDataName in s1-mv-in-project.ts), no dot directory above it
+ *     other than a leading .tmp. `rm -f e2e.json` passes; an untracked
+ *     old.log, a .txt, or a json older than that, still goes to the judge;
  *   - its base name is not a dependency lockfile (bun.lock, yarn.lock,
  *     Cargo.lock, ... see LOCKFILES) and not a sensitive name (.env*, *.pem,
  *     *.key, *.p12, *.sqlite*, *.db), scratch directory or not;
@@ -45,8 +50,7 @@
  *     repository asked is always the one on disk at that directory. Git
  *     missing or failing otherwise counts as tracked.
  *
- * Not covered on purpose: `mv` (no rule fires for it, and a move has two
- * endpoints and can clobber its destination); more than one operand; any
+ * Not covered here on purpose: `mv` (see s1-mv-in-project.ts); more than one operand; any
  * untracked file that is not scratch-style (an untracked `.env` is
  * unrecoverable, and s1-rm-nothing.test.ts already requires `rm -f old.log`
  * at the root to be judged); any tracked file, under run/ or not.
@@ -63,12 +67,15 @@ import { lstatSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
+import { generatedDataName } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 const RM_FLAG = /^-[fv]+$/;
 const SCRATCH_DIRS = new Set(["run", "tmp", ".cache"]);
 const SCRATCH_NAME = /\.(lock|pid)$/;
+/** A generated-data file (#3943) counts as scratch only while it is this fresh. */
+const RECENT_MS = 2 * 60 * 60 * 1000;
 /** Dependency lockfiles end in .lock too, but they are project state, not scratch (compared lower-cased). */
 const LOCKFILES = new Set([
 	"bun.lock",
@@ -115,6 +122,12 @@ function no(hint?: string): SingleFileDelete {
 
 function hasGitSegment(rel: string): boolean {
 	return rel.split("/").some((s) => s.toLowerCase() === ".git");
+}
+
+/** A dot directory anywhere above the file, other than a leading .tmp. */
+function hasDotDir(rel: string): boolean {
+	const dirs = rel.split("/").slice(0, -1);
+	return dirs.some((s, i) => s.startsWith(".") && !(s === ".tmp" && i === 0));
 }
 
 function scratchStyle(rel: string): boolean {
@@ -200,7 +213,10 @@ export function singleFileDelete(command: string, cwd: string | undefined): Sing
 		// Segments are split on "/" below and reported to the model: keep them POSIX-style on Windows.
 		const rel = path.relative(root, path.join(realParent, base)).split(path.sep).join("/");
 		if (hasGitSegment(rel)) return no();
-		if (!scratchStyle(rel)) return no("That file is not a scratch file.");
+		// A data file the task just wrote (`e2e.json`) is scratch while it is fresh, untracked and
+		// not a manifest or config; an older or unfamiliar untracked file still goes to the judge.
+		const fresh = generatedDataName(base) && Date.now() - st.mtimeMs < RECENT_MS && !hasDotDir(rel);
+		if (!scratchStyle(rel) && !fresh) return no("That file is not a scratch file.");
 		if (LOCKFILES.has(base.toLowerCase()))
 			return no("That is a dependency lockfile, not a scratch file.");
 		if (SENSITIVE_NAME.test(base)) return no("That file name needs review.");

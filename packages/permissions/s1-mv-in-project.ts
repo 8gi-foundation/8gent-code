@@ -20,7 +20,9 @@
  *     no quotes, glob, brace, `$`, backtick, `~`, redirect, pipe, `;`, `&`,
  *     `#`, newline (so a variable or glob target is never covered); no
  *     prompt-control text; and decideRules fired no rule;
- *   - the first word is `mv`, flags only -n / -v (no -f, -i, -t, -T, `--`);
+ *   - the first word is `mv`, flags only -n / -v / -f (no -i, -t, -T, `--`);
+ *     -f changes nothing outside because the landing path must not exist
+ *     anyway (#3943);
  *   - at least two operands, every one relative with no `..` segment, no `.`
  *     operand, and no `.git` segment as written;
  *   - every source exists as a regular file or a real directory (not a
@@ -34,7 +36,9 @@
  *     directory plus its base name, or the new name) must not exist, checked
  *     with lstat so a dangling symlink and a case-insensitive twin count;
  *   - no endpoint name is protected: no name starting with `.` (dotfiles,
- *     .env, .git, .claude), no dependency lockfile or project manifest, no
+ *     .env, .git, .claude) except a plain generated-data file such as
+ *     `.todo-e2e.json` (one dot, a stem, .json, not a config
+ *     name) and a leading `.tmp` directory (#3943), no dependency lockfile or project manifest, no
  *     key, certificate or database file;
  *   - no landing name configures or runs tooling by itself (*.config.js,
  *     bunfig.toml, tsconfig*.json, conftest.py, setup.py, *.sh, git hook
@@ -48,7 +52,7 @@
  * Not covered on purpose: moves that leave the workspace or arrive from
  * outside it, overwrites (a move over an existing file always reaches the
  * judge), globs and variables, symlink endpoints, more sources than a
- * directory destination can hold without a clash, and any `-f`/`-t` form.
+ * directory destination can hold without a clash, and any `-t` form.
  *
  * Known window, the same as s1-rm-single.ts: a process of this uid could swap
  * a directory for a symlink between this check and the spawn.
@@ -63,7 +67,7 @@ import { decideRules } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
-const MV_FLAG = /^-[nv]+$/;
+const MV_FLAG = /^-[nvf]+$/;
 /** Dependency lockfiles and project manifests: project state, never moved without review (lower-cased). */
 const PROTECTED_NAMES = new Set([
 	"bun.lock",
@@ -97,6 +101,19 @@ const SENSITIVE_NAME = /\.(pem|key|p12|db)$|\.sqlite|^(credential|secret|id_)/i;
 /** Names that run or configure tooling on their own (bun, jest, pytest, git hooks): never a landing name. */
 const AUTO_EXEC_NAME =
 	/\.config\.[cm]?[jt]s$|^bunfig\.toml$|^tsconfig[\w.-]*\.json$|^(conftest\.py|setup\.py|setup\.cfg|justfile|pre-commit|pre-push|commit-msg|post-[\w-]+)$|\.sh$/i;
+/**
+ * True when a workspace-relative path has a dot segment other than a leading
+ * `.tmp` directory or a final generated-data file name.
+ */
+function badDot(rel: string): boolean {
+	const segs = rel.split("/");
+	return segs.some((seg, i) => {
+		if (!seg.startsWith(".")) return false;
+		if (seg === ".tmp" && i === 0) return false;
+		return !(i === segs.length - 1 && GEN_DOT.test(seg));
+	});
+}
+
 /** Security-bearing source: never moved, never a landing place (workspace-relative). */
 const PROTECTED_PREFIXES = ["packages/permissions", "packages/decide", "hooks"];
 /** Most entries a moved directory may hold before it goes to review. */
@@ -106,9 +123,34 @@ export type MoveInProject = { ok: true; reason: string } | { ok: false };
 
 const NO: MoveInProject = { ok: false };
 
-function protectedName(name: string): boolean {
+/**
+ * A dot-named data file a task writes for itself (`.todo-e2e.json`): one dot,
+ * a plain stem, and a data extension. Dot names that configure tooling or
+ * hold credentials (.eslintrc.json, .mcp.json, .claude.json, .env.json, ...)
+ * never match. Only file endpoints may use it, never a directory or a tree.
+ */
+const GEN_DOT =
+	/^\.(?!(?:eslintrc|prettierrc|babelrc|stylelintrc|swcrc|mcp|claude|env|git|npm|yarn|netrc|ssh|aws|bun|node|nvm|vscode|idea|cursor|husky|github|gitlab|editorconfig|dockerignore|tool-versions|python-version)(?![a-z0-9]))[a-z0-9][a-z0-9_-]*\.json$/i;
+/** Data-file extension a task generates; the names below are never "generated data". */
+const DATA_EXT = /\.json$/i;
+const CONFIG_DATA_NAME =
+	/^(?:requirements[\w.-]*\.txt|cmakelists\.txt|manifest\.json|deno\.jsonc?|jsr\.json|biome\.jsonc?|components\.json|vercel\.json|firebase\.json|turbo\.json|nx\.json|lerna\.json|renovate\.json|app\.json|eas\.json|babel\.config\.json|jest\.config\.json)$/i;
+
+/** True for a plain data-file name (`e2e.json`, `.todo-e2e.json`, `out.txt`) that is not a manifest or config. */
+export function generatedDataName(name: string): boolean {
+	if (!DATA_EXT.test(name)) return false;
+	if (name.startsWith(".") && !GEN_DOT.test(name)) return false;
+	return !(
+		PROTECTED_NAMES.has(name.toLowerCase()) ||
+		SENSITIVE_NAME.test(name) ||
+		AUTO_EXEC_NAME.test(name) ||
+		CONFIG_DATA_NAME.test(name)
+	);
+}
+
+function protectedName(name: string, fileEndpoint = false): boolean {
 	return (
-		name.startsWith(".") ||
+		(name.startsWith(".") && !(fileEndpoint && generatedDataName(name))) ||
 		PROTECTED_NAMES.has(name.toLowerCase()) ||
 		SENSITIVE_NAME.test(name) ||
 		AUTO_EXEC_NAME.test(name)
@@ -229,7 +271,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!destStat.isDirectory()) return NO;
 			const realDest = realpathSync(destAbs);
 			if (!inside(realDest, root)) return NO;
-			if (hasDotSegment(path.relative(root, realDest))) return NO;
+			if (badDot(path.relative(root, realDest))) return NO;
 			for (const s of srcs)
 				moves.push([path.resolve(root, s), path.join(realDest, path.basename(s))]);
 		} else {
@@ -237,7 +279,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (srcs.length !== 1 || destArg.endsWith("/")) return NO;
 			const realParent = realpathSync(path.dirname(destAbs));
 			if (!inside(realParent, root)) return NO;
-			if (hasDotSegment(path.relative(root, realParent))) return NO;
+			if (badDot(path.relative(root, realParent))) return NO;
 			moves.push([path.resolve(root, srcs[0]), path.join(realParent, path.basename(destAbs))]);
 		}
 
@@ -250,10 +292,16 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!inside(realParent, root)) return NO;
 			const realSrc = path.join(realParent, path.basename(srcAbs));
 			const relSrc = path.relative(root, realSrc);
-			if (hasDotSegment(relSrc)) return NO;
+			if (badDot(relSrc)) return NO;
 			if (protectedRel(relSrc) || protectedRel(path.relative(root, finalAbs))) return NO;
-			if (protectedName(path.basename(realSrc)) || protectedName(path.basename(finalAbs)))
+			const isFile = st.isFile();
+			if (
+				protectedName(path.basename(realSrc), isFile) ||
+				protectedName(path.basename(finalAbs), isFile)
+			)
 				return NO;
+			// A generated-data dotfile may only land under .tmp or beside itself, never as a hidden config.
+			if (badDot(path.relative(root, finalAbs))) return NO;
 			if (st.isDirectory()) {
 				// A tree holding a repository, a dotfile, a protected name or path, or
 				// too many entries carries them along unchecked: review it.
