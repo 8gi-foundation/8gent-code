@@ -5,6 +5,7 @@ import {
 	copyText,
 	lastAnswer,
 	nativeCopyArgv,
+	osc52Fits,
 } from "./copy-answer.js";
 import { osc52 } from "./mouse-wiring.js";
 
@@ -57,14 +58,50 @@ describe("/copy (#3918 D7)", () => {
 		});
 		expect(written).toEqual([osc52("x")]);
 		expect(ran).toEqual([["pbcopy"]]);
-		expect(r.native).toBe("pbcopy");
+		expect(r).toEqual({ osc52: true, native: "pbcopy" });
 	});
 
 	test("copyReply says what happened", () => {
 		const deps = { write: () => {}, env: { SSH_TTY: "/dev/ttys001" }, platform: "darwin" };
 		expect(copyReply([], deps)).toBe("Nothing to copy yet: no answer in this chat.");
 		expect(copyReply([{ role: "assistant", content: "a" }], deps)).toBe(
+			"Sent the last answer to the clipboard (1 character).",
+		);
+		const local = { write: () => {}, env: {}, platform: "darwin", runNative: () => true };
+		expect(copyReply([{ role: "assistant", content: "a" }], local)).toBe(
 			"Copied the last answer (1 character).",
 		);
+	});
+
+	test("over the OSC 52 cap: no sequence, the native copy still runs, and it says so", () => {
+		const big = "x".repeat(80_000); // 106,668 bytes of base64
+		expect(osc52Fits("x".repeat(75_000))).toBeTrue();
+		expect(osc52Fits(big)).toBeFalse();
+		const written: string[] = [];
+		const ran: string[] = [];
+		const msgs = [{ role: "assistant", content: big }];
+		const local = {
+			write: (s: string) => written.push(s),
+			env: {},
+			platform: "darwin",
+			runNative: (_argv: string[], text: string) => {
+				ran.push(text);
+				return true;
+			},
+		};
+		expect(copyReply(msgs, local)).toBe(
+			"Copied the last answer (80000 characters) with pbcopy. It is too long for the terminal clipboard (over 100 KB encoded), so it was not sent to the terminal.",
+		);
+		expect(written).toEqual([]);
+		expect(ran).toEqual([big]);
+		const remote = {
+			write: (s: string) => written.push(s),
+			env: { SSH_TTY: "/dev/ttys001" },
+			platform: "darwin",
+		};
+		expect(copyReply(msgs, remote)).toBe(
+			"Nothing copied: the last answer (80000 characters) is too long for the terminal clipboard (over 100 KB encoded), and there is no local copy command here.",
+		);
+		expect(written).toEqual([]);
 	});
 });

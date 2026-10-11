@@ -72,24 +72,51 @@ function runNativeCopy(argv: string[], text: string): boolean {
 	}
 }
 
-/** Copy `text`. Returns the name of the native command that also took it, if any. */
-export function copyText(text: string, deps: CopyDeps): { native: string | null } {
+/**
+ * Most base64 sent in one OSC 52 sequence. Terminals cap it (xterm ~100 KB,
+ * tmux and others less) and drop or truncate anything bigger.
+ */
+export const OSC52_MAX_ENCODED = 100_000;
+
+export function osc52Fits(text: string): boolean {
+	return Math.ceil(Buffer.byteLength(text, "utf8") / 3) * 4 <= OSC52_MAX_ENCODED;
+}
+
+export interface CopyResult {
+	/** OSC 52 was written to the terminal. */
+	osc52: boolean;
+	/** The local copy command that took the text, if any. */
+	native: string | null;
+}
+
+/** Copy `text`: OSC 52 when it fits, plus the local copy command when there is one. */
+export function copyText(text: string, deps: CopyDeps): CopyResult {
 	const env = deps.env ?? process.env;
-	try {
-		deps.write(clipboardSequence(text, env));
-	} catch {
-		/* stdout closed */
+	let osc52 = false;
+	if (osc52Fits(text)) {
+		try {
+			deps.write(clipboardSequence(text, env));
+			osc52 = true;
+		} catch {
+			/* stdout closed */
+		}
 	}
 	const argv = nativeCopyArgv(deps.platform ?? process.platform, env);
-	if (!argv) return { native: null };
-	return { native: (deps.runNative ?? runNativeCopy)(argv, text) ? argv[0] : null };
+	const native = argv && (deps.runNative ?? runNativeCopy)(argv, text) ? argv[0] : null;
+	return { osc52, native };
 }
 
 /** The chat line /copy prints. */
 export function copyReply(messages: readonly ChatLine[], deps: CopyDeps): string {
 	const answer = lastAnswer(messages);
 	if (!answer) return "Nothing to copy yet: no answer in this chat.";
-	copyText(answer, deps);
+	const r = copyText(answer, deps);
 	const n = answer.length;
-	return `Copied the last answer (${n} character${n === 1 ? "" : "s"}).`;
+	const size = `${n} character${n === 1 ? "" : "s"}`;
+	const tooBig = `too long for the terminal clipboard (over ${OSC52_MAX_ENCODED / 1000} KB encoded)`;
+	if (r.native && r.osc52) return `Copied the last answer (${size}).`;
+	if (r.native)
+		return `Copied the last answer (${size}) with ${r.native}. It is ${tooBig}, so it was not sent to the terminal.`;
+	if (r.osc52) return `Sent the last answer to the clipboard (${size}).`;
+	return `Nothing copied: the last answer (${size}) is ${tooBig}, and there is no local copy command here.`;
 }

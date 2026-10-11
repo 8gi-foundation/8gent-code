@@ -18,10 +18,13 @@ async function main() {
 
 	const rawFrom = app.raw().length;
 	m = await app.submit("/copy");
-	await waitFor(() => app.since(m).includes("Copied the last answer"), "/copy reply");
+	await waitFor(
+		() => app.since(m).includes("Sent the last answer to the clipboard"),
+		"/copy reply",
+	);
 	app.emit({
 		phase: "copied",
-		line: app.since(m).match(/Copied the last answer \(\d+ characters?\)\./)?.[0],
+		line: app.since(m).match(/Sent the last answer to the clipboard \(\d+ characters?\)\./)?.[0],
 		raw: app.raw().slice(rawFrom),
 	});
 	process.exit(0);

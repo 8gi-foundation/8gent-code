@@ -21,7 +21,9 @@ test("/copy writes the last answer as OSC 52 and says so", async () => {
 		expect(events.find((e) => e.phase === "error")).toBeUndefined();
 		expect(events.find((e) => e.phase === "empty")?.ok).toBeTrue();
 		const copied = events.find((e) => e.phase === "copied");
-		expect(copied?.line).toBe(`Copied the last answer (${REPLY.length} characters).`);
+		expect(copied?.line).toBe(
+			`Sent the last answer to the clipboard (${REPLY.length} characters).`,
+		);
 		expect(String(copied?.raw)).toContain(osc52(REPLY));
 	} finally {
 		model.stop();
