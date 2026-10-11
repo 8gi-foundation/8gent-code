@@ -22,9 +22,27 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { defaultSessionsDir, isSessionId } from "./session-manager.js";
 
 export const SESSION_FORMAT_VERSION = 1;
+
+/** Ids become file names: only plain ids are ever read or written by id. */
+export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isSessionId(v: unknown): v is string {
+	return typeof v === "string" && SESSION_ID_PATTERN.test(v);
+}
+
+/**
+ * Where sessions live: $EIGHT_DATA_DIR/sessions when set, else
+ * ~/.8gent/sessions. The TUI and the daemon both use this, so a session
+ * shared through the daemon is the same file the TUI resumes (#3929).
+ */
+export function defaultSessionsDir(): string {
+	const dataDir = process.env.EIGHT_DATA_DIR;
+	return dataDir
+		? path.join(dataDir, "sessions")
+		: path.join(process.env.HOME || "~", ".8gent", "sessions");
+}
 
 export interface StoredMessage {
 	role: string;
@@ -65,7 +83,31 @@ export interface BranchSummaryEntry {
 	summary: string;
 }
 
-export type TreeEntry = MessageEntry | BranchSummaryEntry;
+/**
+ * A compaction. It replaces nothing: the summarised messages stay in the file
+ * as its ancestors. The model context starts from this summary plus the
+ * entries from firstKeptId onward; undoing it (an "uncompact" line) makes the
+ * context the full transcript again.
+ */
+export interface CompactionEntry {
+	type: "compaction";
+	id: string;
+	parentId: string | null;
+	ts: string;
+	summary: string;
+	/** First path entry kept verbatim after the summary; null = none kept. */
+	firstKeptId: string | null;
+	tokensBefore?: number;
+	tokensAfter?: number;
+}
+
+export type TreeEntry = MessageEntry | BranchSummaryEntry | CompactionEntry;
+
+export interface UncompactLine {
+	type: "uncompact";
+	ts: string;
+	target: string;
+}
 
 export interface InfoLine {
 	type: "session_info";
@@ -74,6 +116,7 @@ export interface InfoLine {
 	model?: string;
 	provider?: string;
 	branch?: string;
+	channel?: string;
 }
 
 export interface LeafLine {
@@ -83,7 +126,7 @@ export interface LeafLine {
 	target: string | null;
 }
 
-export type MetaLine = InfoLine | LeafLine;
+export type MetaLine = InfoLine | LeafLine | UncompactLine;
 export type SessionLine = SessionHeader | TreeEntry | MetaLine;
 
 export interface SessionListItem {
@@ -94,7 +137,10 @@ export interface SessionListItem {
 	provider?: string;
 	createdAt: string;
 	lastActiveAt: string;
+	/** Message entries in the file, across every branch. */
 	messageCount: number;
+	branch?: string;
+	channel?: string;
 	/** "tree" = this store; "legacy" = an older SessionManager .json file. */
 	format: "tree" | "legacy";
 	file: string;
@@ -157,6 +203,7 @@ export class SessionStore {
 	private order: string[] = [];
 	private info: Omit<InfoLine, "type" | "ts"> = {};
 	private _leafId: string | null = null;
+	private undone = new Set<string>();
 
 	private constructor(sessionsDir: string, header: SessionHeader) {
 		this.sessionsDir = sessionsDir;
@@ -175,6 +222,8 @@ export class SessionStore {
 			branch?: string;
 			channel?: string;
 			parentSession?: SessionHeader["parentSession"];
+			/** Keep the original creation time (migration, import). */
+			createdAt?: string;
 		} = {},
 		sessionsDir: string = defaultSessionsDir(),
 	): SessionStore {
@@ -187,7 +236,7 @@ export class SessionStore {
 			version: SESSION_FORMAT_VERSION,
 			id,
 			cwd: path.resolve(opts.cwd ?? process.cwd()),
-			createdAt: new Date().toISOString(),
+			createdAt: opts.createdAt ?? new Date().toISOString(),
 			...(opts.model ? { model: opts.model } : {}),
 			...(opts.provider ? { provider: opts.provider } : {}),
 			...(opts.branch ? { branch: opts.branch } : {}),
@@ -237,6 +286,14 @@ export class SessionStore {
 	}
 	get provider(): string | undefined {
 		return this.info.provider ?? this._header.provider;
+	}
+	/** The surface that owns the session when shared through the daemon. */
+	get channel(): string | undefined {
+		return this.info.channel ?? this._header.channel;
+	}
+	/** The git branch last recorded for this session. */
+	get branchName(): string | undefined {
+		return this.info.branch ?? this._header.branch;
 	}
 	/** The entry the next append continues from. */
 	get leafId(): string | null {
@@ -310,7 +367,12 @@ export class SessionStore {
 			},
 			this.sessionsDir,
 		);
-		for (const entry of this.pathTo(entryId)) child.write(entry);
+		for (const entry of this.pathTo(entryId)) {
+			child.write(entry);
+			if (entry.type === "compaction" && this.undone.has(entry.id)) {
+				child.write({ type: "uncompact", ts: new Date().toISOString(), target: entry.id });
+			}
+		}
 		return child;
 	}
 
@@ -341,9 +403,265 @@ export class SessionStore {
 		return out.reverse();
 	}
 
-	/** The messages on the current path, oldest first (branch summaries become notes). */
+	/**
+	 * The full transcript on the current path, oldest first. Compactions are
+	 * left out (nothing was removed); branch summaries appear as notes. This is
+	 * what a person scrolls back through.
+	 */
 	messages(entryId: string | null = this._leafId): StoredMessage[] {
-		return this.pathTo(entryId).map(toMessage);
+		return this.transcriptEntries(entryId).map(toMessage);
+	}
+
+	/** The path entries messages() renders, in the same order. */
+	transcriptEntries(
+		entryId: string | null = this._leafId,
+	): Array<MessageEntry | BranchSummaryEntry> {
+		return this.pathTo(entryId).filter(
+			(e): e is MessageEntry | BranchSummaryEntry => e.type !== "compaction",
+		);
+	}
+
+	/**
+	 * What the model sees: the latest active compaction's summary, then the
+	 * entries it kept, then everything after it. With no active compaction
+	 * this equals messages().
+	 */
+	context(entryId: string | null = this._leafId): StoredMessage[] {
+		const path = this.pathTo(entryId);
+		let c = -1;
+		for (let i = path.length - 1; i >= 0; i--) {
+			const e = path[i];
+			if (e.type === "compaction" && !this.undone.has(e.id)) {
+				c = i;
+				break;
+			}
+		}
+		if (c === -1) return this.messages(entryId);
+		const comp = path[c] as CompactionEntry;
+		const keptFrom = comp.firstKeptId ? path.findIndex((e) => e.id === comp.firstKeptId) : c;
+		const start = keptFrom === -1 || keptFrom > c ? c : keptFrom;
+		const rest = [...path.slice(start, c), ...path.slice(c + 1)].filter(
+			(e) => e.type !== "compaction",
+		);
+		return [toMessage(comp), ...rest.map(toMessage)];
+	}
+
+	/**
+	 * Record a compaction at the leaf. Keeps the last `keepLast` transcript
+	 * entries verbatim (or everything from `firstKeptId`). Originals stay in the
+	 * file; undoCompaction() brings them back into context(). Returns the entry id.
+	 */
+	compact(
+		summary: string,
+		opts: {
+			keepLast?: number;
+			firstKeptId?: string | null;
+			tokensBefore?: number;
+			tokensAfter?: number;
+		} = {},
+	): string {
+		const transcript = this.transcriptEntries();
+		let firstKeptId: string | null = null;
+		if (opts.firstKeptId !== undefined) {
+			if (opts.firstKeptId !== null && !transcript.some((e) => e.id === opts.firstKeptId)) {
+				throw new Error(`entry ${opts.firstKeptId} is not on the current path`);
+			}
+			firstKeptId = opts.firstKeptId;
+		} else if (opts.keepLast && opts.keepLast > 0) {
+			firstKeptId = transcript[Math.max(0, transcript.length - opts.keepLast)]?.id ?? null;
+		}
+		const entry: CompactionEntry = {
+			type: "compaction",
+			id: this.freshEntryId(),
+			parentId: this._leafId,
+			ts: new Date().toISOString(),
+			summary,
+			firstKeptId,
+			...(opts.tokensBefore !== undefined ? { tokensBefore: opts.tokensBefore } : {}),
+			...(opts.tokensAfter !== undefined ? { tokensAfter: opts.tokensAfter } : {}),
+		};
+		this.write(entry);
+		return entry.id;
+	}
+
+	/** The compaction context() is applying right now, if any. */
+	activeCompaction(entryId: string | null = this._leafId): CompactionEntry | null {
+		const path = this.pathTo(entryId);
+		for (let i = path.length - 1; i >= 0; i--) {
+			const e = path[i];
+			if (e.type === "compaction" && !this.undone.has(e.id)) return e;
+		}
+		return null;
+	}
+
+	/**
+	 * Undo a compaction (default: the active one). The context goes back to the
+	 * original messages; an older compaction on the path, if any, applies again.
+	 * Returns the id undone, or null when there was nothing to undo.
+	 */
+	undoCompaction(compactionId?: string): string | null {
+		const target = compactionId ?? this.activeCompaction()?.id;
+		if (!target) return null;
+		const entry = this.entries.get(target);
+		if (!entry || entry.type !== "compaction")
+			throw new Error(`entry ${target} is not a compaction`);
+		if (this.undone.has(target)) return null;
+		this.write({ type: "uncompact", ts: new Date().toISOString(), target });
+		return target;
+	}
+
+	isUndone(compactionId: string): boolean {
+		return this.undone.has(compactionId);
+	}
+
+	/**
+	 * Make the current transcript equal `messages` without losing anything.
+	 * The shared prefix is kept; when the list diverges from what is stored
+	 * (an edit, a rewind, a rewrite), the leaf moves back to the last shared
+	 * entry and the new tail is appended as a new branch. The old tail stays
+	 * in the tree. This is how whole-list savers (the TUI, the daemon) write
+	 * into the tree without ever destroying history.
+	 */
+	syncTranscript(messages: StoredMessage[]): { appended: number; branched: boolean } {
+		const stored = this.transcriptEntries();
+		const key = (m: StoredMessage) => `${m.role}\u0000${JSON.stringify(m.content)}`;
+		let p = 0;
+		while (
+			p < stored.length &&
+			p < messages.length &&
+			key(toMessage(stored[p])) === key(messages[p])
+		)
+			p++;
+		const branched = p < stored.length;
+		if (branched) this.branch(p === 0 ? null : stored[p - 1].id);
+		for (const m of messages.slice(p)) this.append(m);
+		return { appended: messages.length - p, branched };
+	}
+
+	/** The session file as JSONL text (it already is the export format). */
+	exportJSONL(): string {
+		return fs.readFileSync(this.file, "utf-8");
+	}
+
+	/**
+	 * Import a session exported by exportJSONL(). Every line is checked:
+	 * parents must appear before children, ids must be plain, unknown line
+	 * types are dropped. Keeps the original id when it is free, else assigns
+	 * a new one. The imported session records where it came from.
+	 */
+	static importJSONL(
+		text: string,
+		opts: { sessionsDir?: string; cwd?: string; name?: string } = {},
+	): SessionStore {
+		const sessionsDir = opts.sessionsDir ?? defaultSessionsDir();
+		const lines = parseLines(text, "import");
+		const header = lines[0];
+		if (!header || header.type !== "session" || typeof header.cwd !== "string") {
+			throw new Error("import: first line must be a session header");
+		}
+		const seen = new Map<string, TreeEntry["type"]>();
+		const out: Array<TreeEntry | MetaLine> = [];
+		const isRef = (v: unknown) => v === null || (typeof v === "string" && seen.has(v));
+		const str = (v: unknown) => v === undefined || typeof v === "string";
+		for (const [i, raw] of lines.slice(1).entries()) {
+			const line = raw as unknown as Record<string, unknown>;
+			const bad = (why: string) => new Error(`import: line ${i + 2}: ${why}`);
+			const ts = typeof line.ts === "string" ? line.ts : new Date().toISOString();
+			switch (line.type) {
+				case "message":
+				case "branch_summary":
+				case "compaction": {
+					if (!isSessionId(line.id) || seen.has(line.id)) throw bad("bad or duplicate id");
+					if (!isRef(line.parentId)) throw bad("parent must appear earlier");
+					let entry: TreeEntry;
+					if (line.type === "message") {
+						const m = line.message as Record<string, unknown> | undefined;
+						if (!m || typeof m.role !== "string") throw bad("message needs a role");
+						entry = {
+							type: "message",
+							id: line.id,
+							parentId: line.parentId as string | null,
+							ts,
+							message: { role: m.role, content: m.content },
+						};
+					} else if (line.type === "branch_summary") {
+						if (typeof line.summary !== "string") throw bad("summary must be text");
+						entry = {
+							type: "branch_summary",
+							id: line.id,
+							parentId: line.parentId as string | null,
+							ts,
+							fromId: typeof line.fromId === "string" ? line.fromId : null,
+							summary: line.summary,
+						};
+					} else {
+						if (typeof line.summary !== "string") throw bad("summary must be text");
+						if (!isRef(line.firstKeptId)) throw bad("firstKeptId must appear earlier");
+						entry = {
+							type: "compaction",
+							id: line.id,
+							parentId: line.parentId as string | null,
+							ts,
+							summary: line.summary,
+							firstKeptId: line.firstKeptId as string | null,
+							...(typeof line.tokensBefore === "number" ? { tokensBefore: line.tokensBefore } : {}),
+							...(typeof line.tokensAfter === "number" ? { tokensAfter: line.tokensAfter } : {}),
+						};
+					}
+					seen.set(entry.id, entry.type);
+					out.push(entry);
+					break;
+				}
+				case "leaf":
+					if (!isRef(line.target)) throw bad("leaf target must appear earlier");
+					out.push({ type: "leaf", ts, target: line.target as string | null });
+					break;
+				case "uncompact":
+					if (typeof line.target !== "string" || seen.get(line.target) !== "compaction") {
+						throw bad("uncompact must name an earlier compaction");
+					}
+					out.push({ type: "uncompact", ts, target: line.target });
+					break;
+				case "session_info":
+					if (
+						!str(line.name) ||
+						!str(line.model) ||
+						!str(line.provider) ||
+						!str(line.branch) ||
+						!str(line.channel)
+					) {
+						throw bad("session_info fields must be text");
+					}
+					out.push({
+						type: "session_info",
+						ts,
+						...(line.name !== undefined ? { name: line.name as string } : {}),
+						...(line.model !== undefined ? { model: line.model as string } : {}),
+						...(line.provider !== undefined ? { provider: line.provider as string } : {}),
+						...(line.branch !== undefined ? { branch: line.branch as string } : {}),
+						...(line.channel !== undefined ? { channel: line.channel as string } : {}),
+					});
+					break;
+				default:
+					break;
+			}
+		}
+		const keepId = isSessionId(header.id) && !SessionStore.exists(header.id, sessionsDir);
+		const store = SessionStore.create(
+			{
+				id: keepId ? header.id : undefined,
+				cwd: opts.cwd ?? header.cwd,
+				model: typeof header.model === "string" ? header.model : undefined,
+				provider: typeof header.provider === "string" ? header.provider : undefined,
+				createdAt: typeof header.createdAt === "string" ? header.createdAt : undefined,
+				parentSession:
+					!keepId && isSessionId(header.id) ? { id: header.id, entryId: null } : undefined,
+			},
+			sessionsDir,
+		);
+		for (const line of out) store.write(line);
+		if (opts.name) store.rename(opts.name);
+		return store;
 	}
 
 	/** The whole tree, for a /tree view. Roots in file order, children in file order. */
@@ -385,12 +703,16 @@ export class SessionStore {
 		switch (line.type) {
 			case "message":
 			case "branch_summary":
+			case "compaction":
 				if (!this.entries.has(line.id)) this.order.push(line.id);
 				this.entries.set(line.id, line);
 				this._leafId = line.id;
 				break;
 			case "leaf":
 				this._leafId = line.target;
+				break;
+			case "uncompact":
+				this.undone.add(line.target);
 				break;
 			case "session_info": {
 				const { type: _t, ts: _ts, ...rest } = line;
@@ -404,7 +726,12 @@ export class SessionStore {
 	}
 }
 
+export const COMPACTION_SUMMARY_PREFIX = "[Context Compaction Summary]";
+
 function toMessage(entry: TreeEntry): StoredMessage {
+	if (entry.type === "compaction") {
+		return { role: "user", content: `${COMPACTION_SUMMARY_PREFIX}\n\n${entry.summary}` };
+	}
 	if (entry.type === "branch_summary") {
 		return {
 			role: "user",
@@ -437,6 +764,8 @@ function listTree(sessionsDir: string): SessionListItem[] {
 			let name: string | undefined;
 			let model = header.model;
 			let provider = header.provider;
+			let branch = header.branch;
+			let channel = header.channel;
 			// Only info lines need parsing; messages are counted by type tag.
 			for (const line of text.split("\n")) {
 				if (!line.includes('"type":"session_info"')) continue;
@@ -445,6 +774,8 @@ function listTree(sessionsDir: string): SessionListItem[] {
 					if (info.name !== undefined) name = info.name;
 					if (info.model !== undefined) model = info.model;
 					if (info.provider !== undefined) provider = info.provider;
+					if (info.branch !== undefined) branch = info.branch;
+					if (info.channel !== undefined) channel = info.channel;
 				} catch {
 					// torn line
 				}
@@ -461,6 +792,8 @@ function listTree(sessionsDir: string): SessionListItem[] {
 				messageCount,
 				format: "tree",
 				file,
+				...(branch ? { branch } : {}),
+				...(channel ? { channel } : {}),
 				...(header.parentSession ? { parentSession: header.parentSession } : {}),
 			});
 		} catch {
@@ -495,6 +828,8 @@ function listLegacy(sessionsDir: string): SessionListItem[] {
 				messageCount: typeof raw.messageCount === "number" ? raw.messageCount : 0,
 				format: "legacy",
 				file,
+				...(typeof raw.branch === "string" ? { branch: raw.branch } : {}),
+				...(typeof raw.channel === "string" ? { channel: raw.channel } : {}),
 			});
 		} catch {
 			// corrupt legacy file

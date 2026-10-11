@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTEXT_NOTE_HEADER, harnessNote } from "../eight/context-note";
@@ -11,14 +11,14 @@ import { planningGateInstruction } from "../eight/local-tool-scope";
 import { SessionManager } from "../eight/session-manager";
 import {
 	type ChatMessage,
+	type ResumeDeps,
+	ResumeSecrets,
 	type SharedAgent,
 	type SharedPool,
 	type SharedSessionDeps,
 	type SharedStore,
 	TRANSCRIPT_MAX_CHARS,
 	TRANSCRIPT_MAX_MESSAGES,
-	type ResumeDeps,
-	ResumeSecrets,
 	capTranscript,
 	chatMessages,
 	handleResume,
@@ -257,7 +257,7 @@ describe("persistSession", () => {
 		const agent = pool.add("s_p", "browser");
 		agent.history.push({ role: "user", content: "q" }, { role: "assistant", content: "a" });
 		expect(persistSession(pool, saveStore, "s_p", new Set(["s_p"]))).toBe(true);
-		const file = JSON.parse(readFileSync(join(dir, "sessions", "s_p.json"), "utf8"));
+		const file = store.get("s_p");
 		expect(file).toMatchObject({
 			id: "s_p",
 			channel: "browser",
@@ -298,7 +298,7 @@ describe("persistence ownership", () => {
 
 	it("session files are owner-only", () => {
 		store.save("s_mode", [{ role: "user", content: "x" }], {});
-		expect(statSync(join(dir, "sessions", "s_mode.json")).mode & 0o777).toBe(0o600);
+		expect(statSync(join(dir, "sessions", "tree", "s_mode.jsonl")).mode & 0o777).toBe(0o600);
 	});
 });
 
