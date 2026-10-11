@@ -14,14 +14,14 @@
  * names a JSON file of the same shape; CI runs the controls.
  */
 
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import * as realShell from "../core/shell";
-
-afterAll(cleanupTempDirs);
+import { ToolExecutor } from "../eight/tools";
+import * as perms from "./index";
+import * as holders from "./permission-mode";
+import * as gate from "./system-one-gate";
 
 type Mode = "default" | "guarded" | "infinite" | "headless";
 type Decision = "ran" | "asked" | "blocked";
@@ -54,33 +54,37 @@ const PUBLIC_ROWS: Row[] = [
 	},
 ];
 
-let spawned: string[] = [];
 let asked: string[] = [];
 
-mock.module("../core/shell", () => {
-	return {
-		...realShell,
-		spawnShell: (command: string) => {
-			spawned.push(command);
-			const p: any = new EventEmitter();
-			p.stdout = new EventEmitter();
-			p.stderr = new EventEmitter();
-			p.pid = 0;
-			p.kill = () => true;
-			p.unref = () => {};
-			setTimeout(() => p.emit("close", 0, null), 0);
-			return p;
-		},
-	};
+let dir = "";
+let shimLog = "";
+
+// Nothing here may outlive this file: env, PATH, System One overrides, the permission manager.
+const savedEnv: Record<string, string | undefined> = {};
+const ENV_KEYS = [
+	"HOME",
+	"PATH",
+	"EIGHT_DATA_DIR",
+	"EIGHT_DECIDE_OLLAMA_HOST",
+	"EIGHT_S1_SHARED_JUDGE",
+	"EIGHT_DECIDE_GGUF",
+	"EIGHT_WORKSPACE_ROOT",
+	"EIGHT_HEADLESS",
+];
+for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+
+afterAll(() => {
+	for (const k of ENV_KEYS) {
+		if (savedEnv[k] === undefined) delete process.env[k];
+		else process.env[k] = savedEnv[k];
+	}
+	gate._resetSystemOne();
+	perms.resetPermissionManager();
+	cleanupTempDirs();
 });
 
-let ToolExecutor: any;
-let holders: any;
-let perms: any;
-let dir = "";
-
 async function decide(command: string, mode: Mode): Promise<Decision> {
-	spawned = [];
+	writeFileSync(shimLog, "");
 	asked = [];
 	// The manager is a process singleton that remembers earlier answers; start each case clean.
 	perms.resetPermissionManager();
@@ -108,7 +112,7 @@ async function decide(command: string, mode: Mode): Promise<Decision> {
 	);
 	if (process.env.EIGHT_CORPUS_PRINT === "1")
 		console.log(`OUT ${mode} ${String(out).slice(0, 400).replace(/\n/g, " ")}`);
-	if (spawned.length > 0) return "ran";
+	if (readFileSync(shimLog, "utf-8").length > 0) return "ran";
 	if (asked.length > 0) return "asked";
 	return "blocked";
 }
@@ -123,10 +127,16 @@ beforeAll(async () => {
 	process.env.EIGHT_S1_SHARED_JUDGE = "0";
 	process.env.EIGHT_DECIDE_GGUF = join(dir, "no-such-model.gguf");
 	delete process.env.EIGHT_WORKSPACE_ROOT;
-	({ ToolExecutor } = await import("../eight/tools"));
+	// Nothing runs for real: a stand-in `sh` first on PATH logs the command it was asked to run
+	// and exits 0. (spawnShell resolves "sh" through PATH.)
+	const bin = join(dir, "bin");
+	mkdirSync(bin, { recursive: true });
+	shimLog = join(dir, "shim.log");
+	writeFileSync(join(bin, "sh"), `#!/bin/bash\nprintf '%s\\n' "$2" >> "${shimLog}"\nexit 0\n`);
+	chmodSync(join(bin, "sh"), 0o755);
+	process.env.PATH = `${bin}:${process.env.PATH ?? ""}`;
 	// No judge: the System One decider is unavailable, so only the deterministic rules and the
 	// read-only allowlist speak, and an escalate has no person to ask. Same on every machine.
-	const gate = await import("./system-one-gate");
 	gate._setSystemOneOverridesForTests({
 		createDecider: () => {
 			throw new Error("no judge in the corpus test");
@@ -134,8 +144,6 @@ beforeAll(async () => {
 		askHuman: async () => null,
 		calibrationDir: join(dir, "no-calibration"),
 	});
-	holders = await import("./permission-mode");
-	perms = await import("./index");
 });
 
 const privatePath = process.env.EIGHT_CORPUS_PRIVATE;
