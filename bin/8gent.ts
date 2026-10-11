@@ -190,10 +190,14 @@ OPTIONS:
   --cwd=<dir>    Override working directory
   --fast         Start in fast mode (use fastest available model)
   --resume       Resume last session (or --resume=<name> for specific)
-  --continue <id>  Resume a specific session by ID or name
+  --continue [id] Resume this folder's latest session (or the one named by id)
+  -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
+  --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
+  --tools a,b    With -p: allow only these tools
+  --no-session   With -p: do not save the run
+  --session-dir <dir>  With -p: read and write sessions there
   --infinite     Enable infinite mode (autonomous until done)
-  --pet          Also spawn Lil Eight dock companion (auto with tui)
-  --no-pet       Disable dock pet auto-spawn
+  --pet          Also start the Lil Eight dock companion (off by default)
   --rpc          Start in JSON-RPC mode (headless, stdin/stdout)
 
 EXAMPLES:
@@ -297,8 +301,17 @@ async function main() {
 
 	let args = process.argv.slice(2);
 
+	// -p / --print / --mode json|text: one prompt, no TUI (stdin is prepended when piped).
+	// --mode rpc is the same server as --rpc.
+	const { headlessRoute, continueTarget } = await import("../packages/eight/run.ts");
+	const headless = headlessRoute(args);
+	if (headless === "run") {
+		const { runRunCommand } = await import("../packages/eight/run.ts");
+		process.exit(await runRunCommand(args));
+	}
+
 	// --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
-	if (args.includes("--rpc")) {
+	if (args.includes("--rpc") || headless === "rpc") {
 		const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
 		await startRPCServer();
 		return;
@@ -389,7 +402,7 @@ async function main() {
 	if (args.includes("--pet") || args.includes("-pet")) {
 		const filtered = args.filter((a) => a !== "--pet" && a !== "-pet");
 		if (filtered.length === 0) {
-			await petCommand(["start"]);
+			await tuiCommand(["--pet"]);
 			return;
 		}
 		// Otherwise it's a flag on another command - handled by tuiCommand
@@ -413,12 +426,24 @@ async function main() {
 		}
 	}
 
-	// --continue <id> = resume specific session
-	const continueIdx = args.indexOf("--continue");
-	if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
-		const sessionId = args[continueIdx + 1];
-		args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
-		args.unshift("tui", `--resume=${sessionId}`);
+	// --continue = the latest session of this folder; --continue <id> = that session.
+	const cont = continueTarget(args);
+	if (cont) {
+		let sessionId = cont.id;
+		if (!sessionId) {
+			const { defaultRunSessionStore } = await import("../packages/eight/run-session.ts");
+			const latest = defaultRunSessionStore().latestForCwd(process.cwd());
+			if (latest) {
+				console.log(
+					`Continuing session: ${latest.name || latest.id} (${latest.model}, ${latest.messageCount} msgs)`,
+				);
+				sessionId = latest.name || latest.id;
+			} else {
+				console.log("No earlier session in this folder. Starting fresh.");
+			}
+		}
+		args = cont.rest;
+		args.unshift("tui", ...(sessionId ? [`--resume=${sessionId}`] : []));
 	}
 
 	// Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
@@ -1254,11 +1279,11 @@ async function spawnPet(sessionId?: string) {
 async function tuiCommand(args: string[]) {
 	console.log(BANNER);
 
-	// Auto-spawn pet unless --no-pet
-	const noPet = args.includes("--no-pet");
+	// The pet is opt-in: `8gent --pet` (C2). --no-pet is still accepted and wins.
+	const wantPet = args.includes("--pet") && !args.includes("--no-pet");
 	const filteredArgs = args.filter((a) => a !== "--no-pet" && a !== "--pet");
 
-	if (!noPet) {
+	if (wantPet) {
 		await spawnPet();
 	}
 

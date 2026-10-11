@@ -22,7 +22,11 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import type { RunEvent } from "./run-events";
+import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
 import type { AgentEventCallbacks } from "./types";
+
+export type { RunEvent } from "./run-events";
 
 export interface RunOptions {
 	prompt: string;
@@ -39,6 +43,18 @@ export interface RunOptions {
 	 * default; `--no-workspace-boundary` stops run mode setting it.
 	 */
 	workspaceBoundary: boolean;
+	/** `-p` / `--print`: the one-shot front door; also reads piped stdin. */
+	print: boolean;
+	/** `--tools a,b`: only these tools for the run (F5). */
+	tools?: string[];
+	/** `--continue`: resume the latest session of this folder (F4). */
+	continueLatest: boolean;
+	/** `--session <id>`: resume that session. */
+	session?: string;
+	/** `--no-session`: save nothing. */
+	noSession: boolean;
+	/** `--session-dir <dir>`: where sessions are read and written. */
+	sessionDir?: string;
 }
 
 /**
@@ -77,6 +93,12 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let maxTurns: number | undefined;
 	let image: string | undefined;
 	let workspaceBoundary = true;
+	let print = false;
+	let tools: string[] | undefined;
+	let continueLatest = false;
+	let session: string | undefined;
+	let noSession = false;
+	let sessionDir: string | undefined;
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
@@ -163,6 +185,43 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			workspaceBoundary = false;
 			continue;
 		}
+		if (a === "-p" || a === "--print") {
+			print = true;
+			continue;
+		}
+		// --mode json|text (rpc is routed before this parser, in bin/8gent.ts)
+		if (a === "--mode" || a.startsWith("--mode=")) {
+			const v = a === "--mode" ? argv[++i] : a.slice("--mode=".length);
+			if (v === "json") outputFormat = "stream-json";
+			else if (v === "text") outputFormat = "text";
+			continue;
+		}
+		if (a === "--tools" || a.startsWith("--tools=")) {
+			const v = a === "--tools" ? argv[++i] : a.slice("--tools=".length);
+			tools = (v ?? "")
+				.split(",")
+				.map((t) => t.trim())
+				.filter(Boolean);
+			continue;
+		}
+		if (a === "--continue" || a === "-c") {
+			continueLatest = true;
+			continue;
+		}
+		if (a === "--no-session") {
+			noSession = true;
+			continue;
+		}
+		if (a === "--session" || a.startsWith("--session=")) {
+			const v = a === "--session" ? argv[++i] : a.slice("--session=".length);
+			if (v) session = v;
+			continue;
+		}
+		if (a === "--session-dir" || a.startsWith("--session-dir=")) {
+			const v = a === "--session-dir" ? argv[++i] : a.slice("--session-dir=".length);
+			if (v) sessionDir = v;
+			continue;
+		}
 		// Any other flag is ignored silently so Orchestra can pass extras
 		if (a.startsWith("-")) continue;
 		positional.push(a);
@@ -178,7 +237,69 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		maxTurns,
 		image,
 		workspaceBoundary,
+		print,
+		tools,
+		continueLatest,
+		session,
+		noSession,
+		sessionDir,
 	};
+}
+
+/**
+ * Which headless surface a command line asks for, when it leads with flags
+ * (not a subcommand): `-p`/`--print` and `--mode json|text` run one prompt,
+ * `--mode rpc` (like `--rpc`) is the JSON-RPC server (F1).
+ */
+export function headlessRoute(args: string[]): "run" | "rpc" | null {
+	if (args.length === 0 || !args[0].startsWith("-")) return null;
+	const modeIdx = args.findIndex((a) => a === "--mode" || a.startsWith("--mode="));
+	if (modeIdx !== -1) {
+		const v =
+			args[modeIdx] === "--mode" ? args[modeIdx + 1] : args[modeIdx].slice("--mode=".length);
+		if (v === "rpc") return "rpc";
+		if (v === "json" || v === "text") return "run";
+	}
+	if (args.includes("-p") || args.includes("--print")) return "run";
+	return null;
+}
+
+/**
+ * `--continue` with no session id means "the latest session of this folder".
+ * With an id (a following token that is not a flag) it is the old form and
+ * names a session. Returns null when `--continue` is absent.
+ */
+export function continueTarget(args: string[]): { id?: string; rest: string[] } | null {
+	const i = args.indexOf("--continue");
+	if (i === -1) return null;
+	const next = args[i + 1];
+	if (next && !next.startsWith("-")) {
+		return { id: next, rest: args.filter((_, j) => j !== i && j !== i + 1) };
+	}
+	return { rest: args.filter((_, j) => j !== i) };
+}
+
+/**
+ * Read piped stdin when there is one and put it ahead of the prompt, so
+ * `git diff | 8gent -p "review"` sends the diff plus the instruction (F2).
+ * Only `-p` runs, and runs with no prompt, read stdin: a plain `run` from a
+ * host that leaves an open pipe on stdin must not hang.
+ */
+export function combinePromptAndStdin(prompt: string, piped: string): string {
+	const body = piped.trim();
+	if (!body) return prompt;
+	return prompt ? `${body}\n\n${prompt}` : body;
+}
+
+async function readPipedStdin(): Promise<string> {
+	if (process.stdin.isTTY) return "";
+	const chunks: Buffer[] = [];
+	try {
+		for await (const c of process.stdin) chunks.push(Buffer.from(c));
+	} catch {
+		return "";
+	}
+	return Buffer.concat(chunks).toString("utf-8");
 }
 
 /**
@@ -266,7 +387,7 @@ export async function loadRunImage(
  * so external parsers never have to disambiguate. All log / diagnostic
  * output goes to stderr.
  */
-function emit(obj: Record<string, unknown>): void {
+function emit(obj: RunEvent): void {
 	try {
 		process.stdout.write(`${JSON.stringify(obj)}\n`);
 	} catch {
@@ -327,12 +448,18 @@ async function autoDetectOllamaModel(): Promise<string | null> {
 	}
 }
 
-export async function runRunCommand(argv: string[]): Promise<number> {
+export async function runRunCommand(
+	argv: string[],
+	deps: { sessions?: RunSessionStore; stdin?: () => Promise<string> } = {},
+): Promise<number> {
 	const opts = parseRunArgs(argv);
+	if (opts.print || !opts.prompt) {
+		opts.prompt = combinePromptAndStdin(opts.prompt, await (deps.stdin ?? readPipedStdin)());
+	}
 
 	if (!opts.prompt) {
 		const err =
-			'Error: `8gent run` requires a prompt. Usage: 8gent run [--yes] [--output-format stream-json] "<prompt>"';
+			'Error: `8gent run` requires a prompt. Usage: 8gent -p [--mode json] "<prompt>" (or: git diff | 8gent -p "review")';
 		if (opts.outputFormat === "stream-json") {
 			emit({ type: "error", subtype: "usage", message: err });
 		} else {
@@ -354,6 +481,12 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		}
 	}
 
+	// --tools: only these tools for the run (F5). Applies to the whole process.
+	if (opts.tools) {
+		const { getModeManager } = await import("./modes");
+		getModeManager().applyToolAllowlist(opts.tools);
+	}
+
 	// Resolve provider + model.
 	// If the caller didn't pick a provider, probe ollama once and only
 	// route to it when it actually answers. Otherwise drop to the free
@@ -373,7 +506,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			]);
 			perms.getPermissionManager().setPinnedLocalProvider(policy.LOCAL_PROVIDERS.has(provider));
 		} catch (err) {
-			process.stderr.write(`[run] warn: could not apply the pinned provider to permissions: ${String(err)}\n`);
+			process.stderr.write(
+				`[run] warn: could not apply the pinned provider to permissions: ${String(err)}\n`,
+			);
 		}
 	}
 	let model = opts.model;
@@ -398,7 +533,33 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 	// Stable run id emitted on session_start and on the terminating `result`
 	// event. Orchestra's PTY completion detector trips on either a `result`
 	// type or the presence of a `session_id` field, so we include both.
-	const sessionId = `run-${Date.now()}`;
+	// Resume (F4): --session <id>, or --continue for this folder's latest session.
+	// --no-session keeps the run out of the store, so nothing is read or written.
+	const workDirForSession = resolvePath(opts.cwd || process.cwd());
+	const store: RunSessionStore | null = opts.noSession
+		? null
+		: (deps.sessions ?? defaultRunSessionStore(opts.sessionDir));
+	let resumeFrom: { id: string; messages: Array<{ role: string; content: string }> } | null = null;
+	if (store && (opts.session || opts.continueLatest)) {
+		const found = opts.session
+			? store.load(opts.session)
+			: (() => {
+					const latest = store.latestForCwd(workDirForSession);
+					return latest ? store.load(latest.id) : null;
+				})();
+		if (found) {
+			resumeFrom = { id: found.id, messages: found.messages };
+		} else if (opts.session) {
+			const err = `Error: no session "${opts.session}" to continue.`;
+			if (opts.outputFormat === "stream-json")
+				emit({ type: "error", subtype: "usage", message: err });
+			else process.stderr.write(`${err}\n`);
+			return 1;
+		} else {
+			process.stderr.write("[run] no earlier session in this folder; starting a new one.\n");
+		}
+	}
+	const sessionId = resumeFrom?.id ?? `run-${Date.now()}`;
 
 	const isStreamJson = opts.outputFormat === "stream-json";
 	const events: AgentEventCallbacks = isStreamJson
@@ -458,6 +619,8 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			provider,
 			model,
 			cwd: opts.cwd || process.cwd(),
+			resumed: resumeFrom !== null,
+			persisted: store !== null,
 		});
 	}
 
@@ -522,6 +685,17 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			headless: true,
 		});
 
+		if (resumeFrom) {
+			// restoreFromCheckpoint logs to stdout; keep stdout for the answer.
+			const log = console.log;
+			console.log = (...a: unknown[]) => process.stderr.write(`${a.map(String).join(" ")}\n`);
+			try {
+				agent.restoreFromCheckpoint(resumeFrom.messages);
+			} finally {
+				console.log = log;
+			}
+		}
+
 		const workDir = opts.cwd || process.cwd();
 		const { baselineCheck, finishWithProjectCheck, projectFingerprint, verdictNotice } =
 			await import("./done-gate");
@@ -540,6 +714,17 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			run,
 			chat: (message) => agent.chat(message),
 		});
+		if (store) {
+			try {
+				store.save(
+					sessionId,
+					agent.getMessageHistory().filter((m) => m.role !== "system"),
+					{ model, provider, cwd: workDirForSession },
+				);
+			} catch (err) {
+				process.stderr.write(`[run] warn: could not save the session: ${String(err)}\n`);
+			}
+		}
 		const notice = verdictNotice(check);
 		const finalText = notice ? `${check.finalText}\n\n${notice}` : check.finalText;
 		const projectCheck = {
