@@ -39,11 +39,40 @@ const BASE_NAMES = new Set([
 	"PROGRAMFILES",
 	"PROGRAMFILES(X86)",
 	"PROGRAMDATA",
+	// Path and mode values for toolchains. Not credentials.
+	"VIRTUAL_ENV",
+	"CONDA_PREFIX",
+	"CONDA_DEFAULT_ENV",
+	"PYTHONPATH",
+	"JAVA_HOME",
+	"ANDROID_HOME",
+	"ANDROID_SDK_ROOT",
+	"NODE_ENV",
+	"NVM_DIR",
+	"VOLTA_HOME",
+	"PNPM_HOME",
+	"BUN_INSTALL",
+	"DOCKER_HOST",
+	"KUBECONFIG",
+	"SSL_CERT_FILE",
+	"NODE_EXTRA_CA_CERTS",
+	"REQUESTS_CA_BUNDLE",
 ]);
 
-const isBase = (name: string): boolean => {
+/** Proxy settings: passed by default only when the value carries no user:pass@. */
+const PROXY_NAMES = new Set(["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"]);
+
+/** A default-allowlist match is refused when the name looks like a credential. */
+const SECRETISH = /(_TOKEN|_KEY|_SECRET|PASSWORD|_AUTH)/i;
+
+const hasUserinfo = (value: string): boolean =>
+	/\/\/[^/@\s]*@/.test(value) || /^[^/@\s]*:[^/@\s]*@/.test(value);
+
+const isBase = (name: string, value: string): boolean => {
 	const upper = name.toUpperCase();
-	return BASE_NAMES.has(upper) || upper.startsWith("LC_");
+	if (SECRETISH.test(upper)) return false;
+	if (PROXY_NAMES.has(upper)) return !hasUserinfo(value);
+	return BASE_NAMES.has(upper) || upper.startsWith("LC_") || upper.startsWith("XDG_");
 };
 
 /** Names listed in EIGHT_SHELL_ENV_PASS ("A,B C"), trimmed, empties dropped. */
@@ -68,7 +97,7 @@ export function buildChildEnv(
 	for (const [k, v] of Object.entries(source)) {
 		if (v === undefined) continue;
 		const upper = k.toUpperCase();
-		if (isBase(k) || names.has(upper)) out[k] = v;
+		if (isBase(k, v) || names.has(upper)) out[k] = v;
 	}
 	return out;
 }
@@ -87,3 +116,15 @@ export const GIT_ENV_NAMES = [
 
 /** Names the gh CLI reads for authentication. Used only on the gh path. */
 export const GH_ENV_NAMES = ["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_ENTERPRISE_TOKEN"] as const;
+
+/** True when the source has variables the child will not see (so a failed command may be missing one). Names and values are never returned. */
+export function withheldAny(
+	source: Env = process.env,
+	extraNames: readonly string[] = [],
+): boolean {
+	const kept = Object.keys(buildChildEnv(source, extraNames)).length;
+	return Object.values(source).filter((v) => v !== undefined).length > kept;
+}
+
+export const ENV_PASS_HINT =
+	"Note: commands run with a minimal environment. To pass a variable by name, export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent.";

@@ -17,7 +17,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadKeysIntoEnv } from "../secrets/keys";
 import { getBackgroundTaskManager } from "../tools/background";
-import { GH_ENV_NAMES, GIT_ENV_NAMES, buildChildEnv, envPassList } from "./harness/child-env";
+import {
+	ENV_PASS_HINT,
+	GH_ENV_NAMES,
+	GIT_ENV_NAMES,
+	buildChildEnv,
+	envPassList,
+	withheldAny,
+} from "./harness/child-env";
 import { ToolExecutor } from "./tools";
 
 const CANARY = "canary-value-7f3a91";
@@ -191,5 +198,79 @@ describe("keys file cannot widen the pass list", () => {
 		} finally {
 			delete process.env.FAKE_LOADED_KEY;
 		}
+	});
+});
+
+describe("default toolchain and proxy allowlist", () => {
+	test("toolchain paths and XDG_* pass", () => {
+		const e = buildChildEnv({
+			VIRTUAL_ENV: "/v",
+			JAVA_HOME: "/j",
+			NODE_ENV: "test",
+			XDG_CONFIG_HOME: "/x",
+			KUBECONFIG: "/k",
+			SSL_CERT_FILE: "/c",
+			OTHER_THING: "o",
+		});
+		expect(Object.keys(e).sort()).toEqual([
+			"JAVA_HOME",
+			"KUBECONFIG",
+			"NODE_ENV",
+			"SSL_CERT_FILE",
+			"VIRTUAL_ENV",
+			"XDG_CONFIG_HOME",
+		]);
+	});
+
+	test("proxy with credentials is dropped, without is kept, either case", () => {
+		const e = buildChildEnv({
+			HTTP_PROXY: "http://user:pw@proxy:3128",
+			https_proxy: "http://proxy:3128",
+			NO_PROXY: "localhost",
+			ALL_PROXY: "user:pw@proxy:1080",
+		});
+		expect(e.HTTP_PROXY).toBeUndefined();
+		expect(e.ALL_PROXY).toBeUndefined();
+		expect(e.https_proxy).toBe("http://proxy:3128");
+		expect(e.NO_PROXY).toBe("localhost");
+	});
+
+	test("credential-looking names never pass by default, even under an allowed prefix", () => {
+		const e = buildChildEnv({
+			XDG_API_TOKEN: "t",
+			XDG_SERVICE_KEY: "k",
+			NODE_ENV_SECRET: "s",
+			JAVA_HOME_PASSWORD: "p",
+			XDG_AUTH_FILE: "a",
+			XDG_DATA_HOME: "/d",
+		});
+		expect(Object.keys(e)).toEqual(["XDG_DATA_HOME"]);
+	});
+
+	test("SSH_AUTH_SOCK is not a default; opt-in passes it", () => {
+		expect(buildChildEnv({ SSH_AUTH_SOCK: "/s" }).SSH_AUTH_SOCK).toBeUndefined();
+		expect(
+			buildChildEnv({ SSH_AUTH_SOCK: "/s", EIGHT_SHELL_ENV_PASS: "SSH_AUTH_SOCK" }).SSH_AUTH_SOCK,
+		).toBe("/s");
+	});
+
+	test("withheldAny reports a filtered variable without naming it", () => {
+		expect(withheldAny({ PATH: "/bin" })).toBe(false);
+		expect(withheldAny({ PATH: "/bin", FOO_TOKEN: "x" })).toBe(true);
+	});
+});
+
+describe("failure hint", () => {
+	test("appended once per session on a non-zero exit, never with names or values", async () => {
+		const first = await run("false");
+		expect(first).toContain("EIGHT_SHELL_ENV_PASS");
+		expect(first).not.toContain("FAKE_SECRET_KEY");
+		expect(first).not.toContain(CANARY);
+		const second = await run("false");
+		expect(second).not.toContain("EIGHT_SHELL_ENV_PASS");
+	});
+
+	test("no hint on success", async () => {
+		expect(await run("true")).not.toContain("EIGHT_SHELL_ENV_PASS");
 	});
 });
