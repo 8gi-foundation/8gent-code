@@ -82,7 +82,10 @@ jobs:
       # Runs the real commands against the compiled binary (script from #2966).
       # Source-mode tests cannot see import-time failures that only exist inside
       # bun build --compile output; v0.17.3 shipped with four of them.
+      # A hang here must be a red step in minutes, not a six-hour job (#3981:
+      # the TUI first-frame check, added in #3894, hung on macos-latest).
       - name: Smoke-test the compiled binary
+        timeout-minutes: 10
         run: bash scripts/smoke-compiled.sh dist/bin/8gent-darwin-arm64
 
       - name: Notarize macOS binaries (opt-in)
@@ -170,6 +173,7 @@ jobs:
           name: 8gent-binaries
           path: bins
       - name: --version, then a memory round trip
+        timeout-minutes: 10
         shell: pwsh
         env:
           TAG: ${{ github.ref_name }}
@@ -206,6 +210,7 @@ jobs:
           name: 8gent-binaries
           path: bins
       - name: Smoke-test the compiled Linux binary
+        timeout-minutes: 10
         run: |
           chmod +x bins/8gent-linux-x64
           bash scripts/smoke-compiled.sh bins/8gent-linux-x64
