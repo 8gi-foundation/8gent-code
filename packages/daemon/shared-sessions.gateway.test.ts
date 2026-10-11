@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "../eight/session-manager";
@@ -184,9 +184,9 @@ describe("shared sessions over the gateway", () => {
 
 		// The turn was saved to the store the TUI reads.
 		await settle();
-		const file = join(dataDir, "sessions", "s_shared.json");
+		const file = join(dataDir, "sessions", "tree", "s_shared.jsonl");
 		expect(existsSync(file)).toBe(true);
-		const saved = JSON.parse(readFileSync(file, "utf8"));
+		const saved = new SessionManager(join(dataDir, "sessions")).get("s_shared")!;
 		expect(saved.channel).toBe("tui");
 		expect(saved.messages.map((m: Frame) => m.content)).toEqual([
 			"hello from the TUI",
@@ -266,8 +266,8 @@ describe("shared sessions over the gateway", () => {
 		browser.send({ type: "prompt", text: "five" });
 		await browser.next((f) => f.event === "agent:stream" && f.payload.final);
 		await settle();
-		const file = join(dataDir, "sessions", `${tui.id}.json`);
-		const saved = JSON.parse(readFileSync(file, "utf8"));
+		const file = join(dataDir, "sessions", "tree", `${tui.id}.jsonl`);
+		const saved = new SessionManager(join(dataDir, "sessions")).get(tui.id)!;
 		expect(saved.messages.map((m: Frame) => m.content)).toEqual([
 			"one",
 			"two",
@@ -344,7 +344,7 @@ describe("shared sessions over the gateway", () => {
 		c.send({ type: "prompt", text: "remember the panel" });
 		await c.next((f) => f.event === "agent:stream" && f.payload.final);
 		await settle();
-		const file = join(dataDir, "sessions", `${id}.json`);
+		const file = join(dataDir, "sessions", "tree", `${id}.jsonl`);
 		expect(existsSync(file)).toBe(true);
 		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 		c.close();

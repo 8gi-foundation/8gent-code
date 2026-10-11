@@ -1,5 +1,6 @@
 export type SlashCommand =
 	| "help"
+	| "hotkeys"
 	| "kanban"
 	| "predict"
 	| "avenues"
@@ -63,7 +64,8 @@ export type SlashCommand =
 	| "btw"
 	| "questions"
 	| "projects"
-	| "terminal";
+	| "terminal"
+	| "copy";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -74,6 +76,12 @@ export interface BuiltInSlashCommandDef {
 
 export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{ name: "help", aliases: ["h", "?"], description: "Show available commands" },
+	{
+		name: "hotkeys",
+		aliases: ["keys", "shortcuts"],
+		description: "List every keyboard shortcut",
+		usage: "/hotkeys",
+	},
 	{
 		name: "kanban",
 		aliases: ["k", "board"],
@@ -443,8 +451,64 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description: "Open a terminal tab in the current project (optional tab label)",
 		usage: "/terminal [label]",
 	},
+	{
+		name: "copy",
+		aliases: [],
+		description: "Copy the last answer to the clipboard (works over SSH)",
+		usage: "/copy",
+	},
 ];
 
 function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 	return BUILT_IN_SLASH_COMMANDS;
+}
+
+/**
+ * The commands about the work itself, few enough that a bare `/` shows every
+ * one without scrolling (the menu draws 14 rows; two are kept free for /copy
+ * and /hotkeys). The `/` menu and the Ctrl+P palette show
+ * these first (the `/` menu shows only these until a letter is typed); every
+ * other command still runs when typed by name and appears once its prefix
+ * matches (#3918, Pi gap D9).
+ */
+export const CORE_SLASH_COMMANDS: ReadonlySet<SlashCommand> = new Set<SlashCommand>([
+	"help",
+	"model",
+	"provider",
+	"clear",
+	"compact",
+	"resume",
+	"fork",
+	"rewind",
+	"export",
+	"skills",
+	"settings",
+	"quit",
+]);
+
+export function isCoreSlashCommand(name: SlashCommand): boolean {
+	return CORE_SLASH_COMMANDS.has(name);
+}
+
+/** Built-in commands with the core ones first, each group in table order. */
+export function builtInCommandsCoreFirst(
+	commands: readonly BuiltInSlashCommandDef[] = BUILT_IN_SLASH_COMMANDS,
+): BuiltInSlashCommandDef[] {
+	return [
+		...commands.filter((c) => isCoreSlashCommand(c.name)),
+		...commands.filter((c) => !isCoreSlashCommand(c.name)),
+	];
+}
+
+/** The /help text. Core commands by default; `all` lists every built-in. */
+export function formatSlashHelp(all: boolean): string {
+	const rows = all
+		? builtInCommandsCoreFirst()
+		: BUILT_IN_SLASH_COMMANDS.filter((c) => isCoreSlashCommand(c.name));
+	const lines = rows.map((c) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`);
+	const hidden = BUILT_IN_SLASH_COMMANDS.length - rows.length;
+	const tail = all
+		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt"
+		: `  /help all - Show ${hidden} more commands`;
+	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
 }
