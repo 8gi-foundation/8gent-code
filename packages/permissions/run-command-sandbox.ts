@@ -438,8 +438,18 @@ function reportUnsandboxed(status: Extract<RunCommandSandbox, { applied: false }
 
 /** Short form of a status reason for the TUI footer: the part before any "(...)". */
 export function sandboxFooterReason(reason: string): string {
+	// A footer word, not a sentence: the hint caps share the row (footer-clicks test).
+	const CODES: [RegExp, string][] = [
+		[/^EIGHT_SEATBELT=0/, "turned off"],
+		[/sandbox-exec missing/, "no sandbox-exec"],
+		[/already sandboxes/, "nested"],
+		[/bwrap not installed/, "no bwrap"],
+		[/bwrap cannot/, "no namespaces"],
+		[/^no OS sandbox on /, "unsupported OS"],
+	];
+	for (const [re, code] of CODES) if (re.test(reason)) return code;
 	const short = reason.split(" (")[0]?.trim() || reason;
-	return short.length > 40 ? `${short.slice(0, 39)}…` : short;
+	return short.length > 16 ? `${short.slice(0, 15)}…` : short;
 }
 
 /**

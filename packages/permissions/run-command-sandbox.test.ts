@@ -315,11 +315,12 @@ describe("wrapping", () => {
 		}
 	});
 
-	test("the footer reason is the short clause", () => {
-		expect(sandboxFooterReason("host already sandboxes this process (sandbox-exec cannot nest)")).toBe(
-			"host already sandboxes this process",
-		);
-		expect(sandboxFooterReason("EIGHT_SEATBELT=0")).toBe("EIGHT_SEATBELT=0");
+	test("the footer reason is a short code", () => {
+		expect(sandboxFooterReason("host already sandboxes this process (sandbox-exec cannot nest)")).toBe("nested");
+		expect(sandboxFooterReason("EIGHT_SEATBELT=0")).toBe("turned off");
+		expect(sandboxFooterReason("bwrap not installed")).toBe("no bwrap");
+		expect(sandboxFooterReason("no OS sandbox on win32")).toBe("unsupported OS");
+		expect(sandboxFooterReason("something new and rather long").length).toBeLessThanOrEqual(16);
 	});
 
 		test("bwrap args bind only protected paths that exist, read-only", () => {
