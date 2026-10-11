@@ -20,6 +20,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 export interface PromptTemplate {
@@ -31,9 +32,16 @@ export interface PromptTemplate {
 }
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** A template larger than this is skipped. */
+export const MAX_TEMPLATE_BYTES = 64 * 1024;
 
+/** ~/.8gent/prompts. Throws when there is no absolute home directory, rather than guess. */
 export function defaultPromptsDir(): string {
-	return path.join(process.env.HOME || process.env.USERPROFILE || "~", ".8gent", "prompts");
+	const home = os.homedir();
+	if (!home || !path.isAbsolute(home)) {
+		throw new Error(`no absolute home directory (got "${home}"); not loading prompt templates`);
+	}
+	return path.join(home, ".8gent", "prompts");
 }
 
 /** Split an optional leading "---" front matter block from the body. */
@@ -47,17 +55,27 @@ export function parseTemplate(text: string): { description: string; body: string
 
 /**
  * Templates in the folders given, later folders winning on a name clash.
- * Files whose name is not a valid command name are skipped. Sorted by name.
+ * Files whose name is not a valid command name, and files over
+ * MAX_TEMPLATE_BYTES, are skipped. Names are case-insensitive: inside one
+ * folder, files are read in sorted order and the first of a case collision
+ * (Review.md before review.md) wins, whatever order the disk lists them in.
+ * Sorted by name.
  */
 export function loadPromptTemplates(dirs: string[] = [defaultPromptsDir()]): PromptTemplate[] {
 	const byName = new Map<string, PromptTemplate>();
 	for (const dir of dirs) {
 		if (!fs.existsSync(dir)) continue;
-		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		const seen = new Set<string>();
+		const entries = fs
+			.readdirSync(dir, { withFileTypes: true })
+			.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+		for (const entry of entries) {
 			if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".md") continue;
 			const name = path.basename(entry.name, path.extname(entry.name)).toLowerCase();
-			if (!NAME.test(name)) continue;
+			if (!NAME.test(name) || seen.has(name)) continue;
 			const file = path.join(dir, entry.name);
+			if (fs.statSync(file).size > MAX_TEMPLATE_BYTES) continue;
+			seen.add(name);
 			const { description, body } = parseTemplate(fs.readFileSync(file, "utf-8"));
 			byName.set(name, { name, description, body, file });
 		}

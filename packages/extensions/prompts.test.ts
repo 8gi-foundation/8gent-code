@@ -1,8 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	MAX_TEMPLATE_BYTES,
+	defaultPromptsDir,
 	expandPromptCommand,
 	expandTemplate,
 	loadPromptTemplates,
@@ -52,5 +54,37 @@ describe("prompt templates", () => {
 			body: "Body",
 		});
 		expect(parseTemplate("Just a body")).toEqual({ description: "", body: "Just a body" });
+	});
+
+	test("a template over the size cap is skipped", () => {
+		const dir = join(root, "big");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "huge.md"), "x".repeat(MAX_TEMPLATE_BYTES + 1));
+		writeFileSync(join(dir, "ok.md"), "fine");
+		expect(loadPromptTemplates([dir]).map((t) => t.name)).toEqual(["ok"]);
+	});
+
+	test("a case collision resolves by sorted name, not by disk order", () => {
+		const dir = join(root, "case");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "Review.md"), "UPPER");
+		writeFileSync(join(dir, "review.md"), "lower");
+		const files = readdirSync(dir);
+		const first = loadPromptTemplates([dir]);
+		expect(first).toEqual(loadPromptTemplates([dir]));
+		expect(first).toHaveLength(1);
+		// Case-sensitive disk: two files, "Review.md" sorts first and wins.
+		// Case-insensitive disk: one file holding the second write.
+		expect(first[0].body).toBe(files.length === 2 ? "UPPER" : "lower");
+	});
+
+	test("arguments are inserted once, never expanded again", () => {
+		expect(expandTemplate("Review $1. All: $ARGUMENTS", '"$ARGUMENTS" $(id) $& $1')).toBe(
+			'Review $ARGUMENTS. All: "$ARGUMENTS" $(id) $& $1',
+		);
+	});
+
+	test("the default folder comes from the OS home directory", () => {
+		expect(defaultPromptsDir()).toBe(join(homedir(), ".8gent", "prompts"));
 	});
 });
