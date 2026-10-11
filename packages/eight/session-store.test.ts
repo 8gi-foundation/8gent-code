@@ -57,6 +57,45 @@ describe("SessionStore file format", () => {
 		expect(SessionStore.open(s.id, dir)?.messages()).toEqual([user("one")]);
 	});
 
+	test("a torn last line followed by two appends: the fragment is cut, every later line survives", () => {
+		const s = SessionStore.create({ cwd: dir }, dir);
+		s.append(user("a"));
+		fs.appendFileSync(s.file, '{"type":"message","id":"zz","par');
+		SessionStore.open(s.id, dir)?.append(user("b"));
+		SessionStore.open(s.id, dir)?.append(user("c"));
+		const text = fs.readFileSync(s.file, "utf-8");
+		expect(text).not.toContain('"zz"');
+		expect(text.endsWith("\n")).toBe(true);
+		expect(SessionStore.open(s.id, dir)?.messages()).toEqual([user("a"), user("b"), user("c")]);
+	});
+
+	test("create never overwrites or follows what is already at the path", () => {
+		const s = SessionStore.create({ cwd: dir, id: "fixed1" }, dir);
+		s.append(user("kept"));
+		// Same explicit id again (a racing migration): reopens, keeps the history.
+		const again = SessionStore.create({ cwd: dir, id: "fixed1" }, dir);
+		expect(again.messages()).toEqual([user("kept")]);
+		if (process.platform === "win32") return;
+		// A planted symlink is not followed: create refuses rather than writing through it.
+		const target = path.join(dir, "victim.txt");
+		fs.writeFileSync(target, "untouched");
+		fs.symlinkSync(target, path.join(treeDir(dir), "planted.jsonl"));
+		expect(() => SessionStore.create({ cwd: dir, id: "planted" }, dir)).toThrow();
+		expect(fs.readFileSync(target, "utf-8")).toBe("untouched");
+	});
+
+	test("a __proto__ key in a session_info line pollutes nothing", () => {
+		const s = SessionStore.create({ cwd: dir }, dir);
+		fs.appendFileSync(
+			s.file,
+			'{"type":"session_info","ts":"t","__proto__":{"polluted":1},"name":"ok"}\n',
+		);
+		const re = SessionStore.open(s.id, dir) as SessionStore;
+		expect(re.name).toBe("ok");
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+		expect((re as unknown as Record<string, unknown>).polluted).toBeUndefined();
+	});
+
 	test("open refuses ids that are not plain file names", () => {
 		expect(SessionStore.open("../etc/passwd", dir)).toBeNull();
 	});

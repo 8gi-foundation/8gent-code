@@ -124,7 +124,7 @@ export function normalizeCwd(cwd: string): string {
 	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-function writeOwnerOnly(file: string, text: string, flag: "w" | "a"): void {
+function writeOwnerOnly(file: string, text: string, flag: "wx" | "a"): void {
 	// Owner-only: transcripts carry whatever was said and pasted (#3929).
 	fs.writeFileSync(file, text, { mode: 0o600, flag });
 }
@@ -157,6 +157,12 @@ export class SessionStore {
 	private order: string[] = [];
 	private info: Omit<InfoLine, "type" | "ts"> = {};
 	private _leafId: string | null = null;
+	/**
+	 * Byte length of the file up to its last newline when it was opened with a
+	 * torn last line (a crash mid-write). The first write cuts the file back to
+	 * this length so the new line does not get glued onto the fragment.
+	 */
+	private tornAt: number | null = null;
 
 	private constructor(sessionsDir: string, header: SessionHeader) {
 		this.sessionsDir = sessionsDir;
@@ -195,8 +201,19 @@ export class SessionStore {
 			...(opts.parentSession ? { parentSession: opts.parentSession } : {}),
 		};
 		const store = new SessionStore(sessionsDir, header);
-		if (fs.existsSync(store.file)) throw new Error(`session ${id} already exists`);
-		writeOwnerOnly(store.file, `${JSON.stringify(header)}\n`, "w");
+		try {
+			// "wx": fails if anything (a file, a planted symlink) is already there.
+			writeOwnerOnly(store.file, `${JSON.stringify(header)}\n`, "wx");
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+			// Same id created by someone else first (two writers migrating one
+			// session): that session is the one to use. A random id collision
+			// gets a fresh id instead of joining a stranger's session.
+			if (opts.id === undefined) return SessionStore.create({ ...opts }, sessionsDir);
+			const existing = SessionStore.open(id, sessionsDir);
+			if (!existing) throw err;
+			return existing;
+		}
 		if (opts.name) store.rename(opts.name);
 		return store;
 	}
@@ -216,6 +233,10 @@ export class SessionStore {
 		if (!header || header.type !== "session") throw new Error(`missing session header in ${file}`);
 		const store = new SessionStore(sessionsDir, header);
 		for (const line of lines.slice(1)) store.apply(line);
+		if (!text.endsWith("\n")) {
+			const cut = text.lastIndexOf("\n") + 1;
+			store.tornAt = Buffer.byteLength(text.slice(0, cut));
+		}
 		return store;
 	}
 
@@ -377,6 +398,10 @@ export class SessionStore {
 	}
 
 	private write(line: TreeEntry | MetaLine): void {
+		if (this.tornAt !== null) {
+			fs.truncateSync(this.file, this.tornAt);
+			this.tornAt = null;
+		}
 		writeOwnerOnly(this.file, `${JSON.stringify(line)}\n`, "a");
 		this.apply(line);
 	}
@@ -393,8 +418,11 @@ export class SessionStore {
 				this._leafId = line.target;
 				break;
 			case "session_info": {
-				const { type: _t, ts: _ts, ...rest } = line;
-				Object.assign(this.info, rest);
+				// Field by field: a "__proto__" key in the file must not reach any prototype.
+				if (typeof line.name === "string") this.info.name = line.name;
+				if (typeof line.model === "string") this.info.model = line.model;
+				if (typeof line.provider === "string") this.info.provider = line.provider;
+				if (typeof line.branch === "string") this.info.branch = line.branch;
 				break;
 			}
 			default:
