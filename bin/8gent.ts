@@ -6,7 +6,9 @@
  * "Never hit usage caps again"
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1289,12 +1291,44 @@ async function tuiCommand(args: string[]) {
  */
 async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+	// A compiled binary may have no Bun on PATH. It is itself a Bun runtime:
+	// BUN_BE_BUN=1 makes it behave as the `bun` CLI, so it runs the TUI bundle.
+	const proc = MODULE_IS_EMBEDDED
+		? spawn(process.execPath, ["run", tuiPath, ...args], {
+				stdio: "inherit",
+				env: { ...process.env, BUN_BE_BUN: "1" },
+			})
+		: spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);
 		process.exit(1);
 	});
 	proc.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+}
+
+/**
+ * The compiled binary carries its own TUI bundle (scripts/build-binaries.ts
+ * embeds dist/tui.js, #2975). Bun can only execute a real file, so write it
+ * once to ~/.8gent/cache/tui-<content hash>.js and reuse it on later launches.
+ * Returns null outside a compiled binary or if the cache is not writable.
+ */
+function extractEmbeddedTui(): string | null {
+	const asset = (globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI;
+	if (typeof asset !== "string") return null;
+	try {
+		const bytes = fs.readFileSync(asset);
+		const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+		const dir = path.join(os.homedir(), ".8gent", "cache");
+		const target = path.join(dir, `tui-${hash}.js`);
+		if (fs.existsSync(target) && fs.statSync(target).size === bytes.length) return target;
+		fs.mkdirSync(dir, { recursive: true });
+		const tmp = `${target}.${process.pid}.tmp`;
+		fs.writeFileSync(tmp, bytes);
+		fs.renameSync(tmp, target);
+		return target;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -1311,6 +1345,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
  * of spawning bun against a phantom path.
  */
 function resolveTuiEntry(): string | null {
+	const embedded = extractEmbeddedTui();
+	if (embedded) return embedded;
 	for (const dir of [MODULE_DIR, EXEC_DIR]) {
 		const bundled = path.join(dir, "tui.js");
 		if (fs.existsSync(bundled)) return bundled;

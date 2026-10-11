@@ -89,10 +89,11 @@ jobs:
           .\dist\bin\8gent-windows-x64.exe --version
           .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
 
-      - name: Compiled binary finds the TUI bundle next to it
+      # The TUI is embedded in the .exe (#2975): nothing is copied next to it
+      # and Bun is not needed on PATH for the launch.
+      - name: Compiled binary starts the embedded TUI
         shell: pwsh
         run: |
-          Copy-Item dist\tui.js dist\bin\tui.js
           New-Item empty-stdin.txt -ItemType File -Force | Out-Null
           $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "tui","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput exe-tui.out -RedirectStandardError exe-tui.err -RedirectStandardInput empty-stdin.txt
           if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
