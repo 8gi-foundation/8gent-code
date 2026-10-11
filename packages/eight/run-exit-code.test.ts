@@ -4,15 +4,16 @@
  * OpenAI-compatible endpoint; $HOME is faked.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HONEST_FAILURE_PREFIX, isDenialResult } from "./honesty";
+import { denialIsCause, HONEST_FAILURE_PREFIX, isDenialResult } from "./honesty";
 import {
 	describeLocalTurnFailure,
 	isLocalTurnFailureReply,
 	LOCAL_TURN_ENDPOINT_PREFIX,
 	redactEndpoint,
+	redactUrlsIn,
 } from "./local-turn-error";
 
 const saved: Record<string, string | undefined> = {};
@@ -207,5 +208,63 @@ describe("recogniser and redaction units", () => {
 			expect(field).not.toContain("u:p");
 			expect(field).not.toContain("token=T");
 		}
+	});
+});
+
+const toolCall = (name: string, args: Record<string, unknown>) =>
+	"```tool_call\n" + JSON.stringify({ name, arguments: args }) + "\n```";
+
+describe("#3899 reasons and exit 2 only when a refusal is the cause", () => {
+	test("a clean run that used a tool exits 0", async () => {
+		calls = 0;
+		script = (n) => (n === 0 ? toolCall("write_file", { path: "ok.txt", content: "x" }) : "DONE: wrote ok.txt");
+		const r = await run(live(), "stream-json");
+		expect(r.code).toBe(0);
+		expect(r.events.filter((e) => e.type === "result")[0].subtype).toBe("ok");
+	}, 60_000);
+
+	test("a successful read of a file containing 'permission denied' is not exit 2", async () => {
+		writeFileSync(join(repo, "notes.txt"), "the log said: permission denied, then it worked\n");
+		calls = 0;
+		script = (n) => (n === 0 ? toolCall("read_file", { path: "notes.txt" }) : "DONE: I read notes.txt.");
+		const r = await run(live(), "stream-json");
+		expect(r.code).toBe(0);
+	}, 60_000);
+
+	test("a denial the model recovered from, then a contradicted claim, is exit 1 unverified, not 2", async () => {
+		calls = 0;
+		script = (n) =>
+			n === 0
+				? toolCall("write_file", { path: "/etc/8gent-denied.txt", content: "x" })
+				: n === 1
+					? toolCall("write_file", { path: "fine.txt", content: "x" })
+					: "I successfully created the file 8gent-denied.txt.";
+		const r = await run(live(), "stream-json");
+		expect(r.code).toBe(1);
+		const res = r.events.filter((e) => e.type === "result")[0];
+		expect(res.reason).toBe("unverified");
+		expect(Array.isArray(res.unverified)).toBe(true);
+		expect(res.unverified.length).toBeGreaterThan(0);
+	}, 60_000);
+});
+
+describe("denial classifier and redaction edge cases", () => {
+	test("connection refused is an outage, not a denial", () => {
+		expect(isDenialResult("curl: (7) Connection refused")).toBe(false);
+		expect(denialIsCause([{ name: "run_command", result: "Error: curl: (7) Connection refused" }])).toBe(false);
+	});
+	test("denialIsCause: all action tools refused yes; one recovered no; non-action output ignored", () => {
+		const blocked = { name: "write_file", result: "[TOOLG8 BLOCKED] write_file did NOT run." };
+		expect(denialIsCause([blocked])).toBe(true);
+		expect(denialIsCause([blocked, { name: "write_file", result: "Wrote a.txt" }])).toBe(false);
+		expect(denialIsCause([{ name: "read_file", result: "permission denied inside the file" }])).toBe(false);
+		expect(denialIsCause([])).toBe(false);
+	});
+	test("scheme-less credentials in a raw error are redacted", () => {
+		const out = redactUrlsIn("connect ECONNREFUSED user:hunter2@127.0.0.1:11434 and http://a:b@h/x?t=1");
+		expect(out).not.toContain("hunter2");
+		expect(out).not.toContain("a:b");
+		expect(out).not.toContain("t=1");
+		expect(out).toContain("127.0.0.1:11434");
 	});
 });

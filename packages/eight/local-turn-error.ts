@@ -64,7 +64,12 @@ export const LOCAL_TURN_ENDPOINT_PREFIX = "The local model endpoint (";
 export const LOCAL_TURN_MODEL_PREFIX = "The local model (";
 
 /** Why a headless turn failed, as `8gent run` reports it (#3899). */
-export type TurnFailureReason = "unreachable" | "turn_failed" | "denied";
+export type TurnFailureReason =
+	| "unreachable"
+	| "turn_failed"
+	| "denied"
+	| "unverified"
+	| "stopped_early";
 
 /**
  * An endpoint URL that is safe to print: no username, password, query or
@@ -86,7 +91,12 @@ export function redactEndpoint(endpoint: string): string {
 
 /** Redact every http(s) URL inside free text (a raw fetch error may repeat the endpoint). */
 export function redactUrlsIn(text: string): string {
-	return text.replace(/https?:\/\/[^\s)"']+/g, (m) => redactEndpoint(m));
+	return (
+		text
+			.replace(/https?:\/\/[^\s)"']+/g, (m) => redactEndpoint(m))
+			// Scheme-less userinfo, e.g. "user:pass@host:11434" in a raw error.
+			.replace(/\b[\w.~%+-]+:[^\s@/:]+@(?=[\w.-]+)/g, "")
+	);
 }
 
 export function describeLocalTurnFailure(

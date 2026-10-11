@@ -566,6 +566,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 					type: "result",
 					subtype: "error",
 					reason: turnFailure?.reason ?? "turn_failed",
+					...(turnFailure?.unverified?.length ? { unverified: turnFailure.unverified } : {}),
 					session_id: sessionId,
 					ended_at: new Date().toISOString(),
 					error: finalText,

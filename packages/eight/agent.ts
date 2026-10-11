@@ -69,7 +69,7 @@ import {
 	ProactiveCompression,
 	type ProactiveResult,
 } from "./compaction";
-import { type ToolLedgerEntry, enforceAgenticHonesty, isDenialResult, isErrorToolResult } from "./honesty";
+import { type ToolLedgerEntry, denialIsCause, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
@@ -320,8 +320,8 @@ export class Agent {
 	 * Set by the harness, never from model text, when the last chat() turn
 	 * failed (#3899). `8gent run` reads it for its exit code.
 	 */
-	private lastTurnFailure: { reason: TurnFailureReason; message: string } | null = null;
-	getLastTurnFailure(): { reason: TurnFailureReason; message: string } | null {
+	private lastTurnFailure: { reason: TurnFailureReason; message: string; unverified?: string[] } | null = null;
+	getLastTurnFailure(): { reason: TurnFailureReason; message: string; unverified?: string[] } | null {
 		return this.lastTurnFailure;
 	}
 	/**
@@ -1308,8 +1308,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// (#3899). Structured: set from the loop's result, never from reply text.
 		if (!this.lastTurnFailure && (breakerStop !== null || agentResult.unverified.length > 0)) {
 			this.lastTurnFailure = {
-				reason: agentResult.toolLog.some((e) => isDenialResult(e.result)) ? "denied" : "turn_failed",
+				// Denied only when refusals are why nothing happened, not when the
+				// model recovered from one (8PO review, #3901).
+				reason: denialIsCause(agentResult.toolLog)
+					? "denied"
+					: breakerStop !== null
+						? "stopped_early"
+						: "unverified",
 				message: content,
+				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
 			};
 		}
 		const flavoredContent =
