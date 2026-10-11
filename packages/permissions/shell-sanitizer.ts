@@ -79,6 +79,87 @@ export function hasUnquotedAmpersand(
 	return false;
 }
 
+interface QuoteScan {
+	balanced: boolean;
+	/** The command with quoted content removed (the quote marks stay). */
+	outside: string;
+	/** Content of each double-quoted span: bash still expands `$(` and backticks there. */
+	doubled: string[];
+}
+
+/**
+ * POSIX quote scan (#3879). `;`, `&&`, `||` inside quotes are data, and `$(`
+ * or a backtick inside SINGLE quotes is data; inside double quotes bash still
+ * expands them, so the caller keeps refusing those. A backslash only escapes a
+ * quote mark or another backslash here, so `\;` and `\$(` stay refused as before.
+ * `$'...'` (ANSI-C) is a single-quote span in which `\'` does not close it.
+ * An unterminated quote makes `balanced` false and the command is refused.
+ */
+function scanQuotes(command: string): QuoteScan {
+	let outside = "";
+	const doubled: string[] = [];
+	let mode: "none" | "single" | "ansi" | "double" = "none";
+	let dq = "";
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (mode === "single") {
+			if (ch === "'") {
+				mode = "none";
+				outside += ch;
+			}
+			continue;
+		}
+		if (mode === "ansi") {
+			if (ch === "\\") i++;
+			else if (ch === "'") {
+				mode = "none";
+				outside += ch;
+			}
+			continue;
+		}
+		if (mode === "double") {
+			if (ch === "\\" && (command[i + 1] === '"' || command[i + 1] === "\\")) {
+				i++;
+				continue;
+			}
+			if (ch === '"') {
+				doubled.push(dq);
+				dq = "";
+				mode = "none";
+				outside += ch;
+				continue;
+			}
+			dq += ch;
+			continue;
+		}
+		if (ch === "\\" && (command[i + 1] === '"' || command[i + 1] === "'" || command[i + 1] === "\\")) {
+			i++;
+			continue;
+		}
+		if (ch === "'") {
+			mode = command[i - 1] === "$" ? "ansi" : "single";
+			outside += ch;
+			continue;
+		}
+		if (ch === '"') {
+			mode = "double";
+			outside += ch;
+			continue;
+		}
+		outside += ch;
+	}
+	return { balanced: mode === "none", outside, doubled };
+}
+
+/** The first heredoc starts a body that is not shell text; split it off so its apostrophes do not unbalance the scan. */
+function splitHeredoc(command: string): { head: string; body: string } {
+	const m = /<<-?\s*(['"]?)[A-Za-z_]\w*\1/.exec(command);
+	if (!m) return { head: command, body: "" };
+	const nl = command.indexOf("\n", m.index);
+	if (nl < 0) return { head: command, body: "" };
+	return { head: command.slice(0, nl), body: command.slice(nl) };
+}
+
 /**
  * Validate a command before it reaches the shell.
  * Returns { safe: false, reason } for a blocked command.
@@ -87,14 +168,32 @@ export function sanitizeShellCommand(
 	command: string,
 	platform: NodeJS.Platform = process.platform,
 ): ShellSanitizeResult {
+	// POSIX: text inside quotes is data (#3879). Windows keeps the strict whole-line rules.
+	let text = command;
+	if (platform !== "win32") {
+		const { head, body } = splitHeredoc(command);
+		const scan = scanQuotes(head);
+		if (!scan.balanced) {
+			return { safe: false, reason: "Unbalanced quotes in the command, so it cannot be checked" };
+		}
+		// Bash still expands these inside double quotes.
+		if (scan.doubled.some((d) => /\$\(/.test(d))) {
+			return { safe: false, reason: "Command substitution $(...) is not allowed" };
+		}
+		if (scan.doubled.some((d) => d.includes("`"))) {
+			return { safe: false, reason: "Command substitution via backticks is not allowed" };
+		}
+		text = scan.outside + body;
+	}
+
 	// Block command substitution: $(...) and backticks
-	if (/\$\(/.test(command)) {
+	if (/\$\(/.test(text)) {
 		return {
 			safe: false,
 			reason: "Command substitution $(...) is not allowed",
 		};
 	}
-	if (/`/.test(command)) {
+	if (/`/.test(text)) {
 		return {
 			safe: false,
 			reason: "Command substitution via backticks is not allowed",
@@ -102,7 +201,7 @@ export function sanitizeShellCommand(
 	}
 
 	// Block semicolon chaining: ; cmd
-	if (/;/.test(command)) {
+	if (/;/.test(text)) {
 		return {
 			safe: false,
 			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
@@ -110,13 +209,13 @@ export function sanitizeShellCommand(
 	}
 
 	// Block && and || chaining
-	if (/&&/.test(command)) {
+	if (/&&/.test(text)) {
 		return {
 			safe: false,
 			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
 		};
 	}
-	if (/\|\|/.test(command)) {
+	if (/\|\|/.test(text)) {
 		return {
 			safe: false,
 			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",

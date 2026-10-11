@@ -110,8 +110,8 @@ describe("sanitizeShellCommand: other rules unchanged", () => {
 			);
 		}
 	});
-	test("&& inside quotes is still blocked (rule is unchanged)", () => {
-		expect(sanitizeShellCommand('echo "a&&b"', "linux").safe).toBe(false);
+	test("&& inside quotes is data (#3879)", () => {
+		expect(sanitizeShellCommand('echo "a&&b"', "linux").safe).toBe(true);
 	});
 	test("|| ; $() and backticks still blocked", () => {
 		expect(sanitizeShellCommand("a || b").reason).toContain("||");
@@ -177,5 +177,75 @@ describe("run_command entry points route through the shared sanitizer", () => {
 		expect(a).toContain("amp&ok");
 		const b = await callSdk({ command: 'echo "amp&ok"' });
 		expect(b).toContain("amp&ok");
+	});
+});
+
+describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
+	const ok = (c: string) => expect(sanitizeShellCommand(c, "linux")).toEqual({ safe: true });
+	const no = (c: string, why?: string) => {
+		const r = sanitizeShellCommand(c, "linux");
+		expect(r.safe).toBe(false);
+		if (why) expect(r.reason).toContain(why);
+	};
+
+	test("the 04:46:33 pilot shape passes", () => {
+		ok(
+			'curl -sS -X POST "$B/sendMessage" --data-urlencode "chat_id=-100" --data-urlencode "text=$\'Run done.\\nChecks 11/12 passed; 487 seconds.\\nOld backups prune failed.\'"',
+		);
+	});
+	test("; && || inside double or single quotes are data", () => {
+		ok('echo "a; b"');
+		ok("echo 'a; b'");
+		ok('echo "a && b || c"');
+		ok("echo 'a && b || c'");
+		ok("grep 'x;y' file | wc -l");
+	});
+	test("$( and backticks inside single quotes are data", () => {
+		ok("echo '$(id)'");
+		ok("echo '`id`'");
+		ok("echo '$(id) ; x'");
+	});
+	test("$( and backticks inside double quotes are still refused (bash expands them)", () => {
+		no('echo "$(id)"', "$(...)");
+		no('echo "x `id` y"', "backticks");
+		no('echo "a; $(id)"', "$(...)");
+	});
+	test("real chaining outside quotes is still refused", () => {
+		no("a; b", "Semicolon");
+		no("a && b", "&&");
+		no("a || b", "||");
+		no("echo $(id)", "$(...)");
+		no("echo `id`", "backticks");
+		no('echo "ok"; id', "Semicolon");
+		no("echo 'ok' && id", "&&");
+		no('echo "ok" || id', "||");
+		no("echo 'x'$(id)", "$(...)");
+	});
+	test("a quote mark does not hide chaining after it closes", () => {
+		no("echo 'a'; rm x", "Semicolon");
+		no('echo "a";rm x', "Semicolon");
+	});
+	test("escaped quotes do not open or close a span", () => {
+		ok('echo "say \\"hi; there\\""');
+		no("echo \\'; id", "Semicolon");
+		no('echo \\"; id', "Semicolon");
+		ok("echo it\\'s fine");
+	});
+	test("ANSI-C $'...' keeps \\' inside the span", () => {
+		ok("echo $'it\\'s; fine'");
+		no("echo $'a'; id", "Semicolon");
+	});
+	test("unbalanced quotes fail closed", () => {
+		no("echo 'abc", "Unbalanced");
+		no('echo "abc', "Unbalanced");
+		no("echo $'abc", "Unbalanced");
+		no("echo it's", "Unbalanced");
+	});
+	test("a heredoc body is not quote-scanned, but its text keeps the strict rules", () => {
+		ok("cat <<'EOF'\nit's fine\nEOF");
+		no("cat <<'EOF'\nrun; id\nEOF", "Semicolon");
+	});
+	test("Windows keeps the strict whole-line rules", () => {
+		expect(sanitizeShellCommand('echo "a; b"', "win32").safe).toBe(false);
 	});
 });
