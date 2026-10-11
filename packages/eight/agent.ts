@@ -2546,7 +2546,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// ── Verify-before-done (issue #3550, EIGHT_VERIFY_GATE=1) ────────
 			// A turn that changed files and checked nothing since gets one more
 			// generate with a nudge to run the most targeted check first. Off by
-			// default; a failed or empty follow-up keeps the first reply.
+			// default; a failed or empty follow-up keeps the first reply. The
+			// retired-fact nudge (#3811) rides this same branch even with the gate
+			// off: it costs one extra generate only when a retired token is left in
+			// a file that drew a warning. With the gate on and nudging, its nudge wins.
 			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
 				console.log("[verify-gate] change not checked yet - asking for one targeted check");

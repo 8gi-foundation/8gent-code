@@ -227,6 +227,22 @@ describe("turn-end nudge (#3811 step 2)", () => {
 		expect(ex.retiredTurnEndNudge()).toContain("b.txt");
 	});
 
+	test("a FIFO and an oversize file give no nudge and do not hang", async () => {
+		const dir = tempDir("retired-nudge-nonreg-");
+		fs.writeFileSync(path.join(dir, "NOTES.md"), NOTES);
+		const ex = new ToolExecutor(dir);
+		await ex.execute("read_file", { path: "NOTES.md" });
+		await ex.execute("write_file", { path: "fifo.txt", content: draft });
+		await ex.execute("write_file", { path: "big.txt", content: draft });
+		const fifo = path.join(dir, "fifo.txt");
+		fs.rmSync(fifo);
+		Bun.spawnSync(["mkfifo", fifo]);
+		fs.writeFileSync(path.join(dir, "big.txt"), `${draft}\n${"x".repeat(1_100_000)}`);
+		const t0 = performance.now();
+		expect(ex.retiredTurnEndNudge()).toBeNull();
+		expect(performance.now() - t0).toBeLessThan(2000);
+	});
+
 	test("both the text-tool and the native path send agent.turnEndNudge()", () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf-8");
 		expect(src).toContain("finalCheck: () => this.turnEndNudge()");
