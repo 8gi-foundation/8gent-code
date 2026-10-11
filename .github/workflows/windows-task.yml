@@ -58,21 +58,19 @@ jobs:
       - name: Compile standalone Windows binary
         run: bun run scripts/build-binaries.ts --only=bun-windows-x64
 
-      - name: Start stub model server
-        shell: pwsh
-        run: |
-          $bun = (Get-Command bun).Source
-          $p = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8189" -NoNewWindow -PassThru -RedirectStandardOutput stub.out -RedirectStandardError stub.err
-          "STUB_PID=$($p.Id)" | Out-File -Append $env:GITHUB_ENV
-          for ($i = 0; $i -lt 30; $i++) {
-            try { Invoke-RestMethod http://127.0.0.1:8189/v1/models | Out-Null; "stub up"; exit 0 } catch { Start-Sleep -Seconds 1 }
-          }
-          Get-Content stub.out, stub.err -ErrorAction SilentlyContinue
-          throw "stub model server did not come up"
-
       - name: Run one task with the exe, Bun off PATH
         shell: pwsh
         run: |
+          # Stub starts in this same step so its lifetime cannot depend on step teardown.
+          $bun = (Get-Command bun).Source
+          $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8189" -NoNewWindow -PassThru -RedirectStandardOutput stub.out -RedirectStandardError stub.err
+          "STUB_PID=$($stub.Id)" | Out-File -Append $env:GITHUB_ENV
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8189/v1/models | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Get-Content stub.out, stub.err -ErrorAction SilentlyContinue; throw "stub model server did not come up" }
+          "stub up (pid $($stub.Id), alive=$(-not $stub.HasExited))"
           # Take every directory that holds bun out of PATH for this step.
           $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
           if (Get-Command bun -ErrorAction SilentlyContinue) { throw "bun is still on PATH" }
@@ -82,7 +80,8 @@ jobs:
           $env:OLLAMA_HOST = "http://127.0.0.1:8189"
           & $exe run --yes --provider ollama --model stub --cwd $work "Create hello.txt" 2>&1 | Tee-Object -FilePath task.log
           $code = $LASTEXITCODE
-          "exit code: $code"
+          "exit code: $code; stub alive=$(-not $stub.HasExited)"
+          Invoke-RestMethod http://127.0.0.1:8189/v1/models | ConvertTo-Json -Compress
           if ($code -ne 0) { throw "run exited $code" }
           $f = Join-Path $work "hello.txt"
           if (-not (Test-Path $f)) { throw "hello.txt was not written" }
