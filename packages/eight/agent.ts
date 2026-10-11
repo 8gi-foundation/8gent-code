@@ -185,6 +185,11 @@ import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
 
+/** At most this many steers wait at once (D1); more are refused. */
+export const MAX_STEERS = 8;
+/** Largest steer accepted, in UTF-8 bytes. */
+export const MAX_STEER_BYTES = 16 * 1024;
+
 /**
  * Did the harness refuse this call before it ran (#3409)? Decided from the
  * call itself, never from the tool's output: a command that ran can print
@@ -291,8 +296,15 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
-	/** Steering messages (D1) waiting for the running turn's next model call. */
-	private steerQueue: string[] = [];
+	/**
+	 * Steering messages (D1), each stamped with the turn it was sent during
+	 * (null: sent while no turn ran). Only the running turn's own steers are
+	 * ever delivered into it.
+	 */
+	private steerQueue: Array<{ text: string; turn: number | null }> = [];
+	/** Id of the turn running now, or null between turns. */
+	private activeTurn: number | null = null;
+	private turnCounter = 0;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -1421,7 +1433,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: this.config.model,
 				baseUrl: this.config.baseUrl,
 			}),
-			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+			async () => {
+				// A new turn: steers left from an earlier turn are stale and are
+				// dropped, never delivered into this one (the caller had its chance
+				// to take them with takeQueuedSteers).
+				const turn = ++this.turnCounter;
+				this.steerQueue = [];
+				this.activeTurn = turn;
+				try {
+					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+				} finally {
+					if (this.activeTurn === turn) this.activeTurn = null;
+				}
+			},
 		);
 	}
 
@@ -2947,16 +2971,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * call, on both the text-tool and the native path. A message sent when no
 	 * further model call comes (the turn is answering, or no turn runs) stays
 	 * queued: read it with takeQueuedSteers() and send it as the next chat().
-	 * Blank text is ignored.
+	 * Blank text is ignored. Returns false when the steer was refused: the
+	 * queue already holds MAX_STEERS, or the text is over MAX_STEER_BYTES.
 	 */
-	steer(text: string): void {
-		if (text.trim() === "") return;
-		this.steerQueue.push(text);
+	steer(text: string): boolean {
+		if (text.trim() === "") return false;
+		if (this.steerQueue.length >= MAX_STEERS) return false;
+		if (Buffer.byteLength(text, "utf8") > MAX_STEER_BYTES) return false;
+		this.steerQueue.push({ text, turn: this.activeTurn });
+		return true;
 	}
 
 	/** Steering messages not delivered yet, in the order they were sent. */
 	queuedSteers(): readonly string[] {
-		return this.steerQueue.slice();
+		return this.steerQueue.map((s) => s.text);
 	}
 
 	/**
@@ -2965,13 +2993,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * the text back to the person to edit).
 	 */
 	takeQueuedSteers(): string[] {
-		return this.steerQueue.splice(0);
+		return this.steerQueue.splice(0).map((s) => s.text);
 	}
 
-	/** Deliver queued steers into the running turn: history, session file, event. */
+	/**
+	 * Deliver this turn's queued steers into it: history, session file, event.
+	 * Nothing is delivered into an aborted turn, and a steer stamped with
+	 * another turn (or none) is never delivered; both stay for takeQueuedSteers.
+	 */
 	private drainSteers(): string[] {
-		if (this.steerQueue.length === 0) return [];
-		const texts = this.steerQueue.splice(0);
+		const controller = this.abortController;
+		if (!controller || controller.signal.aborted) return [];
+		if (this.activeTurn === null) return [];
+		const mine = this.steerQueue.filter((s) => s.turn === this.activeTurn);
+		if (mine.length === 0) return [];
+		this.steerQueue = this.steerQueue.filter((s) => s.turn !== this.activeTurn);
+		const texts = mine.map((s) => s.text);
 		for (const text of texts) {
 			this.messageHistory.push({ role: "user", content: text });
 			this.sessionWriter.writeUserMessage(text);

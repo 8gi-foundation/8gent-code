@@ -137,4 +137,43 @@ describe("Agent.steer (D1 engine)", () => {
 		expect(agent.takeQueuedSteers()).toEqual(["FOLLOW_UP_D1"]);
 		expect(agent.queuedSteers()).toEqual([]);
 	});
+
+	test("the queue is capped: 8 steers, 16 KB each", () => {
+		const agent = build();
+		for (let i = 0; i < 8; i++) expect(agent.steer(`s${i}`)).toBe(true);
+		expect(agent.steer("ninth")).toBe(false);
+		agent.takeQueuedSteers();
+		expect(agent.steer("x".repeat(16 * 1024))).toBe(true);
+		expect(agent.steer("x".repeat(16 * 1024 + 1))).toBe(false);
+		expect(agent.steer("é".repeat(8 * 1024 + 1))).toBe(false);
+	});
+
+	test("a steer left from before a turn is never delivered into it", async () => {
+		bodies.length = 0;
+		const agent = build();
+		agent.steer("STALE_D1");
+		await agent.chat("read notes.txt");
+		for (const b of bodies) expect(JSON.stringify(b).includes("STALE_D1")).toBe(false);
+		expect(agent.queuedSteers()).toEqual([]);
+	});
+
+	test("nothing is delivered into an aborted turn", () => {
+		const agent = build();
+		const internals = agent as unknown as {
+			abortController: AbortController | null;
+			activeTurn: number | null;
+			drainSteers: () => string[];
+		};
+		internals.activeTurn = 7;
+		agent.steer("AFTER_ESC");
+		// steer() stamped it with turn 7; the turn is then aborted.
+		const controller = new AbortController();
+		internals.abortController = controller;
+		controller.abort();
+		expect(internals.drainSteers()).toEqual([]);
+		internals.abortController = null;
+		expect(internals.drainSteers()).toEqual([]);
+		// Still there for the caller to hand back.
+		expect(agent.takeQueuedSteers()).toEqual(["AFTER_ESC"]);
+	});
 });
