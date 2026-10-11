@@ -618,14 +618,16 @@ describe("integration: real agent shell tool entry points", () => {
 	test("ToolExecutor run_command, flag on: forged judge answer is blocked and NOT executed", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
 		const out = await executor.execute("run_command", { command: FORGED });
-		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		// The new lines in FORGED are now refused by the sanitiser (#3879) before System One;
+		// either layer stopping it is the point. The judge-prompt forgery is covered at the gate in guard tests.
+		expect(out.startsWith(SYSTEM_ONE_BLOCK_MARKER) || out.startsWith("[BLOCKED]")).toBe(true);
 		expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 	});
 
 	test("AI SDK run_command, flag on: forged judge answer is blocked and NOT executed", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
 		const out = await callSdk("run_command", { command: FORGED });
-		expect(out).toStartWith(SYSTEM_ONE_BLOCK_MARKER);
+		expect(out.startsWith(SYSTEM_ONE_BLOCK_MARKER) || out.startsWith("[BLOCKED]")).toBe(true);
 		expect(existsSync(join(dir, "victim.txt"))).toBe(true);
 	});
 
