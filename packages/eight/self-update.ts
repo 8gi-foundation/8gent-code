@@ -16,11 +16,19 @@
  * offline. bin/8gent.ts (lane L3) wires `runSelfUpdate` into `8gent update`.
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
 export const GITHUB_REPO = "8gi-foundation/8gent-code";
+
+/**
+ * Release signing key (minisign public key, base64). Kept identical to
+ * scripts/release-signing.pub by self-update.test.ts. Empty until the
+ * maintainer generates the release key; while empty, SHA256SUMS is not
+ * signature-checked (the SHA256 and --version checks still apply).
+ */
+export const RELEASE_SIGNING_KEY = "";
 
 export type InstallChannel = "binary" | "npm" | "source";
 
@@ -86,22 +94,90 @@ export function detectChannel(p: ChannelProbe): InstallChannel {
 
 // ── What is available ────────────────────────────────────────────────
 
-export type FetchLike = (
-	url: string,
-	init?: { headers?: Record<string, string> },
-) => Promise<{
+export interface FetchResponse {
 	ok: boolean;
 	status: number;
+	headers: { get(name: string): string | null };
 	json(): Promise<unknown>;
 	arrayBuffer(): Promise<ArrayBuffer>;
 	text(): Promise<string>;
-}>;
+}
+
+export type FetchLike = (
+	url: string,
+	init?: { headers?: Record<string, string>; redirect?: "manual" },
+) => Promise<FetchResponse>;
+
+/** Hosts a GitHub release download may redirect through. */
+const GITHUB_HOSTS = new Set([
+	"github.com",
+	"api.github.com",
+	"objects.githubusercontent.com",
+	"release-assets.githubusercontent.com",
+]);
+
+type UrlKind = "list" | "asset" | "npm";
+
+function isHttps(url: string): URL | null {
+	try {
+		const u = new URL(url);
+		return u.protocol === "https:" ? u : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The first URL of a download: a release list, a release asset, or the npm registry. */
+export function urlAllowed(url: string, kind: UrlKind, repo = GITHUB_REPO): boolean {
+	const u = isHttps(url);
+	if (!u) return false;
+	if (kind === "npm") return u.hostname === "registry.npmjs.org";
+	if (kind === "asset") return url.startsWith(`https://github.com/${repo}/releases/download/`);
+	return true;
+}
+
+/** A redirect hop: https, and to GitHub's download hosts (or the registry for npm). */
+export function hopAllowed(url: string, kind: UrlKind): boolean {
+	const u = isHttps(url);
+	if (!u) return false;
+	return kind === "npm" ? u.hostname === "registry.npmjs.org" : GITHUB_HOSTS.has(u.hostname);
+}
+
+/** GET with redirects followed by hand, so every hop is checked. */
+export async function fetchChecked(
+	fetchImpl: FetchLike,
+	url: string,
+	kind: UrlKind,
+	headers: Record<string, string> = {},
+): Promise<FetchResponse> {
+	if (!urlAllowed(url, kind)) throw new Error(`refusing to download from ${url}`);
+	let current = url;
+	for (let hop = 0; hop <= 5; hop++) {
+		const res = await fetchImpl(current, {
+			headers: { "user-agent": "8gent-self-update", ...headers },
+			redirect: "manual",
+		});
+		if (res.status >= 300 && res.status < 400) {
+			const loc = res.headers.get("location");
+			if (!loc) throw new Error(`redirect without a location from ${current}`);
+			const next = new URL(loc, current).toString();
+			if (!hopAllowed(next, kind)) throw new Error(`refusing a redirect to ${next}`);
+			current = next;
+			continue;
+		}
+		return res;
+	}
+	throw new Error(`too many redirects for ${url}`);
+}
 
 /** npm's `latest` dist-tag. */
 export async function latestFromNpm(fetchImpl: FetchLike): Promise<string> {
-	const res = await fetchImpl(`https://registry.npmjs.org/${NPM_PACKAGE.replace("/", "%2f")}`, {
-		headers: { accept: "application/vnd.npm.install-v1+json" },
-	});
+	const res = await fetchChecked(
+		fetchImpl,
+		`https://registry.npmjs.org/${NPM_PACKAGE.replace("/", "%2f")}`,
+		"npm",
+		{ accept: "application/vnd.npm.install-v1+json" },
+	);
 	if (!res.ok) throw new Error(`npm registry answered ${res.status}`);
 	const body = (await res.json()) as { "dist-tags"?: { latest?: string } };
 	const latest = body["dist-tags"]?.latest;
@@ -110,20 +186,29 @@ export async function latestFromNpm(fetchImpl: FetchLike): Promise<string> {
 	return latest;
 }
 
-/** Release asset name for this platform, as scripts/build-binaries.ts names it. */
-export function binaryAssetName(platform: string, arch: string): string | null {
+/**
+ * Release asset names for this platform, in the order to try them (as
+ * scripts/build-binaries.ts names them). Windows tries the baseline build
+ * (CPUs without AVX2) when the x64 build will not start, like install.ps1.
+ */
+export function binaryAssetNames(platform: string, arch: string): string[] {
 	const a = arch === "arm64" ? "arm64" : arch === "x64" ? "x64" : null;
-	if (!a) return null;
-	if (platform === "win32") return "8gent-windows-x64.exe";
-	if (platform === "darwin") return `8gent-darwin-${a}`;
-	if (platform === "linux") return `8gent-linux-${a}`;
-	return null;
+	if (!a) return [];
+	if (platform === "win32") return ["8gent-windows-x64.exe", "8gent-windows-x64-baseline.exe"];
+	if (platform === "darwin") return [`8gent-darwin-${a}`];
+	if (platform === "linux") return [`8gent-linux-${a}`];
+	return [];
+}
+
+/** The primary asset name for this platform, or null. */
+export function binaryAssetName(platform: string, arch: string): string | null {
+	return binaryAssetNames(platform, arch)[0] ?? null;
 }
 
 export interface ReleaseBinary {
 	version: string;
-	url: string;
-	sumsUrl: string;
+	/** asset name -> download URL, for every asset on the release */
+	urls: Record<string, string>;
 	asset: string;
 }
 
@@ -135,16 +220,16 @@ interface GhRelease {
 }
 
 /**
- * Newest vX.Y.Z GitHub release that carries this platform's binary and
- * SHA256SUMS. Releases without assets (v0.18.1, v0.19.0) are skipped.
+ * Newest published vX.Y.Z GitHub release that carries this platform's binary
+ * and SHA256SUMS. Releases without assets, drafts and prereleases are skipped.
  */
 export async function latestBinaryRelease(
 	fetchImpl: FetchLike,
 	asset: string,
 	releasesUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100`,
 ): Promise<ReleaseBinary | null> {
-	const res = await fetchImpl(releasesUrl, {
-		headers: { accept: "application/vnd.github+json", "user-agent": "8gent-self-update" },
+	const res = await fetchChecked(fetchImpl, releasesUrl, "list", {
+		accept: "application/vnd.github+json",
 	});
 	if (!res.ok) throw new Error(`GitHub releases answered ${res.status}`);
 	const list = (await res.json()) as GhRelease[];
@@ -153,13 +238,51 @@ export async function latestBinaryRelease(
 		if (r.draft || r.prerelease || !r.tag_name) continue;
 		const v = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name)?.[1];
 		if (!v) continue;
-		const bin = r.assets?.find((x) => x.name === asset)?.browser_download_url;
-		const sums = r.assets?.find((x) => x.name === "SHA256SUMS")?.browser_download_url;
-		if (!bin || !sums) continue;
-		if (!best || compareVersions(v, best.version) > 0)
-			best = { version: v, url: bin, sumsUrl: sums, asset };
+		const urls: Record<string, string> = {};
+		for (const a of r.assets ?? []) {
+			if (a.name && a.browser_download_url) urls[a.name] = a.browser_download_url;
+		}
+		if (!urls[asset] || !urls.SHA256SUMS) continue;
+		if (!best || compareVersions(v, best.version) > 0) best = { version: v, urls, asset };
 	}
 	return best;
+}
+
+// ── Signature (minisign) ─────────────────────────────────────────────
+
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+
+/**
+ * Verify a minisign signature file over `message` with a minisign public key
+ * (the base64 line of a .pub file). Supports pure ("Ed") and prehashed
+ * ("ED", BLAKE2b-512) signatures, and checks the trusted-comment signature.
+ */
+export function verifyMinisign(message: Uint8Array, sigFile: string, publicKey: string): boolean {
+	try {
+		const pk = Buffer.from(publicKey.trim(), "base64");
+		if (pk.length !== 42 || pk.subarray(0, 2).toString() !== "Ed") return false;
+		const lines = sigFile.split(/\r?\n/);
+		const sig = Buffer.from((lines[1] ?? "").trim(), "base64");
+		const trusted = lines[2] ?? "";
+		const globalSig = Buffer.from((lines[3] ?? "").trim(), "base64");
+		if (sig.length !== 74 || globalSig.length !== 64) return false;
+		if (!trusted.startsWith("trusted comment: ")) return false;
+		const alg = sig.subarray(0, 2).toString();
+		if (alg !== "Ed" && alg !== "ED") return false;
+		if (!sig.subarray(2, 10).equals(pk.subarray(2, 10))) return false;
+		const key = createPublicKey({
+			key: Buffer.concat([ED25519_SPKI_PREFIX, pk.subarray(10)]),
+			format: "der",
+			type: "spki",
+		});
+		const signed = alg === "ED" ? createHash("blake2b512").update(message).digest() : message;
+		const sigBytes = sig.subarray(10);
+		if (!cryptoVerify(null, signed, key, sigBytes)) return false;
+		const comment = Buffer.from(trusted.slice("trusted comment: ".length));
+		return cryptoVerify(null, Buffer.concat([sigBytes, comment]), key, globalSig);
+	} catch {
+		return false;
+	}
 }
 
 // ── Installing ───────────────────────────────────────────────────────
@@ -174,10 +297,12 @@ export interface SelfUpdateOptions {
 	fetchImpl?: FetchLike;
 	/** Runs a command, resolves to its exit code. */
 	run?: (cmd: string, args: string[], opts: { shell: boolean }) => Promise<number>;
-	/** Runs `<file> --version`, resolves to stdout. */
+	/** Runs `<file> --version` (15 s limit), resolves to stdout. */
 	probeVersion?: (file: string) => Promise<string>;
 	log?: (line: string) => void;
 	releasesUrl?: string;
+	/** Release signing key; defaults to RELEASE_SIGNING_KEY. Tests only. */
+	signingKey?: string;
 }
 
 export type SelfUpdateResult =
@@ -210,15 +335,32 @@ function defaultRun(cmd: string, args: string[], opts: { shell: boolean }): Prom
 	});
 }
 
-function defaultProbe(file: string): Promise<string> {
+export const PROBE_TIMEOUT_MS = 15_000;
+
+/** `<file> --version` with a 15 s limit; a hung binary is killed and reads as "". */
+export function probeVersionWithTimeout(
+	file: string,
+	timeoutMs = PROBE_TIMEOUT_MS,
+): Promise<string> {
 	return new Promise((resolve) => {
 		let out = "";
+		let done = false;
+		const finish = (v: string) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve(v);
+		};
 		const p = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+		const timer = setTimeout(() => {
+			p.kill("SIGKILL");
+			finish("");
+		}, timeoutMs);
 		p.stdout?.on("data", (d) => {
 			out += String(d);
 		});
-		p.on("exit", () => resolve(out));
-		p.on("error", () => resolve(""));
+		p.on("exit", () => finish(out));
+		p.on("error", () => finish(""));
 	});
 }
 
@@ -235,65 +377,98 @@ export function sumFor(sums: string, asset: string): string | null {
 	return null;
 }
 
+async function download(fetchImpl: FetchLike, url: string): Promise<Uint8Array> {
+	if (!urlAllowed(url, "asset"))
+		throw new Error(`refusing a download URL outside ${GITHUB_REPO}'s releases: ${url}`);
+	const res = await fetchChecked(fetchImpl, url, "asset");
+	if (!res.ok) throw new Error(`download failed (${res.status}): ${url}`);
+	return new Uint8Array(await res.arrayBuffer());
+}
+
+/** Put `staged` in place of `target`. Windows renames the running exe aside first, with rollback. */
+function swapInto(staged: string, target: string, platform: string): void {
+	if (platform !== "win32") {
+		renameSync(staged, target);
+		return;
+	}
+	let old = `${target}.old`;
+	try {
+		rmSync(old, { force: true });
+	} catch {
+		old = `${target}.old-${randomBytes(4).toString("hex")}`;
+	}
+	const hadTarget = existsSync(target);
+	if (hadTarget) renameSync(target, old);
+	try {
+		renameSync(staged, target);
+	} catch (err) {
+		if (hadTarget && !existsSync(target)) renameSync(old, target);
+		throw err;
+	}
+}
+
 /**
- * Download, verify and swap the running binary. The new file is checked
- * (SHA256 and its own --version) before the old one is touched. Windows
- * cannot overwrite a running exe but can rename it, so the old one moves to
- * <exe>.old and is cleaned up by the next update.
+ * Download, verify and swap the running binary. Order: signed SHA256SUMS
+ * (when a release key is configured), the binary's SHA256, then the new
+ * binary's own --version; only then is the running one replaced. On Windows
+ * the baseline build is tried when the x64 build will not start.
  */
 async function updateBinary(
 	o: Required<Pick<SelfUpdateOptions, "fetchImpl" | "probeVersion" | "log">> & SelfUpdateOptions,
 	rel: ReleaseBinary,
+	names: string[],
 ): Promise<string | null> {
-	const bin = await o.fetchImpl(rel.url, { headers: { "user-agent": "8gent-self-update" } });
-	if (!bin.ok) return `download failed (${bin.status}): ${rel.url}`;
-	const bytes = new Uint8Array(await bin.arrayBuffer());
-	const sumsRes = await o.fetchImpl(rel.sumsUrl, {
-		headers: { "user-agent": "8gent-self-update" },
-	});
-	if (!sumsRes.ok)
-		return `could not read SHA256SUMS for v${rel.version}; refusing an unverified binary`;
-	const expected = sumFor(await sumsRes.text(), rel.asset);
-	if (!expected)
-		return `SHA256SUMS for v${rel.version} does not list ${rel.asset}; refusing an unverified binary`;
-	const actual = sha256Hex(bytes);
-	if (actual !== expected)
-		return `checksum mismatch for ${rel.asset} (expected ${expected}, got ${actual}); nothing changed`;
-
-	const target = o.execPath;
-	const next = `${target}.new`;
-	const old = `${target}.old`;
-	writeFileSync(next, bytes);
-	try {
-		chmodSync(next, 0o755);
-	} catch {}
-	const reported = /8gent Code v(\d+\.\d+\.\d+)/.exec(await o.probeVersion(next))?.[1];
-	if (reported !== rel.version) {
-		rmSync(next, { force: true });
-		return `the downloaded binary reported '${reported ?? "nothing"}', not v${rel.version}; nothing changed`;
+	const platform = o.platform ?? process.platform;
+	const sumsBytes = await download(o.fetchImpl, rel.urls.SHA256SUMS);
+	const key = (o.signingKey ?? RELEASE_SIGNING_KEY).trim();
+	if (key) {
+		const sigUrl = rel.urls["SHA256SUMS.minisig"];
+		if (!sigUrl) return `v${rel.version} has no SHA256SUMS.minisig; refusing unsigned checksums`;
+		const sig = new TextDecoder().decode(await download(o.fetchImpl, sigUrl));
+		if (!verifyMinisign(sumsBytes, sig, key))
+			return `SHA256SUMS for v${rel.version} does not carry a valid release signature; nothing changed`;
 	}
-	try {
-		rmSync(old, { force: true });
-	} catch {}
-	if ((o.platform ?? process.platform) === "win32") {
-		renameSync(target, old);
+	const sums = new TextDecoder().decode(sumsBytes);
+	const target = o.execPath;
+	let lastProblem = `no ${names.join(" or ")} on v${rel.version}`;
+	for (const name of names) {
+		const url = rel.urls[name];
+		if (!url) continue;
+		const expected = sumFor(sums, name);
+		if (!expected)
+			return `SHA256SUMS for v${rel.version} does not list ${name}; refusing an unverified binary`;
+		const bytes = await download(o.fetchImpl, url);
+		const actual = sha256Hex(bytes);
+		if (actual !== expected)
+			return `checksum mismatch for ${name} (expected ${expected}, got ${actual}); nothing changed`;
+		// A fresh, uniquely named file beside the target, created exclusively (wx).
+		const staged = `${target}.${randomBytes(6).toString("hex")}.new`;
+		writeFileSync(staged, bytes, { flag: "wx", mode: 0o755 });
 		try {
-			renameSync(next, target);
+			chmodSync(staged, 0o755);
+		} catch {}
+		const reported = /8gent Code v(\d+\.\d+\.\d+)/.exec(await o.probeVersion(staged))?.[1];
+		if (reported !== rel.version) {
+			rmSync(staged, { force: true });
+			lastProblem = `${name} reported '${reported ?? "nothing"}', not v${rel.version}`;
+			continue;
+		}
+		try {
+			swapInto(staged, target, platform);
 		} catch (err) {
-			renameSync(old, target);
+			rmSync(staged, { force: true });
 			throw err;
 		}
-	} else {
-		renameSync(next, target);
+		return null;
 	}
-	return null;
+	return `${lastProblem}; nothing changed`;
 }
 
 export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdateResult> {
 	const o = {
 		...opts,
 		fetchImpl: opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike),
-		probeVersion: opts.probeVersion ?? defaultProbe,
+		probeVersion: opts.probeVersion ?? ((f: string) => probeVersionWithTimeout(f)),
 		log: opts.log ?? ((line: string) => console.log(line)),
 	};
 	const platform = o.platform ?? process.platform;
@@ -326,17 +501,18 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 			return { status: "updated", from: d.from, to: d.to, channel: ch };
 		}
 
-		const asset = binaryAssetName(platform, arch);
-		if (!asset)
+		const names = binaryAssetNames(platform, arch);
+		if (names.length === 0)
 			return { status: "failed", channel: ch, message: `no 8gent binary for ${platform}/${arch}` };
-		const rel = await latestBinaryRelease(o.fetchImpl, asset, o.releasesUrl);
-		if (!rel) return { status: "failed", channel: ch, message: `no release carries ${asset} yet` };
+		const rel = await latestBinaryRelease(o.fetchImpl, names[0], o.releasesUrl);
+		if (!rel)
+			return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
 		const d = decideUpdate(o.currentVersion, rel.version);
 		if (d.action === "current") return { status: "current", version: d.version, channel: ch };
 		if (d.action === "refuse-downgrade")
 			return { status: "refused-downgrade", from: d.from, to: d.to, channel: ch };
-		o.log(`Updating 8gent v${d.from} -> v${d.to} (${asset})...`);
-		const err = await updateBinary(o, rel);
+		o.log(`Updating 8gent v${d.from} -> v${d.to} (${names[0]})...`);
+		const err = await updateBinary(o, rel, names);
 		if (err) return { status: "failed", channel: ch, message: err };
 		return { status: "updated", from: d.from, to: d.to, channel: ch };
 	} catch (err) {

@@ -5,37 +5,50 @@
  * found there, even one lower than the version running.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, sign as cryptoSign, generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type FetchLike,
+	PROBE_TIMEOUT_MS,
+	RELEASE_SIGNING_KEY,
 	binaryAssetName,
+	binaryAssetNames,
 	bundledChangelogPath,
 	changelogBetween,
 	compareVersions,
 	decideUpdate,
 	describeResult,
 	detectChannel,
+	hopAllowed,
 	latestBinaryRelease,
 	npmInstallCommand,
+	probeVersionWithTimeout,
 	runSelfUpdate,
 	sumFor,
+	urlAllowed,
+	verifyMinisign,
 } from "./self-update";
 
-type Routes = Record<string, { status?: number; body: unknown }>;
+type Routes = Record<string, { status?: number; body: unknown; location?: string }>;
+type Init = Parameters<FetchLike>[1];
 
-function fakeFetch(routes: Routes): FetchLike & { calls: string[] } {
+function fakeFetch(routes: Routes): FetchLike & { calls: string[]; inits: Init[] } {
 	const calls: string[] = [];
-	const f = (async (url: string) => {
+	const inits: Init[] = [];
+	const f = (async (url: string, init?: Init) => {
 		calls.push(url);
+		inits.push(init);
 		const r = routes[url];
 		const status = r ? (r.status ?? 200) : 404;
 		const body = r?.body;
 		return {
 			ok: status >= 200 && status < 300,
 			status,
+			headers: {
+				get: (n: string) => (n.toLowerCase() === "location" ? (r?.location ?? null) : null),
+			},
 			json: async () => body,
 			text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
 			arrayBuffer: async () => {
@@ -47,8 +60,9 @@ function fakeFetch(routes: Routes): FetchLike & { calls: string[] } {
 				) as ArrayBuffer;
 			},
 		};
-	}) as FetchLike & { calls: string[] };
+	}) as FetchLike & { calls: string[]; inits: Init[] };
 	f.calls = calls;
+	f.inits = inits;
 	return f;
 }
 
@@ -208,17 +222,18 @@ describe("binary channel", () => {
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 	const asset = "8gent-linux-x64";
+	const DL = "https://github.com/8gi-foundation/8gent-code/releases/download";
 	const newBytes = new TextEncoder().encode("NEW-8GENT-0.20.0");
 	const sum = createHash("sha256").update(newBytes).digest("hex");
-	const release = (tag: string, withAssets = true) => ({
+	const release = (tag: string, withAssets = true, extra: string[] = []) => ({
 		tag_name: tag,
 		draft: false,
 		prerelease: false,
 		assets: withAssets
-			? [
-					{ name: asset, browser_download_url: `https://dl.test/${tag}/${asset}` },
-					{ name: "SHA256SUMS", browser_download_url: `https://dl.test/${tag}/SHA256SUMS` },
-				]
+			? [asset, "SHA256SUMS", ...extra].map((name) => ({
+					name,
+					browser_download_url: `${DL}/${tag}/${name}`,
+				}))
 			: [],
 	});
 	const routes = (sums = `${sum}  ${asset}\n`): Routes => ({
@@ -228,136 +243,289 @@ describe("binary channel", () => {
 				release("v0.20.0"),
 				release("v0.9.0"),
 				{ ...release("v0.30.0"), draft: true },
+				{ ...release("v0.31.0"), prerelease: true },
 				release("desktop-v9.0.0"),
 			],
 		},
-		[`https://dl.test/v0.20.0/${asset}`]: { body: newBytes },
-		"https://dl.test/v0.20.0/SHA256SUMS": { body: sums },
+		[`${DL}/v0.20.0/${asset}`]: { body: newBytes },
+		[`${DL}/v0.20.0/SHA256SUMS`]: { body: sums },
 	});
+	const base = (
+		exe: string,
+		fetchImpl: FetchLike,
+		extra: Partial<Parameters<typeof runSelfUpdate>[0]> = {},
+	) =>
+		runSelfUpdate({
+			currentVersion: "0.19.0",
+			channel: "binary",
+			execPath: exe,
+			platform: "linux",
+			arch: "x64",
+			releasesUrl: RELEASES,
+			fetchImpl,
+			probeVersion: async (f) =>
+				readFileSync(f, "utf8").includes("0.20.0") ? "8gent Code v0.20.0\n" : "",
+			log: () => {},
+			signingKey: "",
+			...extra,
+		});
+	const leftovers = () => readdirSync(dir).filter((n) => n.endsWith(".new"));
 
-	test("picks the newest release that carries the binary", async () => {
+	test("picks the newest published, non-prerelease release that carries the binary", async () => {
 		const rel = await latestBinaryRelease(fakeFetch(routes()), asset, RELEASES);
 		expect(rel?.version).toBe("0.20.0");
 	});
 
-	test("asset names match build-binaries.ts", () => {
-		expect(binaryAssetName("win32", "x64")).toBe("8gent-windows-x64.exe");
+	test("asset names match build-binaries.ts; Windows falls back to baseline", () => {
+		expect(binaryAssetNames("win32", "x64")).toEqual([
+			"8gent-windows-x64.exe",
+			"8gent-windows-x64-baseline.exe",
+		]);
 		expect(binaryAssetName("win32", "arm64")).toBe("8gent-windows-x64.exe");
 		expect(binaryAssetName("darwin", "arm64")).toBe("8gent-darwin-arm64");
 		expect(binaryAssetName("linux", "x64")).toBe("8gent-linux-x64");
 		expect(binaryAssetName("freebsd", "x64")).toBeNull();
 	});
 
-	test("verifies, probes, then swaps the running binary", async () => {
+	test("verifies, probes, then swaps the running binary, leaving no staging file", async () => {
 		const exe = join(dir, "8gent");
 		writeFileSync(exe, "OLD");
-		const r = await runSelfUpdate({
-			currentVersion: "0.19.0",
-			channel: "binary",
-			execPath: exe,
-			platform: "linux",
-			arch: "x64",
-			releasesUrl: RELEASES,
-			fetchImpl: fakeFetch(routes()),
-			probeVersion: async (f) =>
-				readFileSync(f, "utf8").includes("0.20.0") ? "8gent Code v0.20.0\n" : "",
-			log: () => {},
-		});
+		const r = await base(exe, fakeFetch(routes()));
 		expect(r).toEqual({ status: "updated", from: "0.19.0", to: "0.20.0", channel: "binary" });
 		expect(readFileSync(exe, "utf8")).toBe("NEW-8GENT-0.20.0");
-		expect(existsSync(`${exe}.new`)).toBe(false);
+		expect(leftovers()).toEqual([]);
 	});
 
-	test("Windows renames the running exe aside", async () => {
+	test("Windows renames the running exe aside, then tries baseline when x64 will not start", async () => {
 		const exe = join(dir, "8gent.exe");
 		writeFileSync(exe, "OLD");
-		const r = await runSelfUpdate({
-			currentVersion: "0.19.0",
-			channel: "binary",
-			execPath: exe,
-			platform: "win32",
-			arch: "x64",
-			releasesUrl: RELEASES,
-			fetchImpl: fakeFetch({
+		const x64 = new TextEncoder().encode("X64-NEEDS-AVX2");
+		const baseline = new TextEncoder().encode("BASELINE-0.20.0");
+		const h = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+		const names = ["8gent-windows-x64.exe", "8gent-windows-x64-baseline.exe", "SHA256SUMS"];
+		const r = await base(
+			exe,
+			fakeFetch({
 				[RELEASES]: {
 					body: [
 						{
 							tag_name: "v0.20.0",
-							assets: [
-								{ name: "8gent-windows-x64.exe", browser_download_url: "https://dl.test/exe" },
-								{ name: "SHA256SUMS", browser_download_url: "https://dl.test/sums" },
-							],
+							assets: names.map((name) => ({
+								name,
+								browser_download_url: `${DL}/v0.20.0/${name}`,
+							})),
 						},
 					],
 				},
-				"https://dl.test/exe": { body: newBytes },
-				"https://dl.test/sums": { body: `${sum} *8gent-windows-x64.exe\n` },
+				[`${DL}/v0.20.0/8gent-windows-x64.exe`]: { body: x64 },
+				[`${DL}/v0.20.0/8gent-windows-x64-baseline.exe`]: { body: baseline },
+				[`${DL}/v0.20.0/SHA256SUMS`]: {
+					body: `${h(x64)} *8gent-windows-x64.exe\n${h(baseline)} *8gent-windows-x64-baseline.exe\n`,
+				},
 			}),
-			probeVersion: async () => "8gent Code v0.20.0",
-			log: () => {},
-		});
+			{ platform: "win32" },
+		);
 		expect(r.status).toBe("updated");
-		expect(readFileSync(exe, "utf8")).toBe("NEW-8GENT-0.20.0");
+		expect(readFileSync(exe, "utf8")).toBe("BASELINE-0.20.0");
 		expect(readFileSync(`${exe}.old`, "utf8")).toBe("OLD");
+		expect(leftovers()).toEqual([]);
 	});
 
 	test("checksum mismatch leaves the running binary untouched", async () => {
 		const exe = join(dir, "8gent");
 		writeFileSync(exe, "OLD");
-		const r = await runSelfUpdate({
-			currentVersion: "0.19.0",
-			channel: "binary",
-			execPath: exe,
-			platform: "linux",
-			arch: "x64",
-			releasesUrl: RELEASES,
-			fetchImpl: fakeFetch(routes(`${"0".repeat(64)}  ${asset}\n`)),
-			probeVersion: async () => "8gent Code v0.20.0",
-			log: () => {},
-		});
+		const r = await base(exe, fakeFetch(routes(`${"0".repeat(64)}  ${asset}\n`)));
 		expect(r.status).toBe("failed");
 		expect(describeResult(r)).toContain("checksum mismatch");
 		expect(readFileSync(exe, "utf8")).toBe("OLD");
-		expect(existsSync(`${exe}.new`)).toBe(false);
+		expect(leftovers()).toEqual([]);
 	});
 
 	test("a binary that reports the wrong version is not installed", async () => {
 		const exe = join(dir, "8gent");
 		writeFileSync(exe, "OLD");
-		const r = await runSelfUpdate({
-			currentVersion: "0.19.0",
-			channel: "binary",
-			execPath: exe,
-			platform: "linux",
-			arch: "x64",
-			releasesUrl: RELEASES,
-			fetchImpl: fakeFetch(routes()),
-			probeVersion: async () => "",
-			log: () => {},
-		});
+		const r = await base(exe, fakeFetch(routes()), { probeVersion: async () => "" });
 		expect(r.status).toBe("failed");
 		expect(readFileSync(exe, "utf8")).toBe("OLD");
-		expect(existsSync(`${exe}.new`)).toBe(false);
+		expect(leftovers()).toEqual([]);
 	});
 
 	test("a newer running binary is never replaced by an older release", async () => {
 		const exe = join(dir, "8gent");
 		writeFileSync(exe, "DEV");
 		const f = fakeFetch(routes());
-		const r = await runSelfUpdate({
-			currentVersion: "0.25.0",
-			channel: "binary",
-			execPath: exe,
-			platform: "linux",
-			arch: "x64",
-			releasesUrl: RELEASES,
-			fetchImpl: f,
-			log: () => {},
-		});
+		const r = await base(exe, f, { currentVersion: "0.25.0" });
 		expect(r.status).toBe("refused-downgrade");
 		expect(readFileSync(exe, "utf8")).toBe("DEV");
 		expect(f.calls).toEqual([RELEASES]);
 	});
+
+	test("an asset URL outside the repository's releases is refused", async () => {
+		const exe = join(dir, "8gent");
+		writeFileSync(exe, "OLD");
+		const evil = "https://evil.test/8gent-linux-x64";
+		const f = fakeFetch({
+			[RELEASES]: {
+				body: [
+					{
+						tag_name: "v0.20.0",
+						assets: [
+							{ name: asset, browser_download_url: evil },
+							{ name: "SHA256SUMS", browser_download_url: `${DL}/v0.20.0/SHA256SUMS` },
+						],
+					},
+				],
+			},
+			[`${DL}/v0.20.0/SHA256SUMS`]: { body: `${sum}  ${asset}\n` },
+			[evil]: { body: newBytes },
+		});
+		const r = await base(exe, f);
+		expect(r.status).toBe("failed");
+		expect(describeResult(r)).toContain("refusing");
+		expect(f.calls).not.toContain(evil);
+		expect(readFileSync(exe, "utf8")).toBe("OLD");
+	});
+
+	test("redirects are followed by hand: GitHub download hosts only, https only", async () => {
+		const exe = join(dir, "8gent");
+		writeFileSync(exe, "OLD");
+		const blob = "https://release-assets.githubusercontent.com/blob/1";
+		const ok = routes();
+		ok[`${DL}/v0.20.0/${asset}`] = { status: 302, location: blob, body: "" };
+		ok[blob] = { body: newBytes };
+		expect((await base(exe, fakeFetch(ok))).status).toBe("updated");
+
+		for (const bad of ["https://evil.test/blob", "http://objects.githubusercontent.com/blob"]) {
+			writeFileSync(exe, "OLD");
+			const r = routes();
+			r[`${DL}/v0.20.0/${asset}`] = { status: 302, location: bad, body: "" };
+			r[bad] = { body: newBytes };
+			const f = fakeFetch(r);
+			const res = await base(exe, f);
+			expect(res.status).toBe("failed");
+			expect(describeResult(res)).toContain("refusing a redirect");
+			expect(f.calls).not.toContain(bad);
+			expect(readFileSync(exe, "utf8")).toBe("OLD");
+		}
+	});
+
+	test("every request asks fetch not to follow redirects itself", async () => {
+		const exe = join(dir, "8gent");
+		writeFileSync(exe, "OLD");
+		const f = fakeFetch(routes());
+		await base(exe, f);
+		expect(f.inits.every((i) => i?.redirect === "manual")).toBe(true);
+	});
+
+	describe("signed SHA256SUMS", () => {
+		const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+		const keyId = Buffer.from("0123456789abcdef", "hex");
+		const rawPk = publicKey.export({ format: "der", type: "spki" }).subarray(-32);
+		const pub = Buffer.concat([Buffer.from("Ed"), keyId, rawPk]).toString("base64");
+		function minisig(
+			message: Uint8Array,
+			comment = "timestamp:1 file:SHA256SUMS",
+			id = keyId,
+		): string {
+			const hashed = createHash("blake2b512").update(message).digest();
+			const sig = cryptoSign(null, hashed, privateKey);
+			const global = cryptoSign(null, Buffer.concat([sig, Buffer.from(comment)]), privateKey);
+			return [
+				"untrusted comment: signature from minisign secret key",
+				Buffer.concat([Buffer.from("ED"), id, sig]).toString("base64"),
+				`trusted comment: ${comment}`,
+				global.toString("base64"),
+				"",
+			].join("\n");
+		}
+		const sumsText = `${sum}  ${asset}\n`;
+		const sumsBytes = new TextEncoder().encode(sumsText);
+
+		test("verifyMinisign accepts a real signature and rejects tampering", () => {
+			const sig = minisig(sumsBytes);
+			expect(verifyMinisign(sumsBytes, sig, pub)).toBe(true);
+			expect(verifyMinisign(new TextEncoder().encode(`${sumsText} `), sig, pub)).toBe(false);
+			const lines = sig.split("\n");
+			lines[2] = "trusted comment: something else";
+			expect(verifyMinisign(sumsBytes, lines.join("\n"), pub)).toBe(false);
+			expect(verifyMinisign(sumsBytes, minisig(sumsBytes, "c", Buffer.alloc(8)), pub)).toBe(false);
+			const other = generateKeyPairSync("ed25519")
+				.publicKey.export({ format: "der", type: "spki" })
+				.subarray(-32);
+			const otherPub = Buffer.concat([Buffer.from("Ed"), keyId, other]).toString("base64");
+			expect(verifyMinisign(sumsBytes, sig, otherPub)).toBe(false);
+		});
+
+		test("with a release key: signed sums install, missing or bad signatures do not", async () => {
+			const exe = join(dir, "8gent");
+			const withSig = (sigBody: string | null): Routes => {
+				const r = routes(sumsText);
+				const list = r[RELEASES].body as ReturnType<typeof release>[];
+				r[RELEASES] = {
+					body: list.map((x) =>
+						x.tag_name === "v0.20.0"
+							? release("v0.20.0", true, sigBody === null ? [] : ["SHA256SUMS.minisig"])
+							: x,
+					),
+				};
+				if (sigBody !== null) r[`${DL}/v0.20.0/SHA256SUMS.minisig`] = { body: sigBody };
+				return r;
+			};
+
+			writeFileSync(exe, "OLD");
+			const missing = await base(exe, fakeFetch(withSig(null)), { signingKey: pub });
+			expect(describeResult(missing)).toContain("unsigned checksums");
+			expect(readFileSync(exe, "utf8")).toBe("OLD");
+
+			const bad = await base(exe, fakeFetch(withSig(minisig(new TextEncoder().encode("other")))), {
+				signingKey: pub,
+			});
+			expect(describeResult(bad)).toContain("valid release signature");
+			expect(readFileSync(exe, "utf8")).toBe("OLD");
+
+			const good = await base(exe, fakeFetch(withSig(minisig(sumsBytes))), { signingKey: pub });
+			expect(good.status).toBe("updated");
+			expect(readFileSync(exe, "utf8")).toBe("NEW-8GENT-0.20.0");
+		});
+	});
+
+	test("the --version probe gives up after its time limit", async () => {
+		const hang = join(dir, "hang.sh");
+		writeFileSync(hang, "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
+		const t0 = Date.now();
+		expect(await probeVersionWithTimeout(hang, 300)).toBe("");
+		expect(Date.now() - t0).toBeLessThan(5000);
+		expect(PROBE_TIMEOUT_MS).toBe(15_000);
+	});
+});
+
+test("only https and the right hosts pass the URL checks", () => {
+	expect(
+		urlAllowed("https://github.com/8gi-foundation/8gent-code/releases/download/v1.0.0/x", "asset"),
+	).toBe(true);
+	expect(urlAllowed("https://github.com/someone/else/releases/download/v1.0.0/x", "asset")).toBe(
+		false,
+	);
+	expect(
+		urlAllowed("http://github.com/8gi-foundation/8gent-code/releases/download/v1.0.0/x", "asset"),
+	).toBe(false);
+	expect(urlAllowed("https://registry.npmjs.org/x", "npm")).toBe(true);
+	expect(urlAllowed("https://evil.test/x", "npm")).toBe(false);
+	expect(hopAllowed("https://objects.githubusercontent.com/x", "asset")).toBe(true);
+	expect(hopAllowed("https://evil.test/x", "asset")).toBe(false);
+	expect(hopAllowed("http://objects.githubusercontent.com/x", "asset")).toBe(false);
+});
+
+test("the embedded release signing key matches scripts/release-signing.pub", () => {
+	const pub = readFileSync(
+		join(import.meta.dir, "..", "..", "scripts", "release-signing.pub"),
+		"utf8",
+	)
+		.split("\n")
+		.filter((l) => l.trim() && !l.startsWith("#"))
+		.join("")
+		.trim();
+	expect(RELEASE_SIGNING_KEY).toBe(pub);
 });
 
 test("source checkouts are told to git pull, nothing runs", async () => {
