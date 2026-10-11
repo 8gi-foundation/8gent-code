@@ -1293,8 +1293,11 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
 	// A compiled binary may have no Bun on PATH. It is itself a Bun runtime:
 	// BUN_BE_BUN=1 makes it behave as the `bun` CLI, so it runs the TUI bundle.
+	// --no-install: there is no node_modules beside the cache copy, and Bun's
+	// auto-install would otherwise fetch optional modules (sharp) from the
+	// network at launch, stalling the first frame. Optional imports fail fast.
 	const proc = MODULE_IS_EMBEDDED
-		? spawn(process.execPath, ["run", tuiPath, ...args], {
+		? spawn(process.execPath, ["run", "--no-install", tuiPath, ...args], {
 				stdio: "inherit",
 				env: { ...process.env, BUN_BE_BUN: "1" },
 			})
