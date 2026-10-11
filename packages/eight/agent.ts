@@ -74,6 +74,7 @@ import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
+import { completionSelfCheckNudge } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -313,6 +314,7 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	private turnTask = "";
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -1427,7 +1429,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
 	private turnEndNudge(): string | null {
-		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
+		return (
+			verifyNudgeFor(this.turnToolLedger) ??
+			this.executor.retiredTurnEndNudge() ??
+			completionSelfCheckNudge({
+				task: this.turnTask,
+				cwd: this.config.workingDirectory || process.cwd(),
+				ledger: this.turnToolLedger,
+			})
+		);
 	}
 
 	private async runTurn(
@@ -1439,6 +1449,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnTask = userMessage;
 		// write_file may open each deliverable once per turn (#3107).
 		this.executor.beginTurn();
 
