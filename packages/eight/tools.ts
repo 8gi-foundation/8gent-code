@@ -49,7 +49,7 @@ import {
 	formatLocate,
 } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
-import { buildChildEnv } from "./harness/child-env";
+import { GH_ENV_NAMES, GIT_ENV_NAMES, buildChildEnv } from "./harness/child-env";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -566,7 +566,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...buildChildEnv(process.env, ["SSH_AUTH_SOCK"], ["GIT_"]), ...GIT_NON_INTERACTIVE_ENV },
+			env: { ...buildChildEnv(process.env, GIT_ENV_NAMES), ...GIT_NON_INTERACTIVE_ENV },
 		});
 		let stdout = "";
 		let stderr = "";
@@ -3522,7 +3522,10 @@ export class ToolExecutor {
 		return new Promise((resolve) => {
 			let stdout = "";
 			let stderr = "";
-			const proc = spawn(cmd, args, { cwd: this.workingDirectory });
+			const proc = spawn(cmd, args, {
+				cwd: this.workingDirectory,
+				env: buildChildEnv(process.env, GH_ENV_NAMES),
+			});
 			proc.stdout?.on("data", (d: Buffer) => {
 				stdout += d.toString();
 			});

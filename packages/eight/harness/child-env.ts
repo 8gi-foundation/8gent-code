@@ -5,9 +5,6 @@
  * of the parent's environment. Anything else is passed only by name through
  * EIGHT_SHELL_ENV_PASS, a deliberate per-session choice. Tools that need a
  * credential read it in-process from the parent, not through a shell.
- *
- * EIGHT_SHELL_ENV_INHERIT=1 restores the old full-inherit behaviour as a
- * temporary escape hatch.
  */
 
 type Env = Record<string, string | undefined>;
@@ -61,30 +58,32 @@ export function envPassList(source: Env = process.env): string[] {
  * Build the environment for a child process.
  * @param source  environment to read from (defaults to process.env)
  * @param extraNames  extra exact names allowed for this call site only
- * @param extraPrefixes  extra name prefixes allowed for this call site only (e.g. "GIT_")
  */
 export function buildChildEnv(
 	source: Env = process.env,
 	extraNames: readonly string[] = [],
-	extraPrefixes: readonly string[] = [],
 ): Record<string, string> {
-	if (source.EIGHT_SHELL_ENV_INHERIT === "1") {
-		const all: Record<string, string> = {};
-		for (const [k, v] of Object.entries(source)) if (v !== undefined) all[k] = v;
-		return all;
-	}
 	const names = new Set([...extraNames, ...envPassList(source)].map((n) => n.toUpperCase()));
 	const out: Record<string, string> = {};
 	for (const [k, v] of Object.entries(source)) {
 		if (v === undefined) continue;
 		const upper = k.toUpperCase();
-		if (
-			isBase(k) ||
-			names.has(upper) ||
-			extraPrefixes.some((p) => upper.startsWith(p.toUpperCase()))
-		) {
-			out[k] = v;
-		}
+		if (isBase(k) || names.has(upper)) out[k] = v;
 	}
 	return out;
 }
+
+/** Git identity and prompt settings the git helper may keep. Not GIT_CONFIG_*, GIT_EXEC_PATH, GIT_PROXY_COMMAND and the like. */
+export const GIT_ENV_NAMES = [
+	"SSH_AUTH_SOCK",
+	"GIT_AUTHOR_NAME",
+	"GIT_AUTHOR_EMAIL",
+	"GIT_AUTHOR_DATE",
+	"GIT_COMMITTER_NAME",
+	"GIT_COMMITTER_EMAIL",
+	"GIT_COMMITTER_DATE",
+	"GIT_TERMINAL_PROMPT",
+] as const;
+
+/** Names the gh CLI reads for authentication. Used only on the gh path. */
+export const GH_ENV_NAMES = ["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_ENTERPRISE_TOKEN"] as const;

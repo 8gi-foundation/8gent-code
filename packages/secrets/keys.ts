@@ -129,6 +129,9 @@ export function loadKeysIntoEnv(path: string = KEYS_PATH): number {
 	const keys = readKeysFile(path);
 	let merged = 0;
 	for (const [k, v] of Object.entries(keys)) {
+		// The shell pass list is a per-session choice by the person at the keyboard;
+		// a keys file must not be able to widen it.
+		if (k.toUpperCase().startsWith("EIGHT_SHELL_ENV_")) continue;
 		if (!process.env[k]) {
 			process.env[k] = v;
 			merged += 1;
@@ -146,12 +149,7 @@ export function loadKeysIntoEnv(path: string = KEYS_PATH): number {
  */
 export function openKeysFile(): string {
 	const path = ensureKeysFile();
-	const opener =
-		platform() === "darwin"
-			? "open"
-			: platform() === "win32"
-				? "start"
-				: "xdg-open";
+	const opener = platform() === "darwin" ? "open" : platform() === "win32" ? "start" : "xdg-open";
 	try {
 		const proc = spawn(opener, [path], { stdio: "ignore", detached: true });
 		proc.unref();

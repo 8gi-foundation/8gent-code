@@ -8,6 +8,7 @@ import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { wrapRunCommand } from "../permissions/run-command-sandbox";
+import { buildChildEnv } from "../eight/harness/child-env";
 
 // ============================================
 // Types
@@ -97,7 +98,7 @@ export class BackgroundTaskManager {
 		const proc = spawnShell(wrapRunCommand(command), {
 			cwd: workingDirectory,
 			env: {
-				...process.env,
+				...buildChildEnv(),
 				...options.env,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
