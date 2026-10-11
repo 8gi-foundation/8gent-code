@@ -223,7 +223,7 @@ function confinedPath(p: string, outcome: "written" | "read"): { path: string } 
 		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
 	}
 	try {
-		return { path: safePath(p, getToolContext().workingDirectory) };
+		return { path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write") };
 	} catch (err) {
 		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
 	}

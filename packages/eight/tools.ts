@@ -110,7 +110,7 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
+import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
@@ -245,10 +245,10 @@ export function toolReplayClass(toolName: string): ReplayClass {
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-export function safePath(userPath: string, workingDirectory: string): string {
+export function safePath(userPath: string, workingDirectory: string, access: PathAccess = "write"): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
-	const guard = guardPath(userPath, workingDirectory);
+	const guard = guardPath(userPath, workingDirectory, {}, access);
 	if (!guard.ok) {
 		throw new Error(`Path blocked by path-guard: ${guard.reason} ("${userPath}")`);
 	}
@@ -415,7 +415,7 @@ export function confineWrite(named: string, workingDirectory: string): string {
 
 /** A path a tool may read: inside the working directory after following every link. */
 export function confineRead(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "read");
 	assertRealInside(target, named, workingDirectory);
 	return target;
 }
@@ -1959,7 +1959,7 @@ export class ToolExecutor {
 
 			// File operations (with path traversal protection)
 			case "read_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "read");
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
@@ -1977,7 +1977,7 @@ export class ToolExecutor {
 			}
 			case "list_files": {
 				const dir = (args.path as string) || ".";
-				const safeDir = safePath(dir, this.workingDirectory);
+				const safeDir = safePath(dir, this.workingDirectory, "read");
 				return this.listFiles(safeDir, args.pattern as string);
 			}
 
@@ -2788,6 +2788,9 @@ export class ToolExecutor {
 		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
 		if (commandTouchesAuditFiles(command))
 			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
+		// The session's own records are read-only to the shell too.
+		if (commandMutatesSessionRecords(command))
+			return `[PERMISSION DENIED] Command would change session records, which agent tools may not do: ${command}`;
 		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
 		// bump only; the boundary is seatbelting run_command (#3612).
 		if (touchesBrowserSecrets(command))
@@ -2970,7 +2973,7 @@ export class ToolExecutor {
 		// so a refused path reads the same whether or not the file is there.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error reading image: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -3026,7 +3029,7 @@ export class ToolExecutor {
 		// Same guard as read_image, and before the vision router is consulted.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error describing image: ${err instanceof Error ? err.message : String(err)}`;
 		}
