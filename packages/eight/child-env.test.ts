@@ -18,7 +18,9 @@ import { join } from "node:path";
 import { loadKeysIntoEnv } from "../secrets/keys";
 import { getBackgroundTaskManager } from "../tools/background";
 import {
+	BASE_NAMES,
 	ENV_PASS_HINT,
+	SECRETISH,
 	GH_ENV_NAMES,
 	GIT_ENV_NAMES,
 	buildChildEnv,
