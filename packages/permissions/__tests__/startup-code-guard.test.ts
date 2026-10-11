@@ -196,3 +196,60 @@ describe("commandWritesStartupCode: shell writes are refused (#4009)", () => {
 		expect(commandWritesStartupCode("cat hooks.yaml", path.join(HOME, ".8gent"))).toBe(false);
 	});
 });
+
+/** 8SO's review battery on #4010: the 12 commands the first backstop let through. */
+describe("commandWritesStartupCode: 8SO review bypasses are refused (#4009)", () => {
+	const BYPASSES = [
+		`python3 -c "import os;open(os.path.join(os.path.expanduser('~'),'.8gent','extensions','x.ts'),'w').write('x')"`,
+		`node -e "const p=require('path');require('fs').writeFileSync(p.join(require('os').homedir(),'.8gent','extensions','x.ts'),'x')"`,
+		"tar -xzf payload.tgz -C ~",
+		"unzip -o payload.zip -d ~",
+		"cp -R payload/. ~/.8gent/",
+		"rsync -a payload/ ~/",
+		"mv ~/.8gent ~/.8gent.bak && mv ./evil8gent ~/.8gent",
+		"printf x > $(echo ~)/.8gent/hooks.yaml",
+		"cd $(echo ~/.8gent) && cat > hooks.yaml",
+		["echo ZWNobyB4ID4gfi8uOGdlbnQvaG9va3MueWFtbA==", "base64 -d", "sh"].join(" | "),
+		"cd ~/.8gent; git init; git checkout -b x",
+		`node -e "require('fs').writeFileSync(require('os').homedir() + '/.8' + 'gent/hooks.yaml', 'x')"`,
+	];
+	for (const c of BYPASSES) {
+		test(c, () => expect(commandWritesStartupCode(c, PROJ)).toBe(true));
+	}
+
+	test("a script file written earlier is scanned before it runs", () => {
+		const script = path.join(base, "step1.sh");
+		fs.writeFileSync(script, 'echo x > ~/.8""gent/hooks.yaml\n');
+		fs.writeFileSync(
+			path.join(PROJ, "step1.py"),
+			'import os\nopen(os.path.join(os.path.expanduser("~"), ".8gent", "prompts", "a.md"), "w")\n',
+		);
+		fs.writeFileSync(path.join(PROJ, "ok.py"), "print(1)\n");
+		expect(commandWritesStartupCode(`sh ${script}`, PROJ)).toBe(true);
+		expect(commandWritesStartupCode("python3 step1.py", PROJ)).toBe(true);
+		expect(commandWritesStartupCode("bun run step1.py", PROJ)).toBe(true);
+		expect(commandWritesStartupCode("python3 ok.py", PROJ)).toBe(false);
+	});
+
+	const WORKSPACE = [
+		"bun test packages/x.test.ts",
+		"bun run tui",
+		"npm install",
+		"git checkout -b feat",
+		"git init",
+		"git log HEAD~1",
+		"tar -xzf a.tgz -C out",
+		"tar -czf a.tgz src",
+		"unzip a.zip -d out",
+		"cp -R a/. b/",
+		"mv a b",
+		"echo $(date) > out.txt",
+		"python3 -c 'print(1)'",
+		"node scripts/build.js",
+		"cat package.json | jq .name",
+	];
+	for (const c of WORKSPACE) {
+		test(`workspace command passes: ${c}`, () =>
+			expect(commandWritesStartupCode(c, PROJ)).toBe(false));
+	}
+});
