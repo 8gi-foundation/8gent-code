@@ -9,9 +9,12 @@ on:
   # workflow on the tag with workflow_dispatch instead.
   workflow_dispatch:
 
-# contents: write creates the draft release. id-token: write lets npm publish
-# through trusted publishing (OIDC) with provenance, so a release no longer
-# depends on a long-lived NPM_TOKEN that can silently stop working (#3981).
+# The primary install is our own: scripts/install.sh, scripts/install.ps1 and
+# the binaries on the GitHub Release. npm is an optional extra channel: when
+# npm auth works the package is published there too, and when it does not the
+# release still ships (#3981).
+# contents: write creates the draft release. id-token: write lets the optional
+# npm publish use trusted publishing (OIDC) with provenance instead of a token.
 permissions:
   contents: write
   id-token: write
@@ -46,16 +49,13 @@ jobs:
           fi
           npm --version
 
-      # Fail before anything is built, tagged or uploaded. v0.18.0 built, smoke
-      # tested and published a GitHub Release, then npm publish answered E404
-      # because the NPM_TOKEN secret no longer authenticated (#3326).
-      # npm can publish two ways; at least one must work right now:
-      #   1. trusted publishing: npmjs.com lists this repository and release.yml
-      #      as a trusted publisher for the package (no secret at all), or
-      #   2. the NPM_TOKEN secret, if npm still accepts it.
-      # The trusted-publishing check is the same OIDC token exchange npm itself
-      # does at publish time; the short-lived token it returns is discarded.
-      - name: Preflight (tag ref, version, npm auth)
+      # Fail before anything is built if the tag or version is wrong. Then
+      # decide whether the optional npm channel can publish: trusted publishing
+      # (npmjs.com lists release.yml as a trusted publisher; checked with the
+      # same OIDC exchange npm does, the short-lived token is discarded) or the
+      # NPM_TOKEN secret. If neither works the release goes ahead without npm.
+      - name: Preflight (tag ref, version, optional npm channel)
+        id: preflight
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
@@ -84,14 +84,16 @@ jobs:
               "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@8gi-foundation%2f8gent-code" || true)"
             if [ "${CODE:0:1}" = "2" ]; then OIDC=1; fi
           fi
+          NPM=1
           if [ "$OIDC" = 1 ]; then
-            echo "npm publishes through trusted publishing (OIDC, with provenance)"
-          elif [ -n "${NODE_AUTH_TOKEN}" ] && NPM_USER="$(npm whoami)"; then
-            echo "npm publishes as ${NPM_USER} (NPM_TOKEN). Trusted publishing is not set up for this workflow yet."
+            echo "optional npm channel: publishes through trusted publishing (OIDC, with provenance)"
+          elif [ -n "${NODE_AUTH_TOKEN}" ] && NPM_USER="$(npm whoami 2>/dev/null)"; then
+            echo "optional npm channel: publishes as ${NPM_USER} (NPM_TOKEN)"
           else
-            echo "::error::npm would refuse this publish. Either add a trusted publisher on npmjs.com (package @8gi-foundation/8gent-code, Settings, Trusted Publisher, GitHub Actions: organization 8gi-foundation, repository 8gent-code, workflow release.yml), or replace the NPM_TOKEN secret with a token that can publish the package. Then re-run this workflow on ${GITHUB_REF_NAME}."
-            exit 1
+            NPM=0
+            echo "::notice::npm channel skipped for ${GITHUB_REF_NAME}: no trusted publisher and no working NPM_TOKEN. The GitHub Release and the installers are unaffected."
           fi
+          echo "npm=${NPM}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: bun install
@@ -169,7 +171,11 @@ jobs:
               --title "$TAG" --notes-file release_notes.md
           fi
 
-      - name: Publish to npm
+      - name: Publish to npm (optional channel)
+        if: steps.preflight.outputs.npm == '1'
+        # npm is a choice, not a requirement: a failure here is reported but
+        # never holds back the GitHub Release or the installers.
+        continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -184,10 +190,10 @@ jobs:
             npm publish release-assets/*.tgz --access public --provenance
           fi
 
-      # npm `latest` must be this release, or `npm install -g` and everything
-      # that reads npm keep handing out an old version (0.17.0 was latest for
-      # five months). publish moves latest by default; this proves it did.
-      - name: npm latest is this version
+      # When npm was published, confirm its latest tag moved to this release.
+      - name: npm latest is this version (optional channel)
+        if: steps.preflight.outputs.npm == '1'
+        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -197,7 +203,7 @@ jobs:
             if [ "$LATEST" = "$VERSION" ]; then echo "npm latest is ${VERSION}"; exit 0; fi
             sleep 15
           done
-          echo "::error::npm dist-tag latest is '${LATEST}', not ${VERSION}"
+          echo "::warning::npm dist-tag latest is '${LATEST}', not ${VERSION}"
           exit 1
 
       # #3803: this job no longer publishes the release. v0.18.1 and v0.19.0
@@ -205,7 +211,7 @@ jobs:
       # publishing here did not wait for release-binaries.yml. The release
       # stays a draft; the "Attach to GitHub Release" job in release-binaries.yml
       # publishes it once the installers (including the Windows .exe) and this
-      # job's tarball are all on it and npm has the version.
+      # job's tarball are all on it.
       - name: Leave the release as a draft for the installers
         run: echo "release stays a draft until release-binaries.yml attaches the installers and publishes it"
 

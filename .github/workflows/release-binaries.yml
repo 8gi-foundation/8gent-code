@@ -22,8 +22,9 @@
 # EIGHT_MAC_SIGN_IDENTITY needs that identity in the runner's keychain, which a
 # hosted runner does not have, so it is not passed here; notarization (below)
 # and Linux GPG signing still apply when their secrets exist. See SIGNING.md.
-# The npm publish and the GitHub Release (as a draft) live in release.yml; this
-# workflow publishes the release once every installer, the tarball and npm are in.
+# The GitHub Release (as a draft) and the optional npm publish live in
+# release.yml; this workflow publishes the release once every binary,
+# installer, the tarball and SHA256SUMS are on it. npm is not a gate.
 
 name: Release Binaries
 
@@ -270,29 +271,14 @@ jobs:
 
       # #3803: the release goes public only when it carries the Windows .exe,
       # the Windows installer, the macOS and Linux binaries, and release.yml's
-      # tarball + SHA256SUMS, and npm serves this version. Otherwise it stays a
-      # draft and this job fails, so a missing asset is a red run, not a quiet
-      # public release with nothing on it.
+      # tarball + SHA256SUMS. Otherwise it stays a draft and this job fails, so
+      # a missing asset is a red run, not a quiet public release with nothing
+      # on it. npm is an optional channel and is not checked here (#3981).
       - name: Publish the release once it is complete
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
-          # release.yml uploads the tarball before npm publish; wait for npm
-          # to serve this version for up to 15 minutes.
-          npm_ok=0
-          for i in $(seq 1 30); do
-            if curl -fsS "https://registry.npmjs.org/@8gi-foundation%2f8gent-code/${VERSION}" >/dev/null; then
-              npm_ok=1
-              break
-            fi
-            sleep 30
-          done
-          if [ "$npm_ok" != 1 ]; then
-            echo "::error::@8gi-foundation/8gent-code@${VERSION} is not on npm after 15 minutes; release ${TAG} stays a draft. Check the release.yml run (npm auth)."
-            exit 1
-          fi
           bash scripts/release-guard.sh publish-complete "$TAG" \
             '^8gent-windows-x64\.exe$' \
             '^8gent-windows-x64-baseline\.exe$' \

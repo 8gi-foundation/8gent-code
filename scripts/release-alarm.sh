@@ -21,7 +21,7 @@ RUN_URL="${3:?run url}"
 TITLE="Release failed: ${WORKFLOW} on ${REF}"
 BODY="${WORKFLOW} failed on ${REF}: ${RUN_URL}
 
-Until this is fixed and the run is re-run, the release does not reach npm or the GitHub Release, and the one-line installers keep serving the previous version."
+Until this is fixed and the run is re-run, the GitHub Release is not published and the one-line installers keep serving the previous version."
 
 N=""
 while IFS=$'\t' read -r num title; do
