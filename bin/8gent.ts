@@ -435,7 +435,7 @@ async function main() {
 			const latest = defaultRunSessionStore().latestForCwd(process.cwd());
 			if (latest) {
 				console.log(
-					`Continuing session: ${latest.name || latest.id} (${latest.model}, ${latest.messageCount} msgs)`,
+					`Continuing session: ${latest.name || latest.id} (${latest.model ?? "unknown"}, ${latest.messageCount} msgs)`,
 				);
 				sessionId = latest.id;
 			} else {

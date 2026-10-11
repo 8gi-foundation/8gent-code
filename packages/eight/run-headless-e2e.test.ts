@@ -4,9 +4,10 @@
  * --continue resumes this folder's latest session. No real model is loaded.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeTree } from "../../tests/db-files";
 import { validateRunEvent } from "./run-events";
 
 type Body = { messages: Array<{ role: string; content: unknown }> };
@@ -63,8 +64,9 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(work, { recursive: true, force: true });
+	// Windows holds a just-used folder for a moment (#3814): bounded retry, not a flake.
+	removeTree(home);
+	removeTree(work);
 });
 
 async function headless(
@@ -107,9 +109,15 @@ async function headless(
 	return { code, lines };
 }
 
-/** Saved run sessions (the agent also writes its own .jsonl log there). */
-const saved_ = () =>
-	readdirSync(join(home, ".8gent", "sessions")).filter((f) => f.endsWith(".json"));
+/** Sessions in the one tree store (sessions/tree/<id>.jsonl); the agent's own log lives one level up. */
+const treeDir = () => join(home, ".8gent", "sessions", "tree");
+const saved_ = () => {
+	try {
+		return readdirSync(treeDir()).filter((f) => f.endsWith(".jsonl"));
+	} catch {
+		return [];
+	}
+};
 const asText = (b: Body) => JSON.stringify(b.messages);
 
 describe("8gent -p", () => {
@@ -126,7 +134,7 @@ describe("8gent -p", () => {
 	}, 60_000);
 
 	test("--continue resumes this folder's latest session", async () => {
-		const before = saved_()[0].replace(/\.json$/, "");
+		const before = saved_()[0].replace(/\.jsonl$/, "");
 		bodies = [];
 		const { code, lines } = await headless(["--continue", "and again"]);
 		expect(code).toBe(0);
@@ -146,7 +154,7 @@ describe("8gent -p", () => {
 			const fresh = await headless(["--continue", "--cwd", other, "hello"]);
 			expect(fresh.lines[0].resumed).toBe(false);
 		} finally {
-			rmSync(other, { recursive: true, force: true });
+			removeTree(other);
 		}
 	}, 60_000);
 
@@ -156,11 +164,11 @@ describe("8gent -p", () => {
 			const secret = "AKIAIOSFODNN7EXAMPLE";
 			const { code } = await headless(["--cwd", other, "summarise"], `# .env\nAWS_ACCESS_KEY_ID=${secret}\n`);
 			expect(code).toBe(0);
-			const files = saved_().map((f) => readFileSync(join(home, ".8gent", "sessions", f), "utf-8"));
+			const files = saved_().map((f) => readFileSync(join(treeDir(), f), "utf-8"));
 			expect(files.some((t) => t.includes("AWS_ACCESS_KEY_ID"))).toBe(true);
 			expect(files.some((t) => t.includes(secret))).toBe(false);
 		} finally {
-			rmSync(other, { recursive: true, force: true });
+			removeTree(other);
 		}
 	}, 60_000);
 
@@ -178,7 +186,7 @@ describe("8gent -p", () => {
 			}
 			expect(saved_().length).toBe(n);
 		} finally {
-			rmSync(other, { recursive: true, force: true });
+			removeTree(other);
 		}
 	}, 60_000);
 
@@ -196,7 +204,7 @@ describe("8gent -p", () => {
 			for (const l of lines) expect(validateRunEvent(l)).toEqual([]);
 		} finally {
 			process.env.OLLAMA_HOST = host;
-			rmSync(other, { recursive: true, force: true });
+			removeTree(other);
 		}
 	}, 60_000);
 });

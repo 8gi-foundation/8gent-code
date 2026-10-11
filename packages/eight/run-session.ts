@@ -3,24 +3,31 @@
  *
  * `RunSessionStore` is the minimal interface the run needs from the session
  * layer: the latest session of a folder (E2, F4), reading it back, and saving.
- * The default implementation sits on the public SessionManager API and filters
- * by folder here. When the session lane (L4) ships its own cwd-scoped
- * "latest" call, swap `defaultRunSessionStore` to delegate to it; nothing
- * else in the run changes.
+ * The default implementation is the JSONL tree store (session-store.ts), the
+ * one store every surface writes to (row E1): `--continue` resumes what the
+ * TUI or an earlier `-p` run saved in this folder, and a headless run's
+ * session shows up in the TUI's picker. SessionManager is the tree store's
+ * read/write facade (it also migrates pre-tree .json files on first touch).
  */
-import * as path from "node:path";
-import { SessionManager, type SessionInfo } from "./session-manager";
+import { SessionManager } from "./session-manager";
+import { type SessionListItem, latestSessionForCwd } from "./session-store";
 
 export interface RunSessionMessage {
 	role: string;
 	content: string;
 }
 
+/** What the run needs to know about a stored session. */
+export type RunSessionSummary = Pick<
+	SessionListItem,
+	"id" | "name" | "model" | "provider" | "cwd" | "messageCount"
+>;
+
 export interface RunSessionStore {
 	/** The most recently active non-empty session whose folder is `cwd`, or null. */
-	latestForCwd(cwd: string): SessionInfo | null;
+	latestForCwd(cwd: string): RunSessionSummary | null;
 	/** One session by exact id, with its messages. */
-	load(id: string): (SessionInfo & { messages: RunSessionMessage[] }) | null;
+	load(id: string): (RunSessionSummary & { messages: RunSessionMessage[] }) | null;
 	/** Create or overwrite the session `id`. */
 	save(
 		id: string,
@@ -29,17 +36,12 @@ export interface RunSessionStore {
 	): void;
 }
 
-/** Same folder; case-insensitive on Windows, as the session lane compares them. */
-const key = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
-const same = (a: string, b: string) => key(a) === key(b);
-
 export function defaultRunSessionStore(sessionDir?: string): RunSessionStore {
 	const sm = new SessionManager(sessionDir);
 	return {
-		latestForCwd(cwd) {
-			// list() is sorted newest first.
-			return sm.list(Number.MAX_SAFE_INTEGER).find((s) => s.messageCount > 0 && same(s.cwd, cwd)) ?? null; // the TUI writes an empty session on every launch
-		},
+		// Folder match and "newest with a message" live in the store, so the
+		// run, the TUI and the picker all mean the same thing by "latest".
+		latestForCwd: (cwd) => latestSessionForCwd(cwd, sessionDir),
 		load: (id) => sm.get(id),
 		save(id, messages, meta) {
 			sm.save(id, messages, { ...meta, channel: "run" });

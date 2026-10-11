@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -125,9 +125,19 @@ describe("event types", () => {
 	});
 });
 
+const tempDirs: string[] = [];
+const tempSessionDir = () => {
+	const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "run-sess-"));
+	tempDirs.push(dir);
+	return dir;
+};
+afterAll(() => {
+	for (const d of tempDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
 describe("folder sessions", () => {
 	test("latestForCwd picks the newest session of that folder only", async () => {
-		const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "run-sess-"));
+		const dir = tempSessionDir();
 		const store = defaultRunSessionStore(dir);
 		const meta = (cwd: string) => ({ model: "m", provider: "p", cwd });
 		store.save("run-1", [{ role: "user", content: "a" }], meta("/work/a"));
@@ -146,7 +156,7 @@ describe("folder sessions", () => {
 
 describe("folder sessions, empty and case", () => {
 	test("an empty session (the TUI writes one per launch) is never the latest", async () => {
-		const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "run-sess-"));
+		const dir = tempSessionDir();
 		const store = defaultRunSessionStore(dir);
 		const meta = { model: "m", provider: "p", cwd: "/work/a" };
 		store.save("real", [{ role: "user", content: "a" }], meta);
