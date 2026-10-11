@@ -208,6 +208,14 @@ import {
 import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import {
+	BANG_USAGE,
+	bangChatLine,
+	bangContextBlock,
+	parseBang,
+	runBang,
+	withShellContext,
+} from "./lib/bang-command.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
@@ -1772,6 +1780,9 @@ export function App({
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
 	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Output of `!cmd` lines waiting to go to the model with the tab's next
+	// message, keyed by tab id (#3918 D5).
+	const shellContextRef = useRef<Map<string, string[]>>(new Map());
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -5662,6 +5673,25 @@ export function App({
 			return;
 		}
 
+		// `!cmd` runs a shell command here; its output goes with the next
+		// message. `!!cmd` runs it without sending (#3918 D5).
+		const bang = attached ? null : parseBang(input);
+		if (bang) {
+			if (!bang.command) {
+				addSystemMessage(BANG_USAGE);
+				return;
+			}
+			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
+			const result = await runBang(bang.command, projectCwd);
+			if (bang.send) {
+				const pending = shellContextRef.current.get(tabId) ?? [];
+				pending.push(bangContextBlock(bang, result));
+				shellContextRef.current.set(tabId, pending);
+			}
+			addSystemMessage(bangChatLine(bang, result));
+			return;
+		}
+
 		// Linked to a shared session (#3929): the shared 8gent answers, and every
 		// surface on the session sees the message.
 		const daemonLink = daemonLinkRef.current;
@@ -5749,8 +5779,12 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const messageForAgent = await expandSkillSlashCommand(message);
-			const routeHint = messageForAgent.trim() || "User attached an image.";
+			const expanded = await expandSkillSlashCommand(message);
+			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
+			const shellContext = shellContextRef.current.get(tabId);
+			shellContextRef.current.delete(tabId);
+			const messageForAgent = withShellContext(shellContext, expanded);
+			const routeHint = expanded.trim() || "User attached an image.";
 
 			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
