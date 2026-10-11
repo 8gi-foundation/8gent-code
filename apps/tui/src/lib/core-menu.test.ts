@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { slashMenuRows } from "../components/command-input.js";
+import { SLASH_MENU_ROWS, slashMenuRows } from "../components/command-input.js";
 import {
 	BUILT_IN_SLASH_COMMANDS,
 	CORE_SLASH_COMMANDS,
@@ -22,6 +22,13 @@ const ENTRIES: SlashRegistryEntry[] = BUILT_IN_SLASH_COMMANDS.flatMap((c) =>
 );
 
 describe("core command menu (#3918 D9)", () => {
+	test("a bare / fits in the menu: 14 rows or fewer, settings and resume in it", () => {
+		expect(CORE_SLASH_COMMANDS.size).toBeLessThanOrEqual(SLASH_MENU_ROWS);
+		expect(slashMenuRows("", ENTRIES).length).toBeLessThanOrEqual(SLASH_MENU_ROWS);
+		expect(CORE_SLASH_COMMANDS.has("settings")).toBeTrue();
+		expect(CORE_SLASH_COMMANDS.has("resume")).toBeTrue();
+	});
+
 	test("every core command is a real built-in", () => {
 		const names = new Set(BUILT_IN_SLASH_COMMANDS.map((c) => c.name));
 		for (const name of CORE_SLASH_COMMANDS) expect(names.has(name)).toBeTrue();

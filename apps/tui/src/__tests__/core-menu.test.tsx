@@ -8,6 +8,9 @@ test("bare / lists core commands; typing reaches the rest; /help all lists every
 	expect(events.find((e) => e.phase === "error")).toBeUndefined();
 	const bare = String(events.find((e) => e.phase === "bare")?.screen ?? "");
 	expect(bare).toContain("/model");
+	expect(bare).toContain("/settings");
+	expect(bare).toContain("/resume");
+	expect(bare).not.toContain("more, keep typing");
 	for (const novelty of ["/dj ", "/pet ", "/music ", "/kanban ", "/vercel "]) {
 		expect(bare).not.toContain(novelty);
 	}

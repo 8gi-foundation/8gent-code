@@ -606,7 +606,7 @@ export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): Sl
 	return [...matches.filter(isCoreEntry), ...matches.filter((e) => !isCoreEntry(e))];
 }
 
-const SLASH_MENU_ROWS = 14;
+export const SLASH_MENU_ROWS = 14;
 
 // Slash command help dropdown (built-ins + loaded skills)
 function SlashCommandHelp({
