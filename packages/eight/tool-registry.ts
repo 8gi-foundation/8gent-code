@@ -196,11 +196,13 @@ export class ToolRegistry {
 	 * Native tool-calling providers hand the SDK one fixed tool object at turn
 	 * start, so a mid-turn discover_tools call reports "loaded" but the tool
 	 * never reaches the model (#3881: spawn_agent missing on OpenRouter).
-	 * Load what the prompt promises before the first request. Append-only, so
+	 * Load what the prompt promises before the first request, for the
+	 * Orchestrator only (same rule as the local path, #3095): engineers, QA,
+	 * spawned children and role-less agents do not delegate. Append-only, so
 	 * the #3222 byte-stable prefix holds. Text-tool providers are left alone.
 	 */
-	preloadForNative(): void {
-		this.loadCategory("orchestration");
+	preloadForNative(role: string | undefined): void {
+		if (role === "orchestrator") this.loadCategory("orchestration");
 	}
 
 	/**
@@ -238,7 +240,7 @@ export class ToolRegistry {
 	/** Create the discover_tools meta-tool */
 	private createDiscoverTool() {
 		return tool({
-			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Call this to unlock a category before using its tools.`,
+			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Registers a category; its tools are callable from the next turn, not the one you are in.`,
 			inputSchema: z.object({
 				category: z.string().describe(`Category to load. One of: ${CATEGORY_NAMES.join(", ")}`),
 			}),
@@ -256,8 +258,8 @@ export class ToolRegistry {
 					tools: allInCategory,
 					message:
 						loaded.length > 0
-							? `Loaded ${loaded.length} tools: ${loaded.join(", ")}`
-							: `Category "${category}" was already loaded.`,
+							? `Registered ${loaded.length} tools: ${loaded.join(", ")}. They are callable from the next turn, not this one.`
+							: `Category "${category}" was already registered; it is callable if it was registered before this turn started.`,
 				};
 			},
 		});

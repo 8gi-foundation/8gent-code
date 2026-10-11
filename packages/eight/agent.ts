@@ -1676,7 +1676,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 		// Native providers cannot pick up discover_tools mid-turn (#3881).
-		if (!isLocalProvider) this.toolRegistry.preloadForNative();
+		if (!isLocalProvider) this.toolRegistry.preloadForNative(this.config.role);
 		// Load computer category when cua:setup has been run, regardless of provider.
 		const { existsSync } = await import("node:fs");
 		const { homedir } = await import("node:os");
