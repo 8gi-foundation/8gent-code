@@ -149,6 +149,9 @@ import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-ap
 import {
 	WRITE_CONTENT_TOOLS,
 	applyEdit,
+	editRefusal,
+	locateEdit,
+	logEditRefusal,
 	blockedToolMessage,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
@@ -918,6 +921,11 @@ export class ToolExecutor {
 								description: "Text to find and replace",
 							},
 							newText: { type: "string", description: "Replacement text" },
+							startLine: {
+								type: "number",
+								description:
+									"Optional 1-based line. If oldText appears more than once, the copy at or after this line is edited. Without it, a duplicate oldText is refused.",
+							},
 						},
 						required: ["path", "oldText", "newText"],
 					},
@@ -1960,7 +1968,12 @@ export class ToolExecutor {
 			}
 			case "edit_file": {
 				const safe = safePath(args.path as string, this.workingDirectory);
-				return this.editFile(safe, args.oldText as string, args.newText as string);
+				return this.editFile(
+					safe,
+					args.oldText as string,
+					args.newText as string,
+					typeof args.startLine === "number" ? args.startLine : undefined,
+				);
 			}
 			case "list_files": {
 				const dir = (args.path as string) || ".";
@@ -2660,7 +2673,12 @@ export class ToolExecutor {
 		return `${opened ? "File written and opened" : "File written"}: ${absolutePath}${designHint}`;
 	}
 
-	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
+	private async editFile(
+		filePath: string,
+		oldText: string,
+		newText: string,
+		startLine?: number,
+	): Promise<string> {
 		// No anchor, no edit (#3101): indexOf("") is 0, so an empty oldText
 		// used to prepend newText to the file.
 		const noAnchor = emptyOldTextError(oldText, filePath);
@@ -2689,7 +2707,15 @@ export class ToolExecutor {
 
 		// Literal replacement, so the bytes written are the bytes the policy
 		// gate checked (String.replace would expand `$&` etc. in newText).
-		const newContent = applyEdit(content, oldText, newText);
+		// A duplicate oldText is refused, never silently applied to the first
+		// copy (#3898); the refusal is logged so it can be counted.
+		const located = locateEdit(content, oldText, startLine);
+		const refusal = editRefusal(located, filePath);
+		if (refusal) {
+			logEditRefusal(located, filePath, oldText.length);
+			return refusal;
+		}
+		const newContent = applyEdit(content, oldText, newText, startLine);
 		if (newContent === null) {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the

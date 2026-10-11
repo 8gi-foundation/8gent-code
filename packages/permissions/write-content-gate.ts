@@ -33,27 +33,107 @@ export const WRITE_CONTENT_TOOLS = new Set<string>([
 	"write_notes",
 ]);
 
+/** Where an edit lands: one offset, nothing, or a refusal to guess. */
+export type EditTarget =
+	| { kind: "ok"; idx: number }
+	| { kind: "none" }
+	| { kind: "ambiguous"; lines: number[] }
+	| { kind: "none-after"; startLine: number; lines: number[] };
+
+/** 1-based line number of a string offset. */
+function lineOf(original: string, idx: number): number {
+	let n = 1;
+	for (let i = original.indexOf("\n"); i !== -1 && i < idx; i = original.indexOf("\n", i + 1)) n++;
+	return n;
+}
+
 /**
- * Apply an edit_file replacement literally: first occurrence only, and
+ * Find where oldText goes (#3898). Zero matches: "none". One match: it.
+ * Several matches and no startLine: "ambiguous", never a silent first-match.
+ * With startLine, the first match that starts at or after that 1-based line
+ * wins; if every match is earlier the file is not what the model read, so
+ * "none-after" refuses rather than editing the wrong copy.
+ */
+export function locateEdit(original: string, oldText: string, startLine?: number): EditTarget {
+	// indexOf("", i) never returns -1, so an empty oldText would loop forever.
+	if (oldText === "") return { kind: "none" };
+	const offsets: number[] = [];
+	for (let i = original.indexOf(oldText); i !== -1; i = original.indexOf(oldText, i + 1)) {
+		offsets.push(i);
+	}
+	if (offsets.length === 0) return { kind: "none" };
+	const lines = offsets.map((o) => lineOf(original, o));
+	if (typeof startLine === "number" && Number.isFinite(startLine)) {
+		const at = lines.findIndex((l) => l >= startLine);
+		return at === -1
+			? { kind: "none-after", startLine, lines }
+			: { kind: "ok", idx: offsets[at] };
+	}
+	if (offsets.length > 1) return { kind: "ambiguous", lines };
+	return { kind: "ok", idx: offsets[0] };
+}
+
+/** Model-visible refusal for a duplicate or stale-anchored edit, or null if the edit can proceed. */
+export function editRefusal(target: EditTarget, filePath: string): string | null {
+	if (target.kind === "ambiguous") {
+		return `Error: oldText matches ${target.lines.length} times in ${filePath} (lines ${target.lines.join(", ")}). Nothing was written. Add surrounding lines to oldText so it is unique, or pass startLine to pick the copy at or after that line.`;
+	}
+	if (target.kind === "none-after") {
+		return `Error: oldText matches in ${filePath} only before line ${target.startLine} (lines ${target.lines.join(", ")}). Nothing was written. The file may have changed since you read it: read_file again and retry.`;
+	}
+	return null;
+}
+
+/**
+ * Count refused edits (#3898): one JSON line per refusal in
+ * ~/.8gent/edit-ambiguous.jsonl. No file text is logged, only the path,
+ * the match lines and the oldText length. Never throws.
+ */
+export function logEditRefusal(target: EditTarget, filePath: string, oldTextLength: number): void {
+	if (target.kind !== "ambiguous" && target.kind !== "none-after") return;
+	try {
+		const dir = path.join(process.env.HOME || ".", ".8gent");
+		fs.mkdirSync(dir, { recursive: true });
+		const rec = { ts: new Date().toISOString(), kind: target.kind, path: filePath, lines: target.lines, oldTextLength };
+		fs.appendFileSync(path.join(dir, "edit-ambiguous.jsonl"), `${JSON.stringify(rec)}\n`);
+	} catch {
+		// Logging must never change the edit's outcome.
+	}
+}
+
+/**
+ * Apply an edit_file replacement literally at the located match, and
  * newText is inserted verbatim. (String.prototype.replace with a string
  * pattern expands `$&`, `$'` and friends in the replacement, so the bytes on
  * disk could differ from the bytes the model sent and the gate checked.)
- * Returns null when oldText is not in the file.
+ * Returns null when oldText is not in the file, or when the match is
+ * ambiguous (callers ask locateEdit/editRefusal first to say why).
  */
-export function applyEdit(original: string, oldText: string, newText: string): string | null {
-	const idx = original.indexOf(oldText);
-	if (idx === -1) return null;
-	return original.slice(0, idx) + newText + original.slice(idx + oldText.length);
+export function applyEdit(
+	original: string,
+	oldText: string,
+	newText: string,
+	startLine?: number,
+): string | null {
+	const t = locateEdit(original, oldText, startLine);
+	if (t.kind !== "ok") return null;
+	return original.slice(0, t.idx) + newText + original.slice(t.idx + oldText.length);
 }
 
 /**
  * The full lines of the edited result that contain the inserted text (or,
  * for a pure deletion, the line the deletion joined). Null when oldText is
- * not in the file.
+ * not in the file or is ambiguous.
  */
-export function editedLines(original: string, oldText: string, newText: string): string | null {
-	const idx = original.indexOf(oldText);
-	if (idx === -1) return null;
+export function editedLines(
+	original: string,
+	oldText: string,
+	newText: string,
+	startLine?: number,
+): string | null {
+	const t = locateEdit(original, oldText, startLine);
+	if (t.kind !== "ok") return null;
+	const idx = t.idx;
 	const result = original.slice(0, idx) + newText + original.slice(idx + oldText.length);
 	const start = idx === 0 ? 0 : result.lastIndexOf("\n", idx - 1) + 1;
 	const insertEnd = idx + newText.length;
@@ -89,7 +169,12 @@ export function writtenContentFor(
 			if (oldText !== undefined && p) {
 				const abs = path.isAbsolute(p) ? p : path.join(workingDirectory, p);
 				try {
-					const lines = editedLines(fs.readFileSync(abs, "utf-8"), oldText, newText);
+					const lines = editedLines(
+						fs.readFileSync(abs, "utf-8"),
+						oldText,
+						newText,
+						typeof args.startLine === "number" ? args.startLine : undefined,
+					);
 					if (lines !== null) return lines;
 				} catch {
 					// Missing or unreadable file: check what the model sent.
