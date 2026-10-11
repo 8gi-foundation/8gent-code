@@ -12,9 +12,9 @@
  * Supported (exact Pi shapes):
  *   pi.registerTool({ name, label, description, parameters, execute(toolCallId, params, signal, onUpdate, ctx) })
  *     -> result { content: [{ type: "text", text }], details }, types.d.ts:448-506
- *   pi.registerCommand(name, { description, handler(args, ctx) }), types.d.ts:1147-1153, 1206
- *   pi.on("tool_call", (event, ctx) => { block, reason }), types.d.ts:1201, 1065-1074
- *     event { type: "tool_call", toolCallId, toolName, input }, types.d.ts:913-959
+ *   pi.registerCommand(name, { description, handler(args, ctx) }), types.d.ts:1147-1153, 1207
+ *   pi.on("tool_call", (event, ctx) => { block, reason }), types.d.ts:1200, 1065-1074
+ *     event { type: "tool_call", toolCallId, toolName, input }, types.d.ts:907-953
  *   imports: Type from "typebox" / "@sinclair/typebox" / "@earendil-works/pi-ai",
  *     StringEnum from "@earendil-works/pi-ai", defineTool from "@earendil-works/pi-coding-agent"
  *   ctx: cwd, hasUI (false), mode, signal, ui.notify (shown as command output),
