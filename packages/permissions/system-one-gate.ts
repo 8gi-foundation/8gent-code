@@ -623,6 +623,26 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain curl whose every URL is a loopback http(s) server and whose
+		// every file stays inside the workspace (#3941). Default mode only.
+		try {
+			const { curlToLoopback } = await import("./s1-curl-loopback");
+			const c = mode === "default" ? curlToLoopback(command, cwd) : { ok: false as const };
+			if (c.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: c.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {

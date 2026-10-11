@@ -77,7 +77,7 @@ const AMBIENT_ENV_OK = new Set(["NODE_ENV", "DEBUG", "CI", "NO_COLOR", "FORCE_CO
 const MAX_ENV = 4;
 const SCRIPT_EXT = /\.(?:ts|mts|js|mjs)$/;
 const TEMP_ROOTS = ["/tmp", "/private/tmp"];
-const SECRET =
+export const SECRET =
 	/(^|\/)\.env(\.[\w.-]+)?$|(^|\/)\.env\b|id_rsa|id_ed25519|id_ecdsa|(^|\/)\.ssh(\/|$)|\.aws\/|credentials|\.netrc|\.npmrc|\.git-credentials|keychain|\.pem$|\.key$|\.p12$/;
 const BAD_FLAG =
 	/^--?(e|p|r|c|i|eval|print|require|import|preload|loader|env-file|cwd|config|inspect(-brk)?|watch|hot|install|conditions|input-type|experimental[\w-]*|bun|shell|filter|silent|elide-lines|if-present|no-env-file)(=.*)?$/;
@@ -256,7 +256,7 @@ const PATH_OK = new Set(["join", "resolve", "basename", "extname"]);
 const PROC_OK = new Set(["argv", "exit", "exitCode", "cwd", "stdout", "stderr"]);
 /** Tokens after which a `[` opens an array literal or a type, not a member access. */
 const ARRAY_PREV = new Set(["=", "(", ",", ":", "[", "=>", "?", "...", "<", "|", "&", ";", "!", "${", "}$", "+", "??"]);
-const WRITE_BAD_NAME =
+export const WRITE_BAD_NAME =
 	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
 
 interface Ctx {
@@ -370,7 +370,7 @@ function resolveSources(a: Tok[], defs: Defs, depth = 0): Src[] | null {
 }
 
 /** `p` with symlinks in its existing part resolved (/tmp -> /private/tmp), so it compares with the real root. */
-function canon(p: string): string {
+export function canon(p: string): string {
 	const tail: string[] = [];
 	let cur = p;
 	for (;;) {
