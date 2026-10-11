@@ -14,6 +14,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ const ASSET = hostAsset();
 const fakeBinary = (version: string) => `#!/bin/sh\necho "8gent Code v${version}"\n`;
 
 /** path -> body, or a redirect */
-let routes = new Map<string, { body?: string; location?: string }>();
+let routes = new Map<string, { body?: string | Uint8Array; location?: string }>();
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
 
@@ -278,16 +279,20 @@ describe("install.sh: verification", () => {
 		expect(good.out).toContain("signature on SHA256SUMS: verified");
 	});
 
-	test("a signed-in gh whose attestation fails stops the install", async () => {
+	test("gh attestation is pinned to release-binaries.yml and the release tag; a failure stops the install", async () => {
 		const url = one("0.20.0");
+		const log = join(root, "gh.log");
 		tool(
 			"gh",
-			'case "$1 $2" in "auth status") exit 0 ;; "attestation verify") exit 1 ;; esac; exit 2',
+			`echo "$@" >> "${log}"; case "$1 $2" in "auth status") exit 0 ;; "attestation verify") exit 1 ;; esac; exit 2`,
 		);
 		const r = await install(url);
 		expect(r.code).not.toBe(0);
 		expect(r.out).toContain("attestation");
 		expect(installed()).toBeNull();
+		expect(readFileSync(log, "utf8")).toContain(
+			"--repo 8gi-foundation/8gent-code --signer-workflow 8gi-foundation/8gent-code/.github/workflows/release-binaries.yml --source-ref refs/tags/v0.20.0",
+		);
 
 		tool(
 			"gh",
@@ -298,14 +303,95 @@ describe("install.sh: verification", () => {
 		expect(ok.out).toContain("attestation: verified");
 	});
 
-	test("EIGHT_REQUIRE_VERIFIED=1 refuses when nothing could verify; otherwise it warns", async () => {
-		const url = one("0.20.0");
-		const strict = await install(url, { EIGHT_REQUIRE_VERIFIED: "1" });
+	test("without a release key: installs on the checksum, with a warning", async () => {
+		const r = await install(one("0.20.0"));
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("no signing key yet");
+	});
+
+	test("with a key and no verifier: refused unless EIGHT_ALLOW_UNVERIFIED=1", async () => {
+		const url = one("0.20.0", { minisig: true });
+		const env = { EIGHT_TEST_SIGNING_KEY: "RWTESTKEY", EIGHT_TEST_NO_VERIFIER: "1" };
+		const strict = await install(url, env);
 		expect(strict.code).not.toBe(0);
+		expect(strict.out).toContain("EIGHT_ALLOW_UNVERIFIED=1");
 		expect(installed()).toBeNull();
-		const relaxed = await install(url);
-		expect(relaxed.code).toBe(0);
-		expect(relaxed.out).toContain("only the SHA256 checksum was checked");
+		const optOut = await install(url, { ...env, EIGHT_ALLOW_UNVERIFIED: "1" });
+		expect(optOut.code).toBe(0);
+		expect(optOut.out).toContain("was NOT checked");
+	});
+
+	describe("pinned verifier (no minisign on PATH)", () => {
+		// The same archive layout as the real minisign 0.12 release for this OS.
+		function verifierArchive(script: string): { path: string; sha: string; name: string } {
+			const stage = join(root, "ms-stage");
+			const linux = process.platform !== "darwin";
+			const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+			const inner = linux ? join("minisign-linux", arch, "minisign") : "minisign";
+			mkdirSync(join(stage, inner, ".."), { recursive: true });
+			writeFileSync(join(stage, inner), `#!/bin/sh\n${script}\n`);
+			chmodSync(join(stage, inner), 0o755);
+			const name = linux ? "minisign-0.12-linux.tar.gz" : "minisign-0.12-macos.zip";
+			const out = join(root, name);
+			const r = linux
+				? Bun.spawnSync(["tar", "-czf", out, "-C", stage, "minisign-linux"])
+				: Bun.spawnSync(["zip", "-q", out, "minisign"], { cwd: stage });
+			if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+			const bytes = readFileSync(out);
+			return { path: out, sha: createHash("sha256").update(bytes).digest("hex"), name };
+		}
+
+		test("downloads it, checks its SHA256, then verifies with it", async () => {
+			const url = one("0.20.0", { minisig: true });
+			const log = join(root, "pinned.log");
+			const a = verifierArchive(`echo "$@" >> "${log}"; exit 0`);
+			routes.set(`/verifier/${a.name}`, { body: readFileSync(a.path) });
+			const r = await install(url, {
+				EIGHT_TEST_SIGNING_KEY: "RWTESTKEY",
+				EIGHT_TEST_MINISIGN_URL: `${base}/verifier/${a.name}`,
+				EIGHT_TEST_MINISIGN_SHA256: a.sha,
+			});
+			expect(r.out).toContain("pinned signature verifier");
+			expect(r.code).toBe(0);
+			expect(r.out).toContain("signature on SHA256SUMS: verified");
+			expect(readFileSync(log, "utf8")).toContain("-P RWTESTKEY");
+		});
+
+		test("a verifier whose SHA256 does not match the pin is never run", async () => {
+			const url = one("0.20.0", { minisig: true });
+			const log = join(root, "pinned.log");
+			const a = verifierArchive(`echo ran >> "${log}"; exit 0`);
+			routes.set(`/verifier/${a.name}`, { body: readFileSync(a.path) });
+			const r = await install(url, {
+				EIGHT_TEST_SIGNING_KEY: "RWTESTKEY",
+				EIGHT_TEST_MINISIGN_URL: `${base}/verifier/${a.name}`,
+				EIGHT_TEST_MINISIGN_SHA256: "0".repeat(64),
+			});
+			expect(r.code).not.toBe(0);
+			expect(r.out).toContain("pinned SHA256");
+			expect(existsSync(log)).toBe(false);
+			expect(installed()).toBeNull();
+		});
+	});
+
+	const wget = Bun.which("wget");
+	test.skipIf(!wget)("the wget fallback checks every redirect hop too", async () => {
+		symlinkSync(wget as string, join(fakeBin, "wget"));
+		let url = one("0.20.0");
+		const real = routes.get(`/releases/download/v0.20.0/${ASSET}`);
+		routes.set(`/releases/download/v0.20.0/${ASSET}`, { location: `${base}/cdn/blob` });
+		routes.set("/cdn/blob", real ?? {});
+		const ok = await install(url, { EIGHT_TEST_FORCE_WGET: "1" });
+		expect(ok.out).toContain("Installed 8gent v0.20.0");
+		expect(ok.code).toBe(0);
+
+		rmSync(installDir, { recursive: true, force: true });
+		url = one("0.20.0");
+		routes.set(`/releases/download/v0.20.0/${ASSET}`, { location: "http://evil.example/blob" });
+		const bad = await install(url, { EIGHT_TEST_FORCE_WGET: "1" });
+		expect(bad.code).not.toBe(0);
+		expect(bad.out).toContain("refusing a redirect");
+		expect(installed()).toBeNull();
 	});
 });
 
@@ -357,4 +443,98 @@ test("the embedded signing keys match scripts/release-signing.pub", () => {
 test("install.sh is wrapped in main and calls it on the last line", () => {
 	const lines = readFileSync(SCRIPT, "utf8").trimEnd().split("\n");
 	expect(lines[lines.length - 1]).toBe('main "$@"');
+});
+
+// (b4) Interop with the real minisign: a key made and a signature written by
+// the real binary, verified by install.sh both with minisign on PATH and
+// through the pinned-verifier download path. MINISIGN_BIN or PATH supplies
+// it (release-install-smoke.yml provides the pinned 0.12 build).
+const realMinisign = process.env.MINISIGN_BIN || Bun.which("minisign");
+describe.skipIf(!realMinisign)("install.sh with the real minisign", () => {
+	const ms = realMinisign as string;
+	function keypair(): string {
+		const r = Bun.spawnSync([
+			ms,
+			"-G",
+			"-W",
+			"-f",
+			"-p",
+			join(root, "k.pub"),
+			"-s",
+			join(root, "k.key"),
+		]);
+		if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+		return readFileSync(join(root, "k.pub"), "utf8").split("\n")[1].trim();
+	}
+	/** Sign the served SHA256SUMS of v0.20.0 with the real binary; optionally tamper after. */
+	function signServed(tamper = false) {
+		const path = "/releases/download/v0.20.0/SHA256SUMS";
+		const sums = String(routes.get(path)?.body ?? "");
+		writeFileSync(join(root, "SHA256SUMS"), sums);
+		const r = Bun.spawnSync(
+			[
+				ms,
+				"-S",
+				"-s",
+				join(root, "k.key"),
+				"-m",
+				join(root, "SHA256SUMS"),
+				"-x",
+				join(root, "s.minisig"),
+			],
+			{ stdin: "ignore" },
+		);
+		if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+		routes.set("/releases/download/v0.20.0/SHA256SUMS.minisig", {
+			body: readFileSync(join(root, "s.minisig"), "utf8"),
+		});
+		if (tamper) routes.set(path, { body: `${sums}${"b".repeat(64)}  extra\n` });
+	}
+
+	test("a real signature verifies with minisign on PATH; a tampered SHA256SUMS is refused", async () => {
+		const key = keypair();
+		symlinkSync(ms, join(fakeBin, "minisign"));
+		const url = one("0.20.0", { minisig: true });
+		signServed();
+		const ok = await install(url, { EIGHT_TEST_SIGNING_KEY: key });
+		expect(ok.out).toContain("signature on SHA256SUMS: verified");
+		expect(ok.code).toBe(0);
+
+		rmSync(installDir, { recursive: true, force: true });
+		const url2 = one("0.20.0", { minisig: true });
+		signServed(true);
+		const bad = await install(url2, { EIGHT_TEST_SIGNING_KEY: key });
+		expect(bad.code).not.toBe(0);
+		expect(bad.out).toContain("valid release signature");
+		expect(installed()).toBeNull();
+	});
+
+	test("a real signature verifies through the pinned-verifier download path", async () => {
+		const key = keypair();
+		const url = one("0.20.0", { minisig: true });
+		signServed();
+		const linux = process.platform !== "darwin";
+		const stage = join(root, "ms-real");
+		const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+		const inner = linux ? join("minisign-linux", arch, "minisign") : "minisign";
+		mkdirSync(join(stage, inner, ".."), { recursive: true });
+		writeFileSync(join(stage, inner), readFileSync(ms));
+		chmodSync(join(stage, inner), 0o755);
+		const name = linux ? "minisign-0.12-linux.tar.gz" : "minisign-0.12-macos.zip";
+		const archive = join(root, name);
+		const z = linux
+			? Bun.spawnSync(["tar", "-czf", archive, "-C", stage, "minisign-linux"])
+			: Bun.spawnSync(["zip", "-q", archive, "minisign"], { cwd: stage });
+		expect(z.exitCode).toBe(0);
+		const bytes = readFileSync(archive);
+		routes.set(`/verifier/${name}`, { body: bytes });
+		const r = await install(url, {
+			EIGHT_TEST_SIGNING_KEY: key,
+			EIGHT_TEST_MINISIGN_URL: `${base}/verifier/${name}`,
+			EIGHT_TEST_MINISIGN_SHA256: createHash("sha256").update(bytes).digest("hex"),
+		});
+		expect(r.out).toContain("pinned signature verifier");
+		expect(r.out).toContain("signature on SHA256SUMS: verified");
+		expect(r.code).toBe(0);
+	});
 });

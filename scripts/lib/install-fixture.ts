@@ -17,6 +17,11 @@
  *   install.sh, install-ps1.txt   copies, so the literal one-liners are tested
  *                                 (.txt so the test server sends text/plain, as GitHub raw does)
  * <asset> is this host's release asset name, as scripts/build-binaries.ts names it.
+ *
+ * With FIXTURE_MINISIGN=<path to a real minisign>, every SHA256SUMS is signed
+ * with a throwaway key made by that binary and served with its .minisig; the
+ * public key is written to signing-key.txt, and releases-badsig.json offers
+ * v0.0.7 whose SHA256SUMS was changed after signing (must be refused).
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -56,12 +61,50 @@ for (const v of versions) {
 }
 
 // GitHub's key order: tag_name, draft, prerelease, then assets.
+const minisign = process.env.FIXTURE_MINISIGN;
+function ms(args: string[]) {
+	const r = spawnSync(minisign as string, args, { stdio: ["ignore", "inherit", "inherit"] });
+	if (r.status !== 0) process.exit(r.status ?? 1);
+}
+// v0.0.7: v0.0.2's binary, SHA256SUMS signed and then changed.
+mkdirSync(join(dir, "releases", "download", "v0.0.7"), { recursive: true });
+copyFileSync(
+	join(dir, "releases", "download", "v0.0.2", asset),
+	join(dir, "releases", "download", "v0.0.7", asset),
+);
+copyFileSync(
+	join(dir, "releases", "download", "v0.0.2", "SHA256SUMS"),
+	join(dir, "releases", "download", "v0.0.7", "SHA256SUMS"),
+);
+// v0.0.5's SHA256SUMS is served, so only the off-host binary URL can stop it.
+mkdirSync(join(dir, "releases", "download", "v0.0.5"), { recursive: true });
+copyFileSync(
+	join(dir, "releases", "download", "v0.0.2", "SHA256SUMS"),
+	join(dir, "releases", "download", "v0.0.5", "SHA256SUMS"),
+);
+if (minisign) {
+	ms(["-G", "-W", "-f", "-p", join(dir, "signing.pub"), "-s", join(dir, "signing.key")]);
+	writeFileSync(
+		join(dir, "signing-key.txt"),
+		readFileSync(join(dir, "signing.pub"), "utf8").split(/\r?\n/)[1].trim(),
+	);
+	for (const v of [...versions, "0.0.5", "0.0.7"]) {
+		const sums = join(dir, "releases", "download", `v${v}`, "SHA256SUMS");
+		ms(["-S", "-s", join(dir, "signing.key"), "-m", sums, "-x", `${sums}.minisig`]);
+	}
+	writeFileSync(
+		join(dir, "releases", "download", "v0.0.7", "SHA256SUMS"),
+		`${readFileSync(join(dir, "releases", "download", "v0.0.7", "SHA256SUMS"), "utf8")}${"b".repeat(64)}  extra\n`,
+	);
+}
+const files = minisign ? [asset, "SHA256SUMS", "SHA256SUMS.minisig"] : [asset, "SHA256SUMS"];
+
 const release = (v: string, withAssets: boolean, prerelease = false, assetBase = base) => ({
 	tag_name: `v${v}`,
 	draft: false,
 	prerelease,
 	assets: withAssets
-		? [asset, "SHA256SUMS"].map((name) => ({
+		? files.map((name) => ({
 				name,
 				browser_download_url: `${name === asset ? assetBase : base}/releases/download/v${v}/${name}`,
 			}))
@@ -82,12 +125,7 @@ writeFileSync(
 	),
 );
 writeFileSync(join(dir, "releases-old.json"), JSON.stringify([release("0.0.1", true)], null, 2));
-// v0.0.5's SHA256SUMS is served, so only the off-host binary URL can stop it.
-mkdirSync(join(dir, "releases", "download", "v0.0.5"), { recursive: true });
-copyFileSync(
-	join(dir, "releases", "download", "v0.0.2", "SHA256SUMS"),
-	join(dir, "releases", "download", "v0.0.5", "SHA256SUMS"),
-);
+writeFileSync(join(dir, "releases-badsig.json"), JSON.stringify([release("0.0.7", true)], null, 2));
 writeFileSync(
 	join(dir, "releases-evil.json"),
 	JSON.stringify([release("0.0.5", true, false, "http://example.com")], null, 2),

@@ -7,6 +7,9 @@
 #            via the literal `irm ... | iex`, and install.sh via `curl ... | sh`:
 #            newest release with the binary wins, a pinned version installs,
 #            and a newer installed 8gent is never replaced by an older one.
+#            The fake release is signed by the real minisign 0.12 (pinned by
+#            SHA256, kept off PATH), so the installers take their real pinned-
+#            verifier path: download minisign from GitHub, check, verify.
 #   live     (called by release-binaries.yml once a release is public): installs
 #            that real release from GitHub with the real installers and checks
 #            `8gent --version` names the tag.
@@ -47,9 +50,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: Build and serve the fake release site
+      - name: Build, sign and serve the fake release site
         shell: pwsh
         run: |
+          # The real minisign, pinned, kept off PATH: it only signs the fixture.
+          $zip = Join-Path $env:RUNNER_TEMP 'minisign.zip'
+          Invoke-WebRequest https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip -OutFile $zip -UseBasicParsing
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479') { throw 'minisign zip hash mismatch' }
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'minisign')
+          $env:FIXTURE_MINISIGN = Join-Path $env:RUNNER_TEMP 'minisign\minisign-win64\x86_64\minisign.exe'
           $srv = Join-Path $env:RUNNER_TEMP 'srv'
           bun scripts/lib/install-fixture.ts $srv 'http://127.0.0.1:8765'
           if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
@@ -61,14 +70,38 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          if (Get-Command minisign -ErrorAction SilentlyContinue) { throw 'minisign must not be on PATH here' }
+          $env:EIGHT_TEST_SIGNING_KEY = (Get-Content (Join-Path $env:RUNNER_TEMP 'srv\signing-key.txt') -Raw).Trim()
           $dir = Join-Path $env:RUNNER_TEMP 'bin51'
           $exe = Join-Path $dir '8gent.exe'
           $env:EIGHT_INSTALL_DIR = $dir
+          # A %VAR% entry in the user PATH must survive (REG_EXPAND_SZ).
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+          $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $k.SetValue('Path', ($raw.TrimEnd(';') + ';%USERPROFILE%\eight-expand-check'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+          $k.Close()
+
           $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases.json'
-          irm http://127.0.0.1:8765/install-ps1.txt | iex
+          $out = irm http://127.0.0.1:8765/install-ps1.txt | iex *>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'signature on SHA256SUMS: verified') { throw 'the release signature was not verified' }
+          if ($out -notmatch 'pinned signature verifier') { throw 'the pinned verifier was not used' }
           $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "newest: got $v" }
-          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-          if (-not ($userPath -split ';' | Where-Object { $_ -ieq $dir })) { throw "user PATH does not contain $dir" }
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $kind = $k.GetValueKind('Path')
+          $k.Close()
+          if ($kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw "user PATH became $kind" }
+          if ($raw -notmatch '%USERPROFILE%\\eight-expand-check') { throw "a %VAR% PATH entry was expanded or lost: $raw" }
+          if (-not ($raw -split ';' | Where-Object { $_ -ieq $dir })) { throw "user PATH does not contain $dir" }
+          if (($raw -split ';')[0] -ine $dir) { throw "$dir is not first on the user PATH" }
+
+          # SHA256SUMS changed after signing: refused, nothing changes.
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-badsig.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = ("$_" -match 'valid release signature'); Write-Host "refused: $_" }
+          if (-not $refused) { throw 'a tampered SHA256SUMS was not refused by the signature check' }
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.2') { throw "changed after a refused install: got $v" }
 
           $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
           irm http://127.0.0.1:8765/install-ps1.txt | iex
@@ -98,6 +131,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $env:RUNNER_TEMP 'bin7'
           $exe = Join-Path $dir '8gent.exe'
+          $env:EIGHT_TEST_SIGNING_KEY = (Get-Content (Join-Path $env:RUNNER_TEMP 'srv\signing-key.txt') -Raw).Trim()
           $env:EIGHT_INSTALL_DIR = $dir
           $env:EIGHT_NO_MODIFY_PATH = '1'
           $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-old.json'
@@ -121,17 +155,49 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+      # The real minisign 0.12, pinned by SHA256 and kept off PATH: it signs the
+      # fixture and runs the interop tests; the installer must fetch its own.
+      - name: Pinned minisign (off PATH)
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/minisign"; mkdir -p "$d"
+          if [ "$RUNNER_OS" = Linux ]; then
+            curl -fsSL --proto =https -o "$d/m.tgz" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+            echo "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  $d/m.tgz" | sha256sum -c -
+            tar -xzf "$d/m.tgz" -C "$d"
+            echo "MINISIGN_BIN=$d/minisign-linux/x86_64/minisign" >> "$GITHUB_ENV"
+          else
+            curl -fsSL --proto =https -o "$d/m.zip" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
+            echo "89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63  $d/m.zip" | shasum -a 256 -c -
+            unzip -q -o "$d/m.zip" minisign -d "$d"
+            echo "MINISIGN_BIN=$d/minisign" >> "$GITHUB_ENV"
+          fi
+          if command -v minisign; then echo "::error::minisign must not be on PATH"; exit 1; fi
+
+      - name: Unit and real-minisign interop tests for install.sh
+        run: bun test scripts/lib/install-sh.test.ts
+
       - name: curl | sh, then no downgrade, then pin
         run: |
           set -eu
           srv="$RUNNER_TEMP/srv"
-          bun scripts/lib/install-fixture.ts "$srv" http://127.0.0.1:8765
+          FIXTURE_MINISIGN="$MINISIGN_BIN" bun scripts/lib/install-fixture.ts "$srv" http://127.0.0.1:8765
+          export EIGHT_TEST_SIGNING_KEY="$(cat "$srv/signing-key.txt")"
           python3 -m http.server 8765 --bind 127.0.0.1 --directory "$srv" >/dev/null 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/releases.json >/dev/null && break; sleep 1; done
           export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
           bin="$EIGHT_INSTALL_DIR/8gent"
 
-          EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
+          out="$(EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh' 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q 'pinned signature verifier' || { echo "::error::the pinned verifier was not used"; exit 1; }
+          echo "$out" | grep -q 'signature on SHA256SUMS: verified' || { echo "::error::the release signature was not verified"; exit 1; }
+          "$bin" --version | grep -q 'v0\.0\.2'
+
+          # SHA256SUMS changed after signing: refused, nothing changes.
+          if EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-badsig.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::a tampered SHA256SUMS was accepted"; exit 1
+          fi
           "$bin" --version | grep -q 'v0\.0\.2'
 
           EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-old.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
