@@ -22,8 +22,8 @@
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 import { defaultConfigPath as defaultMcpConfigPath } from "../mcp/config";
 import { defaultPiExtensionsDir } from "./pi-compat";
 import { parseTemplate } from "./prompts";
@@ -46,7 +46,9 @@ export interface ImportPaths {
 }
 
 export function defaultImportPaths(env: NodeJS.ProcessEnv = process.env): ImportPaths {
-	const home = os.homedir();
+	const home = resolveHome();
+	if (!home || !path.isAbsolute(home))
+		throw new Error(`no absolute home directory (got "${home}")`);
 	return {
 		claudeDir: path.join(home, ".claude"),
 		claudeJson: path.join(home, ".claude.json"),
@@ -84,8 +86,7 @@ function recordImports(eightDir: string, records: ImportRecord[]): void {
 	const key = (r: ImportRecord) => `${r.source}:${r.kind}:${r.name}`;
 	const byKey = new Map(all.map((r) => [key(r), r]));
 	for (const r of records) byKey.set(key(r), r);
-	fs.mkdirSync(eightDir, { recursive: true });
-	fs.writeFileSync(file, `${JSON.stringify([...byKey.values()], null, 2)}\n`);
+	writePrivate(file, `${JSON.stringify([...byKey.values()], null, 2)}\n`);
 }
 
 function safeName(raw: string): string {
@@ -100,6 +101,18 @@ function safeName(raw: string): string {
 
 // ── claude-code ──────────────────────────────────────────────────────────────
 
+/**
+ * Claude Code runs a `!`command`` line and pastes its output. 8gent does not:
+ * each such line is wrapped in a code fence marked "not-run", so the model
+ * reads it as quoted text and never as an instruction to run it.
+ */
+export function fenceShellLines(text: string): string {
+	return text
+		.split(/\r?\n/)
+		.map((line) => (/!`[^`]+`/.test(line) ? `\`\`\`not-run\n${line}\n\`\`\`` : line))
+		.join("\n");
+}
+
 /** Claude Code command features our prompt templates do not run, named for the report. */
 function claudeCommandGaps(text: string): string[] {
 	const gaps: string[] = [];
@@ -107,7 +120,7 @@ function claudeCommandGaps(text: string): string[] {
 	for (const key of ["allowed-tools", "model", "argument-hint", "disable-model-invocation"]) {
 		if (new RegExp(`^${key}:`, "m").test(fm)) gaps.push(`frontmatter "${key}"`);
 	}
-	if (/^!`|[^`]!`[^`]+`/m.test(text)) gaps.push("!`command` shell output (stays as plain text)");
+	if (/!`[^`]+`/.test(text)) gaps.push("!`command` lines (kept in a not-run code fence)");
 	if (/(^|\s)@[\w./~-]+/.test(text.replace(/^---[\s\S]*?---/, "")))
 		gaps.push("@file references (stay as plain text)");
 	return gaps;
@@ -137,11 +150,12 @@ function importClaudeCode(
 		const text = fs.readFileSync(src, "utf8");
 		const name = `claude-${safeName(f)}`;
 		const gaps = claudeCommandGaps(text);
+		const safe = fenceShellLines(text);
 		fs.mkdirSync(staged, { recursive: true });
-		fs.writeFileSync(path.join(staged, `${name}.md`), text);
+		fs.writeFileSync(path.join(staged, `${name}.md`), safe);
 		if (enable) {
 			fs.mkdirSync(live, { recursive: true });
-			fs.writeFileSync(path.join(live, `${name}.md`), text);
+			fs.writeFileSync(path.join(live, `${name}.md`), safe);
 		}
 		const desc = parseTemplate(text).description;
 		records.push({
@@ -228,17 +242,81 @@ function mcpSources(
 	return [...claude, ...pi];
 }
 
-/** A short, secret-free description of a server for the report. */
-function describeServer(e: McpEntry): string {
+/**
+ * Mask secret-looking parts of a string: KEY=value pairs, known token shapes
+ * (GitHub, OpenAI-style sk-, Slack, AWS), Authorization schemes, URL
+ * userinfo and query values. Used on everything an import or approve prints.
+ */
+export function redact(text: string): string {
+	return text
+		.replace(/\bgh[pousr]_[A-Za-z0-9]{16,}/g, "***")
+		.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "***")
+		.replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "***")
+		.replace(/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "***")
+		.replace(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "***")
+		.replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{6,}/gi, "$1 ***")
+		.replace(/(\/\/)[^/@\s]+@/g, "$1***@")
+		.replace(/([?&][^=&\s]+=)[^&\s]+/g, "$1***")
+		.replace(/\b([A-Za-z_][\w.-]*)=(\S+)/g, "$1=***");
+}
+
+/** The program a server runs, by name only: env assignments skipped, no path, no args. */
+function programName(command: string): string {
+	const first = command
+		.trim()
+		.split(/\s+/)
+		.find((t) => !/^[A-Za-z_][\w]*=/.test(t));
+	return first ? path.basename(first.replace(/^["']|["']$/g, "")) : "(none)";
+}
+
+/** One line for the import summary: program name or URL host only, env key names only. */
+function summarizeServer(e: McpEntry): string {
 	if (e.url) {
 		try {
-			return `url ${new URL(e.url).origin}`;
+			return `url ${new URL(e.url).host}`;
 		} catch {
 			return "url (unparsable)";
 		}
 	}
 	const envKeys = Object.keys(e.env ?? {});
-	return `command ${e.command}${e.args?.length ? ` (+${e.args.length} args)` : ""}${envKeys.length ? `, env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+	return `program ${programName(String(e.command))}${envKeys.length ? `, env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+}
+
+/** What approve shows before it lets a server start: the full command or URL, redacted. */
+function fullServer(e: McpEntry): string {
+	if (e.url)
+		return `url ${redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
+	const args = (e.args ?? []).map((a) => JSON.stringify(redact(String(a))));
+	const envKeys = Object.keys(e.env ?? {});
+	return `command ${redact(String(e.command))}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+}
+
+/**
+ * The hash recorded for an imported server: over its shape with every secret
+ * value replaced (env and header values dropped, args, command and URL
+ * redacted), so imports.json holds no secret and no hash of one.
+ */
+function serverHash(e: McpEntry): string {
+	const shape = {
+		command: e.command ? redact(String(e.command)) : undefined,
+		args: (e.args ?? []).map((a) => redact(String(a))),
+		env: Object.keys(e.env ?? {}).sort(),
+		url: e.url ? redact(String(e.url)) : undefined,
+		headers: Object.keys(e.headers ?? {}).sort(),
+		type: e.type,
+	};
+	return sha(JSON.stringify(shape));
+}
+
+/** Write a file only its owner can read (the MCP config can hold secrets). */
+function writePrivate(file: string, text: string): void {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, text, { mode: 0o600 });
+	try {
+		fs.chmodSync(file, 0o600);
+	} catch {
+		/* Windows: ACLs, not modes */
+	}
 }
 
 function importMcp(
@@ -287,8 +365,7 @@ function importMcp(
 				lines.push(`  ${name}  skipped  (${src.label}) already in ${paths.mcpConfig}`);
 				continue;
 			}
-			const canonical = JSON.stringify(entry, Object.keys(entry).sort());
-			const hash = sha(canonical);
+			const hash = serverHash(entry);
 			pending[name] = {
 				...entry,
 				importedFrom: { source: src.label, path: src.file, sha256: hash, importedAt: now },
@@ -302,7 +379,7 @@ function importMcp(
 				importedAt: now,
 				enabled: false,
 			});
-			lines.push(`  ${name}  pending approval  (${src.label}) ${describeServer(entry)}`);
+			lines.push(`  ${name}  pending approval  (${src.label}) ${summarizeServer(entry)}`);
 		}
 	}
 	if (found === 0) {
@@ -313,23 +390,27 @@ function importMcp(
 		};
 	}
 	config.pendingServers = pending;
-	fs.mkdirSync(path.dirname(paths.mcpConfig), { recursive: true });
-	fs.writeFileSync(paths.mcpConfig, `${JSON.stringify(config, null, 2)}\n`);
+	writePrivate(paths.mcpConfig, `${JSON.stringify(config, null, 2)}\n`);
 	return {
 		lines: [
 			`MCP servers (written to "pendingServers" in ${paths.mcpConfig}; none starts until you approve it):`,
 			...lines,
-			"Approve one with: 8gent ext approve-mcp <name>",
+			"See exactly what one runs, then approve it: 8gent ext approve-mcp <name>, then add --yes",
 		],
 		records,
 		code: 0,
 	};
 }
 
-/** Move one pending MCP server into the live list. Never starts it. */
+/**
+ * Approve one pending MCP server. Without `confirm` it only shows what would
+ * run (full command and args, redacted, and the file it came from); with
+ * `confirm` (`--yes`) it moves the server into the live list. Never starts it.
+ */
 export function approveMcp(
 	name: string,
 	paths: Pick<ImportPaths, "mcpConfig">,
+	confirm = false,
 ): { code: number; output: string } {
 	if (!fs.existsSync(paths.mcpConfig)) return { code: 1, output: `No ${paths.mcpConfig}.` };
 	const config = JSON.parse(fs.readFileSync(paths.mcpConfig, "utf8")) as Record<
@@ -345,15 +426,34 @@ export function approveMcp(
 			output: `No pending MCP server "${name}".${names.length ? ` Pending: ${names.join(", ")}` : ""}`,
 		};
 	}
-	const { importedFrom: _from, ...server } = entry;
+	const { importedFrom, ...server } = entry as McpEntry & {
+		importedFrom?: { path?: string; source?: string };
+	};
+	const shown = [
+		`  ${fullServer(server)}`,
+		`  from ${importedFrom?.source ?? "unknown source"}: ${importedFrom?.path ?? "unknown file"}`,
+	];
+	if (!confirm) {
+		return {
+			code: 0,
+			output: [
+				`MCP server "${name}" would run:`,
+				...shown,
+				`Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --yes`,
+			].join("\n"),
+		};
+	}
 	const key = config.servers ? "servers" : config.mcpServers ? "mcpServers" : "servers";
 	config[key] = { ...(config[key] ?? {}), [name]: server };
 	delete pending[name];
 	config.pendingServers = pending;
-	fs.writeFileSync(paths.mcpConfig, `${JSON.stringify(config, null, 2)}\n`);
+	writePrivate(paths.mcpConfig, `${JSON.stringify(config, null, 2)}\n`);
 	return {
 		code: 0,
-		output: `Approved MCP server "${name}" (${describeServer(server)}). It starts the next time 8gent starts.`,
+		output: [
+			`Approved MCP server "${name}". It starts the next time 8gent starts and runs:`,
+			...shown,
+		].join("\n"),
 	};
 }
 

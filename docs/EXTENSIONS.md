@@ -133,23 +133,31 @@ sha256 in `~/.8gent/imports.json`.
 8gent ext import claude-code --enable   # and turn them on
 8gent ext import mcp                    # MCP servers from Claude Code and Pi, pending
 8gent ext import mcp --from pi          # only Pi's mcp.json
-8gent ext approve-mcp github            # let one pending server start
+8gent ext approve-mcp github            # show exactly what it would run
+8gent ext approve-mcp github --yes      # then let it start
 ```
 
 - **Claude Code commands** (`~/.claude/commands/*.md`) become prompt
   templates named `/claude-<name>`. They are staged in
   `~/.8gent/imports/claude-code/prompts` and only used once you pass
   `--enable`. `$ARGUMENTS` and `$1` work. The report names what does not
-  carry over: `allowed-tools` and `model` front matter, `` !`command` ``
-  lines and `@file` references stay as plain text.
+  carry over: `allowed-tools` and `model` front matter and `@file`
+  references stay as plain text, and each `` !`command` `` line is kept
+  inside a code fence marked `not-run`, so it is never taken as something
+  to run.
 - **Claude Code skills** (`~/.claude/skills/*/SKILL.md`) need no import:
   8gent already reads that folder. The import records their hashes.
 - **MCP servers** from `~/.claude.json` (yours and this project's),
   `./.mcp.json` and Pi's `mcp.json` are added to `~/.8gent/mcp.json` under
   `pendingServers`. A pending server never starts. `8gent ext approve-mcp
-  <name>` moves it into your server list, and it starts the next time 8gent
-  starts. Environment values and headers are copied but never printed.
+  <name>` first shows the full command and arguments (secrets masked) and
+  the file it came from; add `--yes` to move it into your server list, and
+  it starts the next time 8gent starts. The import summary shows only the
+  program name. Environment values and headers are copied (the server needs
+  them) but never printed, and `~/.8gent/mcp.json` and
+  `~/.8gent/imports.json` are written readable by you only. The hashes in
+  `imports.json` are taken with secret values removed.
 - **Anything else** is refused with the reason, and nothing is imported.
 
 In the TUI the same commands work as `/extensions import claude-code`,
-`/extensions import mcp` and `/extensions approve-mcp <name>`.
+`/extensions import mcp` and `/extensions approve-mcp <name> [--yes]`.
