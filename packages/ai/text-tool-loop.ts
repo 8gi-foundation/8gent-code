@@ -141,6 +141,13 @@ export interface TextToolAgentOptions {
 	 * 0 or unset: off.
 	 */
 	uselessStreak?: number;
+	/**
+	 * Steering (D1). Drained before every model call after the first: each
+	 * string it returns joins the conversation as a user message, after the
+	 * results of the tool calls that were running when it was sent. The caller
+	 * owns the queue; returning [] leaves the round unchanged.
+	 */
+	steer?: () => string[];
 }
 
 export interface TextToolAgentResult {
@@ -683,6 +690,14 @@ export async function runTextToolAgent(
 		// circuit breaker, user ESC). Return whatever prose the last round yielded.
 		if (opts.signal?.aborted) {
 			return finish(finalContent(lastContent), round - 1);
+		}
+		// Steering (D1): a message the person sent while the last round's tools
+		// ran lands here, after their results and before the next model call.
+		if (round > 1 && opts.steer) {
+			const steered = opts.steer();
+			if (steered.length > 0) {
+				messages = [...messages, ...steered.map((content) => ({ role: "user" as const, content }))];
+			}
 		}
 		const turn = await runTextToolTurn({
 			messages,
