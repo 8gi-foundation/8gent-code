@@ -213,9 +213,19 @@ describe("package.json entry points", () => {
 		expect(pkg.files).toContain("bin/bunfig.empty.toml");
 	});
 
-	test("user-run scripts pass the empty --config", () => {
-		for (const name of ["start", "agent", "daemon", "daemon:local", "tui"])
-			expect(pkg.scripts[name]).toMatch(/^bun --config=bin\/bunfig\.empty\.toml run /);
+	test("every script that runs a file with bun passes the empty --config", () => {
+		// `bun <file>`, `bun run <file>`, with any flags before the file. `bun test` keeps the
+		// repo's own bunfig ([test] preloads) and is the only Bun use left out.
+		const runsFile = /(?:^|&&\s*)bun\s+(?:(?:--\S+|run)\s+)*[^\s-]\S*\.(?:ts|tsx|js|mjs|cjs)\b/;
+		const checked: string[] = [];
+		for (const [name, cmd] of Object.entries(pkg.scripts as Record<string, string>)) {
+			if (!runsFile.test(cmd)) continue;
+			checked.push(name);
+			for (const seg of cmd.split("&&").map((c) => c.trim()).filter((c) => /^bun\s/.test(c) && !/^bun\s+test\b/.test(c)))
+				expect(`${name} => ${seg}`).toMatch(/ => bun (?:--no-env-file )?--config=bin\/bunfig\.empty\.toml (?:run )?\S/);
+		}
+		for (const name of ["start", "agent", "daemon", "daemon:local", "tui", "cli", "install-wizard", "install:apple-foundation", "harness", "harness:run", "debug"])
+			expect(checked).toContain(name);
 	});
 
 	test("`bun run <script>` runs in the package root, never the user's cwd", () => {
@@ -243,7 +253,10 @@ describe("repo-wide: every Bun spawn passes the safe flags", () => {
 	const SAFE = /safeBunFlags\(|bunFlagsFor\(|SAFE_BUN|--no-env-file/;
 	const ALLOW: Record<string, string> = {
 		"scripts/build-binaries.ts": "build tooling run in the repo root; compile output has autoload off",
-		"packages/eight/prompt.ts": "a code example inside a model prompt, not a spawn",
+	};
+	/** Exact snippets that are not spawns: a code example inside a model prompt. The rest of the file is scanned. */
+	const ALLOW_SNIPPETS: Record<string, string> = {
+		"packages/eight/prompt.ts": "Start the server as a subprocess: \\`Bun.spawn([\"bun\", \"run\", \"server.ts\"])\\`",
 	};
 	const ROOTS = ["packages", "apps", "bin", "scripts", "benchmarks"];
 	const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".next", "__tests__", "fixtures"]);
@@ -266,7 +279,13 @@ describe("repo-wide: every Bun spawn passes the safe flags", () => {
 			for (const file of sources(path.join(REPO, root))) {
 				const rel = path.relative(REPO, file).split(path.sep).join("/");
 				if (ALLOW[rel]) continue;
-				const src = fs.readFileSync(file, "utf8");
+				let src = fs.readFileSync(file, "utf8");
+				const snippet = ALLOW_SNIPPETS[rel];
+				if (snippet) {
+					// Exactly once, so the allowance cannot silently cover a second occurrence.
+					expect(src.split(snippet).length - 1).toBe(1);
+					src = src.replace(snippet, " ".repeat(snippet.length));
+				}
 				for (const m of src.matchAll(SPAWN)) {
 					seen++;
 					if (!SAFE.test(src.slice(m.index, m.index + 400))) {

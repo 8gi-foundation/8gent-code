@@ -121,7 +121,8 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
 	for (const f of files) {
 		let text: string;
 		try {
-			text = fs.readFileSync(f, "utf8");
+			// A leading BOM would hide the first key from the match; Bun still loads it.
+			text = fs.readFileSync(f, "utf8").replace(/^\uFEFF/, "");
 		} catch {
 			continue;
 		}

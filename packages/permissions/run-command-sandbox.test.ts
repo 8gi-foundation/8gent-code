@@ -175,6 +175,29 @@ describe("security env snapshot", () => {
 		});
 	}
 
+	test("a BOM-prefixed .env that Bun loads still has its first key ignored", () => {
+		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
+		try {
+			const file = path.join(dir, ".env");
+			fs.writeFileSync(file, "\uFEFFEIGHT_SEATBELT=0\n");
+			const env = { ...process.env };
+			delete env.EIGHT_SEATBELT;
+			const r = spawnSync("bun", ["--config=/dev/null", "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
+				cwd: dir,
+				env,
+				encoding: "utf8",
+			});
+			// Bun itself loads it, so the key reaches the environment.
+			expect(r.stdout).toBe("0");
+			expect(dotenvDeclaredKeys([file]).has("EIGHT_SEATBELT")).toBe(true);
+			const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: r.stdout }, dotenvDeclaredKeys([file]));
+			expect(snap.values.EIGHT_SEATBELT).toBeUndefined();
+			expect(snap.ignored).toEqual(["EIGHT_SEATBELT"]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("dotenv keys are parsed, with and without export", () => {
 		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
 		try {
