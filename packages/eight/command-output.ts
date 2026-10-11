@@ -16,6 +16,7 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
+import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
 export const HEAD_BYTES = 2 * 1024;
@@ -44,32 +45,56 @@ export function capOutput(text: string): string {
 }
 
 /**
- * Files a silent command wrote on purpose: curl/wget -o, --output, -c, -D and shell `>` redirects.
- * (browser_operation pilot, 11 Oct: curl -o printed nothing, the model could not tell it had
- * worked, repeated the identical call and ran out its 600 s turn. Its fallback paths in /tmp
- * were then refused by read_file.)
+ * Files a silent command wrote on purpose. (browser_operation pilot, 11 Oct: curl -o printed
+ * nothing, the model could not tell it had worked, repeated the identical call and ran out its
+ * 600 s turn. Its fallback paths in /tmp were then refused by read_file.)
+ *   readable: curl -o/--output, wget -O/--output-document, wget -o/--output-file (a log), `>` redirects.
+ *   private:  curl -c/--cookie-jar and -D/--dump-header. They hold session cookies and headers,
+ *             so they are named but never offered to read_file.
  */
-export function writtenFiles(command: string): string[] {
-	const files: string[] = [];
-	const add = (f?: string) => {
-		const t = f?.replace(/^["']|["']$/g, "");
-		if (t && t !== "-" && !t.startsWith("/dev/") && !t.startsWith("&") && !files.includes(t)) files.push(t);
+export function writtenFiles(command: string): { readable: string[]; private: string[] } {
+	const readable: string[] = [];
+	const priv: string[] = [];
+	const clean = (f?: string) => f?.replace(/^["']|["']$/g, "");
+	const add = (list: string[], f?: string) => {
+		const t = clean(f);
+		if (t && t !== "-" && !t.startsWith("/dev/") && !t.startsWith("&") && !list.includes(t)) list.push(t);
 	};
-	if (/\b(curl|wget)\b/.test(command)) {
-		for (const m of command.matchAll(/(?:^|\s)(?:-o|-c|-D|-O|--output|--cookie-jar|--dump-header)(?:\s+|=)(\S+)/g)) add(m[1]);
+	const flags = (re: RegExp, list: string[]) => {
+		for (const m of command.matchAll(re)) add(list, m[1]);
+	};
+	const val = (names: string) => new RegExp(`(?:^|\\s)(?:${names})(?:\\s+|=)(\\S+)`, "g");
+	if (/\bcurl\b/.test(command)) {
+		flags(val("-o|--output"), readable);
+		flags(val("-c|--cookie-jar|-D|--dump-header"), priv);
 	}
-	for (const m of command.matchAll(/(?:^|[^>\d&])\d?>>?\s*([^\s&|;<>]+)/g)) add(m[1]);
-	return files;
+	if (/\bwget\b/.test(command)) {
+		flags(val("-O|--output-document|-o|--output-file"), readable);
+	}
+	// `=>` is an arrow function, not a redirect.
+	for (const t of redirectTargets(command.replace(/=>/g, "= "))) add(readable, t);
+	return { readable, private: priv };
+}
+
+function isOutsideCwd(f: string, workingDirectory?: string): boolean {
+	if (f.startsWith("~/") || f === "~" || f === ".." || f.startsWith("../") || f.includes("/../")) return true;
+	return f.startsWith("/") && !!workingDirectory && !f.startsWith(`${workingDirectory}/`);
 }
 
 export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
 	const base = "Command completed successfully.";
-	const files = command ? writtenFiles(command) : [];
-	if (files.length === 0) return base;
-	const outside = files.filter((f) => f.startsWith("/") && workingDirectory && !f.startsWith(`${workingDirectory}/`));
-	let note = `${base} It printed nothing; it wrote ${files.join(", ")}. Run read_file on that file to see the result, do not repeat the command.`;
-	if (outside.length > 0) {
-		note += ` read_file can only open files inside the working directory, so write ${outside.join(", ")} somewhere under it (for example ./name) next time.`;
+	const w = command ? writtenFiles(command) : { readable: [], private: [] };
+	if (w.readable.length === 0 && w.private.length === 0) return base;
+	let note = `${base} It printed nothing.`;
+	if (w.readable.length > 0) {
+		note += ` It wrote ${w.readable.join(", ")}. Run read_file on ${w.readable.length > 1 ? "those files" : "that file"} to see the result, do not repeat the command.`;
+		const outside = w.readable.filter((f) => isOutsideCwd(f, workingDirectory));
+		if (outside.length > 0) {
+			note += ` read_file can only open files inside the working directory, so write ${outside.join(", ")} somewhere under it (for example ./name) next time.`;
+		}
+	}
+	if (w.private.length > 0) {
+		note += ` ${w.private.join(", ")} ${w.private.length > 1 ? "hold" : "holds"} session cookies or headers: do not read ${w.private.length > 1 ? "them" : "it"}, just pass ${w.private.length > 1 ? "them" : "it"} to the next curl.`;
 	}
 	return note;
 }

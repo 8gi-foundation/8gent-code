@@ -100,20 +100,42 @@ describe("formatCommandOutput (#3373)", () => {
 
 describe("silent success names the file it wrote (browser_operation pilot)", () => {
 	const cwd = "/work/run";
-	test("curl -o inside the working directory points at read_file", () => {
+	test("curl -o is readable; the cookie jar is named but never offered to read_file", () => {
 		const r = formatCommandOutput(0, "", "", "curl -s -c cj.txt http://127.0.0.1:1/ -o login.html", cwd);
-		expect(r).toContain("wrote cj.txt, login.html");
-		expect(r).toContain("read_file");
-		expect(r).not.toContain("inside the working directory");
+		expect(r).toContain("wrote login.html.");
+		expect(r).toContain("read_file on that file");
+		expect(r).toContain("cj.txt holds session cookies or headers: do not read it");
+		expect(r).not.toMatch(/wrote [^.]*cj\.txt/);
 	});
-	test("a /tmp target is called out as unreadable", () => {
-		const r = formatCommandOutput(0, "", "", "curl -s -o /tmp/a.html http://x/", cwd);
-		expect(r).toContain("/tmp/a.html");
-		expect(r).toContain("inside the working directory");
+	test("dump headers and cookie jars alone give no read_file suggestion", () => {
+		for (const c of ["curl -s -D h.txt http://x/", "curl --cookie-jar=j http://x/", "curl --dump-header h http://x/"]) {
+			const r = formatCommandOutput(0, "", "", c, cwd);
+			expect(r).not.toContain("read_file");
+			expect(r).toContain("do not read");
+		}
 	});
-	test("redirects count, /dev/null and 2>&1 do not", () => {
-		expect(writtenFiles("echo hi > out.txt")).toEqual(["out.txt"]);
-		expect(writtenFiles("cmd >/dev/null 2>&1")).toEqual([]);
+	test("several files say those files", () => {
+		const r = formatCommandOutput(0, "", "", "curl -s http://x/ -o a.html > b.txt", cwd);
+		expect(r).toContain("a.html, b.txt");
+		expect(r).toContain("on those files");
+	});
+	test("targets outside the working directory are called out", () => {
+		for (const f of ["/tmp/a.html", "../a.html", "~/a.html"]) {
+			const r = formatCommandOutput(0, "", "", `curl -s -o ${f} http://x/`, cwd);
+			expect(r).toContain("inside the working directory");
+		}
+		expect(formatCommandOutput(0, "", "", "curl -s -o a.html http://x/", cwd)).not.toContain("inside the working");
+	});
+	test("curl -O takes no value; wget -O and -o do", () => {
+		expect(writtenFiles("curl -O http://x/f").readable).toEqual([]);
+		expect(writtenFiles("wget -O out.html http://x/").readable).toEqual(["out.html"]);
+		expect(writtenFiles("wget -o wget.log http://x/").readable).toEqual(["wget.log"]);
+	});
+	test("redirects count; /dev/null, 2>&1 and => do not", () => {
+		expect(writtenFiles("echo hi > out.txt").readable).toEqual(["out.txt"]);
+		expect(writtenFiles("cmd >/dev/null 2>&1").readable).toEqual([]);
+		expect(writtenFiles('bun -e "x=>x"').readable).toEqual([]);
+		expect(writtenFiles("bun -e x=>x").readable).toEqual([]);
 	});
 	test("no file, no note change", () => {
 		expect(formatCommandOutput(0, "", "", "mkdir -p .tmp", cwd)).toBe("Command completed successfully.");
