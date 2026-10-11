@@ -490,12 +490,16 @@ const PATH_GUARDED_ACTIONS = new Set<string>([
 	"delete_file",
 	"edit_file",
 	"apply_patch",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"read_notebook",
 	"glob",
 	"list_files",
 ]);
 
 /** Actions that only read: the session's own records stay readable for these. */
-const PATH_READ_ACTIONS = new Set<string>(["read_file", "glob", "list_files"]);
+const PATH_READ_ACTIONS = new Set<string>(["read_file", "read_notebook", "glob", "list_files"]);
 
 function pathGuardGate(action: string, context: PolicyContext): PolicyDecision | null {
 	// Shell commands cannot be path-checked; refuse ones that name agent audit files (#3735).

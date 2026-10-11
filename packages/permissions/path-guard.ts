@@ -297,6 +297,9 @@ export function commandTouchesAuditFiles(command: string): boolean {
 const MUTATING_VERB =
 	/(?:^|\s)(?:rm|unlink|rmdir|truncate|shred|mv|tee|dd|perl\s+-\w*i\w*|sed\s+-\w*i\w*|git\s+(?:checkout|restore|rm|clean))(?=\s|$)|\sfind\s.*-delete\b/;
 
+const INTERPRETER =
+	/(?:^|[\s;&|(`])(?:python[\d.]*|node|nodejs|perl|ruby|deno|bunx?\s+(?:run\s+)?(?:-e|--eval))(?=\s)/;
+
 function escapeRe(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -330,6 +333,8 @@ export function commandMutatesSessionRecords(command: string): boolean {
 	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "").toLowerCase();
 	const pats = sessionRecordPatterns();
 	const names = (t: string) => pats.some((p) => p.test(t));
+	// An interpreter that names a record can write it in ways no verb list sees; deny the naming.
+	if (INTERPRETER.test(flat) && names(flat)) return true;
 	let inRecordDir = false;
 	for (const raw of flat.split(/;|&&|\|\||\||\n/)) {
 		const seg = raw.trim();

@@ -245,7 +245,7 @@ export function toolReplayClass(toolName: string): ReplayClass {
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-export function safePath(userPath: string, workingDirectory: string, access: PathAccess = "write"): string {
+export function safePath(userPath: string, workingDirectory: string, access: PathAccess): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
 	const guard = guardPath(userPath, workingDirectory, {}, access);
@@ -371,7 +371,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 export function resolveSpeakOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : `speak-${Date.now()}.wav`;
 	if (!named.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${named}")`);
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	// safePath is lexical. A directory symlink inside the workspace would carry the
 	// write outside it, so check real locations: the nearest existing ancestor of the
 	// parent must sit under the real workspace, and the file itself must not be a link.
@@ -406,7 +406,7 @@ function assertRealInside(target: string, named: string, workingDirectory: strin
  * location of its nearest existing parent inside the real workspace, and not itself a symlink.
  */
 export function confineWrite(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	assertRealInside(path.dirname(target), named, workingDirectory);
 	const st = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
@@ -1963,11 +1963,11 @@ export class ToolExecutor {
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.writeFile(safe, args.content as string);
 			}
 			case "edit_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.editFile(
 					safe,
 					args.oldText as string,
@@ -3180,12 +3180,16 @@ export class ToolExecutor {
 	// Notebook Tool Handlers
 	// ============================================
 
-	private async handleReadNotebook(notebookPath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+	/** Notebook paths: absolute or workspace-relative, but refused by the path guard for this access. */
+	private guardedNotebookPath(notebookPath: string, access: PathAccess): string {
+		const guard = guardPath(notebookPath, this.workingDirectory, {}, access);
+		if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
+		return path.isAbsolute(notebookPath) ? notebookPath : path.join(this.workingDirectory, notebookPath);
+	}
 
+	private async handleReadNotebook(notebookPath: string): Promise<string> {
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell) => ({
 				index: cell.index,
@@ -3222,11 +3226,8 @@ export class ToolExecutor {
 		cellIndex: number,
 		newSource: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3240,11 +3241,8 @@ export class ToolExecutor {
 		cellType: "code" | "markdown",
 		source: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3253,11 +3251,8 @@ export class ToolExecutor {
 	}
 
 	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3491,7 +3486,7 @@ export class ToolExecutor {
 			if (action === "mix" && (!args.palette || !args.type)) {
 				return "deck_theme mix needs palette and type";
 			}
-			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory), this.workingDirectory);
+			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory, "write"), this.workingDirectory);
 			const themeName =
 				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
 			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
@@ -4038,9 +4033,9 @@ export class ToolExecutor {
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
 					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
-					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory);
+					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory, "write");
 				} else if (isolatedBrowser()) {
-					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory);
+					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
 				return await getEightBrowser().screenshot(out, session);
 			}

@@ -124,6 +124,39 @@ describe("reads stay allowed", () => {
 	});
 });
 
+describe("interpreters that name a record are denied", () => {
+	for (const c of [
+		`python3 -c "open('/Users/x/.8gent/sessions/a.json','w').close()"`,
+		`python -c "import os; os.remove('$HOME/.8gent/daemon.log')"`,
+		`node -e "require('fs').truncateSync(process.env.HOME+'/.8gent/logs/tools.log')"`,
+		`perl -e 'unlink "$ENV{HOME}/.8gent/approvals-audit.jsonl"'`,
+		`ruby -e 'File.delete("#{ENV["HOME"]}/.8gent/checkpoints/c")'`,
+		`bun -e "Bun.write('/Users/x/.8gent/daemon.log','')"`,
+		`bun run -e "await Bun.write('/Users/x/.8gent/sessions/a.json','')"`,
+		`echo hi && python3 script.py ~/.8gent/daemon.log`,
+	])
+		test(`denies: ${c}`, () => {
+			expect(commandMutatesSessionRecords(c)).toBe(true);
+			expect(evaluatePolicy("run_command", { command: c, cwd: PROJ, workingDirectory: PROJ }).allowed).toBe(false);
+		});
+	test("interpreters that do not name a record are not flagged", () => {
+		for (const c of ["python3 script.py", "node build.js", `bun -e "console.log(1)"`, "perl -v"])
+			expect(commandMutatesSessionRecords(c)).toBe(false);
+	});
+});
+
+describe("notebook tools are guarded", () => {
+	const rec = () => path.join(D, "sessions", "abc.json");
+	for (const action of ["notebook_edit_cell", "notebook_insert_cell", "notebook_delete_cell"]) {
+		test(`${action} on a record is denied`, () => {
+			expect(evaluatePolicy(action as never, { path: rec(), cwd: PROJ, workingDirectory: PROJ }).allowed).toBe(false);
+		});
+	}
+	test("read_notebook on a record is allowed", () => {
+		expect(evaluatePolicy("read_notebook" as never, { path: rec(), cwd: PROJ, workingDirectory: PROJ }).allowed).toBe(true);
+	});
+});
+
 describe("internal writers keep working", () => {
 	test("plain fs writers (session manager, checkpoint store, daemon log) are not gated", () => {
 		for (const r of RECORDS.filter((r) => fs.existsSync(r) && fs.statSync(r).isFile())) {
