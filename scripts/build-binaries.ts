@@ -131,6 +131,10 @@ function writeCompileEntry() {
 		[
 			`import tuiBundle from ${rel("./tui.js")} with { type: "file" };`,
 			`(globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI = tuiBundle;`,
+			// CHANGELOG.md travels inside the binary too, so `/changelog` and the
+			// after-update notes work with nothing next to the executable (#3981).
+			`import changelog from ${rel("../CHANGELOG.md")} with { type: "file" };`,
+			"(globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_CHANGELOG = changelog;",
 			`await import(${rel("../bin/8gent.ts")});`,
 			"",
 		].join("\n"),
