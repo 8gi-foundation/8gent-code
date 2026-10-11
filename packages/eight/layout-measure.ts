@@ -14,7 +14,10 @@
  * error, so read_image behaves as before.
  */
 
-import sharp from "sharp";
+// Loaded on first use, not at import: sharp's native addon is not embedded by
+// `bun build --compile`, and a top-level import crashed every compiled command
+// (run, rpc, mcp-server) on Windows before any model call (#3892). A missing
+// sharp falls into the catch below and measureLayout returns null, as designed.
 
 /** Grey levels a pixel must differ from the background by to count as content. */
 const INK_THRESHOLD = 40;
@@ -38,6 +41,7 @@ export type LayoutMeasure = {
 
 export async function measureLayout(file: string): Promise<LayoutMeasure | null> {
 	try {
+		const sharp = (await import("sharp")).default;
 		const { data, info } = await sharp(file, { limitInputPixels: MAX_PIXELS })
 			.flatten({ background: "#ffffff" })
 			.greyscale()
