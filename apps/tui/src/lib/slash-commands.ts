@@ -465,8 +465,7 @@ function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 
 /**
  * The commands about the work itself, few enough that a bare `/` shows every
- * one without scrolling (the menu draws 14 rows; two are kept free for /copy
- * and /hotkeys). The `/` menu and the Ctrl+P palette show
+ * one without scrolling (the menu draws 14 rows). The `/` menu and the Ctrl+P palette show
  * these first (the `/` menu shows only these until a letter is typed); every
  * other command still runs when typed by name and appears once its prefix
  * matches (#3918, Pi gap D9).
@@ -483,6 +482,8 @@ export const CORE_SLASH_COMMANDS: ReadonlySet<SlashCommand> = new Set<SlashComma
 	"export",
 	"skills",
 	"settings",
+	"copy",
+	"hotkeys",
 	"quit",
 ]);
 
