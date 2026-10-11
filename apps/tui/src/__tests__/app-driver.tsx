@@ -116,10 +116,45 @@ export async function bootApp(cols = 160, rows = 44): Promise<DrivenApp> {
 	return driven;
 }
 
-/** Spawn `harness` with a throwaway HOME and a fake ollama; return its JSON lines. */
+/**
+ * The child's environment: this process's, minus every *_API_KEY (a test
+ * must never reach a hosted provider), pointed at the fake model. The decider
+ * reads EIGHT_DECIDE_OLLAMA_HOST, not OLLAMA_HOST, so it is pointed too.
+ */
+export function harnessEnv(
+	base: string,
+	home: string,
+	extraEnv: Record<string, string>,
+	parent: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [k, v] of Object.entries(parent)) {
+		if (v !== undefined && !k.endsWith("_API_KEY")) env[k] = v;
+	}
+	Object.assign(env, {
+		HOME: home,
+		OLLAMA_BASE_URL: base,
+		OLLAMA_HOST: base,
+		"8GENT_NO_INTRO": "1",
+		"8GENT_REDUCED_MOTION": "1",
+		...extraEnv,
+	});
+	env.EIGHT_DECIDE_OLLAMA_HOST = extraEnv.EIGHT_DECIDE_OLLAMA_HOST ?? env.OLLAMA_HOST;
+	return env;
+}
+
+/** How long a harness may run before it is killed. */
+export const HARNESS_DEADLINE_MS = 75_000;
+
+/**
+ * Spawn `harness` with a throwaway HOME and a fake ollama; return its JSON
+ * lines. A harness that overruns the deadline is killed. When it fails (an
+ * error line, no lines, a non-zero exit, or the kill), its stderr is printed.
+ */
 export async function runAppHarness(
 	harness: string,
 	extraEnv: Record<string, string> = {},
+	deadlineMs = HARNESS_DEADLINE_MS,
 ): Promise<Record<string, unknown>[]> {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-shell-"));
 	const model = "shell-test:1b";
@@ -143,31 +178,33 @@ export async function runAppHarness(
 				path.join(import.meta.dir, "../../../../tests/preload-ink-interactive.ts"),
 				harness,
 			],
-			{
-				env: {
-					...process.env,
-					HOME: home,
-					OLLAMA_BASE_URL: base,
-					OLLAMA_HOST: base,
-					"8GENT_NO_INTRO": "1",
-					"8GENT_REDUCED_MOTION": "1",
-					...extraEnv,
-				},
-				stdout: "pipe",
-				stderr: "ignore",
-			},
+			{ env: harnessEnv(base, home, extraEnv), stdout: "pipe", stderr: "pipe" },
 		);
-		const out = await new Response(proc.stdout).text();
-		await proc.exited;
-		return (
-			out
-				.trim()
-				.split("\n")
-				// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping BEL
-				.map((l) => l.replace(/^[\x00-\x1f]+/, ""))
-				.filter((l) => l.startsWith("{"))
-				.map((l) => JSON.parse(l))
-		);
+		let killed = false;
+		const timer = setTimeout(() => {
+			killed = true;
+			proc.kill("SIGKILL");
+		}, deadlineMs);
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		const code = await proc.exited;
+		clearTimeout(timer);
+		const events = out
+			.trim()
+			.split("\n")
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping BEL
+			.map((l) => l.replace(/^[\x00-\x1f]+/, ""))
+			.filter((l) => l.startsWith("{"))
+			.map((l) => JSON.parse(l) as Record<string, unknown>);
+		if (killed) events.push({ phase: "error", message: `harness killed after ${deadlineMs} ms` });
+		if (killed || code !== 0 || events.length === 0 || events.some((e) => e.phase === "error")) {
+			console.error(
+				`[app-driver] ${path.basename(harness)} failed (exit ${code}${killed ? ", killed" : ""}). stderr:\n${err.slice(-8000)}`,
+			);
+		}
+		return events;
 	} finally {
 		server.stop(true);
 		fs.rmSync(home, { recursive: true, force: true });
