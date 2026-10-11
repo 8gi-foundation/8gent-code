@@ -91,7 +91,7 @@ import type { CreatedFiles } from "./s1-created-files";
 import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
-import { buildRecord, logSystemOneVerdict } from "./system-one-log";
+import { logSystemOneJudge } from "./system-one-log";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -891,12 +891,18 @@ export async function systemOneGate(
 				const after = decider.cacheStats?.();
 				const memoHit = !!before && !!after && after.hits > before.hits && after.misses === before.misses;
 				// #3885: record why the judge said what it said. Observability only.
-				logSystemOneVerdict(buildRecord(command, g, t.label, memoHit));
+				logSystemOneJudge({ command, thresholds: t.label, opts: t.opts, memoHit, guard: g });
 				return g;
 			})(),
 			ms,
 		);
 	} catch (err) {
+		logSystemOneJudge({
+			command,
+			thresholds,
+			outcome: err instanceof SystemOneTimeoutError ? "timeout" : "error",
+			error: err,
+		});
 		const detail = (err as Error)?.message ?? String(err);
 		if (mode === "default") {
 			const reason =
