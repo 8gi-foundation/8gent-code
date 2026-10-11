@@ -15,8 +15,20 @@ TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
 cd "$TMP_HOME" || exit 2
 
-# macOS has no coreutils timeout; perl alarm works on both macOS and Linux.
-run() { local secs="$1"; shift; HOME="$TMP_HOME" perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
+# macOS has no coreutils timeout, so a perl parent forks the command and SIGKILLs it
+# at the deadline (a plain `alarm` + exec is replaced by any alarm the child sets).
+# Output goes to a FILE, never a $(...) pipe: a descendant that survives the kill
+# would keep a pipe open and block the capture forever (#4011). stdin passes through.
+run() {
+	local secs="$1" out; shift
+	out="$(mktemp "$TMP_HOME/run.XXXXXX")"
+	HOME="$TMP_HOME" perl -e '
+		my $secs = shift; my $pid = fork();
+		if (!$pid) { exec @ARGV or exit 127 }
+		$SIG{ALRM} = sub { kill 9, $pid; print STDERR "smoke: killed after ${secs}s: @ARGV\n"; exit 124 };
+		alarm $secs; waitpid $pid, 0; exit($? >> 8);' "$secs" "$@" >"$out" 2>&1
+	cat "$out"
+}
 
 fail=0
 check() {
@@ -54,11 +66,10 @@ case "$(uname -s)" in
 			printf 'HOSTILE=from-dotenv\n' > "$HOSTILE/.env"
 			# Output goes to a FILE, never a $(...) pipe: a TUI descendant that outlives the
 			# kill (setsid, daemonised helper) would keep a pipe open and block the capture
-			# forever (#4011: 30 min hang on macos-latest). The python harness also has its
-			# own SIGALRM watchdog and the whole thing sits under the perl alarm in run().
+			# forever (#4011: 30 min hang on macos-latest). The python harness has its own
+			# SIGALRM watchdog (FRAME_TIMEOUT + 20 s), and run() is the outer 90 s bound.
 			TUI_LOG="$TMP_HOME/tui-harness.log"
-			TUI_CWD="$HOSTILE" HOME="$TMP_HOME" perl -e 'alarm shift; exec @ARGV' 90 \
-				python3 - "$BIN" >"$TUI_LOG" 2>&1 </dev/null <<'PY'
+			TUI_CWD="$HOSTILE" run 90 python3 - "$BIN" >"$TUI_LOG" <<'PY'
 import os, pty, re, select, signal, struct, sys, time, fcntl, termios
 bin_ = sys.argv[1]
 FRAME_TIMEOUT = 45

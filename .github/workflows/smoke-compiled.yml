@@ -13,6 +13,9 @@ on:
       - .github/workflows/smoke-compiled.yml
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: smoke-compiled-${{ github.ref }}
   cancel-in-progress: true
@@ -36,7 +39,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -44,7 +47,7 @@ jobs:
       # macos-latest ships Node 24, whose headers better-sqlite3 cannot compile
       # against; Node 20 (as release.yml) has prebuilt-compatible headers.
       - name: Setup Node (native dependency builds)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
       - name: Install dependencies
