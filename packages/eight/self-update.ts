@@ -1,14 +1,14 @@
 /**
  * Self-update for `8gent update` (#3981, row A2 of the Pi gap plan).
  *
- * The old command ran `npm install -g @8gi-foundation/8gent-code@latest`. npm
- * `latest` sat at 0.17.0 from May to October, so on any newer build "update"
- * was a downgrade. This module fixes the two causes:
+ * The old command always reinstalled from npm, whatever 8gent was installed
+ * from, and took whatever version it found there, so "update" could install
+ * an older 8gent. This module fixes both:
  *
- *   1. It updates from the channel 8gent was installed from: the compiled
- *      binary (scripts/install.ps1 / install.sh) updates from GitHub
- *      releases, an npm install updates from npm, a source checkout is told
- *      to `git pull`.
+ *   1. It updates from the channel 8gent was installed from. The primary
+ *      install is the compiled binary from scripts/install.ps1 / install.sh,
+ *      which updates from GitHub releases. npm is an optional channel: an
+ *      npm install updates from npm. A source checkout is told to `git pull`.
  *   2. It never installs a version lower than the one running. Equal means
  *      up to date; lower is refused with both versions named.
  *

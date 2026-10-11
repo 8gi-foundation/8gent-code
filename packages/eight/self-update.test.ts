@@ -1,8 +1,8 @@
 /**
  * #3981 (A2): `8gent update` must never install a lower version than the
  * one running, and must update from the channel it was installed from.
- * The regression: npm `latest` was 0.17.0 while users ran 0.19.0, and
- * `8gent update` ran `npm install -g ...@latest`.
+ * The regression: `8gent update` reinstalled from npm whatever version it
+ * found there, even one lower than the version running.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -112,7 +112,7 @@ describe("detectChannel", () => {
 });
 
 describe("npm channel", () => {
-	test("the regression: npm latest 0.17.0 under a 0.19.0 install is refused, npm never runs", async () => {
+	test("the regression: an older version on the npm channel is refused, npm never runs", async () => {
 		const runs: string[][] = [];
 		const r = await runSelfUpdate({
 			currentVersion: "0.19.0",
