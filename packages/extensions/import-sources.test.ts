@@ -50,7 +50,9 @@ function world(): ImportPaths {
 	return p;
 }
 
-const run = (p: ImportPaths, ...args: string[]) => runExtCommand(args, { paths: p });
+// A person at a terminal, unless a test says otherwise.
+const run = (p: ImportPaths, ...args: string[]) =>
+	runExtCommand(args, { paths: p, interactive: true });
 const records = (p: ImportPaths) =>
 	JSON.parse(readFileSync(path.join(p.eightDir, "imports.json"), "utf8")) as ImportRecord[];
 
@@ -331,6 +333,58 @@ describe("redaction (8SO follow-up)", () => {
 		);
 		const imports = readFileSync(path.join(p.eightDir, "imports.json"), "utf8");
 		for (const secret of [STRIPE, GOOGLE, JWT, RANDOM]) expect(imports).not.toContain(secret);
+	});
+});
+
+describe("approval and redaction (8SO round 3)", () => {
+	test("approve-mcp --yes needs a person at an interactive terminal", async () => {
+		const p = world();
+		writeFileSync(p.claudeJson, JSON.stringify({ mcpServers: { gh: { command: "npx" } } }));
+		await run(p, "import", "mcp");
+		const r = await runExtCommand(["approve-mcp", "gh", "--yes"], { paths: p, interactive: false });
+		expect(r.code).toBe(1);
+		expect(r.output).toContain("needs a person at an interactive terminal");
+		expect(loadConfig(p.mcpConfig)).toEqual([]);
+		// Looking (without --yes) is fine from anywhere.
+		const look = await runExtCommand(["approve-mcp", "gh"], { paths: p, interactive: false });
+		expect(look.code).toBe(0);
+		expect(look.output).toContain("would run");
+	});
+
+	test("dotted tokens, URL path secrets and --pass/--pw/-p values are masked", () => {
+		const dotted = "a1b2c3d4e5f6.g7h8i9j0k1l2.m3n4";
+		expect(redactArgs(["--pass", "x", "--pw", "y", "-p", "z", dotted, "api.example.com"])).toEqual([
+			"--pass",
+			"***",
+			"--pw",
+			"***",
+			"-p",
+			"***",
+			"***",
+			"api.example.com",
+		]);
+		expect(redact(`srv -p hunter2 --pw=abc token ${dotted}`)).toBe("srv -p *** --pw=*** token ***");
+		expect(redact("https://mcp.example.com/sse/plainword/x")).toBe(
+			"https://mcp.example.com/sse/***/x",
+		);
+		expect(redact("https://hooks.example.com/services/abcdEFGH1234ijklMNOP5678/x")).toBe(
+			"https://hooks.example.com/services/***/x",
+		);
+		expect(redact("https://mcp.example.com/v1/tools")).toBe("https://mcp.example.com/v1/tools");
+	});
+
+	test("approve-mcp shows a URL with its path secret masked", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({
+				mcpServers: { web: { url: "https://mcp.example.com/sse/s3cr3tPathTokenValue42" } },
+			}),
+		);
+		await run(p, "import", "mcp");
+		const look = await run(p, "approve-mcp", "web");
+		expect(look.output).toContain("url https://mcp.example.com/sse/***");
+		expect(look.output).not.toContain("s3cr3tPathTokenValue42");
 	});
 });
 

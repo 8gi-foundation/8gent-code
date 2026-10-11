@@ -136,7 +136,7 @@ sha256 in `~/.8gent/imports.json`.
 8gent ext import mcp                    # MCP servers from Claude Code and Pi, pending
 8gent ext import mcp --from pi          # only Pi's mcp.json
 8gent ext approve-mcp github            # show exactly what it would run
-8gent ext approve-mcp github --yes      # then let it start
+8gent ext approve-mcp github --yes      # then let it start (only from a terminal)
 ```
 
 - **Claude Code commands** (`~/.claude/commands/*.md`) become prompt

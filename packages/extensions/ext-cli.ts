@@ -15,6 +15,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { defaultExtensionsDir } from "./host";
 import {
+	type ImportPaths,
+	approveMcp,
+	defaultImportPaths,
+	importFromSource,
+} from "./import-sources";
+import {
 	type PiStaticReport,
 	analyzePiExtension,
 	copyPiExtensions,
@@ -32,6 +38,8 @@ export interface ExtCommandOptions {
 	 */
 	interactive?: boolean;
 	env?: NodeJS.ProcessEnv;
+	/** Overrides for the other import sources' paths (tests). */
+	paths?: Partial<ImportPaths>;
 }
 
 export interface ExtCommandResult {
@@ -44,6 +52,11 @@ const USAGE = [
 	"  Copies Pi extensions into ~/.8gent/extensions as pi-<name> and checks each one.",
 	"  path defaults to $PI_CODING_AGENT_DIR/extensions or ~/.pi/agent/extensions.",
 	"  Nothing imported runs until: 8gent ext enable <name>  (8gent ext disable <name> turns it off).",
+	"       8gent ext import <pi|claude-code|mcp> [path] [--from claude-code|pi] [--enable]",
+	"  pi: same as import-pi. claude-code: ~/.claude/commands become /claude-<name> prompt",
+	"  templates (staged; --enable turns them on); ~/.claude/skills are already read in place.",
+	"  mcp: MCP servers from Claude Code or Pi are added as pending; none starts until approved.",
+	"       8gent ext approve-mcp <name> [--yes]   shows what it runs; --yes approves",
 ].join("\n");
 
 /** The file the host loads for an imported entry: the file, or a folder's index. */
@@ -73,8 +86,14 @@ export async function runExtCommand(
 	// --to <dir> imports somewhere other than ~/.8gent/extensions.
 	const rest: string[] = [];
 	let toFlag: string | undefined;
+	let fromFlag: string | undefined;
+	let enable = false;
+	let yes = false;
 	for (let i = 0; i < raw.length; i++) {
 		if (raw[i] === "--to" && raw[i + 1]) toFlag = path.resolve(raw[++i]);
+		else if (raw[i] === "--from" && raw[i + 1]) fromFlag = raw[++i];
+		else if (raw[i] === "--enable") enable = true;
+		else if (raw[i] === "--yes") yes = true;
 		else rest.push(raw[i]);
 	}
 	if (sub === "enable" || sub === "disable") {
@@ -95,7 +114,33 @@ export async function runExtCommand(
 		}
 		return setImportedEnabled(dir, rest[0], sub === "enable");
 	}
-	if (sub !== "import-pi") return { code: sub ? 1 : 0, output: USAGE };
+	if (sub === "approve-mcp") {
+		if (!rest[0]) return { code: 1, output: "Usage: 8gent ext approve-mcp <name>" };
+		const paths = { ...defaultImportPaths(opts.env), ...opts.paths };
+		const interactive =
+			opts.interactive ?? (Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY));
+		if (yes && !interactive) {
+			return {
+				code: 1,
+				output: `Refused: approving an MCP server needs a person at an interactive terminal. Run it yourself: 8gent ext approve-mcp ${rest[0]} --yes`,
+			};
+		}
+		return approveMcp(rest[0], paths, yes);
+	}
+	if (sub === "import") {
+		const [source, ...more] = rest;
+		if (!source) return { code: 1, output: USAGE };
+		if (source !== "pi") {
+			return importFromSource(
+				source,
+				{ from: fromFlag, enable },
+				{ paths: opts.paths, env: opts.env },
+			);
+		}
+		rest.splice(0, rest.length, ...more);
+	} else if (sub !== "import-pi") {
+		return { code: sub ? 1 : 0, output: USAGE };
+	}
 	let from: string;
 	let to: string;
 	try {

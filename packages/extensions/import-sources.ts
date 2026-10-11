@@ -247,11 +247,56 @@ function mcpSources(
  * (GitHub, OpenAI-style sk-, Slack, AWS), Authorization schemes, URL
  * userinfo and query values. Used on everything an import or approve prints.
  */
-const SECRET_FLAG = /^--?[\w-]*(?:key|token|secret|password|passwd|auth|cred)[\w-]*$/i;
+const SECRET_FLAG =
+	/^(?:--?[\w-]*(?:key|token|secret|password|passwd|pass|pw|auth|cred)[\w-]*|-p)$/i;
 const HEADER_FLAG = /^(?:-H|--header)$/;
+
+/** Path segments that hold a secret in an MCP or webhook URL: after /sse/, /token/ and so on, or random-looking. */
+function redactUrl(url: string): string {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return url;
+	}
+	const marker =
+		/^(?:sse|token|tokens|key|keys|secret|secrets|auth|apikey|api-key|api_key|hook|hooks|webhook|webhooks)$/i;
+	const segments = u.pathname.split("/");
+	let changed = false;
+	for (let i = 1; i < segments.length; i++) {
+		let seg = segments[i] || "";
+		try {
+			seg = decodeURIComponent(seg);
+		} catch {
+			/* keep it encoded */
+		}
+		if (!seg) continue;
+		const afterMarker = marker.test(segments[i - 1] || "");
+		const random =
+			seg.length >= 16 && /[A-Za-z]/.test(seg) && /[0-9]/.test(seg) && entropy(seg) >= 3.3;
+		if (afterMarker || random || isDottedToken(seg)) {
+			segments[i] = "***";
+			changed = true;
+		}
+	}
+	if (!changed && !u.username && !u.password && !u.search && !u.hash) return url;
+	const userinfo = u.username || u.password ? "***@" : "";
+	const query = u.search ? u.search.replace(/([?&][^=&]+=)[^&]*/g, "$1***") : "";
+	return `${u.protocol}//${userinfo}${u.host}${segments.join("/")}${query}${u.hash ? "#***" : ""}`;
+}
+
+/** abc.def.ghi with 20+ characters, a digit and a long segment: a signed or dotted token, not a host name. */
+function isDottedToken(s: string): boolean {
+	if (s.length < 20 || !/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}$/.test(s)) return false;
+	return /[0-9]/.test(s) && Math.max(...s.split(".").map((x) => x.length)) >= 10;
+}
 
 export function redact(text: string): string {
 	return text
+		.replace(/\bhttps?:\/\/[^\s"']+/g, (m) => redactUrl(m))
+		.replace(/(?<![\w.])[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}(?![\w.])/g, (m) =>
+			isDottedToken(m) ? "***" : m,
+		)
 		.replace(/\bgh[pousr]_[A-Za-z0-9]{16,}/g, "***")
 		.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "***")
 		.replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "***")
@@ -264,7 +309,7 @@ export function redact(text: string): string {
 		.replace(/\b(Authorization\s*:\s*)("[^"]*"|'[^']*'|[^\s"']+(?:\s+[^\s"']+)?)/gi, "$1***")
 		.replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{6,}/gi, "$1 ***")
 		.replace(
-			/((?:^|\s)--?[\w-]*(?:key|token|secret|password|passwd|auth|cred)[\w-]*)(\s+|=)("[^"]*"|'[^']*'|\S+)/gi,
+			/((?:^|\s)(?:--?[\w-]*(?:key|token|secret|password|passwd|pass|pw|auth|cred)[\w-]*|-p))(\s+|=)("[^"]*"|'[^']*'|\S+)/gi,
 			"$1$2***",
 		)
 		.replace(/((?:^|\s)(?:-H|--header))(\s+)("[^"]*"|'[^']*'|\S+)/g, "$1$2***")
@@ -304,7 +349,7 @@ export function redactArgs(args: readonly unknown[]): string[] {
 		const arg = String(args[i]);
 		const prev = i > 0 ? String(args[i - 1]) : "";
 		if (SECRET_FLAG.test(prev) || HEADER_FLAG.test(prev)) out.push("***");
-		else if (looksLikeSecret(arg)) out.push("***");
+		else if (looksLikeSecret(arg) || isDottedToken(arg)) out.push("***");
 		else out.push(redact(arg));
 	}
 	return out;
