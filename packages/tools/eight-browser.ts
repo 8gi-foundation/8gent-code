@@ -396,6 +396,18 @@ export function browserProfileWarning(env: Env = process.env): string | null {
 	}
 }
 
+/**
+ * How to drive a local web app with curl so System One's loopback lane (permissions/s1-curl-loopback.ts)
+ * passes it without asking the judge. One source for the full prompt (TOOL_PATTERNS_SEGMENT) and the
+ * withheld-browser note, which is the only one of the two a local text-tool session receives: the compact
+ * local prompt has no TOOL_PATTERNS_SEGMENT, so before this the local model never saw these rules.
+ */
+export const LOCAL_SERVER_CURL_NOTE =
+	"For a local server (127.0.0.1 or localhost), use run_command with one plain curl per call: no pipes, ; or &&. " +
+	"Keep cookie, header and output files under .tmp/ in the project, never /tmp " +
+	"(curl -s -c .tmp/cj.txt -b .tmp/cj.txt -o .tmp/page.html URL), then read_file them. " +
+	"Do not pass -L: on a 302, read the Location header and make a second loopback request.";
+
 /** Browser tools a local-model session may see: none unless a named profile is configured. */
 export function localBrowserTools(env: Env = process.env): string[] {
 	return isolatedBrowser(env)
@@ -414,7 +426,8 @@ export function browserWithheldNote(env: Env = process.env): string | null {
 		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
 		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
 		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
-		"into password fields, so for a local web app use run_command with curl."
+		"into password fields.\n" +
+		LOCAL_SERVER_CURL_NOTE
 	);
 }
 
