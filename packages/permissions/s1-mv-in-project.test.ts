@@ -15,7 +15,9 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
+import { singleFileDelete } from "./s1-rm-single";
 import {
+	generatedDataName,
 	hasDotSegment,
 	moveInProject,
 	protectedRel,
@@ -138,6 +140,84 @@ describe("moveInProject allows", () => {
 	}
 });
 
+describe("moveInProject: generated-data dotfiles and .tmp (#3943)", () => {
+	beforeEach(() => {
+		writeFileSync(join(ws, "e2e.json"), "[]");
+		writeFileSync(join(ws, ".todo-e2e.json"), "[]");
+		writeFileSync(join(ws, ".mcp.json"), "{}");
+		writeFileSync(join(ws, ".eslintrc.json"), "{}");
+		writeFileSync(join(ws, "tsconfig.json"), "{}");
+		mkdirSync(join(ws, ".tmp"));
+		mkdirSync(join(ws, ".other"));
+	});
+
+	test("the exact command from the issue: mv e2e.json .todo-e2e.json .tmp/", () => {
+		expect(moveInProject("mv e2e.json .todo-e2e.json .tmp/", ws).ok).toBe(true);
+	});
+
+	for (const cmd of [
+		"mv e2e.json .tmp",
+		"mv -f e2e.json .tmp/",
+		"mv -fv e2e.json .tmp/",
+		"mv -nf e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/result.json",
+		"mv e2e.json .todo-moved.json",
+		"mv inbox/note-1.txt .tmp/",
+	]) {
+		test(`allows: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(true);
+		});
+	}
+
+	for (const cmd of [
+		"mv .mcp.json .tmp/",
+		"mv .eslintrc.json .tmp/",
+		"mv .env .tmp/",
+		"mv e2e.json .mcp.json",
+		"mv e2e.json .tmp/.mcp.json",
+		"mv e2e.json .other/",
+		"mv e2e.json .git/",
+		"mv e2e.json .git/hooks/",
+		"mv e2e.json .claude/",
+		"mv .tmp .other/",
+		"mv .other .tmp/",
+		"mv e2e.json tsconfig.json",
+		"mv e2e.json packages/permissions/x.json",
+		"mv e2e.json ../out.json",
+		"mv e2e.json /tmp/",
+		"mv e2e.json escape/",
+		"mv e2e.json notes-link/",
+		"mv inbox/link.txt .tmp/",
+		"mv -t .tmp e2e.json",
+		"mv --target-directory=.tmp e2e.json",
+		"mv -f e2e.json .tmp/../x",
+		"mv e2e.json *.json",
+		"mv *.json .tmp/",
+		"mv -f e2e.json .todo-e2e.json",
+		"mv e2e.json .tmp/ && rm -rf .",
+	]) {
+		test(`still judged: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(false);
+		});
+	}
+
+	test(".tmp as a symlink is refused", () => {
+		rmSync(join(ws, ".tmp"), { recursive: true });
+		symlinkSync(join(ws, "inbox"), join(ws, ".tmp"));
+		expect(moveInProject("mv e2e.json .tmp/", ws).ok).toBe(false);
+	});
+
+	test("both pilot commands pass the gate without asking the judge", async () => {
+		for (const cmd of ["mv e2e.json .todo-e2e.json .tmp/"]) {
+			const g = await systemOneGate(cmd, process.env, ws);
+			expect(g.run, cmd).toBe(true);
+			expect(g.guard?.backend).toBe("allowlist");
+		}
+		expect(judge.asks).toBe(0);
+	});
+});
+
 describe("moveInProject refuses", () => {
 	const refused: Array<[string, string]> = [
 		["a destination outside the workspace (absolute)", `mv inbox/note-1.txt ${"/tmp"}/x.txt`],
@@ -168,7 +248,7 @@ describe("moveInProject refuses", () => {
 		["a quoted path", 'mv "inbox/note-1.txt" inbox/notes/'],
 		["a command substitution", "mv inbox/note-1.txt $(pwd)/x"],
 		["a chained command", "mv inbox/note-1.txt inbox/notes/ && rm -rf inbox"],
-		["force flag", "mv -f inbox/note-1.txt inbox/notes/"],
+		["force flag over an existing file", "mv -f inbox/note-1.txt inbox/notes/note-9.txt"],
 		["target-directory flag", "mv -t inbox/notes inbox/note-1.txt"],
 		["a missing source", "mv inbox/nope.txt inbox/notes/"],
 		["a new directory by trailing slash", "mv inbox/note-1.txt inbox/fresh/"],
@@ -277,5 +357,94 @@ describe("systemOneGate end to end with a judge that says dangerous", () => {
 		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
 		const r = await systemOneGate("mv inbox/note-1.txt inbox/notes/", process.env, ws);
 		expect(r.run).toBe(false);
+	});
+});
+
+describe("one sensitive-name set for mv and rm (#3944)", () => {
+	const NAMES = [
+		".env",
+		".env.local",
+		".npmrc",
+		".netrc",
+		"app.pem",
+		"server.key",
+		"cert.p12",
+		"data.db",
+		"data.sqlite3",
+		"id_rsa",
+		"id_ed25519.txt",
+		"credentials.txt",
+		"my-credential.lock",
+		"secret.txt",
+		"client-secret.lock",
+		"secrets.pid",
+	];
+	for (const name of NAMES) {
+		test(`mv and rm both refuse ${name}`, () => {
+			mkdirSync(join(ws, "tmp"), { recursive: true });
+			writeFileSync(join(ws, "tmp", name), "x");
+			writeFileSync(join(ws, "inbox", name), "x");
+			expect(singleFileDelete(`rm -f tmp/${name}`, ws).ok, `rm tmp/${name}`).toBe(false);
+			expect(moveInProject(`mv inbox/${name} inbox/notes/`, ws).ok, `mv src ${name}`).toBe(false);
+			expect(moveInProject(`mv inbox/note-1.txt inbox/notes/${name}`, ws).ok, `mv dest ${name}`).toBe(false);
+		});
+	}
+	test("a plain scratch name still passes both", () => {
+		mkdirSync(join(ws, "tmp"), { recursive: true });
+		writeFileSync(join(ws, "tmp", "plain.txt"), "x");
+		expect(singleFileDelete("rm -f tmp/plain.txt", ws).ok).toBe(true);
+	});
+});
+
+describe("generatedDataName is a positive allowlist (8SO, #3944)", () => {
+	test("config names laundered through json never match", () => {
+		for (const n of [
+			".mocharc.json",
+			".huskyrc.json",
+			".nycrc.json",
+			".lintstagedrc.json",
+			".releaserc.json",
+			".commitlintrc.json",
+			"nodemon.json",
+			"ecosystem.config.json",
+			"tailwind.config.json",
+			"postcss.config.json",
+			"vite.config.json",
+			"bower.json",
+			"composer.json",
+			"pyrightconfig.json",
+			"wrangler.json",
+			"e2e.config.json",
+			"todo-rc.json",
+			".todo.rc.json",
+			"package.json",
+			"tsconfig.json",
+			"notes.json",
+			".json",
+		])
+			expect(generatedDataName(n), n).toBe(false);
+	});
+	test("generated data names match", () => {
+		for (const n of ["e2e.json", ".todo-e2e.json", "result.json", "out.json", "tmp_state.json", "todo.json", "results2.json"])
+			expect(generatedDataName(n), n).toBe(true);
+	});
+	test("mv refuses every laundered name as source or landing name", () => {
+		for (const n of [
+			".mocharc.json",
+			".huskyrc.json",
+			"nodemon.json",
+			"ecosystem.config.json",
+			"vite.config.json",
+			"bower.json",
+			"wrangler.json",
+			"src/.mocharc.json",
+		]) {
+			mkdirSync(join(ws, "src"), { recursive: true });
+			writeFileSync(join(ws, "a.json"), "[]");
+			writeFileSync(join(ws, "e2e.json"), "[]");
+			expect(moveInProject(`mv e2e.json ${n}`, ws).ok, `mv e2e.json ${n}`).toBe(false);
+			expect(moveInProject(`mv a.json ${n}`, ws).ok, `mv a.json ${n}`).toBe(false);
+			expect(singleFileDelete(`rm -f ${n}`, ws).ok, `rm ${n}`).toBe(false);
+		}
 	});
 });
