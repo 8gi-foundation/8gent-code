@@ -31,6 +31,7 @@ import {
 	parseGoCommand,
 } from "../lib/goal-client.js";
 import { t } from "../theme.js";
+import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { Blink } from "./fade-transition.js";
@@ -207,6 +208,26 @@ export function CommandInput({
 		};
 	}, []);
 
+	// `@` file mention (#3918 D2): the files matching the @token at the end
+	// of the input. The file list loads the first time an @ is typed, and
+	// again if the working directory changed since.
+	const mention = useMemo(() => mentionAtEnd(value), [value]);
+	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
+	const [mentionIndex, setMentionIndex] = useState(0);
+	useEffect(() => {
+		if (!mention) return;
+		const cwd = process.cwd();
+		if (projectFiles?.cwd === cwd) return;
+		setProjectFiles({ cwd, files: listProjectFiles(cwd) });
+	}, [mention, projectFiles]);
+	const mentionMatches = useMemo(
+		() => (mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : []),
+		[mention, projectFiles],
+	);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new query starts at the best match
+	useEffect(() => setMentionIndex(0), [mention?.query]);
+	const mentionOpen = mention !== null && mentionMatches.length > 0;
+
 	// Ghost suggestion hook
 	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
 		isGitRepo,
@@ -225,6 +246,23 @@ export function CommandInput({
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
+			// An open @ file list takes Tab, Up and Down before anything else.
+			if (mentionOpen && mention) {
+				if (key.tab && !key.shift) {
+					const file = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+					if (file) setValue(applyMention(value, mention.start, file));
+					return;
+				}
+				if (key.upArrow) {
+					setMentionIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setMentionIndex((i) => Math.min(mentionMatches.length - 1, i + 1));
+					return;
+				}
+			}
+
 			// Tab to accept ghost suggestion. Not Shift+Tab: Ink sets key.tab for
 			// it too, and Shift+Tab switches the permission mode (#3170).
 			if (key.tab && !key.shift && isVisible && suggestion) {
@@ -431,6 +469,11 @@ export function CommandInput({
 				</Box>
 			)}
 
+			{/* @ file mention list */}
+			{!isProcessing && mentionOpen && (
+				<FileMentionList files={mentionMatches} selected={mentionIndex} />
+			)}
+
 			{/* Slash command help */}
 			{!isProcessing && showSlashHelp && (
 				<SlashCommandHelp filter={value.trimStart().slice(1)} entries={slashRegistryEntries} />
@@ -611,6 +654,25 @@ function SlashCommandHelp({
 					<Text color={t.textPrimary}>/{row.label}</Text>
 					<Text color={t.textTertiary}> {row.description}</Text>
 				</Box>
+			))}
+		</Box>
+	);
+}
+
+const MENTION_ROWS = 8;
+
+// The @ file list: matching files, the picked one marked, Tab to insert.
+function FileMentionList({ files, selected }: { files: string[]; selected: number }) {
+	return (
+		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
+			<Text color={t.heading} bold>
+				FILES <Text color={t.textTertiary}>Up/Down to pick, Tab to insert</Text>
+			</Text>
+			{files.map((file, i) => (
+				<Text key={file} color={i === selected ? t.textPrimary : t.textTertiary}>
+					{i === selected ? "> " : "  "}
+					{file}
+				</Text>
 			))}
 		</Box>
 	);
