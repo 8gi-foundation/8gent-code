@@ -491,7 +491,8 @@ describe("SecretScanner - #3203 false-positive guard (must stay untouched)", () 
 		"apiKey: process.env.OPENAI_API_KEY,",
 		"password: ${DB_PASSWORD}",
 		"API_KEY=",
-		"SECRET_KEY=<your-secret-here>",
+		"SECRET_KEY=<YOUR_SECRET_KEY>",
+		"PASSWORD=${DB_PASSWORD}",
 		"OPENAI_API_KEY=your-key",
 		"token: undefined",
 		"auth: true",
@@ -522,4 +523,228 @@ describe("SecretScanner - #3203 false-positive guard (must stay untouched)", () 
 			expect(out.redactedCount).toBe(0);
 		});
 	}
+});
+
+// 8SO review of #4018 (#3203): leaks, false positives and ReDoS found by
+// Karen's probes. Every vector below failed against the first fix.
+const V20 = "Zq9xLm2pRt7vWk4nBc8d";
+const V32 = rand(32, ALNUM, 31);
+const V44 = rand(44, ALNUM, 32);
+const V64 = rand(64, ALNUM, 33);
+
+function expectHidden(input: string, secret: string) {
+	const out = scrub(input);
+	expect(out.scrubbed).not.toContain(secret);
+	expect(out.scrubbed).toContain("[REDACTED:");
+	return out.scrubbed;
+}
+
+describe("SecretScanner - 8SO: auth headers and cookies", () => {
+	const cases: [string, string][] = [
+		[`curl -H "Authorization: Bearer ${V32}" https://x`, V32],
+		[`> Authorization: Bearer ${V32}`, V32],
+		[`> Authorization: Basic ${V32}`, V32],
+		[`Authorization: Token ${V32}`, V32],
+		[`Authorization: Digest username="bob", realm="x", response="${V32}"`, V32],
+		[`Authorization: ${V32}`, V32],
+		[`Proxy-Authorization: Basic ${V32}`, V32],
+		[`> Cookie: sid=${V32}; theme=${V20}`, V20],
+		[`> Cookie: sid=${V32}`, V32],
+		[`< Set-Cookie: session=${V32}; Path=/`, V32],
+		[`token was Bearer ${V32} ok`, V32],
+		[`> X-Api-Key: ${V32}`, V32],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+
+	it("keeps the scheme word and Set-Cookie attributes", () => {
+		expect(scrub(`Authorization: Bearer ${V32}`).scrubbed).toBe("Authorization: Bearer [REDACTED:auth_header]");
+		expect(scrub(`Set-Cookie: session=${V32}; Path=/; HttpOnly`).scrubbed).toBe(
+			"Set-Cookie: session=[REDACTED:cookie]; Path=/; HttpOnly",
+		);
+	});
+});
+
+describe("SecretScanner - 8SO: CLI flags", () => {
+	const cases: [string, string][] = [
+		[`mysql --password ${V20} -u root`, V20],
+		[`mysql --password="${V20}" -u root`, V20],
+		[`gh --token ${V20}`, V20],
+		[`mysql -u root -p${V20} db`, V20],
+		[`sshpass -p '${V20}' ssh x`, V20],
+		[`sshpass -p ${V20} ssh x`, V20],
+		[`curl -u admin:${V20} https://x`, V20],
+		[`curl -u 'admin:${V20}' https://x`, V20],
+		[`curl --user "admin:${V20}" https://x`, V20],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+
+	it("keeps the rest of the command", () => {
+		expect(scrub(`curl -u admin:${V20} https://x`).scrubbed).toBe("curl -u admin:[REDACTED:cli_password] https://x");
+		expect(scrub(`mysql --password ${V20} -u root`).scrubbed).toBe("mysql --password [REDACTED:secret_assignment] -u root");
+	});
+});
+
+describe("SecretScanner - 8SO: punctuation tails", () => {
+	const cases: [string, string][] = [
+		[`SECRET_KEY=${V20}==`, V20],
+		[`SECRET_KEY=ab${V20}=cd`, V20],
+		[`API_TOKEN=abc=def${V20}`, V20],
+		[`password: ab;cd${V20}`, V20],
+		[`password: ab,cd${V20}`, `cd${V20}`],
+		[`password: ab(cd${V20}`, `cd${V20}`],
+		[`secret: ab[cd${V20}`, `cd${V20}`],
+		[`PASSWORD=ab"cd${V20}`, V20],
+		[`password = "${V20} ${V20}"`, V20],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+
+	it("cuts at , only in JSON or YAML flow context", () => {
+		expect(scrub(`{password: ${V20}, user: bob}`).scrubbed).toBe("{password: [REDACTED:secret_assignment], user: bob}");
+		expect(scrub(`{"password": "${V20}", "user": "bob"}`).scrubbed).toBe(
+			'{"password": "[REDACTED:secret_assignment]", "user": "bob"}',
+		);
+	});
+});
+
+describe("SecretScanner - 8SO: URL userinfo", () => {
+	const cases: [string, string][] = [
+		[`redis://:${V20}@host:6379`, V20],
+		[`postgres://u:p@ss${V20}@host/db`, V20],
+		[`postgres://u:ab/cd${V20}@host/db`, `cd${V20}`],
+		[`https://${V20}@github.com/a/b`, V20],
+		[`mongodb://u:${V20}@h1,h2/db?authSource=admin`, V20],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+
+	it("keeps host and path", () => {
+		expect(scrub(`postgres://u:p@ss${V20}@host/db`).scrubbed).toBe("postgres://u:[REDACTED:url_password]@host/db");
+		expect(scrub(`https://${V20}@github.com/a/b`).scrubbed).toBe("https://[REDACTED:url_password]@github.com/a/b");
+	});
+});
+
+describe("SecretScanner - 8SO: short values and name families", () => {
+	const cases: [string, string][] = [
+		["PASSWORD=hunter2", "hunter2"],
+		["PASSWORD=correcthorse", "correcthorse"],
+		["SECRET_KEY=abcdefghijklmno", "abcdefghijklmno"],
+		["secret: my-secret-value", "my-secret-value"],
+		["API_KEY=1234567890123456", "1234567890123456"],
+		["API_KEY=abc123", "abc123"],
+		[`PASSWORD=/${V20}`, V20],
+		[`SECRET=${V20}.${V20}`, V20],
+		[`PRIVATE_KEY=config.${V20}`, V20],
+		[`"private_key_id": "${rand(40, HEX, 34)}"`, rand(40, HEX, 34)],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+});
+
+describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
+	const cases: [string, string][] = [
+		[`PASSWORD=$ecret${V20}`, V20],
+		[`PASSWORD=\${${V20}}`, V20],
+		[`PASSWORD=<${V20}>`, V20],
+		[`token = \`${V20}\``, V20],
+		[`$env:API_KEY="${V32}"`, V32],
+		[`set API_KEY=${V32}`, V32],
+		[`"password":\n  "${V20}"`, V20],
+	];
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+
+	it("redacts a YAML block scalar under a secret-named key and keeps the next key", () => {
+		const out = scrub(`db:\n  private_key: |\n    ${V32}\n    ${V44}\n  host: x\n`);
+		expect(out.scrubbed).not.toContain(V32);
+		expect(out.scrubbed).not.toContain(V44);
+		expect(out.scrubbed).toContain("  host: x");
+		expect(out.scrubbed).toContain("private_key: |");
+	});
+});
+
+describe("SecretScanner - 8SO: extra provider shapes", () => {
+	const cases: [string, string, string][] = [
+		["azure conn str", `DefaultEndpointsProtocol=https;AccountName=x;AccountKey=${V64}==;EndpointSuffix=core.windows.net`, V64],
+		["azure SAS sig", `https://x.blob.core.windows.net/c?sv=2020&sig=${V44}%3D&se=2030`, V44],
+		["azure SharedAccessKey", `Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=${V44}=`, V44],
+		["google ya29", `access ya29.${rand(60, URLSAFE, 35)}`, rand(60, URLSAFE, 35)],
+		["npm", `//registry.npmjs.org/:_authToken=npm_${rand(36, ALNUM, 36)}`, rand(36, ALNUM, 36)],
+		["npm bare", `npm_${rand(36, ALNUM, 37)}`, rand(36, ALNUM, 37)],
+		["huggingface", `hf_${rand(34, ALNUM, 38)}`, rand(34, ALNUM, 38)],
+		["groq", `gsk_${rand(52, ALNUM, 39)}`, rand(52, ALNUM, 39)],
+		["xai", `xai-${rand(80, ALNUM, 40)}`, rand(80, ALNUM, 40)],
+		["google oauth secret", `GOCSPX-${rand(28, URLSAFE, 41)}`, rand(28, URLSAFE, 41)],
+		["sendgrid", `SG.${rand(22, URLSAFE, 42)}.${rand(43, URLSAFE, 43)}`, rand(43, URLSAFE, 43)],
+		["twilio", `SK${rand(32, HEX, 44)}`, rand(32, HEX, 44)],
+		["slack webhook", `https://hooks.slack.com/services/T${rand(8, ALNUM, 45)}/B${rand(8, ALNUM, 46)}/${rand(24, ALNUM, 47)}`, rand(24, ALNUM, 47)],
+	];
+	for (const [label, input, secret] of cases) it(`hides ${label}`, () => expectHidden(input, secret));
+});
+
+describe("SecretScanner - 8SO: false positives stay untouched", () => {
+	const negatives = [
+		"const token = getToken();",
+		"password: await hash(input),",
+		"secret: z.string().min(8),",
+		"  password: string;\n  apiKey: string;\n  token?: string;",
+		"const apiKey = process.env.OPENAI_API_KEY;",
+		"password: process.env.DB_PASSWORD,",
+		"apiKey: config.apiKey,",
+		"auth_url=https://example.com/login",
+		"TOKEN_URL=https://auth.example.com/oauth/token",
+		"DOC_AUTH=docs/auth.md",
+		"auth=oauth2",
+		"key=value&other=1",
+		"cache_key=build-linux-x64-abc123def456",
+		"CACHE_KEY=node-modules-8f3a9c1e2b7d",
+		"TOKEN=$(cat x)",
+		"PASSWORD=$(op read op://vault/db/password)",
+		"sk-learn-pipeline-stage-one-transform",
+		"sk-1-column-layout-wrapper-class",
+		"tailwind class: sk-button-primary-2xl-large-variant",
+		"headers: { Authorization: `Bearer ${token}` }",
+		"Authorization: Bearer ${TOKEN}",
+		"AuthorizationError: not allowed",
+		"public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghijklmnopqrstuvwxyz0123456789 user@host",
+		"private: true",
+		'"private": true,',
+		"url: https://host:8080/path@v2",
+		"ssh://git@github.com/a/b",
+		"max_tokens: 4096",
+		"token_count=12345678",
+		"Password:",
+		"password: yes",
+		"PASSWORD=none",
+		"SharedAccessKeyName=RootManageSharedAccessKey",
+		"tokenizer: gpt2",
+		"monkey=banana",
+	];
+	for (const line of negatives) {
+		it(`leaves alone: ${line.slice(0, 40)}`, () => {
+			expect(scrub(line).scrubbed).toBe(line);
+		});
+	}
+});
+
+describe("SecretScanner - 8SO: ReDoS and input cap", () => {
+	const MB = 1024 * 1024;
+	for (const [label, unit] of [
+		["a.", "a."],
+		["a-", "a-"],
+		["key-", "key-"],
+		["key.", "key."],
+		["a+ before ://", "a+"],
+	] as const) {
+		it(`1 MB of "${label}" in under 200 ms`, () => {
+			const input = unit.repeat(Math.ceil(MB / unit.length));
+			const start = performance.now();
+			scrub(input);
+			expect(performance.now() - start).toBeLessThan(200);
+		});
+	}
+
+	it("fails closed past the 2 MB cap", () => {
+		const input = `${"x ".repeat(MB)}PASSWORD=${V20}`;
+		const out = scrub(input);
+		expect(out.scrubbed).not.toContain(V20);
+		expect(out.scrubbed).toContain("[REDACTED:input_cap]");
+		expect(out.rules).toContain("input_cap");
+	});
 });
