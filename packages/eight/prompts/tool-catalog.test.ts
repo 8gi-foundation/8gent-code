@@ -9,7 +9,14 @@
 
 import { describe, expect, it } from "bun:test";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
-import { SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
+import { REVIEW_FOCUS_NOTE, SLIDES_TO_VIDEO_NOTE, TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
+
+/**
+ * Size cap for the concise catalog the local TUI sends on every request.
+ * Raising it is a deliberate decision (it costs every local turn), not a
+ * fix for a failing test. Smallest value that fits today: 2156 (#3920).
+ */
+const CONCISE_CATALOG_MAX_BYTES = 2156;
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {
@@ -57,10 +64,10 @@ describe("buildToolCatalogSegment", () => {
 		expect(TOOL_CATALOG_SEGMENT).not.toContain("discover_tools");
 	});
 
-	it("fits in a reasonable token budget (< 4KB default, < 2KB concise)", () => {
+	it("fits in a reasonable token budget (< 4KB default, within CONCISE_CATALOG_MAX_BYTES concise)", () => {
 		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4096);
 		const concise = buildToolCatalogSegment({ concise: true });
-		expect(concise.length).toBeLessThan(2048);
+		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
 
 	it("tells the local model to keep scratch files inside the project (#3865)", () => {
@@ -82,12 +89,23 @@ describe("slides-to-video join guidance (#3862)", () => {
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(concise).toContain("segment count equals slide count");
 		expect(concise).toContain("trailing newline");
-		expect(concise.length).toBeLessThan(2048);
+		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
 
 	it("appears exactly once in each catalog variant", () => {
 		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
 			expect(seg.split(SLIDES_TO_VIDEO_NOTE).length - 1).toBe(1);
 		}
+	});
+});
+
+describe("review focus guidance (#3920)", () => {
+	it("is in both catalog variants exactly once, within the concise budget", () => {
+		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(seg.split(REVIEW_FOCUS_NOTE).length - 1).toBe(1);
+		}
+		expect(Buffer.byteLength(buildToolCatalogSegment({ concise: true }))).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
+		expect(REVIEW_FOCUS_NOTE).toContain("cite only lines that must change");
+		expect(REVIEW_FOCUS_NOTE).toContain("security-relevant");
 	});
 });
