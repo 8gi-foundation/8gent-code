@@ -35,6 +35,12 @@ class RecordingPool {
 	getActiveSessions() {
 		return [];
 	}
+	getSessionInfo(id: string) {
+		const channel = this.live.get(id);
+		return channel
+			? { channel, messageCount: 0, busy: false, createdAt: 0, lastActiveAt: 0 }
+			: null;
+	}
 	getStatus() {
 		return {};
 	}

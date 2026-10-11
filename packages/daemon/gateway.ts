@@ -8,7 +8,13 @@
 import { telegramBridgeHealth } from "./bridge-health";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
-import { SPEAK_URL_RE, TableStore, handleTableAudioHttp, handleTableSpeakHttp, installTablePolicies } from "../table/index";
+import {
+	SPEAK_URL_RE,
+	TableStore,
+	handleTableAudioHttp,
+	handleTableSpeakHttp,
+	installTablePolicies,
+} from "../table/index";
 import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
@@ -44,7 +50,20 @@ import {
 } from "./routes/store/index";
 import { handleStageHttp } from "./huddle-stage";
 import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
-import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
+import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
+import {
+	type SharedPool,
+	type SharedSessionInbound,
+	type SharedSessionOutbound,
+	type SharedStore,
+	ResumeSecrets,
+	SHAREABLE_CHANNELS,
+	handleResume,
+	handleSharedSession,
+	isSharedSessionType,
+	persistSession,
+} from "./shared-sessions";
+import { bindParticipant, handleTableFrame, isLoopbackAddress, isTableFrame } from "./table-routes";
 import {
 	type TimeTravelInbound,
 	type TimeTravelOutbound,
@@ -88,12 +107,15 @@ interface ClientState {
 	participantId?: string;
 	/** Peer address captured at open, for the Table per-frame loopback guard (F1). */
 	remoteAddress?: string;
+	/** Times of this connection's restores from disk, for the rate limit (#3929). */
+	restores?: number[];
 }
 
 type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
-	| { type: "session:create"; channel: string }
-	| { type: "session:resume"; sessionId: string; channel?: string }
+	/** persist: true saves the session after every turn (#3929), so it can be resumed later. */
+	| { type: "session:create"; channel: string; persist?: boolean }
+	| { type: "session:resume"; sessionId: string; channel?: string; resumeSecret?: string }
 	| { type: "session:compact"; sessionId: string }
 	| { type: "session:destroy"; sessionId: string }
 	/** `turn` counts only from the registered approval bridge (#3621). */
@@ -115,12 +137,13 @@ type InboundMessage =
 			approver?: string;
 	  }
 	| { type: "ping" }
-	| TimeTravelInbound;
+	| TimeTravelInbound
+	| SharedSessionInbound;
 
 type OutboundMessage =
 	| { type: "auth:ok" }
 	| { type: "auth:fail" }
-	| { type: "session:created"; sessionId: string }
+	| { type: "session:created"; sessionId: string; resumeSecret?: string }
 	| { type: "session:resumed"; sessionId: string }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
@@ -132,7 +155,8 @@ type OutboundMessage =
 	| { type: "pong" }
 	| { type: "approval:resolved"; requestId: string; ok: boolean; reason?: string }
 	| { type: "approvals:registered"; ok: boolean }
-	| TimeTravelOutbound;
+	| TimeTravelOutbound
+	| SharedSessionOutbound;
 
 const clients = new Map<any, ClientState>();
 let nextClientId = 0;
@@ -159,6 +183,55 @@ function broadcastToChannel(channelId: string, frame: unknown): void {
 				// client disconnected
 			}
 		}
+	}
+}
+
+/**
+ * The session store shared with the TUI (~/.8gent/sessions, SessionManager's
+ * format). Lazy, so a daemon that never shares a session never creates it.
+ */
+let sessionStore: { dir: string; store: SessionManager } | null = null;
+function getSessionStore(): SharedStore {
+	// The same directory the TUI uses (SessionManager's default, which honours
+	// EIGHT_DATA_DIR). Resolved per call: it can differ between test files.
+	const dir = defaultSessionsDir();
+	if (sessionStore?.dir !== dir) sessionStore = { dir, store: new SessionManager(dir) };
+	return sessionStore.store as unknown as SharedStore;
+}
+
+/**
+ * Sessions whose store file this daemon may write (#3929): restored from it,
+ * or shared when no file existed. See SharedSessionDeps.persistable.
+ */
+const persistable = new Set<string>();
+
+/** Resume secrets for remote session:resume (#3929). */
+const resumeSecrets = new ResumeSecrets();
+
+/** Most restores from disk one connection may make per minute. */
+const RESTORES_PER_MINUTE = 5;
+function allowRestore(state: ClientState): boolean {
+	const now = Date.now();
+	state.restores = (state.restores ?? []).filter((t) => now - t < 60_000);
+	if (state.restores.length >= RESTORES_PER_MINUTE) return false;
+	state.restores.push(now);
+	return true;
+}
+
+/** Connections bound to a session (shared sessions, #3929). */
+function clientsOn(sessionId: string, except?: unknown): number {
+	let n = 0;
+	for (const [ws, s] of clients) {
+		if (ws !== except && s.sessionId === sessionId && !s.isComputerRoute) n++;
+	}
+	return n;
+}
+
+/** Show the other clients on a session what this one sent (#3929). */
+function echoPrompt(from: unknown, sessionId: string, text: string, channel: string): void {
+	for (const [ws, s] of clients) {
+		if (ws === from || s.isComputerRoute || !s.authenticated || s.sessionId !== sessionId) continue;
+		send(ws, { type: "event", event: "user:message", payload: { sessionId, text, channel } });
 	}
 }
 
@@ -269,6 +342,32 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 	const pool = config.pool;
 
+	// Shared sessions (#3929): list, attach, detach, abort. Loopback-only on
+	// every frame, like Table, whatever the listener's bind.
+	if (isSharedSessionType((msg as { type?: unknown }).type)) {
+		if (!isLoopbackAddress(state.remoteAddress)) {
+			send(ws, { type: "error", message: "shared sessions are loopback-only" });
+			return;
+		}
+		const { reply, bind, surface } = handleSharedSession(msg as SharedSessionInbound, {
+			pool: pool as unknown as SharedPool,
+			store: getSessionStore(),
+			boundSessionId: state.sessionId,
+			clientsOn: (id) => clientsOn(id),
+			persistable,
+			allowRestore: () => allowRestore(state),
+		});
+		if (bind !== undefined) state.sessionId = bind;
+		if (surface) state.channel = surface;
+		send(
+			ws,
+			reply.type === "session:attached"
+				? { ...reply, resumeSecret: resumeSecrets.issue(reply.sessionId) }
+				: reply,
+		);
+		return;
+	}
+
 	switch (msg.type) {
 		case "ping":
 			send(ws, { type: "pong" });
@@ -296,9 +395,16 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			const sessionId = generateSessionId();
 			state.sessionId = sessionId;
 			state.channel = msg.channel || "api";
+			// Opt-in save after every turn, so a panel-only chat can be resumed
+			// later, also after a daemon restart (#3929). Shareable channels only.
+			if (msg.persist === true && SHAREABLE_CHANNELS.has(state.channel)) persistable.add(sessionId);
 
 			// Respond to the client first, then emit events and create agent
-			send(ws, { type: "session:created", sessionId });
+			send(ws, {
+				type: "session:created",
+				sessionId,
+				resumeSecret: resumeSecrets.issue(sessionId),
+			});
 			bus.emit("session:start", { sessionId, channel: state.channel });
 
 			// Create Agent instance async (constructor does blocking AST indexing)
@@ -307,21 +413,39 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		}
 
 		case "session:resume": {
-			state.sessionId = msg.sessionId;
 			// A resume on a fresh socket would otherwise default to "api" (#3538).
 			// session:create already takes the channel from the client.
-			state.channel = msg.channel || state.channel;
-
-			// If pool doesn't have this session, create a new agent for it
-			if (!pool.hasSession(msg.sessionId)) {
-				pool.createSession(msg.sessionId, state.channel);
+			const channel = msg.channel || state.channel;
+			// Shared-session rules (#3929): private channels stay private, a saved
+			// session is restored with its history, never recreated empty.
+			const { reply, bind, surface } = handleResume(msg.sessionId, {
+				pool: pool as unknown as SharedPool,
+				store: getSessionStore(),
+				boundSessionId: state.sessionId,
+				clientsOn: (id) => clientsOn(id, ws),
+				persistable,
+				allowRestore: () => allowRestore(state),
+				isBridge: state.approvalBridge === true,
+				loopback: isLoopbackAddress(state.remoteAddress),
+				channel,
+				resumeSecretOk: resumeSecrets.matches(msg.sessionId, msg.resumeSecret),
+			});
+			if (reply.type === "error") {
+				send(ws, reply);
+				break;
 			}
-
+			state.sessionId = bind ?? state.sessionId;
+			state.channel = surface ?? channel;
 			bus.emit("session:start", {
 				sessionId: msg.sessionId,
 				channel: state.channel,
 			});
-			send(ws, { type: "session:resumed", sessionId: msg.sessionId });
+			send(
+				ws,
+				reply.type === "session:resumed"
+					? { ...reply, resumeSecret: resumeSecrets.issue(msg.sessionId) }
+					: reply,
+			);
 			break;
 		}
 
@@ -334,6 +458,18 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
 		case "session:destroy": {
 			if (msg.sessionId) {
+				// Only the session this connection is on (#3929).
+				if (msg.sessionId !== state.sessionId) {
+					send(ws, { type: "error", message: "can only end the session you are on" });
+					break;
+				}
+				// Others are still on it: this client leaves, the session goes on.
+				if (clientsOn(msg.sessionId, ws) > 0) {
+					state.sessionId = null;
+					break;
+				}
+				persistable.delete(msg.sessionId);
+				resumeSecrets.forget(msg.sessionId);
 				// Only the bridge's own socket may cancel its live prompt.
 				if (state.approvalBridge) channelApprovals.endSession(msg.sessionId);
 				pool.destroySession(msg.sessionId);
@@ -360,6 +496,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// Only the bridge's own socket can make a turn ask for approval; a
 			// client that merely resumed the session cannot.
 			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
+			if (typeof msg.text === "string") echoPrompt(ws, sid, msg.text, state.channel);
 			pool
 				.chat(sid, msg.text, turn)
 				.then((response) => {
@@ -371,6 +508,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 						sessionId: sid,
 						error: err instanceof Error ? err.message : String(err),
 					});
+				})
+				.finally(() => {
+					// Shareable sessions are saved after every turn so the TUI and a
+					// later session:attach can resume them (#3929).
+					persistSession(pool as unknown as SharedPool, getSessionStore, sid, persistable);
 				});
 			break;
 		}
@@ -553,6 +695,8 @@ async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<R
 
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
 	subscribeToBus();
+	// An attached session is never evicted from under its clients (#3929).
+	config.pool.setInUse?.((id) => clientsOn(id) > 0);
 
 	// Install the Table deny-by-default policy set once (idempotent). Table
 	// agents bind under the "__table__" scope; these rules block
@@ -779,10 +923,14 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
 						if (state.approvalBridge) channelApprovals.endSession(state.sessionId);
-						bus.emit("session:end", {
-							sessionId: state.sessionId,
-							reason: "client-disconnect",
-						});
+						// A shared session goes on for the clients still on it (#3929):
+						// only the last one leaving ends it for listeners.
+						if (clientsOn(state.sessionId, ws) === 0) {
+							bus.emit("session:end", {
+								sessionId: state.sessionId,
+								reason: "client-disconnect",
+							});
+						}
 					}
 				}
 				clients.delete(ws);
