@@ -116,7 +116,7 @@ import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permiss
 import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { wrapRunCommand } from "../permissions/run-command-sandbox";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
@@ -2867,6 +2867,9 @@ export class ToolExecutor {
 		}
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
+
+		const sandboxRefusal = runCommandSandboxRefusal();
+		if (sandboxRefusal) return sandboxRefusal;
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).

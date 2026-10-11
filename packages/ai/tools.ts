@@ -29,7 +29,7 @@ import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { wrapRunCommand } from "../permissions/run-command-sandbox";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
@@ -1359,6 +1359,9 @@ async function runShellCommand(command: string): Promise<string> {
 	if (command.includes("npm init") && !command.includes("-y")) {
 		finalCommand = `${command} -y`;
 	}
+
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).

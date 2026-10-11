@@ -11,25 +11,38 @@
  *   ~/.8gent/{extensions,prompts,packages,browser-profiles}/
  *   ~/.8gent/{audit/,audit.jsonl,permissions-audit.jsonl}
  *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
+ *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
  *
- * The same set is applied under EIGHT_DATA_DIR when that is set, and each path
+ * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
+ * those are set, and each path
  * is also denied by its realpath. Reads stay allowed. Everything else the
  * command does (the workspace, the network, other ~/.8gent files) is
  * unchanged: the profile is allow-default with targeted write denies.
  *
- *   macOS   Seatbelt (sandbox-exec). Default on. EIGHT_SEATBELT=0 turns it off.
+ *   macOS   Seatbelt (sandbox-exec). Default on. EIGHT_SEATBELT=0 turns it
+ *           off; EIGHT_SEATBELT=require refuses to run a command unwrapped.
  *   Linux   bubblewrap read-only binds when bwrap is installed and works;
  *           paths that do not exist yet cannot be bound (see the PR / docs).
  *   Windows no OS boundary; the text backstops are all that stand.
  *
  * Not applied when the host already sandboxes this process (sandbox-exec
- * cannot nest). runCommandSandboxStatus() says which case applies.
+ * cannot nest). runCommandSandboxStatus() says which case applies, and an
+ * unwrapped run is never silent: one stderr warning per process, an audit
+ * line, and onRunCommandUnsandboxed() listeners (the TUI status hook point).
+ *
+ * The env keys that steer this (EIGHT_SEATBELT, EIGHT_DATA_DIR, EIGHT_HOME,
+ * HOME) are snapshotted when this module loads, before the TUI's own .env
+ * loader runs, and a key declared in any .env file 8gent or Bun would load is
+ * ignored: a command that writes `EIGHT_SEATBELT=0` into ./.env must not turn
+ * the boundary off for the next launch. EIGHT_FAKE_HOME is a test hook and is
+ * honoured only under NODE_ENV=test or BUN_ENV=test (themselves not from .env).
  */
 
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
@@ -43,6 +56,10 @@ export const PROTECTED_DATA_FILES = [
 	"permissions-audit.jsonl",
 	"daemon.log",
 	"approvals-audit.jsonl",
+	"policies.yaml",
+	"mcp.json",
+	".env",
+	"keys.env",
 ] as const;
 
 /** Directories whose whole tree is protected, relative to a data dir. */
@@ -55,19 +72,122 @@ export const PROTECTED_DATA_DIRS = [
 	"sessions",
 	"logs",
 	"checkpoints",
+	"bin",
+	// A file or a directory: a subpath rule covers both.
+	"policy-checksum",
 ] as const;
 
-function homeDir(): string {
-	// Same test hook as path-guard and seatbelt.ts.
-	return process.env.EIGHT_FAKE_HOME || os.homedir();
+// ============================================
+// Security env snapshot
+// ============================================
+
+/** Env keys that decide whether and where the boundary applies. */
+export const SECURITY_ENV_KEYS = [
+	"EIGHT_SEATBELT",
+	"EIGHT_DATA_DIR",
+	"EIGHT_HOME",
+	"EIGHT_FAKE_HOME",
+	"HOME",
+	"USERPROFILE",
+	"NODE_ENV",
+	"BUN_ENV",
+] as const;
+type SecurityKey = (typeof SECURITY_ENV_KEYS)[number];
+
+export interface SecurityEnv {
+	values: Partial<Record<SecurityKey, string>>;
+	/** Keys present in the environment but declared in a .env file, so ignored. */
+	ignored: SecurityKey[];
 }
 
-/** ~/.8gent, plus EIGHT_DATA_DIR when it points elsewhere. */
+/** The .env files Bun (cwd, by NODE_ENV) or the TUI loader could have read. */
+export function dotenvCandidates(cwd: string = process.cwd(), home: string = os.homedir()): string[] {
+	const names = [".env", ".env.local"];
+	for (const mode of ["development", "production", "test"]) names.push(`.env.${mode}`, `.env.${mode}.local`);
+	return [
+		...names.map((n) => path.join(cwd, n)),
+		path.resolve(import.meta.dirname, "../../.env"),
+		path.join(home, ".8gent", ".env"),
+	];
+}
+
+/** Keys declared (KEY=... or export KEY=...) in the given dotenv files. */
+export function dotenvDeclaredKeys(files: string[]): Set<string> {
+	const keys = new Set<string>();
+	for (const f of files) {
+		let text: string;
+		try {
+			text = fs.readFileSync(f, "utf8");
+		} catch {
+			continue;
+		}
+		for (const m of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) keys.add(m[1] as string);
+	}
+	return keys;
+}
+
+/** Pure: keep each security key unless a .env file declares it. */
+export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Set<string>): SecurityEnv {
+	const values: SecurityEnv["values"] = {};
+	const ignored: SecurityKey[] = [];
+	for (const k of SECURITY_ENV_KEYS) {
+		const v = env[k];
+		if (v === undefined || v === "") continue;
+		if (declared.has(k)) ignored.push(k);
+		else values[k] = v;
+	}
+	return { values, ignored };
+}
+
+function takeSnapshot(): SecurityEnv {
+	return snapshotSecurityEnv(process.env, dotenvDeclaredKeys(dotenvCandidates()));
+}
+
+// Taken at module load: before the TUI's loadEnvFile() runs (app.tsx imports
+// this module's importers first), so nothing it sets can steer the boundary.
+let securityEnv: SecurityEnv = takeSnapshot();
+
+export function securityEnvSnapshot(): SecurityEnv {
+	return securityEnv;
+}
+
+/** Pure: test mode comes only from a NODE_ENV/BUN_ENV that a .env file did not set. */
+export function isTestMode(values: SecurityEnv["values"]): boolean {
+	return values.NODE_ENV === "test" || values.BUN_ENV === "test";
+}
+
+function inTestMode(): boolean {
+	return isTestMode(securityEnv.values);
+}
+
+/** Tests only: re-read the env after changing it. A no-op outside test mode. */
+export function refreshSecurityEnvForTests(): void {
+	if (inTestMode()) securityEnv = takeSnapshot();
+}
+
+/** EIGHT_FAKE_HOME is a test hook: honoured only in test mode, read live there. */
+function fakeHome(): string | undefined {
+	return inTestMode() ? process.env.EIGHT_FAKE_HOME || undefined : undefined;
+}
+
+/** ~/.8gent, resolveHome()/.8gent (EIGHT_HOME), and EIGHT_DATA_DIR, deduplicated. */
 export function protectedDataRoots(): string[] {
-	const roots = [path.join(homeDir(), ".8gent")];
-	const dataDir = process.env.EIGHT_DATA_DIR;
-	if (dataDir && path.isAbsolute(dataDir)) roots.push(dataDir);
-	return [...new Set(roots.map((r) => path.normalize(r)))];
+	const v = securityEnv.values;
+	const fake = fakeHome();
+	const home = fake ?? os.homedir();
+	const roots = [
+		path.join(home, ".8gent"),
+		path.join(resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }), ".8gent"),
+	];
+	// Path keys only ever ADD roots: a value from .env (ignored for trust) or set
+	// after the snapshot may still be where the harness reads from, so it is
+	// protected too. Nothing here can remove a root.
+	for (const dataDir of [v.EIGHT_DATA_DIR, process.env.EIGHT_DATA_DIR]) {
+		if (dataDir && path.isAbsolute(dataDir)) roots.push(dataDir);
+	}
+	const liveEightHome = process.env.EIGHT_HOME;
+	if (liveEightHome && path.isAbsolute(liveEightHome)) roots.push(path.join(liveEightHome, ".8gent"));
+	return [...new Set(roots.filter((r) => path.isAbsolute(r)).map((r) => path.normalize(r)))];
 }
 
 export interface ProtectedPaths {
@@ -234,11 +354,17 @@ function findBwrap(): string | undefined {
 
 export type RunCommandSandbox =
 	| { applied: true; mechanism: "seatbelt" | "bwrap" }
-	| { applied: false; reason: string };
+	| { applied: false; reason: string; required: boolean };
 
 /** Which OS boundary run_command gets on this host, and why not when none. */
 export function runCommandSandboxStatus(): RunCommandSandbox {
-	if (process.env.EIGHT_SEATBELT === "0") return { applied: false, reason: "EIGHT_SEATBELT=0" };
+	const status = sandboxStatusInner();
+	if (status.applied) return status;
+	return { ...status, required: securityEnv.values.EIGHT_SEATBELT === "require" };
+}
+
+function sandboxStatusInner(): RunCommandSandbox | { applied: false; reason: string } {
+	if (securityEnv.values.EIGHT_SEATBELT === "0") return { applied: false, reason: "EIGHT_SEATBELT=0" };
 	if (process.platform === "darwin") {
 		if (!fs.existsSync(SANDBOX_EXEC)) return { applied: false, reason: "sandbox-exec missing" };
 		if (!canApplySeatbelt())
@@ -255,14 +381,78 @@ export function runCommandSandboxStatus(): RunCommandSandbox {
 	return { applied: false, reason: `no OS sandbox on ${process.platform}` };
 }
 
+// ============================================
+// Unwrapped runs are never silent
+// ============================================
+
+type UnsandboxedListener = (status: Extract<RunCommandSandbox, { applied: false }>) => void;
+const listeners = new Set<UnsandboxedListener>();
+let warned = false;
+
+/** Hook point for the TUI status line: called on every unwrapped run. Returns an unsubscribe. */
+export function onRunCommandUnsandboxed(listener: UnsandboxedListener): () => void {
+	listeners.add(listener);
+	return () => listeners.delete(listener);
+}
+
+function auditPath(): string {
+	const roots = protectedDataRoots();
+	const root = securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
+		? securityEnv.values.EIGHT_DATA_DIR
+		: (roots[0] as string);
+	return path.join(root, "audit", "run-command-sandbox.jsonl");
+}
+
+function reportUnsandboxed(status: Extract<RunCommandSandbox, { applied: false }>, command: string): void {
+	if (!warned) {
+		warned = true;
+		const ignored = securityEnv.ignored.length ? ` (ignored from .env: ${securityEnv.ignored.join(", ")})` : "";
+		process.stderr.write(
+			`[8gent] WARNING: run_command is NOT OS-sandboxed: ${status.reason}${ignored}. ` +
+				"Writes to ~/.8gent startup code, secrets and records are stopped by text checks only. " +
+				"Set EIGHT_SEATBELT=require to refuse unsandboxed commands.\n",
+		);
+	}
+	try {
+		const file = auditPath();
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.appendFileSync(
+			file,
+			`${JSON.stringify({ ts: new Date().toISOString(), event: "run_command_unsandboxed", reason: status.reason, required: status.required, command: command.slice(0, 200) })}\n`,
+		);
+	} catch {}
+	for (const l of listeners) {
+		try {
+			l(status);
+		} catch {}
+	}
+}
+
+/**
+ * Callers check this before spawning: a refusal message when
+ * EIGHT_SEATBELT=require and no OS boundary can be applied, else undefined.
+ */
+export function runCommandSandboxRefusal(): string | undefined {
+	const status = runCommandSandboxStatus();
+	if (status.applied || !status.required) return undefined;
+	return `[PERMISSION DENIED] EIGHT_SEATBELT=require and run_command cannot be OS-sandboxed here: ${status.reason}`;
+}
+
+export class RunCommandSandboxRequired extends Error {}
+
 /**
  * Wrap a run_command so the kernel refuses writes to the protected set,
- * whatever the command text says. Returned unchanged when no OS boundary can
- * be applied (see runCommandSandboxStatus).
+ * whatever the command text says. When no OS boundary can be applied the
+ * command is returned unchanged and reported (stderr once, audit line,
+ * listeners), or, under EIGHT_SEATBELT=require, refused with a throw.
  */
 export function wrapRunCommand(command: string): string {
 	const status = runCommandSandboxStatus();
-	if (!status.applied) return command;
+	if (!status.applied) {
+		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
+		reportUnsandboxed(status, command);
+		return command;
+	}
 	if (status.mechanism === "seatbelt") {
 		return `${SANDBOX_EXEC} -p ${shellQuote(buildRunCommandProfile())} /bin/sh -c ${shellQuote(command)}`;
 	}

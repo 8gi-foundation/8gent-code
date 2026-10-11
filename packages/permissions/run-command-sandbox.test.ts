@@ -23,12 +23,20 @@ import {
 	buildRunCommandProfile,
 	canApplySeatbelt,
 	caseInsensitivePathRegex,
+	dotenvDeclaredKeys,
+	isTestMode,
+	onRunCommandUnsandboxed,
 	PROTECTED_DATA_DIRS,
 	PROTECTED_DATA_FILES,
 	protectedRunCommandPaths,
+	refreshSecurityEnvForTests,
+	RunCommandSandboxRequired,
+	runCommandSandboxRefusal,
 	runCommandSandboxStatus,
+	snapshotSecurityEnv,
 	wrapRunCommand,
 } from "./run-command-sandbox";
+import { BackgroundTaskManager } from "../tools/background";
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 	const saved: Record<string, string | undefined> = {};
@@ -37,6 +45,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 		if (v === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = v;
 	}
+	refreshSecurityEnvForTests();
 	try {
 		fn();
 	} finally {
@@ -44,18 +53,47 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 			if (v === undefined) Reflect.deleteProperty(process.env, k);
 			else process.env[k] = v;
 		}
+		refreshSecurityEnvForTests();
 	}
 }
 
 describe("protected set", () => {
 	test("covers startup code, secrets, audit and session records under ~/.8gent", () => {
-		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined }, () => {
+		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
 			const p = protectedRunCommandPaths();
-			for (const f of ["hooks.yaml", "hooks.json", "settings.json", "browser-control.token", "audit.jsonl"])
+			for (const f of [
+				"hooks.yaml",
+				"hooks.json",
+				"settings.json",
+				"browser-control.token",
+				"audit.jsonl",
+				"policies.yaml",
+				"mcp.json",
+				".env",
+				"keys.env",
+			])
 				expect(p.files).toContain(`/nonexistent-h/.8gent/${f}`);
-			for (const d of ["extensions", "prompts", "packages", "browser-profiles", "audit", "sessions"])
+			for (const d of [
+				"extensions",
+				"prompts",
+				"packages",
+				"browser-profiles",
+				"audit",
+				"sessions",
+				"bin",
+				"policy-checksum",
+			])
 				expect(p.dirs).toContain(`/nonexistent-h/.8gent/${d}`);
 			expect(p.roots).toEqual(["/nonexistent-h/.8gent"]);
+		});
+	});
+
+	test("EIGHT_HOME (resolveHome) adds its .8gent as a root", () => {
+		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_HOME: "/nonexistent-e", EIGHT_DATA_DIR: undefined }, () => {
+			const p = protectedRunCommandPaths();
+			expect(p.roots).toContain("/nonexistent-h/.8gent");
+			expect(p.roots).toContain("/nonexistent-e/.8gent");
+			expect(p.files).toContain("/nonexistent-e/.8gent/hooks.yaml");
 		});
 	});
 
@@ -82,6 +120,39 @@ describe("protected set", () => {
 			fs.rmSync(link, { force: true });
 			fs.rmSync(real, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("security env snapshot", () => {
+	test("a key declared in a .env file is ignored, others kept", () => {
+		const snap = snapshotSecurityEnv(
+			{ EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" },
+			new Set(["EIGHT_SEATBELT"]),
+		);
+		expect(snap.values).toEqual({ EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" });
+		expect(snap.ignored).toEqual(["EIGHT_SEATBELT"]);
+	});
+
+	test("dotenv keys are parsed, with and without export", () => {
+		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
+		try {
+			fs.writeFileSync(path.join(dir, ".env"), "# c\nEIGHT_SEATBELT=0\n export NODE_ENV=test\nX = 1\n");
+			expect([...dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, "missing")])].sort()).toEqual([
+				"EIGHT_SEATBELT",
+				"NODE_ENV",
+				"X",
+			]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("EIGHT_FAKE_HOME needs test mode, and test mode cannot come from .env", () => {
+		expect(isTestMode({ NODE_ENV: "test" })).toBe(true);
+		expect(isTestMode({ BUN_ENV: "test" })).toBe(true);
+		expect(isTestMode({ NODE_ENV: "production" })).toBe(false);
+		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, new Set(["NODE_ENV"]));
+		expect(isTestMode(fromDotenv.values)).toBe(false);
 	});
 });
 
@@ -126,16 +197,59 @@ describe("wrapping", () => {
 	test("EIGHT_SEATBELT=0 leaves the command unwrapped", () => {
 		withEnv({ EIGHT_SEATBELT: "0" }, () => {
 			expect(wrapRunCommand("echo hi")).toBe("echo hi");
-			expect(runCommandSandboxStatus()).toEqual({ applied: false, reason: "EIGHT_SEATBELT=0" });
+			expect(runCommandSandboxStatus()).toEqual({ applied: false, reason: "EIGHT_SEATBELT=0", required: false });
 		});
 	});
 
 	test("unwrapped exactly when no boundary applies, and says why", () => {
-		const s = runCommandSandboxStatus();
-		if (s.applied) expect(wrapRunCommand("echo hi")).not.toBe("echo hi");
-		else {
-			expect(wrapRunCommand("echo hi")).toBe("echo hi");
-			expect(s.reason.length).toBeGreaterThan(0);
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-wrap-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: undefined }, () => {
+				const s = runCommandSandboxStatus();
+				if (s.applied) expect(wrapRunCommand("echo hi")).not.toBe("echo hi");
+				else {
+					expect(wrapRunCommand("echo hi")).toBe("echo hi");
+					expect(s.reason.length).toBeGreaterThan(0);
+				}
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("an unwrapped run is reported: listener and audit line", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-audit-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
+				const seen: string[] = [];
+				const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
+				wrapRunCommand("echo audited");
+				off();
+				expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
+				const line = fs.readFileSync(path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"), "utf8");
+				expect(JSON.parse(line.trim())).toMatchObject({ event: "run_command_unsandboxed", command: "echo audited" });
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("EIGHT_SEATBELT=require refuses to run unwrapped, including background_start", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-req-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "require" }, () => {
+				const s = runCommandSandboxStatus();
+				if (s.applied) {
+					expect(runCommandSandboxRefusal()).toBeUndefined();
+					return;
+				}
+				expect(s.required).toBe(true);
+				expect(runCommandSandboxRefusal()).toContain("EIGHT_SEATBELT=require");
+				expect(() => wrapRunCommand("echo hi")).toThrow(RunCommandSandboxRequired);
+				expect(() => new BackgroundTaskManager(home).startTask("echo hi")).toThrow(RunCommandSandboxRequired);
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
 		}
 	});
 
@@ -160,7 +274,11 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 	let home = "";
 	let dot = "";
 	let proj = "";
-	const saved = { EIGHT_FAKE_HOME: process.env.EIGHT_FAKE_HOME, EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR };
+	const saved = {
+		EIGHT_FAKE_HOME: process.env.EIGHT_FAKE_HOME,
+		EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR,
+		EIGHT_HOME: process.env.EIGHT_HOME,
+	};
 
 	/** Hash of every protected file and tree, plus the listing of the root. */
 	function snapshot(): string {
@@ -173,7 +291,10 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 				h.update(`${p}:absent\n`);
 				return;
 			}
-			h.update(`${p}:${st.mode}:${st.isSymbolicLink() ? fs.readlinkSync(p) : ""}\n`);
+			// mode, mtime, BSD flags (chflags) and xattrs, not just content.
+			const flags = spawnSync("stat", ["-f", "%f", p], { encoding: "utf8" }).stdout;
+			const xattrs = spawnSync("xattr", ["-l", "-s", p], { encoding: "utf8" }).stdout;
+			h.update(`${p}:${st.mode}:${st.mtimeMs}:${st.ino}:${st.nlink}:${flags}:${xattrs}:${st.isSymbolicLink() ? fs.readlinkSync(p) : ""}\n`);
 			if (st.isDirectory()) for (const e of fs.readdirSync(p).sort()) walk(path.join(p, e));
 			else if (st.isFile()) h.update(fs.readFileSync(p));
 		};
@@ -189,6 +310,8 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		proj = path.join(home, "proj");
 		process.env.EIGHT_FAKE_HOME = home;
 		Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+		Reflect.deleteProperty(process.env, "EIGHT_HOME");
+		refreshSecurityEnvForTests();
 		fs.mkdirSync(proj, { recursive: true });
 		for (const d of PROTECTED_DATA_DIRS) fs.mkdirSync(path.join(dot, d), { recursive: true });
 		for (const f of PROTECTED_DATA_FILES) fs.writeFileSync(path.join(dot, f), `original ${f}\n`);
@@ -211,6 +334,7 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		fs.mkdirSync(path.join(proj, "evil8gent", "extensions"), { recursive: true });
 		fs.writeFileSync(path.join(proj, "evil8gent", "hooks.yaml"), "evil: true\n");
 		fs.writeFileSync(path.join(proj, "step1.sh"), "echo x > ~/.8gent/hooks.yaml\n");
+		fs.writeFileSync(path.join(dot, "bin", "tool"), "#!/bin/sh\necho real\n");
 	});
 
 	afterAll(() => {
@@ -218,7 +342,12 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 			if (v === undefined) Reflect.deleteProperty(process.env, k);
 			else process.env[k] = v;
 		}
-		if (home) fs.rmSync(home, { recursive: true, force: true });
+		refreshSecurityEnvForTests();
+		if (home) {
+			// A chflags uchg that got through would make the cleanup fail too.
+			spawnSync("chflags", ["-R", "nouchg", home]);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
 	});
 
 	const run = (cmd: string) =>
@@ -263,9 +392,27 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		"echo x >> ~/.8gent/audit.jsonl",
 		"echo x > ~/.8gent/browser-profiles/work.token",
 		"mv ~/.8gent/extensions ~/.8gent/ext-old",
+		"echo x > ~/.8gent/bin/tool",
+		"echo x > ~/.8gent/bin/new-tool",
+		"echo EIGHT_SEATBELT=0 >> ~/.8gent/.env",
+		"echo x > ~/.8gent/keys.env",
+		"echo '{}' > ~/.8gent/mcp.json",
+		"echo x > ~/.8gent/policies.yaml",
+		"echo x > ~/.8gent/policy-checksum",
+	];
+	// Karen's (8SO) live probe on #4013: metadata, flags, replace-by-rename, forced link, clone, root move.
+	const KAREN = [
+		"xattr -w com.evil x ~/.8gent/hooks.yaml",
+		"touch -t 200001010000 ~/.8gent/hooks.yaml",
+		"chflags uchg ~/.8gent/hooks.yaml",
+		"echo evil > ./h && mv -f ./h ~/.8gent/hooks.yaml",
+		"ln -f ./x.ts ~/.8gent/hooks.yaml",
+		"cp -c ./x.ts ~/.8gent/hooks.yaml",
+		"cp -c ./x.ts ~/.8gent/extensions/clone.ts",
+		"mv ~/.8gent ./moved-8gent",
 	];
 
-	for (const cmd of [...POC_12, ...MORE]) {
+	for (const cmd of [...POC_12, ...MORE, ...KAREN]) {
 		test(`denied: ${JSON.stringify(cmd).slice(0, 90)}`, () => {
 			const before = snapshot();
 			run(cmd);
@@ -275,12 +422,16 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 	}
 
 	test("allowed: workspace writes, reads of protected files, other ~/.8gent files", () => {
-		const r = run(
-			"echo ok > ./made.txt && cat ~/.8gent/hooks.yaml && mkdir -p ~/.8gent/bin && echo ok > ~/.8gent/bin/tool",
-		);
+		const r = run("echo ok > ./made.txt && cat ~/.8gent/hooks.yaml && echo ok > ~/.8gent/other.txt");
 		expect(r.status).toBe(0);
 		expect(r.stdout).toContain("original hooks.yaml");
 		expect(fs.readFileSync(path.join(proj, "made.txt"), "utf8")).toBe("ok\n");
-		expect(fs.readFileSync(path.join(dot, "bin", "tool"), "utf8")).toBe("ok\n");
+		expect(fs.readFileSync(path.join(dot, "other.txt"), "utf8")).toBe("ok\n");
+	});
+
+	test("~/.8gent/bin is NOT writable, but runs", () => {
+		const r = run("echo ok > ~/.8gent/bin/tool; sh ~/.8gent/bin/tool");
+		expect(r.stdout).toContain("real");
+		expect(fs.readFileSync(path.join(dot, "bin", "tool"), "utf8")).toBe("#!/bin/sh\necho real\n");
 	});
 });

@@ -7,6 +7,7 @@
 import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
+import { wrapRunCommand } from "../permissions/run-command-sandbox";
 
 // ============================================
 // Types
@@ -91,8 +92,9 @@ export class BackgroundTaskManager {
 			workingDirectory,
 		};
 
-		// Spawn the process
-		const proc = spawnShell(command, {
+		// Spawn the process under the run_command OS boundary (#4009, #3612). Throws under
+		// EIGHT_SEATBELT=require when no boundary applies; callers report the error.
+		const proc = spawnShell(wrapRunCommand(command), {
 			cwd: workingDirectory,
 			env: {
 				...process.env,
