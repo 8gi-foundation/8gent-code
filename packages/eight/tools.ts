@@ -49,6 +49,7 @@ import {
 	formatLocate,
 } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
+import { buildChildEnv } from "./harness/child-env";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -565,7 +566,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...process.env, ...GIT_NON_INTERACTIVE_ENV },
+			env: { ...buildChildEnv(process.env, ["SSH_AUTH_SOCK"], ["GIT_"]), ...GIT_NON_INTERACTIVE_ENV },
 		});
 		let stdout = "";
 		let stderr = "";
@@ -3445,7 +3446,8 @@ export class ToolExecutor {
 				processGroup: true,
 				windowsShell,
 				env: {
-					...((env as NodeJS.ProcessEnv | undefined) ?? process.env),
+					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
+					...((env as NodeJS.ProcessEnv | undefined) ?? buildChildEnv()),
 					...SPAWN_NON_INTERACTIVE_ENV,
 				},
 			});
