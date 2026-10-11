@@ -133,6 +133,14 @@ export interface AgentConfig {
 	 * provider. Unset: the adaptive router, as before.
 	 */
 	providerPinned?: boolean;
+	/**
+	 * Load one-file extensions from ~/.8gent/extensions (G1). Off by default:
+	 * the interactive TUI and the headless CLI opt in; daemon, Table and
+	 * no-tool sessions never load them.
+	 */
+	extensions?: boolean;
+	/** Where extensions load from when enabled. Default ~/.8gent/extensions (os.homedir()). */
+	extensionsDir?: string;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory?: string;

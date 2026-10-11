@@ -1705,6 +1705,21 @@ export class ToolExecutor {
 
 	private rateLimiter = new RateLimiter();
 
+	/** One-file extension tools (G1), set by the agent that owns this executor. */
+	private extensionRunner: {
+		has(name: string): boolean;
+		run(name: string, args: Record<string, unknown>): Promise<string>;
+	} | null = null;
+
+	/**
+	 * Route extension tools through this executor (G1), so they pass the same
+	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
+	 * tools, and their output is scrubbed, filtered and chipped the same way.
+	 */
+	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
+		this.extensionRunner = runner;
+	}
+
 	/**
 	 * Map tool names to policy action types for ToolG8 gate evaluation.
 	 */
@@ -1907,6 +1922,15 @@ export class ToolExecutor {
 					gateResult.alternative,
 				);
 			}
+		}
+
+		// One-file extension tools (G1): after every gate above, never in a Table
+		// session. execute() then scrubs, filters and chips the result.
+		if (this.extensionRunner?.has(toolName)) {
+			if (this.agentId === "__table__") {
+				return `Error: extension tool "${toolName}" is not available in this session; nothing was run.`;
+			}
+			return this.extensionRunner.run(toolName, args);
 		}
 
 		// Delegate windowed-session orchestration tools to their own module so the

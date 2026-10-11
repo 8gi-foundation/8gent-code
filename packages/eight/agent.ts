@@ -17,7 +17,12 @@ import * as path from "node:path";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { jsonSchema, tool as sdkTool } from "ai";
 import { agentTools } from "../ai/tools";
-import { ExtensionHost, type ExtensionLoadResult, getExtensionManager } from "../extensions";
+import {
+	ExtensionHost,
+	type ExtensionLoadResult,
+	defaultExtensionsDir,
+	getExtensionManager,
+} from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
 import type { HedgeCandidate } from "../kernel/hedge-executor";
@@ -776,8 +781,27 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// ── One-file extensions (G1): ~/.8gent/extensions/*.ts ─────────
 		// Built-in tool names are reserved, so an extension never shadows one.
-		this.extensionHost = new ExtensionHost(undefined, () => this.builtInToolNames());
-		this.extensionsReady = this.reloadExtensions().catch(() => []);
+		// Off unless the host opts in (config.extensions), and never in a no-tool
+		// or Table scope. Their tools run through this agent's own executor, so
+		// they get maker-checker, rate limits, the scrubber, the output filter
+		// and artifact handling like any built-in tool.
+		let extensionsDir = "";
+		if (this.extensionsEnabled()) {
+			try {
+				extensionsDir = this.config.extensionsDir ?? defaultExtensionsDir();
+			} catch (err) {
+				console.log(`[ext] ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
+		this.extensionHost = new ExtensionHost(extensionsDir, () => this.builtInToolNames());
+		this.executor.setExtensionRunner({
+			has: (name) => this.extensionHost.getTool(name) !== undefined,
+			run: (name, args) =>
+				this.extensionHost.runTool(name, args, {
+					cwd: this.config.workingDirectory || process.cwd(),
+				}),
+		});
+		if (this.extensionsEnabled()) this.extensionsReady = this.reloadExtensions().catch(() => []);
 
 		// ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
 		const extMgr = getExtensionManager();
@@ -825,13 +849,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * model emits it anyway.
 	 */
 	private modeFilter<T>(tools: Record<string, T>): Record<string, T> {
+		return Object.fromEntries(Object.entries(tools).filter(([name]) => this.modeAllows(name)));
+	}
+
+	/**
+	 * Does the active mode allow this tool? An extension tool (G1) is allowed
+	 * in the default mode; in a mode that restricts tools (allowedTools or
+	 * deniedTools) only when its allowedTools names `extension:<name>`.
+	 */
+	private modeAllows(toolName: string): boolean {
 		const mm = getModeManager();
-		return Object.fromEntries(Object.entries(tools).filter(([name]) => mm.isToolAllowed(name)));
+		if (!this.extensionHost?.getTool(toolName)) return mm.isToolAllowed(toolName);
+		const mode = mm.getActiveMode();
+		const restricted = mode.allowedTools !== undefined || (mode.deniedTools?.length ?? 0) > 0;
+		if (!restricted) return true;
+		return mode.allowedTools?.includes(`extension:${toolName}`) === true;
 	}
 
 	private modeRefusal(toolName: string): string | null {
 		const mm = getModeManager();
-		if (mm.isToolAllowed(toolName)) return null;
+		if (this.modeAllows(toolName)) return null;
 		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
 	}
 
@@ -876,12 +913,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return !isNoToolScope(this.config.agentScope) && this.config.agentScope !== "__table__";
 	}
 
+	/** Extensions load only when the host opted in, and never in a no-tool or Table scope. */
+	private extensionsEnabled(): boolean {
+		return this.config.extensions === true && this.extensionToolsAllowed();
+	}
+
 	/**
 	 * Load (or reload, D12) the one-file extensions in ~/.8gent/extensions.
 	 * Replaces every extension tool, command and tool_call handler; the next
 	 * turn sees the result. One result per file, with its error if it failed.
 	 */
 	reloadExtensions(): Promise<ExtensionLoadResult[]> {
+		if (!this.extensionsEnabled()) return Promise.resolve([]);
 		const loading = this.extensionHost.load().then((results) => {
 			for (const r of results) {
 				if (!r.ok) console.log(`[ext] ${r.file}: ${r.error}`);
@@ -967,7 +1010,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Extension tools (G1) join the offered set, unless the scope or the mode withholds them.
 		if (this.extensionToolsAllowed()) {
 			for (const t of this.extensionHost.listTools()) {
-				if (getModeManager().isToolAllowed(t.name)) {
+				if (this.modeAllows(t.name)) {
 					specs.push({ name: t.name, description: t.description, parameters: t.parameters });
 				}
 			}
@@ -1020,11 +1063,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let success = true;
 				try {
 					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
-					result = this.extensionHost.getTool(toolName)
-						? await this.extensionHost.runTool(toolName, args, {
-								cwd: this.config.workingDirectory || process.cwd(),
-							})
-						: await this.executor.execute(toolName, args);
+					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
@@ -1869,13 +1908,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Extension tools (G1): offered beside the built-ins, never in place of one.
 		const withExtensions: typeof scopedTools = { ...scopedTools };
 		if (this.extensionToolsAllowed()) {
-			const cwd = this.config.workingDirectory || process.cwd();
 			for (const t of this.extensionHost.listTools()) {
 				if (t.name in withExtensions) continue;
 				(withExtensions as Record<string, unknown>)[t.name] = sdkTool({
 					description: t.description,
 					inputSchema: jsonSchema<Record<string, unknown>>(t.parameters as Parameters<typeof jsonSchema>[0]),
-					execute: (args: Record<string, unknown>) => this.extensionHost.runTool(t.name, args, { cwd }),
+					// Through the executor, like every built-in tool.
+					execute: (args: Record<string, unknown>) => this.executor.execute(t.name, args),
 				});
 			}
 		}
