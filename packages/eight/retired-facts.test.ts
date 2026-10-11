@@ -154,3 +154,99 @@ describe("write_file result carries the warning (#3811)", () => {
 		expect(out).not.toContain("[Retired fact]");
 	});
 });
+
+describe("turn-end nudge (#3811 step 2)", () => {
+	const draft = "Delivery 24 November 2026. The earlier 3 November date moved.";
+	const warned = () => {
+		const r = new RetiredFacts();
+		r.noteRead("/w/NOTES.md", NOTES);
+		r.warn("/w/outbox/d.txt", draft);
+		return r;
+	};
+
+	test("the warning leads with the action", () => {
+		const r = new RetiredFacts();
+		r.noteRead("/w/NOTES.md", NOTES);
+		const w = r.warn("/w/outbox/d.txt", draft);
+		expect(w).toContain('Remove "3 November 2026"');
+		expect(w).toContain("Do not explain the change");
+	});
+
+	test("warned then fixed by a later write: no nudge", () => {
+		expect(warned().turnEndNudge(() => "Delivery 24 November 2026.")).toBeNull();
+	});
+
+	test("warned and untouched: exactly one nudge naming the token, then none", () => {
+		const r = warned();
+		const n = r.turnEndNudge(() => draft);
+		expect(n).toContain('"3 November 2026"');
+		expect(n).toContain("d.txt");
+		expect(n).toContain("unless the reader needs it");
+		expect(n?.includes("/w/")).toBe(false);
+		expect(r.turnEndNudge(() => draft)).toBeNull();
+	});
+
+	test("two warned files give one message", () => {
+		const r = new RetiredFacts();
+		r.noteRead("/w/NOTES.md", NOTES);
+		r.warn("/w/a.txt", draft);
+		r.warn("/w/b.txt", draft);
+		const n = r.turnEndNudge(() => draft) ?? "";
+		expect(n).toContain("a.txt");
+		expect(n).toContain("b.txt");
+		expect(n.split("Before you finish").length).toBe(2);
+	});
+
+	test("nothing warned: null; reset forgets a warned file", () => {
+		const r = new RetiredFacts();
+		r.noteRead("/w/NOTES.md", NOTES);
+		expect(r.turnEndNudge(() => draft)).toBeNull();
+		const w = warned();
+		w.reset();
+		expect(w.turnEndNudge(() => draft)).toBeNull();
+	});
+
+	test("a deleted or unreadable file is skipped", () => {
+		expect(warned().turnEndNudge(() => null)).toBeNull();
+		expect(
+			warned().turnEndNudge(() => {
+				throw new Error("EACCES");
+			}),
+		).toBeNull();
+	});
+
+	test("through ToolExecutor: write warns, a later rewrite clears it, an untouched file nudges", async () => {
+		const dir = tempDir("retired-nudge-");
+		fs.writeFileSync(path.join(dir, "NOTES.md"), NOTES);
+		const ex = new ToolExecutor(dir);
+		await ex.execute("read_file", { path: "NOTES.md" });
+		await ex.execute("write_file", { path: "a.txt", content: draft });
+		await ex.execute("write_file", { path: "a.txt", content: "Delivery 24 November 2026." });
+		expect(ex.retiredTurnEndNudge()).toBeNull();
+		await ex.execute("write_file", { path: "b.txt", content: draft });
+		expect(ex.retiredTurnEndNudge()).toContain("b.txt");
+	});
+
+	test("a FIFO and an oversize file give no nudge and do not hang", async () => {
+		const dir = tempDir("retired-nudge-nonreg-");
+		fs.writeFileSync(path.join(dir, "NOTES.md"), NOTES);
+		const ex = new ToolExecutor(dir);
+		await ex.execute("read_file", { path: "NOTES.md" });
+		await ex.execute("write_file", { path: "fifo.txt", content: draft });
+		await ex.execute("write_file", { path: "big.txt", content: draft });
+		const fifo = path.join(dir, "fifo.txt");
+		fs.rmSync(fifo);
+		Bun.spawnSync(["mkfifo", fifo]);
+		fs.writeFileSync(path.join(dir, "big.txt"), `${draft}\n${"x".repeat(1_100_000)}`);
+		const t0 = performance.now();
+		expect(ex.retiredTurnEndNudge()).toBeNull();
+		expect(performance.now() - t0).toBeLessThan(2000);
+	});
+
+	test("both the text-tool and the native path send agent.turnEndNudge()", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf-8");
+		expect(src).toContain("finalCheck: () => this.turnEndNudge()");
+		expect(src).toContain("result?.text ? this.turnEndNudge() : null");
+		expect(src.match(/verifyNudgeFor\(this\.turnToolLedger\)/g)?.length).toBe(1);
+	});
+});

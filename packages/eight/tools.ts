@@ -725,6 +725,16 @@ export class ToolExecutor {
 		return this.workingDirectory;
 	}
 
+	/** Once per turn, at its end: a retired fact still in a file that was warned about (#3811). */
+	retiredTurnEndNudge(): string | null {
+		// Regular files up to 1 MB only: a FIFO, device or huge file must not hang or bloat the turn.
+		return this.retiredFacts.turnEndNudge((file) => {
+			const st = fs.statSync(file, { throwIfNoEntry: false });
+			if (!st || !st.isFile() || st.size > 1_048_576) return null;
+			return fs.readFileSync(file, "utf-8");
+		});
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();

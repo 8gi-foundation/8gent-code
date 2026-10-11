@@ -34,6 +34,7 @@ const MAX_READ_CHARS = 200_000;
 const MAX_LISTED = 5;
 const MAX_TOKEN_CHARS = 40;
 const MAX_ENTRIES = 5000;
+const MAX_WARNED_FILES = 20;
 
 /** A file name safe to print in a warning: basename only, word characters, dot, hyphen. */
 export function safeLabel(file: string): string {
@@ -76,6 +77,8 @@ export class RetiredFacts {
 	private retired = new Map<string, { shown: string; where: string }>(); // key -> token
 	private live = new Set<string>();
 	private readPaths = new Set<string>();
+	/** Files that drew a warning this turn, for the turn-end re-check. */
+	private warned = new Set<string>();
 
 	private retire(t: Token, where: string): void {
 		if (this.retired.size < MAX_ENTRIES && !this.retired.has(t.key))
@@ -102,17 +105,46 @@ export class RetiredFacts {
 		});
 	}
 
+	/** Retired tokens in `content`, as `"token" (where)`. Empty when none or nothing was read. */
+	private hits(file: string, content: string): string[] {
+		if (this.retired.size === 0 || this.readPaths.has(file)) return [];
+		const found = new Set(extractTokens(content.slice(0, MAX_READ_CHARS)).map((t) => t.key));
+		const out: string[] = [];
+		for (const [key, { shown, where }] of this.retired) {
+			if (!this.live.has(key) && found.has(key)) out.push(`"${shown}" (${where})`);
+		}
+		return out.slice(0, MAX_LISTED);
+	}
+
 	/** One short line naming retired tokens found in `content`, or "". Never throws. */
 	warn(file: string, content: string): string {
-		if (this.retired.size === 0 || this.readPaths.has(file)) return "";
-		const found = new Set(extractTokens(content.slice(0, MAX_READ_CHARS)).map((t) => t.key));
-		const hits: string[] = [];
-		for (const [key, { shown, where }] of this.retired) {
-			if (!this.live.has(key) && found.has(key)) hits.push(`"${shown}" (${where})`);
-		}
+		const hits = this.hits(file, content);
 		if (hits.length === 0) return "";
-		const shown = hits.slice(0, MAX_LISTED).join(", ");
-		return `[Retired fact] This file contains ${shown}, marked retired in a file you read. Remove it unless the reader needs it.`;
+		if (this.warned.size < MAX_WARNED_FILES) this.warned.add(file);
+		return `[Retired fact] Remove ${hits.join(", ")} from this file before you finish: a file you read marks it retired. Do not explain the change to the reader.`;
+	}
+
+	/**
+	 * Once, at the end of a turn: one message if a file this turn drew a warning and,
+	 * re-read from disk now, still holds a retired token. A file fixed, deleted or
+	 * unreadable since is skipped. Null when nothing is left. Never blocks.
+	 */
+	turnEndNudge(readDisk: (file: string) => string | null): string | null {
+		const left: string[] = [];
+		for (const file of this.warned) {
+			let content: string | null = null;
+			try {
+				content = readDisk(file);
+			} catch {
+				content = null;
+			}
+			if (content === null) continue;
+			const hits = this.hits(file, content);
+			if (hits.length > 0) left.push(`${hits.join(", ")} from ${safeLabel(file)}`);
+		}
+		this.warned.clear();
+		if (left.length === 0) return null;
+		return `Before you finish: remove ${left.join("; ")}. They are marked retired in a file you read. Do not explain the change to the reader, unless the reader needs it, then give your final answer.`;
 	}
 
 	/** A new turn: forget everything read. */
@@ -120,5 +152,6 @@ export class RetiredFacts {
 		this.retired.clear();
 		this.live.clear();
 		this.readPaths.clear();
+		this.warned.clear();
 	}
 }
