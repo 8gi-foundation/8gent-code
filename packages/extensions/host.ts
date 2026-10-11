@@ -28,12 +28,13 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveHome } from "../core/home";
 import {
 	createPiApi,
 	explainPiLoadError,
+	importGate,
 	isPiExtension,
 	registerPiModules,
 	unservedImports,
@@ -101,7 +102,7 @@ export interface ExtensionLoadResult {
 	 * loaded: everything it asked for works. partial: it loaded, but used APIs
 	 * 8gent accepts without acting on (named in `missing`). failed: see error.
 	 */
-	status?: "loaded" | "partial" | "failed";
+	status?: "loaded" | "partial" | "failed" | "off";
 	/** Accepted-but-inactive APIs the extension used (Pi extensions). */
 	missing?: string[];
 }
@@ -114,6 +115,12 @@ const EXTENSIONS = new Set([".ts", ".js", ".mjs", ".mts"]);
  * class by name, so an extension tool there would escape extension_call.
  */
 export const RESERVED_TOOL_PREFIXES = ["mcp__", "term_", "git_", "desktop_", "browser_"];
+/**
+ * Pi's built-in tool names. An extension may not register a tool under one:
+ * a second "bash" would be a shell that skips run_command's sanitizer, its
+ * pre-spawn refusal and the policy backstop.
+ */
+export const RESERVED_PI_TOOL_NAMES = ["bash", "read", "write", "edit", "ls", "grep", "find"];
 /** A tool_call handler that takes longer than this refuses the call. */
 export const HANDLER_TIMEOUT_MS = 2000;
 /**
@@ -131,21 +138,26 @@ copy hotkeys tree import update extensions`.split(/\s+/),
 );
 
 /**
- * Does this local process want extensions? Yes unless started with
- * `--no-extensions` or EIGHT_EXTENSIONS=0. Interactive TUI and headless runs
- * on the person's own machine pass this as AgentConfig.extensions; daemon,
- * Table, channel and no-tool sessions never do.
+ * Does this local process want extensions? The interactive TUI: yes unless
+ * started with `--no-extensions` or EIGHT_EXTENSIONS=0. A headless run
+ * (`interactive: false`): only with `--extensions` or EIGHT_EXTENSIONS=1.
+ * Daemon, Table, channel and no-tool sessions never pass extensions at all.
+ * Imported extensions also need `8gent ext enable <name>`.
  */
 export function extensionsWanted(
+	opts: { interactive?: boolean } = {},
 	argv: readonly string[] = process.argv,
 	env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-	return !argv.includes("--no-extensions") && env.EIGHT_EXTENSIONS !== "0";
+	if (argv.includes("--no-extensions") || env.EIGHT_EXTENSIONS === "0") return false;
+	// Interactive TUI: on by default. Headless runs: only when asked.
+	if (opts.interactive !== false) return true;
+	return argv.includes("--extensions") || env.EIGHT_EXTENSIONS === "1";
 }
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
 export function defaultExtensionsDir(): string {
-	const home = os.homedir();
+	const home = resolveHome();
 	if (!home || !path.isAbsolute(home)) {
 		throw new Error(`no absolute home directory (got "${home}"); not loading extensions`);
 	}
@@ -244,6 +256,21 @@ export class ExtensionHost {
 				results.push({ file: listed, ok: false, error: String(err), tools: [], commands: [] });
 				continue;
 			}
+			// Imported extensions: off until enabled, and their sha256 must still
+			// match the import record, checked on every load. A refusal here never
+			// falls back to an earlier version.
+			const gate = importGate(this.dir, real);
+			if (gate && !gate.allowed) {
+				results.push({
+					file: real,
+					ok: false,
+					error: gate.reason,
+					tools: [],
+					commands: [],
+					status: gate.reason?.includes(" is off;") ? "off" : "failed",
+				});
+				continue;
+			}
 			const { result, reg } = await this.loadFile(real, reserved, next);
 			if (reg) {
 				next.set(real, reg);
@@ -306,7 +333,7 @@ export class ExtensionHost {
 					`imports ${unserved.map((u) => `"${u}"`).join(", ")}, which 8gent does not install; extensions load local files only`,
 				);
 			}
-			if (pi) registerPiModules();
+			if (pi) registerPiModules(this.dir);
 			// Bun keys its module cache by real path and ignores a ?query, so drop
 			// the cached copy (and, for a folder extension, every file in it): an
 			// edited file then loads fresh on reload.
@@ -334,7 +361,9 @@ export class ExtensionHost {
 					if (!t || typeof t.name !== "string" || !NAME.test(t.name)) {
 						throw new Error(`tool name ${JSON.stringify(t?.name)} must match ${NAME}`);
 					}
-					if (reserved.has(t.name)) throw new Error(`tool "${t.name}" is a built-in tool`);
+					if (reserved.has(t.name) || RESERVED_PI_TOOL_NAMES.includes(t.name)) {
+						throw new Error(`tool "${t.name}" is a built-in tool`);
+					}
 					const prefix = RESERVED_TOOL_PREFIXES.find((p) => t.name.startsWith(p));
 					if (prefix) throw new Error(`tool "${t.name}": the prefix "${prefix}" is reserved`);
 					if (toolTaken(t.name)) throw new Error(`tool "${t.name}" is already registered`);

@@ -20,8 +20,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 
 export interface PromptTemplate {
 	/** The command name, from the file name: review.md is "review". */
@@ -37,7 +37,7 @@ export const MAX_TEMPLATE_BYTES = 64 * 1024;
 
 /** ~/.8gent/prompts. Throws when there is no absolute home directory, rather than guess. */
 export function defaultPromptsDir(): string {
-	const home = os.homedir();
+	const home = resolveHome();
 	if (!home || !path.isAbsolute(home)) {
 		throw new Error(`no absolute home directory (got "${home}"); not loading prompt templates`);
 	}

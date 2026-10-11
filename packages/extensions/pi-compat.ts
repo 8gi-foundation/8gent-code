@@ -32,14 +32,21 @@
  *
  * Tool names in a tool_call event use Pi's names for the tools both have:
  * run_command is "bash", read_file "read", write_file "write", edit_file
- * "edit", list_files "ls". A tool_call handler cannot rewrite the input
- * (Pi allows mutating event.input; 8gent hands handlers a frozen copy).
+ * "edit", list_files "ls". Other 8gent tools keep their names, so a guard
+ * written for "bash" does not see git_*, term_* or other command-running
+ * tools. A tool_call handler cannot rewrite the input (Pi allows mutating
+ * event.input; 8gent hands handlers a frozen copy). An extension may not
+ * register a tool under one of Pi's built-in names (host.ts
+ * RESERVED_PI_TOOL_NAMES): a second "bash" would skip run_command's checks.
+ *
+ * Imported extensions are off until `8gent ext enable`, and their sha256 is
+ * checked against the import record on every load (importGate).
  */
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 import type { ExtensionAPI, ExtensionContext, ToolCallDecision, ToolCallEvent } from "./host";
 
 /** Our tool names, as Pi's tool_call events name the same tools. */
@@ -153,30 +160,88 @@ export function defineTool<T>(tool: T): T {
 	return tool;
 }
 
+/** Prefix of the virtual module names Pi files are rewritten to import. */
+export const PI_SHIM_PREFIX = "8gent-pi-compat:";
 let modulesRegistered = false;
+const scopedDirs = new Set<string>();
+
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Rewrite a Pi file's imports of the shimmed modules (static `from`,
+ * `import()` and `require()` with a literal name) to 8gent's virtual names.
+ * Nothing else in the file changes.
+ */
+export function rewritePiImports(source: string): string {
+	const names = PI_SHIMMED_MODULES.map(escapeRegExp).join("|");
+	const re = new RegExp(
+		`(\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s+)(["'])(${names})\\2`,
+		"g",
+	);
+	return source.replace(
+		re,
+		(_m, lead: string, q: string, name: string) => `${lead}${q}${PI_SHIM_PREFIX}${name}${q}`,
+	);
+}
 
 /**
  * Serve the npm modules Pi extensions import (typebox, pi-ai,
- * pi-coding-agent) from this file, process-wide, once. 8gent's own code does
- * not import any of these names.
+ * pi-coding-agent) to Pi extension files only. The modules exist only under
+ * virtual names (8gent-pi-compat:<name>), and a load hook scoped to
+ * `<dir>/pi-*` rewrites those files' imports to them, so no other code in the
+ * process ever resolves "typebox" or "@sinclair/typebox" to the shim.
  */
-export function registerPiModules(): void {
-	if (modulesRegistered) return;
-	modulesRegistered = true;
+export function registerPiModules(dir: string): void {
 	const typeExports = { Type, default: Type };
+	if (!modulesRegistered) {
+		modulesRegistered = true;
+		Bun.plugin({
+			name: "8gent-pi-compat-modules",
+			setup(build) {
+				build.module(`${PI_SHIM_PREFIX}typebox`, () => ({
+					exports: typeExports,
+					loader: "object",
+				}));
+				build.module(`${PI_SHIM_PREFIX}@sinclair/typebox`, () => ({
+					exports: typeExports,
+					loader: "object",
+				}));
+				build.module(`${PI_SHIM_PREFIX}@earendil-works/pi-ai`, () => ({
+					exports: { Type, StringEnum },
+					loader: "object",
+				}));
+				build.module(`${PI_SHIM_PREFIX}@earendil-works/pi-coding-agent`, () => ({
+					exports: { defineTool },
+					loader: "object",
+				}));
+			},
+		});
+	}
+	let real: string;
+	try {
+		real = fs.realpathSync(dir);
+	} catch {
+		return;
+	}
+	if (scopedDirs.has(real)) return;
+	scopedDirs.add(real);
+	const filter = new RegExp(
+		`^${escapeRegExp(real)}[\\\\/]pi-[^\\\\/]+(\\.(m?[jt]s|tsx|cjs)$|[\\\\/].*\\.(m?[jt]s|tsx|cjs)$)`,
+	);
 	Bun.plugin({
-		name: "8gent-pi-compat",
+		name: `8gent-pi-compat-files:${real}`,
 		setup(build) {
-			build.module("typebox", () => ({ exports: typeExports, loader: "object" }));
-			build.module("@sinclair/typebox", () => ({ exports: typeExports, loader: "object" }));
-			build.module("@earendil-works/pi-ai", () => ({
-				exports: { Type, StringEnum },
-				loader: "object",
-			}));
-			build.module("@earendil-works/pi-coding-agent", () => ({
-				exports: { defineTool },
-				loader: "object",
-			}));
+			build.onLoad({ filter }, async (args) => {
+				const source = await Bun.file(args.path).text();
+				const ext = path.extname(args.path).slice(1);
+				const loader = (ext === "tsx" ? "tsx" : ext.endsWith("ts") ? "ts" : "js") as
+					| "ts"
+					| "tsx"
+					| "js";
+				return { contents: rewritePiImports(source), loader };
+			});
 		},
 	});
 }
@@ -188,7 +253,10 @@ export function registerPiModules(): void {
  */
 export function explainPiLoadError(message: string): string {
 	const m = message.match(/(?:Export named|export) '([^']+)' not found in module '([^']+)'/i);
-	if (m) return `Pi API ${m[1]} (from ${m[2]}) is not supported by 8gent's Pi compatibility`;
+	if (m) {
+		const from = m[2].replace(PI_SHIM_PREFIX, "");
+		return `Pi API ${m[1]} (from ${from}) is not supported by 8gent's Pi compatibility`;
+	}
 	return message;
 }
 
@@ -353,10 +421,43 @@ const BUILTINS = new Set(
 	]),
 );
 
+const SOURCE_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+/**
+ * The file a relative import names, as Bun resolves it: the exact path, the
+ * path with a source extension, the TypeScript twin of a .js/.mjs/.cjs name
+ * (the "import ./x.js means x.ts" convention), or a folder's index.
+ */
+function resolveRelative(fromFile: string, spec: string): string | null {
+	const base = path.resolve(path.dirname(fromFile), spec);
+	const twins: string[] = [];
+	const ext = path.extname(base);
+	if ([".js", ".mjs", ".cjs", ".jsx"].includes(ext)) {
+		const stem = base.slice(0, -ext.length);
+		twins.push(`${stem}.ts`, `${stem}.tsx`, `${stem}.mts`, `${stem}.cts`);
+	}
+	const candidates = [
+		base,
+		...twins,
+		...SOURCE_EXTS.map((e) => `${base}${e}`),
+		...SOURCE_EXTS.map((e) => path.join(base, `index${e}`)),
+	];
+	for (const c of candidates) {
+		try {
+			if (fs.statSync(c).isFile()) return c;
+		} catch {
+			/* next */
+		}
+	}
+	return null;
+}
+
 /**
  * Bare npm imports an extension file (and the relative files it imports)
- * makes that 8gent will not serve. Bun would otherwise try to auto-install
- * them from the network; an extension loads local files only.
+ * makes that 8gent will not serve, for a clear message before load. This is
+ * a courtesy check, not the guard: a computed import() or require() cannot be
+ * seen statically. The guard is that 8gent runs Bun with --no-install, so no
+ * import ever installs a package (bin/8gent.ts shebang, the TUI launcher).
  */
 export function unservedImports(entry: string, allowPi: boolean): string[] {
 	const transpiler = new Bun.Transpiler({ loader: "tsx" });
@@ -380,19 +481,8 @@ export function unservedImports(entry: string, allowPi: boolean): string[] {
 		}
 		for (const { path: spec } of imports) {
 			if (spec.startsWith(".") || spec.startsWith("/")) {
-				const base = path.resolve(path.dirname(file), spec);
-				for (const candidate of [
-					base,
-					`${base}.ts`,
-					`${base}.js`,
-					path.join(base, "index.ts"),
-					path.join(base, "index.js"),
-				]) {
-					if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-						visit(candidate);
-						break;
-					}
-				}
+				const target = resolveRelative(file, spec);
+				if (target) visit(target);
 				continue;
 			}
 			if (BUILTINS.has(spec) || allowed.has(spec) || spec.startsWith("bun:")) continue;
@@ -401,6 +491,109 @@ export function unservedImports(entry: string, allowPi: boolean): string[] {
 	};
 	visit(entry);
 	return [...out].sort();
+}
+
+// ── Static report (import never runs extension code) ─────────────────────────
+
+/** Methods of Pi's API 8gent runs. */
+const PI_ACTIVE = new Set(["registerTool", "registerCommand", "on"]);
+/** Named value exports 8gent's shims provide, per module. */
+const PI_EXPORTS: Record<string, Set<string>> = {
+	typebox: new Set(["Type", "default"]),
+	"@sinclair/typebox": new Set(["Type", "default"]),
+	"@earendil-works/pi-ai": new Set(["Type", "StringEnum"]),
+	"@earendil-works/pi-coding-agent": new Set(["defineTool"]),
+};
+
+export interface PiStaticReport {
+	status: "loaded" | "partial" | "failed";
+	/** What it registers, from the source text. */
+	registers: string[];
+	/** Accepted-but-inactive APIs (partial). */
+	missing: string[];
+	/** Why it would fail. */
+	errors: string[];
+}
+
+/**
+ * Judge a Pi extension from its source text alone (all files it imports
+ * relatively): no code runs. The first enabled load is the real check; this
+ * report names what that load would refuse or ignore.
+ */
+export function analyzePiExtension(entry: string): PiStaticReport {
+	const errors: string[] = [];
+	const missing = new Set<string>();
+	const registers = new Set<string>();
+	const unserved = unservedImports(entry, true);
+	const piPackages = unserved.filter((u) => u.startsWith("@earendil-works/"));
+	const other = unserved.filter((u) => !u.startsWith("@earendil-works/"));
+	for (const u of piPackages) errors.push(`Pi API package "${u}" is not supported`);
+	if (other.length)
+		errors.push(`imports ${other.map((u) => `"${u}"`).join(", ")}, which 8gent does not install`);
+
+	const files: string[] = [];
+	const seen = new Set<string>();
+	const transpiler = new Bun.Transpiler({ loader: "tsx" });
+	const walk = (file: string) => {
+		if (seen.has(file)) return;
+		seen.add(file);
+		files.push(file);
+		try {
+			for (const { path: spec } of transpiler.scanImports(fs.readFileSync(file, "utf8"))) {
+				if (spec.startsWith(".")) {
+					const t = resolveRelative(file, spec);
+					if (t) walk(t);
+				}
+			}
+		} catch {
+			/* syntax errors show on load */
+		}
+	};
+	walk(entry);
+
+	for (const file of files) {
+		const src = fs.readFileSync(file, "utf8");
+		// Named value imports from the shimmed modules that 8gent does not provide.
+		const importRe = /import\s+(type\s+)?(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g;
+		for (const m of src.matchAll(importRe)) {
+			if (m[1]) continue;
+			const provided = PI_EXPORTS[m[3]];
+			if (!provided) continue;
+			for (const raw of m[2].split(",")) {
+				const part = raw.trim();
+				if (!part || part.startsWith("type ")) continue;
+				const name = part.split(/\s+as\s+/)[0].trim();
+				if (!provided.has(name)) errors.push(`Pi API ${name} (from ${m[3]}) is not supported`);
+			}
+		}
+		// The API parameter's name: `export default function (pi)`, `(api) =>`, etc.
+		const param =
+			src.match(/export\s+default\s+(?:async\s+)?function\s*[\w$]*\s*\(\s*([\w$]+)/)?.[1] ??
+			src.match(/export\s+default\s+(?:async\s+)?\(?\s*([\w$]+)\s*(?::[^)=]*)?\)?\s*=>/)?.[1] ??
+			"pi";
+		const call = new RegExp(`\\b${escapeRegExp(param)}\\.([A-Za-z_$][\\w$]*)`, "g");
+		for (const m of src.matchAll(call)) {
+			const method = m[1];
+			if (method === "registerTool") registers.add("tools");
+			else if (method === "registerCommand") registers.add("commands");
+			else if (method === "on") continue;
+			else if ((PI_INACTIVE_METHODS as readonly string[]).includes(method))
+				missing.add(`pi.${method}`);
+			else if (!PI_ACTIVE.has(method)) errors.push(`Pi API pi.${method} is not supported`);
+		}
+		const onRe = new RegExp(`\\b${escapeRegExp(param)}\\.on\\(\\s*["']([\\w-]+)["']`, "g");
+		for (const m of src.matchAll(onRe)) {
+			if (m[1] === "tool_call") registers.add("tool_call checks");
+			else missing.add(`pi.on("${m[1]}")`);
+		}
+	}
+	const uniqueErrors = [...new Set(errors)];
+	return {
+		status: uniqueErrors.length ? "failed" : missing.size ? "partial" : "loaded",
+		registers: [...registers],
+		missing: [...missing],
+		errors: uniqueErrors,
+	};
 }
 
 // ── Import from Pi's extensions folder ────────────────────────────────────────
@@ -414,7 +607,7 @@ export function unservedImports(entry: string, allowPi: boolean): string[] {
 export function defaultPiExtensionsDir(
 	env: NodeJS.ProcessEnv = process.env,
 	p: path.PlatformPath = path,
-	home: string = os.homedir(),
+	home: string = resolveHome(),
 ): string {
 	const fromEnv = env.PI_CODING_AGENT_DIR;
 	if (fromEnv) {
@@ -437,9 +630,11 @@ export interface PiImportEntry {
 	source: string;
 	/** Where it was copied. */
 	dest: string;
-	/** sha256 of the file, or of the sorted file list and contents for a folder. */
+	/** sha256 of the copy: the file, or the sorted file list and contents for a folder. */
 	sha256: string;
 	importedAt: string;
+	/** Imported extensions are off until `8gent ext enable <name>`. */
+	enabled: boolean;
 }
 
 export const PI_IMPORT_MANIFEST = "pi-imports.json";
@@ -467,7 +662,8 @@ function folderFiles(dir: string, rel = ""): string[] {
 	return out.sort();
 }
 
-function sha256Of(source: string): string {
+/** sha256 of an extension file, or of a folder's sorted file list and contents. */
+export function sha256Of(source: string): string {
 	const h = createHash("sha256");
 	if (fs.statSync(source).isDirectory()) {
 		for (const rel of folderFiles(source)) {
@@ -520,13 +716,13 @@ export function copyPiExtensions(from: string, to: string): PiImportEntry[] {
 				fs.mkdirSync(path.dirname(target), { recursive: true });
 				fs.copyFileSync(path.join(source, ...rel.split("/")), target);
 			}
-			entries.push({ name, source, dest, sha256: sha256Of(source), importedAt: now });
+			entries.push({ name, source, dest, sha256: sha256Of(dest), importedAt: now, enabled: false });
 		} else if (EXT.test(e.name) && !e.name.endsWith(".d.ts")) {
 			const ext = path.extname(e.name);
 			const name = `pi-${safeName(e.name)}`;
 			const dest = path.join(to, `${name}${ext}`);
 			fs.copyFileSync(source, dest);
-			entries.push({ name, source, dest, sha256: sha256Of(source), importedAt: now });
+			entries.push({ name, source, dest, sha256: sha256Of(dest), importedAt: now, enabled: false });
 		}
 	}
 	const manifestPath = path.join(to, PI_IMPORT_MANIFEST);
@@ -537,7 +733,117 @@ export function copyPiExtensions(from: string, to: string): PiImportEntry[] {
 		previous = [];
 	}
 	const byName = new Map(previous.map((p) => [p.name, p]));
-	for (const entry of entries) byName.set(entry.name, entry);
-	fs.writeFileSync(manifestPath, `${JSON.stringify([...byName.values()], null, 2)}\n`);
+	for (const entry of entries) {
+		// The same bytes again keep their on/off choice; changed bytes start off.
+		const before = byName.get(entry.name);
+		if (before?.enabled && before.sha256 === entry.sha256) entry.enabled = true;
+		byName.set(entry.name, entry);
+	}
+	writeManifest(to, [...byName.values()]);
 	return entries;
+}
+
+function writeManifest(dir: string, entries: PiImportEntry[]): void {
+	fs.writeFileSync(path.join(dir, PI_IMPORT_MANIFEST), `${JSON.stringify(entries, null, 2)}\n`);
+}
+
+/** The import manifest of an extensions folder ([] when there is none or it is unreadable). */
+export function readPiManifest(dir: string): PiImportEntry[] {
+	try {
+		const raw = JSON.parse(fs.readFileSync(path.join(dir, PI_IMPORT_MANIFEST), "utf8"));
+		return Array.isArray(raw) ? (raw as PiImportEntry[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+function realOrResolved(p: string): string {
+	try {
+		return fs.realpathSync(p);
+	} catch {
+		return path.resolve(p);
+	}
+}
+
+/**
+ * The load gate for imported extensions. `file` is what the host is about to
+ * load (a file, or a folder's index). Not imported: null (a file the person
+ * wrote; the host's own rules apply). Imported: it loads only when enabled
+ * and its bytes still hash to the sha256 recorded at import, checked on every
+ * load. Otherwise the reason it does not load.
+ */
+export function importGate(
+	dir: string,
+	file: string,
+): { allowed: boolean; reason?: string } | null {
+	const real = realOrResolved(file);
+	const entry = readPiManifest(dir).find((e) => {
+		const dest = realOrResolved(e.dest);
+		return dest === real || real.startsWith(dest + path.sep);
+	});
+	if (!entry) return null;
+	if (!entry.enabled) {
+		return {
+			allowed: false,
+			reason: `imported extension ${entry.name} is off; turn it on with: 8gent ext enable ${entry.name}`,
+		};
+	}
+	let now: string;
+	try {
+		now = sha256Of(entry.dest);
+	} catch (err) {
+		return {
+			allowed: false,
+			reason: `imported extension ${entry.name} cannot be read: ${(err as Error).message}`,
+		};
+	}
+	if (now !== entry.sha256) {
+		return {
+			allowed: false,
+			reason: `imported extension ${entry.name} changed since import (sha256 ${now.slice(0, 12)}, recorded ${entry.sha256.slice(0, 12)}), so it was not loaded; import it again to accept the change`,
+		};
+	}
+	return { allowed: true };
+}
+
+/**
+ * Turn an imported extension on or off. Turning it on re-checks its sha256
+ * against the import record first, so a copy edited after import is refused.
+ */
+export function setImportedEnabled(
+	dir: string,
+	name: string,
+	on: boolean,
+): { code: number; output: string } {
+	const entries = readPiManifest(dir);
+	const entry = entries.find((e) => e.name === name);
+	if (!entry) {
+		const names = entries.map((e) => e.name);
+		return {
+			code: 1,
+			output: `No imported extension "${name}".${names.length ? ` Imported: ${names.join(", ")}` : ""}`,
+		};
+	}
+	if (on) {
+		let now = "";
+		try {
+			now = sha256Of(entry.dest);
+		} catch {
+			/* reported below */
+		}
+		if (now !== entry.sha256) {
+			return {
+				code: 1,
+				output: `${name} changed since import (or is missing); import it again before enabling it.`,
+			};
+		}
+	}
+	entry.enabled = on;
+	writeManifest(dir, entries);
+	return {
+		code: 0,
+		output: on
+			? `${name} is on. It loads the next time 8gent starts, when that session has extensions on.`
+			: `${name} is off.`,
+	};
 }
