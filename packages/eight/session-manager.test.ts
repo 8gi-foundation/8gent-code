@@ -119,3 +119,28 @@ describe("sessions saved before the tree store", () => {
 		expect(mgr.get("leg2")).toMatchObject({ channel: "tui", messageCount: 3 });
 	});
 });
+
+describe("review fixes (#3986)", () => {
+	test("TUI, /share and daemon shapes of one chat do not branch", () => {
+		const tui = [m("user", "q"), m("system", "Resumed"), m("assistant", "a")];
+		mgr.save("s_mix", tui);
+		mgr.save("s_mix", [m("user", "q"), m("assistant", "a"), m("user", "q2")]);
+		mgr.save("s_mix", [...tui, m("user", "q2")]);
+		const store = mgr.store("s_mix") as SessionStore;
+		expect(store.leaves()).toHaveLength(1);
+		expect(store.allEntries()).toHaveLength(3);
+		expect(mgr.get("s_mix")?.messages).toEqual([
+			m("user", "q"),
+			m("assistant", "a"),
+			m("user", "q2"),
+		]);
+	});
+
+	test("picker count and get() agree", () => {
+		const s = mgr.create({ cwd: "/work/c" });
+		mgr.update(s.id, [m("user", "a"), m("assistant", "b"), m("user", "c")]);
+		mgr.update(s.id, [m("user", "a"), m("assistant", "b2")]);
+		expect(latestSessionForCwd("/work/c", dir)?.messageCount).toBe(mgr.get(s.id)?.messageCount);
+		expect(mgr.list()[0].messageCount).toBe(2);
+	});
+});

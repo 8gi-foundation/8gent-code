@@ -25,6 +25,12 @@ import * as path from "node:path";
 
 export const SESSION_FORMAT_VERSION = 1;
 
+/** importJSONL limits: whole file, line count, one line. */
+export const IMPORT_MAX_BYTES = 50 * 1024 * 1024;
+export const IMPORT_MAX_LINES = 100_000;
+export const IMPORT_MAX_LINE_CHARS = 8 * 1024 * 1024;
+const IMPORT_ROLES = new Set(["user", "assistant", "tool"]);
+
 /** Ids become file names: only plain ids are ever read or written by id. */
 export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -62,6 +68,8 @@ export interface SessionHeader {
 	channel?: string;
 	/** Set when this session was forked from another one. */
 	parentSession?: { id: string; entryId: string | null };
+	/** Set by importJSONL: the id and folder the session had where it was exported. */
+	importedFrom?: { id: string; cwd: string };
 }
 
 export interface MessageEntry {
@@ -137,7 +145,7 @@ export interface SessionListItem {
 	provider?: string;
 	createdAt: string;
 	lastActiveAt: string;
-	/** Message entries in the file, across every branch. */
+	/** Messages on the current path: equals SessionStore.messages().length. */
 	messageCount: number;
 	branch?: string;
 	channel?: string;
@@ -170,7 +178,35 @@ export function normalizeCwd(cwd: string): string {
 	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-function writeOwnerOnly(file: string, text: string, flag: "w" | "a"): void {
+// Built from strings so the source holds no raw control characters.
+const CONTROL_ALL = /[\u0000-\u001F\u007F-\u009F]/g;
+/** Everything but tab and newline: CR, ESC, BEL, the C1 block. */
+const CONTROL_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
+
+/** A name is one line of plain text: every C0/C1 control character goes. */
+export function cleanName(s: string): string {
+	return s.replace(CONTROL_ALL, "");
+}
+
+/** Body text keeps tabs and newlines; terminal escapes and other controls go. */
+export function cleanText(s: string): string {
+	return s.replace(CONTROL_TEXT, "");
+}
+
+/** cleanText on every string inside message content; drops __proto__ keys. */
+function cleanContent(v: unknown, depth = 0): unknown {
+	if (typeof v === "string") return cleanText(v);
+	if (depth > 32 || v === null || typeof v !== "object") return v;
+	if (Array.isArray(v)) return v.map((x) => cleanContent(x, depth + 1));
+	const out: Record<string, unknown> = {};
+	for (const [k, x] of Object.entries(v)) {
+		if (k === "__proto__") continue;
+		out[k] = cleanContent(x, depth + 1);
+	}
+	return out;
+}
+
+function writeOwnerOnly(file: string, text: string, flag: "wx" | "a"): void {
 	// Owner-only: transcripts carry whatever was said and pasted (#3929).
 	fs.writeFileSync(file, text, { mode: 0o600, flag });
 }
@@ -204,6 +240,12 @@ export class SessionStore {
 	private info: Omit<InfoLine, "type" | "ts"> = {};
 	private _leafId: string | null = null;
 	private undone = new Set<string>();
+	/**
+	 * Byte length of the file up to its last newline when it was opened with a
+	 * torn last line (a crash mid-write). The first write cuts the file back to
+	 * this length so the new line does not get glued onto the fragment.
+	 */
+	private tornAt: number | null = null;
 
 	private constructor(sessionsDir: string, header: SessionHeader) {
 		this.sessionsDir = sessionsDir;
@@ -224,6 +266,9 @@ export class SessionStore {
 			parentSession?: SessionHeader["parentSession"];
 			/** Keep the original creation time (migration, import). */
 			createdAt?: string;
+			importedFrom?: SessionHeader["importedFrom"];
+			/** Throw on an existing file instead of reopening it (import). */
+			exclusive?: boolean;
 		} = {},
 		sessionsDir: string = defaultSessionsDir(),
 	): SessionStore {
@@ -242,10 +287,23 @@ export class SessionStore {
 			...(opts.branch ? { branch: opts.branch } : {}),
 			...(opts.channel ? { channel: opts.channel } : {}),
 			...(opts.parentSession ? { parentSession: opts.parentSession } : {}),
+			...(opts.importedFrom ? { importedFrom: opts.importedFrom } : {}),
 		};
 		const store = new SessionStore(sessionsDir, header);
-		if (fs.existsSync(store.file)) throw new Error(`session ${id} already exists`);
-		writeOwnerOnly(store.file, `${JSON.stringify(header)}\n`, "w");
+		try {
+			// "wx": fails if anything (a file, a planted symlink) is already there.
+			writeOwnerOnly(store.file, `${JSON.stringify(header)}\n`, "wx");
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+			// Same id created by someone else first (two writers migrating one
+			// session): that session is the one to use. A random id collision
+			// gets a fresh id instead of joining a stranger's session.
+			if (opts.id === undefined) return SessionStore.create({ ...opts }, sessionsDir);
+			if (opts.exclusive) throw err;
+			const existing = SessionStore.open(id, sessionsDir);
+			if (!existing) throw err;
+			return existing;
+		}
 		if (opts.name) store.rename(opts.name);
 		return store;
 	}
@@ -265,6 +323,10 @@ export class SessionStore {
 		if (!header || header.type !== "session") throw new Error(`missing session header in ${file}`);
 		const store = new SessionStore(sessionsDir, header);
 		for (const line of lines.slice(1)) store.apply(line);
+		if (!text.endsWith("\n")) {
+			const cut = text.lastIndexOf("\n") + 1;
+			store.tornAt = Buffer.byteLength(text.slice(0, cut));
+		}
 		return store;
 	}
 
@@ -378,7 +440,7 @@ export class SessionStore {
 
 	/** Set the display name (and optionally model/provider) without touching the tree. */
 	rename(name: string): void {
-		this.write({ type: "session_info", ts: new Date().toISOString(), name });
+		this.write({ type: "session_info", ts: new Date().toISOString(), name: cleanName(name) });
 	}
 
 	setInfo(info: Omit<InfoLine, "type" | "ts">): void {
@@ -532,13 +594,35 @@ export class SessionStore {
 			key(toMessage(stored[p])) === key(messages[p])
 		)
 			p++;
+		if (p === 0 && stored.length > 0 && messages.length > 0) {
+			// A sliding window (a capped or compacted history) starts part-way
+			// through what is stored. If it lines up with the stored tail, only
+			// its new messages are appended; nothing branches.
+			const first = key(messages[0]);
+			for (let o = 1; o < stored.length; o++) {
+				if (key(toMessage(stored[o])) !== first) continue;
+				const overlap = stored.length - o;
+				if (overlap > messages.length) continue;
+				let ok = true;
+				for (let j = 1; j < overlap && ok; j++)
+					ok = key(toMessage(stored[o + j])) === key(messages[j]);
+				if (!ok) continue;
+				for (const m of messages.slice(overlap)) this.append(m);
+				return { appended: messages.length - overlap, branched: false };
+			}
+		}
 		const branched = p < stored.length;
 		if (branched) this.branch(p === 0 ? null : stored[p - 1].id);
 		for (const m of messages.slice(p)) this.append(m);
 		return { appended: messages.length - p, branched };
 	}
 
-	/** The session file as JSONL text (it already is the export format). */
+	/**
+	 * The session file as JSONL text (it already is the export format).
+	 * It is the WHOLE file: every branch, including abandoned ones, and the
+	 * original messages behind every compaction. Whoever shares an export
+	 * shares all of that, not just what the current conversation shows.
+	 */
 	exportJSONL(): string {
 		return fs.readFileSync(this.file, "utf-8");
 	}
@@ -554,6 +638,15 @@ export class SessionStore {
 		opts: { sessionsDir?: string; cwd?: string; name?: string } = {},
 	): SessionStore {
 		const sessionsDir = opts.sessionsDir ?? defaultSessionsDir();
+		if (Buffer.byteLength(text) > IMPORT_MAX_BYTES) {
+			throw new Error(`import: file is over ${IMPORT_MAX_BYTES / 1024 / 1024} MB`);
+		}
+		const rawLines = text.split("\n");
+		if (rawLines.length > IMPORT_MAX_LINES)
+			throw new Error(`import: over ${IMPORT_MAX_LINES} lines`);
+		for (const [i, l] of rawLines.entries()) {
+			if (l.length > IMPORT_MAX_LINE_CHARS) throw new Error(`import: line ${i + 1} is too long`);
+		}
 		const lines = parseLines(text, "import");
 		const header = lines[0];
 		if (!header || header.type !== "session" || typeof header.cwd !== "string") {
@@ -577,12 +670,14 @@ export class SessionStore {
 					if (line.type === "message") {
 						const m = line.message as Record<string, unknown> | undefined;
 						if (!m || typeof m.role !== "string") throw bad("message needs a role");
+						// No "system": an imported file must not be able to set the rules.
+						if (!IMPORT_ROLES.has(m.role)) throw bad(`role "${m.role}" is not allowed`);
 						entry = {
 							type: "message",
 							id: line.id,
 							parentId: line.parentId as string | null,
 							ts,
-							message: { role: m.role, content: m.content },
+							message: { role: m.role, content: cleanContent(m.content) },
 						};
 					} else if (line.type === "branch_summary") {
 						if (typeof line.summary !== "string") throw bad("summary must be text");
@@ -592,7 +687,7 @@ export class SessionStore {
 							parentId: line.parentId as string | null,
 							ts,
 							fromId: typeof line.fromId === "string" ? line.fromId : null,
-							summary: line.summary,
+							summary: cleanText(line.summary),
 						};
 					} else {
 						if (typeof line.summary !== "string") throw bad("summary must be text");
@@ -602,7 +697,7 @@ export class SessionStore {
 							id: line.id,
 							parentId: line.parentId as string | null,
 							ts,
-							summary: line.summary,
+							summary: cleanText(line.summary),
 							firstKeptId: line.firstKeptId as string | null,
 							...(typeof line.tokensBefore === "number" ? { tokensBefore: line.tokensBefore } : {}),
 							...(typeof line.tokensAfter === "number" ? { tokensAfter: line.tokensAfter } : {}),
@@ -635,30 +730,41 @@ export class SessionStore {
 					out.push({
 						type: "session_info",
 						ts,
-						...(line.name !== undefined ? { name: line.name as string } : {}),
-						...(line.model !== undefined ? { model: line.model as string } : {}),
-						...(line.provider !== undefined ? { provider: line.provider as string } : {}),
-						...(line.branch !== undefined ? { branch: line.branch as string } : {}),
-						...(line.channel !== undefined ? { channel: line.channel as string } : {}),
+						...(line.name !== undefined ? { name: cleanName(line.name as string) } : {}),
+						...(line.model !== undefined ? { model: cleanName(line.model as string) } : {}),
+						...(line.provider !== undefined
+							? { provider: cleanName(line.provider as string) }
+							: {}),
+						...(line.branch !== undefined ? { branch: cleanName(line.branch as string) } : {}),
+						...(line.channel !== undefined ? { channel: cleanName(line.channel as string) } : {}),
 					});
 					break;
 				default:
 					break;
 			}
 		}
-		const keepId = isSessionId(header.id) && !SessionStore.exists(header.id, sessionsDir);
-		const store = SessionStore.create(
-			{
-				id: keepId ? header.id : undefined,
-				cwd: opts.cwd ?? header.cwd,
-				model: typeof header.model === "string" ? header.model : undefined,
-				provider: typeof header.provider === "string" ? header.provider : undefined,
-				createdAt: typeof header.createdAt === "string" ? header.createdAt : undefined,
-				parentSession:
-					!keepId && isSessionId(header.id) ? { id: header.id, entryId: null } : undefined,
-			},
-			sessionsDir,
-		);
+		const originalId = isSessionId(header.id) ? header.id : undefined;
+		// The id is kept only when nothing, in either store, already uses it.
+		const keepId =
+			originalId !== undefined &&
+			!SessionStore.exists(originalId, sessionsDir) &&
+			!fs.existsSync(path.join(sessionsDir, `${originalId}.json`));
+		const base = {
+			// The importer's folder, not whatever folder the file claims.
+			cwd: opts.cwd ?? process.cwd(),
+			model: typeof header.model === "string" ? cleanName(header.model) : undefined,
+			provider: typeof header.provider === "string" ? cleanName(header.provider) : undefined,
+			createdAt: typeof header.createdAt === "string" ? header.createdAt : undefined,
+			importedFrom: { id: originalId ?? "", cwd: cleanName(header.cwd) },
+			exclusive: true,
+		};
+		let store: SessionStore;
+		try {
+			store = SessionStore.create({ ...base, id: keepId ? originalId : undefined }, sessionsDir);
+		} catch (err) {
+			if (!keepId || (err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+			store = SessionStore.create({ ...base, id: undefined }, sessionsDir);
+		}
 		for (const line of out) store.write(line);
 		if (opts.name) store.rename(opts.name);
 		return store;
@@ -695,6 +801,10 @@ export class SessionStore {
 	}
 
 	private write(line: TreeEntry | MetaLine): void {
+		if (this.tornAt !== null) {
+			fs.truncateSync(this.file, this.tornAt);
+			this.tornAt = null;
+		}
 		writeOwnerOnly(this.file, `${JSON.stringify(line)}\n`, "a");
 		this.apply(line);
 	}
@@ -715,8 +825,12 @@ export class SessionStore {
 				this.undone.add(line.target);
 				break;
 			case "session_info": {
-				const { type: _t, ts: _ts, ...rest } = line;
-				Object.assign(this.info, rest);
+				// Field by field: a "__proto__" key in the file must not reach any prototype.
+				if (typeof line.name === "string") this.info.name = line.name;
+				if (typeof line.model === "string") this.info.model = line.model;
+				if (typeof line.provider === "string") this.info.provider = line.provider;
+				if (typeof line.branch === "string") this.info.branch = line.branch;
+				if (typeof line.channel === "string") this.info.channel = line.channel;
 				break;
 			}
 			default:
@@ -745,6 +859,9 @@ function toMessage(entry: TreeEntry): StoredMessage {
 // Listing
 // ---------------------------------------------------------------------------
 
+const ENTRY_PREFIX =
+	/^\{"type":"(message|branch_summary|compaction)","id":"([A-Za-z0-9_-]{1,64})","parentId":(null|"[A-Za-z0-9_-]{1,64}")/;
+
 function listTree(sessionsDir: string): SessionListItem[] {
 	const dir = treeDir(sessionsDir);
 	let files: string[];
@@ -766,21 +883,46 @@ function listTree(sessionsDir: string): SessionListItem[] {
 			let provider = header.provider;
 			let branch = header.branch;
 			let channel = header.channel;
-			// Only info lines need parsing; messages are counted by type tag.
-			for (const line of text.split("\n")) {
-				if (!line.includes('"type":"session_info"')) continue;
+			// One pass. Tree entries are read by their fixed key prefix (the writer
+			// always emits type, id, parentId first) so message bodies are never
+			// parsed; the count walks the current path, the same number
+			// SessionStore.messages().length gives for this session.
+			const parent = new Map<string, { parentId: string | null; transcript: boolean }>();
+			let leaf: string | null = null;
+			for (const line of text.split("\n").slice(1)) {
+				if (!line) continue;
+				const m = ENTRY_PREFIX.exec(line);
+				if (m) {
+					const parentId = m[3] === "null" ? null : m[3].slice(1, -1);
+					parent.set(m[2], { parentId, transcript: m[1] !== "compaction" });
+					leaf = m[2];
+					continue;
+				}
+				if (!line.startsWith('{"type":"leaf"') && !line.startsWith('{"type":"session_info"'))
+					continue;
 				try {
-					const info = JSON.parse(line) as InfoLine;
-					if (info.name !== undefined) name = info.name;
-					if (info.model !== undefined) model = info.model;
-					if (info.provider !== undefined) provider = info.provider;
-					if (info.branch !== undefined) branch = info.branch;
-					if (info.channel !== undefined) channel = info.channel;
+					const meta = JSON.parse(line) as MetaLine;
+					if (meta.type === "leaf") leaf = meta.target;
+					else if (meta.type === "session_info") {
+						if (typeof meta.name === "string") name = meta.name;
+						if (typeof meta.model === "string") model = meta.model;
+						if (typeof meta.provider === "string") provider = meta.provider;
+						if (typeof meta.branch === "string") branch = meta.branch;
+						if (typeof meta.channel === "string") channel = meta.channel;
+					}
 				} catch {
 					// torn line
 				}
 			}
-			const messageCount = text.split('{"type":"message"').length - 1;
+			let messageCount = 0;
+			const seen = new Set<string>();
+			for (let cur = leaf; cur && !seen.has(cur); ) {
+				seen.add(cur);
+				const e = parent.get(cur);
+				if (!e) break;
+				if (e.transcript) messageCount++;
+				cur = e.parentId;
+			}
 			out.push({
 				id: header.id,
 				name,

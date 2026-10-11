@@ -11,14 +11,14 @@ import { planningGateInstruction } from "../eight/local-tool-scope";
 import { SessionManager } from "../eight/session-manager";
 import {
 	type ChatMessage,
-	type ResumeDeps,
-	ResumeSecrets,
 	type SharedAgent,
 	type SharedPool,
 	type SharedSessionDeps,
 	type SharedStore,
 	TRANSCRIPT_MAX_CHARS,
 	TRANSCRIPT_MAX_MESSAGES,
+	type ResumeDeps,
+	ResumeSecrets,
 	capTranscript,
 	chatMessages,
 	handleResume,
@@ -268,6 +268,23 @@ describe("persistSession", () => {
 			{ role: "user", content: "q" },
 			{ role: "assistant", content: "a" },
 		]);
+	});
+
+	it("a session past 1000 messages keeps appending one turn at a time (#3986 review)", () => {
+		const agent = pool.add("s_long", "browser");
+		for (let i = 0; i < 1100; i++) {
+			agent.history.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
+		}
+		const persistable = new Set(["s_long"]);
+		expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
+		for (let t = 0; t < 3; t++) {
+			agent.history.push({ role: "user", content: `n${t}` }, { role: "assistant", content: `r${t}` });
+			expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
+		}
+		const tree = store.store("s_long")!;
+		expect(tree.allEntries()).toHaveLength(1106);
+		expect(tree.tree()).toHaveLength(1);
+		expect(store.get("s_long")?.messageCount).toBe(1106);
 	});
 
 	it("never writes telegram or table transcripts", () => {

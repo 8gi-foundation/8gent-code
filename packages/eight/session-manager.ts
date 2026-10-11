@@ -4,7 +4,9 @@
  * Backed by the JSONL tree store (session-store.ts): one append-only file per
  * session in <sessions dir>/tree/<id>.jsonl. Saving a whole message list never
  * overwrites history: the shared prefix is kept and anything that changed goes
- * on a new branch (SessionStore.syncTranscript).
+ * on a new branch (SessionStore.syncTranscript). Every save is first cut to
+ * the chat a person sees (session-messages.ts chatMessages: user and assistant
+ * text, no system lines, no harness notes), so different savers agree.
  *
  * Sessions written before the tree store existed (<sessions dir>/<id>.json)
  * are still listed and resumed. The first write to one copies it into the tree
@@ -14,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { chatMessages } from "./session-messages.js";
 import {
 	type SessionListItem,
 	SessionStore,
@@ -159,7 +162,9 @@ export class SessionManager {
 		messages: Msg[],
 		meta: Partial<Pick<SessionInfo, "model" | "provider" | "branch" | "channel">>,
 	): void {
-		store.syncTranscript(messages);
+		// One shape for every saver (TUI autosave keeps system lines, /share and
+		// the daemon do not): without this each alternation would branch.
+		store.syncTranscript(chatMessages(messages));
 		const changed: Partial<Pick<SessionInfo, "model" | "provider" | "branch" | "channel">> = {};
 		if (meta.channel && meta.channel !== store.channel) changed.channel = meta.channel;
 		if (meta.model && meta.model !== store.model) changed.model = meta.model;
@@ -229,7 +234,7 @@ export class SessionManager {
 			},
 			this.dir,
 		);
-		for (const m of old.messages ?? []) store.append(m);
+		for (const m of chatMessages(old.messages ?? [])) store.append(m);
 		return store;
 	}
 }
