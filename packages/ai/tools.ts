@@ -28,6 +28,7 @@ import {
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
@@ -653,7 +654,9 @@ const runCommand = tool({
 		command: z.string().describe("Command to run"),
 	}),
 	execute: async ({ command }) => {
-		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
+		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
+		const backstop = preSpawnRefusal(command);
+		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const startedAt = Date.now();
@@ -1303,6 +1306,9 @@ async function runShellCommand(command: string): Promise<string> {
 	// Judge git state against the directory this command runs in (#3748).
 	const cwd = getToolContext().workingDirectory;
 	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+	// The text path's pre-spawn backstops (#3993); also covers the git and gh tools.
+	const backstop = preSpawnRefusal(command);
+	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");
 

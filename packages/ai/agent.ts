@@ -10,7 +10,7 @@
  */
 
 import { ToolLoopAgent, stepCountIs } from "ai";
-import type { GenerateTextResult, LanguageModel, ToolSet } from "ai";
+import type { GenerateTextResult, LanguageModel, ModelMessage, ToolSet } from "ai";
 import { type ProviderConfig, createModel } from "./providers";
 import { type AgentTools, type RuntimeParams, type ToolContext, agentTools, getRuntimeParams } from "./tools";
 
@@ -43,9 +43,23 @@ export interface EightAgentConfig {
 	presencePenalty?: number;
 	/** Callback fired before each model call (step), with the step index only. */
 	onStepStart?: (event: StepStartEvent) => void | Promise<void>;
+	/**
+	 * Steering (D1). Drained before every model call after the first: each
+	 * string becomes a user message placed after the tool results that existed
+	 * when it was drained, and stays there for the rest of this generate() run.
+	 */
+	steer?: () => string[];
 	/** Callback for each step */
 	onStepFinish?: (event: StepFinishEvent) => void | Promise<void>;
-	/** Callback for tool call start */
+	/**
+	 * Refusal gate, run inside every native tool's execute before it runs. A
+	 * string refuses the call: the tool never runs and the model gets the
+	 * string as the tool error. Null lets it run. This is the place for checks
+	 * that must stop a call: the SDK swallows anything thrown from
+	 * onToolCallStart, so a throw there never stopped a tool.
+	 */
+	gateToolCall?: (event: ToolCallStartEvent) => string | null | Promise<string | null>;
+	/** Callback for tool call start (observation only: a throw here does not stop the call) */
 	onToolCallStart?: (event: ToolCallStartEvent) => void | Promise<void>;
 	/** Callback for tool call finish */
 	onToolCallFinish?: (event: ToolCallFinishEvent) => void | Promise<void>;
@@ -210,9 +224,14 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 					Object.entries(agentTools).filter(([k]) => CORE_TOOLS.includes(k)),
 				) as AgentTools)
 			: agentTools;
-	const tools = (config.tools as AgentTools) || defaultTools;
+	const offered = (config.tools as AgentTools) || defaultTools;
+	const tools = config.gateToolCall ? gateTools(offered, config.gateToolCall) : offered;
 
 	const isLocalProvider = config.provider.name === "lmstudio" || config.provider.name === "ollama";
+
+	// Steering messages drained during the current generate() run, each with
+	// the position it was inserted at. Reset when a run starts again (step 0).
+	const steerLog: SteerEntry[] = [];
 
 	const agent = new ToolLoopAgent<never, AgentTools>({
 		model,
@@ -236,19 +255,22 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		experimental_context: toolContext,
 		stopWhen: stepCountIs(config.maxSteps || 30),
 
-		// Fires before every model call. Observation only: returns undefined so
-		// the step runs with its default settings, and a throwing callback never
-		// breaks the loop.
-		prepareStep: config.onStepStart
-			? async ({ stepNumber }: { stepNumber: number }) => {
-					try {
-						await config.onStepStart?.({ stepNumber });
-					} catch {
-						/* step-start logging is best-effort */
+		// Fires before every model call. onStepStart is observation only and a
+		// throwing callback never breaks the loop. Steering (D1) is the one thing
+		// that changes the step: drained messages are spliced in, see steerMessages.
+		prepareStep:
+			config.onStepStart || config.steer
+				? async ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }) => {
+						try {
+							await config.onStepStart?.({ stepNumber });
+						} catch {
+							/* step-start logging is best-effort */
+						}
+						if (!config.steer) return undefined;
+						const steered = steerMessages(steerLog, stepNumber, messages, config.steer);
+						return steered ? { messages: steered } : undefined;
 					}
-					return undefined;
-				}
-			: undefined,
+				: undefined,
 
 		onStepFinish: config.onStepFinish
 			? (event: any) => {
@@ -441,4 +463,90 @@ export async function runAgent(
 			totalTokens: result.usage?.totalTokens ?? 0,
 		},
 	};
+}
+
+/** Thrown inside a tool's execute when the refusal gate refuses the call. */
+export class ToolCallRefused extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ToolCallRefused";
+	}
+}
+
+/**
+ * Wrap every tool that executes so the gate runs first, inside execute, where
+ * a refusal actually stops the call. Tools without execute are left as they
+ * are. Returns new tool objects; the input set is not changed.
+ */
+export function gateTools<T extends ToolSet>(
+	tools: T,
+	gate: NonNullable<EightAgentConfig["gateToolCall"]>,
+): T {
+	const out: Record<string, unknown> = {};
+	for (const [name, t] of Object.entries(tools)) {
+		const execute = (t as { execute?: (input: unknown, options: { toolCallId: string }) => unknown })
+			.execute;
+		if (typeof execute !== "function") {
+			out[name] = t;
+			continue;
+		}
+		const check = async (input: unknown, options: { toolCallId: string }) => {
+			const refusal = await gate({
+				toolCallId: options?.toolCallId ?? "",
+				toolName: name,
+				args: (input ?? {}) as Record<string, unknown>,
+			});
+			if (refusal) throw new ToolCallRefused(refusal);
+		};
+		// A streaming tool (async generator) stays a generator, so the SDK still
+		// sees its preliminary results; every other tool stays a plain promise.
+		const streaming = execute.constructor?.name === "AsyncGeneratorFunction";
+		out[name] = {
+			...t,
+			execute: streaming
+				? async function* (input: unknown, options: { toolCallId: string }) {
+						await check(input, options);
+						yield* execute.call(t, input, options) as AsyncIterable<unknown>;
+					}
+				: async (input: unknown, options: { toolCallId: string }) => {
+						await check(input, options);
+						return execute.call(t, input, options);
+					},
+		};
+	}
+	return out as T;
+}
+
+/** A steering message and where it sits in the SDK's own step messages. */
+export interface SteerEntry {
+	at: number;
+	message: ModelMessage;
+}
+
+/**
+ * Steering for the native loop (D1). The SDK rebuilds each step's messages as
+ * the run's input plus every response so far, and a `messages` override from
+ * prepareStep holds for that step only. So the log keeps each steer with the
+ * position it was first inserted at (always the end of the messages at that
+ * step, after the tool results), and every later step splices them all back in
+ * at the same places. Returns undefined when there is nothing to add.
+ */
+export function steerMessages(
+	log: SteerEntry[],
+	stepNumber: number,
+	messages: ModelMessage[],
+	drain: () => string[],
+): ModelMessage[] | undefined {
+	if (stepNumber === 0) log.length = 0;
+	else {
+		for (const content of drain()) {
+			log.push({ at: messages.length, message: { role: "user", content } });
+		}
+	}
+	if (log.length === 0) return undefined;
+	const out = messages.slice();
+	// Ascending positions, each against the messages without steers: offset by
+	// the steers already placed in front of it.
+	log.forEach((entry, i) => out.splice(entry.at + i, 0, entry.message));
+	return out;
 }
