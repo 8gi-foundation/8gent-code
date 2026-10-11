@@ -620,7 +620,7 @@ function blankSearchPattern(seg: string): string {
 
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
-	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*\s-[a-z]*r/i.test(command);
+	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
 	for (const view of decodedViews(command)) {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
