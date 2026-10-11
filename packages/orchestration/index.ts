@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import { withChildGuidance } from "./child-guidance";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { hostedAllowed, isHostedProvider } from "../providers/failover";
 import type { AgentConfig as EightAgentConfig } from "../eight/types";
@@ -380,7 +381,7 @@ export class AgentPool extends EventEmitter {
 			}
 
 			// Execute the task
-			const result = await agent.chat(spawnedAgent.task.description);
+			const result = await agent.chat(withChildGuidance(spawnedAgent.task.description));
 
 			// Evidence before "completed": did the scoped files change, and do their tests pass?
 			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {
