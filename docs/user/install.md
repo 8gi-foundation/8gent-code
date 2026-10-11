@@ -2,7 +2,7 @@
 
 ## Windows (PowerShell 7 or Windows PowerShell)
 
-The npm package is behind (0.17.0, and `8gent run` fails there), so on Windows install from a clone. This path is run on every relevant pull request by the `windows-smoke` workflow on a GitHub Windows runner.
+On Windows, install from a source clone with Bun. This path is run on every relevant pull request by the `windows-smoke` workflow on a GitHub Windows runner.
 
 ```powershell
 # Bun: the one-liner below, or download Bun from bun.sh/docs/installation and inspect it first
@@ -30,7 +30,7 @@ To type `8gent` from any folder, add this to your profile (`notepad $PROFILE`). 
 function 8gent { bun run "$HOME\8gent-code\bin\8gent.ts" @args }
 ```
 
-Use Windows Terminal or PowerShell. Piped into an editor pane, the interface stops with "Raw mode is not supported".
+Run the interface in Windows Terminal or PowerShell.
 
 Update later:
 
@@ -41,13 +41,11 @@ git reset --hard origin/main      # discards local edits to tracked files
 bun install
 ```
 
-Known Windows notes, including WSL and the compiled `.exe`, are in [docs/ARTALE-WINDOWS.md](../ARTALE-WINDOWS.md).
-
-Coming soon: SQLite files are released properly on Windows (#3275).
+WSL and the compiled `.exe` are covered in [docs/ARTALE-WINDOWS.md](../ARTALE-WINDOWS.md).
 
 ## WSL, macOS, Linux
 
-Same clone steps; on WSL work under `~`, not `/mnt/c`. Or from npm (gets 0.17.0 until the next publish):
+Same clone steps; on WSL work under `~`, not `/mnt/c`. npm is an optional channel if you prefer it:
 
 ```bash
 npm install -g @8gi-foundation/8gent-code

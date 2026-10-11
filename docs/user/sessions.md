@@ -41,5 +41,3 @@ Ctrl+T opens a tab, Ctrl+W closes it, Ctrl+1 to Ctrl+9 jump. Each tab has its ow
 ## Share a live session
 
 `/sessions share` makes the session joinable. `/sessions attach <id>` joins one, `/sessions detach` leaves, `/sessions stop` ends sharing. A shared session can be joined from the 8gent Browser panel.
-
-Coming soon: crash-safe session saves, recovery from an unreadable session file, and owner-only session files (#3527).

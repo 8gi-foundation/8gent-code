@@ -28,7 +28,7 @@ Pointing at a different host: set `OLLAMA_BASE_URL` (or `OLLAMA_HOST`) for Ollam
 8gent run "say hello in one sentence"
 ```
 
-The first run can print nothing for up to a minute while the model loads.
+The first run loads the model, so the first answer takes a little longer. The next ones are quick.
 
 Choose the model for a run:
 
