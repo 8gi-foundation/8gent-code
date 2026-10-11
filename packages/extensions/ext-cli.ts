@@ -25,6 +25,12 @@ import {
 export interface ExtCommandOptions {
 	/** Destination; default ~/.8gent/extensions. */
 	extensionsDir?: string;
+	/**
+	 * Is a person at a terminal? Default: stdin and stdout are both TTYs.
+	 * Enabling an extension requires it, so a model running a shell command
+	 * cannot turn one on.
+	 */
+	interactive?: boolean;
 	env?: NodeJS.ProcessEnv;
 }
 
@@ -78,6 +84,14 @@ export async function runExtCommand(
 			dir = toFlag ?? opts.extensionsDir ?? defaultExtensionsDir();
 		} catch (err) {
 			return { code: 1, output: (err as Error).message };
+		}
+		const interactive =
+			opts.interactive ?? (Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY));
+		if (sub === "enable" && !interactive) {
+			return {
+				code: 1,
+				output: `Refused: 8gent ext enable needs a person at an interactive terminal. Run it yourself in a terminal: 8gent ext enable ${rest[0]}`,
+			};
 		}
 		return setImportedEnabled(dir, rest[0], sub === "enable");
 	}

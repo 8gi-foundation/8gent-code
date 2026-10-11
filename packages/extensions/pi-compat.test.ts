@@ -57,7 +57,8 @@ afterAll(() => {
 const manifest = (dest: string) =>
 	JSON.parse(readFileSync(path.join(dest, PI_IMPORT_MANIFEST), "utf8")) as PiImportEntry[];
 const enableAll = async (dest: string) => {
-	for (const e of manifest(dest)) await runExtCommand(["enable", e.name], { extensionsDir: dest });
+	for (const e of manifest(dest))
+		await runExtCommand(["enable", e.name], { extensionsDir: dest, interactive: true });
 };
 
 describe("8gent ext import-pi", () => {
@@ -121,22 +122,25 @@ describe("8gent ext import-pi", () => {
 		expect(host.getTool("hello")).toBeUndefined();
 		expect(host.hasCommand("mine")).toBe(true);
 
-		const on = await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest });
+		const on = await runExtCommand(["enable", "pi-hello-tool"], {
+			extensionsDir: dest,
+			interactive: true,
+		});
 		expect(on.code).toBe(0);
 		await host.load();
 		expect(await host.runTool("hello", { name: "Ana" }, { cwd: dest })).toBe("Hello, Ana!");
 		await runExtCommand(["disable", "pi-hello-tool"], { extensionsDir: dest });
 		await host.load();
 		expect(host.getTool("hello")).toBeUndefined();
-		expect((await runExtCommand(["enable", "nope"], { extensionsDir: dest })).output).toContain(
-			'No imported extension "nope"',
-		);
+		expect(
+			(await runExtCommand(["enable", "nope"], { extensionsDir: dest, interactive: true })).output,
+		).toContain('No imported extension "nope"');
 	});
 
 	test("the sha256 is checked on every load: an edited copy does not load, and cannot be enabled", async () => {
 		const dest = tmp();
 		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
-		await runExtCommand(["enable", "pi-bash-guard"], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-bash-guard"], { extensionsDir: dest, interactive: true });
 		const host = new ExtensionHost(dest);
 		await host.load();
 		expect(await host.checkToolCall("run_command", { command: "rm -rf /" })).toContain("Dangerous");
@@ -150,7 +154,10 @@ describe("8gent ext import-pi", () => {
 		expect(await host.checkToolCall("run_command", { command: "rm -rf /" })).toBeNull();
 
 		await runExtCommand(["disable", "pi-bash-guard"], { extensionsDir: dest });
-		const again = await runExtCommand(["enable", "pi-bash-guard"], { extensionsDir: dest });
+		const again = await runExtCommand(["enable", "pi-bash-guard"], {
+			extensionsDir: dest,
+			interactive: true,
+		});
 		expect(again.code).toBe(1);
 		expect(again.output).toContain("changed since import");
 	});
@@ -185,7 +192,7 @@ describe("8gent ext import-pi", () => {
 	test("an enabled imported tool still runs through the executor's policy gate (unattended asks)", async () => {
 		const dest = tmp();
 		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
-		await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest, interactive: true });
 		const host = new ExtensionHost(dest);
 		await host.load();
 		const runner = {
@@ -207,7 +214,7 @@ describe("8gent ext import-pi", () => {
 		const dest = tmp();
 		writeFileSync(path.join(src, "one.ts"), readFileSync(path.join(FIXTURES, "greet-command.ts")));
 		await runExtCommand(["import-pi", src], { extensionsDir: dest });
-		await runExtCommand(["enable", "pi-one"], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-one"], { extensionsDir: dest, interactive: true });
 		await runExtCommand(["import-pi", src], { extensionsDir: dest });
 		expect(manifest(dest).find((m) => m.name === "pi-one")?.enabled).toBe(true);
 		appendFileSync(path.join(src, "one.ts"), "\n// new version\n");
@@ -304,7 +311,7 @@ describe("the import gate fails closed", () => {
 
 		const entry = manifest(dest).find((m) => m.name === "pi-dotted");
 		expect(Object.keys(entry?.files ?? {}).sort()).toEqual([".helper.ts", "index.ts"]);
-		await runExtCommand(["enable", "pi-dotted"], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-dotted"], { extensionsDir: dest, interactive: true });
 		const host = new ExtensionHost(dest);
 		await host.load();
 		expect(await host.runCommand("dot", "", { cwd: dest })).toBe("dot ok");
@@ -326,7 +333,7 @@ describe("the import gate fails closed", () => {
 	test("the load hook serves only bytes that match the record (no check-then-load gap)", async () => {
 		const dest = tmp();
 		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
-		await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest });
+		await runExtCommand(["enable", "pi-hello-tool"], { extensionsDir: dest, interactive: true });
 		const file = path.join(dest, "pi-hello-tool.ts");
 		const good = new Uint8Array(readFileSync(file));
 		expect(servedBytesCheck(dest, file, good)).toBeNull();
@@ -339,35 +346,49 @@ describe("the import gate fails closed", () => {
 		expect(servedBytesCheck(dest, path.join(dest, "pi-unknown.ts"), good)).toContain("not part of");
 	});
 
-	test("extensions load only when Bun cannot auto-install", async () => {
-		expect(noInstallActive(["--no-install"], {}, "/nowhere")).toBe(true);
-		expect(noInstallActive([], {}, "/nowhere")).toBe(false);
-		const withBunfig = tmp();
-		writeFileSync(
-			path.join(withBunfig, "bunfig.toml"),
-			`[test]\npreload = []\n\n[install]\nauto = "disable"\n`,
-		);
-		expect(noInstallActive([], { NODE_ENV: "test" }, withBunfig)).toBe(true);
-		expect(noInstallActive([], { NODE_ENV: "test" }, tmp())).toBe(false);
-		expect(noInstallActive([], {}, withBunfig)).toBe(false);
+	test("extensions load only when Bun runs with --no-install (no other signal counts)", async () => {
+		expect(noInstallActive(["--no-install"])).toBe(true);
+		expect(noInstallActive([])).toBe(false);
+		expect(noInstallActive(["--config=/dev/null"])).toBe(false);
+		// This suite itself runs as `bun --no-install test`.
+		expect(noInstallActive()).toBe(true);
 
-		// In a folder without that bunfig, this test process has no --no-install: nothing loads.
 		const dest = tmp();
 		writeFileSync(
 			path.join(dest, "mine.ts"),
 			`export default (api) => api.registerCommand({ name: "mine", run: () => "yes" });`,
 		);
-		const cwd = process.cwd();
-		process.chdir(tmp());
-		try {
-			const host = new ExtensionHost(dest);
-			const results = await host.load();
-			expect(results[0].status).toBe("off");
-			expect(results[0].error).toContain("--no-install");
-			expect(host.hasCommand("mine")).toBe(false);
-		} finally {
-			process.chdir(cwd);
-		}
+		const host = new ExtensionHost(
+			dest,
+			() => [],
+			2000,
+			() => false,
+		);
+		const results = await host.load();
+		expect(results[0].status).toBe("off");
+		expect(results[0].error).toContain("--no-install");
+		expect(host.hasCommand("mine")).toBe(false);
+	});
+
+	test("ext enable needs a person at an interactive terminal", async () => {
+		const dest = tmp();
+		await runExtCommand(["import-pi", FIXTURES], { extensionsDir: dest });
+		const r = await runExtCommand(["enable", "pi-hello-tool"], {
+			extensionsDir: dest,
+			interactive: false,
+		});
+		expect(r.code).toBe(1);
+		expect(r.output).toContain("needs a person at an interactive terminal");
+		expect(manifest(dest).find((m) => m.name === "pi-hello-tool")?.enabled).toBe(false);
+		// Disabling never needs one.
+		expect(
+			(
+				await runExtCommand(["disable", "pi-hello-tool"], {
+					extensionsDir: dest,
+					interactive: false,
+				})
+			).code,
+		).toBe(0);
 	});
 });
 
@@ -440,7 +461,9 @@ describe("guards around imported code", () => {
 		// Every launcher passes the flag.
 		const repo = path.join(import.meta.dir, "..", "..");
 		const cli = readFileSync(path.join(repo, "bin", "8gent.ts"), "utf8");
-		expect(cli.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-install");
+		expect(cli.split("\n")[0]).toBe(
+			"#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null",
+		);
 		expect(cli).toContain('["--no-install", "run", tuiPath');
 		expect(readFileSync(path.join(repo, "bin", "8gent-run.js"), "utf8")).toContain(
 			'["--no-install", cli',
@@ -450,9 +473,15 @@ describe("guards around imported code", () => {
 		expect(cli).not.toMatch(/spawn\("bun", \["run"/);
 		expect(
 			readFileSync(path.join(repo, "apps", "tui", "src", "index.tsx"), "utf8").split("\n")[0],
-		).toBe("#!/usr/bin/env -S bun --no-install");
+		).toBe("#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null");
 		expect(readFileSync(path.join(repo, "packages", "cron", "index.ts"), "utf8")).toContain(
 			'["bun", "--no-install", "run", "bin/8gent.ts"',
+		);
+		expect(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).scripts.test).toMatch(
+			/^bun --no-install test /,
+		);
+		expect(readFileSync(path.join(repo, "scripts", "test-sharded.sh"), "utf8")).toContain(
+			"bun --no-install test",
 		);
 		expect(readFileSync(path.join(repo, "bunfig.toml"), "utf8")).toMatch(
 			/\[install\]\s*\nauto = "disable"/,

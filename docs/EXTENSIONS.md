@@ -94,6 +94,8 @@ This reads `C:\Users\<you>\.pi\agent\extensions` (or
 - Nothing imported runs yet: import reads the files, it does not run them.
   Every imported extension starts **off**. Turn one on with
   `8gent ext enable pi-<name>` (and off with `8gent ext disable pi-<name>`).
+  Enabling only works when you type it yourself in a terminal, so nothing
+  running inside a session can turn an extension on.
 - Every time 8gent loads an imported extension it checks the sha256 again.
   If the copy changed since you imported it, it does not load and 8gent
   says so; import it again to accept the change.
