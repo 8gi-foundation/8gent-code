@@ -725,6 +725,13 @@ export class ToolExecutor {
 		return this.workingDirectory;
 	}
 
+	/** Once per turn, at its end: a retired fact still in a file that was warned about (#3811). */
+	retiredTurnEndNudge(): string | null {
+		return this.retiredFacts.turnEndNudge((file) =>
+			fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null,
+		);
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();

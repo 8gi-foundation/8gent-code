@@ -1107,7 +1107,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				keepAnswerFirst: this.config.keepAnswerFirst === true,
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
-				finalCheck: () => verifyNudgeFor(this.turnToolLedger),
+				finalCheck: () => this.turnEndNudge(),
 				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
@@ -1406,6 +1406,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}),
 			() => this.runTurn(userMessage, imageBase64, imageMimeType),
 		);
+	}
+
+	/**
+	 * The one message a turn may get before it ends, on both the text-tool and the
+	 * native path: the verify gate (#3550) first, else a retired fact still in a file
+	 * that was warned about (#3811). Never blocks; the callers send it at most once.
+	 */
+	private turnEndNudge(): string | null {
+		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
 	}
 
 	private async runTurn(
@@ -2538,7 +2547,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// A turn that changed files and checked nothing since gets one more
 			// generate with a nudge to run the most targeted check first. Off by
 			// default; a failed or empty follow-up keeps the first reply.
-			const verifyNudge = result?.text ? verifyNudgeFor(this.turnToolLedger) : null;
+			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
 				console.log("[verify-gate] change not checked yet - asking for one targeted check");
 				// agentConfig already holds the provider that answered (chain step
