@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { loadConfig } from "../mcp/config";
 import { runExtCommand } from "./ext-cli";
-import type { ImportPaths, ImportRecord } from "./import-sources";
+import { type ImportPaths, type ImportRecord, redact, redactArgs } from "./import-sources";
 import { expandPromptCommand, loadPromptTemplates } from "./prompts";
 
 const made: string[] = [];
@@ -257,6 +257,80 @@ describe("8gent ext import mcp: secrets and visibility (8SO PoC)", () => {
 			expect(shown.output).not.toContain(SECRET);
 		}
 		expect((await run(p, "approve-mcp", "web")).output).toContain("No pending");
+	});
+});
+
+describe("redaction (8SO follow-up)", () => {
+	// Fake values in the shapes real secrets take; none is a real credential.
+	const STRIPE = `sk_live_${"4eC39HqLyjWDarjtT1zdp7dc".repeat(1)}`;
+	const GOOGLE = `AIza${"SyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY".slice(0, 35)}`;
+	const JWT =
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+	const RANDOM = "Zq8xT2vLm9Rk4Wp7Ys3Nd6Hc";
+
+	test("token shapes, Authorization: values, secret-named flags and -H values are masked", () => {
+		for (const secret of [STRIPE, GOOGLE, JWT])
+			expect(redact(`x ${secret} y`)).not.toContain(secret);
+		expect(redact("Authorization:abc123secret")).toBe("Authorization:***");
+		expect(redact("curl --api-key abc123 -H 'X-Custom: v1' https://h")).toBe(
+			"curl --api-key *** -H *** https://h",
+		);
+		expect(redact("srv --password=hunter2")).toBe("srv --password=***");
+	});
+
+	test("argument lists are masked in context; harmless arguments stay readable", () => {
+		expect(
+			redactArgs([
+				"-y",
+				"@modelcontextprotocol/server-github",
+				"--token",
+				"plainvalue",
+				"--client-secret",
+				"x",
+				"-H",
+				"Authorization: Bearer abc",
+				"--auth",
+				"y",
+				RANDOM,
+				"--verbose",
+			]),
+		).toEqual([
+			"-y",
+			"@modelcontextprotocol/server-github",
+			"--token",
+			"***",
+			"--client-secret",
+			"***",
+			"-H",
+			"***",
+			"--auth",
+			"***",
+			"***",
+			"--verbose",
+		]);
+	});
+
+	test("approve-mcp never prints any of them", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({
+				mcpServers: {
+					pay: {
+						command: "stripe-mcp",
+						args: ["--api-key", STRIPE, "-H", `Authorization:${JWT}`, RANDOM, "--key", GOOGLE],
+					},
+				},
+			}),
+		);
+		await run(p, "import", "mcp");
+		const shown = await run(p, "approve-mcp", "pay");
+		for (const secret of [STRIPE, GOOGLE, JWT, RANDOM]) expect(shown.output).not.toContain(secret);
+		expect(shown.output).toContain(
+			'command stripe-mcp "--api-key" "***" "-H" "***" "***" "--key" "***"',
+		);
+		const imports = readFileSync(path.join(p.eightDir, "imports.json"), "utf8");
+		for (const secret of [STRIPE, GOOGLE, JWT, RANDOM]) expect(imports).not.toContain(secret);
 	});
 });
 

@@ -247,17 +247,67 @@ function mcpSources(
  * (GitHub, OpenAI-style sk-, Slack, AWS), Authorization schemes, URL
  * userinfo and query values. Used on everything an import or approve prints.
  */
+const SECRET_FLAG = /^--?[\w-]*(?:key|token|secret|password|passwd|auth|cred)[\w-]*$/i;
+const HEADER_FLAG = /^(?:-H|--header)$/;
+
 export function redact(text: string): string {
 	return text
 		.replace(/\bgh[pousr]_[A-Za-z0-9]{16,}/g, "***")
 		.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "***")
 		.replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "***")
+		.replace(/\bsk_(?:live|test)_[A-Za-z0-9]{8,}/g, "***")
+		.replace(/\bsk_[A-Za-z0-9]{16,}/g, "***")
+		.replace(/\bAIza[0-9A-Za-z_-]{30,}/g, "***")
+		.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}/g, "***")
 		.replace(/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "***")
 		.replace(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "***")
+		.replace(/\b(Authorization\s*:\s*)("[^"]*"|'[^']*'|[^\s"']+(?:\s+[^\s"']+)?)/gi, "$1***")
 		.replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{6,}/gi, "$1 ***")
+		.replace(
+			/((?:^|\s)--?[\w-]*(?:key|token|secret|password|passwd|auth|cred)[\w-]*)(\s+|=)("[^"]*"|'[^']*'|\S+)/gi,
+			"$1$2***",
+		)
+		.replace(/((?:^|\s)(?:-H|--header))(\s+)("[^"]*"|'[^']*'|\S+)/g, "$1$2***")
 		.replace(/(\/\/)[^/@\s]+@/g, "$1***@")
 		.replace(/([?&][^=&\s]+=)[^&\s]+/g, "$1***")
 		.replace(/\b([A-Za-z_][\w.-]*)=(\S+)/g, "$1=***");
+}
+
+/** Shannon entropy of a string, bits per character. */
+function entropy(s: string): number {
+	const counts = new Map<string, number>();
+	for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+	let h = 0;
+	for (const n of counts.values()) {
+		const p = n / s.length;
+		h -= p * Math.log2(p);
+	}
+	return h;
+}
+
+/** A 20+ character token that looks random (no spaces or path parts, mixed letters and digits, high entropy). */
+function looksLikeSecret(arg: string): boolean {
+	if (arg.length < 20 || /[\s/\\.]/.test(arg)) return false;
+	if (!/[A-Za-z]/.test(arg) || !/[0-9]/.test(arg)) return false;
+	return entropy(arg) >= 3.5;
+}
+
+/**
+ * Redact an argument list in context: the value after a flag whose name says
+ * key, token, secret, password, auth or cred, and after -H / --header, is
+ * masked; every argument also goes through redact(), and a long random-looking
+ * argument is masked whole.
+ */
+export function redactArgs(args: readonly unknown[]): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = String(args[i]);
+		const prev = i > 0 ? String(args[i - 1]) : "";
+		if (SECRET_FLAG.test(prev) || HEADER_FLAG.test(prev)) out.push("***");
+		else if (looksLikeSecret(arg)) out.push("***");
+		else out.push(redact(arg));
+	}
+	return out;
 }
 
 /** The program a server runs, by name only: env assignments skipped, no path, no args. */
@@ -286,7 +336,7 @@ function summarizeServer(e: McpEntry): string {
 function fullServer(e: McpEntry): string {
 	if (e.url)
 		return `url ${redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
-	const args = (e.args ?? []).map((a) => JSON.stringify(redact(String(a))));
+	const args = redactArgs(e.args ?? []).map((a) => JSON.stringify(a));
 	const envKeys = Object.keys(e.env ?? {});
 	return `command ${redact(String(e.command))}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
 }
@@ -299,7 +349,7 @@ function fullServer(e: McpEntry): string {
 function serverHash(e: McpEntry): string {
 	const shape = {
 		command: e.command ? redact(String(e.command)) : undefined,
-		args: (e.args ?? []).map((a) => redact(String(a))),
+		args: redactArgs(e.args ?? []),
 		env: Object.keys(e.env ?? {}).sort(),
 		url: e.url ? redact(String(e.url)) : undefined,
 		headers: Object.keys(e.headers ?? {}).sort(),
@@ -311,12 +361,15 @@ function serverHash(e: McpEntry): string {
 /** Write a file only its owner can read (the MCP config can hold secrets). */
 function writePrivate(file: string, text: string): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
-	fs.writeFileSync(file, text, { mode: 0o600 });
-	try {
-		fs.chmodSync(file, 0o600);
-	} catch {
-		/* Windows: ACLs, not modes */
+	// Tighten an existing file BEFORE the secrets go in; a new file is created 0600.
+	if (fs.existsSync(file)) {
+		try {
+			fs.chmodSync(file, 0o600);
+		} catch {
+			/* Windows: ACLs, not modes */
+		}
 	}
+	fs.writeFileSync(file, text, { mode: 0o600 });
 }
 
 function importMcp(
