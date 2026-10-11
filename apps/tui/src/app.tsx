@@ -237,6 +237,7 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import { safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
 	onRunCommandUnsandboxed,
 	runCommandSandboxStatus,
@@ -4226,7 +4227,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,
