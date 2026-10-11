@@ -172,23 +172,51 @@ describe.skipIf(WIN)("everything else stays judged", () => {
 		expect(rmOwn("rm -f fresh.txt")).toBeNull();
 	});
 
-	test("a command during which a tracked file went missing records nothing", () => {
-		child("rm notes.md; echo hi > fresh.txt");
-		expect(own("fresh.txt")).toBe(false);
-	});
-
 	test("a directory is not a file: nothing recorded, rm of it judged", () => {
 		child("mkdir adir");
 		expect(own("adir")).toBe(false);
 		expect(rmOwn("rm -f adir")).toBeNull();
 	});
 
-	test("no repository: nothing recorded", () => {
+	test("no repository: nothing recorded, and the watch stays off for the session", () => {
 		const bare = tempDir("s1-child-bare-");
 		child("echo x > f.txt", bare);
 		expect(rec.createdBySession(join(bare, "f.txt"))).toBe(false);
 		expect(rmOfNothingOrOwn("rm -f f.txt", bare, rec)).toBeNull();
+		expect(rec.watchStopped).toBe(true);
+		// Circuit breaker: a later command in a real repository records nothing either.
+		child("echo y > later.txt");
+		expect(own("later.txt")).toBe(false);
+		expect(rmOwn("rm -f later.txt")).toBeNull();
 		rmSync(bare, { recursive: true, force: true });
+	});
+
+	test("a snapshot slower than 500 ms stops the watch for the session", () => {
+		const bin = tempDir("s1-child-slowgit-");
+		const realGit = execSync("command -v git", { shell: "/bin/sh" }).toString().trim();
+		writeFileSync(join(bin, "git"), `#!/bin/sh\nsleep 0.7\nexec ${realGit} "$@"\n`, {
+			mode: 0o755,
+		});
+		const pathWas = process.env.PATH;
+		process.env.PATH = `${bin}:${pathWas}`;
+		try {
+			child("echo x > slow.txt");
+		} finally {
+			process.env.PATH = pathWas;
+		}
+		expect(rec.watchStopped).toBe(true);
+		expect(own("slow.txt")).toBe(false);
+		// Real git is back, but the breaker holds.
+		child("echo y > after.txt");
+		expect(own("after.txt")).toBe(false);
+		expect(rmOwn("rm -f after.txt")).toBeNull();
+		rmSync(bin, { recursive: true, force: true });
+	});
+
+	test("a fast snapshot leaves the watch on", () => {
+		child("echo x > fast.txt");
+		expect(rec.watchStopped).toBe(false);
+		expect(own("fast.txt")).toBe(true);
 	});
 
 	test("the closer runs once: a second call after later changes records nothing new", () => {

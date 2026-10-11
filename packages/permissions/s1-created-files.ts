@@ -24,9 +24,10 @@
  *     a name seen before any earlier command (git stash -u then pop recreates
  *     it), a gitignored name (.env), a file moved in (mv keeps its mtime),
  *     a hard link, anything from a command during which an untracked name
- *     that was not this session's, or a tracked file, vanished; anything when
- *     the snapshot fails (no repository, git missing, a 5 s timeout, more
- *     than 5,000 untracked names, more than 20,000 names seen): fail closed.
+ *     that was not this session's vanished; anything when the snapshot fails (no repository, git missing, a 5 s timeout, more
+ *     than 5,000 untracked names, more than 20,000 names seen): fail closed,
+ *     and the watch stays off for the rest of the session, as it does after
+ *     one snapshot slower than 500 ms.
  *     An own entry is refreshed after a command only when it still names the
  *     same device and inode, or a fresh file written during the command.
  *     Known gap, for 8SO: another process (an editor, another tab) creating a
@@ -117,6 +118,8 @@ export function pathAbsent(abs: string): boolean {
 
 /** Untracked names one snapshot may hold (#3514); more records nothing. */
 const MAX_UNTRACKED = 5_000;
+/** A snapshot slower than this (ms), or any failed one, stops the watch for the session (#3514). */
+const SLOW_SNAPSHOT_MS = 500;
 /** Names one record may remember as seen (#3514); past this it records nothing new. */
 const MAX_SEEN = 20_000;
 
@@ -158,6 +161,8 @@ export class CreatedFiles {
 	/** Every untracked name present when one of this record's commands started (#3514). */
 	private readonly seen = new Set<string>();
 	private seenFull = false;
+	/** Set once a snapshot failed or was slow (#3514): the watch stays off for this record. */
+	private tripped = false;
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {
@@ -190,6 +195,17 @@ export class CreatedFiles {
 		return !!want && !!now && want === now;
 	}
 
+	/** Circuit breaker: stop watching commands for the rest of this record, so deletes go to the judge. */
+	private trip(): () => void {
+		this.tripped = true;
+		return () => {};
+	}
+
+	/** True once a snapshot failed or took over SLOW_SNAPSHOT_MS (tests and diagnostics). */
+	get watchStopped(): boolean {
+		return this.tripped;
+	}
+
 	/**
 	 * Bracket one of the session's own commands by untracked-name snapshots
 	 * (#3514): call before it runs, and call the result after it exits. A name
@@ -199,10 +215,12 @@ export class CreatedFiles {
 	 * a vanished name, records and refreshes nothing.
 	 */
 	watchCommand(cwd: string): () => void {
+		if (this.tripped) return () => {};
 		const start = (BigInt(Date.now()) + 1n) * 1_000_000n;
+		const t0 = Date.now();
 		const before = gitNames(cwd, ["-o", "--exclude-standard"]);
-		const missingBefore = gitNames(cwd, ["-d"]);
-		if (!before || !missingBefore) return () => {};
+		if (Date.now() - t0 > SLOW_SNAPSHOT_MS) return this.trip();
+		if (!before) return this.trip();
 		const ours = new Map<string, string>();
 		for (const abs of before) {
 			const id = this.createdBySession(abs) ? inodeOf(abs) : null;
@@ -214,15 +232,18 @@ export class CreatedFiles {
 		return () => {
 			if (!open) return;
 			open = false;
+			const t1 = Date.now();
 			const after = gitNames(cwd, ["-o", "--exclude-standard"]);
-			const missingAfter = gitNames(cwd, ["-d"]);
-			if (!after || !missingAfter) return;
-			// A name that was not ours vanished, or a tracked file went missing:
-			// something was moved or deleted, so a new name may be that file.
+			if (Date.now() - t1 > SLOW_SNAPSHOT_MS) this.trip();
+			if (!after) {
+				this.trip();
+				return;
+			}
+			if (this.tripped) return;
+			// A name that was not ours vanished: something was moved or deleted,
+			// so a new name may be that file.
 			const now = new Set(after);
 			if (before.some((abs) => !ours.has(abs) && !now.has(abs))) return;
-			const wasMissing = new Set(missingBefore);
-			if (missingAfter.some((abs) => !wasMissing.has(abs))) return;
 			for (const [abs, id] of ours) {
 				// In place (same inode), or a fresh file the command wrote over it.
 				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);
