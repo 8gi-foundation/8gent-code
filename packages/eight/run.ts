@@ -22,7 +22,6 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
-import { isFailedTurnReply } from "./local-turn-error";
 import type { AgentEventCallbacks } from "./types";
 
 export interface RunOptions {
@@ -553,16 +552,20 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		if (check.status === "fail") exitCode = 1;
 		if (notice) process.stderr.write(`${notice}\n`);
 
-		if (isEmptyReplyNote(finalText) || isFailedTurnReply(check.finalText)) {
+		// The harness sets this flag; model text cannot (#3899).
+		const turnFailure = agent.getLastTurnFailure();
+		if (isEmptyReplyNote(finalText) || turnFailure) {
 			// #3524: a blank model reply is not a finished turn, so a script must
 			// not read it as success. Same for a turn that ended in a failure
 			// reply (endpoint unreachable, model error, honesty-gate refusal): the
 			// agent returns those as text, so they need an exit code here (#3899).
-			exitCode = 1;
+			// Exit 2 = a permission or sandbox refusal; 1 = everything else (#3899).
+			exitCode = turnFailure?.reason === "denied" ? 2 : 1;
 			if (isStreamJson) {
 				emit({
 					type: "result",
 					subtype: "error",
+					reason: turnFailure?.reason ?? "turn_failed",
 					session_id: sessionId,
 					ended_at: new Date().toISOString(),
 					error: finalText,
