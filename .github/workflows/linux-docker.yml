@@ -1,10 +1,12 @@
 # linux-docker.yml - install, typecheck, test and build on Linux, inside Docker,
-# on the org's self-hosted helm runner.
+# on a GitHub-hosted ubuntu-latest runner.
 #
-# WHY: GitHub-hosted runners are refused for this org over billing, so ci.yml's
-# ubuntu-latest job never runs. The helm runner is an Apple Silicon Mac with
-# Docker Desktop; a macOS runner cannot use the `container:` key, so this job
-# builds a small image and calls `docker run` itself.
+# WHY HOSTED: until 11 Oct 2026 this ran on the self-hosted helm runner (an
+# Apple Silicon Mac with Docker Desktop). One machine serialised every PR, and
+# when Docker Desktop stopped every merge froze for hours. The repo is public,
+# so hosted minutes are free; gitleaks, semgrep and windows-smoke already run
+# hosted. The job keeps building its own image and calling `docker run` so the
+# environment is byte-for-byte the one a contributor reproduces below.
 #
 # WHAT RUNS: .github/docker/linux-ci/run.sh inside the image built from
 # .github/docker/linux-ci/Dockerfile (oven/bun:1 pinned by digest, plus git,
@@ -19,7 +21,7 @@
 #
 # Reproduce locally on any machine with Docker:
 #   docker build -t 8gent-linux-ci:local .github/docker/linux-ci
-#   docker run --rm --init --cpus 6 --memory 6g -v "$PWD":/src:ro \
+#   docker run --rm --init --cpus 4 --memory 6g -v "$PWD":/src:ro \
 #     8gent-linux-ci:local bash /src/.github/docker/linux-ci/run.sh
 
 name: Linux (Docker)
@@ -41,40 +43,43 @@ concurrency:
 jobs:
   linux:
     name: Linux install, typecheck, test, build
-    # Self-hosted: never run code from a fork's pull request on this machine.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, 8gi, helm]
-    timeout-minutes: 40
+    # Hosted, ephemeral VM, read-only token, no secrets: fork pull requests run too
+    # (the old fork guard protected the shared Mac, which this no longer touches).
+    # 4 vCPU instead of the Mac's 6, so the timeouts carry headroom.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       CONTAINER: 8gent-linux-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Docker is up
         run: |
           docker info --format 'docker {{.ServerVersion}} {{.OSType}}/{{.Architecture}} cpus={{.NCPU}} mem={{.MemTotal}}' \
-            || { echo "::error::Docker daemon is not reachable from the runner. Is Docker Desktop running?"; exit 1; }
+            || { echo "::error::Docker daemon is not reachable on the hosted runner."; exit 1; }
 
       # Tag by Dockerfile content, so an unchanged Dockerfile reuses the image.
       - name: Build CI image
         run: |
           IMAGE="8gent-linux-ci:$(shasum -a 256 .github/docker/linux-ci/Dockerfile | cut -c1-16)"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-          nice -n 10 docker build --pull=false -t "$IMAGE" .github/docker/linux-ci
+          docker build --pull=false -t "$IMAGE" .github/docker/linux-ci
 
       - name: Install, typecheck, test, build (in Docker)
-        timeout-minutes: 35
+        timeout-minutes: 55
         run: |
           PACK_DIR="$RUNNER_TEMP/8gent-pack-${{ github.run_id }}"
           echo "PACK_DIR=$PACK_DIR" >> "$GITHUB_ENV"
           rm -rf "$PACK_DIR" && mkdir -p "$PACK_DIR" && chmod 777 "$PACK_DIR"
-          nice -n 10 docker run --rm --init \
+          # ubuntu-latest (public repo) has 4 vCPU and 16 GB; --cpus above the host count is refused.
+          docker run --rm --init \
             --name "$CONTAINER" \
-            --cpus 6 --memory 6g --memory-swap 6g --pids-limit 4096 \
+            --cpus "$(nproc)" --memory 6g --memory-swap 6g --pids-limit 4096 \
             -v "$GITHUB_WORKSPACE":/src:ro \
             -v "$PACK_DIR":/out \
-            -v 8gent-linux-ci-bun-cache:/home/ci/.bun/install/cache \
             "$IMAGE" bash /src/.github/docker/linux-ci/run.sh
 
       # #3256: install the packed tarball the way a stranger does, install
@@ -86,8 +91,8 @@ jobs:
         timeout-minutes: 10
         run: sh scripts/bare-install-smoke.sh "$(ls "$PACK_DIR"/*.tgz | head -1)"
 
-      # Runs on success, failure and cancellation, so a cancelled run never
-      # leaves a container holding CPU on the runner.
+      # Runs on success, failure and cancellation. The VM is discarded anyway;
+      # this keeps the job correct if it is ever pointed at a long-lived runner.
       - name: Remove container
         if: always()
         run: |

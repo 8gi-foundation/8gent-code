@@ -74,6 +74,7 @@ import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
+import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -185,6 +186,11 @@ import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
 
+/** At most this many steers wait at once (D1); more are refused. */
+export const MAX_STEERS = 8;
+/** Largest steer accepted, in UTF-8 bytes. */
+export const MAX_STEER_BYTES = 16 * 1024;
+
 /**
  * Did the harness refuse this call before it ran (#3409)? Decided from the
  * call itself, never from the tool's output: a command that ran can print
@@ -291,6 +297,15 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
+	/**
+	 * Steering messages (D1), each stamped with the turn it was sent during
+	 * (null: sent while no turn ran). Only the running turn's own steers are
+	 * ever delivered into it.
+	 */
+	private steerQueue: Array<{ text: string; turn: number | null }> = [];
+	/** Id of the turn running now, or null between turns. */
+	private activeTurn: number | null = null;
+	private turnCounter = 0;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -313,6 +328,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	private turnTask = "";
+	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -823,6 +840,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (mm.isToolAllowed(toolName)) return null;
 		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
 	}
+
+	/**
+	 * The one refusal gate for a tool call, on both paths, before the tool runs:
+	 * the active mode's tool set, then YAML PreToolUse hooks. A string refuses
+	 * the call with that message; null lets it run. It only ever refuses: the
+	 * permission policy inside the tools still applies to every call it lets
+	 * through.
+	 */
+	private async refuseToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<string | null> {
+		const modeRefusal = this.modeRefusal(toolName);
+		if (modeRefusal) return modeRefusal;
+		const preResult = await this.hookManager.fire("PreToolUse", {
+			tool: toolName,
+			args,
+			sessionId: this.sessionId,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		if (preResult.blocked) {
+			console.log(`  [BLOCKED] ${toolName} - ${preResult.reason}`);
+			return `Hook blocked tool "${toolName}": ${preResult.reason}`;
+		}
+		return null;
+	}
+
 	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
@@ -890,9 +934,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const step = stepNumber++;
 				const startedAt = Date.now();
 
+				// The refusal gate runs first: a refused call never reaches the
+				// privacy tracker, the start event or a start row in the session
+				// file. Its refusal is still recorded below, as a failed call.
+				const refusal = await this.refuseToolCall(toolName, args);
+
 				// Track file paths for the privacy gate, matching the native path.
 				const toolPath = (args as { path?: unknown }).path;
 				if (
+					!refusal &&
 					typeof toolPath === "string" &&
 					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
 				) {
@@ -900,9 +950,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
 				}
 
-				console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
-				this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
-				this.sessionWriter.writeToolCall(
+				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
+				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
+				if (!refusal) this.sessionWriter.writeToolCall(
 					{
 						toolCallId,
 						name: toolName,
@@ -923,7 +973,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let shown = "";
 				let success = true;
 				try {
-					const refusal = this.modeRefusal(toolName);
 					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
 					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
@@ -1125,6 +1174,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
+				// Steering (D1): delivered after the running tool calls.
+				steer: () => this.drainSteers(),
 			});
 		};
 
@@ -1417,7 +1468,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: this.config.model,
 				baseUrl: this.config.baseUrl,
 			}),
-			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+			async () => {
+				// A new turn: steers left from an earlier turn are stale and are
+				// dropped, never delivered into this one (the caller had its chance
+				// to take them with takeQueuedSteers).
+				const turn = ++this.turnCounter;
+				this.steerQueue = [];
+				this.activeTurn = turn;
+				try {
+					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+				} finally {
+					if (this.activeTurn === turn) this.activeTurn = null;
+				}
+			},
 		);
 	}
 
@@ -1427,7 +1490,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
 	private turnEndNudge(): string | null {
-		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
+		return (
+			verifyNudgeFor(this.turnToolLedger) ??
+			this.executor.retiredTurnEndNudge() ??
+			completionSelfCheckNudge({
+				task: this.turnTask,
+				gitBaseline: this.turnGitBaseline,
+				cwd: this.config.workingDirectory || process.cwd(),
+				ledger: this.turnToolLedger,
+			})
+		);
 	}
 
 	private async runTurn(
@@ -1439,6 +1511,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnTask = userMessage;
+		this.turnGitBaseline = asksForCommit(userMessage)
+			? gitSnapshot(this.config.workingDirectory || process.cwd())
+			: null;
 		// write_file may open each deliverable once per turn (#3107).
 		this.executor.beginTurn();
 
@@ -1843,6 +1919,73 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			return textResult;
 		}
 
+		// What an allowed native tool call starts with (see gateToolCall below).
+		const nativeToolSteps = new Map<string, number | undefined>();
+		const startAllowedTool = async (event: {
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			stepNumber?: number;
+		}) => {
+			await this.hookManager.executeHooks("beforeTool", {
+				sessionId: this.sessionId,
+				tool: event.toolName,
+				toolInput: event.args,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			});
+
+			// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
+			const toolPath = event.args?.path as string | undefined;
+			if (
+				toolPath &&
+				["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
+			) {
+				this.recentFilePaths.push(toolPath);
+				// Keep bounded - only last 20 paths
+				if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+
+				const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+				if (gate.shouldForceLocal) {
+					const fallback = forceLocalModel(providerConfig.name);
+					if (fallback) {
+						console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+						console.log(
+							`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
+						);
+						providerConfig.name = fallback.provider as typeof providerConfig.name;
+						providerConfig.model = fallback.model;
+						// The forced-local provider resolves its own endpoint and key:
+						// the session's belong to the provider it is leaving (#3261).
+						providerConfig.apiKey = undefined;
+						providerConfig.baseURL = undefined;
+						providerConfig.headers = undefined;
+					}
+				}
+			}
+
+			console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
+
+			this.events.onToolStart?.({
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				args: event.args,
+				stepNumber: event.stepNumber,
+			});
+
+			this.sessionWriter.writeToolCall(
+				{
+					toolCallId: event.toolCallId,
+					name: event.toolName,
+					arguments: event.args,
+					success: true,
+					durationMs: 0,
+					startedAt: new Date().toISOString(),
+				},
+				undefined,
+				event.stepNumber,
+			);
+		};
+
 		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
 			instructions: effectiveInstructions,
@@ -1862,79 +2005,27 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
 			tools: effectiveTools,
+			// Steering (D1): delivered after the running tool calls.
+			steer: () => this.drainSteers(),
 
-			onToolCallStart: async (event) => {
-				const modeRefusal = this.modeRefusal(event.toolName);
-				if (modeRefusal) throw new Error(modeRefusal);
-				await this.hookManager.executeHooks("beforeTool", {
-					sessionId: this.sessionId,
-					tool: event.toolName,
-					toolInput: event.args,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
+			// Refusals live in the gate, inside each tool's execute: the SDK
+			// swallows a throw from onToolCallStart, so one there never stopped
+			// a call.
+			// The gate runs first; everything a call starts (beforeTool hooks, the
+			// privacy tracker, onToolStart, the session start row) happens only
+			// once it is allowed. onToolCallStart, which the SDK fires before
+			// execute, only remembers the step number for it.
+			gateToolCall: async (event) => {
+				const refusal = await this.refuseToolCall(event.toolName, event.args);
+				const stepNumber = nativeToolSteps.get(event.toolCallId);
+				nativeToolSteps.delete(event.toolCallId);
+				if (refusal) return refusal;
+				await startAllowedTool({ ...event, stepNumber });
+				return null;
+			},
 
-				// Fire YAML PreToolUse hooks - if any hook blocks, skip the tool
-				const preResult = await this.hookManager.fire("PreToolUse", {
-					tool: event.toolName,
-					args: event.args,
-					sessionId: this.sessionId,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
-				if (preResult.blocked) {
-					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
-					throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
-				}
-
-				// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
-				const toolPath = event.args?.path as string | undefined;
-				if (
-					toolPath &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
-				) {
-					this.recentFilePaths.push(toolPath);
-					// Keep bounded - only last 20 paths
-					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-
-					const gate = privacyGate(this.recentFilePaths, providerConfig.name);
-					if (gate.shouldForceLocal) {
-						const fallback = forceLocalModel(providerConfig.name);
-						if (fallback) {
-							console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
-							console.log(
-								`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
-							);
-							providerConfig.name = fallback.provider as typeof providerConfig.name;
-							providerConfig.model = fallback.model;
-							// The forced-local provider resolves its own endpoint and key:
-							// the session's belong to the provider it is leaving (#3261).
-							providerConfig.apiKey = undefined;
-							providerConfig.baseURL = undefined;
-							providerConfig.headers = undefined;
-						}
-					}
-				}
-
-				console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
-
-				this.events.onToolStart?.({
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-					args: event.args,
-					stepNumber: event.stepNumber,
-				});
-
-				this.sessionWriter.writeToolCall(
-					{
-						toolCallId: event.toolCallId,
-						name: event.toolName,
-						arguments: event.args,
-						success: true,
-						durationMs: 0,
-						startedAt: new Date().toISOString(),
-					},
-					undefined,
-					event.stepNumber,
-				);
+			onToolCallStart: (event) => {
+				nativeToolSteps.set(event.toolCallId, event.stepNumber);
 			},
 
 			onToolCallFinish: async (event) => {
@@ -2587,7 +2678,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
 			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
-				console.log("[verify-gate] change not checked yet - asking for one targeted check");
+				console.log(
+					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
+				);
 				// agentConfig already holds the provider that answered (chain step
 				// or hedge winner), so the follow-up goes to the same one.
 				const verifyAgent = createEightAgent(agentConfig);
@@ -2936,6 +3029,58 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Steer the running turn (D1). The message joins the conversation as a user
+	 * message after the tool calls running now finish, before the next model
+	 * call, on both the text-tool and the native path. A message sent when no
+	 * further model call comes (the turn is answering, or no turn runs) stays
+	 * queued: read it with takeQueuedSteers() and send it as the next chat().
+	 * Blank text is ignored. Returns false when the steer was refused: the
+	 * queue already holds MAX_STEERS, or the text is over MAX_STEER_BYTES.
+	 */
+	steer(text: string): boolean {
+		if (text.trim() === "") return false;
+		if (this.steerQueue.length >= MAX_STEERS) return false;
+		if (Buffer.byteLength(text, "utf8") > MAX_STEER_BYTES) return false;
+		this.steerQueue.push({ text, turn: this.activeTurn });
+		return true;
+	}
+
+	/** Steering messages not delivered yet, in the order they were sent. */
+	queuedSteers(): readonly string[] {
+		return this.steerQueue.map((s) => s.text);
+	}
+
+	/**
+	 * Take the undelivered steering messages and clear the queue. Call it after
+	 * chat() resolves (send them as the follow-up turn) or after abort() (give
+	 * the text back to the person to edit).
+	 */
+	takeQueuedSteers(): string[] {
+		return this.steerQueue.splice(0).map((s) => s.text);
+	}
+
+	/**
+	 * Deliver this turn's queued steers into it: history, session file, event.
+	 * Nothing is delivered into an aborted turn, and a steer stamped with
+	 * another turn (or none) is never delivered; both stay for takeQueuedSteers.
+	 */
+	private drainSteers(): string[] {
+		const controller = this.abortController;
+		if (!controller || controller.signal.aborted) return [];
+		if (this.activeTurn === null) return [];
+		const mine = this.steerQueue.filter((s) => s.turn === this.activeTurn);
+		if (mine.length === 0) return [];
+		this.steerQueue = this.steerQueue.filter((s) => s.turn !== this.activeTurn);
+		const texts = mine.map((s) => s.text);
+		for (const text of texts) {
+			this.messageHistory.push({ role: "user", content: text });
+			this.sessionWriter.writeUserMessage(text);
+			this.events.onSteer?.({ text });
+		}
+		return texts;
+	}
+
+	/**
 	 * Abort the current generation. Called when user presses ESC during processing.
 	 */
 	abort(): void {
@@ -3275,9 +3420,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * same executor (permissions, secret scrub) as a normal call. The caller
 	 * only uses it for tools whose replay class is "replay".
 	 */
-	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
-		const refusal = this.modeRefusal(toolName);
-		if (refusal) return Promise.resolve(refusal);
+	async runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// The same gate as a model's call: mode, PreToolUse, then (G1) extensions.
+		const refusal = await this.refuseToolCall(toolName, args);
+		if (refusal) return refusal;
 		return this.executor.execute(toolName, args);
 	}
 
@@ -3396,7 +3542,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (decision.strategy === "none" || decision.confidence <= 0.6) return;
 
 		const dispatch = mapStrategyToTool(decision);
-		if (!dispatch || this.modeRefusal(dispatch.tool)) return;
+		if (!dispatch || (await this.refuseToolCall(dispatch.tool, dispatch.args))) return;
 
 		try {
 			const result = await this.executor.execute(dispatch.tool, dispatch.args);
