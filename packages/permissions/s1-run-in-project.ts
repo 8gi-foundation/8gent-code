@@ -77,7 +77,7 @@ const AMBIENT_ENV_OK = new Set(["NODE_ENV", "DEBUG", "CI", "NO_COLOR", "FORCE_CO
 const MAX_ENV = 4;
 const SCRIPT_EXT = /\.(?:ts|mts|js|mjs)$/;
 const TEMP_ROOTS = ["/tmp", "/private/tmp"];
-const SECRET =
+export const SECRET =
 	/(^|\/)\.env(\.[\w.-]+)?$|(^|\/)\.env\b|id_rsa|id_ed25519|id_ecdsa|(^|\/)\.ssh(\/|$)|\.aws\/|credentials|\.netrc|\.npmrc|\.git-credentials|keychain|\.pem$|\.key$|\.p12$/;
 const BAD_FLAG =
 	/^--?(e|p|r|c|i|eval|print|require|import|preload|loader|env-file|cwd|config|inspect(-brk)?|watch|hot|install|conditions|input-type|experimental[\w-]*|bun|shell|filter|silent|elide-lines|if-present|no-env-file)(=.*)?$/;
@@ -256,8 +256,8 @@ const PATH_OK = new Set(["join", "resolve", "basename", "extname"]);
 const PROC_OK = new Set(["argv", "exit", "exitCode", "cwd", "stdout", "stderr"]);
 /** Tokens after which a `[` opens an array literal or a type, not a member access. */
 const ARRAY_PREV = new Set(["=", "(", ",", ":", "[", "=>", "?", "...", "<", "|", "&", ";", "!", "${", "}$", "+", "??"]);
-const WRITE_BAD_NAME =
-	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
+export const WRITE_BAD_NAME =
+	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|justfile|gemfile|rakefile|procfile|claude\.md|agents\.md|\.cursorrules|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|py|rb|pl|php|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
 
 interface Ctx {
 	root: string;
@@ -370,7 +370,7 @@ function resolveSources(a: Tok[], defs: Defs, depth = 0): Src[] | null {
 }
 
 /** `p` with symlinks in its existing part resolved (/tmp -> /private/tmp), so it compares with the real root. */
-function canon(p: string): string {
+export function canon(p: string): string {
 	const tail: string[] = [];
 	let cur = p;
 	for (;;) {
@@ -385,6 +385,19 @@ function canon(p: string): string {
 	}
 }
 
+/** True when any existing component of `abs` below `root` is a symlink (a dangling final one included). */
+export function symlinkBelow(root: string, abs: string): boolean {
+	let cur = root;
+	for (const seg of path.relative(root, abs).split("/")) {
+		if (seg === "") continue;
+		cur = path.join(cur, seg);
+		const st = lstatOrNull(cur);
+		if (!st) return false;
+		if (st.isSymbolicLink()) return true;
+	}
+	return false;
+}
+
 function writeTargetOk(p: string, root: string): boolean {
 	if (SECRET.test(p)) return false;
 	const abs = canon(path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p));
@@ -392,6 +405,12 @@ function writeTargetOk(p: string, root: string): boolean {
 	if (!inside(abs, root)) return underTemp(abs);
 	const rel = path.relative(root, abs);
 	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
+	if (rel.split("/").includes("node_modules")) return false;
+	// canon() falls back to the nearest existing parent, so a dangling symlink as
+	// the final part, or one in the middle, would pass; refuse any symlink.
+	if (p.split("/").includes("..")) return false;
+	const lexical = path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p);
+	if (inside(lexical, root) && symlinkBelow(root, lexical)) return false;
 	return !WRITE_BAD_NAME.test(path.basename(abs));
 }
 

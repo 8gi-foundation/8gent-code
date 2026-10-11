@@ -189,6 +189,18 @@ describe("runInProject allows the pilot's real CLI", () => {
 	});
 });
 
+describe("runInProject write targets that are symlinks (8SO)", () => {
+	test("a dangling symlink as the final component is refused", () => {
+		symlinkSync("src/pwn.txt", join(ws, "dangling.json"));
+		expect(runInProject("TODO_FILE=dangling.json bun src/cli.ts done 1", ws).ok).toBe(false);
+		expect(runInProject("TODO_FILE=other.json bun src/cli.ts done 1", ws).ok).toBe(true);
+	});
+	test("a symlinked directory on the way is refused", () => {
+		symlinkSync("src", join(ws, "data"));
+		expect(runInProject("TODO_FILE=data/t.json bun src/cli.ts done 1", ws).ok).toBe(false);
+	});
+});
+
 describe("runInProject refuses", () => {
 	const base = "TODO_FILE=/tmp/todo-test.json";
 	test("command shapes", () => {
@@ -212,6 +224,19 @@ describe("runInProject refuses", () => {
 			["env at source (write target)", `TODO_FILE=${ws}/src/cli.ts bun src/cli.ts done 1`],
 			["env at package.json (write target)", `TODO_FILE=${ws}/package.json bun src/cli.ts done 1`],
 			["env at a dot name (write target)", "TODO_FILE=.bashrc bun src/cli.ts done 1"],
+			["env at tool.py (write target)", "TODO_FILE=tool.py bun src/cli.ts done 1"],
+			["env at tool.rb (write target)", "TODO_FILE=tool.rb bun src/cli.ts done 1"],
+			["env at tool.pl (write target)", "TODO_FILE=tool.pl bun src/cli.ts done 1"],
+			["env at tool.php (write target)", "TODO_FILE=tool.php bun src/cli.ts done 1"],
+			["env at Makefile (write target)", "TODO_FILE=Makefile bun src/cli.ts done 1"],
+			["env at justfile (write target)", "TODO_FILE=justfile bun src/cli.ts done 1"],
+			["env at Gemfile (write target)", "TODO_FILE=Gemfile bun src/cli.ts done 1"],
+			["env at Rakefile (write target)", "TODO_FILE=Rakefile bun src/cli.ts done 1"],
+			["env at Dockerfile (write target)", "TODO_FILE=Dockerfile bun src/cli.ts done 1"],
+			["env at Procfile (write target)", "TODO_FILE=Procfile bun src/cli.ts done 1"],
+			["env at CLAUDE.md (write target)", "TODO_FILE=CLAUDE.md bun src/cli.ts done 1"],
+			["env at AGENTS.md (write target)", "TODO_FILE=AGENTS.md bun src/cli.ts done 1"],
+			["env at node_modules/x.json (write target)", "TODO_FILE=node_modules/x.json bun src/cli.ts done 1"],
 			["cli with ..", `${base} bun ../cli.ts done 1`],
 			["cli with .. inside", `${base} bun ${ws}/src/../../cli.ts done 1`],
 			["cli outside", `${base} bun ${outside}/ext.ts`],
