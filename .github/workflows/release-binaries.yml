@@ -56,6 +56,14 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      # better-sqlite3's install script builds against the runner's Node. The
+      # macOS image's Node 24 has no prebuilt better-sqlite3 binary and its
+      # headers do not compile with the image's clang, so pin an LTS that does.
+      - name: Setup Node (native dependency builds)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
       - name: Toolchain (nfpm, makensis)
         run: |
           brew install makensis
@@ -311,7 +319,9 @@ jobs:
   alarm:
     name: Open an issue when the release fails
     needs: [build, smoke-windows, smoke-linux, release, install-smoke]
-    if: failure()
+    # Only a release tag raises the alarm; a dispatched dry run on a branch
+    # reports its failure in the run itself.
+    if: failure() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
