@@ -39,6 +39,19 @@ export type LayoutMeasure = {
 	bands: Band[];
 };
 
+let warnedSharpUnavailable = false;
+
+function isModuleLoadError(err: unknown): boolean {
+	const e = err as { code?: unknown; message?: unknown } | null;
+	const code = typeof e?.code === "string" ? e.code : "";
+	const msg = typeof e?.message === "string" ? e.message : "";
+	return (
+		code === "ERR_MODULE_NOT_FOUND" ||
+		code === "MODULE_NOT_FOUND" ||
+		/Cannot find (?:module|package)|Could not load the "?sharp"? module|sharp.*(?:runtime|native)/i.test(msg)
+	);
+}
+
 export async function measureLayout(file: string): Promise<LayoutMeasure | null> {
 	try {
 		const sharp = (await import("sharp")).default;
@@ -111,7 +124,11 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 			centered,
 			bands: bands.slice(0, MAX_BANDS),
 		};
-	} catch {
+	} catch (err) {
+		if (!warnedSharpUnavailable && isModuleLoadError(err)) {
+			warnedSharpUnavailable = true;
+			console.warn("[8gent] sharp is unavailable, so image layout hints are off for this run.");
+		}
 		return null;
 	}
 }

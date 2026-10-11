@@ -26,7 +26,8 @@ function* sources(dir: string): Generator<string> {
 
 // import sharp from "sharp" / import * as sharp / import { x } / require("sharp") at module level.
 // `import type` is erased and allowed.
-const STATIC = /^\s*(?:import\s+(?!type\b)[^;\n]*?from\s+|import\s+|(?:const|let|var)\s+\w+\s*=\s*require\()\s*["']sharp["']/m;
+// The binding clause may span lines (`import {\n x,\n} from "sharp"`), so braces are matched with [^}]*.
+const STATIC = /^\s*(?:import\s+(?!type\b)(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s+as\s+[\w$]+)?\s*from\s*|import\s+|(?:const|let|var)\s+\w+\s*=\s*require\()\s*["']sharp["']/m;
 
 describe("sharp is lazy", () => {
 	test("no product module imports sharp statically", () => {
@@ -42,6 +43,9 @@ describe("sharp is lazy", () => {
 	test("the guard sees an eager import (it is not vacuous)", () => {
 		expect(STATIC.test('import sharp from "sharp";\n')).toBe(true);
 		expect(STATIC.test('import type SharpFn from "sharp";\n')).toBe(false);
+		expect(STATIC.test('import {\n\tdefault as sharp,\n} from "sharp";\n')).toBe(true);
+		expect(STATIC.test('import sharp, {\n\tx\n} from "sharp"\n')).toBe(true);
+		expect(STATIC.test('import type {\n\tSharp,\n} from "sharp";\n')).toBe(false);
 		expect(STATIC.test('const m = (await import("sharp")).default;\n')).toBe(false);
 	});
 });
