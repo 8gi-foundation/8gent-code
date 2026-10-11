@@ -575,3 +575,59 @@ describe("changelog", () => {
 		);
 	});
 });
+
+// (b4) Interop with the real minisign.
+describe("verifyMinisign against the real minisign", () => {
+	// Fixed vectors written by minisign 0.12 with a throwaway key (the secret
+	// key was discarded): one default (prehashed, "ED") and one legacy ("Ed").
+	const pub = "RWSh+VM93J6ir+mzQHIQcnpwQYHnwU/K4p2yT7/RU4ePwiCzJFHVPWUj";
+	const msg = new TextEncoder().encode("aaaa  8gent-linux-x64\n");
+	const prehashed = [
+		"untrusted comment: signature from minisign secret key",
+		"RUSh+VM93J6ir+kUc8CZFr1/KwiXkThqFlzx8t4tXHrQLDmLQTJvJ9liaUOXuBiQWpyDLRUbx3b+1NlwMXd55/VU7h/r5j0y8AA=",
+		"trusted comment: 8gent v0.0.1 SHA256SUMS",
+		"u82TutUuESIOBkVda9IoTH1NSFlUIDXsvdK5VKEbfdy3cV6PJNZwW9La804lX2cCf1DK/S7uxX/ezSEiHARBCg==",
+		"",
+	].join("\n");
+	const legacy = [
+		"untrusted comment: signature from minisign secret key",
+		"RWSh+VM93J6irwm3attJDqqfFDJTGxippy3jwQywOJl02f7xOr0Vlbj19N/Lhw8pCN7w72aouYTro/xc+FYlUiHs89hkmBklBAQ=",
+		"trusted comment: timestamp:1791752102\tfile:vec.msg",
+		"2JPcgT0vfEH5x+eLA8jfOtbZoefoROr7+2iwTEi8KAGspgCWauZeE9XYg/exLC0UvRGzFzY1wdKM+u+DwlSuCA==",
+		"",
+	].join("\n");
+
+	test("accepts signatures written by minisign 0.12, both formats", () => {
+		expect(verifyMinisign(msg, prehashed, pub)).toBe(true);
+		expect(verifyMinisign(msg, legacy, pub)).toBe(true);
+	});
+
+	test("rejects them for a changed message", () => {
+		const changed = new TextEncoder().encode("aaab  8gent-linux-x64\n");
+		expect(verifyMinisign(changed, prehashed, pub)).toBe(false);
+		expect(verifyMinisign(changed, legacy, pub)).toBe(false);
+	});
+
+	// With a minisign binary available (MINISIGN_BIN or PATH), sign fresh
+	// content with it now and verify in-process.
+	const bin = process.env.MINISIGN_BIN || Bun.which("minisign");
+	test.skipIf(!bin)("verifies what the installed minisign signs right now", () => {
+		const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "minisign-interop-"));
+		try {
+			const run = (args: string[]) => {
+				const r = Bun.spawnSync([bin as string, ...args], { stdin: "ignore" });
+				if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+			};
+			run(["-G", "-W", "-f", "-p", join(d, "k.pub"), "-s", join(d, "k.key")]);
+			const key = readFileSync(join(d, "k.pub"), "utf8").split("\n")[1].trim();
+			const body = `${"c".repeat(64)}  8gent-darwin-arm64\n`;
+			writeFileSync(join(d, "SHA256SUMS"), body);
+			run(["-S", "-s", join(d, "k.key"), "-m", join(d, "SHA256SUMS"), "-t", "8gent interop"]);
+			const sig = readFileSync(join(d, "SHA256SUMS.minisig"), "utf8");
+			expect(verifyMinisign(new TextEncoder().encode(body), sig, key)).toBe(true);
+			expect(verifyMinisign(new TextEncoder().encode(`${body} `), sig, key)).toBe(false);
+		} finally {
+			rmSync(d, { recursive: true, force: true });
+		}
+	});
+});
