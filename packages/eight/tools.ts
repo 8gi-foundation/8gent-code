@@ -739,9 +739,24 @@ export class ToolExecutor {
 		});
 	}
 
+	/** Measured-layout blocks already in this turn's context (#3823), so read_image does not repeat them. */
+	private layoutNotesSent = new Set<string>();
+
+	/** The agent put this measured-layout block in front of the model already this turn. */
+	markLayoutSent(block: string): void {
+		this.layoutNotesSent.add(block);
+	}
+
+	/** The measured layout for read_image, or "" when there is none or the model already has it this turn. */
+	private async layoutForRead(file: string): Promise<string> {
+		const measured = await layoutMeasureLine(file);
+		return measured && !this.layoutNotesSent.has(measured) ? measured : "";
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();
+		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
 	}
 
@@ -3004,12 +3019,12 @@ export class ToolExecutor {
 					2,
 				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
-				const measured = await layoutMeasureLine(absolutePath);
+				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);
-			const measured = await layoutMeasureLine(absolutePath);
+			const measured = await this.layoutForRead(absolutePath);
 			const info = JSON.stringify(
 				{
 					path: imageInfo.path,

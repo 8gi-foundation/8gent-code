@@ -1474,7 +1474,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// over on the attach path too. Bounded, model-free, empty on any failure.
 			try {
 				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
-				if (measured) this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+				if (measured) {
+					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+					// read_image on the same file this turn must not repeat the block.
+					this.executor.markLayoutSent(measured);
+				}
 			} catch {
 				// layout hints are best-effort; the image itself is already attached
 			}
