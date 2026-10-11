@@ -53,3 +53,13 @@ export {
 	type ToolCallDecision,
 	type ToolCallEvent,
 } from "./host";
+
+export {
+	defaultPromptsDir,
+	expandPromptCommand,
+	expandTemplate,
+	loadPromptTemplates,
+	parseTemplate,
+	splitArgs,
+	type PromptTemplate,
+} from "./prompts";
