@@ -20,8 +20,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@8gent/eyes": "*",
-		"@8gent/hands": "*"
+		"@8gent/eyes": "0.18.0",
+		"@8gent/hands": "0.18.0"
 	},
 	"devDependencies": {
 		"typescript": "^5.3.0"

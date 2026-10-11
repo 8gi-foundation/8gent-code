@@ -97,8 +97,11 @@ jobs:
           [ "$COUNT" -ge 2 ] || { echo "::error::expected at least 2 release assets, staged ${COUNT}"; exit 1; }
           echo "release dry run: ${COUNT} assets staged for v${VERSION}"
 
-      - name: No workspace: specifier in manifests or the npm tarball
+      - name: No workspace: specifier in manifests, bun.lock or the npm tarball
         run: bun scripts/lib/no-workspace-protocol.ts "$RUNNER_TEMP"/release-assets/*.tgz
+
+      - name: Lockfile is in sync with the manifests
+        run: bun install --frozen-lockfile
 
       - name: Verify version sync
         run: |

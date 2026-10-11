@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { findWorkspaceSpecifiers, scanRepo, scanTarball } from "./no-workspace-protocol";
+import { findWorkspaceSpecifiers, scanRepo, scanTarball, syncInternalPins, workspaceManifests } from "./no-workspace-protocol";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
 
@@ -40,6 +40,26 @@ describe("no workspace: protocol", () => {
 		const okTgz = join(dir, "ok.tgz");
 		spawnSync("tar", ["-czf", okTgz, "-C", ok, "package"]);
 		expect(scanTarball(okTgz)).toEqual([]);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("internal pins follow the workspace version on a release bump", () => {
+		const versions = new Map([["@8gent/eyes", "0.19.0"]]);
+		const text = '{"dependencies": {"@8gent/eyes": "0.18.0", "zod": "^4.0.0", "@8gent/other": "1.0.0"}}';
+		expect(syncInternalPins(text, versions)).toBe(
+			'{"dependencies": {"@8gent/eyes": "0.19.0", "zod": "^4.0.0", "@8gent/other": "1.0.0"}}',
+		);
+	});
+
+	test("nested workspace globs are walked", () => {
+		const dir = mkdtempSync(join(tmpdir(), "nwp-"));
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "r", workspaces: ["apps/*", "libs/*/pkg"] }));
+		for (const p of ["apps/a", "libs/x/pkg", "libs/y/pkg", "libs/z/other"]) {
+			mkdirSync(join(dir, p), { recursive: true });
+			writeFileSync(join(dir, p, "package.json"), JSON.stringify({ name: p, version: "1.0.0" }));
+		}
+		const found = workspaceManifests(dir).map((f) => f.slice(dir.length + 1)).sort();
+		expect(found).toEqual(["apps/a/package.json", "libs/x/pkg/package.json", "libs/y/pkg/package.json", "package.json"]);
 		rmSync(dir, { recursive: true, force: true });
 	});
 });
