@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
 let modes: typeof import("./modes");
@@ -88,14 +89,16 @@ beforeAll(async () => {
 	});
 });
 
-afterAll(() => {
+afterAll(async () => {
 	server?.stop(true);
+	// The agent opened a memory database under home; Windows will not delete it while open.
+	(await import("../memory/index")).resetMemoryManager();
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 const PROMPT = "Create the file out.txt in the repo root with the text hello, then report back.";

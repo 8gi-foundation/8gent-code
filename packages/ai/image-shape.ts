@@ -169,7 +169,7 @@ export async function imagesWrittenLine(
 	try {
 		sharp = (await import("sharp")).default;
 	} catch {}
-	const rel = (f: string) => path.relative(root, f) || f;
+	const rel = (f: string) => (path.relative(root, f) || f).split(path.sep).join("/");
 	const sizes = new Set<string>();
 	const clipped: string[] = [];
 	const blank: string[] = [];

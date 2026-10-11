@@ -11,9 +11,10 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveHome } from "../core/home.js";
+import { fileURLToPath } from "node:url";
 import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
+import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
 import { commandTouchesAuditFiles, validatePath } from "./path-guard.js";
@@ -32,7 +33,7 @@ import type {
 // ============================================
 
 const DEFAULT_POLICY_PATH = path.join(
-	path.dirname(typeof __filename !== "undefined" ? __filename : new URL(import.meta.url).pathname),
+	path.dirname(typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url)),
 	"default-policies.yaml",
 );
 
@@ -557,7 +558,11 @@ function withResolvedPath(action: string, context: PolicyContext): PolicyContext
 		(typeof context.cwd === "string" && context.cwd) ||
 		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
 		process.cwd();
-	return { ...context, resolved_path: resolvePolicyPath(context.path, cwd) };
+	// Rules match with forward slashes (`ends_with /.8gent/mcp.json`); a Windows path has backslashes.
+	return {
+		...context,
+		resolved_path: resolvePolicyPath(context.path, cwd).split(path.sep).join("/"),
+	};
 }
 
 /**

@@ -74,7 +74,8 @@ describe("AC3: '..' escape into protected dir", () => {
 });
 
 // --- AC4: device files ---
-describe("AC4: device files", () => {
+// POSIX only: /dev device files do not exist on Windows.
+describe.skipIf(process.platform === "win32")("AC4: device files", () => {
 	test("rejects /dev/zero with reason 'device file'", () => {
 		const r = validatePath("/dev/zero", "/tmp");
 		expect(r.ok).toBe(false);
@@ -212,13 +213,17 @@ describe("Integration: evaluatePolicy denies before consulting other rules", () 
 		if (!decision.allowed) expect(decision.reason).toMatch(/path-guard/i);
 	});
 
-	test("write_file on /dev/zero is denied via path-guard", () => {
-		const decision = evaluatePolicy("write_file", {
-			path: "/dev/zero",
-			workingDirectory: FAKE_PROJ,
-		});
-		expect(decision.allowed).toBe(false);
-	});
+	// POSIX only: /dev device files do not exist on Windows.
+	test.skipIf(process.platform === "win32")(
+		"write_file on /dev/zero is denied via path-guard",
+		() => {
+			const decision = evaluatePolicy("write_file", {
+				path: "/dev/zero",
+				workingDirectory: FAKE_PROJ,
+			});
+			expect(decision.allowed).toBe(false);
+		},
+	);
 
 	test("read_file inside project still allowed by path-guard layer", () => {
 		const decision = evaluatePolicy("read_file", {
