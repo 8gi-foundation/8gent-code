@@ -50,6 +50,11 @@ export function desktopPolicyContext(
 			return { action: "safe_list" };
 		case "desktop_accessibility_tree":
 			return { action: "screenshot" }; // read-only equivalent under default policy
+		case "desktop_act":
+			// The pre-gate covers only the read half (screenshot + ground). The
+			// act itself is gated inside handleDesktopAct as click/type/press
+			// with the real point on the card (packages/computer/desktop-act.ts).
+			return { action: "act_resolve" };
 		default:
 			return { action: tool };
 	}

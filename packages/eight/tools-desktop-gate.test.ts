@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getPermissionManager } from "../permissions";
 import { evaluatePolicy } from "../permissions/policy-engine";
 import {
 	type TuiApprovalRequest,
@@ -111,5 +112,63 @@ describe("Table agents cannot reach desktop_use", () => {
 		const d = evaluatePolicy("desktop_use", { agentId: "__shadow__", action: "screenshot" });
 		expect(d.allowed).toBe(false);
 		expect(d.allowed === false && d.requiresApproval).toBeFalsy();
+	});
+});
+
+describe("desktop_act through the executor", () => {
+	const prevHeadless = process.env.EIGHT_HEADLESS;
+	const prevDry = process.env.EIGHT_DESKTOP_ACT_DRY;
+	afterEach(() => {
+		_resetTuiApprovalChannel();
+		getPermissionManager().disableInfiniteMode();
+		if (prevHeadless === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		else process.env.EIGHT_HEADLESS = prevHeadless;
+		if (prevDry === undefined) Reflect.deleteProperty(process.env, "EIGHT_DESKTOP_ACT_DRY");
+		else process.env.EIGHT_DESKTOP_ACT_DRY = prevDry;
+	});
+
+	test("Infinite mode does not lift the desktop card", async () => {
+		const asked: TuiApprovalRequest[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req);
+			return "deny";
+		});
+		getPermissionManager().enableInfiniteMode();
+		const exec = new ToolExecutor(dir, "desktop-gate-test");
+		const out = await exec.execute("desktop_click", { x: 10, y: 10 });
+		expect(asked.length).toBe(1);
+		expect(out).toContain("[PERMISSION DENIED]");
+	});
+
+	test("desktop_act is offered as one line and its pre-gate is the read half only", () => {
+		const defs = new ToolExecutor(dir, "desktop-gate-test").getToolDefinitions() as Array<{
+			function: { name: string; description: string };
+		}>;
+		const def = defs.find((d) => d.function?.name === "desktop_act");
+		expect(def).toBeDefined();
+		expect(def?.function.description).not.toContain("\n");
+		expect(evaluatePolicy("desktop_use", { action: "act_resolve" }).allowed).toBe(true);
+	});
+
+	test("desktop_act press cmd+q is blocked before any screenshot or model call", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		process.env.EIGHT_DESKTOP_ACT_DRY = join(dir, "never-read.png");
+		const exec = new ToolExecutor(dir, "desktop-gate-test");
+		const out = await exec.execute("desktop_act", {
+			target: "the window",
+			action: "press",
+			keys: "cmd+q",
+		});
+		const r = JSON.parse(out);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("Blocked by policy");
+	});
+
+	test("desktop_act with bad args never reaches the screen", async () => {
+		const exec = new ToolExecutor(dir, "desktop-gate-test");
+		expect(await exec.execute("desktop_act", { target: "x", action: "hover" })).toContain(
+			"action must be one of",
+		);
+		expect(await exec.execute("desktop_act", { action: "click" })).toContain("target is required");
 	});
 });

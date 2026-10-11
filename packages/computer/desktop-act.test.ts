@@ -1,0 +1,411 @@
+/**
+ * desktop_act: grounded, gated, verified. Every effectful dependency is a
+ * stub here; the real policy engine and the real TUI approval channel are
+ * exercised so the gate is tested, not simulated.
+ */
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import sharp from "sharp";
+import type { GroundOutcome } from "../eyes/ground";
+import { evaluatePolicy } from "../permissions/policy-engine";
+import {
+	_resetTuiApprovalChannel,
+	hasTuiApprovalHandler,
+	registerTuiApprovalHandler,
+	requestTuiApproval,
+} from "../permissions/tui-approval-channel";
+import {
+	DESKTOP_ACT_MAX_STEPS,
+	DESKTOP_ACT_TOOL_DEF,
+	type DesktopActApproval,
+	type DesktopActDeps,
+	DesktopActSession,
+	desktopAct,
+	frameChange,
+	validateDesktopActArgs,
+} from "./desktop-act";
+import { desktopPolicyContext } from "./desktop-policy";
+import {
+	_resetPreflightCache,
+	desktopPreflight,
+	preflightFromReport,
+	resolveHostApp,
+} from "./preflight";
+
+const dir = mkdtempSync(join(tmpdir(), "desktop-act-"));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+async function png(name: string, paint?: (svg: string) => string): Promise<string> {
+	const base = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#fff"/><rect x="150" y="120" width="100" height="40" fill="#1f6feb"/></svg>`;
+	const svg = paint ? paint(base) : base;
+	const out = join(dir, name);
+	writeFileSync(out, await sharp(Buffer.from(svg)).png().toBuffer());
+	return out;
+}
+
+/** The production approval rule in miniature: a card if there is one, else refuse. */
+async function approveLikeTheExecutor(
+	req: DesktopActApproval,
+	reason: string,
+): Promise<string | null> {
+	if (!hasTuiApprovalHandler()) {
+		return `[BLOCKED] desktop_act needs the person's approval and there is no one to ask in this session. Nothing was done.`;
+	}
+	const ok = await requestTuiApproval({
+		action: "Desktop control",
+		details: `${reason} ${req.action} "${req.target}" at (${req.point.x}, ${req.point.y})`,
+	});
+	return ok ? null : "[PERMISSION DENIED] The person declined desktop_act. Nothing was done.";
+}
+
+function found(x = 200, y = 140, confidence = 1): GroundOutcome {
+	return {
+		ok: true,
+		x,
+		y,
+		bbox: [150, 120, 250, 160],
+		confidence,
+		backend: "stub",
+		model: "stub",
+		ms: 1,
+	};
+}
+
+interface Calls {
+	clicks: Array<{ x: number; y: number; button: string; count: number }>;
+	typed: string[];
+	pressed: string[];
+	shots: number;
+}
+
+function deps(
+	over: Partial<DesktopActDeps> & { before: string; after?: string },
+	calls: Calls,
+): DesktopActDeps {
+	const frames = [over.before, over.after ?? over.before];
+	return {
+		preflight: () => ({ ok: true }),
+		screenshot: () => {
+			const path = frames[Math.min(calls.shots, frames.length - 1)];
+			calls.shots++;
+			return {
+				ok: true,
+				path,
+				coordMap: {
+					captureX: 0,
+					captureY: 0,
+					captureWidth: 400,
+					captureHeight: 300,
+					imageWidth: 400,
+					imageHeight: 300,
+				},
+			};
+		},
+		ground: async () => found(),
+		policy: (ctx) => evaluatePolicy("desktop_use", ctx),
+		approve: approveLikeTheExecutor,
+		click: (p, button, count) => {
+			calls.clicks.push({ ...p, button, count });
+			return { ok: true };
+		},
+		type: (t) => {
+			calls.typed.push(t);
+			return { ok: true };
+		},
+		press: (k) => {
+			calls.pressed.push(k);
+			return { ok: true };
+		},
+		screenScale: () => 1,
+		sleep: async () => {},
+		...over,
+	};
+}
+
+const fresh = (): Calls => ({ clicks: [], typed: [], pressed: [], shots: 0 });
+
+describe("desktop_act gate", () => {
+	let before: string;
+	let after: string;
+	const prevHeadless = process.env.EIGHT_HEADLESS;
+	beforeEach(async () => {
+		before = await png("before.png");
+		after = await png("after.png", (s) => s.replace("#1f6feb", "#d73a49"));
+	});
+	afterEach(() => {
+		_resetTuiApprovalChannel();
+		if (prevHeadless === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		else process.env.EIGHT_HEADLESS = prevHeadless;
+	});
+
+	test("headless: a click is denied and nothing moves", async () => {
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toStartWith("[BLOCKED]");
+		expect(r.point).toEqual({ x: 200, y: 140 });
+		expect(calls.clicks.length).toBe(0);
+		expect(calls.shots).toBe(1);
+	});
+
+	test("TUI approve: the click runs, shows target and point on the card, and is verified on the changed frame", async () => {
+		const cards: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			cards.push(req.details);
+			return "approve";
+		});
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, after }, calls),
+			new DesktopActSession(),
+		);
+		expect(cards.length).toBe(1);
+		expect(cards[0]).toContain('click "the blue button" at (200, 140)');
+		expect(calls.clicks).toEqual([{ x: 200, y: 140, button: "left", count: 1 }]);
+		expect(r.ok).toBe(true);
+		expect(r.verified).toBe(true);
+		expect(r.change).toBe("near point");
+		expect(calls.shots).toBe(2);
+	});
+
+	test("TUI deny: nothing runs", async () => {
+		registerTuiApprovalHandler(async () => "deny");
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "type", text: "hello" },
+			deps({ before }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("[PERMISSION DENIED]");
+		expect(calls.clicks.length).toBe(0);
+		expect(calls.typed.length).toBe(0);
+	});
+
+	test("cmd+q is blocked by the YAML before any screenshot, model or card", async () => {
+		let asked = 0;
+		registerTuiApprovalHandler(async () => {
+			asked++;
+			return "approve";
+		});
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the window", action: "press", keys: "cmd+q" },
+			deps({ before }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("Blocked by policy");
+		expect(asked).toBe(0);
+		expect(calls.shots).toBe(0);
+		expect(calls.pressed.length).toBe(0);
+	});
+
+	test("screenshot and the act_resolve pre-gate stay allowed; click, type, press ask", () => {
+		expect(evaluatePolicy("desktop_use", { action: "screenshot" }).allowed).toBe(true);
+		expect(evaluatePolicy("desktop_use", desktopPolicyContext("desktop_act", {})).allowed).toBe(
+			true,
+		);
+		for (const action of ["click", "type", "press"]) {
+			const d = evaluatePolicy("desktop_use", { action });
+			expect(d.allowed).toBe(false);
+			expect(d.allowed === false && d.requiresApproval).toBe(true);
+		}
+	});
+
+	test("approved but the screen did not change: ok, verified false, says so", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(true);
+		expect(r.verified).toBe(false);
+		expect(r.change).toBe("none");
+		expect(r.reason).toContain("Not verified");
+	});
+
+	test("low confidence: not found, no card, no act", async () => {
+		let asked = 0;
+		registerTuiApprovalHandler(async () => {
+			asked++;
+			return "approve";
+		});
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "a unicorn", action: "click" },
+			deps({ before, ground: async () => found(10, 10, 0.3) }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("not found");
+		expect(asked).toBe(0);
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("Retina: image pixels map to screen points", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "right_click" },
+			deps({ before, after, screenScale: () => 2 }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.imagePoint).toEqual({ x: 200, y: 140 });
+		expect(r.point).toEqual({ x: 100, y: 70 });
+		expect(calls.clicks[0]).toEqual({ x: 100, y: 70, button: "right", count: 1 });
+	});
+
+	test("the same act at the same point three times stops the session", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const session = new DesktopActSession();
+		const calls = fresh();
+		const args = { target: "the blue button", action: "click" as const };
+		const r1 = await desktopAct(args, deps({ before }, calls), session);
+		const r2 = await desktopAct(args, deps({ before }, calls), session);
+		const r3 = await desktopAct(args, deps({ before }, calls), session);
+		expect(r1.ok && r2.ok).toBe(true);
+		expect(r3.ok).toBe(false);
+		expect(r3.reason).toContain("times in a row");
+		expect(calls.clicks.length).toBe(2);
+	});
+
+	test("the step cap stops acting", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const session = new DesktopActSession();
+		session.steps = DESKTOP_ACT_MAX_STEPS;
+		const calls = fresh();
+		const r = await desktopAct({ target: "x", action: "click" }, deps({ before }, calls), session);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("Step cap");
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("dry run: full flow, act recorded only, never verified", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, dryRun: true }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.dryRun).toBe(true);
+		expect(r.ok).toBe(true);
+		expect(r.verified).toBe(false);
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("missing macOS grants: one line, no screenshot", async () => {
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "x", action: "click" },
+			deps(
+				{
+					before,
+					preflight: () => ({
+						ok: false,
+						line: "Grant Screen Recording to Ghostty in System Settings > Privacy & Security, then restart 8gent.",
+					}),
+				},
+				calls,
+			),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toBe(
+			"Grant Screen Recording to Ghostty in System Settings > Privacy & Security, then restart 8gent.",
+		);
+		expect(calls.shots).toBe(0);
+	});
+});
+
+describe("frameChange", () => {
+	test("identical files: none; a moved pixel far away: frame; a change at the point: near point", async () => {
+		const a = await png("f-a.png");
+		const far = await png("f-far.png", (s) =>
+			s.replace(
+				'fill="#fff"/>',
+				'fill="#fff"/><rect x="0" y="0" width="40" height="40" fill="#000"/>',
+			),
+		);
+		const near = await png("f-near.png", (s) => s.replace("#1f6feb", "#000"));
+		expect(await frameChange(a, a, { x: 200, y: 140 })).toBe("none");
+		expect(await frameChange(a, far, { x: 200, y: 140 })).toBe("frame");
+		expect(await frameChange(a, near, { x: 200, y: 140 })).toBe("near point");
+	});
+});
+
+describe("args and tool definition", () => {
+	test("validation", () => {
+		expect(typeof validateDesktopActArgs({ action: "click" })).toBe("string");
+		expect(typeof validateDesktopActArgs({ target: "x", action: "hover" })).toBe("string");
+		expect(typeof validateDesktopActArgs({ target: "x", action: "type" })).toBe("string");
+		expect(typeof validateDesktopActArgs({ target: "x", action: "press" })).toBe("string");
+		expect(validateDesktopActArgs({ target: " x ", action: "press", keys: "enter" })).toEqual({
+			target: "x",
+			action: "press",
+			text: undefined,
+			keys: "enter",
+		});
+	});
+	test("the description is one short line", () => {
+		const d = DESKTOP_ACT_TOOL_DEF.function.description;
+		expect(d).not.toContain("\n");
+		expect(d.length).toBeLessThan(160);
+	});
+});
+
+describe("preflight", () => {
+	afterEach(() => _resetPreflightCache());
+	const report = (sr: boolean, ax: boolean) => ({
+		screenRecording: { granted: sr, detail: "" },
+		accessibility: { granted: ax, detail: "" },
+		terminalApp: "x",
+		allGranted: sr && ax,
+	});
+
+	test("the grant line names exactly what is missing and the host app", () => {
+		expect(preflightFromReport(report(false, false), "Ghostty").line).toBe(
+			"Grant Screen Recording and Accessibility to Ghostty in System Settings > Privacy & Security, then restart 8gent.",
+		);
+		expect(preflightFromReport(report(true, false), "Terminal").line).toBe(
+			"Grant Accessibility to Terminal in System Settings > Privacy & Security, then restart 8gent.",
+		);
+		expect(preflightFromReport(report(true, true), "iTerm")).toEqual({
+			ok: true,
+			missing: [],
+			app: "iTerm",
+		});
+	});
+
+	test("host app: bundle on the process tree wins, then TERM_PROGRAM", () => {
+		expect(resolveHostApp({ TERM_PROGRAM: "tmux" }, () => "Ghostty")).toBe("Ghostty");
+		expect(resolveHostApp({ TERM_PROGRAM: "ghostty" }, () => null)).toBe("Ghostty");
+		expect(resolveHostApp({ TERM_PROGRAM: "Apple_Terminal" }, () => null)).toBe("Terminal");
+		expect(resolveHostApp({ TERM_PROGRAM: "8gent" }, () => null)).toBe("8gent.app");
+		expect(resolveHostApp({}, () => null)).toBe("the app running 8gent");
+	});
+
+	test("a pass is cached, a failure is re-probed", () => {
+		let probes = 0;
+		const failing = () => {
+			probes++;
+			return report(false, true);
+		};
+		expect(desktopPreflight(failing).ok).toBe(false);
+		expect(desktopPreflight(failing).ok).toBe(false);
+		expect(probes).toBe(2);
+		expect(desktopPreflight(() => report(true, true)).ok).toBe(true);
+		expect(desktopPreflight(failing).ok).toBe(true);
+		expect(probes).toBe(2);
+	});
+});

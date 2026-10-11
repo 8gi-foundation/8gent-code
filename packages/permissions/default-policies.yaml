@@ -99,9 +99,11 @@ policies:
 
   - name: "desktop-allow-screenshot"
     action: desktop_use
-    condition: "action equals screenshot or action equals window_list or action equals display_list or action equals hover or action equals scroll or action equals clipboard_get or action equals list_processes or action equals suggest_quit or action equals safe_list"
+    condition: "action equals screenshot or action equals window_list or action equals display_list or action equals hover or action equals scroll or action equals clipboard_get or action equals list_processes or action equals suggest_quit or action equals safe_list or action equals act_resolve"
     decision: allow
     message: "Read-only desktop actions are allowed without confirmation."
+  # act_resolve is desktop_act's read half (screenshot + local grounding). Its
+  # act is re-gated as click / type / press above, with the point on the card.
 
   - name: "desktop-quit-require-approval"
     action: desktop_use

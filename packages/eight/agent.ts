@@ -1801,6 +1801,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"desktop_hover",
 			"desktop_windows",
 			"desktop_clipboard",
+			// Grounded, gated, verified act through the local grounder.
+			"desktop_act",
 		];
 		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
 		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).

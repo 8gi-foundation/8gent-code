@@ -62,6 +62,14 @@ import {
 } from "../computer";
 import { DESKTOP_POLICY_ACTION, desktopPolicyContext } from "../computer/desktop-policy";
 import {
+	DESKTOP_ACT_TOOL_DEF,
+	DesktopActSession,
+	desktopAct,
+	detectScreenScale,
+	validateDesktopActArgs,
+} from "../computer/desktop-act";
+import { desktopPreflight } from "../computer/preflight";
+import {
 	detectDesignNeed,
 	getAvailableDesignSystems,
 	needsDesignDecision,
@@ -617,6 +625,8 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
+	/** Step cap and repeat stop for desktop_act, per executor lifetime. */
+	private desktopActSession = new DesktopActSession();
 	private hookManager: HookManager;
 	private toolG8: ToolG8;
 	private agentId: string;
@@ -1580,6 +1590,7 @@ export class ToolExecutor {
 			},
 			// Desktop Computer Use tools (Power #10)
 			...getComputerToolDefs(),
+			DESKTOP_ACT_TOOL_DEF,
 			{
 				type: "function",
 				function: {
@@ -2305,6 +2316,8 @@ export class ToolExecutor {
 				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 			case "run_computer_task":
 				return this.handleRunComputerTask(args.goal as string, args.maxSteps as number | undefined);
+			case "desktop_act":
+				return this.handleDesktopAct(args);
 
 			// Browser Use tools
 			case "browser_open":
@@ -3872,6 +3885,48 @@ export class ToolExecutor {
 	}
 
 	/**
+	 * desktop_act: ground the target with the local grounder, ask, act, verify.
+	 * The outer gate admitted only the read half (act_resolve); the act is
+	 * gated here as click / type / press, so a block stays a block and a
+	 * require_approval rule reaches the person with the point on the card.
+	 * EIGHT_DESKTOP_ACT_DRY=<png> runs the whole flow against a saved frame
+	 * and records the act instead of executing it.
+	 */
+	private async handleDesktopAct(args: Record<string, unknown>): Promise<string> {
+		const parsed = validateDesktopActArgs(args);
+		if (typeof parsed === "string") return parsed;
+		const dry = process.env.EIGHT_DESKTOP_ACT_DRY;
+		const { ground } = await import("../eyes/ground");
+		const result = await desktopAct(
+			parsed,
+			{
+				dryRun: !!dry,
+				preflight: () => desktopPreflight(),
+				screenshot: () => {
+					if (dry) {
+						return { ok: true, path: dry, coordMap: { captureX: 0, captureY: 0, captureWidth: 0, captureHeight: 0, imageWidth: 0, imageHeight: 0 } };
+					}
+					return computerScreenshot({});
+				},
+				ground: (image, instruction) => ground({ image, instruction }),
+				policy: (ctx) => this.toolG8.gate(this.agentId, DESKTOP_POLICY_ACTION as PolicyActionType, ctx),
+				approve: (req, reason) =>
+					this.askDesktopApproval(
+						"desktop_act",
+						{ action: req.action, target: req.target, point: req.point, keys: req.keys, textLength: req.textLength },
+						reason,
+					),
+				click: (point, button, count) => computerClick({ point, button, count }),
+				type: (text) => computerType({ text }),
+				press: (keys) => computerPress({ keys }),
+				screenScale: () => (dry ? 1 : detectScreenScale()),
+			},
+			this.desktopActSession,
+		);
+		return JSON.stringify(result);
+	}
+
+	/**
 	 * A desktop action the policy says needs the person (#3213). Returns null
 	 * when they approved, or the refusal to hand back to the model. With no
 	 * person to ask (headless, no approval card) it refuses: desktop control
@@ -3882,8 +3937,10 @@ export class ToolExecutor {
 		args: Record<string, unknown>,
 		reason: string | undefined,
 	): Promise<string | null> {
-		if (this.permissionManager.isInfiniteMode()) return null;
 		const browser = toolName.startsWith("browser_");
+		// Infinite lifts the browser card only. Desktop control reaches every
+		// app the person has open, so it asks in every mode, Infinite included.
+		if (browser && this.permissionManager.isInfiniteMode()) return null;
 		const request = {
 			action: browser ? "Browser control" : "Desktop control",
 			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
