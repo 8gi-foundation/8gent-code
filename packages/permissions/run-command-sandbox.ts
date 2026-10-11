@@ -135,7 +135,10 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
  * Pure: drop each security key any .env file declares, whatever the value.
  * EIGHT_SEATBELT=require is kept regardless: dropping it could only weaken.
  */
-export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Set<string>): SecurityEnv {
+export function snapshotSecurityEnv(
+	env: Readonly<Partial<Record<SecurityKey, string>>>,
+	declared: Set<string>,
+): SecurityEnv {
 	const values: SecurityEnv["values"] = {};
 	const ignored: SecurityKey[] = [];
 	for (const k of SECURITY_ENV_KEYS) {

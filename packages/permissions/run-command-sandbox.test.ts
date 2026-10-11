@@ -156,7 +156,7 @@ describe("security env snapshot", () => {
 			try {
 				const file = path.join(dir, ".env");
 				fs.writeFileSync(file, `Z=0\n${line}\n`);
-				const env = { ...process.env, Z: "0" };
+				const env: NodeJS.ProcessEnv = { ...process.env, Z: "0" };
 				delete env.EIGHT_SEATBELT;
 				const r = spawnSync("bun", ["--config=/dev/null", "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
 					cwd: dir,

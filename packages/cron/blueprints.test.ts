@@ -195,7 +195,9 @@ describe("a text slot stays inside the single prompt argument", () => {
 			expect(argv.slice(0, 1 + flags.length)).toEqual(["bun", ...flags]);
 			const rest = argv.slice(1 + flags.length);
 			expect(rest[0]).toBe("run");
-			expect(rest[1]).toBe(eightCliPath());
+			const cli = eightCliPath();
+			if (cli === undefined) throw new Error("8gent CLI entry not found in this checkout");
+			expect(rest[1]).toBe(cli);
 			expect(rest[2]).toBe("chat");
 			expect(rest[3]).toBe(r.prompt);
 			expect(rest[3]).toContain("--flag");
