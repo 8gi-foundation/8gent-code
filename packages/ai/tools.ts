@@ -29,6 +29,7 @@ import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
@@ -1366,7 +1367,8 @@ async function runShellCommand(command: string): Promise<string> {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
+		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+		const proc = spawnShell(wrapRunCommand(finalCommand), {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,

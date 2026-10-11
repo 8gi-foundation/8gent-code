@@ -116,6 +116,7 @@ import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permiss
 import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
@@ -2878,7 +2879,8 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawnShell(finalCommand, {
+			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+			const proc = spawnShell(wrapRunCommand(finalCommand), {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
