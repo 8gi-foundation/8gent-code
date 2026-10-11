@@ -62,3 +62,22 @@ export {
 	type PublishResult,
 	runPublish,
 } from "./publish";
+
+export {
+	DEFAULT_REGISTRY,
+	LOCK_FILENAME,
+	defaultPackagesRoot,
+	installPackage,
+	listPackages,
+	packageDirName,
+	parseSource,
+	readLock,
+	removePackage,
+	sri512,
+	verifyPackage,
+	type InstallOptions,
+	type InstallResult,
+	type NpmSource,
+	type PackageLock,
+	type PinnedPackage,
+} from "./install";

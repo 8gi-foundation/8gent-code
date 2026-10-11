@@ -19,9 +19,8 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
-import { CONTEXT_NOTE_HEADER } from "../eight/context-note";
-import { PLANNING_GATE_INSTRUCTION } from "../eight/prompt";
 import { isSessionId } from "../eight/session-manager";
+import { type ChatMessage, chatMessages, isHarnessNote } from "../eight/session-messages";
 
 export const SHAREABLE_CHANNELS: ReadonlySet<string> = new Set([
 	"tui",
@@ -34,13 +33,9 @@ export const SHAREABLE_CHANNELS: ReadonlySet<string> = new Set([
 /** Transcript frames stay small whatever the history size. */
 export const TRANSCRIPT_MAX_MESSAGES = 200;
 export const TRANSCRIPT_MAX_CHARS = 20_000;
-/** Most messages written to the store per session. */
-const PERSIST_MAX_MESSAGES = 1000;
 
-export interface ChatMessage {
-	role: string;
-	content: string;
-}
+export type { ChatMessage };
+export { chatMessages, isHarnessNote };
 
 /** The slice of Agent this module needs. */
 export interface SharedAgent {
@@ -182,34 +177,6 @@ export interface SharedSessionResult {
 	bind?: string | null;
 	/** The surface the connection declared, when it is a shareable one. */
 	surface?: string;
-}
-
-/** The planning gate is injected after the user's words; any depth's variant starts the same. */
-const PLANNING_GATE_PREFIX = PLANNING_GATE_INSTRUCTION.slice(0, 60);
-
-/**
- * True for the harness's own user-role notes: session context, vision and
- * clarification notes (CONTEXT_NOTE_HEADER) and the planning gate. They sit in
- * the agent's history as role "user" but no person typed them.
- */
-export function isHarnessNote(content: string): boolean {
-	return content.startsWith(CONTEXT_NOTE_HEADER) || content.startsWith(PLANNING_GATE_PREFIX);
-}
-
-/** User and assistant turns with text content that a person wrote or reads. */
-export function chatMessages(history: Array<{ role: string; content: unknown }>): ChatMessage[] {
-	const out: ChatMessage[] = [];
-	for (const m of history) {
-		if (
-			(m.role === "user" || m.role === "assistant") &&
-			typeof m.content === "string" &&
-			m.content &&
-			!(m.role === "user" && isHarnessNote(m.content))
-		) {
-			out.push({ role: m.role, content: m.content });
-		}
-	}
-	return out;
 }
 
 /** The last TRANSCRIPT_MAX_MESSAGES messages, each capped at TRANSCRIPT_MAX_CHARS. */
@@ -495,7 +462,7 @@ export function persistSession(
 		const info = pool.getSessionInfo(sessionId);
 		const agent = pool.getAgent(sessionId);
 		if (!info || !agent || !SHAREABLE_CHANNELS.has(info.channel)) return false;
-		const messages = chatMessages(agent.getMessageHistory()).slice(-PERSIST_MAX_MESSAGES);
+		const messages = chatMessages(agent.getMessageHistory());
 		if (messages.length === 0) return false;
 		store().save(sessionId, messages, {
 			channel: info.channel,
