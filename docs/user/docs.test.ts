@@ -26,8 +26,8 @@ function read(page: string) {
 }
 
 describe("docs/user", () => {
-	test("has the seven pages", () => {
-		for (const p of ["install", "first-run", "commands", "sessions", "headless", "extensions", "approvals"]) {
+	test("has the four pages", () => {
+		for (const p of ["install", "use", "headless", "extensions"]) {
 			expect(pages).toContain(`${p}.md`);
 		}
 	});
