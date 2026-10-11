@@ -391,7 +391,15 @@ describe("state rendering", () => {
 	});
 });
 
-describe("wsTransport (real WebSocket round trip)", () => {
+// Skipped on Windows: every block that opens a real Bun.serve WebSocket server. The windows-latest
+// run dies in this file: Bun 1.4.3 segfaults and 1.4.2 segfaults or hangs, at a different test each
+// run, right after such a server is stopped, and every test after it in the process is lost.
+// Cause not isolated; tracked in #3820. The driver logic is also covered by the in-process
+// fakeSite() tests above, which still run on Windows.
+const describeNotWin = process.platform === "win32" ? describe.skip : describe;
+const testNotWin = process.platform === "win32" ? test.skip : test;
+
+describeNotWin("wsTransport (real WebSocket round trip)", () => {
 	test("authenticates with the token file, then sends the command and returns its result", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "8b-ws-"));
 		writeFileSync(join(dir, "token"), "tok-123\n");
@@ -661,7 +669,7 @@ describe("browserWithheldNote (a withheld browser says why and how to get it, #3
 	});
 });
 
-describe("wsTransport with a named profile", () => {
+describeNotWin("wsTransport with a named profile", () => {
 	afterEach(() => _setProfileHomeForTest(null));
 
 	test("uses the profile's own token and port file, not the default token or EIGHT_BROWSER_CONTROL_PORT", async () => {
@@ -754,10 +762,6 @@ describe("isolated driver (named profile): no typing into password or payment fi
 	});
 });
 
-// Skipped on Windows: this block is where the windows-latest run dies. Bun 1.4.3 segfaults and
-// 1.4.2 hangs here with no further output (the second test never reports), which also loses every
-// test after it in the process. Cause not isolated; tracked in #3820. Runs everywhere else.
-const describeNotWin = process.platform === "win32" ? describe.skip : describe;
 describeNotWin("ToolExecutor: named profile acts without a card; default profile still asks", () => {
 	const dir = mkdtempSync(join(tmpdir(), "browser-profile-gate-"));
 	const saved = {
@@ -1000,7 +1004,7 @@ describe("ToolExecutor, review round", () => {
 		expect(out).toContain("[PERMISSION DENIED]");
 	});
 
-	test("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
+	testNotWin("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
 		const site = fakeSite();
 		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
 		try {
@@ -1018,7 +1022,7 @@ describe("ToolExecutor, review round", () => {
 		}
 	});
 
-	test("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
+	testNotWin("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
 		const site = nextSite();
 		const shot: BrowserCall = async (cmd, args) =>
 			cmd === "page.screenshot"
