@@ -3,7 +3,7 @@
 # No Ollama - inference via model-proxy.
 # Target: ~60MB image, 256MB RAM at runtime.
 
-FROM oven/bun:1.2-alpine AS base
+FROM oven/bun:1.4.3-alpine AS base
 
 WORKDIR /app
 

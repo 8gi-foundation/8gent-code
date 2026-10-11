@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -87,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -128,7 +128,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
