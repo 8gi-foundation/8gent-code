@@ -1,16 +1,23 @@
 // Stub OpenAI-compatible model server for the Windows one-task CI job (#3892).
 // First chat request (no assistant turn yet) answers with one write_file call in
-// the text-tool format; any later request answers with a DONE: summary.
+// the text-tool format (or one run_command call when STUB_COMMAND is set); any later request answers with a DONE: summary.
 // Usage: bun scripts/ci/stub-model-server.ts [port]   (default 8189)
 const port = Number(process.argv[2] ?? 8189);
 const TARGET = process.env.STUB_TARGET_FILE ?? "hello.txt";
 const CONTENT = process.env.STUB_TARGET_CONTENT ?? "hello from windows ci";
 
+// STUB_COMMAND: answer with one run_command call instead of write_file (bash-style proof, Windows CI).
+const COMMAND = process.env.STUB_COMMAND;
+
 const toolReply =
 	"```tool_call\n" +
-	JSON.stringify({ name: "write_file", arguments: { path: TARGET, content: CONTENT } }) +
+	JSON.stringify(
+		COMMAND
+			? { name: "run_command", arguments: { command: COMMAND } }
+			: { name: "write_file", arguments: { path: TARGET, content: CONTENT } },
+	) +
 	"\n```";
-const doneReply = `DONE: wrote ${TARGET}`;
+const doneReply = COMMAND ? "DONE: ran the command" : `DONE: wrote ${TARGET}`;
 
 function completion(content: string) {
 	return {

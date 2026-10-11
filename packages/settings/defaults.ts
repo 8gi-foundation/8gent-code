@@ -89,4 +89,12 @@ export const DEFAULT_SETTINGS: Settings = {
 		// Audible, well short of loud: a first-ever track never starts at 100% (#3190).
 		volume: 60,
 	},
+	shell: {
+		path: "",
+		powershellTool: false,
+	},
+	retry: {
+		maxRetries: 3,
+		freeModelMaxRetries: 8,
+	},
 };

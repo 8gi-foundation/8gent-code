@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 
-import { killProcessTree, shellInvocation, spawnShell } from "./shell";
+import { describeShell, killProcessTree, resolvePowerShell, resolveWindowsShell, shellInvocation, spawnShell } from "./shell";
 
 describe("shellInvocation", () => {
 	test("posix runs the command with sh -c", () => {
@@ -134,4 +134,76 @@ describe("real processes on this host", () => {
 		expect(result.stdout.trim()).toBe("started");
 		expect(await waitUntil(() => !isAlive(grandchild), 5_000)).toBe(true);
 	}, 30_000);
+});
+
+describe("resolveWindowsShell", () => {
+	const only = (...files: string[]) => (p: string) => files.includes(p);
+	const env = { ProgramFiles: "C:\\Program Files", Path: "C:\\Windows\\System32;C:\\tools", ComSpec: "C:\\Windows\\system32\\cmd.exe" };
+	const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+	test("settings.shell.path wins when the file exists", () => {
+		const shell = resolveWindowsShell({ env, shellPath: "D:\\sh\\bash.exe", exists: only("D:\\sh\\bash.exe", gitBash) });
+		expect(shell).toEqual({ kind: "git-bash", file: "D:\\sh\\bash.exe" });
+	});
+
+	test("a missing settings.shell.path is ignored", () => {
+		expect(resolveWindowsShell({ env, shellPath: "D:\\gone\\bash.exe", exists: only(gitBash) }).file).toBe(gitBash);
+	});
+
+	test("Git Bash under Program Files is the default", () => {
+		expect(resolveWindowsShell({ env, exists: only(gitBash) })).toEqual({ kind: "git-bash", file: gitBash });
+	});
+
+	test("Git Bash is found next to git.exe on PATH", () => {
+		const e = { ...env, ProgramFiles: undefined, Path: "C:\\Windows\\System32;D:\\Git\\cmd" };
+		const shell = resolveWindowsShell({ env: e, exists: only("D:\\Git\\cmd\\git.exe", "D:\\Git\\bin\\bash.exe") });
+		expect(shell.kind).toBe("git-bash");
+		expect(shell.file.toLowerCase()).toContain("d:\\git\\bin\\bash.exe");
+	});
+
+	test("the WSL bash in System32 is never chosen", () => {
+		const shell = resolveWindowsShell({ env, exists: only("C:\\Windows\\System32\\bash.exe") });
+		expect(shell.kind).toBe("cmd");
+	});
+
+	test("falls back to PowerShell 7, then cmd.exe", () => {
+		expect(resolveWindowsShell({ env, exists: only("C:\\tools\\pwsh.exe") })).toEqual({ kind: "powershell", file: "C:\\tools\\pwsh.exe" });
+		expect(resolveWindowsShell({ env, exists: () => false })).toEqual({ kind: "cmd", file: env.ComSpec });
+	});
+
+	test("resolvePowerShell finds Windows PowerShell for the optional tool", () => {
+		const e = { ...env, SystemRoot: "C:\\Windows" };
+		const ps = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+		expect(resolvePowerShell({ env: e, exists: only(ps) })).toEqual({ kind: "powershell", file: ps });
+		expect(resolvePowerShell({ env: e, exists: () => false })).toBeUndefined();
+	});
+
+	test("describeShell names each shell in plain words", () => {
+		expect(describeShell({ kind: "git-bash", file: "x" })).toBe("Git Bash");
+		expect(describeShell({ kind: "cmd", file: "x" })).toBe("cmd.exe");
+	});
+});
+
+describe("shellInvocation on Windows with a resolved shell", () => {
+	test("Git Bash runs the command with -c, unquoted", () => {
+		expect(
+			shellInvocation("ls | grep x", { platform: "win32", windowsShell: { kind: "git-bash", file: "C:\\Git\\bin\\bash.exe" } }),
+		).toEqual({ file: "C:\\Git\\bin\\bash.exe", args: ["-c", "ls | grep x"], windowsVerbatimArguments: false });
+	});
+
+	test("PowerShell runs with -NoProfile -NonInteractive -Command", () => {
+		expect(
+			shellInvocation("Get-Date", { platform: "win32", windowsShell: { kind: "powershell", file: "pwsh.exe" } }),
+		).toEqual({
+			file: "pwsh.exe",
+			args: ["-NoProfile", "-NonInteractive", "-Command", "Get-Date"],
+			windowsVerbatimArguments: false,
+		});
+	});
+
+	test("an explicit cmd shell keeps the verbatim path", () => {
+		const inv = shellInvocation("dir", { platform: "win32", windowsShell: { kind: "cmd", file: "cmd.exe" } });
+		expect(inv.args).toEqual(["/d", "/s", "/c", '"dir"']);
+		expect(inv.windowsVerbatimArguments).toBe(true);
+	});
 });

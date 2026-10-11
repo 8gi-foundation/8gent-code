@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../core/home";
+import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
@@ -279,6 +280,8 @@ export interface ToolCatalogOptions {
 	 * registered gets called and fails.
 	 */
 	omit?: Iterable<string>;
+	/** Working directory to name in the environment line. Omitted from the line when unset. */
+	cwd?: string;
 }
 
 /** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
@@ -288,6 +291,38 @@ export const CONCISE_WEB_NOTE =
 export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**";
 export const SCRATCH_DIR_NOTE =
 	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
+
+export type EnvironmentNoteInput = {
+	platform?: NodeJS.Platform;
+	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
+	shell?: ResolvedShell;
+	cwd?: string;
+	/** OS release string, e.g. "Windows 11". Default: os.release(). */
+	release?: string;
+};
+
+const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
+
+/**
+ * One line telling the model which OS and shell run_command uses (B3): the
+ * model otherwise guesses, writes `ls` for cmd.exe, or `dir` for bash.
+ */
+export function environmentNote(input: EnvironmentNoteInput = {}): string {
+	const platform = input.platform ?? process.platform;
+	const os = OS_NAMES[platform] ?? platform;
+	const cwd = input.cwd ? `, cwd ${input.cwd}` : "";
+	if (platform !== "win32") {
+		return `**Environment: ${os}, shell sh, paths use /${cwd}.**`;
+	}
+	const shell = input.shell ?? currentWindowsShell();
+	const how =
+		shell.kind === "git-bash"
+			? "Git Bash (POSIX syntax: ls, grep, &&, pipes and $VAR work; write paths with /)"
+			: shell.kind === "powershell"
+				? "PowerShell (use PowerShell syntax: Get-ChildItem, $env:VAR; no && in Windows PowerShell 5.1)"
+				: "cmd.exe (use dir, type, %VAR%, backslash paths; ls and grep are not installed)";
+	return `**Environment: ${os}, run_command uses ${how}, path separator \\${cwd}.**`;
+}
 
 /** Review focus (#3920): a review that cites every line it read buries the defect. */
 export const REVIEW_FOCUS_NOTE =
@@ -345,6 +380,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
+		environmentNote({ cwd: opts.cwd }),
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 

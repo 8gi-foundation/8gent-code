@@ -22,6 +22,7 @@ on:
       - "packages/ai/**"
       - "packages/permissions/**"
       - "packages/core/**"
+      - "packages/settings/**"
       - "package.json"
       - "bun.lock"
   push:
@@ -89,13 +90,45 @@ jobs:
           if ($got -ne "hello from windows ci") { throw "hello.txt content was: $got" }
           "task finished: hello.txt = $got"
 
+      - name: Run a bash-style command with the exe (Git Bash)
+        shell: pwsh
+        run: |
+          # B1/B3 regression guard: the model issues a bash-only line. `$BASH_VERSION`
+          # expands only in bash; cmd.exe prints it literally, so the grep finds no
+          # version and bash-proof.txt stays empty. Passing proves Git Bash ran it.
+          $bun = (Get-Command bun).Source
+          $env:STUB_COMMAND = "printf '%s' ""`$BASH_VERSION"" | grep -E '^[0-9]+[.][0-9]+' > bash-proof.txt"
+          $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8190" -NoNewWindow -PassThru -RedirectStandardOutput stub2.out -RedirectStandardError stub2.err
+          "STUB2_PID=$($stub.Id)" | Out-File -Append $env:GITHUB_ENV
+          Remove-Item Env:STUB_COMMAND
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8190/v1/models | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Get-Content stub2.out, stub2.err -ErrorAction SilentlyContinue; throw "stub model server did not come up" }
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $work = Join-Path $env:RUNNER_TEMP "bash-work"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          $env:OLLAMA_HOST = "http://127.0.0.1:8190"
+          & $exe run --yes --provider ollama --model stub --cwd $work "Print the shell version" 2>&1 | Tee-Object -FilePath bash-task.log
+          if ($LASTEXITCODE -ne 0) { throw "run exited $LASTEXITCODE" }
+          $f = Join-Path $work "bash-proof.txt"
+          if (-not (Test-Path $f)) { throw "bash-proof.txt was not written" }
+          $got = (Get-Content $f -Raw).Trim()
+          if ($got -notmatch '^\d+\.\d+') { throw "bash did not run the command; bash-proof.txt was: '$got'" }
+          "bash-style command ran in Git Bash: BASH_VERSION = $got"
+
       - name: Logs
         if: always()
         shell: pwsh
         run: |
           "--- stub.out"; Get-Content stub.out -ErrorAction SilentlyContinue
           "--- stub.err"; Get-Content stub.err -ErrorAction SilentlyContinue
+          "--- stub2.out"; Get-Content stub2.out -ErrorAction SilentlyContinue
+          "--- stub2.err"; Get-Content stub2.err -ErrorAction SilentlyContinue
           if ($env:STUB_PID) { Stop-Process -Id $env:STUB_PID -Force -ErrorAction SilentlyContinue }
+          if ($env:STUB2_PID) { Stop-Process -Id $env:STUB2_PID -Force -ErrorAction SilentlyContinue }
 
       - name: Upload logs
         if: always()
@@ -104,6 +137,9 @@ jobs:
           name: windows-task-logs
           path: |
             task.log
+            bash-task.log
             stub.out
             stub.err
+            stub2.out
+            stub2.err
           retention-days: 7

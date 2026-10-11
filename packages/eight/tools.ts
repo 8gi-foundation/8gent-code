@@ -35,7 +35,8 @@ import { layoutMeasureLine } from "./layout-measure";
 import { writeShapeLine } from "../ai/write-shape";
 import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
-import { killProcessTree, spawnShell } from "../core/shell";
+import { loadSettings } from "../settings/store";
+import { type ResolvedShell, killProcessTree, resolvePowerShell, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -207,6 +208,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"write_file",
 	"edit_file",
 	"run_command",
+	"powershell",
 	"git_checkout",
 	"git_create_branch",
 	"git_add",
@@ -612,6 +614,31 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 	);
 	return { ...args, actions };
 }
+
+/** The PowerShell for the optional `powershell` tool: win32 only, and only when settings.shell.powershellTool is on. */
+function powershellToolShell(): ResolvedShell | undefined {
+	if (process.platform !== "win32") return undefined;
+	try {
+		if (!loadSettings().shell?.powershellTool) return undefined;
+	} catch {
+		return undefined;
+	}
+	return resolvePowerShell();
+}
+
+const POWERSHELL_TOOL_DEF = {
+	type: "function",
+	function: {
+		name: "powershell",
+		description:
+			"[SHELL] Windows only. Runs a PowerShell command (-NoProfile -NonInteractive) and returns stdout/stderr. Use for Windows-native work (Get-ChildItem, registry, services); use run_command for git, bun, npm and POSIX tools. Same permission checks as run_command.",
+		parameters: {
+			type: "object",
+			properties: { command: { type: "string", description: "PowerShell command to run" } },
+			required: ["command"],
+		},
+	},
+};
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1700,6 +1727,8 @@ export class ToolExecutor {
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
+			// Windows only, off by default (settings.shell.powershellTool).
+			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
 		];
 	}
 
@@ -1721,6 +1750,7 @@ export class ToolExecutor {
 		notebook_insert_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
+		powershell: "run_command",
 		git_push: "git_push",
 		git_commit: "git_commit",
 		web_search: "network_request",
@@ -2063,6 +2093,12 @@ export class ToolExecutor {
 				return target && sanitizeShellCommand(command).safe
 					? this.gatedCommit(run, target)
 					: run();
+			}
+
+			case "powershell": {
+				const shell = powershellToolShell();
+				if (!shell) return "Error: the powershell tool is off. Use run_command.";
+				return this.runCommand(args.command as string, args.timeout as number | undefined, undefined, shell);
 			}
 
 			// Multi-agent orchestration
@@ -2776,15 +2812,16 @@ export class ToolExecutor {
 		command: string,
 		timeoutSec?: number,
 		env?: Record<string, string | undefined>,
+		windowsShell?: ResolvedShell,
 	): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () =>
-				this.runCommand(command, timeoutSec, env),
+				this.runCommand(command, timeoutSec, env, windowsShell),
 			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
 		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env, windowsShell));
 		}
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen
@@ -2882,6 +2919,7 @@ export class ToolExecutor {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
+				windowsShell,
 				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
