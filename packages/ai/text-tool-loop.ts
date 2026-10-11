@@ -90,6 +90,7 @@ import {
 } from "./claim-check";
 import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
 import { type PlanItem, parsePlan } from "./update-plan";
+import { browserWithheldNote } from "../tools/eight-browser";
 import { UselessStreak } from "./useless-streak";
 import type { ToolSpec } from "./text-tools";
 
@@ -495,7 +496,8 @@ export function splitImageAttachment(result: string): { text: string; images: st
  */
 export function unknownToolResult(name: string, available: string[]): string {
 	const list = available.length > 0 ? available.join(", ") : "none";
-	return `Error: no tool named "${name}" is available. Available tools: ${list}.`;
+	const withheld = name.startsWith("browser_") ? browserWithheldNote() : null;
+	return `Error: no tool named "${name}" is available. Available tools: ${list}.${withheld ? ` ${withheld}` : ""}`;
 }
 
 /**
