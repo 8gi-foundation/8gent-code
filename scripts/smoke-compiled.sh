@@ -45,7 +45,9 @@ if command -v python3 >/dev/null 2>&1 && python3 -c 'import pty, fcntl, termios'
 	tui_out="$(HOME="$TMP_HOME" python3 - "$BIN" <<'PY' 2>&1
 import os, pty, re, select, signal, struct, sys, time, fcntl, termios
 bin_ = sys.argv[1]
-env = dict(os.environ, PATH="/usr/bin:/bin", TERM="xterm-256color")
+# No CI variables: Ink detects CI and suppresses rendering (see pack-smoke.ts).
+env = {k: v for k, v in os.environ.items() if k not in ("CI", "GITHUB_ACTIONS", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID")}
+env.update(PATH="/usr/bin:/bin", TERM="xterm-256color", LANG="en_US.UTF-8")
 pid, fd = pty.fork()
 if pid == 0:
     os.execve(bin_, [bin_, "tui", "--no-pet"], env)
