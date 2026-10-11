@@ -163,8 +163,35 @@ describe("step_start and step_finish timing", () => {
 		logger.logStep("t1", "Chat", 0, 5);
 		const ev = readEvents("timing-4");
 		for (const e of ev.filter((x) => x.type === "step_start" || x.type === "step_finish")) {
-			const { text: _t, ...rest } = e; // step_finish text is the model reply, not new here
-			expect(JSON.stringify(rest)).not.toContain(secret);
+			expect(JSON.stringify(e)).not.toContain(secret);
 		}
+	});
+
+	test("two tabs interleaving the same step number each get their own duration", async () => {
+		logger.initSessionLogger("timing-5", "m", "p");
+		logger.logStepStart("A", "A", 0, "ollama", "m");
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStepStart("B", "B", 0, "ollama", "m");
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStep("A", "A", 0, 1);
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStep("B", "B", 0, 1);
+		const ev = readEvents("timing-5");
+		const starts = Object.fromEntries(ev.filter((e) => e.type === "step_start").map((e) => [e.tabId, e]));
+		const fins = Object.fromEntries(ev.filter((e) => e.type === "step_finish").map((e) => [e.tabId, e]));
+		for (const t of ["A", "B"]) {
+			expect(fins[t].durationMs).toBe(Date.parse(fins[t].timestamp) - Date.parse(starts[t].timestamp));
+		}
+		expect(fins.A.durationMs).toBeGreaterThan(fins.B.durationMs - 31);
+		expect(fins.B.durationMs).toBeGreaterThanOrEqual(55);
+	});
+
+	test("step_finish stores textLength and never the model text", () => {
+		logger.initSessionLogger("timing-6", "m", "p");
+		logger.logStep("t1", "Chat", 0, 1, "reply with sk-MODEL-ECHO-123");
+		const fin = readEvents("timing-6").find((e) => e.type === "step_finish")!;
+		expect(fin.text).toBeUndefined();
+		expect(fin.textLength).toBe("reply with sk-MODEL-ECHO-123".length);
+		expect(JSON.stringify(fin)).not.toContain("sk-MODEL-ECHO-123");
 	});
 });

@@ -4,6 +4,10 @@
  * Each line is one JSON object with { type, timestamp, sequenceNumber, ... }.
  * The debugger webapp reads these .jsonl files via SSE streaming.
  *
+ * Consumers must pair step_start with step_finish on (tabId, stepNumber), never
+ * stepNumber alone: every tab numbers its steps from 0 in this one file.
+ * step_finish records textLength, not the model text.
+ *
  * Event types match the debugger schema:
  *   session_start, user_message, assistant_message, tool_call, tool_result,
  *   step_start, step_finish, error, tab_switch, session_end
@@ -63,8 +67,10 @@ let statToolCalls = 0;
 let statTotalTokens = 0;
 let statErrors = 0;
 let stepCount = 0;
-// Start time (ms) of each open step, keyed by step number, for durationMs.
-const stepStartedAt = new Map<number, number>();
+// Start time (ms) of each open step, keyed by tabId:stepNumber, for durationMs.
+// Every tab numbers its steps from 0 in one shared file, so step number alone collides.
+const stepStartedAt = new Map<string, number>();
+const stepKey = (tabId: string, stepNumber: number): string => `${tabId}:${stepNumber}`;
 
 // Pending writes buffer (batched via flush timer)
 let pendingLines: string[] = [];
@@ -336,7 +342,7 @@ export function logStepStart(
 	if (!sessionId) return;
 
 	const at = Date.now();
-	stepStartedAt.set(stepNumber, at);
+	stepStartedAt.set(stepKey(tabId, stepNumber), at);
 	appendLine({
 		type: "step_start",
 		timestamp: new Date(at).toISOString(),
@@ -363,8 +369,9 @@ export function logStep(
 
 	// Measured wall time since this step's step_start; absent when no start was seen.
 	const at = Date.now();
-	const startedAt = stepStartedAt.get(stepNumber);
-	stepStartedAt.delete(stepNumber);
+	const key = stepKey(tabId, stepNumber);
+	const startedAt = stepStartedAt.get(key);
+	stepStartedAt.delete(key);
 
 	appendLine({
 		type: "step_finish",
@@ -374,7 +381,8 @@ export function logStep(
 		finishReason: "stop",
 		durationMs: startedAt === undefined ? undefined : at - startedAt,
 		totalTokens,
-		text: text?.slice(0, 500),
+		// Length only: model output is never persisted in the session log.
+		textLength: text?.length ?? 0,
 		tabId,
 		tabName,
 	});
