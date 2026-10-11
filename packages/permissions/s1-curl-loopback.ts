@@ -21,35 +21,30 @@
  *   - every option is on the allowlist below and written exactly (no `--x=y`
  *     form, no abbreviation, no `--`). Anything else, including -K/--config,
  *     --proxy/-x, --unix-socket, --resolve, --connect-to, --proto*, --next,
- *     --output-dir, --trace*, --stderr, -w with `@file` or `%output{}`, is
+ *     --output-dir, -L, -O, --trace*, --stderr, -w with `@file` or `%output{}`, is
  *     refused;
  *   - every URL is `http://` or `https://` plus 127.0.0.1, localhost or [::1],
  *     then an optional port (1 to 65535) and a path. No userinfo, no `{}` or
  *     `[]` glob, no other scheme, no scheme-less guess, at least one URL;
- *   - every file the command reads or writes (-o, -c, -b when a file, -D, -T,
- *     -d/--data/--data-binary/--data-ascii/--data-urlencode `@file`, -F
- *     `name=@file`, `name=<file`) resolves, after realpath of its nearest
- *     existing part, inside the workspace: not a secret, not a protected
- *     path, no dot directory except `.tmp`, and a write is not source or
- *     config. `-` (stdout) is fine for output, never for input. `/dev/null`
- *     is fine for output. -O names its file from the URL and gets the same
- *     checks;
+ *   - every file the command reads (-b when a file, -T, -d/--data/
+ *     --data-binary/--data-ascii/--data-urlencode `@file`, -F `name=@file`,
+ *     `name=<file`) resolves, after realpath of its nearest existing part,
+ *     inside the workspace: not a secret, not a protected path, no dot
+ *     directory except `.tmp`. Every file it writes (-o, -c, -D) must be
+ *     under the workspace's `.tmp/` (realpath again) and not source or
+ *     config. `-` (stdout) is fine for output, never for input; `/dev/null`
+ *     is fine for output. -O is refused (it writes into the working
+ *     directory, not `.tmp/`). -F/--form values may carry only `type=` and
+ *     `filename=` options after `;` (`headers=@file` reads a file);
  *   - no http(s)/ALL proxy variable in the environment (curl would send the
  *     loopback request to the proxy, body and all), and no curlrc in $CURL_HOME,
  *     $XDG_CONFIG_HOME, ~ or ~/.config unless `-q` is the first argument.
  *
- * Redirects (-L), decided: allowed only when the request carries nothing that
- * could follow it off the box. curl cannot be told "loopback only" for
- * redirects (--proto-redir limits the scheme, never the host), so a hop to a
- * public host is possible. What such a hop can leak is whatever the request
- * carries: a 307/308 resends a body, -H and -b STRING are sent to every host,
- * -u likewise. So -L is refused with any body (-d*, -F, -T), any -H, any -b cookie STRING, and any -X (a forced method sticks across hops).
- * Left is a body-less GET/HEAD whose only secret is a cookie jar file: curl
- * binds jar cookies to the host that set them (127.0.0.1 cannot set a cookie
- * for another domain), so nothing in the workspace travels. The residual is an
- * unauthenticated GET to a host the scenario's own loopback server named,
- * which a plain `curl` to any page already is. The alternative, refusing -L
- * outright, would still fail the scenario this lane exists for.
+ * Redirects (-L/--location) are refused. curl cannot be told "loopback only"
+ * for redirects (--proto-redir limits the scheme, never the host), so a hop
+ * could reach 169.254.169.254 or the LAN (SSRF) with whatever the request
+ * carries. A curl with -L goes to the judge as before. To follow a 302, make a
+ * second loopback request to the Location it returned; this lane allows that.
  *
  * Known limits, on purpose: only POSIX single or double quoting; no `-d` with
  * `&` unquoted; multiple files in -F `@a,b` are refused; a file can change
@@ -58,9 +53,8 @@
  * Synchronous, never throws.
  */
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import * as path from "node:path";
+import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { protectedRel } from "./s1-mv-in-project";
@@ -77,17 +71,9 @@ const NUM = /^\d{1,6}(\.\d{1,3})?$/;
 const METHOD = /^[A-Z]{3,10}$/;
 const URL_RE =
 	/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?:\/[^\s{}[\]\\]*)?$/i;
-const PROXY_ENV = [
-	"http_proxy",
-	"https_proxy",
-	"all_proxy",
-	"HTTP_PROXY",
-	"HTTPS_PROXY",
-	"ALL_PROXY",
-];
 
 /** Options taking no value. */
-const BOOL_SHORT = new Set(["s", "S", "f", "i", "I", "v", "O", "L", "G"]);
+const BOOL_SHORT = new Set(["s", "S", "f", "i", "I", "v", "G"]);
 const BOOL_LONG = new Map<string, string>([
 	["--silent", "s"],
 	["--show-error", "S"],
@@ -96,8 +82,6 @@ const BOOL_LONG = new Map<string, string>([
 	["--include", "i"],
 	["--head", "I"],
 	["--verbose", "v"],
-	["--remote-name", "O"],
-	["--location", "L"],
 	["--get", "G"],
 	["--compressed", "z"],
 	["--create-dirs", "z"],
@@ -143,7 +127,6 @@ type Word = string;
 
 /** Split into words under the small quoting subset, or null when anything else appears. */
 function splitWords(text: string): Word[] | null {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
 	if (/[^\x20-\x7e]/.test(text)) return null;
 	const words: Word[] = [];
 	let cur = "";
@@ -175,25 +158,9 @@ function splitWords(text: string): Word[] | null {
 	return words;
 }
 
-function curlrcPresent(): boolean {
-	const dirs = new Set<string>();
-	for (const e of [process.env.CURL_HOME, process.env.XDG_CONFIG_HOME, process.env.HOME, homedir()])
-		if (e) dirs.add(e);
-	const files: string[] = [];
-	for (const d of dirs)
-		files.push(path.join(d, ".curlrc"), path.join(d, "_curlrc"), path.join(d, ".config", "curlrc"));
-	return files.some((f) => existsSync(f));
-}
-
 interface St {
 	root: string;
 	urls: string[];
-	location: boolean;
-	remoteName: boolean;
-	body: boolean;
-	header: boolean;
-	method: boolean;
-	cookieString: boolean;
 }
 
 /** Check one file the command touches. `-` is stdout for writes only. */
@@ -205,8 +172,13 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 	if (!inside(abs, st.root)) return false;
 	const rel = path.relative(st.root, abs);
 	if (rel === "" || SECRET.test(rel) || protectedRel(rel)) return false;
-	if (rel.split("/").some((s) => s.startsWith(".") && s !== ".tmp")) return false;
-	if (write && WRITE_BAD_NAME.test(path.basename(abs))) return false;
+	const segs = rel.split("/");
+	if (segs.some((s) => s.startsWith(".") && s !== ".tmp")) return false;
+	if (write) {
+		// Outputs only under the workspace's .tmp/ directory.
+		if (segs[0] !== ".tmp" || segs.length < 2 || segs.includes("node_modules")) return false;
+		if (WRITE_BAD_NAME.test(path.basename(abs))) return false;
+	}
 	return true;
 }
 
@@ -230,47 +202,41 @@ function applyValue(key: string, v: string, st: St): boolean {
 		case "b":
 			if (v === "") return true;
 			if (v.includes("=")) {
-				st.cookieString = true;
 				return true;
 			}
 			return fileOk(v, st, false);
 		case "T":
-			st.body = true;
 			return fileOk(v, st, false);
 		case "d": {
-			st.body = true;
 			return v.startsWith("@") ? fileOk(v.slice(1), st, false) : true;
 		}
 		case "raw":
-			st.body = true;
 			return true;
 		case "urlenc": {
-			st.body = true;
 			const at = v.indexOf("@");
 			const eq = v.indexOf("=");
 			if (at !== -1 && (eq === -1 || at < eq)) return fileOk(v.slice(at + 1), st, false);
 			return true;
 		}
 		case "F": {
-			st.body = true;
 			const eq = v.indexOf("=");
 			if (eq === -1) return false;
-			const val = v.slice(eq + 1);
+			const [val, ...opts] = v.slice(eq + 1).split(";");
+			// Only type= and filename= may follow; headers=@file reads a file.
+			if (opts.some((o) => !/^(type|filename)=[A-Za-z0-9._/+-]*$/.test(o))) return false;
+			if (/headers\s*=/i.test(v)) return false;
 			if (val.startsWith("@") || val.startsWith("<")) {
-				const file = val.slice(1).split(";")[0];
+				const file = val.slice(1);
 				if (file.includes(",") || file.includes('"')) return false;
 				return fileOk(file, st, false);
 			}
 			return true;
 		}
 		case "fstr":
-			st.body = true;
 			return true;
 		case "H":
-			st.header = true;
 			return !v.startsWith("@");
 		case "X":
-			st.method = true;
 			return METHOD.test(v);
 		case "m":
 			return NUM.test(v);
@@ -296,30 +262,21 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 		if (decideRules(text).rules.length !== 0) return NO;
 		const words = splitWords(text);
 		if (!words || words.length < 2 || words.length > MAX_WORDS || words[0] !== "curl") return NO;
-		if (PROXY_ENV.some((k) => process.env[k])) return NO;
+
 		const st: St = {
 			root: canon(cwd),
 			urls: [],
-			location: false,
-			remoteName: false,
-			body: false,
-			header: false,
-			method: false,
-			cookieString: false,
 		};
 		let i = 1;
-		if (words[1] === "-q" || words[1] === "--disable") i = 2;
-		else if (curlrcPresent()) return NO;
+		const qFirst = words[1] === "-q" || words[1] === "--disable";
+		if (qFirst) i = 2;
+		// Proxy variable, or a curlrc without -q first: curl would leave the box or read config.
+		if (curlEnvRefusal(qFirst) !== null) return NO;
 		for (; i < words.length; i++) {
 			const w = words[i];
 			if (w === "-" || w === "--") return NO;
 			if (w.startsWith("--")) {
-				const b = BOOL_LONG.get(w);
-				if (b !== undefined) {
-					if (b === "L") st.location = true;
-					if (b === "O") st.remoteName = true;
-					continue;
-				}
+				if (BOOL_LONG.has(w)) continue;
 				const key = VAL_LONG.get(w);
 				if (key === undefined || i + 1 >= words.length) return NO;
 				if (!applyValue(key, words[++i], st)) return NO;
@@ -329,11 +286,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 				// A cluster of short options; one that takes a value ends it.
 				for (let j = 1; j < w.length; j++) {
 					const c = w[j];
-					if (BOOL_SHORT.has(c)) {
-						if (c === "L") st.location = true;
-						if (c === "O") st.remoteName = true;
-						continue;
-					}
+					if (BOOL_SHORT.has(c)) continue;
 					const key = VAL_SHORT.get(c);
 					if (key === undefined) return NO;
 					const rest = w.slice(j + 1);
@@ -350,18 +303,6 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 			st.urls.push(w);
 		}
 		if (st.urls.length === 0 || st.urls.length > MAX_URLS || !st.urls.every(urlOk)) return NO;
-		if (st.remoteName) {
-			for (const u of st.urls) {
-				const name =
-					u
-						.replace(/[?#].*$/, "")
-						.split("/")
-						.pop() ?? "";
-				if (!name || name.includes(":") || !fileOk(name, st, true)) return NO;
-			}
-		}
-		// Redirects: nothing that could follow a hop to another host may ride along.
-		if (st.location && (st.body || st.header || st.method || st.cookieString)) return NO;
 		return {
 			ok: true,
 			reason: `curl to a loopback server (${st.urls.length} URL${st.urls.length === 1 ? "" : "s"}) touching only files inside the workspace`,

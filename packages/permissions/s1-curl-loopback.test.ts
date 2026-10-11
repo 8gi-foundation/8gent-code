@@ -44,9 +44,13 @@ class AlwaysDangerous implements DecideBackend {
 	}
 }
 
-// The exact command from the issue (port is the stub's).
+// The exact command from the issue (port is the stub's). It has -L, which this lane refuses (8SO).
+// ISSUE_NO_L is the same command with the redirect followed by a second loopback request.
 const ISSUE_CMD =
 	"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -L -D .tmp/headers.txt http://127.0.0.1:41873/login";
+
+const ISSUE_NO_L =
+	"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -D .tmp/headers.txt http://127.0.0.1:41873/login";
 
 let ws: string;
 let outside: string;
@@ -127,8 +131,8 @@ afterEach(() => {
 const ok = (c: string) => curlToLoopback(c, ws).ok;
 
 describe("curlToLoopback allows", () => {
-	test("the exact command from the issue", () => {
-		expect(ok(ISSUE_CMD)).toBe(true);
+	test("the issue's command without -L (follow a 302 with a second loopback request)", () => {
+		expect(ok(ISSUE_NO_L)).toBe(true);
 	});
 	test("loopback hosts, default and explicit ports, http and https", () => {
 		for (const u of [
@@ -146,7 +150,7 @@ describe("curlToLoopback allows", () => {
 		for (const c of [
 			"curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/",
 			"curl -sS -f -i http://127.0.0.1:8080/",
-			"curl -sSLo .tmp/out.html http://127.0.0.1:8080/",
+			"curl -sSo .tmp/out.html http://127.0.0.1:8080/",
 			"curl -s -X POST -d 'user=a&pw=b' -c .tmp/jar.txt http://127.0.0.1:8080/login",
 			'curl -s -H "Accept: application/json" http://localhost:8080/api',
 			"curl -s -d @data.json http://127.0.0.1:8080/api",
@@ -156,7 +160,6 @@ describe("curlToLoopback allows", () => {
 			"curl -s -b 'sid=abc' http://127.0.0.1:8080/",
 			"curl -s -b .tmp/cookies.txt -D - http://127.0.0.1:8080/",
 			"curl -s -m 5 --max-redirs 0 http://127.0.0.1:8080/",
-			"curl -s -O http://127.0.0.1:8080/files/report.txt",
 			"curl -s -o .tmp/a.txt http://127.0.0.1:8080/ http://localhost:8081/",
 			"curl -q -s http://127.0.0.1:8080/",
 		]) {
@@ -302,27 +305,81 @@ describe("curlToLoopback refuses", () => {
 		}
 	});
 	test("no workspace", () => {
-		expect(curlToLoopback(ISSUE_CMD, undefined).ok).toBe(false);
-		expect(curlToLoopback(ISSUE_CMD, "relative").ok).toBe(false);
+		expect(curlToLoopback(ISSUE_NO_L, undefined).ok).toBe(false);
+		expect(curlToLoopback(ISSUE_NO_L, "relative").ok).toBe(false);
 	});
 });
 
-describe("-L is allowed only when nothing can follow a hop off the box", () => {
-	test("a body-less GET with a cookie jar file passes", () => {
-		expect(ok("curl -sL -b .tmp/c.txt -c .tmp/c.txt http://127.0.0.1:8080/")).toBe(true);
-		expect(ok("curl -s --location http://127.0.0.1:8080/")).toBe(true);
+describe("-L is refused (8SO: the redirect host cannot be pinned)", () => {
+	test("the issue's exact command, with -L, goes to the judge", () => {
+		expect(ok(ISSUE_CMD)).toBe(false);
 	});
-	test("with a body, header, forced method or cookie string it is refused", () => {
+	test("every spelling of -L is refused", () => {
 		for (const c of [
+			"curl -sL http://127.0.0.1:8080/",
+			"curl -s -L http://127.0.0.1:8080/",
+			"curl -s --location http://127.0.0.1:8080/",
+			"curl -s --location-trusted http://127.0.0.1:8080/",
+			"curl -sL -b .tmp/c.txt -c .tmp/c.txt http://127.0.0.1:8080/",
 			"curl -sL -d x=1 http://127.0.0.1:8080/",
-			"curl -sL --data-raw x http://127.0.0.1:8080/",
-			"curl -sL -d @data.json http://127.0.0.1:8080/",
-			"curl -sL -F a=b http://127.0.0.1:8080/",
-			"curl -sL -T data.json http://127.0.0.1:8080/",
-			"curl -sL -H 'Authorization: x' http://127.0.0.1:8080/",
-			"curl -sL -X POST http://127.0.0.1:8080/",
-			"curl -sL -b sid=abc http://127.0.0.1:8080/",
-			"curl -s --location -d x=1 http://127.0.0.1:8080/",
+		]) {
+			expect(ok(c), c).toBe(false);
+		}
+	});
+});
+
+describe("-F options and writes (8SO)", () => {
+	test("-F with headers= or any option other than type= and filename= is refused", () => {
+		const outsideFile = "/etc/ho" + "sts";
+		for (const f of [
+			`'f=a;headers=@${outsideFile}'`,
+			"'f=a;headers=<data.json'",
+			"'f=a;headers=@data.json'",
+			`'f=@data.json;headers=@${outsideFile}'`,
+			"'f=@data.json;headers=<../x'",
+			"'f=@data.json;encoder=base64'",
+			"'f=@data.json;type=text/plain;headers=@data.json'",
+			"'f=a;HEADERS=@data.json'",
+		]) {
+			expect(ok(`curl -s -F ${f} http://127.0.0.1:8080/`), f).toBe(false);
+			expect(ok(`curl -s --form ${f} http://127.0.0.1:8080/`), f).toBe(false);
+		}
+		expect(
+			ok("curl -s -F 'f=@data.json;type=text/plain;filename=x.txt' http://127.0.0.1:8080/"),
+		).toBe(true);
+	});
+	test("outputs are allowed only under .tmp/", () => {
+		for (const f of [
+			"-o out.txt",
+			"-o data.json",
+			"-c cookies.txt",
+			"-D headers.txt",
+			"-o docs/x.txt",
+			"-o .tmp",
+			"-o .tmp/",
+			"-o .tmp/node_modules/x",
+			"-o .tmp/t.py",
+			"-o .tmp/Makefile",
+			"-o .tmp/CLAUDE.md",
+		]) {
+			expect(ok(`curl -s ${f} http://127.0.0.1:8080/`), f).toBe(false);
+		}
+		for (const f of [
+			"-o .tmp/out.txt",
+			"-c .tmp/a/b.txt",
+			"-D .tmp/h.txt",
+			"-o /dev/null",
+			"-D -",
+			"-o -",
+		]) {
+			expect(ok(`curl -s ${f} http://127.0.0.1:8080/`), f).toBe(true);
+		}
+	});
+	test("-O and --remote-name are refused", () => {
+		for (const c of [
+			"curl -s -O http://127.0.0.1:8080/a.txt",
+			"curl -s --remote-name http://127.0.0.1:8080/a.txt",
+			"curl -sO http://127.0.0.1:8080/a.txt",
 		]) {
 			expect(ok(c), c).toBe(false);
 		}
@@ -332,7 +389,7 @@ describe("-L is allowed only when nothing can follow a hop off the box", () => {
 describe("curl environment", () => {
 	test("a curlrc in the home directory refuses unless -q is first", () => {
 		put(".curlrc", "proxy=http://evil:1", process.env.HOME as string);
-		expect(ok(ISSUE_CMD)).toBe(false);
+		expect(ok(ISSUE_NO_L)).toBe(false);
 		expect(ok("curl -q -s http://127.0.0.1:8080/")).toBe(true);
 		expect(ok("curl --disable -s http://127.0.0.1:8080/")).toBe(true);
 		expect(ok("curl -s -q http://127.0.0.1:8080/")).toBe(false);
@@ -341,32 +398,33 @@ describe("curl environment", () => {
 		const d = tempDir("s1-curl-ch-");
 		put("_curlrc", "x", d);
 		process.env.CURL_HOME = d;
-		expect(ok(ISSUE_CMD)).toBe(false);
+		expect(ok(ISSUE_NO_L)).toBe(false);
 		Reflect.deleteProperty(process.env, "CURL_HOME");
 		const x = tempDir("s1-curl-xdg-");
 		put(".curlrc", "x", x);
 		process.env.XDG_CONFIG_HOME = x;
-		expect(ok(ISSUE_CMD)).toBe(false);
+		expect(ok(ISSUE_NO_L)).toBe(false);
 	});
 	test("a proxy variable in the environment refuses", () => {
 		process.env.http_proxy = "http://evil:3128";
-		expect(ok(ISSUE_CMD)).toBe(false);
+		expect(ok(ISSUE_NO_L)).toBe(false);
 		Reflect.deleteProperty(process.env, "http_proxy");
 		process.env.ALL_PROXY = "socks5://evil:1080";
-		expect(ok(ISSUE_CMD)).toBe(false);
+		expect(ok(ISSUE_NO_L)).toBe(false);
 	});
 });
 
 describe("systemOneGate end to end (default mode) with a judge that says dangerous", () => {
 	test("the issue's command passes without asking the judge", async () => {
-		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		const r = await systemOneGate(ISSUE_NO_L, process.env, ws);
 		expect(r.run).toBe(true);
 		expect(r.guard?.backend).toBe("allowlist");
 		expect(judge.asks).toBe(0);
 	});
 
 	for (const cmd of [
-		"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -L -D .tmp/headers.txt http://example.com/login",
+		ISSUE_CMD,
+		"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -D .tmp/headers.txt http://example.com/login",
 		"curl -s https://api.github.com/",
 		"curl -s -K x.cfg http://127.0.0.1:8080/",
 		"curl -s file:///etc/passwd",
@@ -380,14 +438,14 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 
 	test("strict mode (Guarded) never skips the judge", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
-		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		const r = await systemOneGate(ISSUE_NO_L, process.env, ws);
 		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 
 	test("EIGHT_S1_ALLOWLIST=0 turns the lane off with the rest of the allowlist", async () => {
 		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
-		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		const r = await systemOneGate(ISSUE_NO_L, process.env, ws);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

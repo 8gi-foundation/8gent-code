@@ -257,7 +257,7 @@ const PROC_OK = new Set(["argv", "exit", "exitCode", "cwd", "stdout", "stderr"])
 /** Tokens after which a `[` opens an array literal or a type, not a member access. */
 const ARRAY_PREV = new Set(["=", "(", ",", ":", "[", "=>", "?", "...", "<", "|", "&", ";", "!", "${", "}$", "+", "??"]);
 export const WRITE_BAD_NAME =
-	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
+	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|justfile|gemfile|rakefile|procfile|claude\.md|agents\.md|\.cursorrules|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|py|rb|pl|php|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
 
 interface Ctx {
 	root: string;
@@ -392,6 +392,7 @@ function writeTargetOk(p: string, root: string): boolean {
 	if (!inside(abs, root)) return underTemp(abs);
 	const rel = path.relative(root, abs);
 	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
+	if (rel.split("/").includes("node_modules")) return false;
 	return !WRITE_BAD_NAME.test(path.basename(abs));
 }
 

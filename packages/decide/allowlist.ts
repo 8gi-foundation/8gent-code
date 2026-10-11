@@ -40,6 +40,9 @@
  * Pure, synchronous, never throws. Prompt text only: nothing is executed.
  */
 
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promptControlText } from "./guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "./rules";
 
@@ -147,7 +150,35 @@ function fetchValueOk(bin: string, flag: string, v: string): string | null {
 	return `${bin} flag ${flag}`;
 }
 
-function loopbackFetchOk(bin: string, args: string[]): string | null {
+/** Proxy variables curl honours; any of them would send a loopback request (and its body) elsewhere. */
+const CURL_PROXY_ENV = /^(http|https|all)_proxy$/i;
+
+/**
+ * Why a curl cannot be trusted to stay on this machine because of its
+ * ENVIRONMENT, or null: a proxy variable (any case) is set, or a curlrc exists
+ * in $CURL_HOME, $XDG_CONFIG_HOME, ~ or ~/.config and `-q` is not the first
+ * argument. Shared with packages/permissions/s1-curl-loopback.ts.
+ */
+export function curlEnvRefusal(qFirst: boolean, env: NodeJS.ProcessEnv = process.env): string | null {
+	for (const [k, v] of Object.entries(env)) if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
+	if (qFirst) return null;
+	const dirs = new Set<string>();
+	for (const e of [env.CURL_HOME, env.XDG_CONFIG_HOME, env.HOME, homedir()]) if (e) dirs.add(e);
+	for (const d of dirs) {
+		for (const f of [join(d, ".curlrc"), join(d, "_curlrc"), join(d, ".config", "curlrc")]) {
+			if (existsSync(f)) return "curl with a curlrc present and no -q first";
+		}
+	}
+	return null;
+}
+
+function loopbackFetchOk(bin: string, argsIn: string[]): string | null {
+	const qFirst = bin === "curl" && (argsIn[0] === "-q" || argsIn[0] === "--disable");
+	const args = qFirst ? argsIn.slice(1) : argsIn;
+	if (bin === "curl") {
+		const env = curlEnvRefusal(qFirst);
+		if (env) return env;
+	}
 	const spec = FETCH_FLAGS;
 	const urls: string[] = [];
 	for (let i = 0; i < args.length; i++) {
