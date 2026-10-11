@@ -628,7 +628,10 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
+			// "browser" counts only as the first path part after .8gent (browser-shots/...) or as its own
+			// word, never as a later directory name: a run dir like .8gent/rishi-pilot/runs/x/browser-op-practice
+			// is not the browser's state (#browser-op false positive).
+			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || /^\.8gent[^\s/\\]*[/\\]+browser|\sbrowser/.test(lower.slice(at))) return true;
 			if (lists) return true;
 		}
 		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
