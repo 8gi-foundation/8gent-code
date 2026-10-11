@@ -102,6 +102,8 @@ export interface AgentEventCallbacks {
 	 * that runs the turn while it runs. Display only (#3102).
 	 */
 	onModelRouted?: (event: { requested: string; used: string; provider: string }) => void;
+	/** A steering message (Agent.steer) was delivered into the running turn (D1). */
+	onSteer?: (event: { text: string }) => void;
 	onCompaction?: (event: {
 		summary: string;
 		tokensBefore: number;
