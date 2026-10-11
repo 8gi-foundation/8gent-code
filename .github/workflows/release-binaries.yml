@@ -48,12 +48,10 @@ jobs:
   build:
     name: Build macOS, Linux and Windows
     runs-on: macos-latest
-    # id-token + attestations: write sign the build provenance attestation for
-    # every built file (checked by `gh attestation verify` in the installers).
+    # Read-only. This job runs dependency install scripts (bun install), so it
+    # must never hold id-token or attestations: those live only in `attest`.
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     env:
       # A step's own env is not visible to its `if:`, so the notarization
       # switch lives here.
@@ -176,20 +174,38 @@ jobs:
           ls | grep -v '^installers.sha256$' | xargs shasum -a 256 | LC_ALL=C sort -k2 > installers.sha256
           cat installers.sha256
 
-      # GitHub build provenance for every file attached to the release:
-      # `gh attestation verify <file> --repo 8gi-foundation/8gent-code` proves
-      # it was built by this workflow from this repository.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-checksums: dist/installers/installers.sha256
-
       - name: Upload artifacts to workflow
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: 8gent-binaries
           path: dist/installers/*
           if-no-files-found: error
+
+  # GitHub build provenance for every built file, signed in a job that runs no
+  # repository or dependency code: it only downloads the build's artifact and
+  # calls the pinned attest action, so nothing a dependency's install script
+  # did can reach the OIDC token (#3981 N1). The installers check it with
+  #   gh attestation verify <file> --repo 8gi-foundation/8gent-code \
+  #     --signer-workflow 8gi-foundation/8gent-code/.github/workflows/release-binaries.yml \
+  #     --source-ref refs/tags/vX.Y.Z
+  attest:
+    name: Attest build provenance
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: bins/installers.sha256
 
   # No CI run had ever started the Windows exe before a release. Start both
   # Windows builds on a real Windows machine; nothing is attached otherwise.
@@ -252,7 +268,7 @@ jobs:
 
   release:
     name: Attach to GitHub Release
-    needs: [build, smoke-windows, smoke-linux]
+    needs: [build, attest, smoke-windows, smoke-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -364,7 +380,7 @@ jobs:
   # above opens (or comments on) one P0 issue, so it lands where people look.
   alarm:
     name: Open an issue when the release fails
-    needs: [build, smoke-windows, smoke-linux, release, install-smoke]
+    needs: [build, attest, smoke-windows, smoke-linux, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
     if: failure() && startsWith(github.ref, 'refs/tags/v')
