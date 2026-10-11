@@ -516,7 +516,29 @@ describe.skipIf(WIN)("rename then rewrite does not launder a file (8SO F1)", () 
 		}
 	});
 
-	test("8SO F4: generated-output directories are not enumerated; over 5,000 names inside an ignored directory records nothing for that command only", () => {
+	test("8SO F5: files moved out of nested or look-alike generated directories stay judged", () => {
+		writeFileSync(join(ws, ".gitignore"), ".cache/\nbuild/\ndist/\nsecrets/\n");
+		const rows: Array<[string, string]> = [
+			[".cache/key", "m''v .cache/key cfg.txt && sed -i.b s/K/Z/ cfg.txt"],
+			["build/secret", "m''v build/secret cfg.txt && sed -i.b s/K/Z/ cfg.txt"],
+			["dist/s", "m''v dist/s cfg.txt && sed -i.b s/K/Z/ cfg.txt"],
+			["secrets/build/bkey", "m''v secrets/build/bkey cfg.txt && sed -i.b s/K/Z/ cfg.txt"],
+		];
+		for (const [file, cmd] of rows) {
+			rmSync(join(ws, "cfg.txt"), { force: true });
+			mkdirSync(join(ws, file, ".."), { recursive: true });
+			writeFileSync(join(ws, file), "K=1\n");
+			const rec2 = new CreatedFiles();
+			const done = rec2.watchCommand(ws, cmd);
+			execSync(cmd, { cwd: ws, stdio: "ignore", shell: "/bin/sh" });
+			done();
+			expect(existsSync(join(ws, file))).toBe(false);
+			expect(rec2.createdBySession(join(ws, "cfg.txt"))).toBe(false);
+			expect(rmOfNothingOrOwn("rm -f cfg.txt", ws, rec2)).toBeNull();
+		}
+	});
+
+	test("8SO F4: a top-level node_modules is not enumerated; over 5,000 names inside an ignored directory records nothing for that command only", () => {
 		writeFileSync(join(ws, ".gitignore"), "node_modules/\nbig/\n");
 		mkdirSync(join(ws, "node_modules/pkg"), { recursive: true });
 		writeFileSync(join(ws, "node_modules/pkg/a.js"), "x");

@@ -28,9 +28,9 @@
  *     command during which an untracked name that was not this session's
  *     vanished, a tracked file newly went missing, or a gitignored name
  *     vanished or a name inside an ignored directory vanished (names are
- *     enumerated recursively, no symlink followed, except node_modules, .git,
- *     .next, dist, build, .cache, target and .turbo; more than 5,000 names
- *     records nothing for that command only) (`git ls-files -o -d -t`, and
+ *     enumerated recursively, no symlink followed, except a top-level
+ *     node_modules/ or .git/; more than 5,000 names records nothing for that
+ *     command only) (`git ls-files -o -d -t`, and
  *     `-o -i --directory`, each side); anything from a command whose text holds a
  *     rename-class word (mv, rename, install, rsync, ln, cp, ditto, git mv/rm/
  *     reset/stash/checkout/restore/clean/apply/...: "mv t.ts t2.ts && touch
@@ -143,21 +143,17 @@ const SLOW_SNAPSHOT_MS = 500;
 /** Names one record may remember as seen (#3514); past this it records nothing new. */
 const MAX_SEEN = 20_000;
 
-/** Generated-output directories whose contents are not enumerated (#3514 F4). */
-const GENERATED_DIRS = new Set([
-	"node_modules",
-	".git",
-	".next",
-	"dist",
-	"build",
-	".cache",
-	"target",
-	".turbo",
-]);
+/**
+ * The only ignored directories whose contents are not enumerated (#3514 F5):
+ * these two names, collapsed at the top of the working directory. Nested ones
+ * (`secrets/build/`, `.cache/`, `dist/`, `sub/node_modules/`) are enumerated
+ * like any other, under the cap.
+ */
+const TOP_LEVEL_SKIPPED = new Set(["node_modules/", ".git/"]);
 
 /**
  * Adds the names under `dir` (recursive, relative to nothing: absolute) to `out`,
- * without following symlinks and without entering GENERATED_DIRS. False once
+ * without following symlinks (every depth is enumerated). False once
  * `out` holds more than MAX_UNTRACKED names or a directory cannot be read.
  */
 function enumerate(dir: string, out: Set<string>): boolean {
@@ -171,7 +167,7 @@ function enumerate(dir: string, out: Set<string>): boolean {
 		const abs = path.join(dir, e.name);
 		out.add(abs);
 		if (out.size > MAX_UNTRACKED) return false;
-		if (e.isDirectory() && !GENERATED_DIRS.has(e.name) && !enumerate(abs, out)) return false;
+		if (e.isDirectory() && !enumerate(abs, out)) return false;
 	}
 	return true;
 }
@@ -234,7 +230,7 @@ function snapshot(cwd: string): Snapshot | null {
 		for (const n of ignored) {
 			if (!n.endsWith("/")) continue;
 			const dir = path.resolve(root, n);
-			if (GENERATED_DIRS.has(path.basename(dir))) continue;
+			if (TOP_LEVEL_SKIPPED.has(n)) continue;
 			if (!enumerate(dir, out.inside)) out.overflow = true;
 		}
 		for (const e of entries) {
