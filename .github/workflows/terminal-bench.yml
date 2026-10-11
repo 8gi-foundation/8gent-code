@@ -78,7 +78,7 @@ jobs:
           export EIGHTGENT_TB_BASE_URL="http://${HOST_IP}:11434"
           export HARBOR_EXTRA_ARGS="--agent-timeout-multiplier 3"
           # shellcheck disable=SC2086
-          benchmarks/terminal-bench/run-easy-slice.sh "ollama/$MODEL" $TASKS
+          bash benchmarks/terminal-bench/run-easy-slice.sh "ollama/$MODEL" $TASKS
 
       - name: Summarize scores
         if: always()
