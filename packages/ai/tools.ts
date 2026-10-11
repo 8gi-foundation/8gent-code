@@ -654,7 +654,7 @@ const runCommand = tool({
 	}),
 	execute: async ({ command }) => {
 		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
-		const backstop = preSpawnRefusal(command);
+		const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
 		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
@@ -1306,7 +1306,7 @@ async function runShellCommand(command: string): Promise<string> {
 	const cwd = getToolContext().workingDirectory;
 	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
 	// The text path's pre-spawn backstops (#3993); also covers the git and gh tools.
-	const backstop = preSpawnRefusal(command);
+	const backstop = preSpawnRefusal(command, cwd);
 	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");

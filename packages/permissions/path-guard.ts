@@ -67,6 +67,16 @@ export const SESSION_RECORD_FILES = ["daemon.log", "approvals-audit.jsonl"];
 const AUDIT_DATA_DIR_DIRS = ["audit"];
 const AUDIT_DATA_DIR_FILES = ["audit.jsonl", "permissions-audit.jsonl"];
 
+/**
+ * What 8gent loads and runs at start, relative to ~/.8gent and to EIGHT_DATA_DIR (#4009).
+ * hooks.yaml / hooks.json run shell commands on tool events; extensions/ is imported as
+ * code; prompts/ is injected into the system prompt; packages/ holds the lock file and
+ * installed package code. Tool calls may read these but never write, delete or move them.
+ * EIGHT_HOOKS_YAML, when set, names the hooks file and is protected the same way.
+ */
+export const STARTUP_CODE_FILES = ["hooks.yaml", "hooks.json"];
+export const STARTUP_CODE_DIRS = ["extensions", "prompts", "packages"];
+
 /** Basenames that always indicate a credential file regardless of location. */
 const PROTECTED_BASENAMES = new Set<string>([
 	".gitconfig",
@@ -169,6 +179,42 @@ function isUnderProtectedDir(resolved: string, home: string, platform: NodeJS.Pl
 	);
 }
 
+/** macOS (APFS default) and Windows open the same file under any case of its name. */
+function foldsCase(platform: NodeJS.Platform): boolean {
+	return platform === "darwin" || platform === "win32";
+}
+
+/** The protected startup-code locations, canonical (realpath, case-folded where the FS folds). */
+function startupCodeTargets(host: Required<PathGuardHost>): { files: string[]; dirs: string[] } {
+	const { platform, home } = host;
+	const flavor = pathFor(platform);
+	const fold = (s: string) => (foldsCase(platform) ? s.toLowerCase() : s);
+	const roots = [flavor.join(home, ".8gent")];
+	if (process.env.EIGHT_DATA_DIR) roots.push(process.env.EIGHT_DATA_DIR);
+	const files: string[] = [];
+	const dirs: string[] = [];
+	for (const r of roots) {
+		const root = resolveSafe(r, home, platform);
+		for (const f of STARTUP_CODE_FILES) files.push(fold(flavor.join(root, f)));
+		for (const d of STARTUP_CODE_DIRS) dirs.push(fold(flavor.join(root, d)));
+	}
+	if (process.env.EIGHT_HOOKS_YAML)
+		files.push(fold(resolveSafe(process.env.EIGHT_HOOKS_YAML, home, platform)));
+	return { files, dirs };
+}
+
+/**
+ * True when `resolved` (an absolute, realpath'd path) is one of the startup-code files or
+ * lies inside one of the startup-code dirs (#4009). A project's own `.8gent/` is not
+ * affected unless the project is HOME (or the data dir).
+ */
+export function isStartupCodePath(resolved: string, host: PathGuardHost = {}): boolean {
+	const h = { platform: host.platform ?? process.platform, home: host.home ?? homeDir() };
+	const target = foldsCase(h.platform) ? resolved.toLowerCase() : resolved;
+	const { files, dirs } = startupCodeTargets(h);
+	return files.includes(target) || dirs.some((d) => isPathWithin(target, d, h.platform));
+}
+
 // ============================================
 // Public API
 // ============================================
@@ -267,6 +313,15 @@ export function validatePath(
 		}
 	}
 
+	// 5e. What 8gent loads and runs at start (#4009): hooks, extensions, prompts and
+	// packages. A model write there is code that runs on the next start. Reads stay open.
+	if (
+		access === "write" &&
+		isStartupCodePath(resolved, { platform, home: host.home ?? homeDir() })
+	) {
+		return { ok: false, reason: "protected 8gent startup code" };
+	}
+
 	// 6. Protected basenames anywhere (e.g. a .netrc dropped into the project).
 	// NTFS matches names case-insensitively, so ID_RSA opens id_rsa.
 	const base = pathFor(platform).basename(resolved);
@@ -362,6 +417,209 @@ export function commandMutatesSessionRecords(command: string): boolean {
 			continue;
 		}
 		if (mutating) return true;
+	}
+	return false;
+}
+
+// ============================================
+// Shell: writes to startup code (#4009)
+// ============================================
+
+/** Verbs that only read what they name. Anything else naming startup code is a write. */
+const READ_ONLY_VERBS = new Set([
+	"cat",
+	"less",
+	"more",
+	"head",
+	"tail",
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"ag",
+	"ls",
+	"stat",
+	"file",
+	"wc",
+	"diff",
+	"cmp",
+	"bat",
+	"jq",
+	"yq",
+	"md5",
+	"md5sum",
+	"shasum",
+	"sha1sum",
+	"sha256sum",
+	"readlink",
+	"realpath",
+	"test",
+	"[",
+	"du",
+	"tree",
+	"nl",
+	"od",
+	"xxd",
+	"hexdump",
+	"strings",
+	"echo",
+	"printf",
+	"pwd",
+	"basename",
+	"dirname",
+]);
+
+/** Copy-like verbs: naming startup code as a source is a read, as the destination a write. */
+const COPY_VERBS = new Set(["cp", "rsync", "install", "scp", "ditto"]);
+
+/** Prefixes that run the next word as the command. */
+const WRAPPERS = new Set(["sudo", "env", "command", "exec", "nohup", "time", "nice", "xargs"]);
+
+const INTERPRETER_VERB = /^(?:python[\d.]*|node|nodejs|perl|ruby|deno|bun|bunx|php|lua|osascript)$/;
+
+const STARTUP_MENTION = new RegExp(
+	`\\.8gent[/\\\\]+(?:${[...STARTUP_CODE_FILES, ...STARTUP_CODE_DIRS].map(escapeRe).join("|")})(?![\\w.-])`,
+	"i",
+);
+
+/** Path-like spans inside a token (`--out=X`, `of=X`, `open(X,w)`). */
+const PATH_SPAN = /[~$\w{}./-]*\.8gent[/\\]+[\w./*?{}-]*/gi;
+
+function globToRegExp(glob: string, fold: boolean): RegExp {
+	let re = "";
+	for (const ch of glob) {
+		if (ch === "*") re += "[^/]*";
+		else if (ch === "?") re += "[^/]";
+		else re += escapeRe(ch);
+	}
+	return new RegExp(`^${re}$`, fold ? "i" : "");
+}
+
+/**
+ * True when a shell command would write, delete, move, link or install into what 8gent
+ * runs at start: ~/.8gent/hooks.yaml, hooks.json, extensions/, prompts/, packages/ (and
+ * the same under EIGHT_DATA_DIR). Reads (cat, ls, grep, cp out) are not flagged, and a
+ * project's own `.8gent/` is not flagged unless `cwd` resolves it to HOME.
+ *
+ * Paths are resolved the way the shell will: `~`, `$HOME`, `${HOME}`, simple `VAR=` values,
+ * `cd`, `./` and `..`, realpath (a symlinked HOME), and case on macOS. A speed bump, not a
+ * parser: the file-tool checks are the boundary, and the real boundary is seatbelting
+ * run_command (#3612).
+ */
+export function commandWritesStartupCode(
+	command: string,
+	cwd: string = process.cwd(),
+	host: PathGuardHost = {},
+): boolean {
+	const platform = host.platform ?? process.platform;
+	const home = host.home ?? homeDir();
+	const fold = foldsCase(platform);
+	const flavor = pathFor(platform);
+	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
+	const vars = new Map<string, string>([["HOME", home]]);
+	let dir = cwd;
+
+	const expand = (tok: string): string | null => {
+		let t = tok.replace(/\$\{(\w+)\}|\$(\w+)/g, (m, a, b) => vars.get(a ?? b) ?? m);
+		if (t === "~" || t.startsWith("~/")) t = home + t.slice(1);
+		return t.includes("$") ? null : t;
+	};
+	const { files, dirs } = startupCodeTargets({ platform, home });
+	const isProtected = (tok: string): boolean => {
+		if (!tok) return false;
+		const t = expand(tok);
+		// An unknown variable: judge the literal spelling.
+		if (t === null) return STARTUP_MENTION.test(tok);
+		if (/[*?]/.test(t)) {
+			const re = globToRegExp(flavor.resolve(dir, t), fold);
+			const last = flavor.basename(t);
+			return [...files, ...dirs, ...dirs.map((d) => flavor.join(d, last))].some((p) => re.test(p));
+		}
+		return isStartupCodePath(resolveSafe(t, dir, platform), { platform, home });
+	};
+	/** The token, every `=` value in it, and every startup-code path span in it. */
+	const candidates = (tok: string): string[] => {
+		const out = [tok, ...tok.split("=").slice(1)];
+		for (const m of tok.matchAll(PATH_SPAN)) out.push(m[0]);
+		return out;
+	};
+	const anyProtected = (tok: string) => candidates(tok).some(isProtected);
+
+	for (const raw of flat.split(/;|&&|\|\||\||\n/)) {
+		let seg = raw.trim().replace(/^[({]\s*|\s*[)}]$/g, "");
+		if (!seg) continue;
+		// A redirect onto startup code: >, >>, &>, 2> (not >&, not 2>&1).
+		for (const m of seg.matchAll(/(?:\d|&)?>{1,2}\|?(?!&)\s*([^\s;&|<>()]+)/g))
+			if (anyProtected(m[1])) return true;
+		seg = seg.replace(/(?:\d|&)?>{1,2}\|?\s*[^\s;&|<>()]+/g, " ").trim();
+		let words = seg.split(/\s+/).filter(Boolean);
+		// VAR=value assignments, alone or before a command, and export VAR=value.
+		if (words[0] === "export" || words[0] === "declare" || words[0] === "local")
+			words = words.slice(1);
+		while (words.length && /^\w+=/.test(words[0])) {
+			const [name, ...rest] = words[0].split("=");
+			const value = expand(rest.join("="));
+			if (value !== null) vars.set(name, value);
+			words = words.slice(1);
+		}
+		while (words.length && (WRAPPERS.has(words[0]) || /^\w+=/.test(words[0]))) {
+			words = words.slice(1);
+			while (words.length && words[0].startsWith("-")) words = words.slice(1);
+		}
+		if (!words.length) continue;
+		const verb = flavor.basename(words[0]).toLowerCase();
+		const args = words.slice(1);
+		if (verb === "cd" || verb === "pushd") {
+			const target = args.find((a) => !a.startsWith("-"));
+			const t = target === undefined ? home : expand(target);
+			if (t !== null && target !== "-") dir = resolveSafe(t, dir, platform);
+			continue;
+		}
+		// Inside startup code, anything but a read writes there, named or not (npm install).
+		const inside = isStartupCodePath(resolveSafe(dir, dir, platform), { platform, home });
+		if (READ_ONLY_VERBS.has(verb)) continue;
+		if (verb === "find") {
+			if (
+				/\s-(?:delete|exec|execdir|ok|okdir|fprint\w*)\b/.test(` ${args.join(" ")}`) &&
+				(inside || args.some(anyProtected))
+			)
+				return true;
+			continue;
+		}
+		if (inside) return true;
+		// An interpreter can write anything it names, in ways no verb list sees.
+		if (INTERPRETER_VERB.test(verb) && STARTUP_MENTION.test(seg)) return true;
+		if (COPY_VERBS.has(verb)) {
+			const pos = args.filter((a) => !a.startsWith("-"));
+			const tIdx = args.indexOf("-t");
+			const dest = tIdx >= 0 ? args[tIdx + 1] : pos[pos.length - 1];
+			const srcs = pos.filter((a) => a !== dest);
+			if (!dest) continue;
+			if (anyProtected(dest)) return true;
+			// Copying into a directory lands at dest/<basename of each source>.
+			const d = expand(dest);
+			if (
+				d !== null &&
+				srcs.some((s) => isProtected(flavor.join(d, flavor.basename(s.replace(/[/\\]+$/, "")))))
+			)
+				return true;
+			continue;
+		}
+		if (verb === "mv") {
+			const pos = args.filter((a) => !a.startsWith("-"));
+			if (pos.some(anyProtected)) return true;
+			const dest = expand(pos[pos.length - 1] ?? "");
+			if (
+				dest !== null &&
+				pos
+					.slice(0, -1)
+					.some((s) => isProtected(flavor.join(dest, flavor.basename(s.replace(/[/\\]+$/, "")))))
+			)
+				return true;
+			continue;
+		}
+		// Everything else (ln, tee, touch, rm, mkdir, sed -i, dd of=, tar -C, npm, git ...).
+		if (args.some(anyProtected)) return true;
 	}
 	return false;
 }
