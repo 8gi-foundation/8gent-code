@@ -604,9 +604,10 @@ export async function systemOneGate(
 		// A plain run of the project's own script inside the workspace, with
 		// only workspace or /tmp paths in its environment and arguments, whose
 		// source (and local imports) spawns, fetches and deletes nothing (#3937).
+		// Default mode only: strict/Guarded never skips the judge or the person.
 		try {
 			const { runInProject } = await import("./s1-run-in-project");
-			const run = runInProject(command, cwd);
+			const run = mode === "default" ? runInProject(command, cwd) : { ok: false as const };
 			if (run.ok) {
 				return {
 					run: true,
