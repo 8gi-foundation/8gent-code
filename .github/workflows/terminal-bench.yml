@@ -3,6 +3,11 @@ name: terminal-bench
 # Manual run of the Terminal-Bench 2.0 easy slice with 8gent-code against a model
 # served by Ollama on the runner itself. No cloud model, no secrets.
 on:
+  # TEMPORARY: GitHub only allows dispatch once the file is on main. Remove this push
+  # trigger before merge.
+  push:
+    branches: [feat/terminal-bench-adapter]
+    paths: [.github/workflows/terminal-bench.yml]
   workflow_dispatch:
     inputs:
       model:
@@ -24,7 +29,7 @@ jobs:
       TB2_COMMIT: 2fd12b88aafdd04a52c298e3940bcb189f9766d6
       TB_HOME: ${{ github.workspace }}/tb-home
       HARBOR_TELEMETRY: "0"
-      MODEL: ${{ inputs.model }}
+      MODEL: ${{ inputs.model || 'qwen3.5:9b' }}
       TASKS: ${{ inputs.tasks }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
