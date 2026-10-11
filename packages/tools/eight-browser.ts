@@ -592,6 +592,32 @@ function decodedViews(command: string): string[] {
 	return views;
 }
 
+/** Short flags of grep/rg that take no value, so the first word after them is the pattern. */
+const PLAIN_SHORT = /^-[rRhHnioEFwvcIsaqzPxlLu]+$/;
+
+/**
+ * For one pipeline segment that runs grep or rg: blank the quoted pattern (the first non-option word),
+ * and only when every option before it is a plain no-value flag. Any other option (--include, -g, -e,
+ * -f, --pre, anything with "=") or any $( ` <( in the segment leaves the segment untouched, so it is
+ * judged as written. Unknown shapes therefore fail closed.
+ */
+function blankSearchPattern(seg: string): string {
+	if (/\$\(|`|<\(/.test(seg) || !/^[\s;|&]*(?:grep|egrep|fgrep|rg)\s/.test(seg)) return seg;
+	const words = [...seg.matchAll(/(?:'[^']*'|"[^"]*"|\S)+/g)];
+	for (let i = 1; i < words.length; i++) {
+		const w = words[i];
+		if (w[0].startsWith("-")) {
+			if (PLAIN_SHORT.test(w[0]) || w[0] === "--hidden") continue;
+			return seg;
+		}
+		const q = w[0];
+		if (!/^(?:'[^']*'|"[^"]*")$/.test(q) || /\/|\.8|browser/i.test(q)) return seg;
+		const at = w.index ?? 0;
+		return seg.slice(0, at) + " ".repeat(q.length) + seg.slice(at + q.length);
+	}
+	return seg;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
 	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b/i.test(command);
@@ -605,17 +631,12 @@ export function touchesBrowserSecrets(command: string): boolean {
 			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
 			if (lists) return true;
 		}
-		// A quoted pattern given to a text-search tool is a regex, not a shell glob: grep 'value=[a-f0-9]*'
-		// must not read as a glob over browser-control.token. Per pipeline segment, for grep/rg/sed/awk
-		// only, drop quoted spans that name no path or secret ("/", ".8" or "browser"). find -name 'b*'
-		// and every other binary keep their quoted globs.
+		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
+		// as a glob over browser-control.token. Only that one word is blanked (see blankSearchPattern);
+		// option values, find/sed/awk and anything with a substitution keep their globs.
 		const shellView = view
 			.split(/(?<=[;|&\n])/)
-			.map((seg) =>
-				/^[\s;|&]*(?:e?grep|fgrep|rg|sed|awk)\b/.test(seg)
-					? seg.replace(/'[^']*'|"[^"]*"/g, (q) => (/\/|\.8|browser/i.test(q) ? q : " "))
-					: seg,
-			)
+			.map(blankSearchPattern)
 			.join("")
 			.replace(/["'`\\]/g, "")
 			.replace(/\s*\+\s*/g, "");
