@@ -77,6 +77,20 @@ jobs:
           $env:EIGHT_VERSION = '0.0.1'
           irm http://127.0.0.1:8765/install-ps1.txt | iex
           $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "pinned: got $v" }
+          Remove-Item Env:EIGHT_VERSION
+
+          # A binary URL off the allowed host must be refused, leaving v0.0.1 in place.
+          $env:EIGHT_RELEASES_URL = 'http://127.0.0.1:8765/releases-evil.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = $true; Write-Host "refused as expected: $_" }
+          if (-not $refused) { throw 'an off-host download URL was accepted' }
+          $v = & $exe --version; if ($v -notmatch 'v0\.0\.1') { throw "changed after a refused install: got $v" }
+
+          # A non-https releases URL is refused.
+          $env:EIGHT_RELEASES_URL = 'http://example.com/releases.json'
+          $refused = $false
+          try { irm http://127.0.0.1:8765/install-ps1.txt | iex } catch { $refused = $true }
+          if (-not $refused) { throw 'a non-https releases URL was accepted' }
           Write-Host 'Windows PowerShell 5.1: PASS'
       - name: PowerShell 7, irm | iex, upgrade over an older install
         shell: pwsh
@@ -125,6 +139,16 @@ jobs:
 
           EIGHT_VERSION=0.0.1 EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'
           "$bin" --version | grep -q 'v0\.0\.1'
+
+          # A binary URL off the allowed host is refused and nothing changes.
+          if EIGHT_RELEASES_URL=http://127.0.0.1:8765/releases-evil.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::an off-host download URL was accepted"; exit 1
+          fi
+          "$bin" --version | grep -q 'v0\.0\.1'
+          # A non-https releases URL is refused.
+          if EIGHT_RELEASES_URL=http://example.com/releases.json sh -c 'curl -fsSL http://127.0.0.1:8765/install.sh | sh'; then
+            echo "::error::a non-https releases URL was accepted"; exit 1
+          fi
           echo "install.sh on ${RUNNER_OS}: PASS"
 
   live-windows:
