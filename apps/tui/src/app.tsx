@@ -209,12 +209,18 @@ import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import {
+	BANG_ID_PREFIX,
 	BANG_USAGE,
+	type BangRun,
 	bangChatLine,
 	bangContextBlock,
+	bangRunningLine,
 	parseBang,
-	runBang,
+	planModeRefusal,
+	sendRefusal,
+	startBang,
 	withShellContext,
+	withoutBangLines,
 } from "./lib/bang-command.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
@@ -1414,7 +1420,7 @@ export function App({
 			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1783,6 +1789,25 @@ export function App({
 	// Output of `!cmd` lines waiting to go to the model with the tab's next
 	// message, keyed by tab id (#3918 D5).
 	const shellContextRef = useRef<Map<string, string[]>>(new Map());
+	// Running `!cmd` processes per tab, so Esc, tab close and exit can stop them.
+	const bangRunsRef = useRef<Map<string, Set<BangRun>>>(new Map());
+	const bangSeq = useRef(0);
+	const stopBangRuns = useCallback((tabId?: string) => {
+		for (const [id, runs] of bangRunsRef.current) {
+			if (tabId !== undefined && id !== tabId) continue;
+			for (const run of runs) run.cancel();
+			runs.clear();
+		}
+	}, []);
+	// Never leave a shell command behind: unmount and process exit kill them.
+	useEffect(() => {
+		const onExit = () => stopBangRuns();
+		process.once("exit", onExit);
+		return () => {
+			process.off("exit", onExit);
+			stopBangRuns();
+		};
+	}, [stopBangRuns]);
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -2043,7 +2068,7 @@ export function App({
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
 			if (activeSessionId && messages.length > 0) {
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -2053,6 +2078,7 @@ export function App({
 				});
 			}
 			flushSession();
+			stopBangRuns();
 			if (agent) agent.cleanup().catch(() => {});
 			exit();
 		}
@@ -2163,6 +2189,8 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				shellContextRef.current.delete(closingId);
+				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
@@ -2199,6 +2227,11 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			const bangs = bangRunsRef.current.get(activeTabId);
+			if (bangs && bangs.size > 0) {
+				stopBangRuns(activeTabId);
+				return;
+			}
 			if (isProcessing) {
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
@@ -2416,6 +2449,15 @@ export function App({
 		},
 		[activeTabId],
 	);
+
+	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
+		const swap = (list: Message[]) =>
+			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
+		const cur = tabMessagesRef.current.get(tabId);
+		if (cur) tabMessagesRef.current.set(tabId, swap(cur));
+		setMessagesRaw((prev) => (prev.some((m) => m.id === id) ? swap(prev) : prev));
+	}, []);
 
 	/**
 	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
@@ -3466,7 +3508,7 @@ export function App({
 
 				case "quit":
 					if (activeSessionId && messages.length > 0) {
-						const serializable = messages.map((m) => ({
+						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
 						}));
@@ -3476,6 +3518,7 @@ export function App({
 						});
 					}
 					flushSession();
+					stopBangRuns();
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
@@ -5677,18 +5720,33 @@ export function App({
 		// message. `!!cmd` runs it without sending (#3918 D5).
 		const bang = attached ? null : parseBang(input);
 		if (bang) {
-			if (!bang.command) {
-				addSystemMessage(BANG_USAGE);
+			const bangLine = (content: string): Message => ({
+				id: `${BANG_ID_PREFIX}${Date.now()}-${bangSeq.current++}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+			const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+			if (!bang.command || refused) {
+				appendToTab(tabId, bangLine(refused ?? BANG_USAGE));
 				return;
 			}
 			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
-			const result = await runBang(bang.command, projectCwd);
-			if (bang.send) {
+			const running = bangLine(bangRunningLine(bang));
+			appendToTab(tabId, running);
+			const run = startBang(bang.command, projectCwd);
+			const runs = bangRunsRef.current.get(tabId) ?? new Set();
+			runs.add(run);
+			bangRunsRef.current.set(tabId, runs);
+			const result = await run.done;
+			runs.delete(run);
+			const withheld = bang.send ? sendRefusal(bang.command) : null;
+			if (bang.send && !withheld && !result.cancelled) {
 				const pending = shellContextRef.current.get(tabId) ?? [];
 				pending.push(bangContextBlock(bang, result));
 				shellContextRef.current.set(tabId, pending);
 			}
-			addSystemMessage(bangChatLine(bang, result));
+			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
 			return;
 		}
 
@@ -5704,7 +5762,10 @@ export function App({
 			});
 			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
 			try {
-				daemonLink.client.prompt(input);
+				// Output from `!cmd` goes in front here too, once (#3918 D5).
+				const shellContext = shellContextRef.current.get(tabId);
+				shellContextRef.current.delete(tabId);
+				daemonLink.client.prompt(withShellContext(shellContext, input));
 			} catch (err) {
 				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
 			}

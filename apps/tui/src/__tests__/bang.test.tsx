@@ -15,7 +15,7 @@ function userTexts(requests: unknown[]): string[] {
 	);
 }
 
-test("!cmd goes to the model once with the next message; !!cmd never does", async () => {
+test("!cmd reaches the model once; !!, stopped and Plan-mode lines never do; nothing is saved", async () => {
 	const model = serveFakeModel(REPLY);
 	try {
 		const events = await runAppHarness(path.join(import.meta.dir, "bang.harness.tsx"), {
@@ -32,7 +32,8 @@ test("!cmd goes to the model once with the next message; !!cmd never does", asyn
 		// The turn's own message: the shell block in front of what was typed.
 		const turn = texts.find((t) => t.endsWith("what did it print"));
 		expect(turn).toBeDefined();
-		expect(turn).toContain("I ran `echo from-the-shell-abc` in the shell (exit 0).");
+		expect(turn).toContain("Command: echo from-the-shell-abc (exit 0)");
+		expect(turn).toContain("not words the user wrote");
 		expect(turn).toContain("from-the-shell-abc\n```");
 		// The next message goes alone: the block was sent once.
 		const next = texts.filter((t) => t.endsWith("and now"));
@@ -40,6 +41,18 @@ test("!cmd goes to the model once with the next message; !!cmd never does", asyn
 		for (const t of next) expect(t).not.toContain("from-the-shell-abc");
 		// `!!` output never reaches the model.
 		for (const t of texts) expect(t).not.toContain("kept-local-xyz");
+		// A stopped command never reaches the model either.
+		for (const t of texts) expect(t).not.toContain("setTimeout(() => {}, 20000)");
+
+		// Esc stopped the slow command quickly; Plan mode ran nothing.
+		expect(Number(events.find((e) => e.phase === "cancel")?.ms)).toBeLessThan(5000);
+		expect(events.find((e) => e.phase === "plan")?.ran).toBeFalse();
+		for (const t of texts) expect(t).not.toContain("should-not-run-123");
+
+		// The session was saved, and no file under HOME holds the `!!` output.
+		const saved = events.find((e) => e.phase === "saved") as { leaks: string[]; sessions: number };
+		expect(saved.sessions).toBeGreaterThan(0);
+		expect(saved.leaks).toEqual([]);
 	} finally {
 		model.stop();
 	}

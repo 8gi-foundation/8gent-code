@@ -208,13 +208,16 @@ export function CommandInput({
 	}, []);
 
 	// Ghost suggestion hook
-	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+	const { suggestion, accept, dismiss, isVisible: ghostShown } = useGhostSuggestion(value, {
 		isGitRepo,
 		currentBranch,
 		planNextStep,
 		recentCommands,
 		extraContextSuggestions: extraSlashContext,
 	});
+	// Never offer a shell line: Tab would complete a command nobody typed
+	// (#3918 D5, 8SO).
+	const isVisible = ghostShown && !isShellSuggestion(value, suggestion?.text);
 
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
@@ -810,4 +813,9 @@ function parseSlashCommand(input: string): { command: SlashCommand; args: string
 	if (!cmd) return null;
 
 	return { command: cmd.name, args };
+}
+
+/** True when accepting the ghost text would leave a `!` shell line in the input. */
+export function isShellSuggestion(value: string, ghost: string | undefined): boolean {
+	return `${value}${ghost ?? ""}`.trimStart().startsWith("!");
 }
