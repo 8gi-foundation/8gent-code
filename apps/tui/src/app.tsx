@@ -76,7 +76,7 @@ import {
 	ADHD_MODE_ENABLED_MSG,
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
-import { CommandInput } from "./components/command-input.js";
+import { CommandInput, slashMenuCompact } from "./components/command-input.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import pkgInfo from "../../../package.json" with { type: "json" };
@@ -1668,6 +1668,8 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// The / menu is open: in a short terminal the focal strip steps aside for it.
+	const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 	// Real rows of the chat box after layout (#3019). The viewport guess
 	// overestimated it and messages overprinted.
 	const chatBoxRef = useRef<DOMElement>(null);
@@ -6753,33 +6755,35 @@ export function App({
 							))}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={shownModel.ran || "-"}
-							routeAsked={shownModel.asked}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-							lastTurnEndedAt={lastTurnEndedAt}
-							lastTurnSuccess={lastTurnSuccess}
-							animate={showAnimations}
-							width={chatWidth}
-						/>
+						{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							<LiveFocalStripWithGoal
+								goalClient={goalClient}
+								adhdMode={adhdMode}
+								mode={
+									agentMode === "Planning"
+										? "Planning"
+										: agentMode === "Implementing"
+											? "Implementing"
+											: agentMode === "Testing"
+												? "Testing"
+												: agentMode === "Debugging"
+													? "Debugging"
+													: "Researching"
+								}
+								activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+								route={shownModel.ran || "-"}
+								routeAsked={shownModel.asked}
+								tokens={tokenStr}
+								contextPct={contextPct}
+								approvalPending={isApprovalPending}
+								autonomous={infiniteModeActive}
+								isProcessing={isProcessing}
+								lastTurnEndedAt={lastTurnEndedAt}
+								lastTurnSuccess={lastTurnSuccess}
+								animate={showAnimations}
+								width={chatWidth}
+							/>
+						)}
 
 						<NoProviderNotice
 							checked={providerHealth.checked}
@@ -6839,6 +6843,7 @@ export function App({
 						>
 							<CommandInput
 								cwd={projectCwd}
+								onSlashMenuChange={setSlashMenuOpen}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={
