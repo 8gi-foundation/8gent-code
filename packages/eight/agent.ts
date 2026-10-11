@@ -823,6 +823,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (mm.isToolAllowed(toolName)) return null;
 		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
 	}
+
+	/**
+	 * The one refusal gate for a tool call, on both paths, before the tool runs:
+	 * the active mode's tool set, then YAML PreToolUse hooks. A string refuses
+	 * the call with that message; null lets it run. It only ever refuses: the
+	 * permission policy inside the tools still applies to every call it lets
+	 * through.
+	 */
+	private async refuseToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<string | null> {
+		const modeRefusal = this.modeRefusal(toolName);
+		if (modeRefusal) return modeRefusal;
+		const preResult = await this.hookManager.fire("PreToolUse", {
+			tool: toolName,
+			args,
+			sessionId: this.sessionId,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		if (preResult.blocked) {
+			console.log(`  [BLOCKED] ${toolName} - ${preResult.reason}`);
+			return `Hook blocked tool "${toolName}": ${preResult.reason}`;
+		}
+		return null;
+	}
+
 	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
@@ -923,7 +950,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let shown = "";
 				let success = true;
 				try {
-					const refusal = this.modeRefusal(toolName);
+					const refusal = await this.refuseToolCall(toolName, args);
 					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
 					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
@@ -1863,27 +1890,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			createdFiles: this.executor.createdFiles,
 			tools: effectiveTools,
 
+			// Refusals live in the gate, inside each tool's execute: the SDK
+			// swallows a throw from onToolCallStart, so one there never stopped
+			// a call.
+			gateToolCall: (event) => this.refuseToolCall(event.toolName, event.args),
+
 			onToolCallStart: async (event) => {
-				const modeRefusal = this.modeRefusal(event.toolName);
-				if (modeRefusal) throw new Error(modeRefusal);
 				await this.hookManager.executeHooks("beforeTool", {
 					sessionId: this.sessionId,
 					tool: event.toolName,
 					toolInput: event.args,
 					workingDirectory: this.config.workingDirectory || process.cwd(),
 				});
-
-				// Fire YAML PreToolUse hooks - if any hook blocks, skip the tool
-				const preResult = await this.hookManager.fire("PreToolUse", {
-					tool: event.toolName,
-					args: event.args,
-					sessionId: this.sessionId,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
-				if (preResult.blocked) {
-					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
-					throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
-				}
 
 				// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
 				const toolPath = event.args?.path as string | undefined;
