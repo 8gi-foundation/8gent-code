@@ -90,13 +90,14 @@ export async function runExtCommand(
 	} catch (err) {
 		return { code: 1, output: (err as Error).message };
 	}
-	let entries: ReturnType<typeof copyPiExtensions>;
+	let copied: ReturnType<typeof copyPiExtensions>;
 	try {
-		entries = copyPiExtensions(from, to);
+		copied = copyPiExtensions(from, to);
 	} catch (err) {
 		return { code: 1, output: (err as Error).message };
 	}
-	if (entries.length === 0) {
+	const { entries, refused } = copied;
+	if (entries.length === 0 && refused.length === 0) {
 		return {
 			code: 0,
 			output: `No Pi extensions (.ts/.js files or folders with an index) in ${from}.`,
@@ -110,6 +111,10 @@ export async function runExtCommand(
 		const report = analyzePiExtension(entryFile(e.dest));
 		if (report.status === "failed") failed++;
 		lines.push(line(e.name, e.sha256, report));
+	}
+	for (const r of refused) {
+		failed++;
+		lines.push(`  ${r.name}  not imported  ${r.reason}`);
 	}
 	lines.push(
 		"All of them are OFF. Turn one on with: 8gent ext enable <name> (its sha256 is checked on every load).",

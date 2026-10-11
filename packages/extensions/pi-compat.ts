@@ -234,8 +234,16 @@ export function registerPiModules(dir: string): void {
 		name: `8gent-pi-compat-files:${real}`,
 		setup(build) {
 			build.onLoad({ filter }, async (args) => {
-				const source = await Bun.file(args.path).text();
 				const ext = path.extname(args.path).slice(1);
+				// Serve exactly the bytes whose hash matches the import record: read
+				// once, hash those bytes, and load those same bytes. No gap between
+				// the check and the load.
+				const bytes = new Uint8Array(await Bun.file(args.path).arrayBuffer());
+				const verdict = servedBytesCheck(real, args.path, bytes);
+				if (verdict) {
+					return { contents: `throw new Error(${JSON.stringify(verdict)});`, loader: "js" };
+				}
+				const source = new TextDecoder().decode(bytes);
 				const loader = (ext === "tsx" ? "tsx" : ext.endsWith("ts") ? "ts" : "js") as
 					| "ts"
 					| "tsx"
@@ -244,6 +252,22 @@ export function registerPiModules(dir: string): void {
 			});
 		},
 	});
+}
+
+/**
+ * Why the bytes about to be loaded for a pi-* file must not run, or null when
+ * they match that file's sha256 in an enabled import record.
+ */
+export function servedBytesCheck(dir: string, file: string, bytes: Uint8Array): string | null {
+	const manifest = readPiManifest(dir);
+	if (manifest.error) return manifest.error;
+	const found = recordFor(manifest.entries, file);
+	if (!found) return `${path.basename(file)} is not part of an imported extension record`;
+	if (!found.entry.enabled) return `imported extension ${found.entry.name} is off`;
+	const expected = found.entry.files[found.rel];
+	if (!expected) return `${found.rel} was not part of ${found.entry.name} when it was imported`;
+	if (sha256(bytes) !== expected) return `${found.rel} in ${found.entry.name} changed since import`;
+	return null;
 }
 
 /**
@@ -630,8 +654,10 @@ export interface PiImportEntry {
 	source: string;
 	/** Where it was copied. */
 	dest: string;
-	/** sha256 of the copy: the file, or the sorted file list and contents for a folder. */
+	/** sha256 over the sorted file list and each file's sha256 (see extensionHash). */
 	sha256: string;
+	/** sha256 of every file, by path relative to the folder (a single file: its own name). */
+	files: Record<string, string>;
 	importedAt: string;
 	/** Imported extensions are off until `8gent ext enable <name>`. */
 	enabled: boolean;
@@ -651,109 +677,193 @@ function safeName(raw: string): string {
 	return s;
 }
 
-function folderFiles(dir: string, rel = ""): string[] {
+const sha256 = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
+
+/**
+ * Every regular file under `dir`, dotfiles included, sorted. A symlink or any
+ * other kind of entry is refused: it could point outside the hashed bytes.
+ * `skip` names top-level-or-nested folder names left out (node_modules when
+ * copying from Pi; nothing when checking a copy).
+ */
+function listFiles(dir: string, skip: Set<string> = new Set(), rel = ""): string[] {
 	const out: string[] = [];
 	for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
-		if (e.name === "node_modules" || e.name.startsWith(".")) continue;
 		const r = rel ? `${rel}/${e.name}` : e.name;
-		if (e.isDirectory()) out.push(...folderFiles(dir, r));
-		else if (e.isFile()) out.push(r);
+		if (e.isSymbolicLink())
+			throw new Error(`${r} is a symlink; imported extensions may not contain links`);
+		if (e.isDirectory()) {
+			if (skip.has(e.name)) continue;
+			out.push(...listFiles(dir, skip, r));
+		} else if (e.isFile()) out.push(r);
+		else throw new Error(`${r} is not a regular file`);
 	}
 	return out.sort();
 }
 
-/** sha256 of an extension file, or of a folder's sorted file list and contents. */
-export function sha256Of(source: string): string {
+/** Per-file sha256 of an extension: a file (keyed by its name) or a folder. */
+export function fileHashes(target: string, skip: Set<string> = new Set()): Record<string, string> {
+	const st = fs.lstatSync(target);
+	if (st.isSymbolicLink())
+		throw new Error(`${target} is a symlink; imported extensions may not be links`);
+	if (st.isFile()) return { [path.basename(target)]: sha256(fs.readFileSync(target)) };
+	const out: Record<string, string> = {};
+	for (const rel of listFiles(target, skip))
+		out[rel] = sha256(fs.readFileSync(path.join(target, ...rel.split("/"))));
+	return out;
+}
+
+/** The extension's sha256: over the sorted file list and each file's sha256. */
+export function extensionHash(files: Record<string, string>): string {
 	const h = createHash("sha256");
-	if (fs.statSync(source).isDirectory()) {
-		for (const rel of folderFiles(source)) {
-			h.update(`${rel}\0`);
-			h.update(fs.readFileSync(path.join(source, ...rel.split("/"))));
-			h.update("\0");
-		}
-	} else {
-		h.update(fs.readFileSync(source));
-	}
+	for (const rel of Object.keys(files).sort()) h.update(`${rel}\0${files[rel]}\0`);
 	return h.digest("hex");
 }
 
+/** sha256 of an extension file or folder as it is on disk now (dotfiles included, links refused). */
+export function sha256Of(target: string): string {
+	return extensionHash(fileHashes(target));
+}
+
+export interface PiCopyResult {
+	entries: PiImportEntry[];
+	/** Extensions not imported, with the reason (for example a symlink inside). */
+	refused: Array<{ name: string; source: string; reason: string }>;
+}
+
 /**
- * Copy every Pi extension in `from` into `to` as pi-<name>: a single
+ * Import every Pi extension in `from` into `to` as pi-<name>: a single
  * .ts/.js file, or a folder with an index.ts/index.js (copied without
- * node_modules). Copies, never links: links need extra rights on Windows and
- * would let a later edit in Pi's folder change code without a new hash.
- * Records source, destination and sha256 in pi-imports.json. Loads nothing.
+ * node_modules; dotfiles included; any symlink inside refuses the folder).
+ * Copies, never links. For each one the record (source, per-file sha256,
+ * off) is written to pi-imports.json atomically BEFORE its files are copied,
+ * so a pi-* file never exists without a record; the copy is then checked
+ * against the record. Loads and runs nothing.
  */
-export function copyPiExtensions(from: string, to: string): PiImportEntry[] {
+export function copyPiExtensions(from: string, to: string): PiCopyResult {
 	if (!fs.existsSync(from) || !fs.statSync(from).isDirectory()) {
 		throw new Error(`no Pi extensions folder at ${from}`);
 	}
 	fs.mkdirSync(to, { recursive: true });
+	const manifest = readPiManifest(to);
+	if (manifest.error) throw new Error(manifest.error);
+	const byName = new Map(manifest.entries.map((p) => [p.name, p]));
 	const entries: PiImportEntry[] = [];
+	const refused: PiCopyResult["refused"] = [];
 	const now = new Date().toISOString();
+	const skip = new Set(["node_modules"]);
 	for (const e of fs
 		.readdirSync(from, { withFileTypes: true })
 		.sort((a, b) => (a.name < b.name ? -1 : 1))) {
 		const source = path.join(from, e.name);
-		let isDir = e.isDirectory();
 		if (e.isSymbolicLink()) {
-			try {
-				isDir = fs.statSync(source).isDirectory();
-			} catch {
-				continue;
-			}
+			refused.push({
+				name: e.name,
+				source,
+				reason: "is a symlink; import the real file or folder",
+			});
+			continue;
 		}
-		if (isDir) {
-			const index = ["index.ts", "index.js", "index.mjs"].find((i) =>
-				fs.existsSync(path.join(source, i)),
-			);
-			if (!index) continue;
-			const name = `pi-${safeName(e.name)}`;
-			const dest = path.join(to, name);
-			fs.rmSync(dest, { recursive: true, force: true });
-			for (const rel of folderFiles(source)) {
+		let name: string;
+		let dest: string;
+		if (e.isDirectory()) {
+			if (!["index.ts", "index.js", "index.mjs"].some((i) => fs.existsSync(path.join(source, i))))
+				continue;
+			name = `pi-${safeName(e.name)}`;
+			dest = path.join(to, name);
+		} else if (e.isFile() && EXT.test(e.name) && !e.name.endsWith(".d.ts")) {
+			name = `pi-${safeName(e.name)}`;
+			dest = path.join(to, `${name}${path.extname(e.name)}`);
+		} else continue;
+
+		let files: Record<string, string>;
+		try {
+			files = fileHashes(source, skip);
+		} catch (err) {
+			refused.push({ name, source, reason: (err as Error).message });
+			continue;
+		}
+		if (e.isFile()) files = { [path.basename(dest)]: Object.values(files)[0] };
+		const entry: PiImportEntry = {
+			name,
+			source,
+			dest,
+			sha256: extensionHash(files),
+			files,
+			importedAt: now,
+			enabled: false,
+		};
+		// The same bytes again keep their on/off choice; changed bytes start off.
+		const before = byName.get(name);
+		if (before?.enabled && before.sha256 === entry.sha256) entry.enabled = true;
+		// Record first (atomic), then copy.
+		byName.set(name, entry);
+		writeManifest(to, [...byName.values()]);
+		fs.rmSync(dest, { recursive: true, force: true });
+		if (e.isDirectory()) {
+			for (const rel of Object.keys(files)) {
 				const target = path.join(dest, ...rel.split("/"));
 				fs.mkdirSync(path.dirname(target), { recursive: true });
 				fs.copyFileSync(path.join(source, ...rel.split("/")), target);
 			}
-			entries.push({ name, source, dest, sha256: sha256Of(dest), importedAt: now, enabled: false });
-		} else if (EXT.test(e.name) && !e.name.endsWith(".d.ts")) {
-			const ext = path.extname(e.name);
-			const name = `pi-${safeName(e.name)}`;
-			const dest = path.join(to, `${name}${ext}`);
+		} else {
 			fs.copyFileSync(source, dest);
-			entries.push({ name, source, dest, sha256: sha256Of(dest), importedAt: now, enabled: false });
 		}
+		let copied = "";
+		try {
+			copied = sha256Of(dest);
+		} catch {
+			/* reported below */
+		}
+		if (copied !== entry.sha256) {
+			refused.push({
+				name,
+				source,
+				reason: "the copy does not match what was read (changed while importing?)",
+			});
+			continue;
+		}
+		entries.push(entry);
 	}
-	const manifestPath = path.join(to, PI_IMPORT_MANIFEST);
-	let previous: PiImportEntry[] = [];
-	try {
-		previous = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as PiImportEntry[];
-	} catch {
-		previous = [];
-	}
-	const byName = new Map(previous.map((p) => [p.name, p]));
-	for (const entry of entries) {
-		// The same bytes again keep their on/off choice; changed bytes start off.
-		const before = byName.get(entry.name);
-		if (before?.enabled && before.sha256 === entry.sha256) entry.enabled = true;
-		byName.set(entry.name, entry);
-	}
-	writeManifest(to, [...byName.values()]);
-	return entries;
+	return { entries, refused };
 }
 
+/** Write the manifest atomically: a temp file in the same folder, then rename. */
 function writeManifest(dir: string, entries: PiImportEntry[]): void {
-	fs.writeFileSync(path.join(dir, PI_IMPORT_MANIFEST), `${JSON.stringify(entries, null, 2)}\n`);
+	const file = path.join(dir, PI_IMPORT_MANIFEST);
+	const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+	fs.writeFileSync(tmp, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600 });
+	fs.renameSync(tmp, file);
 }
 
-/** The import manifest of an extensions folder ([] when there is none or it is unreadable). */
-export function readPiManifest(dir: string): PiImportEntry[] {
+/**
+ * The import manifest of an extensions folder. No file: no entries. A file
+ * that cannot be read or parsed: `error` is set, and every pi-* extension is
+ * refused (the gate fails closed).
+ */
+export function readPiManifest(dir: string): { entries: PiImportEntry[]; error?: string } {
+	const file = path.join(dir, PI_IMPORT_MANIFEST);
+	if (!fs.existsSync(file)) return { entries: [] };
 	try {
-		const raw = JSON.parse(fs.readFileSync(path.join(dir, PI_IMPORT_MANIFEST), "utf8"));
-		return Array.isArray(raw) ? (raw as PiImportEntry[]) : [];
-	} catch {
-		return [];
+		const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+		if (!Array.isArray(raw)) throw new Error("not a list");
+		for (const e of raw) {
+			if (
+				!e ||
+				typeof e.name !== "string" ||
+				typeof e.dest !== "string" ||
+				typeof e.sha256 !== "string" ||
+				!e.files ||
+				typeof e.files !== "object"
+			) {
+				throw new Error("an entry is malformed");
+			}
+		}
+		return { entries: raw as PiImportEntry[] };
+	} catch (err) {
+		return {
+			entries: [],
+			error: `${file} cannot be read (${(err as Error).message}); no imported (pi-*) extension loads until it is fixed or the extensions are imported again`,
+		};
 	}
 }
 
@@ -765,23 +875,45 @@ function realOrResolved(p: string): string {
 	}
 }
 
+/** The record an extension file belongs to, and the file's path inside it. */
+export function recordFor(
+	entries: PiImportEntry[],
+	file: string,
+): { entry: PiImportEntry; rel: string } | null {
+	const real = realOrResolved(file);
+	for (const e of entries) {
+		const dest = realOrResolved(e.dest);
+		if (dest === real) return { entry: e, rel: path.basename(e.dest) };
+		if (real.startsWith(dest + path.sep)) {
+			return { entry: e, rel: path.relative(dest, real).split(path.sep).join("/") };
+		}
+	}
+	return null;
+}
+
 /**
- * The load gate for imported extensions. `file` is what the host is about to
- * load (a file, or a folder's index). Not imported: null (a file the person
- * wrote; the host's own rules apply). Imported: it loads only when enabled
- * and its bytes still hash to the sha256 recorded at import, checked on every
- * load. Otherwise the reason it does not load.
+ * The load gate. `file` is what the host is about to load (a file, or a
+ * folder's index). A file the person wrote (not pi-*, no record): null, the
+ * host's own rules apply. A pi-* file loads only with a matching record,
+ * enabled, whose sha256 still matches the bytes on disk (checked on every
+ * load). It fails closed: no record, or an unreadable record file, refuses it.
  */
 export function importGate(
 	dir: string,
 	file: string,
 ): { allowed: boolean; reason?: string } | null {
-	const real = realOrResolved(file);
-	const entry = readPiManifest(dir).find((e) => {
-		const dest = realOrResolved(e.dest);
-		return dest === real || real.startsWith(dest + path.sep);
-	});
-	if (!entry) return null;
+	const pi = isPiExtension(file);
+	const manifest = readPiManifest(dir);
+	if (manifest.error) return pi ? { allowed: false, reason: manifest.error } : null;
+	const found = recordFor(manifest.entries, file);
+	if (!found) {
+		if (!pi) return null;
+		return {
+			allowed: false,
+			reason: `${path.basename(file)} has no import record in ${PI_IMPORT_MANIFEST}; pi-* extensions load only after 8gent ext import-pi and 8gent ext enable`,
+		};
+	}
+	const { entry } = found;
 	if (!entry.enabled) {
 		return {
 			allowed: false,
@@ -794,7 +926,7 @@ export function importGate(
 	} catch (err) {
 		return {
 			allowed: false,
-			reason: `imported extension ${entry.name} cannot be read: ${(err as Error).message}`,
+			reason: `imported extension ${entry.name} cannot be checked: ${(err as Error).message}`,
 		};
 	}
 	if (now !== entry.sha256) {
@@ -815,7 +947,9 @@ export function setImportedEnabled(
 	name: string,
 	on: boolean,
 ): { code: number; output: string } {
-	const entries = readPiManifest(dir);
+	const manifest = readPiManifest(dir);
+	if (manifest.error) return { code: 1, output: manifest.error };
+	const entries = manifest.entries;
 	const entry = entries.find((e) => e.name === name);
 	if (!entry) {
 		const names = entries.map((e) => e.name);

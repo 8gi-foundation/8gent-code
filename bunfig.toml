@@ -4,3 +4,8 @@
 # Tests run against a temp $HOME, never the real one (#3240).
 # Temp files go to one run-scoped dir, removed after the run; fixed tests that leak fail it (#3285).
 preload = ["./tests/preload-temp-dirs.ts", "./tests/preload-temp-home.ts", "./tests/preload-ink-interactive.ts", "./tests/preload-system-one-off.ts"]
+
+# Never auto-install a package an import names (an extension's included):
+# 8gent loads local files only. The CLI and TUI also run Bun with --no-install.
+[install]
+auto = "disable"
