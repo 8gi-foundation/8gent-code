@@ -12,8 +12,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-/** The `@token` being typed at the end of the input, or null. */
+/**
+ * The `@token` being typed at the end of the input, or null. A `!` shell line
+ * has no mentions: `@` there is the shell's (#3918 D5, 8SO).
+ */
 export function mentionAtEnd(value: string): { query: string; start: number } | null {
+	if (value.trimStart().startsWith("!")) return null;
 	const m = value.match(/(?:^|\s)@([^\s@]*)$/);
 	if (!m || m.index === undefined) return null;
 	const start = value.length - m[1].length - 1;

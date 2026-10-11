@@ -18,6 +18,8 @@ describe("@ file mention (#3918 D2)", () => {
 		expect(mentionAtEnd("read @src/app.tsx and")).toBeNull();
 		expect(mentionAtEnd("mail me at a@b")).toBeNull();
 		expect(mentionAtEnd("no mention")).toBeNull();
+		expect(mentionAtEnd("!git log @{u")).toBeNull();
+		expect(mentionAtEnd("  !!ls @src")).toBeNull();
 	});
 
 	test("applyMention replaces the token and adds a space", () => {
