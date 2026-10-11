@@ -31,6 +31,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+	createPiApi,
+	explainPiLoadError,
+	isPiExtension,
+	registerPiModules,
+	unservedImports,
+} from "./pi-compat";
 
 /** JSON Schema for a tool's arguments (an object schema). */
 export interface ExtensionToolParameters {
@@ -90,6 +97,13 @@ export interface ExtensionLoadResult {
 	error?: string;
 	tools: string[];
 	commands: string[];
+	/**
+	 * loaded: everything it asked for works. partial: it loaded, but used APIs
+	 * 8gent accepts without acting on (named in `missing`). failed: see error.
+	 */
+	status?: "loaded" | "partial" | "failed";
+	/** Accepted-but-inactive APIs the extension used (Pi extensions). */
+	missing?: string[];
 }
 
 const NAME = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -112,8 +126,21 @@ export const RESERVED_COMMANDS = new Set(
 preferences skip animations adhd quarantine toolshed skills design evidence auth vision session sessions
 resume history continue compact chat agent github debug music dj pet export fork rewind branch cron deploy
 vercel telegram router rename spawn settings quiet term create-app hands eyes handeyes goal subgoal build
-notes ideas btw questions projects terminal reload exit copy hotkeys tree`.split(/\s+/),
+notes ideas btw questions projects terminal reload exit copy hotkeys tree extensions`.split(/\s+/),
 );
+
+/**
+ * Does this local process want extensions? Yes unless started with
+ * `--no-extensions` or EIGHT_EXTENSIONS=0. Interactive TUI and headless runs
+ * on the person's own machine pass this as AgentConfig.extensions; daemon,
+ * Table, channel and no-tool sessions never do.
+ */
+export function extensionsWanted(
+	argv: readonly string[] = process.argv,
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	return !argv.includes("--no-extensions") && env.EIGHT_EXTENSIONS !== "0";
+}
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
 export function defaultExtensionsDir(): string {
@@ -165,26 +192,32 @@ export class ExtensionHost {
 		private readonly handlerTimeoutMs: number = HANDLER_TIMEOUT_MS,
 	) {}
 
-	/** One-file extensions in the folder (real paths), sorted so load order is stable. */
+	/**
+	 * Extensions in the folder, sorted so load order is stable: one-file
+	 * extensions, and (as in Pi) folders holding an index.ts, index.js or
+	 * index.mjs, listed by that index file.
+	 */
 	files(): string[] {
-		if (!fs.existsSync(this.dir)) return [];
-		return fs
-			.readdirSync(this.dir, { withFileTypes: true })
-			.filter(
-				(e) =>
-					(e.isFile() || e.isSymbolicLink()) &&
-					EXTENSIONS.has(path.extname(e.name)) &&
-					!e.name.endsWith(".d.ts"),
-			)
-			.map((e) => path.join(this.dir, e.name))
-			.filter((f) => {
-				try {
-					return fs.statSync(f).isFile();
-				} catch {
-					return false;
-				}
-			})
-			.sort();
+		if (!this.dir || !fs.existsSync(this.dir)) return [];
+		const out: string[] = [];
+		for (const e of fs.readdirSync(this.dir, { withFileTypes: true })) {
+			const full = path.join(this.dir, e.name);
+			let stat: fs.Stats;
+			try {
+				stat = fs.statSync(full);
+			} catch {
+				continue;
+			}
+			if (stat.isFile()) {
+				if (EXTENSIONS.has(path.extname(e.name)) && !e.name.endsWith(".d.ts")) out.push(full);
+			} else if (stat.isDirectory() && e.name !== "node_modules") {
+				const index = ["index.ts", "index.js", "index.mjs"].find((i) =>
+					fs.existsSync(path.join(full, i)),
+				);
+				if (index) out.push(path.join(full, index));
+			}
+		}
+		return out.sort();
 	}
 
 	/**
@@ -255,15 +288,44 @@ export class ExtensionHost {
 		const commandTaken = (name: string) =>
 			reg.commands.some((x) => x.name === name) ||
 			[...taken.values()].some((r) => r.commands.some((x) => x.name === name));
+		const pi = isPiExtension(file);
+		const missing: string[] = [];
 		try {
+			// Local files only: an npm import 8gent does not serve is refused here,
+			// before Bun could try to auto-install it from the network.
+			const unserved = unservedImports(file, pi);
+			const piPackages = pi ? unserved.filter((u) => u.startsWith("@earendil-works/")) : [];
+			if (piPackages.length > 0) {
+				throw new Error(
+					`Pi API package ${piPackages.map((u) => `"${u}"`).join(", ")} is not supported by 8gent's Pi compatibility (terminal UI and runtime packages)`,
+				);
+			}
+			if (unserved.length > 0) {
+				throw new Error(
+					`imports ${unserved.map((u) => `"${u}"`).join(", ")}, which 8gent does not install; extensions load local files only`,
+				);
+			}
+			if (pi) registerPiModules();
 			// Bun keys its module cache by real path and ignores a ?query, so drop
-			// the cached copy: an edited file then loads fresh on reload.
+			// the cached copy (and, for a folder extension, every file in it): an
+			// edited file then loads fresh on reload.
 			try {
-				delete require.cache[file];
+				const folder = /^index\.[cm]?[jt]s$/.test(path.basename(file))
+					? path.dirname(file) + path.sep
+					: null;
+				for (const key of Object.keys(require.cache)) {
+					if (key === file || (folder && key.startsWith(folder))) delete require.cache[key];
+				}
 			} catch {
 				/* no CommonJS cache here: first load only */
 			}
-			const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+			let mod: { default?: unknown };
+			try {
+				mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				throw new Error(pi ? explainPiLoadError(message) : message);
+			}
 			const factory = mod.default;
 			if (typeof factory !== "function") throw new Error("default export is not a function");
 			const api: ExtensionAPI = {
@@ -298,12 +360,17 @@ export class ExtensionHost {
 					reg.handlers.push(handler);
 				},
 			};
-			await factory(api);
+			// A Pi extension gets Pi's ExtensionAPI, built over this same api, so
+			// every check above applies to what it registers (pi-compat.ts).
+			await factory(pi ? createPiApi(api, missing) : api);
 		} catch (err) {
 			result.error = err instanceof Error ? err.message : String(err);
+			result.status = "failed";
 			return { result };
 		}
 		result.ok = true;
+		result.status = missing.length > 0 ? "partial" : "loaded";
+		if (missing.length > 0) result.missing = missing;
 		result.tools = reg.tools.map((t) => t.name);
 		result.commands = reg.commands.map((c) => c.name);
 		return { result, reg };

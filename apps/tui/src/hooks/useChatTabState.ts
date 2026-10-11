@@ -27,6 +27,7 @@ import type {
 } from "../../../../packages/eight/index.js";
 import type { Message } from "../app.js";
 import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
+import { extensionsWanted } from "../../../../packages/extensions/index.js";
 
 // ============================================
 // Types
@@ -224,6 +225,8 @@ export function useChatTabState(
 					model,
 					runtime,
 					workingDirectory: process.cwd(),
+					// Extensions on unless --no-extensions (G1 wiring contract).
+					extensions: extensionsWanted(),
 					maxTurns: 50,
 					// Only the runtime's own key (#3261).
 					apiKey: sessionApiKey(runtime),

@@ -36,6 +36,7 @@ import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
 import type { Settings } from "../../../../packages/settings/index.js";
 import { providerToRuntime } from "../lib/model-selection.js";
+import { extensionsWanted } from "../../../../packages/extensions/index.js";
 
 // ============================================
 // Types
@@ -184,6 +185,8 @@ export function usePerTabAgents() {
 					model: opts.model,
 					runtime: toAgentRuntime(opts.provider),
 					workingDirectory: opts.workingDirectory,
+					// Extensions on unless --no-extensions (G1 wiring contract).
+					extensions: extensionsWanted(),
 					maxTurns: opts.maxTurns ?? 50,
 					apiKey: opts.apiKey,
 					events: opts.events,

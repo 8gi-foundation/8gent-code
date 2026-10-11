@@ -23,6 +23,7 @@
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import type { AgentEventCallbacks } from "./types";
+import { extensionsWanted } from "../extensions/index";
 
 export interface RunOptions {
 	prompt: string;
@@ -510,6 +511,8 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			model,
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
 			workingDirectory: opts.cwd || process.cwd(),
+			// Extensions on unless --no-extensions (G1 wiring contract).
+			extensions: extensionsWanted(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
 			// --provider names the provider: a provider error ends the run

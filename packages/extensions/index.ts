@@ -43,6 +43,7 @@ export {
 	ExtensionHost,
 	defaultExtensionsDir,
 	defineExtension,
+	extensionsWanted,
 	type ExtensionAPI,
 	type ExtensionCommand,
 	type ExtensionContext,

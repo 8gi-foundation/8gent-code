@@ -339,6 +339,7 @@ import {
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
+import { extensionsWanted } from "../../../packages/extensions/index.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -2823,6 +2824,8 @@ export function App({
 					model: _plan.model,
 					runtime,
 					workingDirectory: process.cwd(),
+					// Extensions on unless --no-extensions (G1 wiring contract).
+					extensions: extensionsWanted(),
 					maxTurns: 50,
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
@@ -4899,6 +4902,17 @@ export function App({
 					}
 					break;
 
+				case "extensions":
+					void (async () => {
+						try {
+							const { runExtCommand } = await import("../../../packages/extensions/ext-cli.js");
+							const result = await runExtCommand(args.length ? args : ["import-pi"]);
+							addSystemMessage(result.output);
+						} catch (e) {
+							addSystemMessage(`/extensions failed: ${e instanceof Error ? e.message : String(e)}`);
+						}
+					})();
+					break;
 				case "skills":
 					void (async () => {
 						try {
@@ -5679,6 +5693,19 @@ export function App({
 				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			return;
+		}
+
+		// Extension commands (G1, Pi imports included): "/name args" runs the
+		// command an extension registered, when no built-in took it first.
+		if (input?.startsWith("/") && !attached) {
+			const [head, ...restWords] = input.slice(1).split(/\s+/);
+			const tabAgent = tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
+			if (head && tabAgent?.extensionCommands().some((c) => c.name === head)) {
+				void tabAgent.runExtensionCommand(head, restWords.join(" ")).then((out) => {
+					addSystemMessage(out?.trim() ? out : `/${head} done.`);
+				});
+				return;
+			}
 		}
 
 		// Build-intent auto-route: an imperative "build / create / scaffold ..."

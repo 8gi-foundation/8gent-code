@@ -63,7 +63,8 @@ export type SlashCommand =
 	| "btw"
 	| "questions"
 	| "projects"
-	| "terminal";
+	| "terminal"
+	| "extensions";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -442,6 +443,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Open a terminal tab in the current project (optional tab label)",
 		usage: "/terminal [label]",
+	},
+	{
+		name: "extensions",
+		aliases: ["ext"],
+		description: "Import Pi extensions into 8gent (copies, records sha256, reports each)",
+		usage: "/extensions import-pi [path]",
 	},
 ];
 
