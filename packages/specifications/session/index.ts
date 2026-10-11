@@ -328,6 +328,8 @@ export interface StepEndEntry extends BaseEntry {
 	stepNumber: number;
 	/** Why this step finished */
 	finishReason: FinishReason;
+	/** Measured wall time from this step's step_start to this step_end (ms) */
+	durationMs?: number;
 	/** Detailed token usage for this step */
 	usage?: DetailedTokenUsage;
 	/** Provider response metadata */
