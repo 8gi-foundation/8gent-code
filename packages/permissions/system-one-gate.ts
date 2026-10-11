@@ -91,6 +91,7 @@ import type { CreatedFiles } from "./s1-created-files";
 import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
+import { buildRecord, logSystemOneVerdict } from "./system-one-log";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -923,7 +924,13 @@ export async function systemOneGate(
 					throw new Error("the judge is not on this machine, so the script is not sent to it");
 				await announceJudgeLoad(decider, env);
 				const { bashGuard } = await import("../decide/guard");
-				return bashGuard(command, decider, t.opts, script.body);
+				const before = decider.cacheStats?.();
+				const g = await bashGuard(command, decider, t.opts, script.body);
+				const after = decider.cacheStats?.();
+				const memoHit = !!before && !!after && after.hits > before.hits && after.misses === before.misses;
+				// #3885: record why the judge said what it said. Observability only.
+				logSystemOneVerdict(buildRecord(command, g, t.label, memoHit));
+				return g;
 			})(),
 			ms,
 		);
