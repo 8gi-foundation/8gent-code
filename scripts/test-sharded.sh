@@ -26,7 +26,7 @@ for ((s = 0; s < n; s++)); do
 	shard=()
 	for ((i = s; i < ${#files[@]}; i += n)); do shard+=("./${files[$i]}"); done
 	echo "::group::shard $((s + 1))/$n (${#shard[@]} files)"
-	bun test "${shard[@]}" || { echo "shard $((s + 1)) failed"; rc=1; }
+	bun --no-install test "${shard[@]}" || { echo "shard $((s + 1)) failed"; rc=1; }
 	echo "::endgroup::"
 done
 exit $rc

@@ -156,25 +156,13 @@ export function extensionsWanted(
 }
 
 /**
- * Is this Bun process unable to auto-install packages? True when it was
- * started with --no-install (every 8gent launcher passes it). Under `bun test`
- * (NODE_ENV=test, no flags) the bunfig.toml in the working folder must say
- * `[install] auto = "disable"`, as the repo's does.
+ * Is this Bun process unable to auto-install packages? Only when it was
+ * started with --no-install: every 8gent launcher passes it, and the test
+ * suite runs as `bun --no-install test`. No other signal counts: a bunfig or
+ * an environment variable can be changed by whatever controls the folder.
  */
-export function noInstallActive(
-	execArgv: readonly string[] = process.execArgv,
-	env: Record<string, string | undefined> = process.env,
-	cwd: string = process.cwd(),
-): boolean {
-	if (execArgv.includes("--no-install")) return true;
-	if (env.NODE_ENV !== "test") return false;
-	try {
-		const toml = fs.readFileSync(path.join(cwd, "bunfig.toml"), "utf8");
-		const install = toml.split(/^\[/m).find((sec) => sec.startsWith("install]"));
-		return install ? /^\s*auto\s*=\s*"disable"/m.test(install) : false;
-	} catch {
-		return false;
-	}
+export function noInstallActive(execArgv: readonly string[] = process.execArgv): boolean {
+	return execArgv.includes("--no-install");
 }
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
@@ -225,6 +213,7 @@ export class ExtensionHost {
 		private readonly dir: string = defaultExtensionsDir(),
 		private readonly reserved: () => Iterable<string> = () => [],
 		private readonly handlerTimeoutMs: number = HANDLER_TIMEOUT_MS,
+		private readonly noInstall: () => boolean = () => noInstallActive(),
 	) {}
 
 	/**
@@ -269,7 +258,7 @@ export class ExtensionHost {
 	async load(): Promise<ExtensionLoadResult[]> {
 		// Extension code may import anything; only a Bun that cannot auto-install
 		// keeps that to local files. Without --no-install, load nothing.
-		if (!noInstallActive()) {
+		if (!this.noInstall()) {
 			const files = this.files();
 			const reason =
 				"extensions are off: 8gent was started without Bun's --no-install, so an import could download a package";
