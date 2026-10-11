@@ -45,4 +45,5 @@ exec "$TB_HOME/venv/bin/harbor" run \
   --model "$MODEL" \
   --n-concurrent 1 \
   --jobs-dir "$TB_HOME/jobs" \
-  --job-name "easy-$(date +%Y%m%d-%H%M%S)"
+  --job-name "easy-$(date +%Y%m%d-%H%M%S)" \
+  ${HARBOR_EXTRA_ARGS:-}
