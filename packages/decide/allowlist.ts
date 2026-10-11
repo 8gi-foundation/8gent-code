@@ -45,7 +45,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { activeShellKind } from "../core/shell";
 import { type ActiveShellKind, posixRulesApply } from "../permissions/shell-tools";
-import { ffprobeOk, magickOk } from "./allowlist-media";
 import { promptControlText } from "./guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "./rules";
 
@@ -241,8 +240,6 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
 	if (b === "curl") return loopbackFetchOk(b, args);
-	if (b === "ffprobe") return ffprobeOk(args);
-	if (b === "magick") return magickOk(args);
 	if (b === "git") return gitOk(args);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";
