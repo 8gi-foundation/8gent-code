@@ -1276,7 +1276,10 @@ describe("secret placeholders: the model never holds the value (#3604)", () => {
 			["wrong host", "{{secret:OTHER_PW}}", () => write(0o600)],
 			["unknown name", "{{secret:NOPE}}", () => write(0o600)],
 			["no host list", "{{secret:NO_HOSTS}}", () => write(0o600)],
-			["loose mode", "{{secret:APP_PW}}", () => write(0o644)],
+			// Windows has no mode bits to loosen; the check does not apply there.
+			...(process.platform === "win32"
+				? []
+				: ([["loose mode", "{{secret:APP_PW}}", () => write(0o644)]] as const)),
 		] as const) {
 			setup();
 			const site = fakeSite();

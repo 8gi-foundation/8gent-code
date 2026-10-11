@@ -115,7 +115,9 @@ function protectedName(name: string): boolean {
 	);
 }
 
-function protectedRel(rel: string): boolean {
+function protectedRel(relIn: string): boolean {
+	// path.relative() is backslash-separated on Windows; the prefixes are not.
+	const rel = path.sep === "/" ? relIn : relIn.split(path.sep).join("/");
 	return PROTECTED_PREFIXES.some(
 		(p) => rel === p || rel.startsWith(`${p}/`) || p.startsWith(`${rel}/`),
 	);
@@ -224,7 +226,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!inside(realParent, root)) return NO;
 			const realSrc = path.join(realParent, path.basename(srcAbs));
 			const relSrc = path.relative(root, realSrc);
-			if (relSrc.split("/").some((s) => s.startsWith("."))) return NO;
+			if (relSrc.split(path.sep).some((s) => s.startsWith("."))) return NO;
 			if (protectedRel(relSrc) || protectedRel(path.relative(root, finalAbs))) return NO;
 			if (protectedName(path.basename(realSrc)) || protectedName(path.basename(finalAbs)))
 				return NO;

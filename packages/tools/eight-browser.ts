@@ -240,7 +240,9 @@ export function resolveSecretText(
 	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
 	let table: Record<string, { value?: unknown; hosts?: unknown }>;
 	try {
-		if (statSync(file).mode & 0o077)
+		// Windows has no POSIX mode bits (stat reports 0o666 for every file), so this check
+		// would refuse every secrets file there; access is the NTFS ACL of the user profile.
+		if (process.platform !== "win32" && statSync(file).mode & 0o077)
 			return { ok: false, error: "the secrets file must not be readable by group or others" };
 		table = JSON.parse(readFileSync(file, "utf8"));
 	} catch {

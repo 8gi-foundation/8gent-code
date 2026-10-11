@@ -343,7 +343,7 @@ describe("graph.* canonical knowledge graph", () => {
 		expect(ea.id).toBe(eb.id);
 		expect(eb.mentionCount).toBe(2);
 		handleStoreClose(ws as never);
-	});
+	}, 30_000); // first graph.* call opens and migrates a cold database: 6.5 s on a Windows runner
 
 	test("graph.upsertEntity keeps same-identity entities separate across projects", async () => {
 		const ws = makeWS();
