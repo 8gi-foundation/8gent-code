@@ -5,57 +5,93 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
 	completionSelfCheckEnabled,
-	completionSelfCheckNudge,
+	completionSelfCheckNudge as nudge,
 	deliverableFiles,
+	gitSnapshot,
 } from "./completion-selfcheck";
 
-const on = { EIGHT_COMPLETION_SELFCHECK: "1" };
 const wrote = [{ name: "write_file", success: true }];
 const repo = () => {
 	const d = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), "selfcheck-"));
 	execFileSync("git", ["init", "-q"], { cwd: d });
 	return d;
 };
+const run = (task: string, cwd: string, extra: object = {}) =>
+	nudge({ task, cwd, ledger: wrote, gitBaseline: gitSnapshot(cwd), ...extra });
 
 describe("completion self-check", () => {
-	test("flag", () => {
+	test("flag defaults on, =0 off", () => {
 		expect(completionSelfCheckEnabled({})).toBe(true);
-		expect(completionSelfCheckEnabled(on)).toBe(true);
 		expect(completionSelfCheckEnabled({ EIGHT_COMPLETION_SELFCHECK: "0" })).toBe(false);
-	});
-	test("extracts files only from creating sentences, skips versions and domains", () => {
-		expect(deliverableFiles("Create `out/report.md` and save notes.txt. Use node 20.1.2 and 8gent.dev")).toEqual(
-			["out/report.md", "notes.txt"],
-		);
-		expect(deliverableFiles("Read src/a.ts please")).toEqual([]);
-	});
-	test("missing named file is flagged, present file is not", () => {
 		const d = repo();
-		const task = "Write the summary to summary.md";
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: wrote, env: on })).toContain("summary.md");
-		writeFileSync(path.join(d, "summary.md"), "x");
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: wrote, env: on })).toBeNull();
+		expect(run("Write x.md", d, { env: { EIGHT_COMPLETION_SELFCHECK: "0" } })).toBeNull();
 	});
-	test("commit asked and tree dirty is flagged; clean or not asked is not", () => {
+
+	test("must-fix 1: commit check is scoped to the turn", () => {
 		const d = repo();
-		writeFileSync(path.join(d, "e2e.json"), "{}");
+		writeFileSync(path.join(d, "old.txt"), "dirt from before");
+		const baseline = gitSnapshot(d);
 		const task = "Implement it and commit the work";
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: wrote, env: on })).toContain("e2e.json");
-		expect(completionSelfCheckNudge({ task: "Implement it, do not commit", cwd: d, ledger: wrote, env: on })).toBeNull();
-		expect(completionSelfCheckNudge({ task: "Implement it", cwd: d, ledger: wrote, env: on })).toBeNull();
+		expect(nudge({ task, cwd: d, ledger: wrote, gitBaseline: baseline })).toBeNull();
+		writeFileSync(path.join(d, "e2e.json"), "{}");
+		const n = nudge({ task, cwd: d, ledger: wrote, gitBaseline: baseline });
+		expect(n).toContain('"?? e2e.json"');
+		expect(n).not.toContain("old.txt");
+		expect(n).not.toContain("or remove");
+		writeFileSync(path.join(d, "old.txt"), "edited during the turn, longer");
+		expect(nudge({ task, cwd: d, ledger: wrote, gitBaseline: baseline })).toContain("old.txt");
 	});
+
+	test("must-fix 1: only an imperative ask to commit counts", () => {
+		const d = repo();
+		const base = gitSnapshot(d);
+		writeFileSync(path.join(d, "new.txt"), "x");
+		for (const t of [
+			"Review the last commit and fix the typo",
+			"Fix the commit message wording",
+			"Explain the previous commit",
+			"Read the commit history",
+			"Implement it, do not commit",
+		])
+			expect(nudge({ task: t, cwd: d, ledger: wrote, gitBaseline: base })).toBeNull();
+		expect(nudge({ task: "Fix it and commit.", cwd: d, ledger: wrote, gitBaseline: base })).toContain("new.txt");
+	});
+
+	test("must-fix 2: URLs, ~, framework names, removed files, verb word boundary", () => {
+		expect(deliverableFiles("Write a doc, see https://example.com/a/page.html and www.foo.org/x.md")).toEqual([]);
+		expect(deliverableFiles("Create a Node.js and Next.js app using Three.js")).toEqual([]);
+		expect(deliverableFiles("Deploy to production and read config.json")).toEqual([]);
+		expect(deliverableFiles("Create app/Vue.js")).toEqual(["app/Vue.js"]);
+		expect(deliverableFiles("Rename old.md and create new.md.")).toEqual([]);
+		const d = repo();
+		const del = [...wrote, { name: "delete_file", success: true, args: { path: "tmp.txt" } }];
+		expect(nudge({ task: "Create tmp.txt then tidy up", cwd: d, ledger: del })).toBeNull();
+		expect(nudge({ task: "Create tmp.txt then tidy up", cwd: d, ledger: wrote })).toContain("tmp.txt");
+	});
+
+	test("must-fix 3: paths outside the workspace are skipped; ~ is expanded then confined", () => {
+		const d = repo();
+		expect(run("Save the notes to /etc/missing-notes.txt", d)).toBeNull();
+		expect(run("Write ../elsewhere/out.txt", d)).toBeNull();
+		expect(run("Save it to ~/never-exists-l18.txt", d)).toBeNull();
+		expect(run("Write sub/out.txt", d)).toContain("sub/out.txt");
+		writeFileSync(path.join(d, "ok.txt"), "x");
+		expect(run("Write ok.txt", d)).toBeNull();
+	});
+
 	test("tests asked but never run is flagged; a test run satisfies it", () => {
 		const d = repo();
 		const task = "Fix the bug and run the tests";
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: wrote, env: on })).toContain("no test command");
+		expect(run(task, d)).toContain("no test command");
 		const ran = [...wrote, { name: "run_command", success: true, args: { command: "bun test" } }];
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: ran, env: on })).toBeNull();
+		expect(nudge({ task, cwd: d, ledger: ran })).toBeNull();
 	});
-	test("silent when off, outside git, or when nothing was done", () => {
+
+	test("silent when nothing was done, no baseline for commit, or oversized task", () => {
 		const d = repo();
-		const task = "Write x.md and commit and run the tests";
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: wrote, env: { EIGHT_COMPLETION_SELFCHECK: "0" } })).toBeNull();
-		expect(completionSelfCheckNudge({ task, cwd: d, ledger: [], env: on })).toBeNull();
-		expect(completionSelfCheckNudge({ task: "Explain what a commit is", cwd: d, ledger: wrote, env: on })).toBeNull();
+		writeFileSync(path.join(d, "n.txt"), "x");
+		expect(nudge({ task: "Write x.md", cwd: d, ledger: [] })).toBeNull();
+		expect(nudge({ task: "and commit the work", cwd: d, ledger: wrote })).toBeNull();
+		expect(run("a ".repeat(20000) + "Write late.md", d)).toBeNull();
 	});
 });
