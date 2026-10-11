@@ -63,6 +63,13 @@ export interface AgentStepEvent {
 	tokensPerSecond?: number;
 }
 
+/** Event emitted just before a model call. Names only: never prompt text, args or output. */
+export interface AgentStepStartEvent {
+	stepNumber: number;
+	provider: string;
+	model: string;
+}
+
 /** Event emitted when evidence is collected */
 export interface AgentEvidenceEvent {
 	type: string;
@@ -84,6 +91,7 @@ export interface AgentEvidenceSummaryEvent {
 export interface AgentEventCallbacks {
 	onToolStart?: (event: AgentToolStartEvent) => void;
 	onToolEnd?: (event: AgentToolEndEvent) => void;
+	onStepStart?: (event: AgentStepStartEvent) => void;
 	onStepFinish?: (event: AgentStepEvent) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;

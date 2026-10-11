@@ -31,7 +31,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { arch as osArch, platform as osPlatform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const ENTRY = join(ROOT, "bin", "8gent.ts");
 const OUT_DIR = join(ROOT, "dist", "bin");
+const TUI_BUNDLE = join(ROOT, "dist", "tui.js");
+// Generated compile entry (dist/ is gitignored). It embeds dist/tui.js into the
+// binary and then loads the real entry, so `8gent tui` works with nothing next
+// to the executable and no Bun on PATH (#2975). bin/8gent.ts reads the embedded
+// path from globalThis.__EIGHT_EMBEDDED_TUI (see resolveTuiEntry).
+const COMPILE_ENTRY = join(ROOT, "dist", "compile-entry.ts");
 
 interface Target {
 	triple: string;
@@ -113,12 +119,42 @@ function humanSize(bytes: number): string {
 	return `${mb.toFixed(1)}M`;
 }
 
+function buildTuiBundle(): boolean {
+	const res = spawnSync("bun", ["run", "build:tui"], { stdio: "inherit", cwd: ROOT });
+	return res.status === 0 && existsSync(TUI_BUNDLE);
+}
+
+function writeCompileEntry() {
+	const rel = (p: string) => JSON.stringify(p.replace(/\\/g, "/"));
+	writeFileSync(
+		COMPILE_ENTRY,
+		[
+			`import tuiBundle from ${rel("./tui.js")} with { type: "file" };`,
+			`(globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI = tuiBundle;`,
+			`await import(${rel("../bin/8gent.ts")});`,
+			"",
+		].join("\n"),
+	);
+}
+
 function build(target: Target): boolean {
 	const outfile = join(OUT_DIR, target.artifact);
 	console.log(`\n-> ${target.triple}  ->  dist/bin/${target.artifact}`);
 	const res = spawnSync(
 		"bun",
-		["build", "--compile", `--target=${target.triple}`, ENTRY, "--outfile", outfile],
+		[
+			"build",
+			"--compile",
+			// A compiled binary otherwise loads $cwd/bunfig.toml (preload = code) and .env
+			// on every launch, even `--version`, so running 8gent inside an untrusted
+			// clone would execute that repo's code (#3894). Config is never read from cwd.
+			"--no-compile-autoload-bunfig",
+			"--no-compile-autoload-dotenv",
+			`--target=${target.triple}`,
+			COMPILE_ENTRY,
+			"--outfile",
+			outfile,
+		],
 		{ stdio: "inherit", cwd: ROOT },
 	);
 	if (res.status !== 0) {
@@ -163,6 +199,11 @@ function main() {
 		process.exit(1);
 	}
 	mkdirSync(OUT_DIR, { recursive: true });
+	if (!buildTuiBundle()) {
+		console.error("dist/tui.js could not be built; the binary would have no TUI.");
+		process.exit(1);
+	}
+	writeCompileEntry();
 	const targets = selectTargets();
 	console.log(`Building ${targets.length} target(s) from bin/8gent.ts`);
 	let failures = 0;

@@ -26,6 +26,8 @@ export interface DaemonEvents {
 	/** A channel approval closed with no answer (#3621). */
 	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
 	"session:start": { sessionId: string; channel: string };
+	/** A prompt one client sent, echoed to the other clients on that session (#3929). */
+	"user:message": { sessionId: string; text: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
 	// CEO task lifecycle events
 	"task:created": { taskId: string; description: string };

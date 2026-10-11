@@ -64,7 +64,7 @@ describe("editedLines / applyEdit", () => {
 
 	test("a deletion is checked on the line it joins", () => {
 		const orig = 'token = "\nq8ZrT2vLx9Mw4Kp7\n"';
-		expect(editedLines(orig, "\n", "")).toBe('token = "q8ZrT2vLx9Mw4Kp7');
+		expect(editedLines(orig, "\n", "", 1)).toBe('token = "q8ZrT2vLx9Mw4Kp7');
 	});
 
 	test("oldText not found is null", () => {

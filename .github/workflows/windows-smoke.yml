@@ -45,9 +45,9 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
 
       - name: Install dependencies
         run: bun install
@@ -89,15 +89,56 @@ jobs:
           .\dist\bin\8gent-windows-x64.exe --version
           .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
 
-      - name: Compiled binary finds the TUI bundle next to it
+      - name: Compiled binary runs the daemon on loopback and opens a browser session
         shell: pwsh
         run: |
-          Copy-Item dist\tui.js dist\bin\tui.js
-          New-Item empty-stdin.txt -ItemType File -Force | Out-Null
-          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "tui","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput exe-tui.out -RedirectStandardError exe-tui.err -RedirectStandardInput empty-stdin.txt
-          if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
-          Get-Content exe-tui.out, exe-tui.err -ErrorAction SilentlyContinue | Select-Object -First 30
-          if ((Get-Content exe-tui.out, exe-tui.err -Raw -ErrorAction SilentlyContinue) -match "TUI entry not found|Could not start the TUI") { throw "compiled binary could not start the TUI" }
+          # The path a Windows user takes for 8gent Browser: `8gent daemon run`,
+          # then a client on ws://127.0.0.1:18789 opens a session. No model is called.
+          $home8 = Join-Path $env:RUNNER_TEMP "daemon-home"
+          New-Item -ItemType Directory -Force $home8 | Out-Null
+          $env:EIGHT_DATA_DIR = Join-Path $home8 ".8gent"
+          $env:EIGHT_DAEMON_PORT = "18797"
+          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "daemon","run" -NoNewWindow -PassThru -RedirectStandardOutput daemon.out -RedirectStandardError daemon.err
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { $h = Invoke-RestMethod -Uri http://127.0.0.1:18797/health -TimeoutSec 2; if ($h.status -eq "ok") { $ok = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ok) { throw "daemon did not answer /health within 30 s" }
+            $bound = Get-NetTCPConnection -LocalPort 18797 -State Listen | Select-Object -ExpandProperty LocalAddress
+            "listening on: $($bound -join ', ')"
+            if ($bound | Where-Object { $_ -ne "127.0.0.1" }) { throw "daemon run must listen on 127.0.0.1 only, got: $($bound -join ', ')" }
+            # A web page that is not ours must be refused before any upgrade.
+            $code = 0
+            try { Invoke-WebRequest -Uri http://127.0.0.1:18797/ -Headers @{ Origin = "https://evil.example" } -UseBasicParsing | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+            if ($code -ne 403) { throw "Origin https://evil.example must get 403, got $code" }
+            "foreign origin refused (403)"
+            $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+            $ct = [Threading.CancellationToken]::None
+            $ws.ConnectAsync([Uri]"ws://127.0.0.1:18797", $ct).Wait(10000) | Out-Null
+            $req = [Text.Encoding]::UTF8.GetBytes('{"type":"session:create","channel":"browser"}')
+            $ws.SendAsync([ArraySegment[byte]]::new($req), "Text", $true, $ct).Wait(10000) | Out-Null
+            $got = ""
+            for ($i = 0; $i -lt 10 -and $got -notmatch "session:created"; $i++) {
+              $buf = [byte[]]::new(65536)
+              $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $ct)
+              if (-not $r.Wait(10000)) { break }
+              $got = [Text.Encoding]::UTF8.GetString($buf, 0, $r.Result.Count)
+            }
+            if ($got -notmatch "session:created") { throw "no session:created frame, last frame: $got" }
+            "browser session opened"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Content daemon.out, daemon.err -ErrorAction SilentlyContinue | Select-Object -Last 20
+          }
+
+      # The TUI is embedded in the .exe (#2975). Launch it under ConPTY from a
+      # hostile working directory and require a real first frame (a known TUI
+      # string), not just the absence of two error strings (#3894).
+      - name: Compiled binary renders the embedded TUI first frame
+        shell: pwsh
+        run: node scripts/tui-first-frame.mjs dist\bin\8gent-windows-x64.exe 90
 
       - name: Hash the binary
         shell: pwsh
@@ -115,5 +156,4 @@ jobs:
           path: |
             dist/bin/8gent-windows-x64.exe
             dist/bin/8gent-windows-x64.exe.sha256
-            dist/bin/tui.js
           retention-days: 14

@@ -19,9 +19,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix as pathPosix, win32 as pathWin32 } from "node:path";
 import {
 	BlockedDestinationError,
 	type Resolver,
@@ -231,6 +231,17 @@ export const hasSecretPlaceholder = (text: string): boolean => {
 	return PLACEHOLDER.test(text);
 };
 
+/**
+ * True when `file` is `home` or below it, compared with the rules of `platform`
+ * (case-insensitive on win32). Pure, so the Windows rule is testable on any OS.
+ */
+export function secretsPathInHome(file: string, home: string, platform: NodeJS.Platform): boolean {
+	const p = platform === "win32" ? pathWin32 : pathPosix;
+	const norm = (x: string) => (platform === "win32" ? p.resolve(x).toLowerCase() : p.resolve(x));
+	const rel = p.relative(norm(home), norm(file));
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel);
+}
+
 /** Secrets file: { "NAME": { "value": "...", "hosts": ["app.example.com"] } }, mode 0600. */
 export function resolveSecretText(
 	text: string,
@@ -240,7 +251,16 @@ export function resolveSecretText(
 	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
 	let table: Record<string, { value?: unknown; hosts?: unknown }>;
 	try {
-		if (statSync(file).mode & 0o077)
+		// Windows has no POSIX mode bits (stat reports 0o666 for every file), so the mode check
+		// would refuse every secrets file there. Instead the file must live under the user's home,
+		// whose NTFS ACL is user-only by default. The ACL itself is not read: accepted risk,
+		// docs/security/windows-secrets-file.md.
+		if (
+			process.platform === "win32" &&
+			!secretsPathInHome(realpathSync.native(file), realpathSync.native(homedir()), "win32")
+		)
+			return { ok: false, error: "on Windows the secrets file must be inside your home folder" };
+		if (process.platform !== "win32" && statSync(file).mode & 0o077)
 			return { ok: false, error: "the secrets file must not be readable by group or others" };
 		table = JSON.parse(readFileSync(file, "utf8"));
 	} catch {
@@ -572,9 +592,35 @@ function decodedViews(command: string): string[] {
 	return views;
 }
 
+/** Short flags of grep/rg that take no value, so the first word after them is the pattern. */
+const PLAIN_SHORT = /^-[rRhHnioEFwvcIsaqzPxlLu]+$/;
+
+/**
+ * For one pipeline segment that runs grep or rg: blank the quoted pattern (the first non-option word),
+ * and only when every option before it is a plain no-value flag. Any other option (--include, -g, -e,
+ * -f, --pre, anything with "=") or any $( ` <( in the segment leaves the segment untouched, so it is
+ * judged as written. Unknown shapes therefore fail closed.
+ */
+function blankSearchPattern(seg: string): string {
+	if (/\$\(|`|<\(/.test(seg) || !/^[\s;|&]*(?:grep|egrep|fgrep|rg)\s/.test(seg)) return seg;
+	const words = [...seg.matchAll(/(?:'[^']*'|"[^"]*"|\S)+/g)];
+	for (let i = 1; i < words.length; i++) {
+		const w = words[i];
+		if (w[0].startsWith("-")) {
+			if (PLAIN_SHORT.test(w[0]) || w[0] === "--hidden") continue;
+			return seg;
+		}
+		const q = w[0];
+		if (!/^(?:'[^']*'|"[^"]*")$/.test(q) || /\/|\.8|browser/i.test(q)) return seg;
+		const at = w.index ?? 0;
+		return seg.slice(0, at) + " ".repeat(q.length) + seg.slice(at + q.length);
+	}
+	return seg;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
-	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b/i.test(command);
+	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
 	for (const view of decodedViews(command)) {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
@@ -585,7 +631,16 @@ export function touchesBrowserSecrets(command: string): boolean {
 			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
 			if (lists) return true;
 		}
-		for (const token of flat.split(/[\s;|&()<>=]+/)) {
+		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
+		// as a glob over browser-control.token. Only that one word is blanked (see blankSearchPattern);
+		// option values, find/sed/awk and anything with a substitution keep their globs.
+		const shellView = view
+			.split(/(?<=[;|&\n])/)
+			.map(blankSearchPattern)
+			.join("")
+			.replace(/["'`\\]/g, "")
+			.replace(/\s*\+\s*/g, "");
+		for (const token of shellView.split(/[\s;|&()<>=]+/)) {
 			if (!/[*?[{]/.test(token)) continue;
 			for (const seg of token.split("/")) {
 				if (seg === "*" || !/[*?[{]/.test(seg)) continue;

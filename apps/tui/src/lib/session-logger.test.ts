@@ -103,3 +103,95 @@ describe("logToolStart", () => {
 		expect(call.toolCall.arguments.path).toBe("deck/outline.md");
 	});
 });
+
+describe("step_start and step_finish timing", () => {
+	function readEvents(id: string): Array<Record<string, any>> {
+		logger.flushSession();
+		const dir = path.join(home, ".8gent", "sessions");
+		for (const f of fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl"))) {
+			const lines = fs
+				.readFileSync(path.join(dir, f), "utf-8")
+				.trim()
+				.split("\n")
+				.map((l) => JSON.parse(l));
+			if (lines[0]?.meta?.sessionId === id) return lines;
+		}
+		throw new Error(`no session file for ${id}`);
+	}
+
+	test("step_start precedes step_finish and durationMs is finish minus start", async () => {
+		logger.initSessionLogger("timing-1", "qwen3.8:27b", "ollama");
+		logger.logStepStart("t1", "Chat", 0, "ollama", "qwen3.8:27b");
+		await new Promise((r) => setTimeout(r, 40));
+		logger.logStep("t1", "Chat", 0, 12, "hello");
+		const ev = readEvents("timing-1");
+		const start = ev.find((e) => e.type === "step_start")!;
+		const fin = ev.find((e) => e.type === "step_finish")!;
+		expect(start).toBeDefined();
+		expect(start.sequenceNumber).toBeLessThan(fin.sequenceNumber);
+		expect(start.stepNumber).toBe(0);
+		expect(start.provider).toBe("ollama");
+		expect(start.model).toBe("qwen3.8:27b");
+		expect(typeof start.timestamp).toBe("string");
+		const measured = Date.parse(fin.timestamp) - Date.parse(start.timestamp);
+		expect(fin.durationMs).toBe(measured);
+		expect(fin.durationMs).toBeGreaterThanOrEqual(30);
+	});
+
+	test("step_finish with no step_start has no durationMs", () => {
+		logger.initSessionLogger("timing-2", "m", "p");
+		logger.logStep("t1", "Chat", 3, 1);
+		const fin = readEvents("timing-2").find((e) => e.type === "step_finish")!;
+		expect(fin.durationMs).toBeUndefined();
+	});
+
+	test("step_start carries only index, provider, model, timestamp and tab ids", () => {
+		logger.initSessionLogger("timing-3", "m", "p");
+		logger.logStepStart("t1", "Chat", 1, "ollama", "qwen");
+		const start = readEvents("timing-3").find((e) => e.type === "step_start")!;
+		expect(Object.keys(start).sort()).toEqual(
+			["model", "provider", "sequenceNumber", "stepNumber", "tabId", "tabName", "timestamp", "type"].sort(),
+		);
+	});
+
+	test("secret text passed as a user message or tool arg never lands in step_start", () => {
+		const secret = "sk-SECRET-do-not-log-0123456789";
+		logger.initSessionLogger("timing-4", "m", "p");
+		logger.logMessage("t1", "Chat", "user", `my key is ${secret}`);
+		logger.logToolStart("t1", "Chat", "write_file", "c1", { content: secret });
+		logger.logStepStart("t1", "Chat", 0, "ollama", "qwen");
+		logger.logStep("t1", "Chat", 0, 5);
+		const ev = readEvents("timing-4");
+		for (const e of ev.filter((x) => x.type === "step_start" || x.type === "step_finish")) {
+			expect(JSON.stringify(e)).not.toContain(secret);
+		}
+	});
+
+	test("two tabs interleaving the same step number each get their own duration", async () => {
+		logger.initSessionLogger("timing-5", "m", "p");
+		logger.logStepStart("A", "A", 0, "ollama", "m");
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStepStart("B", "B", 0, "ollama", "m");
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStep("A", "A", 0, 1);
+		await new Promise((r) => setTimeout(r, 30));
+		logger.logStep("B", "B", 0, 1);
+		const ev = readEvents("timing-5");
+		const starts = Object.fromEntries(ev.filter((e) => e.type === "step_start").map((e) => [e.tabId, e]));
+		const fins = Object.fromEntries(ev.filter((e) => e.type === "step_finish").map((e) => [e.tabId, e]));
+		for (const t of ["A", "B"]) {
+			expect(fins[t].durationMs).toBe(Date.parse(fins[t].timestamp) - Date.parse(starts[t].timestamp));
+		}
+		expect(fins.A.durationMs).toBeGreaterThan(fins.B.durationMs - 31);
+		expect(fins.B.durationMs).toBeGreaterThanOrEqual(55);
+	});
+
+	test("step_finish stores textLength and never the model text", () => {
+		logger.initSessionLogger("timing-6", "m", "p");
+		logger.logStep("t1", "Chat", 0, 1, "reply with sk-MODEL-ECHO-123");
+		const fin = readEvents("timing-6").find((e) => e.type === "step_finish")!;
+		expect(fin.text).toBeUndefined();
+		expect(fin.textLength).toBe("reply with sk-MODEL-ECHO-123".length);
+		expect(JSON.stringify(fin)).not.toContain("sk-MODEL-ECHO-123");
+	});
+});

@@ -20,18 +20,39 @@ export interface SessionInfo {
 	messageCount: number;
 	createdAt: string;
 	lastActiveAt: string;
+	/** Surface that owns it when shared through the daemon ("tui", "browser", ...). */
+	channel?: string;
+}
+
+/** Ids become file names: only plain ids are ever read or written by id. */
+export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isSessionId(v: unknown): v is string {
+	return typeof v === "string" && SESSION_ID_PATTERN.test(v);
 }
 
 interface SessionFile extends SessionInfo {
 	messages: Array<{ role: string; content: string }>;
 }
 
+/**
+ * Where sessions live: $EIGHT_DATA_DIR/sessions when set, else
+ * ~/.8gent/sessions. The TUI and the daemon both use this, so a session
+ * shared through the daemon is the same file the TUI resumes (#3929).
+ */
+export function defaultSessionsDir(): string {
+	const dataDir = process.env.EIGHT_DATA_DIR;
+	return dataDir
+		? path.join(dataDir, "sessions")
+		: path.join(process.env.HOME || "~", ".8gent", "sessions");
+}
+
 export class SessionManager {
 	private dir: string;
 
 	constructor(dataDir?: string) {
-		this.dir = dataDir || path.join(process.env.HOME || "~", ".8gent", "sessions");
-		fs.mkdirSync(this.dir, { recursive: true });
+		this.dir = dataDir || defaultSessionsDir();
+		fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
 	}
 
 	/** Create a new session and persist it. */
@@ -66,7 +87,7 @@ export class SessionManager {
 		const needle = nameOrId.toLowerCase();
 
 		// Try exact ID match first
-		const byId = this.readFile(needle);
+		const byId = isSessionId(needle) ? this.readFile(needle) : null;
 		if (byId) return byId;
 
 		// Scan all sessions for name prefix match
@@ -84,6 +105,42 @@ export class SessionManager {
 		return this.listAll()
 			.sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
 			.slice(0, limit);
+	}
+
+	/** Read one session by exact id (no name matching). Null when absent or the id is not plain. */
+	get(id: string): (SessionInfo & { messages: Array<{ role: string; content: string }> }) | null {
+		if (!isSessionId(id)) return null;
+		return this.readFile(id);
+	}
+
+	/**
+	 * Write a session's messages, creating the file when it does not exist yet
+	 * (a daemon session the store has never seen). Keeps the name and createdAt
+	 * of an existing file.
+	 */
+	save(
+		id: string,
+		messages: Array<{ role: string; content: string }>,
+		meta: Partial<Pick<SessionInfo, "model" | "provider" | "branch" | "cwd" | "channel">> = {},
+	): void {
+		if (!isSessionId(id)) throw new Error(`invalid session id: ${id}`);
+		const now = new Date().toISOString();
+		const prev = this.readFile(id);
+		const file: SessionFile = {
+			...(prev ?? {
+				id,
+				model: "unknown",
+				provider: "unknown",
+				cwd: meta.cwd || process.cwd(),
+				createdAt: now,
+			}),
+			...Object.fromEntries(Object.entries(meta).filter(([, v]) => v !== undefined)),
+			id,
+			messages,
+			messageCount: messages.length,
+			lastActiveAt: now,
+		} as SessionFile;
+		this.write(id, file);
 	}
 
 	/** Rename a session. */
@@ -124,7 +181,10 @@ export class SessionManager {
 	}
 
 	private write(id: string, data: SessionFile): void {
-		fs.writeFileSync(this.filePath(id), JSON.stringify(data, null, 2));
+		// Owner-only: transcripts carry whatever was said and pasted (#3929).
+		const file = this.filePath(id);
+		fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+		fs.chmodSync(file, 0o600);
 	}
 
 	private readFile(id: string): SessionFile | null {

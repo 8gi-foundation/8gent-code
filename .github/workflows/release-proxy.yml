@@ -44,9 +44,9 @@ jobs:
       APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_KEYCHAIN_PROFILE }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -85,9 +85,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -126,9 +126,9 @@ jobs:
       WIN_CERT_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile

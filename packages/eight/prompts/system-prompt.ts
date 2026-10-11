@@ -289,6 +289,10 @@ export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**"
 export const SCRATCH_DIR_NOTE =
 	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
 
+/** Review focus (#3920): a review that cites every line it read buries the defect. */
+export const REVIEW_FOCUS_NOTE =
+	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
+
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
@@ -342,7 +346,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
 	);
-	lines.push(SLIDES_TO_VIDEO_NOTE);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 
 	return lines.join("\n");
 }
@@ -382,6 +386,9 @@ This is enforced at the infrastructure level: read_file on large code files will
 {"tool": "write_file", "arguments": {"path": "new.ts", "content": "..."}}
 {"tool": "edit_file", "arguments": {"path": "src/x.ts", "oldText": "...", "newText": "..."}}
 \`\`\`
+
+### Local servers
+For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request.
 
 ### Git Flow
 \`\`\`json

@@ -601,6 +601,48 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain run of the project's own script inside the workspace, with
+		// only workspace or /tmp paths in its environment and arguments, whose
+		// source (and local imports) spawns, fetches and deletes nothing (#3937).
+		// Default mode only: strict/Guarded never skips the judge or the person.
+		try {
+			const { runInProject } = await import("./s1-run-in-project");
+			const run = mode === "default" ? runInProject(command, cwd) : { ok: false as const };
+			if (run.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: run.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain curl whose every URL is a loopback http(s) server and whose
+		// every file stays inside the workspace (#3941). Default mode only.
+		try {
+			const { curlToLoopback } = await import("./s1-curl-loopback");
+			const c = mode === "default" ? curlToLoopback(command, cwd) : { ok: false as const };
+			if (c.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: c.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {

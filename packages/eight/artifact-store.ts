@@ -64,7 +64,7 @@ function ensureDirAllowed(dir: string): void {
 	// reads via the agent loop, but the artifact store writes from the tool
 	// boundary. A symlink under the data dir pointing into ~/.ssh would
 	// otherwise let a malicious tool result land on a credential file.
-	const result = validatePath(dir, process.cwd());
+	const result = validatePath(dir, process.cwd(), {}, "write");
 	if (!result.ok) {
 		throw new Error(`[artifact-store] PathGuard denied dataDir: ${result.reason}`);
 	}

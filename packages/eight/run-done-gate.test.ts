@@ -10,9 +10,10 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDir } from "../../tests/temp-dirs";
 
 const GATE_NEEDLE = "[DONE GATE]";
 
@@ -164,12 +165,12 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
+	removeDir(home);
 });
 
 afterEach(() => {
 	Reflect.deleteProperty(process.env, "EIGHT_DONE_GATE");
-	rmSync(repo, { recursive: true, force: true });
+	removeDir(repo);
 });
 
 /** Run `8gent run --yes` headless and collect its output and exit code. */
@@ -321,9 +322,14 @@ describe("done gate, hardening", () => {
 		name: "envdump",
 		available: true,
 		setup: (dir, start) => {
+			// `env > file` is POSIX-only; a node script dumps the same environment on every OS.
+			writeFileSync(
+				join(dir, "dump-env.js"),
+				`require("fs").writeFileSync(${JSON.stringify(out)}, Object.entries(process.env).map(([k, v]) => k.toUpperCase() + "=" + v).join("\\n"));\n`,
+			);
 			writeFileSync(
 				join(dir, "package.json"),
-				JSON.stringify({ name: "ex", scripts: { test: `env > '${out}'` } }),
+				JSON.stringify({ name: "ex", scripts: { test: "node dump-env.js" } }),
 			);
 			writeFileSync(join(dir, "index.js"), start);
 		},

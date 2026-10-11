@@ -21,9 +21,9 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
 
       - name: Install dependencies
         run: bun install
@@ -96,6 +96,12 @@ jobs:
           sha256sum -c SHA256SUMS
           [ "$COUNT" -ge 2 ] || { echo "::error::expected at least 2 release assets, staged ${COUNT}"; exit 1; }
           echo "release dry run: ${COUNT} assets staged for v${VERSION}"
+
+      - name: No workspace: specifier in manifests, bun.lock or the npm tarball
+        run: bun scripts/lib/no-workspace-protocol.ts "$RUNNER_TEMP"/release-assets/*.tgz
+
+      - name: Lockfile is in sync with the manifests
+        run: bun install --frozen-lockfile
 
       - name: Verify version sync
         run: |
@@ -217,9 +223,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install dependencies
         run: bun install
       - name: CLI version check

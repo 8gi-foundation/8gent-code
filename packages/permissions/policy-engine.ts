@@ -17,7 +17,7 @@ import { parse as parseYaml } from "yaml";
 import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
-import { commandTouchesAuditFiles, validatePath } from "./path-guard.js";
+import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath } from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -490,9 +490,16 @@ const PATH_GUARDED_ACTIONS = new Set<string>([
 	"delete_file",
 	"edit_file",
 	"apply_patch",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"read_notebook",
 	"glob",
 	"list_files",
 ]);
+
+/** Actions that only read: the session's own records stay readable for these. */
+const PATH_READ_ACTIONS = new Set<string>(["read_file", "read_notebook", "glob", "list_files"]);
 
 function pathGuardGate(action: string, context: PolicyContext): PolicyDecision | null {
 	// Shell commands cannot be path-checked; refuse ones that name agent audit files (#3735).
@@ -500,6 +507,9 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 		const command = typeof context.command === "string" ? context.command : "";
 		if (command && commandTouchesAuditFiles(command)) {
 			return { allowed: false, reason: "[path-guard] protected audit file named in command" };
+		}
+		if (command && commandMutatesSessionRecords(command)) {
+			return { allowed: false, reason: "[path-guard] protected session record named in command" };
 		}
 		return null;
 	}
@@ -510,7 +520,7 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
 		(typeof context.workspaceRoot === "string" && context.workspaceRoot) ||
 		process.cwd();
-	const result = validatePath(filePath, cwd);
+	const result = validatePath(filePath, cwd, {}, PATH_READ_ACTIONS.has(action) ? "read" : "write");
 	if (!result.ok) {
 		return { allowed: false, reason: `[path-guard] ${result.reason}: ${filePath}` };
 	}

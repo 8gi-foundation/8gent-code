@@ -1,0 +1,109 @@
+# windows-task.yml - Prove one real task finishes on Windows (#3892).
+#
+# windows-smoke.yml proves install, start and RPC. Nothing there sends a prompt.
+# This job builds the standalone .exe, takes Bun off PATH, points the exe at a
+# stub OpenAI-compatible server on 127.0.0.1 and asserts the model's one
+# write_file call lands as a file with the expected content. Provider call,
+# tool dispatch, workspace boundary and file write run on the shipped binary.
+# No model, no Ollama install, no network beyond the runner. A red run is a
+# real Windows failure, not a flake in the stub: the stub is scripts/ci/stub-model-server.ts.
+
+name: Windows Task
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-task.yml"
+      - "scripts/ci/stub-model-server.ts"
+      - "bin/**"
+      - "scripts/build-*.ts"
+      - "packages/eight/**"
+      - "packages/ai/**"
+      - "packages/permissions/**"
+      - "packages/core/**"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-task-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-task:
+    name: Windows (one task, standalone exe)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      EIGHT_DECIDE_OLLAMA_HOST: http://127.0.0.1:9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Compile standalone Windows binary
+        run: bun run scripts/build-binaries.ts --only=bun-windows-x64
+
+      - name: Run one task with the exe, Bun off PATH
+        shell: pwsh
+        run: |
+          # Stub starts in this same step so its lifetime cannot depend on step teardown.
+          $bun = (Get-Command bun).Source
+          $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8189" -NoNewWindow -PassThru -RedirectStandardOutput stub.out -RedirectStandardError stub.err
+          "STUB_PID=$($stub.Id)" | Out-File -Append $env:GITHUB_ENV
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8189/v1/models | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Get-Content stub.out, stub.err -ErrorAction SilentlyContinue; throw "stub model server did not come up" }
+          "stub up (pid $($stub.Id), alive=$(-not $stub.HasExited))"
+          # Take every directory that holds bun out of PATH for this step.
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          if (Get-Command bun -ErrorAction SilentlyContinue) { throw "bun is still on PATH" }
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $work = Join-Path $env:RUNNER_TEMP "task-work"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          $env:OLLAMA_HOST = "http://127.0.0.1:8189"
+          & $exe run --yes --provider ollama --model stub --cwd $work "Create hello.txt" 2>&1 | Tee-Object -FilePath task.log
+          $code = $LASTEXITCODE
+          "exit code: $code; stub alive=$(-not $stub.HasExited)"
+          Invoke-RestMethod http://127.0.0.1:8189/v1/models | ConvertTo-Json -Compress
+          if ($code -ne 0) { throw "run exited $code" }
+          $f = Join-Path $work "hello.txt"
+          if (-not (Test-Path $f)) { throw "hello.txt was not written" }
+          $got = (Get-Content $f -Raw).Trim()
+          if ($got -ne "hello from windows ci") { throw "hello.txt content was: $got" }
+          "task finished: hello.txt = $got"
+
+      - name: Logs
+        if: always()
+        shell: pwsh
+        run: |
+          "--- stub.out"; Get-Content stub.out -ErrorAction SilentlyContinue
+          "--- stub.err"; Get-Content stub.err -ErrorAction SilentlyContinue
+          if ($env:STUB_PID) { Stop-Process -Id $env:STUB_PID -Force -ErrorAction SilentlyContinue }
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-task-logs
+          path: |
+            task.log
+            stub.out
+            stub.err
+          retention-days: 7

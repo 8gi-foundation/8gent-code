@@ -12,7 +12,7 @@
  * @see docs/bmad/loop-stop-conditions/edge-case-catalog.md
  */
 
-import { describe, test, expect, vi, beforeEach } from "bun:test";
+import { afterAll, describe, test, expect, mock, vi, beforeEach } from "bun:test";
 import type { CuaStepRecord } from "../loops/computer-use";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,12 @@ vi.mock("../perception/screenshot", () => ({
 // the factory must keep the module's full export surface: agent.ts imports
 // VisionInterpreter, and later test files (e.g. packages/harness local.test)
 // import agent.ts in the same run.
+// The real module, captured before it is mocked, so afterAll can put it back: a leaked stub class
+// has no interpret(), which broke vision-router.test.ts whenever it ran later in the same process.
+const realVisionInterpreter = { ...(await import("../vision-interpreter")) };
+afterAll(() => {
+  mock.module("../vision-interpreter", () => realVisionInterpreter);
+});
 vi.mock("../vision-interpreter", () => ({
   buildVisionPrompt: vi.fn().mockReturnValue("mock vision prompt"),
   summarizePerception: vi.fn().mockReturnValue("mock summary"),

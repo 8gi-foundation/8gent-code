@@ -70,9 +70,10 @@ fs.writeFileSync(
 beforeAll(() => {
 	process.env.EIGHT_DATA_DIR = DATA_DIR;
 	process.env.EIGHT_WORKSPACE_ROOT = WORKSPACE;
-	// Direct the sessions to a sandbox dir.
-	process.env.HOME = TMP; // SessionManager defaults to $HOME/.8gent/sessions
-	fs.mkdirSync(path.join(TMP, ".8gent", "sessions"), { recursive: true });
+	// Direct the sessions to a sandbox dir. SessionManager uses
+	// $EIGHT_DATA_DIR/sessions when it is set (#3929), else $HOME/.8gent/sessions.
+	process.env.HOME = TMP;
+	fs.mkdirSync(path.join(DATA_DIR, "sessions"), { recursive: true });
 
 	_setAuditDir(AUDIT_DIR);
 	_setKgStorePath(KG_DB);
@@ -197,7 +198,7 @@ describe("session.*", () => {
 
 	test("session.open round-trip via SessionManager", async () => {
 		// Seed a session manually so we don't depend on the agent path.
-		const sessionsDir = path.join(TMP, ".8gent", "sessions");
+		const sessionsDir = path.join(DATA_DIR, "sessions");
 		const id = "abcd1234";
 		fs.writeFileSync(
 			path.join(sessionsDir, `${id}.json`),
@@ -343,7 +344,7 @@ describe("graph.* canonical knowledge graph", () => {
 		expect(ea.id).toBe(eb.id);
 		expect(eb.mentionCount).toBe(2);
 		handleStoreClose(ws as never);
-	});
+	}, 30_000); // first graph.* call opens and migrates a cold database: 6.5 s on a Windows runner
 
 	test("graph.upsertEntity keeps same-identity entities separate across projects", async () => {
 		const ws = makeWS();
@@ -993,7 +994,7 @@ describe("session.subscribe per-socket cap", () => {
 		handleStoreOpen(ws as never);
 		await handshake(ws, ensureServerToken(TOKEN_PATH));
 		// Seed 33 fake sessions on disk so subscribe()'s existence check passes.
-		const sessionsDir = path.join(TMP, ".8gent", "sessions");
+		const sessionsDir = path.join(DATA_DIR, "sessions");
 		fs.mkdirSync(sessionsDir, { recursive: true });
 		const ids: string[] = [];
 		for (let i = 0; i < 33; i++) {

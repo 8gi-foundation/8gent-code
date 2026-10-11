@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand, sanitizeShellCommand } from "./shell-sanitizer";
+import { hasUnquotedAmpersand, hasUnquotedSemicolon, sanitizeShellCommand } from "./shell-sanitizer";
 
 const AMP_REASON =
 	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
@@ -234,7 +234,7 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 	test("ANSI-C $'...' with a backslash is refused; without one it is a plain span", () => {
 		no("echo $'it\\'s; fine'", "backslash");
 		no("echo $'a\\nb'", "backslash");
-		ok("echo $'a; b'");
+		no("echo $'a; b'", "$'");
 		no("echo $'a'; id", "Semicolon");
 	});
 	// 8SO review of #3880: payloads that ran a second command in bash.
@@ -286,5 +286,37 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 	});
 	test("Windows keeps the strict whole-line rules", () => {
 		expect(sanitizeShellCommand('echo "a; b"', "win32").safe).toBe(false);
+	});
+});
+
+describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-video)", () => {
+	test("quoted ; passes on POSIX (single, double, escaped)", () => {
+		expect(sanitizeShellCommand("magick xc:red -annotate +0+0 'a;b' out.png", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand('echo "a;b"', "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo a\\;b", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo 'it\"s;ok'", "linux").safe).toBe(true);
+	});
+	test("unquoted ; still blocked, including after a closed quote", () => {
+		expect(sanitizeShellCommand("which a; mkdir video", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo 'a'; id", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand('echo "a\\";id', "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo 'unterminated; id", "linux").safe).toBe(false);
+	});
+	test("win32: single quotes are not quoting", () => {
+		expect(hasUnquotedSemicolon("echo 'a;b'", "win32")).toBe(true);
+		expect(hasUnquotedSemicolon('echo "a;b"', "win32")).toBe(false);
+	});
+});
+
+describe("sanitizeShellCommand: bash $'...' quoting is refused (8SO)", () => {
+	test("ANSI-C quote smuggling is blocked on POSIX", () => {
+		expect(sanitizeShellCommand("echo $'\\'';id;#'", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo $'\\'';id;echo '", "linux").safe).toBe(false);
+		expect(sanitizeShellCommand('echo $"x"', "linux").safe).toBe(false);
+		expect(sanitizeShellCommand("echo $'a'", "linux").reason).toContain("$'");
+	});
+	test("a $ inside quotes or before other chars still passes", () => {
+		expect(sanitizeShellCommand("echo '$'", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand('echo "cost $5"', "linux").safe).toBe(true);
 	});
 });
