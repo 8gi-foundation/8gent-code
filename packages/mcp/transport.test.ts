@@ -175,3 +175,31 @@ for await (const chunk of process.stdin) {
 		t.close();
 	}
 });
+
+test("an answer written just before the server exits is still delivered", async () => {
+	const bye = join(dir, "bye.ts");
+	writeFileSync(
+		bye,
+		`let buf = "";
+for await (const chunk of process.stdin) {
+	buf += chunk;
+	const i = buf.indexOf("\\n");
+	if (i < 0) continue;
+	const m = JSON.parse(buf.slice(0, i));
+	process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { last: true } }) + "\\n", () => process.exit(0));
+	break;
+}
+`,
+	);
+	const t = new StdioTransport(process.execPath, [bye], {});
+	await t.start();
+	try {
+		expect(await t.send("initialize", {})).toEqual({ last: true });
+		// The process is gone now: later requests fail at once, not after the 30 s timeout.
+		const t0 = Date.now();
+		await expect(t.send("tools/list")).rejects.toThrow();
+		expect(Date.now() - t0).toBeLessThan(3000);
+	} finally {
+		t.close();
+	}
+}, 30_000);

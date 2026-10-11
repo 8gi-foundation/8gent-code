@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -17,8 +17,10 @@ import {
 	browserProfile,
 	browserProfileWarning,
 	createEightBrowser,
+	secretsPathInHome,
 	localBrowserTools,
 	touchesBrowserSecrets,
+	browserWithheldNote,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
@@ -389,7 +391,15 @@ describe("state rendering", () => {
 	});
 });
 
-describe("wsTransport (real WebSocket round trip)", () => {
+// Skipped on Windows: every block that opens a real Bun.serve WebSocket server. The windows-latest
+// run dies in this file: Bun 1.4.3 segfaults and 1.4.2 segfaults or hangs, at a different test each
+// run, right after such a server is stopped, and every test after it in the process is lost.
+// Cause not isolated; tracked in #3820. The driver logic is also covered by the in-process
+// fakeSite() tests above, which still run on Windows.
+const describeNotWin = process.platform === "win32" ? describe.skip : describe;
+const testNotWin = process.platform === "win32" ? test.skip : test;
+
+describeNotWin("wsTransport (real WebSocket round trip)", () => {
 	test("authenticates with the token file, then sends the command and returns its result", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "8b-ws-"));
 		writeFileSync(join(dir, "token"), "tok-123\n");
@@ -644,7 +654,22 @@ describe("localBrowserTools (local sessions get a browser only with a named prof
 	});
 });
 
-describe("wsTransport with a named profile", () => {
+describe("browserWithheldNote (a withheld browser says why and how to get it, #3785)", () => {
+	test("names the tools, the reason and EIGHT_BROWSER_PROFILE when none is configured", () => {
+		const note = browserWithheldNote({}) ?? "";
+		expect(note).toMatch(/browser_open/);
+		expect(note).toMatch(/not offered/);
+		expect(note).toMatch(/EIGHT_BROWSER_PROFILE/);
+		expect(note).toMatch(/loopback|private/);
+		expect(note).not.toContain("\u2014");
+	});
+	test("a bad profile name is still withheld; a valid one offers the tools so no note", () => {
+		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "../x" })).not.toBeNull();
+		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "eightgent" })).toBeNull();
+	});
+});
+
+describeNotWin("wsTransport with a named profile", () => {
 	afterEach(() => _setProfileHomeForTest(null));
 
 	test("uses the profile's own token and port file, not the default token or EIGHT_BROWSER_CONTROL_PORT", async () => {
@@ -737,7 +762,7 @@ describe("isolated driver (named profile): no typing into password or payment fi
 	});
 });
 
-describe("ToolExecutor: named profile acts without a card; default profile still asks", () => {
+describeNotWin("ToolExecutor: named profile acts without a card; default profile still asks", () => {
 	const dir = mkdtempSync(join(tmpdir(), "browser-profile-gate-"));
 	const saved = {
 		profile: process.env.EIGHT_BROWSER_PROFILE,
@@ -979,7 +1004,7 @@ describe("ToolExecutor, review round", () => {
 		expect(out).toContain("[PERMISSION DENIED]");
 	});
 
-	test("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
+	testNotWin("named profile: the sensitive-click card does not say 'your logged-in browser'", async () => {
 		const site = fakeSite();
 		const { server } = serveCall(withSecretFields(site.call), "bot-tok");
 		try {
@@ -997,7 +1022,7 @@ describe("ToolExecutor, review round", () => {
 		}
 	});
 
-	test("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
+	testNotWin("named profile: a screenshot is saved in the workspace, never in the protected profile dir", async () => {
 		const site = nextSite();
 		const shot: BrowserCall = async (cmd, args) =>
 			cmd === "page.screenshot"
@@ -1044,6 +1069,26 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		"cat ~/.{8,9}gent/x",
 		"find ~ -name 'browser-*'",
 		"find ~ -name 'b*'",
+		"grep -r 'b*' ~/.8*/",
+		"grep -r --include='*.token' . ~",
+		"grep -rhg '*.token' 'x' ~",
+		"grep -rlg '*.token' . ~",
+		"grep -r -- '*.token' ~",
+		"rg -g '*control*' 'x' ~",
+		"grep -e '*.token' -r ~",
+		"grep -r 'x' ~/.8gent",
+		"grep --recursive x ~/.8gent",
+		"grep --dereference-recursive x ~/.8gent",
+		"grep -d recurse x ~/.8gent",
+		"grep --directories=recurse x ~/.8gent",
+		"rg x ~/.8gent",
+		"grep -r 'x' ~/.?gent",
+		"grep -rh --include='*.token' '' ~",
+		"rg --hidden -g '*.token' . ~",
+		`awk 'BEGIN{system("find ~ -name *.token -exec cat {} +")}'`,
+		"sed -n '1e find ~ -name *.tok* -exec cat {} +' f",
+		"grep . $(find ~ -name '*.token')",
+		"echo ok; find ~ -name 'b*'",
 		'cat ~/".8"gent/browser-control.token',
 		"cat ~/'.8gent'/'browser'-'control'.token",
 		"cat ~/.8gent/browser-control.token",
@@ -1074,6 +1119,9 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		"echo hello | base64",
 		"grep -r browser packages/tools",
 		'node -e "console.log(1+1)"',
+		// #3589: pulling a csrf token out of a login page is not a glob over the token file
+		"grep -o 'name=csrf value=[a-f0-9]*' page.html",
+		"curl -s -c jar.txt http://127.0.0.1:8080/ | grep -o 'value=[a-f0-9]*'",
 	];
 	for (const cmd of allowed)
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
@@ -1204,5 +1252,129 @@ describe("browser destinations go through the net guard in every profile (#3603)
 		});
 		expect(await b.open(at("http", "192.168.1.1:80/"))).toMatch(/Refused/);
 		expect(await b.open(at("http", "169.254.169.254:80/"))).toMatch(/Refused/);
+	});
+});
+
+describe("secretsPathInHome: the Windows secrets-file rule, run on any OS (#3814)", () => {
+	const home = "C:\\Users\\james";
+	test("inside the home folder is accepted, case-insensitively", () => {
+		expect(secretsPathInHome("C:\\Users\\james\\.8gent\\secrets.json", home, "win32")).toBe(true);
+		expect(secretsPathInHome("c:\\users\\JAMES\\AppData\\Local\\Temp\\s.json", home, "win32")).toBe(
+			true,
+		);
+	});
+	test("outside the home folder is refused", () => {
+		for (const f of [
+			"C:\\ProgramData\\secrets.json",
+			"D:\\shared\\secrets.json",
+			"C:\\Users\\other\\secrets.json",
+			"C:\\Users\\james-old\\secrets.json",
+			"C:\\Users\\james\\..\\other\\secrets.json",
+			"\\\\server\\share\\secrets.json",
+			"C:\\Users\\james",
+		])
+			expect(secretsPathInHome(f, home, "win32"), f).toBe(false);
+	});
+	test("posix rules are unchanged by the helper", () => {
+		expect(secretsPathInHome("/home/a/s.json", "/home/a", "linux")).toBe(true);
+		expect(secretsPathInHome("/tmp/s.json", "/home/a", "linux")).toBe(false);
+	});
+});
+
+describe("secret placeholders: the model never holds the value (#3604)", () => {
+	const SECRET = "s3cr3t-Value-42";
+	const OTHER = "other-secret-77";
+	const dir = mkdtempSync(join(tmpdir(), "browser-secrets-"));
+	const file = join(dir, "secrets.json");
+	const write = (mode: number) => {
+		writeFileSync(
+			file,
+			JSON.stringify({
+				APP_PW: { value: SECRET, hosts: ["127.0.0.1"] },
+				OTHER_PW: { value: OTHER, hosts: ["example.com"] },
+				NO_HOSTS: { value: "nohost-secret" },
+			}),
+		);
+		chmodSync(file, mode);
+	};
+	const mk = (call: BrowserCall, secretsFile: string | undefined = file) =>
+		createEightBrowser(call, { settleMs: 0, secretsFile, allowLoopback: ["127.0.0.1:5"] });
+	const typeStep = (text: string) => [{ action: "type", selector: "input[name=username]", text }];
+	const open = async (b: ReturnType<typeof createEightBrowser>) => b.open("http://127.0.0.1:5/");
+	const sent = (calls: Array<{ cmd: string; args: Record<string, unknown> }>) =>
+		calls.filter((c) => c.cmd === "page.type").map((c) => c.args.text);
+
+	test("the page receives the real value; no output carries it", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		const out = await b.run(typeStep("{{secret:APP_PW}}"));
+		expect(JSON.parse(out).ok).toBe(true);
+		expect(sent(site.calls)).toEqual([SECRET]);
+		expect(out).not.toContain(SECRET);
+		expect(await b.state()).not.toContain(SECRET);
+	});
+
+	test("a page reply that echoes the value is scrubbed from the result", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const echo: BrowserCall = async (cmd, args) =>
+			cmd === "page.type"
+				? { ok: false, error: `rejected input ${String(args?.text)}` }
+				: site.call(cmd, args);
+		const b = mk(echo);
+		await open(b);
+		const out = await b.run(typeStep("{{secret:APP_PW}}"));
+		expect(out).not.toContain(SECRET);
+	});
+
+	test("refused with nothing typed: wrong host, unknown name, no host list, no file, loose file mode", async () => {
+		for (const [label, text, setup] of [
+			["wrong host", "{{secret:OTHER_PW}}", () => write(0o600)],
+			["unknown name", "{{secret:NOPE}}", () => write(0o600)],
+			["no host list", "{{secret:NO_HOSTS}}", () => write(0o600)],
+			// Windows has no mode bits to loosen; the check does not apply there.
+			...(process.platform === "win32"
+				? []
+				: ([["loose mode", "{{secret:APP_PW}}", () => write(0o644)]] as const)),
+		] as const) {
+			setup();
+			const site = fakeSite();
+			const b = mk(site.call);
+			await open(b);
+			const out = await b.run(typeStep(text));
+			expect(JSON.parse(out).ok, label).toBe(false);
+			expect(sent(site.calls), label).toEqual([]);
+			for (const v of [SECRET, OTHER, "nohost-secret"]) expect(out, label).not.toContain(v);
+		}
+		const site = fakeSite();
+		const b = mk(site.call, "");
+		await open(b);
+		expect(JSON.parse(await b.run(typeStep("{{secret:APP_PW}}"))).ok).toBe(false);
+		expect(sent(site.calls)).toEqual([]);
+	});
+
+	test("a plan with a refused placeholder types nothing, not even earlier steps", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		const out = await b.run([
+			{ action: "type", selector: "input[name=username]", text: "alice" },
+			{ action: "type", selector: "input[name=username]", text: "{{secret:OTHER_PW}}" },
+		]);
+		expect(JSON.parse(out).ok).toBe(false);
+		expect(sent(site.calls)).toEqual([]);
+	});
+
+	test("text without a placeholder is typed as given", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await open(b);
+		await b.run(typeStep("alice {{not-a-secret}}"));
+		expect(sent(site.calls)).toEqual(["alice {{not-a-secret}}"]);
+		rmSync(dir, { recursive: true, force: true });
 	});
 });

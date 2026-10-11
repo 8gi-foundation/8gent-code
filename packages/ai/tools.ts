@@ -30,7 +30,7 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -45,6 +45,7 @@ import { withImagesWritten } from "./image-shape";
 import { writeShapeLine } from "./write-shape";
 import { writeScopeLine } from "./write-scope";
 import { safePath } from "../eight/tools";
+import { type PathAccess, validatePath } from "../permissions/path-guard";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -208,23 +209,33 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 	return gateWriteTool(ctx.agentId ?? "primary", toolName, args, ctx.workingDirectory);
 }
 
-function resolvePath(p: string): string {
-	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
+/** Absolute path for a tool, refused by the path guard. The access mode is explicit on every call. */
+function resolvePath(p: string, access: PathAccess): string {
+	const wd = getToolContext().workingDirectory;
+	const guard = validatePath(p, wd, {}, access);
+	if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${p}")`);
+	return path.isAbsolute(p) ? p : path.join(wd, p);
 }
 
 /**
- * The path native write_file or edit_file may touch (#3747): inside the
- * workspace root, by safePath (traversal, symlink escape, credential paths).
- * Returns the path, or the refusal to hand back. Only these two native tools
- * use it: native read_file (#3759), run_command and the notebook tools
- * (#3760) are not covered by this change.
+ * The path a native file tool may touch (#3747, #3759): inside the workspace
+ * root, by safePath (traversal, symlink escape, credential paths). Returns the
+ * path, or the refusal to hand back. Used by native write_file, edit_file and
+ * read_file; run_command and the notebook tools (#3760) are not covered.
  */
-function confinedWritePath(p: string): { path: string } | { refused: string } {
-	try {
-		return { path: safePath(p, getToolContext().workingDirectory) };
-	} catch (err) {
-		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was written.` };
+function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
+	if (p.includes("\0")) {
+		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
 	}
+	try {
+		return { path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write") };
+	} catch (err) {
+		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
+	}
+}
+
+function confinedWritePath(p: string): { path: string } | { refused: string } {
+	return confinedPath(p, "written");
 }
 
 // ============================================
@@ -239,7 +250,7 @@ const getOutline = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { parseTypeScriptFile } = await import("../ast-index/typescript-parser");
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -279,7 +290,7 @@ const getSymbol = tool({
 
 		const filePath = symbolId.slice(0, separatorIndex);
 		const symbolName = symbolId.slice(separatorIndex + 2);
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -394,7 +405,9 @@ const readFile = tool({
 		path: z.string().describe("Path to the file to read"),
 	}),
 	execute: async ({ path: filePath }) => {
-		const absolutePath = resolvePath(filePath);
+		const target = confinedPath(filePath, "read");
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
@@ -441,19 +454,31 @@ const editFile = tool({
 		path: z.string().describe("Path to the file"),
 		oldText: z.string().describe("Text to find and replace"),
 		newText: z.string().describe("Replacement text"),
+		startLine: z
+			.number()
+			.int()
+			.optional()
+			.describe("1-based line; when oldText appears more than once, edit the copy at or after this line"),
 	}),
-	execute: async ({ path: filePath, oldText, newText }) => {
+	execute: async ({ path: filePath, oldText, newText, startLine }) => {
 		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
 		const noAnchor = emptyOldTextError(oldText, filePath);
 		if (noAnchor) return noAnchor;
-		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
+		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText, startLine });
 		if (blocked) return blocked;
 		const target = confinedWritePath(filePath);
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		const edited = applyEdit(content, oldText, newText);
+		const located = locateEdit(content, oldText, startLine);
+		const refusal = editRefusal(located, filePath);
+		if (refusal) {
+			logEditRefusal(located, filePath, oldText.length);
+			return refusal;
+		}
+		const edited =
+			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
@@ -471,7 +496,7 @@ const listFiles = tool({
 	}),
 	execute: async ({ path: dirPath, pattern }) => {
 		const { glob } = await import("glob");
-		const absolutePath = resolvePath(dirPath || ".");
+		const absolutePath = resolvePath(dirPath || ".", "read");
 		const files = await glob(pattern || "**/*", {
 			cwd: absolutePath,
 			ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
@@ -713,7 +738,7 @@ const readImage = tool({
 	}),
 	execute: async ({ path: imagePath }) => {
 		const { readImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const imageInfo = await readImage(absolutePath);
 			return JSON.stringify(
@@ -745,7 +770,7 @@ const describeImage = tool({
 	}),
 	execute: async ({ path: imagePath, prompt }) => {
 		const { describeImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const description = await describeImage(
 				absolutePath,
@@ -890,7 +915,7 @@ const readPdf = tool({
 		path: z.string().describe("Path to the PDF file"),
 	}),
 	execute: async ({ path: pdfPath }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			// PDF support is stubbed for now
 			throw new Error("PDF support coming soon");
@@ -907,7 +932,7 @@ const readPdfPage = tool({
 		pageNum: z.number().describe("Page number to read"),
 	}),
 	execute: async ({ path: pdfPath, pageNum }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			throw new Error("PDF support coming soon");
 		} catch (err) {
@@ -927,8 +952,8 @@ const readNotebook = tool({
 	}),
 	execute: async ({ path: notebookPath }) => {
 		const { readNotebook } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell: any) => ({
 				index: cell.index,
@@ -971,8 +996,8 @@ const notebookEditCell = tool({
 		const blocked = gateWrite("notebook_edit_cell", { path: notebookPath, newSource });
 		if (blocked) return blocked;
 		const { editCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -993,8 +1018,8 @@ const notebookInsertCell = tool({
 		const blocked = gateWrite("notebook_insert_cell", { path: notebookPath, source });
 		if (blocked) return blocked;
 		const { insertCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -1011,8 +1036,8 @@ const notebookDeleteCell = tool({
 	}),
 	execute: async ({ path: notebookPath, cellIndex }) => {
 		const { deleteCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -2079,7 +2104,7 @@ const deckTheme = tool({
 				return { error: "deck_theme mix needs palette and type" };
 			}
 			const cwd = getToolContext().workingDirectory;
-			const deckPath = dt.resolveDeckPath(resolvePath(deck), cwd);
+			const deckPath = dt.resolveDeckPath(resolvePath(deck, "write"), cwd);
 			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
 			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
 				const blocked = gateWrite("write_file", { path: target, content: "" });

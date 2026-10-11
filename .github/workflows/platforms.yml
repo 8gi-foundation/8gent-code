@@ -37,9 +37,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          # Pinned to what windows-task.yml uses; `latest` moved to 1.4.3, which segfaults mid-run
+          # on windows-latest (#3820). Sharding below is the mitigation, not a fix for the crash.
+          bun-version: 1.4.3
 
       - name: Checkout has LF line endings
         run: |
@@ -56,8 +58,11 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then choco install ripgrep -y --no-progress; else sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; fi
           rg --version
 
+      # Windows runs the suite as four shorter processes: Bun 1.4.x segfaults about
+      # ten minutes into a single one and the rest of the results are lost (#3820).
       - name: Test
-        run: bun run test
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then bash scripts/test-sharded.sh 4; else bun run test; fi
 
       # Installs the real login service (Scheduled Task on Windows, systemd
       # --user on Linux), checks the daemon answers /health, then removes it.

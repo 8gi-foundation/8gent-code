@@ -80,6 +80,69 @@ export function hasUnquotedAmpersand(
 }
 
 /**
+ * Find a `;` that separates commands. On POSIX a `;` inside single or double
+ * quotes, or escaped with a backslash, is plain text. cmd.exe does not treat
+ * single quotes or `\\` as quoting, so on win32 any `;` outside double quotes
+ * (and not `^`-escaped) counts.
+ */
+export function hasUnquotedSemicolon(
+	command: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	return scanSemicolon(command, platform) !== null;
+}
+
+/**
+ * Scanner behind hasUnquotedSemicolon. On POSIX, bash `$'...'` and `$"..."`
+ * quote differently (`\'` is an escaped quote inside `$'...'`), so this scanner
+ * cannot track them; any `$'` or `$"` outside quotes is refused outright.
+ */
+function scanSemicolon(
+	command: string,
+	platform: NodeJS.Platform,
+): "semicolon" | "dollar-quote" | null {
+	const win = platform === "win32";
+	let inSingle = false;
+	let inDouble = false;
+
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+
+		if (inSingle) {
+			if (ch === "'") inSingle = false;
+			continue;
+		}
+		if (inDouble) {
+			if (!win && ch === "\\") {
+				i++;
+				continue;
+			}
+			if (ch === '"') inDouble = false;
+			continue;
+		}
+
+		if (win ? ch === "^" : ch === "\\") {
+			i++;
+			continue;
+		}
+		if (ch === '"') {
+			inDouble = true;
+			continue;
+		}
+		if (ch === "'" && !win) {
+			inSingle = true;
+			continue;
+		}
+		if (!win && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) {
+			return "dollar-quote";
+		}
+		if (ch === ";") return "semicolon";
+	}
+	// An unterminated quote is a malformed command; refuse it rather than guess.
+	return inSingle || inDouble ? "semicolon" : null;
+}
+
+/**
  * Validate a command before it reaches the shell.
  * Returns { safe: false, reason } for a blocked command.
  */
@@ -101,8 +164,16 @@ export function sanitizeShellCommand(
 		};
 	}
 
-	// Block semicolon chaining: ; cmd
-	if (/;/.test(command)) {
+	// Block semicolon chaining: ; cmd. A `;` inside POSIX quotes is data, not a
+	// separator (e.g. magick -annotate 'a;b'), so only an unquoted one blocks.
+	const semi = scanSemicolon(command, platform);
+	if (semi === "dollar-quote") {
+		return {
+			safe: false,
+			reason: "Bash $'...' and $\"...\" quoting is not allowed. Use plain quotes instead",
+		};
+	}
+	if (semi) {
 		return {
 			safe: false,
 			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",

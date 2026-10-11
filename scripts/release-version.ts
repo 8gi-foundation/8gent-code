@@ -23,6 +23,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { syncInternalPins, workspaceManifests, workspaceVersions } from "./lib/no-workspace-protocol";
 import {
 	bumpFromMarkers,
 	nextVersion,
@@ -90,6 +91,13 @@ function cmdApply(version: string): void {
 		["bin/8gent.ts", (t) => setBinVersion(t, version), true],
 		["README.md", (t) => setReadmeBadge(t, version), false],
 	];
+	// Internal @8gent/* pins must follow the workspace versions (npm cannot use workspace:).
+	const pinVersions = workspaceVersions(process.cwd());
+	for (const f of workspaceManifests(process.cwd())) {
+		const before = readFileSync(f, "utf8");
+		const after = syncInternalPins(before, pinVersions);
+		if (after !== before) writeFileSync(f, after);
+	}
 	for (const [file, edit, required] of edits) {
 		const before = readFileSync(file, "utf8");
 		const after = edit(before);

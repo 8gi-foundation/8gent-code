@@ -102,6 +102,18 @@ export class StdioTransport implements Transport {
 			stderr: "pipe",
 		});
 
+		// On Windows the stdout reader can stay pending after the child has exited, which
+		// left every request waiting out its 30 s timeout. Once the process is gone, give
+		// the reader a moment to deliver what is already buffered, then shut down.
+		const proc = this.proc;
+		void proc.exited.then(() => {
+			const timer = setTimeout(() => {
+				if (this.proc === proc) this._shutdown("MCP server exited");
+			}, 250);
+			// Never keep the host process alive just for this grace period.
+			timer.unref?.();
+		});
+
 		// Read stderr in background (logging)
 		this._readStderr();
 

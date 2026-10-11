@@ -13,18 +13,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
 import { type SharedMemoryBus, createSharedMemoryBus } from "./bus.js";
 
-const TEST_DB = "/tmp/test-shared-bus.db";
+const TEST_DB = join(tmpdir(), "test-shared-bus.db");
 
 let bus: SharedMemoryBus;
 
 function cleanup() {
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = TEST_DB + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(TEST_DB);
 }
 
 describe("SharedMemoryBus", () => {
@@ -34,6 +33,7 @@ describe("SharedMemoryBus", () => {
 	});
 
 	afterEach(() => {
+		bus.close();
 		cleanup();
 	});
 

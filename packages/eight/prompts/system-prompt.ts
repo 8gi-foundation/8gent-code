@@ -281,6 +281,21 @@ export interface ToolCatalogOptions {
 	omit?: Iterable<string>;
 }
 
+/** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
+/** Short notes shared by the concise catalog and the headless prompt (#3865). */
+export const CONCISE_WEB_NOTE =
+	"**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**";
+export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**";
+export const SCRATCH_DIR_NOTE =
+	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
+
+/** Review focus (#3920): a review that cites every line it read buries the defect. */
+export const REVIEW_FOCUS_NOTE =
+	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
+
+export const SLIDES_TO_VIDEO_NOTE =
+	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
+
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
  * Closes #1082 (structured, honest, versioned tool/policy/skills snapshot).
@@ -302,7 +317,9 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 	} else {
 		lines.push(
 			"",
-			"These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
+			concise
+				? "Call these tools directly."
+				: "These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
 		);
 	}
 	lines.push("");
@@ -323,9 +340,13 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 
 	lines.push(
 		"",
-		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
-		"**Video narration: call `speak` (local neural voice), never espeak or say.**",
+		concise
+			? CONCISE_WEB_NOTE
+			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
+		NARRATION_NOTE,
+		SCRATCH_DIR_NOTE,
 	);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 
 	return lines.join("\n");
 }
@@ -365,6 +386,9 @@ This is enforced at the infrastructure level: read_file on large code files will
 {"tool": "write_file", "arguments": {"path": "new.ts", "content": "..."}}
 {"tool": "edit_file", "arguments": {"path": "src/x.ts", "oldText": "...", "newText": "..."}}
 \`\`\`
+
+### Local servers
+For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request.
 
 ### Git Flow
 \`\`\`json
@@ -545,6 +569,12 @@ Write like a sharp teammate, not a text generator. Minimum formatting for clarit
 3. Never bullet a refusal or bad news; prose reads as considered, not clinical.
 4. Never write an em dash or an en dash. Use a comma, a colon, a hyphen or a new sentence. No enthusiasm inflation. Say what works, what does not, and what is unverified.`;
 
+export const REVIEW_DISCIPLINE_SEGMENT = `## WHEN ASKED TO REVIEW CODE
+
+Report only findings that matter: bugs, regressions, security or data-loss risks, broken contracts. Cap it at what you can defend; one real finding beats five weak ones.
+Cite the line number in the changed file as it reads after the change, never a diff row or hunk offset.
+Leave out nice-to-have padding: style nits, renames, speculative refactors, praise and restating the diff. If nothing matters, say so in one sentence.`;
+
 export const RULES_SEGMENT = `## CRITICAL RULES
 
 1. ALWAYS plan first for multi-step tasks
@@ -590,6 +620,7 @@ export function getFullSystemPrompt(): string {
 		ERROR_RECOVERY_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,
@@ -627,6 +658,7 @@ export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserCont
 		GITHUB_AUTH_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,

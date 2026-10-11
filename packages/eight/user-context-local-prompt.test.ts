@@ -10,9 +10,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
 import { Agent } from "./agent";
 import { projectInstructionsSection } from "./instruction-loader";
 import { ACTION_FIRST_PRECEDENCE, ACTION_FIRST_STYLE } from "./prompts/system-prompt";
@@ -31,8 +32,8 @@ beforeAll(() => {
 afterAll(() => {
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 function writeUser(identity: Record<string, unknown>) {

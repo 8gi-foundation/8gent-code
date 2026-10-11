@@ -52,6 +52,12 @@ class GatedPool {
 	getActiveSessions() {
 		return [];
 	}
+	getSessionInfo(id: string) {
+		const channel = this.live.get(id);
+		return channel
+			? { channel, messageCount: 0, busy: false, createdAt: 0, lastActiveAt: 0 }
+			: null;
+	}
 	getStatus() {
 		return {};
 	}
@@ -555,7 +561,9 @@ describe("audit log (8SO MEDIUM-5)", () => {
 		expect(lines[0]).toMatchObject({ approver: String(JAMES), chat: String(JAMES) });
 		expect(typeof lines[0].requestId).toBe("string");
 		expect(typeof lines[0].ts).toBe("string");
-		expect(statSync(join(dataDir, "approvals-audit.jsonl")).mode & 0o777).toBe(0o600);
+		// Windows has no POSIX file modes (chmod is a no-op).
+		if (process.platform !== "win32")
+			expect(statSync(join(dataDir, "approvals-audit.jsonl")).mode & 0o777).toBe(0o600);
 	});
 });
 
@@ -565,6 +573,11 @@ describe("8SO exploit probes, as regressions (#3624 review)", () => {
 		const rogue = await rogueSocket();
 		rogue.ws.send(JSON.stringify({ type: "session:resume", sessionId: sid, channel: "telegram" }));
 		await settle();
+		// #3929: a telegram session is the bridge's alone; the resume is refused.
+		expect(rogue.frames.find((f) => f.type === "error")).toMatchObject({
+			message: "session cannot be shared",
+		});
+		expect(rogue.frames.some((f) => f.type === "session:resumed")).toBe(false);
 
 		prompt(`${DEL} ./e1`);
 		await until(() => cards().length === 1);
@@ -583,11 +596,11 @@ describe("8SO exploit probes, as regressions (#3624 review)", () => {
 		});
 		expect(pool.outcomes).toEqual([]);
 
-		// A forged registration fails, and a turn it claims raises no card: flat deny.
+		// A forged registration fails, and with no session its turn never runs.
 		rogue.ws.send(JSON.stringify({ type: "approvals:register", secret: "guess" }));
 		rogue.ws.send(JSON.stringify({ type: "prompt", text: `${DEL} ./e1-rogue`, turn: OPERATOR_DM }));
-		await until(() => pool.outcomes.length === 1);
-		expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./e1-rogue`, allowed: false });
+		await until(() => rogue.frames.some((f) => f.message === "no active session"));
+		expect(pool.outcomes).toEqual([]);
 		expect(rogue.frames.find((f) => f.type === "approvals:registered")).toMatchObject({
 			ok: false,
 		});
@@ -596,8 +609,8 @@ describe("8SO exploit probes, as regressions (#3624 review)", () => {
 		rogue.ws.close();
 		await settle();
 		await press(JAMES, button(cards()[0], "Deny"));
-		await until(() => pool.outcomes.length === 2);
-		expect(pool.outcomes[1]).toMatchObject({ command: `${DEL} ./e1`, allowed: false, note: null });
+		await until(() => pool.outcomes.length === 1);
+		expect(pool.outcomes[0]).toMatchObject({ command: `${DEL} ./e1`, allowed: false, note: null });
 	});
 
 	it("E2: the card shows the whole command; one too long to show is never offered", async () => {

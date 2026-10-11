@@ -254,7 +254,9 @@ describe("integration: the real run_command paths", () => {
  * `rm -f /tmp/todos.json`; no rule fired and the judge blocked it.
  * Not covered on purpose: globs, and any existing temp file (see below).
  */
-describe("#3381: absent absolute paths under a temp root", () => {
+// The temp-root rule is defined on POSIX /tmp: root-owned sticky directory, uid ownership and
+// mode bits (rmOfNothingOrOwn finds no temp root on Windows by design, so it returns null).
+describe.skipIf(process.platform === "win32")("#3381: absent absolute paths under a temp root", () => {
 	const uniq = () => `s1-3381-${process.pid}-${Math.random().toString(36).slice(2)}`;
 	const ownOnly = (abs: string) =>
 		({ createdBySession: (p: string) => p === abs }) as unknown as CreatedFiles;
@@ -618,7 +620,8 @@ describe("#3381: absent absolute paths under a temp root", () => {
  * record opened and is owned by this uid with one link: content can be moved
  * into a fresh temp path, so birth time alone does not prove the session made it.
  */
-describe("existing temp files are judged, whoever made them", () => {
+// Needs sh, zip and rsync and the POSIX temp-root rule; none of them exist on a Windows runner.
+describe.skipIf(process.platform === "win32")("existing temp files are judged, whoever made them", () => {
 	let tmp: string;
 	beforeEach(() => {
 		tmp = tempDir("s1-archive-tmp-");

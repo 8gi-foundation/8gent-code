@@ -14,9 +14,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
+import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
 
@@ -73,8 +75,8 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	rmSync(home, { recursive: true, force: true });
-	rmSync(repo, { recursive: true, force: true });
+	rmRetry(home);
+	rmRetry(repo);
 });
 
 /** Every request the model receives for one chat() turn. */
@@ -154,6 +156,13 @@ describe("headless prompt diet", () => {
 		expect(sys).toContain("NEVER guess, invent, or recall a tool's output");
 		expect(sys).toContain("you MUST use the write_file tool");
 		expect(sys).toContain("Do not claim you have no internet access");
+	}, 60_000);
+
+	test("headless carries the shared slides-to-video note (#3862)", async () => {
+		const [headless] = await run(true);
+		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
+		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
+		expect(headless.messages[0].content).toContain(NARRATION_NOTE);
 	}, 60_000);
 
 	test("headless does not advertise tools the run does not offer", async () => {

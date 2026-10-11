@@ -4,9 +4,13 @@
  * Each line is one JSON object with { type, timestamp, sequenceNumber, ... }.
  * The debugger webapp reads these .jsonl files via SSE streaming.
  *
+ * Consumers must pair step_start with step_finish on (tabId, stepNumber), never
+ * stepNumber alone: every tab numbers its steps from 0 in this one file.
+ * step_finish records textLength, not the model text.
+ *
  * Event types match the debugger schema:
  *   session_start, user_message, assistant_message, tool_call, tool_result,
- *   step_finish, error, tab_switch, session_end
+ *   step_start, step_finish, error, tab_switch, session_end
  */
 
 import * as fs from "node:fs";
@@ -63,6 +67,10 @@ let statToolCalls = 0;
 let statTotalTokens = 0;
 let statErrors = 0;
 let stepCount = 0;
+// Start time (ms) of each open step, keyed by tabId:stepNumber, for durationMs.
+// Every tab numbers its steps from 0 in one shared file, so step number alone collides.
+const stepStartedAt = new Map<string, number>();
+const stepKey = (tabId: string, stepNumber: number): string => `${tabId}:${stepNumber}`;
 
 // Pending writes buffer (batched via flush timer)
 let pendingLines: string[] = [];
@@ -166,6 +174,7 @@ export function initSessionLogger(id: string, model: string, provider: string): 
 	statTotalTokens = 0;
 	statErrors = 0;
 	stepCount = 0;
+	stepStartedAt.clear();
 
 	// Write the session_start event immediately (not batched)
 	const startEvent: SessionEvent = {
@@ -319,6 +328,33 @@ export function logToolEnd(
 	});
 }
 
+/**
+ * Record the start of a model call. Fields are the step index, provider and
+ * model name only: no prompt text, tool args or output ever reaches this event.
+ */
+export function logStepStart(
+	tabId: string,
+	tabName: string,
+	stepNumber: number,
+	provider: string,
+	model: string,
+): void {
+	if (!sessionId) return;
+
+	const at = Date.now();
+	stepStartedAt.set(stepKey(tabId, stepNumber), at);
+	appendLine({
+		type: "step_start",
+		timestamp: new Date(at).toISOString(),
+		sequenceNumber: nextSeq(),
+		stepNumber,
+		provider: String(provider).slice(0, 100),
+		model: String(model).slice(0, 200),
+		tabId,
+		tabName,
+	});
+}
+
 export function logStep(
 	tabId: string,
 	tabName: string,
@@ -331,14 +367,22 @@ export function logStep(
 	statTotalTokens += totalTokens;
 	stepCount = Math.max(stepCount, stepNumber);
 
+	// Measured wall time since this step's step_start; absent when no start was seen.
+	const at = Date.now();
+	const key = stepKey(tabId, stepNumber);
+	const startedAt = stepStartedAt.get(key);
+	stepStartedAt.delete(key);
+
 	appendLine({
 		type: "step_finish",
-		timestamp: now(),
+		timestamp: new Date(at).toISOString(),
 		sequenceNumber: nextSeq(),
 		stepNumber,
 		finishReason: "stop",
+		durationMs: startedAt === undefined ? undefined : at - startedAt,
 		totalTokens,
-		text: text?.slice(0, 500),
+		// Length only: model output is never persisted in the session log.
+		textLength: text?.length ?? 0,
 		tabId,
 		tabName,
 	});

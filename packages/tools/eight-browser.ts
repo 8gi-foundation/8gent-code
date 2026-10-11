@@ -19,9 +19,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix as pathPosix, win32 as pathWin32 } from "node:path";
 import {
 	BlockedDestinationError,
 	type Resolver,
@@ -217,6 +217,80 @@ export async function blockedBrowserDestination(
 	}
 }
 
+// ── Secret placeholders (#3604) ──────────────────────────────────────────────
+// The model writes {{secret:NAME}} in type.text. The driver swaps in the real value at act time,
+// from a local file the person controls, so the value never sits in the model context, the
+// transcript or the provider request. Each secret lists the hosts it may be typed on (a secret
+// is never typed into a page the model steered somewhere else), and the file must be private
+// to the user. Output, errors and the page read-back are scrubbed of every resolved value.
+
+const PLACEHOLDER = /\{\{secret:([A-Za-z][A-Za-z0-9_]{0,63})\}\}/g;
+
+export const hasSecretPlaceholder = (text: string): boolean => {
+	PLACEHOLDER.lastIndex = 0;
+	return PLACEHOLDER.test(text);
+};
+
+/**
+ * True when `file` is `home` or below it, compared with the rules of `platform`
+ * (case-insensitive on win32). Pure, so the Windows rule is testable on any OS.
+ */
+export function secretsPathInHome(file: string, home: string, platform: NodeJS.Platform): boolean {
+	const p = platform === "win32" ? pathWin32 : pathPosix;
+	const norm = (x: string) => (platform === "win32" ? p.resolve(x).toLowerCase() : p.resolve(x));
+	const rel = p.relative(norm(home), norm(file));
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel);
+}
+
+/** Secrets file: { "NAME": { "value": "...", "hosts": ["app.example.com"] } }, mode 0600. */
+export function resolveSecretText(
+	text: string,
+	pageUrl: string,
+	file: string | undefined = process.env.EIGHT_BROWSER_SECRETS_FILE,
+): { ok: true; text: string; values: Map<string, string> } | { ok: false; error: string } {
+	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
+	let table: Record<string, { value?: unknown; hosts?: unknown }>;
+	try {
+		// Windows has no POSIX mode bits (stat reports 0o666 for every file), so the mode check
+		// would refuse every secrets file there. Instead the file must live under the user's home,
+		// whose NTFS ACL is user-only by default. The ACL itself is not read: accepted risk,
+		// docs/security/windows-secrets-file.md.
+		if (
+			process.platform === "win32" &&
+			!secretsPathInHome(realpathSync.native(file), realpathSync.native(homedir()), "win32")
+		)
+			return { ok: false, error: "on Windows the secrets file must be inside your home folder" };
+		if (process.platform !== "win32" && statSync(file).mode & 0o077)
+			return { ok: false, error: "the secrets file must not be readable by group or others" };
+		table = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		return { ok: false, error: "the secrets file could not be read" };
+	}
+	let host = "";
+	try {
+		host = new URL(pageUrl).hostname.toLowerCase();
+	} catch {}
+	const values = new Map<string, string>();
+	let failure: string | null = null;
+	const out = text.replace(PLACEHOLDER, (_m, name: string) => {
+		const e = Object.hasOwn(table ?? {}, name) ? table[name] : undefined;
+		if (!e || typeof e.value !== "string" || e.value === "") {
+			failure ??= `secret ${name} is not available`;
+			return "";
+		}
+		if (!Array.isArray(e.hosts) || !e.hosts.some((h) => String(h).toLowerCase() === host)) {
+			failure ??= `secret ${name} is not allowed on this page`;
+			return "";
+		}
+		values.set(`{{secret:${name}}}`, e.value);
+		return e.value;
+	});
+	if (failure) return { ok: false, error: failure };
+	if (out.length > LIMITS.maxTypeLength)
+		return { ok: false, error: `type.text > ${LIMITS.maxTypeLength} chars after resolving` };
+	return { ok: true, text: out, values };
+}
+
 export function validateBrowserAction(
 	raw: unknown,
 	opts: { isolated?: boolean } = {},
@@ -327,6 +401,21 @@ export function localBrowserTools(env: Env = process.env): string[] {
 	return isolatedBrowser(env)
 		? ["browser_open", "browser_state", "browser_task", "browser_screenshot"]
 		: [];
+}
+
+/**
+ * Why the browser tools are not in a local session, or null when they are offered (#3785). Shown in the
+ * local tool catalog and in the result of a browser_* call that is not registered, so a model that was
+ * told to use "the browser" learns the reason and the way to get it instead of rediscovering each gate.
+ */
+export function browserWithheldNote(env: Env = process.env): string | null {
+	if (localBrowserTools(env).length > 0) return null;
+	return (
+		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
+		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
+		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
+		"into password fields, so for a local web app use run_command with curl."
+	);
 }
 
 /** Where to connect: a named profile's own token and published port, else the default token and port. */
@@ -503,9 +592,35 @@ function decodedViews(command: string): string[] {
 	return views;
 }
 
+/** Short flags of grep/rg that take no value, so the first word after them is the pattern. */
+const PLAIN_SHORT = /^-[rRhHnioEFwvcIsaqzPxlLu]+$/;
+
+/**
+ * For one pipeline segment that runs grep or rg: blank the quoted pattern (the first non-option word),
+ * and only when every option before it is a plain no-value flag. Any other option (--include, -g, -e,
+ * -f, --pre, anything with "=") or any $( ` <( in the segment leaves the segment untouched, so it is
+ * judged as written. Unknown shapes therefore fail closed.
+ */
+function blankSearchPattern(seg: string): string {
+	if (/\$\(|`|<\(/.test(seg) || !/^[\s;|&]*(?:grep|egrep|fgrep|rg)\s/.test(seg)) return seg;
+	const words = [...seg.matchAll(/(?:'[^']*'|"[^"]*"|\S)+/g)];
+	for (let i = 1; i < words.length; i++) {
+		const w = words[i];
+		if (w[0].startsWith("-")) {
+			if (PLAIN_SHORT.test(w[0]) || w[0] === "--hidden") continue;
+			return seg;
+		}
+		const q = w[0];
+		if (!/^(?:'[^']*'|"[^"]*")$/.test(q) || /\/|\.8|browser/i.test(q)) return seg;
+		const at = w.index ?? 0;
+		return seg.slice(0, at) + " ".repeat(q.length) + seg.slice(at + q.length);
+	}
+	return seg;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
-	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b/i.test(command);
+	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
 	for (const view of decodedViews(command)) {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
@@ -516,7 +631,16 @@ export function touchesBrowserSecrets(command: string): boolean {
 			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
 			if (lists) return true;
 		}
-		for (const token of flat.split(/[\s;|&()<>=]+/)) {
+		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
+		// as a glob over browser-control.token. Only that one word is blanked (see blankSearchPattern);
+		// option values, find/sed/awk and anything with a substitution keep their globs.
+		const shellView = view
+			.split(/(?<=[;|&\n])/)
+			.map(blankSearchPattern)
+			.join("")
+			.replace(/["'`\\]/g, "")
+			.replace(/\s*\+\s*/g, "");
+		for (const token of shellView.split(/[\s;|&()<>=]+/)) {
 			if (!/[*?[{]/.test(token)) continue;
 			for (const seg of token.split("/")) {
 				if (seg === "*" || !/[*?[{]/.test(seg)) continue;
@@ -591,6 +715,8 @@ export function createEightBrowser(
 		allowLoopback?: string[];
 		/** DNS resolver, injectable for tests. */
 		resolve?: Resolver;
+		/** Secrets file for {{secret:NAME}} placeholders (default EIGHT_BROWSER_SECRETS_FILE; "" disables). */
+		secretsFile?: string;
 	} = {},
 ) {
 	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
@@ -612,6 +738,12 @@ export function createEightBrowser(
 		return r.elements.length > 0;
 	};
 	const owned = new Set<string>();
+	const resolvedSecrets = new Map<string, string>(); // real value -> placeholder, for scrubbing output
+	const scrub = (text: string): string => {
+		let out = text;
+		for (const [value, placeholder] of resolvedSecrets) out = out.split(value).join(placeholder);
+		return out;
+	};
 	const typed = new Set<string>(); // clipped forms of text typed this session; page.query echoes input values
 	let current: string | undefined;
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -658,15 +790,17 @@ export function createEightBrowser(
 		return id;
 	};
 	const render = (tab: string, o: Awaited<ReturnType<typeof observe>>) =>
-		JSON.stringify({
-			tab,
-			url: o.url,
-			title: o.title,
-			elements: o.els
-				.filter((e) => !e.hidden)
-				.map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()),
-			text: o.text.slice(0, 3_000),
-		});
+		scrub(
+			JSON.stringify({
+				tab,
+				url: o.url,
+				title: o.title,
+				elements: o.els
+					.filter((e) => !e.hidden)
+					.map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()),
+				text: o.text.slice(0, 3_000),
+			}),
+		);
 	const shown = (e: El) =>
 		e.secret ? "(password field)" : typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text;
 	const indexGuard = (els: El[], index?: number): string | null => {
@@ -737,6 +871,10 @@ export function createEightBrowser(
 	}
 
 	async function run(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
+		return scrub(await runSteps(raw, tabId, approve));
+	}
+
+	async function runSteps(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
 		const fail = (error: string, steps: unknown[] = []) =>
 			JSON.stringify({ ok: false, error, steps });
 		let id: string;
@@ -756,6 +894,11 @@ export function createEightBrowser(
 			if (v.action.action === "open") {
 				const blocked = await destinationBlocked(v.action.url);
 				if (blocked) return fail(`dry run: step ${i}: ${blocked}`);
+			}
+
+			if (v.action.action === "type" && hasSecretPlaceholder(v.action.text)) {
+				const r = resolveSecretText(v.action.text, before.url, opts.secretsFile);
+				if (!r.ok) return fail(`dry run: step ${i}: ${r.error}`);
 			}
 			plan.push(v.action);
 		}
@@ -783,14 +926,22 @@ export function createEightBrowser(
 				if (isolated() && (await secretField(id, a.selector))) return refuseSecret(i, a.selector);
 				row.selector = a.selector;
 				row.text_len = a.text.length;
-				if (a.text) typed.add(clipped(a.text));
+				let text = a.text;
+				if (hasSecretPlaceholder(a.text)) {
+					// Resolved now, against the page as it is now: an earlier step may have moved it.
+					const r = resolveSecretText(a.text, before.url, opts.secretsFile);
+					if (!r.ok) return fail(`step ${i}: ${r.error}`, steps);
+					text = r.text;
+					for (const [placeholder, value] of r.values) resolvedSecrets.set(value, placeholder);
+				}
+				if (text) typed.add(clipped(text));
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
-					const r = await call("page.type", { tabId: id, selector: a.selector, text: a.text });
+					const r = await call("page.type", { tabId: id, selector: a.selector, text });
 					if (r?.ok === false) row.error = r.error;
 					const got = (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]
 						?.text;
-					row.verified = got === clipped(a.text);
+					row.verified = got === clipped(text);
 					if (row.verified) break;
 				}
 				row.ok = row.verified;

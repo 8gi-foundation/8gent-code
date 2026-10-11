@@ -15,6 +15,9 @@ import * as path from "node:path";
 import { isPathWithin, pathFor } from "../core/path-within";
 import { resolveSafe } from "./src/workspace-boundary";
 
+/** What the caller will do with the path. The default is "write": the stricter reading. */
+export type PathAccess = "read" | "write";
+
 export type ValidatePathResult =
 	| { ok: true }
 	| { ok: false; reason: string };
@@ -50,6 +53,15 @@ const PROTECTED_HOME_FILES = [
 	[".8gent", "audit.jsonl"],
 	[".8gent", "permissions-audit.jsonl"],
 ];
+
+/**
+ * The session's own records (trace integrity), relative to the data dir (~/.8gent, or
+ * EIGHT_DATA_DIR). Tool calls may READ these but never write, delete, truncate or move
+ * them. The harness's own writers (session manager, checkpoint store, daemon log,
+ * approvals audit) use plain fs calls rather than the guard, so they are unaffected.
+ */
+export const SESSION_RECORD_DIRS = ["sessions", "logs", "checkpoints"];
+export const SESSION_RECORD_FILES = ["daemon.log", "approvals-audit.jsonl"];
 
 /** Audit locations under the data dir (EIGHT_DATA_DIR, default ~/.8gent), relative to it. */
 const AUDIT_DATA_DIR_DIRS = ["audit"];
@@ -173,6 +185,7 @@ export function validatePath(
 	rawPath: string,
 	workingDirectory: string,
 	host: PathGuardHost = {},
+	access: PathAccess = "write",
 ): ValidatePathResult {
 	const platform = host.platform ?? process.platform;
 	if (typeof rawPath !== "string" || rawPath.length === 0) {
@@ -236,6 +249,24 @@ export function validatePath(
 		}
 	}
 
+	// 5d. The session's own records: readable, never writable (trace integrity).
+	if (access === "write") {
+		const flavor = pathFor(platform);
+		const roots = [flavor.join(host.home ?? homeDir(), ".8gent")];
+		if (process.env.EIGHT_DATA_DIR) roots.push(process.env.EIGHT_DATA_DIR);
+		for (const r of roots) {
+			const root = resolveSafe(r, r, platform);
+			if (
+				SESSION_RECORD_DIRS.some((d) => isPathWithin(resolved, flavor.join(root, d), platform)) ||
+				SESSION_RECORD_FILES.some((f) => resolved === flavor.join(root, f)) ||
+				// The data dir itself: removing or moving it takes every record with it.
+				resolved === root
+			) {
+				return { ok: false, reason: "protected session record" };
+			}
+		}
+	}
+
 	// 6. Protected basenames anywhere (e.g. a .netrc dropped into the project).
 	// NTFS matches names case-insensitively, so ID_RSA opens id_rsa.
 	const base = pathFor(platform).basename(resolved);
@@ -259,6 +290,78 @@ export function commandTouchesAuditFiles(command: string): boolean {
 	if (dataDir) {
 		const d = dataDir.toLowerCase().replace(/\/+$/, "");
 		if (flat.includes(`${d}/audit`) || flat.includes(`${d}/permissions-audit`)) return true;
+	}
+	return false;
+}
+
+const MUTATING_VERB =
+	/(?:^|\s)(?:rm|unlink|rmdir|truncate|shred|mv|tee|dd|perl\s+-\w*i\w*|sed\s+-\w*i\w*|git\s+(?:checkout|restore|rm|clean))(?=\s|$)|\sfind\s.*-delete\b/;
+
+const INTERPRETER =
+	/(?:^|[\s;&|(`])(?:python[\d.]*|node|nodejs|perl|ruby|deno|bunx?\s+(?:run\s+)?(?:-e|--eval))(?=\s)/;
+
+function escapeRe(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Spellings of a session record (or the data dir itself) in a flattened command. */
+function sessionRecordPatterns(includeRoot = true): RegExp[] {
+	const dirs = SESSION_RECORD_DIRS.join("|");
+	const files = SESSION_RECORD_FILES.map(escapeRe).join("|");
+	const pats = [
+		new RegExp(`\\.8gent/+(?:${dirs})(?![\\w-])`),
+		new RegExp(`\\.8gent/+(?:${files})(?![\\w.-])`),
+		new RegExp(`(?:^|[\\s/=])(?:${files})(?![\\w.-])`),
+		...(includeRoot ? [/\.8gent\/*(?=$|[\s;&|)])/] : []),
+	];
+	const dataDir = process.env.EIGHT_DATA_DIR;
+	if (dataDir) {
+		const d = escapeRe(dataDir.toLowerCase().replace(/\/+$/, ""));
+		pats.push(new RegExp(`${d}/+(?:${dirs}|${files})`));
+		if (includeRoot) pats.push(new RegExp(`${d}/*(?=$|[\\s;&|)])`));
+	}
+	return pats;
+}
+
+/**
+ * True when a shell command would write, delete, truncate, move or overwrite one of the
+ * session's own records (sessions, logs, checkpoints, daemon.log, approvals-audit.jsonl),
+ * or check tracked logs back out of git. Reads (cat, tail, grep, ls) are not flagged.
+ * A speed bump, not a parser: the file-tool checks are the boundary, and the real
+ * boundary is seatbelting run_command (#3612).
+ */
+export function commandMutatesSessionRecords(command: string): boolean {
+	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "").toLowerCase();
+	const pats = sessionRecordPatterns();
+	const names = (t: string) => pats.some((p) => p.test(t));
+	// An interpreter that names a record can write it in ways no verb list sees; deny the naming.
+	if (INTERPRETER.test(flat) && sessionRecordPatterns(false).some((p) => p.test(flat))) return true;
+	let inRecordDir = false;
+	for (const raw of flat.split(/;|&&|\|\||\||\n/)) {
+		const seg = raw.trim();
+		if (!seg) continue;
+		// A redirect onto a record: > or >> (not >&, not 2>&1).
+		for (const m of seg.matchAll(/(?:^|[^>&\d])\d?>>?\s*([^\s;&|<>]+)/g)) if (names(m[1])) return true;
+		// git checkout/restore/rm/clean of tracked logs rewrites the trace (no workspace root needed).
+		if (/(?:^|\s)git\s+(?:checkout|restore|rm|clean)(?=\s|$)/.test(seg)) {
+			if (names(seg) || /(?:^|[\s/])(?:logs|sessions|checkpoints)\/|\.log(?![\w.-])/.test(seg)) return true;
+			continue;
+		}
+		if (/^cd(?:\s|$)/.test(seg)) {
+			inRecordDir = names(seg);
+			continue;
+		}
+		const mutating = MUTATING_VERB.test(` ${seg}`);
+		// After cd into the records, any mutating verb counts: the names may be relative or globbed.
+		if (inRecordDir && mutating) return true;
+		if (!names(seg)) continue;
+		if (/(?:^|\s)(?:cp|rsync|install|ln)(?=\s)/.test(seg)) {
+			// Copying a record out is a read; copying over one is a write.
+			const args = seg.split(/\s+/).filter((a) => !a.startsWith("-"));
+			if (names(args[args.length - 1] ?? "")) return true;
+			continue;
+		}
+		if (mutating) return true;
 	}
 	return false;
 }

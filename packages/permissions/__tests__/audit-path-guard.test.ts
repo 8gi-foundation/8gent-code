@@ -91,7 +91,8 @@ describe("run_command on audit files", () => {
 		"rm -r ~/.8gent/audit",
 		": > ~/.8gent/audit.jsonl",
 		"truncate -s 0 $HOME/.8gent/permissions-audit.jsonl",
-		`rm ${path.join(DATA_DIR, "audit.jsonl")}`,
+		// forward slashes: an unquoted backslash path is an escape sequence to the command parser
+		`rm ${path.join(DATA_DIR, "audit.jsonl").split(path.sep).join("/")}`,
 		"rm ~/'.8gent'/'audit'.jsonl",
 		"cd ~/.8gent && rm audit.jsonl",
 		"sqlite3 ~/.8gent/audit/access.db 'delete from t'",

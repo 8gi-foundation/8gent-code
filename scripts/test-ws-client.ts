@@ -138,7 +138,7 @@ async function run(): Promise<void> {
 	}
 
 	// --- Test 3: Create session ---
-	ws.send(JSON.stringify({ type: "session:create", channel: "test" }));
+	ws.send(JSON.stringify({ type: "session:create", channel: "api" }));
 	const sessionReply = await waitForType("session:created", 10000);
 	if (sessionReply.type === "session:created" && sessionReply.sessionId) {
 		sessionId = sessionReply.sessionId;

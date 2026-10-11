@@ -41,6 +41,8 @@ export interface EightAgentConfig {
 	topK?: number;
 	frequencyPenalty?: number;
 	presencePenalty?: number;
+	/** Callback fired before each model call (step), with the step index only. */
+	onStepStart?: (event: StepStartEvent) => void | Promise<void>;
 	/** Callback for each step */
 	onStepFinish?: (event: StepFinishEvent) => void | Promise<void>;
 	/** Callback for tool call start */
@@ -49,6 +51,11 @@ export interface EightAgentConfig {
 	onToolCallFinish?: (event: ToolCallFinishEvent) => void | Promise<void>;
 	/** Callback when generation finishes */
 	onFinish?: (event: FinishEvent) => void | Promise<void>;
+}
+
+export interface StepStartEvent {
+	/** Step number (0-based) */
+	stepNumber: number;
 }
 
 export interface StepFinishEvent {
@@ -228,6 +235,20 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		tools,
 		experimental_context: toolContext,
 		stopWhen: stepCountIs(config.maxSteps || 30),
+
+		// Fires before every model call. Observation only: returns undefined so
+		// the step runs with its default settings, and a throwing callback never
+		// breaks the loop.
+		prepareStep: config.onStepStart
+			? async ({ stepNumber }: { stepNumber: number }) => {
+					try {
+						await config.onStepStart?.({ stepNumber });
+					} catch {
+						/* step-start logging is best-effort */
+					}
+					return undefined;
+				}
+			: undefined,
 
 		onStepFinish: config.onStepFinish
 			? (event: any) => {

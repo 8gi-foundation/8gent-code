@@ -15,7 +15,15 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { moveInProject } from "./s1-mv-in-project";
+import { singleFileDelete } from "./s1-rm-single";
+import {
+	generatedDataName,
+	hasDotSegment,
+	moveInProject,
+	protectedRel,
+	relSegments,
+	windowsAliasOperand,
+} from "./s1-mv-in-project";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -138,6 +146,84 @@ describe("moveInProject allows", () => {
 	}
 });
 
+describe("moveInProject: generated-data dotfiles and .tmp (#3943)", () => {
+	beforeEach(() => {
+		writeFileSync(join(ws, "e2e.json"), "[]");
+		writeFileSync(join(ws, ".todo-e2e.json"), "[]");
+		writeFileSync(join(ws, ".mcp.json"), "{}");
+		writeFileSync(join(ws, ".eslintrc.json"), "{}");
+		writeFileSync(join(ws, "tsconfig.json"), "{}");
+		mkdirSync(join(ws, ".tmp"));
+		mkdirSync(join(ws, ".other"));
+	});
+
+	test("the exact command from the issue: mv e2e.json .todo-e2e.json .tmp/", () => {
+		expect(moveInProject("mv e2e.json .todo-e2e.json .tmp/", ws).ok).toBe(true);
+	});
+
+	for (const cmd of [
+		"mv e2e.json .tmp",
+		"mv -f e2e.json .tmp/",
+		"mv -fv e2e.json .tmp/",
+		"mv -nf e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/",
+		"mv .todo-e2e.json .tmp/result.json",
+		"mv e2e.json .todo-moved.json",
+		"mv inbox/note-1.txt .tmp/",
+	]) {
+		test(`allows: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(true);
+		});
+	}
+
+	for (const cmd of [
+		"mv .mcp.json .tmp/",
+		"mv .eslintrc.json .tmp/",
+		"mv .env .tmp/",
+		"mv e2e.json .mcp.json",
+		"mv e2e.json .tmp/.mcp.json",
+		"mv e2e.json .other/",
+		"mv e2e.json .git/",
+		"mv e2e.json .git/hooks/",
+		"mv e2e.json .claude/",
+		"mv .tmp .other/",
+		"mv .other .tmp/",
+		"mv e2e.json tsconfig.json",
+		"mv e2e.json packages/permissions/x.json",
+		"mv e2e.json ../out.json",
+		"mv e2e.json /tmp/",
+		"mv e2e.json escape/",
+		"mv e2e.json notes-link/",
+		"mv inbox/link.txt .tmp/",
+		"mv -t .tmp e2e.json",
+		"mv --target-directory=.tmp e2e.json",
+		"mv -f e2e.json .tmp/../x",
+		"mv e2e.json *.json",
+		"mv *.json .tmp/",
+		"mv -f e2e.json .todo-e2e.json",
+		"mv e2e.json .tmp/ && rm -rf .",
+	]) {
+		test(`still judged: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(false);
+		});
+	}
+
+	test(".tmp as a symlink is refused", () => {
+		rmSync(join(ws, ".tmp"), { recursive: true });
+		symlinkSync(join(ws, "inbox"), join(ws, ".tmp"));
+		expect(moveInProject("mv e2e.json .tmp/", ws).ok).toBe(false);
+	});
+
+	test("both pilot commands pass the gate without asking the judge", async () => {
+		for (const cmd of ["mv e2e.json .todo-e2e.json .tmp/"]) {
+			const g = await systemOneGate(cmd, process.env, ws);
+			expect(g.run, cmd).toBe(true);
+			expect(g.guard?.backend).toBe("allowlist");
+		}
+		expect(judge.asks).toBe(0);
+	});
+});
+
 describe("moveInProject refuses", () => {
 	const refused: Array<[string, string]> = [
 		["a destination outside the workspace (absolute)", `mv inbox/note-1.txt ${"/tmp"}/x.txt`],
@@ -168,7 +254,7 @@ describe("moveInProject refuses", () => {
 		["a quoted path", 'mv "inbox/note-1.txt" inbox/notes/'],
 		["a command substitution", "mv inbox/note-1.txt $(pwd)/x"],
 		["a chained command", "mv inbox/note-1.txt inbox/notes/ && rm -rf inbox"],
-		["force flag", "mv -f inbox/note-1.txt inbox/notes/"],
+		["force flag over an existing file", "mv -f inbox/note-1.txt inbox/notes/note-9.txt"],
 		["target-directory flag", "mv -t inbox/notes inbox/note-1.txt"],
 		["a missing source", "mv inbox/nope.txt inbox/notes/"],
 		["a new directory by trailing slash", "mv inbox/note-1.txt inbox/fresh/"],
@@ -228,6 +314,54 @@ describe("moveInProject refuses", () => {
 	});
 });
 
+// The helpers take the platform, so these run the Windows and macOS rules on any runner (#3814).
+describe("moveInProject path rules on any OS", () => {
+	test("win32 relative paths split on backslash and slash", () => {
+		expect(relSegments("sub\\.claude", "win32")).toEqual(["sub", ".claude"]);
+		expect(relSegments("sub/.claude", "win32")).toEqual(["sub", ".claude"]);
+		expect(relSegments("sub\\x", "linux")).toEqual(["sub\\x"]);
+	});
+
+	test("a dot directory below a win32 path is seen", () => {
+		expect(hasDotSegment("sub\\.claude", "win32")).toBe(true);
+		expect(hasDotSegment("a\\b\\.git\\hooks", "win32")).toBe(true);
+		expect(hasDotSegment("sub\\notes", "win32")).toBe(false);
+	});
+
+	test("protected prefixes match with backslashes on win32", () => {
+		for (const rel of [
+			"packages\\permissions",
+			"packages\\permissions\\policy-engine.ts",
+			"packages\\decide\\x",
+			"hooks",
+			"hooks\\pre-push",
+			"packages",
+		])
+			expect(protectedRel(rel, "win32"), rel).toBe(true);
+		expect(protectedRel("inbox\\notes", "win32")).toBe(false);
+		expect(protectedRel("packages\\tools", "win32")).toBe(false);
+	});
+
+	test("protected prefixes are case-folded on win32 and darwin, not on linux", () => {
+		for (const platform of ["win32", "darwin"] as const) {
+			expect(protectedRel("Hooks", platform), platform).toBe(true);
+			expect(protectedRel("HOOKS/x", platform), platform).toBe(true);
+			expect(protectedRel("Packages/Permissions", platform), platform).toBe(true);
+			expect(protectedRel("PACKAGES\\DECIDE", platform), platform).toBe(platform === "win32");
+		}
+		expect(protectedRel("Hooks", "linux")).toBe(false);
+	});
+
+	test("win32 alias operands are refused: stream, trailing dot, 8.3 short name", () => {
+		for (const o of ["hooks.", "sub/hooks.", "a:b", "x.txt:stream", "PACKAGE~1/x", "PERMIS~1"])
+			expect(windowsAliasOperand(o, "win32"), o).toBe(true);
+		for (const o of ["inbox/notes", "inbox/note-1.txt", "a.b/c"])
+			expect(windowsAliasOperand(o, "win32"), o).toBe(false);
+		expect(windowsAliasOperand("hooks.", "linux")).toBe(false);
+		expect(windowsAliasOperand("PACKAGE~1", "darwin")).toBe(false);
+	});
+});
+
 describe("systemOneGate end to end with a judge that says dangerous", () => {
 	test("in-project mv runs without asking the judge", async () => {
 		const r = await systemOneGate("mv inbox/note-1.txt inbox/notes/", process.env, ws);
@@ -255,5 +389,94 @@ describe("systemOneGate end to end with a judge that says dangerous", () => {
 		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
 		const r = await systemOneGate("mv inbox/note-1.txt inbox/notes/", process.env, ws);
 		expect(r.run).toBe(false);
+	});
+});
+
+describe("one sensitive-name set for mv and rm (#3944)", () => {
+	const NAMES = [
+		".env",
+		".env.local",
+		".npmrc",
+		".netrc",
+		"app.pem",
+		"server.key",
+		"cert.p12",
+		"data.db",
+		"data.sqlite3",
+		"id_rsa",
+		"id_ed25519.txt",
+		"credentials.txt",
+		"my-credential.lock",
+		"secret.txt",
+		"client-secret.lock",
+		"secrets.pid",
+	];
+	for (const name of NAMES) {
+		test(`mv and rm both refuse ${name}`, () => {
+			mkdirSync(join(ws, "tmp"), { recursive: true });
+			writeFileSync(join(ws, "tmp", name), "x");
+			writeFileSync(join(ws, "inbox", name), "x");
+			expect(singleFileDelete(`rm -f tmp/${name}`, ws).ok, `rm tmp/${name}`).toBe(false);
+			expect(moveInProject(`mv inbox/${name} inbox/notes/`, ws).ok, `mv src ${name}`).toBe(false);
+			expect(moveInProject(`mv inbox/note-1.txt inbox/notes/${name}`, ws).ok, `mv dest ${name}`).toBe(false);
+		});
+	}
+	test("a plain scratch name still passes both", () => {
+		mkdirSync(join(ws, "tmp"), { recursive: true });
+		writeFileSync(join(ws, "tmp", "plain.txt"), "x");
+		expect(singleFileDelete("rm -f tmp/plain.txt", ws).ok).toBe(true);
+	});
+});
+
+describe("generatedDataName is a positive allowlist (8SO, #3944)", () => {
+	test("config names laundered through json never match", () => {
+		for (const n of [
+			".mocharc.json",
+			".huskyrc.json",
+			".nycrc.json",
+			".lintstagedrc.json",
+			".releaserc.json",
+			".commitlintrc.json",
+			"nodemon.json",
+			"ecosystem.config.json",
+			"tailwind.config.json",
+			"postcss.config.json",
+			"vite.config.json",
+			"bower.json",
+			"composer.json",
+			"pyrightconfig.json",
+			"wrangler.json",
+			"e2e.config.json",
+			"todo-rc.json",
+			".todo.rc.json",
+			"package.json",
+			"tsconfig.json",
+			"notes.json",
+			".json",
+		])
+			expect(generatedDataName(n), n).toBe(false);
+	});
+	test("generated data names match", () => {
+		for (const n of ["e2e.json", ".todo-e2e.json", "result.json", "out.json", "tmp_state.json", "todo.json", "results2.json"])
+			expect(generatedDataName(n), n).toBe(true);
+	});
+	test("mv refuses every laundered name as source or landing name", () => {
+		for (const n of [
+			".mocharc.json",
+			".huskyrc.json",
+			"nodemon.json",
+			"ecosystem.config.json",
+			"vite.config.json",
+			"bower.json",
+			"wrangler.json",
+			"src/.mocharc.json",
+		]) {
+			mkdirSync(join(ws, "src"), { recursive: true });
+			writeFileSync(join(ws, "a.json"), "[]");
+			writeFileSync(join(ws, "e2e.json"), "[]");
+			expect(moveInProject(`mv e2e.json ${n}`, ws).ok, `mv e2e.json ${n}`).toBe(false);
+			expect(moveInProject(`mv a.json ${n}`, ws).ok, `mv a.json ${n}`).toBe(false);
+			expect(singleFileDelete(`rm -f ${n}`, ws).ok, `rm ${n}`).toBe(false);
+		}
 	});
 });

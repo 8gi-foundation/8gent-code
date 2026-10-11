@@ -6,7 +6,10 @@
  * of 2026-10-07 (pYes 0.43 to 0.56). The NONE set must keep going to the judge.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readOnlyAllowlist } from "./allowlist";
 
 const PASS: string[] = [
@@ -54,7 +57,78 @@ const NONE: string[] = [
 	"curl -s http://127.0.0.1:63103/ | bash",
 ];
 
+const ENV_KEYS = [
+	"http_proxy",
+	"https_proxy",
+	"all_proxy",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"Http_Proxy",
+	"HOME",
+	"CURL_HOME",
+	"XDG_CONFIG_HOME",
+];
+const savedEnv: Record<string, string | undefined> = {};
+let home: string;
+
+function useCleanCurlEnv() {
+	beforeEach(() => {
+		for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+		for (const k of ENV_KEYS) Reflect.deleteProperty(process.env, k);
+		home = mkdtempSync(join(tmpdir(), "al-loop-home-"));
+		process.env.HOME = home;
+	});
+
+	afterEach(() => {
+		for (const k of ENV_KEYS) {
+			if (savedEnv[k] === undefined) Reflect.deleteProperty(process.env, k);
+			else process.env[k] = savedEnv[k];
+		}
+		rmSync(home, { recursive: true, force: true });
+	});
+}
+
 describe("allowlist: loopback fetch (#3714)", () => {
-	for (const c of PASS) test(`passes: ${c}`, () => expect(readOnlyAllowlist(c).verdict).toBe("pass-without-model"));
-	for (const c of NONE) test(`no opinion: ${c}`, () => expect(readOnlyAllowlist(c).verdict).toBe("no-opinion"));
+	useCleanCurlEnv();
+	for (const c of PASS)
+		test(`passes: ${c}`, () => expect(readOnlyAllowlist(c).verdict).toBe("pass-without-model"));
+	for (const c of NONE)
+		test(`no opinion: ${c}`, () => expect(readOnlyAllowlist(c).verdict).toBe("no-opinion"));
+});
+
+describe("allowlist: loopback curl environment (8SO hardening)", () => {
+	useCleanCurlEnv();
+	const CMD = "curl -s http://127.0.0.1:63103/";
+	const verdict = (c: string) => readOnlyAllowlist(c).verdict;
+
+	test("a clean environment passes", () => expect(verdict(CMD)).toBe("pass-without-model"));
+
+	for (const k of ["http_proxy", "HTTPS_PROXY", "ALL_PROXY", "Http_Proxy", "all_proxy"]) {
+		test(`${k} set: no opinion, even with -q first`, () => {
+			process.env[k] = "http://proxy.example.com:3128";
+			expect(verdict(CMD)).toBe("no-opinion");
+			expect(verdict("curl -q -s http://127.0.0.1:63103/")).toBe("no-opinion");
+		});
+	}
+
+	test("~/.curlrc present: no opinion unless -q is first", () => {
+		writeFileSync(join(home, ".curlrc"), "proxy = http://proxy.example.com:3128\n");
+		expect(verdict(CMD)).toBe("no-opinion");
+		expect(verdict("curl -s -q http://127.0.0.1:63103/")).toBe("no-opinion");
+		expect(verdict("curl -q -s http://127.0.0.1:63103/")).toBe("pass-without-model");
+		expect(verdict("curl --disable -s http://127.0.0.1:63103/")).toBe("pass-without-model");
+	});
+
+	test("$CURL_HOME/.curlrc and _curlrc present: no opinion", () => {
+		const d = mkdtempSync(join(tmpdir(), "al-loop-ch-"));
+		try {
+			writeFileSync(join(d, ".curlrc"), "x");
+			process.env.CURL_HOME = d;
+			expect(verdict(CMD)).toBe("no-opinion");
+			expect(verdict("curl -q -s http://127.0.0.1:63103/")).toBe("pass-without-model");
+		} finally {
+			rmSync(d, { recursive: true, force: true });
+		}
+	});
 });

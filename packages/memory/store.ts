@@ -12,6 +12,7 @@ import { Database } from "bun:sqlite";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { admitMemory } from "./admission.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
+import { trackStatements } from "./tracked-db.js";
 import {
 	type VecLoadResult,
 	encodeVector,
@@ -191,7 +192,7 @@ export class MemoryStore {
 		// Must run before the first Database is opened in this process.
 		ensureSqliteSupportsExtensions();
 
-		this.db = new Database(dbPath, { create: true });
+		this.db = trackStatements(new Database(dbPath, { create: true }));
 		this.embeddingProvider = embeddingProvider ?? null;
 
 		// Configure WAL mode and pragmas

@@ -5,6 +5,7 @@
  * This is the bridge between LLM tool calls and actual system operations.
  */
 
+import { RetiredFacts } from "./retired-facts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -109,7 +110,7 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
+import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
@@ -147,7 +148,10 @@ import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
 	WRITE_CONTENT_TOOLS,
-	applyEdit,
+	applyAt,
+	editRefusal,
+	locateEdit,
+	logEditRefusal,
 	blockedToolMessage,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
@@ -173,6 +177,7 @@ import { ArtifactStore } from "./artifact-store";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
 import { formatEditNotFound } from "./edit-hint";
+import { isNoToolScope } from "./agent-scopes";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
@@ -241,10 +246,10 @@ export function toolReplayClass(toolName: string): ReplayClass {
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-export function safePath(userPath: string, workingDirectory: string): string {
+export function safePath(userPath: string, workingDirectory: string, access: PathAccess): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
-	const guard = guardPath(userPath, workingDirectory);
+	const guard = guardPath(userPath, workingDirectory, {}, access);
 	if (!guard.ok) {
 		throw new Error(`Path blocked by path-guard: ${guard.reason} ("${userPath}")`);
 	}
@@ -291,9 +296,9 @@ export function safePath(userPath: string, workingDirectory: string): string {
  * only when that target is inside the real workspace. Returns the path to use.
  */
 function assertNoSymlinkEscape(target: string, base: string, userPath: string): string {
-	const escape = (real?: string) =>
+	const escape = () =>
 		new Error(
-			`Path escapes workspace via symlink: "${userPath}"${real ? ` resolves to ${real}` : ""}, outside ${base}. ` +
+			`Path escapes workspace via symlink: "${userPath}" points outside ${base}. ` +
 				"Files can only be read or written inside the workspace.",
 		);
 	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
@@ -334,9 +339,9 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 						"Create or write that real path directly.",
 				);
 			}
-			throw escape(dest || undefined);
+			throw escape();
 		}
-		if (!inside(real, realBase)) throw escape(real);
+		if (!inside(real, realBase)) throw escape();
 		return real;
 	}
 
@@ -356,7 +361,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		}
 		throw escape();
 	}
-	if (!inside(realAncestor, realBase)) throw escape(realAncestor);
+	if (!inside(realAncestor, realBase)) throw escape();
 	return target;
 }
 
@@ -367,7 +372,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 export function resolveSpeakOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : `speak-${Date.now()}.wav`;
 	if (!named.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${named}")`);
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	// safePath is lexical. A directory symlink inside the workspace would carry the
 	// write outside it, so check real locations: the nearest existing ancestor of the
 	// parent must sit under the real workspace, and the file itself must not be a link.
@@ -402,7 +407,7 @@ function assertRealInside(target: string, named: string, workingDirectory: strin
  * location of its nearest existing parent inside the real workspace, and not itself a symlink.
  */
 export function confineWrite(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	assertRealInside(path.dirname(target), named, workingDirectory);
 	const st = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
@@ -411,7 +416,7 @@ export function confineWrite(named: string, workingDirectory: string): string {
 
 /** A path a tool may read: inside the working directory after following every link. */
 export function confineRead(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "read");
 	assertRealInside(target, named, workingDirectory);
 	return target;
 }
@@ -637,6 +642,8 @@ export class ToolExecutor {
 	private openOnWrite: boolean;
 	/** Paths write_file opened this turn: each opens at most once per turn. */
 	private openedThisTurn = new Set<string>();
+	/** Dates and numbers files read this turn mark as retired (#3811). */
+	private retiredFacts = new RetiredFacts();
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -722,9 +729,20 @@ export class ToolExecutor {
 		return this.workingDirectory;
 	}
 
+	/** Once per turn, at its end: a retired fact still in a file that was warned about (#3811). */
+	retiredTurnEndNudge(): string | null {
+		// Regular files up to 1 MB only: a FIFO, device or huge file must not hang or bloat the turn.
+		return this.retiredFacts.turnEndNudge((file) => {
+			const st = fs.statSync(file, { throwIfNoEntry: false });
+			if (!st || !st.isFile() || st.size > 1_048_576) return null;
+			return fs.readFileSync(file, "utf-8");
+		});
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();
+		this.retiredFacts.reset();
 	}
 
 	/**
@@ -904,6 +922,11 @@ export class ToolExecutor {
 								description: "Text to find and replace",
 							},
 							newText: { type: "string", description: "Replacement text" },
+							startLine: {
+								type: "number",
+								description:
+									"Optional 1-based line. If oldText appears more than once, the copy at or after this line is edited. Without it, a duplicate oldText is refused.",
+							},
 						},
 						required: ["path", "oldText", "newText"],
 					},
@@ -1721,6 +1744,11 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// A no-tool scope (classroom, #3939) runs nothing, whatever reached here:
+		// the model is offered zero tools; this is the backstop at the executor.
+		if (isNoToolScope(this.agentId)) {
+			return `Error: tool "${toolName}" is not available in this session (no tools are permitted).`;
+		}
 		// Every call runs in this agent's permission mode (#3170), so the
 		// permission layer below answers for this agent and no other.
 		if (this.permission && currentPermissionHolder() !== this.permission) {
@@ -1937,20 +1965,25 @@ export class ToolExecutor {
 
 			// File operations (with path traversal protection)
 			case "read_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "read");
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.writeFile(safe, args.content as string);
 			}
 			case "edit_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
-				return this.editFile(safe, args.oldText as string, args.newText as string);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
+				return this.editFile(
+					safe,
+					args.oldText as string,
+					args.newText as string,
+					typeof args.startLine === "number" ? args.startLine : undefined,
+				);
 			}
 			case "list_files": {
 				const dir = (args.path as string) || ".";
-				const safeDir = safePath(dir, this.workingDirectory);
+				const safeDir = safePath(dir, this.workingDirectory, "read");
 				return this.listFiles(safeDir, args.pattern as string);
 			}
 
@@ -2503,6 +2536,7 @@ export class ToolExecutor {
 		}
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
+		this.retiredFacts.noteRead(absolutePath, content);
 		const lines = content.split("\n");
 		// A trailing newline ends the last line; it does not start another one.
 		if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
@@ -2618,6 +2652,10 @@ export class ToolExecutor {
 		const scope = writeScopeLine(this.createdFiles, this.workingDirectory, absolutePath, wasNew);
 		if (scope) designHint += `\n${scope}`;
 
+		// A date or number a file read this turn marks retired (#3811): warn, never block.
+		const retiredLine = this.retiredFacts.warn(absolutePath, content);
+		if (retiredLine) designHint += `\n${retiredLine}`;
+
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
 		if (deckLine) designHint += `\n${deckLine}`;
@@ -2641,7 +2679,12 @@ export class ToolExecutor {
 		return `${opened ? "File written and opened" : "File written"}: ${absolutePath}${designHint}`;
 	}
 
-	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
+	private async editFile(
+		filePath: string,
+		oldText: string,
+		newText: string,
+		startLine?: number,
+	): Promise<string> {
 		// No anchor, no edit (#3101): indexOf("") is 0, so an empty oldText
 		// used to prepend newText to the file.
 		const noAnchor = emptyOldTextError(oldText, filePath);
@@ -2670,7 +2713,16 @@ export class ToolExecutor {
 
 		// Literal replacement, so the bytes written are the bytes the policy
 		// gate checked (String.replace would expand `$&` etc. in newText).
-		const newContent = applyEdit(content, oldText, newText);
+		// A duplicate oldText is refused, never silently applied to the first
+		// copy (#3898); the refusal is logged so it can be counted.
+		const located = locateEdit(content, oldText, startLine);
+		const refusal = editRefusal(located, filePath);
+		if (refusal) {
+			logEditRefusal(located, filePath, oldText.length);
+			return refusal;
+		}
+		const newContent =
+			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
 		if (newContent === null) {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the
@@ -2719,13 +2771,20 @@ export class ToolExecutor {
 		return gate.note ? `${gate.note}\n${out}` : out;
 	}
 
-	async runCommand(command: string, timeoutSec?: number): Promise<string> {
+	/** `env` replaces process.env for the child (the done gate passes a scrubbed one). */
+	async runCommand(
+		command: string,
+		timeoutSec?: number,
+		env?: Record<string, string | undefined>,
+	): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
-			return runWithPermissionHolder(this.permission, () => this.runCommand(command, timeoutSec));
+			return runWithPermissionHolder(this.permission, () =>
+				this.runCommand(command, timeoutSec, env),
+			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
 		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec));
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
 		}
 		// Backstop (#3595): the file that lists post_message recipients is not
 		// for the shell. A minimum, not a parser: the allowlist is also frozen
@@ -2735,6 +2794,9 @@ export class ToolExecutor {
 		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
 		if (commandTouchesAuditFiles(command))
 			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
+		// The session's own records are read-only to the shell too.
+		if (commandMutatesSessionRecords(command))
+			return `[PERMISSION DENIED] Command would change session records, which agent tools may not do: ${command}`;
 		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
 		// bump only; the boundary is seatbelting run_command (#3612).
 		if (touchesBrowserSecrets(command))
@@ -2820,7 +2882,7 @@ export class ToolExecutor {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
-				env: { ...process.env, ...SPAWN_NON_INTERACTIVE_ENV },
+				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
 			let stdout = "";
@@ -2917,7 +2979,7 @@ export class ToolExecutor {
 		// so a refused path reads the same whether or not the file is there.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error reading image: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -2973,7 +3035,7 @@ export class ToolExecutor {
 		// Same guard as read_image, and before the vision router is consulted.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error describing image: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -3124,12 +3186,16 @@ export class ToolExecutor {
 	// Notebook Tool Handlers
 	// ============================================
 
-	private async handleReadNotebook(notebookPath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+	/** Notebook paths: absolute or workspace-relative, but refused by the path guard for this access. */
+	private guardedNotebookPath(notebookPath: string, access: PathAccess): string {
+		const guard = guardPath(notebookPath, this.workingDirectory, {}, access);
+		if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
+		return path.isAbsolute(notebookPath) ? notebookPath : path.join(this.workingDirectory, notebookPath);
+	}
 
+	private async handleReadNotebook(notebookPath: string): Promise<string> {
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell) => ({
 				index: cell.index,
@@ -3166,11 +3232,8 @@ export class ToolExecutor {
 		cellIndex: number,
 		newSource: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3184,11 +3247,8 @@ export class ToolExecutor {
 		cellType: "code" | "markdown",
 		source: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3197,11 +3257,8 @@ export class ToolExecutor {
 	}
 
 	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3435,7 +3492,7 @@ export class ToolExecutor {
 			if (action === "mix" && (!args.palette || !args.type)) {
 				return "deck_theme mix needs palette and type";
 			}
-			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory), this.workingDirectory);
+			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory, "write"), this.workingDirectory);
 			const themeName =
 				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
 			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
@@ -3982,9 +4039,9 @@ export class ToolExecutor {
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
 					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
-					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory);
+					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory, "write");
 				} else if (isolatedBrowser()) {
-					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory);
+					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
 				return await getEightBrowser().screenshot(out, session);
 			}

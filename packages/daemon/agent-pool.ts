@@ -11,6 +11,14 @@ import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
+import {
+	CLASSROOM_AGENT_SCOPE,
+	CLASSROOM_CHANNEL,
+	CLASSROOM_IDLE_MS,
+	CLASSROOM_MAX_TURNS,
+	CLASSROOM_SESSION_CAP,
+	CLASSROOM_SYSTEM_PROMPT,
+} from "./classroom";
 import { bus } from "./events";
 import type { SessionJournal } from "./session-journal";
 
@@ -71,6 +79,12 @@ export interface SessionOverrides {
 	model?: string;
 	baseUrl?: string;
 	systemPrompt?: string;
+	/**
+	 * Working directory for this session's tools. Set when a saved TUI
+	 * session is attached through the daemon, so its tools keep running in
+	 * the project it was started in (#3929). Defaults to the pool's.
+	 */
+	workingDirectory?: string;
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -100,12 +114,15 @@ export const KNOWN_CHANNELS = [
 	"computer",
 	"browser",
 	"table",
+	"tui",
+	"classroom",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
 /** Per-channel concurrency caps. Falls back to MAX_SESSIONS when unset. */
 const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
 	computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
+	classroom: CLASSROOM_SESSION_CAP,
 };
 
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
@@ -114,6 +131,8 @@ const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
 	// Table agent sessions are cheap to rebuild (deterministic sessionId) and
 	// should not linger holding a scoped agent; reap them faster than the default.
 	table: 10 * 60 * 1000, // 10 minutes
+	// Classroom sessions are one-shot lesson generators; do not let them linger.
+	classroom: CLASSROOM_IDLE_MS,
 };
 
 /** Channels that should never be evicted by the idle reaper. */
@@ -125,6 +144,11 @@ export class AgentPool {
 	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 	/** Open-session journal for resume after a crash (#3552). Unset by default. */
 	private journal: SessionJournal | null;
+	/**
+	 * True while a client is attached to a session (#3929). The gateway sets
+	 * it; an attached session is never evicted for idleness or room.
+	 */
+	private inUse: (sessionId: string) => boolean = () => false;
 
 	constructor(config: Partial<PoolConfig> = {}, options: { journal?: SessionJournal } = {}) {
 		this.journal = options.journal ?? null;
@@ -138,6 +162,31 @@ export class AgentPool {
 
 		// Clean up idle sessions every 5 minutes
 		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+	}
+
+	/** Tell the pool which sessions have clients attached (gateway, #3929). */
+	setInUse(fn: (sessionId: string) => boolean): void {
+		this.inUse = fn;
+	}
+
+	/** Whether a session may be evicted to make room or for idleness. */
+	private evictable(id: string, entry: SessionEntry): boolean {
+		return !NEVER_EVICT.has(entry.channel) && !entry.busy && !this.inUse(id);
+	}
+
+	/**
+	 * Whether a new session on `channel` fits: under both caps, or with an
+	 * evictable session to make room. Restores from disk check this first so
+	 * they never push the pool past its cap (#3929).
+	 */
+	canCreate(channel: string): boolean {
+		const entries = [...this.sessions];
+		const channelOk =
+			this.countOn(channel) < this.capFor(channel) ||
+			entries.some(([id, e]) => e.channel === channel && this.evictable(id, e));
+		const globalOk =
+			this.sessions.size < MAX_SESSIONS || entries.some(([id, e]) => this.evictable(id, e));
+		return channelOk && globalOk;
 	}
 
 	/** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
@@ -166,7 +215,7 @@ export class AgentPool {
 			// Never evict persistent channels (telegram, delegation)
 			if (NEVER_EVICT.has(entry.channel)) continue;
 			const timeout = this.idleTimeoutFor(entry.channel);
-			if (!entry.busy && now - entry.lastActiveAt > timeout) {
+			if (this.evictable(id, entry) && now - entry.lastActiveAt > timeout) {
 				console.log(
 					`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`,
 				);
@@ -195,8 +244,7 @@ export class AgentPool {
 			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
 				if (entry.channel !== channel) continue;
-				if (NEVER_EVICT.has(entry.channel)) continue;
-				if (!entry.busy && entry.createdAt < oldestTime) {
+				if (this.evictable(id, entry) && entry.createdAt < oldestTime) {
 					oldestTime = entry.createdAt;
 					oldestId = id;
 				}
@@ -215,21 +263,29 @@ export class AgentPool {
 			let oldestId: string | null = null;
 			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
-				if (NEVER_EVICT.has(entry.channel)) continue;
-				if (!entry.busy && entry.createdAt < oldestTime) {
+				if (this.evictable(id, entry) && entry.createdAt < oldestTime) {
 					oldestTime = entry.createdAt;
 					oldestId = id;
 				}
 			}
 			if (oldestId) {
 				this.destroySession(oldestId);
+				// Clients still holding the id must hear it ended (#3929).
+				bus.emit("session:end", { sessionId: oldestId, reason: "channel-cap-evict" });
 			}
 		}
 
 		const events = this.buildEventCallbacks(sessionId);
 
+		// Classroom (#3939) is fixed by the channel, never by the caller: no tools,
+		// a short turn budget, and the untrusted-data system prompt. Overrides for
+		// scope, prompt and turns are ignored here on purpose.
+		const isClassroom = channel === CLASSROOM_CHANNEL;
+
 		// Delegation sessions get more tool turns than Telegram chat
-		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
+		const maxTurns = isClassroom
+			? Math.min(overrides?.maxTurns ?? CLASSROOM_MAX_TURNS, CLASSROOM_MAX_TURNS)
+			: (overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns));
 
 		// F4: Table sessions must run inference on a LOCAL runtime. A Table agent
 		// processes UNTRUSTED channel text; if the runtime is cloud, that text
@@ -268,8 +324,8 @@ export class AgentPool {
 			baseUrl: overrides?.baseUrl,
 			// Optional per-session persona (officer character prompt). Undefined
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
-			systemPrompt: overrides?.systemPrompt,
-			workingDirectory: this.config.workingDirectory,
+			systemPrompt: isClassroom ? CLASSROOM_SYSTEM_PROMPT : overrides?.systemPrompt,
+			workingDirectory: overrides?.workingDirectory ?? this.config.workingDirectory,
 			// The pool key was resolved for the pool's default runtime. A session
 			// whose runtime differs (an override, or a Table session forced local)
 			// gets only its own runtime's key, never the pool's (#3261).
@@ -286,7 +342,9 @@ export class AgentPool {
 			// installTablePolicies() rules block run_command/network/write_file etc.
 			// The agent produces only a reply; the gated post_to_channel write path
 			// is driven by the gateway. Other channels keep the default scope.
-			agentScope: overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined),
+			agentScope: isClassroom
+				? CLASSROOM_AGENT_SCOPE
+				: (overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined)),
 			// Delegation runs UNATTENDED (the relay autonomy engine / missions
 			// dispatch through it with no human approving each tool). Mark it so the
 			// maker-checker gate enforces at the executor: branch pushes auto-approve
@@ -460,6 +518,14 @@ export class AgentPool {
 
 		this.sessions.delete(sessionId);
 		this.unjournal(sessionId);
+		// A destroyed session must not keep running its in-flight turn.
+		if (entry.busy) {
+			try {
+				entry.agent.abort();
+			} catch (err) {
+				console.error(`[agent-pool] abort on destroy failed for ${sessionId}: ${String(err)}`);
+			}
+		}
 		// #3554: queued messages never run on an ended session.
 		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
@@ -485,16 +551,34 @@ export class AgentPool {
 	}
 
 	/** Get session info */
-	getSessionInfo(
-		sessionId: string,
-	): { channel: string; messageCount: number; busy: boolean } | null {
+	getSessionInfo(sessionId: string): {
+		channel: string;
+		messageCount: number;
+		busy: boolean;
+		createdAt: number;
+		lastActiveAt: number;
+	} | null {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) return null;
 		return {
 			channel: entry.channel,
 			messageCount: entry.messageCount,
 			busy: entry.busy,
+			createdAt: entry.createdAt,
+			lastActiveAt: entry.lastActiveAt,
 		};
+	}
+
+	/**
+	 * Stop the turn in flight without ending the session (#3929): the
+	 * shared-safe Stop, since session:destroy would end it for every client.
+	 * False when the session does not exist or nothing is running.
+	 */
+	abort(sessionId: string): boolean {
+		const entry = this.sessions.get(sessionId);
+		if (!entry || !entry.busy) return false;
+		entry.agent.abort();
+		return true;
 	}
 
 	/** Get count of active sessions */

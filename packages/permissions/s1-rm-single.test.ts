@@ -14,7 +14,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -32,6 +32,9 @@ import {
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
 
 afterAll(cleanupTempDirs);
+
+// Windows refuses a filename that starts with a colon; those cases run on POSIX only.
+const HAS_COLON_NAMES = process.platform !== "win32";
 
 class AlwaysDangerous implements DecideBackend {
 	readonly name = "stub";
@@ -124,10 +127,17 @@ beforeEach(() => {
 	// Tracked files whose names need the literal, case-insensitive check:
 	// a capitalised twin and a name that starts with a colon.
 	writeFileSync(join(ws, "run", "Case.lock"), "pid=1");
-	writeFileSync(join(ws, "run", ":colon.lock"), "pid=1");
-	git(ws, "add", "--", "run/Case.lock", ":(literal)run/:colon.lock");
+	// A colon cannot start a filename on Windows (it is the drive/stream separator), so the
+	// colon-named fixtures exist on POSIX only. The command grammar admits no other character
+	// that git treats as pathspec magic and Windows allows, so there is no twin to add.
+	const literalNames = ["run/Case.lock"];
+	if (HAS_COLON_NAMES) {
+		writeFileSync(join(ws, "run", ":colon.lock"), "pid=1");
+		literalNames.push(":(literal)run/:colon.lock");
+	}
+	git(ws, "add", "--", ...literalNames);
 	git(ws, "commit", "-qm", "names");
-	writeFileSync(join(ws, "run", ":free.lock"), "pid=1");
+	if (HAS_COLON_NAMES) writeFileSync(join(ws, "run", ":free.lock"), "pid=1");
 	// An independent repository nested under run/, with a tracked lock.
 	mkdirSync(join(ws, "run", "nested"));
 	git(join(ws, "run", "nested"), "init", "-q");
@@ -166,7 +176,7 @@ beforeEach(() => {
 		calibrationDir: tempDir("s1-single-nocal-"),
 	});
 	process.env[SYSTEM_ONE_FLAG] = "1";
-});
+}, 60_000); // git init, commit and submodule add take seconds on a Windows runner
 
 afterEach(() => {
 	rmSync(ws, { recursive: true, force: true });
@@ -229,7 +239,9 @@ describe("singleFileDelete", () => {
 		// Tracked status is read from the file's own directory, by literal name.
 		["a tracked file spelt in another case", "rm -f run/case.lock"],
 		["a tracked file spelt in its own case", "rm -f run/Case.lock"],
-		["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"],
+		...(HAS_COLON_NAMES
+			? [["a tracked file whose name starts with a colon", "rm -f run/:colon.lock"] as [string, string]]
+			: []),
 		["a file tracked by a nested repository", "rm -f run/nested/a.lock"],
 		["a file tracked by a submodule", "rm -f run/mod/m.lock"],
 		// Dependency lockfiles are project state, not scratch.
@@ -262,11 +274,14 @@ describe("singleFileDelete", () => {
 		expect(singleFileDelete(`rm -f ${join(ws, "run", "worker.lock")}`, ws).ok).toBe(false);
 	});
 
-	test("literal names: an untracked colon-named lock, and an untracked lock in a nested repository, still pass", () => {
+	test.skipIf(!HAS_COLON_NAMES)("literal names: an untracked colon-named lock still passes (POSIX only: Windows forbids a leading colon)", () => {
 		expect(singleFileDelete("rm -f run/:free.lock", ws)).toEqual({
 			ok: true,
 			rel: "run/:free.lock",
 		});
+	});
+
+	test("literal names: an untracked lock in a nested repository still passes", () => {
 		expect(singleFileDelete("rm -f run/nested/free.lock", ws)).toEqual({
 			ok: true,
 			rel: "run/nested/free.lock",
@@ -353,7 +368,9 @@ describe("singleFileDelete", () => {
 		expect(hint("rm -f run/tracked.lock")).toStartWith("That file is tracked by git.");
 		expect(hint("rm -f run/mod/m.lock")).toStartWith("That file is tracked by git.");
 		expect(hint("rm -f run/nested/a.lock")).toStartWith("That file is tracked by git.");
-		expect(hint("rm -f run/:colon.lock")).toStartWith("That file is tracked by git.");
+		if (HAS_COLON_NAMES) {
+			expect(hint("rm -f run/:colon.lock")).toStartWith("That file is tracked by git.");
+		}
 		// On a case-insensitive file system the other spelling names the same
 		// file, and it is the tracked check that refuses it, not the lstat.
 		if (process.platform === "darwin")
@@ -373,6 +390,89 @@ describe("singleFileDelete", () => {
 		// Not even close: no hint.
 		expect(hint("shred run/worker.lock")).toBe("");
 		expect(hint("rm -f .git/index.lock")).toBe("");
+	});
+});
+
+describe("fresh generated-data files (#3943)", () => {
+	const old = new Date(Date.now() - 5 * 60 * 60 * 1000);
+	beforeEach(() => {
+		writeFileSync(join(ws, "e2e.json"), "[]");
+		writeFileSync(join(ws, ".todo-e2e.json"), "[]");
+		writeFileSync(join(ws, "stale.json"), "[]");
+		utimesSync(join(ws, "stale.json"), old, old);
+		writeFileSync(join(ws, "tsconfig.json"), "{}");
+		writeFileSync(join(ws, "package.json"), "{}");
+		writeFileSync(join(ws, ".mcp.json"), "{}");
+		writeFileSync(join(ws, "fresh.txt"), "x");
+		mkdirSync(join(ws, ".hidden"));
+		writeFileSync(join(ws, ".hidden", "d.json"), "[]");
+		mkdirSync(join(ws, ".tmp"));
+		writeFileSync(join(ws, ".tmp", "e2e.json"), "[]");
+		writeFileSync(join(outside, "x.json"), "[]");
+		symlinkSync(join(outside, "x.json"), join(ws, "link.json"));
+	});
+
+	test("the exact command from the issue: rm -f e2e.json", () => {
+		expect(singleFileDelete("rm -f e2e.json", ws)).toEqual({ ok: true, rel: "e2e.json" });
+	});
+
+	for (const cmd of ["rm -f .todo-e2e.json", "rm -f .tmp/e2e.json", "rm e2e.json", "rm -fv ./e2e.json"]) {
+		test(`passes: ${cmd}`, () => {
+			expect(singleFileDelete(cmd, ws).ok).toBe(true);
+		});
+	}
+
+	for (const cmd of [
+		"rm -f stale.json",
+		"rm -f tsconfig.json",
+		"rm -f package.json",
+		"rm -f .mcp.json",
+		"rm -f fresh.txt",
+		"rm -f .hidden/d.json",
+		"rm -f link.json",
+		"rm -f /tmp/e2e.json",
+		"rm -f ../e2e.json",
+		"rm -rf e2e.json",
+		"rm -f e2e.json .todo-e2e.json",
+		"rm -f *.json",
+		"rm -f old.log",
+	]) {
+		test(`still judged: ${cmd}`, () => {
+			expect(singleFileDelete(cmd, ws).ok).toBe(false);
+		});
+	}
+
+	test("a future mtime or a touched old file is not fresh by mtime (birth time rules)", () => {
+		const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+		utimesSync(join(ws, "stale.json"), new Date(), new Date());
+		// stale.json was just touched (fresh mtime) but is named like plain data, not generated data
+		expect(singleFileDelete("rm -f stale.json", ws).ok).toBe(false);
+		writeFileSync(join(ws, "todo-old.json"), "[]");
+		utimesSync(join(ws, "todo-old.json"), future, future);
+		// Born just now, future mtime: still fresh by birth time, which is the point of using it.
+		expect(singleFileDelete("rm -f todo-old.json", ws).ok).toBe(true);
+	});
+
+	test("a plain data json under .tmp/ passes; tooling config under .tmp/ does not", () => {
+		writeFileSync(join(ws, ".tmp", "state.json"), "[]");
+		writeFileSync(join(ws, ".tmp", "nodemon.json"), "{}");
+		writeFileSync(join(ws, ".tmp", "app.config.json"), "{}");
+		expect(singleFileDelete("rm -f .tmp/state.json", ws).ok).toBe(true);
+		expect(singleFileDelete("rm -f .tmp/nodemon.json", ws).ok).toBe(false);
+		expect(singleFileDelete("rm -f .tmp/app.config.json", ws).ok).toBe(false);
+	});
+
+	test("config laundered through json is judged", () => {
+		for (const n of [".mocharc.json", ".huskyrc.json", "nodemon.json", "vite.config.json", "bower.json", "wrangler.json"]) {
+			writeFileSync(join(ws, n), "{}");
+			expect(singleFileDelete(`rm -f ${n}`, ws).ok, n).toBe(false);
+		}
+	});
+
+	test("a tracked json is judged", () => {
+		rmSync(join(ws, ".git", "index.lock"));
+		git(ws, "add", "e2e.json");
+		expect(singleFileDelete("rm -f e2e.json", ws).ok).toBe(false);
 	});
 });
 
@@ -425,7 +525,7 @@ describe("systemOneGate", () => {
 		// a case twin only exists on a case-insensitive filesystem; on Linux run/case.lock is absent,
 		// and removing an absent file is already allowed by the rm-of-nothing rule
 		...(process.platform === "darwin" ? ["rm -f run/case.lock"] : []),
-		"rm -f run/:colon.lock",
+		...(HAS_COLON_NAMES ? ["rm -f run/:colon.lock"] : []),
 		"rm -f run/nested/a.lock",
 		"rm -f run/mod/m.lock",
 		"rm -f run/bun.lock",

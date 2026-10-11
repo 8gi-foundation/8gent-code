@@ -25,6 +25,7 @@ export type SlashCommand =
 	| "auth"
 	| "vision"
 	| "session"
+	| "sessions"
 	| "resume"
 	| "history"
 	| "continue"
@@ -291,8 +292,14 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/session [name|list|resume] <args>",
 	},
 	{
+		name: "sessions",
+		aliases: ["shared"],
+		description: "Live and past shared sessions (join from the TUI or the 8gent Browser panel)",
+		usage: "/sessions [share|attach <id>|stop|detach]",
+	},
+	{
 		name: "history",
-		aliases: ["hist", "sessions"],
+		aliases: ["hist"],
 		description: "Browse all past sessions",
 		usage: "/history",
 	},

@@ -18,6 +18,8 @@ const tmp = (p: string) => {
 afterAll(() => {
 	for (const d of made) fs.rmSync(d, { recursive: true, force: true });
 });
+// `magick -list font` enumerates every installed font; on a Windows runner that alone exceeds bun's 5 s default.
+const FILM_TIMEOUT = process.platform === "win32" ? 60_000 : 5_000;
 const slides = [
 	{ title: "One", seconds: 2 },
 	{ title: "Two", seconds: 2 },
@@ -34,23 +36,27 @@ describe("film_craft tool", () => {
 		expect(names).toContain("film_craft");
 	});
 
-	test("plan writes video/film.sh with absolute paths; bed lands in video/", async () => {
-		fs.mkdirSync(path.join(root, "audio"));
-		fs.writeFileSync(path.join(root, "audio", "voice.wav"), "");
-		const out = await executor.execute("film_craft", {
-			action: "plan",
-			preset: "lotus-night",
-			slides,
-			narration: "audio/voice.wav",
-		});
-		expect(out).toContain("2 slides, 4.00 s");
-		const sh = fs.readFileSync(path.join(root, "video", "film.sh"), "utf8");
-		expect(sh).toContain(path.join(root, "audio", "voice.wav"));
-		expect(sh).toContain(path.join(root, "video", "film.mp4"));
-		const bed = await executor.execute("film_craft", { action: "bed", seconds: 2 });
-		expect(bed).toContain(path.join(root, "video", "bed.wav"));
-		expect(fs.existsSync(path.join(root, "video", "bed.wav"))).toBe(true);
-	});
+	test(
+		"plan writes video/film.sh with absolute paths; bed lands in video/",
+		async () => {
+			fs.mkdirSync(path.join(root, "audio"));
+			fs.writeFileSync(path.join(root, "audio", "voice.wav"), "");
+			const out = await executor.execute("film_craft", {
+				action: "plan",
+				preset: "lotus-night",
+				slides,
+				narration: "audio/voice.wav",
+			});
+			expect(out).toContain("2 slides, 4.00 s");
+			const sh = fs.readFileSync(path.join(root, "video", "film.sh"), "utf8");
+			expect(sh).toContain(path.join(root, "audio", "voice.wav"));
+			expect(sh).toContain(path.join(root, "video", "film.mp4"));
+			const bed = await executor.execute("film_craft", { action: "bed", seconds: 2 });
+			expect(bed).toContain(path.join(root, "video", "bed.wav"));
+			expect(fs.existsSync(path.join(root, "video", "bed.wav"))).toBe(true);
+		},
+		FILM_TIMEOUT,
+	);
 });
 
 describe("film_craft confinement", () => {

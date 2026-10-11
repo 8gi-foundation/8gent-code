@@ -9,6 +9,7 @@
  */
 
 import { getModeManager } from "./modes";
+import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -46,7 +47,7 @@ import {
 } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
-import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
+import { capabilityToolMode, knownContextWindow, ollamaContextWindowLookup } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -71,17 +72,22 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
-import { browserProfileWarning, localBrowserTools } from "../tools/eight-browser";
+import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
 
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
-import { buildToolCatalogSegment } from "./prompts/system-prompt";
+import {
+	NARRATION_NOTE,
+	SCRATCH_DIR_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+	buildToolCatalogSegment,
+} from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -106,6 +112,7 @@ import {
 	type Summarizer,
 	type AgentState as TwoStageAgentState,
 	TwoStageCompactor,
+	estimateMessageTokens,
 	twoStageCheckpointPrompt,
 } from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
@@ -195,11 +202,12 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 }
 
 /**
- * The two notes from the tool catalog a headless run keeps: the model has the
- * internet, and narration goes through `speak`. Same wording as the catalog.
+ * The notes from the tool catalog a headless run keeps: internet, narration
+ * through `speak`, scratch dir, slides to video. Same wording as the catalog.
  */
-const HEADLESS_TOOL_NOTES =
-	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**\n**Video narration: call `speak` (local neural voice), never espeak or say.**";
+const HEADLESS_WEB_NOTE =
+	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
+const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -290,6 +298,11 @@ export class Agent {
 	private twoStageCheckpoints: CheckpointEntry[] = [];
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
+	/** #3643: pending one-shot read of the Ollama server's real context window. */
+	private serverContextWindow: { baseUrl: string; model: string; engine: ProactiveCompression } | null =
+		null;
+	/** Injectable for tests; the real lookup reads /api/ps and /api/show. */
+	private contextWindowLookup: typeof ollamaContextWindowLookup = ollamaContextWindowLookup;
 	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
 	// Lazily constructed so sessions that never call a tool pay nothing.
 	private timeTravelStore: TimeTravelStore | null = null;
@@ -377,11 +390,21 @@ export class Agent {
 		// compaction instead of the hardcoded 32k. A large-context cloud model
 		// (e.g. anthropic 200k) compacts far later; a small local model compacts
 		// sooner. Falls back to the conservative floor for unknown providers.
-		const compactionContextWindow = knownContextWindow(
-			getProviderManager().getProvider(config.runtime as ProviderRegistryName),
-		);
+		const activeProvider = getProviderManager().getProvider(config.runtime as ProviderRegistryName);
+		const compactionContextWindow = knownContextWindow(activeProvider);
 		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 		this.compactionContextWindow = compactionContextWindow;
+		// #3643: for an Ollama-served model the 32768 above is only a fallback.
+		// The real window is read from the server once, lazily, the first time
+		// the history nears the fallback's compaction line (see
+		// readServerContextWindow), so short sessions never pay for it.
+		if (activeProvider?.name === "ollama" || activeProvider?.name === "8gent") {
+			this.serverContextWindow = {
+				baseUrl: config.baseUrl || activeProvider.baseUrl,
+				model: config.model || activeProvider.defaultModel,
+				engine: this.compaction,
+			};
+		}
 
 		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
 		// rather than replacing it: the legacy single-threshold engine still
@@ -475,7 +498,7 @@ export class Agent {
 			(userData.onboardingComplete || userData.identity.name) &&
 			style &&
 			styleHasGuide(style) &&
-			config.agentScope !== "__table__"
+			!isVerbatimScope(config.agentScope)
 		) {
 			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
@@ -508,7 +531,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
 		const globalMemoriesBlock = recallGlobalMemoriesSync();
 		this.sessionMemoryContext =
-			config.agentScope === "__table__" ? "" : globalMemoriesBlock + priorSessionsBlock;
+			isVerbatimScope(config.agentScope) ? "" : globalMemoriesBlock + priorSessionsBlock;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -543,7 +566,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have (they were advertised), "never claim you cannot do something"
 		// pushing them to fabricate, and private-memory leakage into an
 		// untrusted channel. Table sessions bypass it.
-		const isTableScope = config.agentScope === "__table__";
+		const isTableScope = isVerbatimScope(config.agentScope);
 		// Project instructions (AGENTS.md / 8GENT.md / CLAUDE.md) reach the model
 		// on both coding paths (#3236), as the trailing section so the prefix
 		// before it stays stable (#3222). Table officers keep their supplied
@@ -598,7 +621,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 
 		// Initialize session persistence (v2)
-		this.sessionWriter = new SessionWriter(this.sessionId);
+		// A classroom session leaves no session file: its text is untrusted and private (#3939).
+		this.sessionWriter = new SessionWriter(
+			this.sessionId,
+			undefined,
+			undefined,
+			!isNoToolScope(config.agentScope),
+		);
 		// A Table officer is a colleague in a chat channel, not the orchestrator of a
 		// coding session. Appending the orchestrator/personality blocks told every
 		// officer "You are the orchestrator, you can spawn specialists" and re-listed
@@ -606,7 +635,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// and producing rigid "PLAN: 1. 2. 3." replies with fake shell blocks. Table
 		// sessions therefore use their supplied prompt VERBATIM.
 		const systemPromptFull =
-			this.config.agentScope === "__table__"
+			isVerbatimScope(this.config.agentScope)
 				? basePrompt + languageInstruction
 				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
@@ -1019,6 +1048,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// the run log + journal. Nothing fires when the endpoint omits usage -
 		// no fabricated numbers, ever.
 		let usageStepNumber = 0;
+		// Model calls begun so far on this text-tools path; step_start fires per call.
+		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
@@ -1056,7 +1087,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					usageTotals.completionTokens += usage.completionTokens;
 					usageTotals.totalTokens += usage.totalTokens;
 					this.events.onStepFinish?.({
-						stepNumber: usageStepNumber++,
+						// Close the step the last call opened; fall back to a counter
+						// when no call was announced.
+						stepNumber: startedSteps > 0 ? startedSteps - 1 : usageStepNumber++,
 						finishReason: "stop",
 						text: "",
 						toolCalls: [],
@@ -1068,6 +1101,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const packer = observations ? new ObservationPacker(observations) : null;
 			const call = (msgs: Parameters<typeof rawCall>[0]) => {
 				const sent = packer ? packer.pack(msgs) : msgs;
+				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({ stepNumber: startedSteps++, provider, model });
 				return withTurnTimeout(
 					() => rawCall(withStyleReminder(sent, this.styleReminder)),
 					attemptTimeoutMs,
@@ -1085,7 +1120,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				keepAnswerFirst: this.config.keepAnswerFirst === true,
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
-				finalCheck: () => verifyNudgeFor(this.turnToolLedger),
+				finalCheck: () => this.turnEndNudge(),
 				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
@@ -1121,7 +1156,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// read-only text-tool set (read_file, list_files, get_outline,
 		// get_symbol, search_symbols, recall - see TABLE_SESSION_TOOLS above), so
 		// there is no genuine capability gap this gate protects against here.
-		const isTableSession = this.config.agentScope === "__table__";
+		const isTableSession = isVerbatimScope(this.config.agentScope);
 		let effectiveProvider = providerName;
 		let effectiveModel = providerModel;
 		if (!isTableSession) {
@@ -1265,7 +1300,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			gated.violated ||
 			breakerStop !== null ||
 			agentResult.unverified.length > 0 ||
-			this.config.agentScope === "__table__"
+			isVerbatimScope(this.config.agentScope)
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1359,6 +1394,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Run one command through this agent's own gated run_command (permissions,
+	 * sanitizer, policy), outside any model turn. The headless done gate uses it
+	 * to run the project's build and tests after the agent answers.
+	 */
+	runGatedCommand(
+		command: string,
+		timeoutSec: number,
+		env?: Record<string, string | undefined>,
+	): Promise<string> {
+		return this.executor.runCommand(command, timeoutSec, env);
+	}
+
+	/**
 	 * One turn. Children this turn spawns inherit this agent's provider, model
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
@@ -1371,6 +1419,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}),
 			() => this.runTurn(userMessage, imageBase64, imageMimeType),
 		);
+	}
+
+	/**
+	 * The one message a turn may get before it ends, on both the text-tool and the
+	 * native path: the verify gate (#3550) first, else a retired fact still in a file
+	 * that was warned about (#3811). Never blocks; the callers send it at most once.
+	 */
+	private turnEndNudge(): string | null {
+		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
 	}
 
 	private async runTurn(
@@ -1465,7 +1522,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		if (needsClarification(textForAgent) && !imageBase64) {
+		if (
+			needsClarification(textForAgent) &&
+			!imageBase64 &&
+			!isNoToolScope(this.config.agentScope)
+		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {
@@ -1516,7 +1577,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			this.config.agentScope !== "__table__" &&
+			!isVerbatimScope(this.config.agentScope) &&
 			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
 
 		// Changed session context goes in before the user's words (#3222).
@@ -1697,8 +1758,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"search_symbols",
 			"recall",
 		]);
-		const scopedTools =
-			this.config.agentScope === "__table__"
+		const scopedTools = isNoToolScope(this.config.agentScope)
+			? {}
+			: this.config.agentScope === "__table__"
 				? Object.fromEntries(
 						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
 					)
@@ -1715,7 +1777,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have executed them (ToolG8's __table__ rules were the only thing left
 		// standing). Officers "hallucinating tool names" were reading a catalog.
 		const textToolAllowlist = (
-			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools
+			isNoToolScope(this.config.agentScope)
+				? []
+				: this.config.agentScope === "__table__"
+					? [...TABLE_SESSION_TOOLS]
+					: localCoreTools
 		).filter((name) => getModeManager().isToolAllowed(name));
 
 		// ── Populate runtime params for self-awareness tools ──────────
@@ -1761,7 +1827,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const textResult = await this.runTextToolChat({
 				providerName,
 				providerModel: providerConfig.model,
-				instructions: effectiveInstructions,
+				// A withheld browser says so up front (#3785); a __table__ session has no browser by design.
+				instructions:
+					isVerbatimScope(this.config.agentScope)
+						? effectiveInstructions
+						: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
@@ -2054,6 +2124,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.catch(() => {
 						/* PostToolUse hooks are best-effort */
 					});
+			},
+
+			onStepStart: ({ stepNumber }) => {
+				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({
+					stepNumber,
+					provider: String(providerConfig.name),
+					model: String(providerConfig.model),
+				});
+				this.sessionWriter.writeStepStart(stepNumber, {
+					provider: String(providerConfig.name),
+					modelId: String(providerConfig.model),
+				});
 			},
 
 			onStepFinish: async (event: StepFinishEvent) => {
@@ -2498,8 +2581,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// ── Verify-before-done (issue #3550, EIGHT_VERIFY_GATE=1) ────────
 			// A turn that changed files and checked nothing since gets one more
 			// generate with a nudge to run the most targeted check first. Off by
-			// default; a failed or empty follow-up keeps the first reply.
-			const verifyNudge = result?.text ? verifyNudgeFor(this.turnToolLedger) : null;
+			// default; a failed or empty follow-up keeps the first reply. The
+			// retired-fact nudge (#3811) rides this same branch even with the gate
+			// off: it costs one extra generate only when a retired token is left in
+			// a file that drew a warning. With the gate on and nudging, its nudge wins.
+			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
 				console.log("[verify-gate] change not checked yet - asking for one targeted check");
 				// agentConfig already holds the provider that answered (chain step
@@ -2552,7 +2638,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
 			}
-			const content = gatedNative.content;
+			// #3524: a blank reply is a failed turn, never a finished one.
+			const blankNative = gatedNative.content.trim() === "";
+			const content = blankNative
+				? emptyReplyNote(this.turnToolLedger.length)
+				: gatedNative.content;
 
 			// Apply personality voice flavoring to the response (never on a reply
 			// the honesty gate rewrote - no celebration on a failure).
@@ -2561,7 +2651,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
 			const flavoredContent =
-				gatedNative.violated || this.config.agentScope === "__table__"
+				gatedNative.violated || isVerbatimScope(this.config.agentScope)
 					? content
 					: flavorResponse(content, flavor);
 
@@ -2577,7 +2667,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Trace capture (#2752 step 1) also routes through here: when only
 			// traceCapture is opted in, processTurn still returns null (loop off)
 			// and collectSessionTrace persists the scrubbed trajectory locally.
-			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
+			if (
+				!isNoToolScope(this.config.agentScope) &&
+				(this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled)
+			) {
 				const toolCallsSucceeded =
 					this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
@@ -2624,6 +2717,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (this.messageHistory.filter((m) => m.role === "user").length % 5 === 0) {
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
+
+			await this.readServerContextWindow();
 
 			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
 			// Monitors token pressure and escalates through 4 stages:
@@ -2679,6 +2774,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					session: this.sessionId,
 					cwd: this.config.workingDirectory || process.cwd(),
 					prompt: textForAgent.slice(0, 120),
+					...(blankNative ? { unverified: [emptyReplyStall(this.turnToolLedger.length)] } : {}),
 				});
 			}
 			const finalContent = flavoredContent;
@@ -2920,6 +3016,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	getSessionEvidence(): Evidence[] {
 		return this.sessionEvidence;
+	}
+
+	/**
+	 * #3643: the first time the history reaches the two-stage checkpoint line
+	 * (65 percent) of the 32768 fallback, read the Ollama server's real context
+	 * window once and resize both compactors to it, so a long document is not
+	 * summarised away while the model still has room. Skipped when the
+	 * compactor was replaced after construction. Unreadable: keep the fallback.
+	 */
+	private async readServerContextWindow(): Promise<void> {
+		const pending = this.serverContextWindow;
+		if (!pending) return;
+		if (this.compaction !== pending.engine) {
+			this.serverContextWindow = null;
+			return;
+		}
+		const used = estimateMessageTokens(this.messageHistory);
+		if (used < this.compactionContextWindow * 0.65) return;
+		this.serverContextWindow = null;
+		const window = await this.contextWindowLookup({ baseUrl: pending.baseUrl, model: pending.model }).catch(
+			() => null,
+		);
+		if (!window) {
+			console.error(
+				`  [COMPRESSION] could not read the context window for ${pending.model}; using ${this.compactionContextWindow}`,
+			);
+			return;
+		}
+		this.compaction = new ProactiveCompression({ contextWindow: window });
+		this.compactionContextWindow = window;
 	}
 
 	/**
@@ -3258,6 +3384,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * a hard dependency of the agent loop.
 	 */
 	private async tryRunPreToolRouter(userMessage: string): Promise<void> {
+		// A no-tool scope (classroom) never pre-fetches: that would run a tool on untrusted text.
+		if (isNoToolScope(this.config.agentScope)) return;
 		const cwd = this.config.workingDirectory || process.cwd();
 		let decision: RouterDecision;
 		try {
