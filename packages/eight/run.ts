@@ -512,7 +512,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
 			workingDirectory: opts.cwd || process.cwd(),
 			// Extensions on unless --no-extensions (G1 wiring contract).
-			extensions: extensionsWanted(),
+			extensions: extensionsWanted({ interactive: false }),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
 			// --provider names the provider: a provider error ends the run

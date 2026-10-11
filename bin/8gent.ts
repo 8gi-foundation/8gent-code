@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-install
 /**
  * 8gent Code - Main CLI Entry Point
  *
@@ -1308,7 +1308,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
 		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: inv.env });
 	} else {
-		proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+		// --no-install: an import (an extension's included) never installs a package.
+		proc = spawn("bun", ["--no-install", "run", tuiPath, ...args], { stdio: "inherit" });
 	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);

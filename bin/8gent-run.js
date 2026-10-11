@@ -39,7 +39,9 @@ if (!existsSync(cli)) {
 	process.exit(1);
 }
 
-const result = spawnSync("bun", [cli, ...process.argv.slice(2)], {
+// --no-install: no import, an extension's included, ever installs a package
+// from the network (Bun's auto-install would otherwise run outside a project).
+const result = spawnSync("bun", ["--no-install", cli, ...process.argv.slice(2)], {
 	stdio: "inherit",
 	env: process.env,
 });

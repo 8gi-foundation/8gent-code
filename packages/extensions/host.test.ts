@@ -8,7 +8,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	ExtensionHost,
@@ -16,6 +16,19 @@ import {
 	RESERVED_TOOL_PREFIXES,
 	defaultExtensionsDir,
 } from "./host";
+
+// Never touch the real ~/.8gent: HOME and EIGHT_HOME point at a temp home.
+const savedHomeEnv = { HOME: process.env.HOME, EIGHT_HOME: process.env.EIGHT_HOME };
+const testHome = mkdtempSync(join(tmpdir(), "extensions-home-"));
+process.env.HOME = testHome;
+process.env.EIGHT_HOME = testHome;
+afterAll(() => {
+	for (const [k, v] of Object.entries(savedHomeEnv)) {
+		if (v === undefined) Reflect.deleteProperty(process.env, k);
+		else process.env[k] = v;
+	}
+	rmSync(testHome, { recursive: true, force: true });
+});
 
 const dirs: string[] = [];
 let dir: string;
@@ -280,6 +293,6 @@ describe("ExtensionHost", () => {
 	});
 
 	test("the default folder comes from the OS home directory", () => {
-		expect(defaultExtensionsDir()).toBe(join(homedir(), ".8gent", "extensions"));
+		expect(defaultExtensionsDir()).toBe(join(testHome, ".8gent", "extensions"));
 	});
 });

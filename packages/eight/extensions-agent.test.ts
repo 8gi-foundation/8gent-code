@@ -63,6 +63,7 @@ beforeAll(async () => {
 `,
 	);
 	ENV.HOME = home;
+	ENV.EIGHT_HOME = home;
 	ENV.EIGHT_DATA_DIR = join(home, ".8gent");
 	for (const [k, v] of Object.entries(ENV)) {
 		saved[k] = process.env[k];

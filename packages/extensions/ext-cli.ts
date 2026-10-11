@@ -5,17 +5,22 @@
  *                          record their sha256, and report each one as
  *                          loaded, partial (named missing APIs) or failed.
  *
- * Import copies local files only and fetches nothing. The status check loads
- * each imported extension once in an isolated host (its factory runs, as it
- * would on the next start); nothing is registered with a running session.
- * Imported extensions run when the session has extensions on, the default in
- * the interactive TUI and `8gent -p` (`--no-extensions` turns them off).
+ * Import copies local files only, fetches nothing and runs none of the
+ * imported code: the report comes from reading the source (pi-compat.ts
+ * analyzePiExtension). Imported extensions stay off until
+ * `8gent ext enable <name>`, and their sha256 is checked on every load.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ExtensionHost, type ExtensionLoadResult, defaultExtensionsDir } from "./host";
-import { copyPiExtensions, defaultPiExtensionsDir } from "./pi-compat";
+import { defaultExtensionsDir } from "./host";
+import {
+	type PiStaticReport,
+	analyzePiExtension,
+	copyPiExtensions,
+	defaultPiExtensionsDir,
+	setImportedEnabled,
+} from "./pi-compat";
 
 export interface ExtCommandOptions {
 	/** Destination; default ~/.8gent/extensions. */
@@ -32,20 +37,8 @@ const USAGE = [
 	"Usage: 8gent ext import-pi [path] [--to <dir>]",
 	"  Copies Pi extensions into ~/.8gent/extensions as pi-<name> and checks each one.",
 	"  path defaults to $PI_CODING_AGENT_DIR/extensions or ~/.pi/agent/extensions.",
+	"  Nothing imported runs until: 8gent ext enable <name>  (8gent ext disable <name> turns it off).",
 ].join("\n");
-
-/** A host that loads only the given files, to check them in isolation. */
-class OnlyHost extends ExtensionHost {
-	constructor(
-		dir: string,
-		private readonly only: Set<string>,
-	) {
-		super(dir);
-	}
-	override files(): string[] {
-		return super.files().filter((f) => this.only.has(path.resolve(f)));
-	}
-}
 
 /** The file the host loads for an imported entry: the file, or a folder's index. */
 function entryFile(dest: string): string {
@@ -56,28 +49,14 @@ function entryFile(dest: string): string {
 	return path.join(dest, index ?? "index.ts");
 }
 
-function realOf(p: string): string {
-	try {
-		return fs.realpathSync(p);
-	} catch {
-		return path.resolve(p);
-	}
-}
-
-function line(name: string, sha: string, r: ExtensionLoadResult | undefined): string {
+function line(name: string, sha: string, r: PiStaticReport): string {
 	const short = sha.slice(0, 12);
-	if (!r) return `  ${name}  failed   not found after copy  sha256 ${short}`;
-	const what = [
-		r.tools.length ? `tools: ${r.tools.join(", ")}` : "",
-		r.commands.length ? `commands: ${r.commands.map((c) => `/${c}`).join(", ")}` : "",
-	]
-		.filter(Boolean)
-		.join("; ");
-	if (r.status === "failed" || !r.ok) return `  ${name}  failed   ${r.error}  sha256 ${short}`;
+	const what = r.registers.length ? r.registers.join(", ") : "nothing found";
+	if (r.status === "failed") return `  ${name}  failed   ${r.errors.join("; ")}  sha256 ${short}`;
 	if (r.status === "partial") {
-		return `  ${name}  partial  ${what}${what ? "; " : ""}not active in 8gent: ${(r.missing ?? []).join(", ")}  sha256 ${short}`;
+		return `  ${name}  partial  registers ${what}; not active in 8gent: ${r.missing.join(", ")}  sha256 ${short}`;
 	}
-	return `  ${name}  loaded   ${what || "tool_call checks"}  sha256 ${short}`;
+	return `  ${name}  loaded   registers ${what}  sha256 ${short}`;
 }
 
 export async function runExtCommand(
@@ -91,6 +70,16 @@ export async function runExtCommand(
 	for (let i = 0; i < raw.length; i++) {
 		if (raw[i] === "--to" && raw[i + 1]) toFlag = path.resolve(raw[++i]);
 		else rest.push(raw[i]);
+	}
+	if (sub === "enable" || sub === "disable") {
+		if (!rest[0]) return { code: 1, output: `Usage: 8gent ext ${sub} <name>` };
+		let dir: string;
+		try {
+			dir = toFlag ?? opts.extensionsDir ?? defaultExtensionsDir();
+		} catch (err) {
+			return { code: 1, output: (err as Error).message };
+		}
+		return setImportedEnabled(dir, rest[0], sub === "enable");
 	}
 	if (sub !== "import-pi") return { code: sub ? 1 : 0, output: USAGE };
 	let from: string;
@@ -113,18 +102,18 @@ export async function runExtCommand(
 			output: `No Pi extensions (.ts/.js files or folders with an index) in ${from}.`,
 		};
 	}
-	const host = new OnlyHost(to, new Set(entries.map((e) => path.resolve(entryFile(e.dest)))));
-	const results = await host.load();
-	const byFile = new Map(results.map((r) => [realOf(r.file), r]));
-	const lines = [`Imported ${entries.length} Pi extension(s) from ${from} into ${to}:`];
+	const lines = [
+		`Imported ${entries.length} Pi extension(s) from ${from} into ${to} (none of their code was run):`,
+	];
 	let failed = 0;
 	for (const e of entries) {
-		const r = byFile.get(realOf(entryFile(e.dest)));
-		if (!r?.ok) failed++;
-		lines.push(line(e.name, e.sha256, r));
+		const report = analyzePiExtension(entryFile(e.dest));
+		if (report.status === "failed") failed++;
+		lines.push(line(e.name, e.sha256, report));
 	}
 	lines.push(
-		"Sources and sha256 are recorded in pi-imports.json. They run when extensions are on (the default in the TUI and 8gent -p; --no-extensions turns them off). Restart 8gent to pick them up.",
+		"All of them are OFF. Turn one on with: 8gent ext enable <name> (its sha256 is checked on every load).",
+		"Sources and sha256 are recorded in pi-imports.json. Enabled ones load in the interactive TUI (--no-extensions turns extensions off).",
 	);
 	return { code: failed > 0 ? 2 : 0, output: lines.join("\n") };
 }

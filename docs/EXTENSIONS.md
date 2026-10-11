@@ -22,15 +22,23 @@ export default function (api) {
 }
 ```
 
-Extensions are on in the interactive TUI and in `8gent -p` on your own
-machine. Start with `--no-extensions` to turn them off. They never load in
-daemon, Table, channel (Telegram, Discord) or no-tool sessions. An extension
+Files you write in `~/.8gent/extensions` are on in the interactive TUI;
+start it with `--no-extensions` to turn them off. Headless runs
+(`8gent run`) load extensions only with `--extensions` or
+`EIGHT_EXTENSIONS=1`. They never load in daemon, Table, channel (Telegram,
+Discord) or no-tool sessions. Extensions you import are off until you turn
+each one on (see below). An extension
 runs with your own rights, so only add code you trust. Every extension tool
 call still goes through 8gent's policy check, and in an unattended session it
 needs approval, so it does not run there.
 
-Extensions load local files only: an import of an npm package is refused
-with a message naming the package, and 8gent never downloads one.
+Extensions load local files only. 8gent runs Bun with `--no-install`, so no
+import, however it is written, ever downloads a package; an import of an npm
+package 8gent does not provide is also named in the load error.
+
+An extension cannot register a tool named `bash`, `read`, `write`, `edit`,
+`ls`, `grep` or `find`, or one starting with `mcp__`, `term_`, `git_`,
+`desktop_` or `browser_`: those belong to 8gent's own tools and their checks.
 
 ## Bring your Pi extensions
 
@@ -41,6 +49,7 @@ with a message naming the package, and 8gent never downloads one.
 
 ```sh
 8gent ext import-pi
+8gent ext enable pi-<name>      # for each one you want on
 ```
 
 This reads `~/.pi/agent/extensions` (or `$PI_CODING_AGENT_DIR/extensions`
@@ -54,6 +63,7 @@ when you set that for Pi). To import from somewhere else:
 
 ```powershell
 8gent ext import-pi
+8gent ext enable pi-<name>      # for each one you want on
 ```
 
 This reads `C:\Users\<you>\.pi\agent\extensions` (or
@@ -81,7 +91,13 @@ This reads `C:\Users\<you>\.pi\agent\extensions` (or
     yet; the line names them (for example `pi.on("session_start")`).
   - `failed`: it uses something 8gent does not provide; the line names it
     (for example `Pi API CustomEditor` or `"@earendil-works/pi-tui"`).
-- Restart 8gent to use them.
+- Nothing imported runs yet: import reads the files, it does not run them.
+  Every imported extension starts **off**. Turn one on with
+  `8gent ext enable pi-<name>` (and off with `8gent ext disable pi-<name>`).
+- Every time 8gent loads an imported extension it checks the sha256 again.
+  If the copy changed since you imported it, it does not load and 8gent
+  says so; import it again to accept the change.
+- Restart 8gent to use the ones you enabled.
 
 ### What works and what does not
 
@@ -89,7 +105,10 @@ Works: `pi.registerTool` (with `Type` from `typebox`, `@sinclair/typebox` or
 `@earendil-works/pi-ai`, and `defineTool`), `pi.registerCommand`, and
 `pi.on("tool_call")` with `{ block, reason }`. In a `tool_call` event,
 `run_command` is called `bash`, `read_file` is `read`, `write_file` is
-`write`, `edit_file` is `edit` and `list_files` is `ls`, as in Pi.
+`write`, `edit_file` is `edit` and `list_files` is `ls`, as in Pi. Other
+8gent tools keep their own names, so a Pi guard written for `bash` does not
+see `git_*`, `term_*` or other tools that also run commands; check those by
+name if your guard needs to.
 `ctx.ui.notify` text shows as the command's output; there are no dialogs,
 so `ctx.hasUI` is false and `ctx.ui.confirm` answers no.
 
