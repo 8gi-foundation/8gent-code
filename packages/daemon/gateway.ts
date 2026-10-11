@@ -16,7 +16,12 @@ import {
 	installTablePolicies,
 } from "../table/index";
 import { handleHarnessRoute } from "../harness/http";
-import type { AgentPool } from "./agent-pool";
+import { type AgentPool, KNOWN_CHANNELS } from "./agent-pool";
+import {
+	CLASSROOM_CHANNEL,
+	classroomCreateRefusal,
+	installClassroomPolicies,
+} from "./classroom";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
 	DispatchHub,
@@ -143,7 +148,14 @@ type InboundMessage =
 type OutboundMessage =
 	| { type: "auth:ok" }
 	| { type: "auth:fail" }
-	| { type: "session:created"; sessionId: string; resumeSecret?: string }
+	| {
+			type: "session:created";
+			sessionId: string;
+			resumeSecret?: string;
+			/** Effective policy scope and tool list, so a client can fail closed (#3939). */
+			scope?: string;
+			tools?: string[];
+	  }
 	| { type: "session:resumed"; sessionId: string }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
@@ -392,6 +404,22 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		}
 
 		case "session:create": {
+			// classroom (#3939) runs on untrusted web text: authenticated loopback only.
+			if (msg.channel === CLASSROOM_CHANNEL) {
+				const refusal = classroomCreateRefusal({
+					loopback: isLoopbackAddress(state.remoteAddress),
+					authenticated: state.authenticated,
+				});
+				if (refusal) {
+					send(ws, { type: "error", message: refusal });
+					break;
+				}
+			}
+			// An unknown channel string is refused, never defaulted into a wider scope.
+			if (msg.channel && !(KNOWN_CHANNELS as readonly string[]).includes(msg.channel)) {
+				send(ws, { type: "error", message: `unknown channel: ${String(msg.channel).slice(0, 40)}` });
+				break;
+			}
 			const sessionId = generateSessionId();
 			state.sessionId = sessionId;
 			state.channel = msg.channel || "api";
@@ -404,6 +432,9 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				type: "session:created",
 				sessionId,
 				resumeSecret: resumeSecrets.issue(sessionId),
+				...(state.channel === CLASSROOM_CHANNEL
+					? { scope: CLASSROOM_CHANNEL, tools: [] as string[] }
+					: {}),
 			});
 			bus.emit("session:start", { sessionId, channel: state.channel });
 
@@ -518,7 +549,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		}
 
 		case "sessions:list": {
-			send(ws, { type: "sessions:list", sessions: pool.getActiveSessions() });
+			// Classroom sessions are private to their creator: not even listed (#3939).
+			send(ws, {
+				type: "sessions:list",
+				sessions: pool.getActiveSessions().filter((s) => s.channel !== CLASSROOM_CHANNEL),
+			});
 			break;
 		}
 
@@ -702,6 +737,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 	// agents bind under the "__table__" scope; these rules block
 	// run_command/network/write_file and explicitly allow only channel_post.
 	installTablePolicies();
+	installClassroomPolicies();
 
 	// Loopback unless DAEMON_HOSTNAME says otherwise, and never a wider bind
 	// without a token. The /computer route and Table frames keep their own
@@ -922,6 +958,12 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					} else if (state.isStoreRoute) {
 						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
+						// A classroom session dies with the socket that made it (#3939).
+						if (state.channel === CLASSROOM_CHANNEL) {
+							config.pool.destroySession(state.sessionId);
+							persistable.delete(state.sessionId);
+							resumeSecrets.forget(state.sessionId);
+						}
 						if (state.approvalBridge) channelApprovals.endSession(state.sessionId);
 						// A shared session goes on for the clients still on it (#3929):
 						// only the last one leaving ends it for listeners.

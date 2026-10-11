@@ -37,6 +37,8 @@ function defaultSessionsDir(): string {
 export class SessionWriter {
 	private filePath: string;
 	private fd: number;
+	/** False for a session that must leave nothing on disk (classroom, #3939). */
+	private persist: boolean;
 	private seq = 0;
 	private sessionId: string;
 	private startTime: number;
@@ -59,12 +61,23 @@ export class SessionWriter {
 	/** Epoch-ms clock; injectable so tests can prove duration = end - start. */
 	private clock: () => number;
 
-	constructor(sessionId: string, sessionsDir?: string, clock: () => number = Date.now) {
+	constructor(
+		sessionId: string,
+		sessionsDir?: string,
+		clock: () => number = Date.now,
+		persist = true,
+	) {
 		this.clock = clock;
+		this.persist = persist;
 		this.sessionId = sessionId;
 		this.startTime = Date.now();
 
 		const dir = sessionsDir || defaultSessionsDir();
+		if (!persist) {
+			this.filePath = path.join(dir, `${sessionId}.jsonl`);
+			this.fd = -1;
+			return;
+		}
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
@@ -78,6 +91,7 @@ export class SessionWriter {
 	// ============================================
 
 	private write(entry: SessionEntry): void {
+		if (!this.persist) return;
 		const line = `${JSON.stringify(entry)}\n`;
 		fs.writeSync(this.fd, line);
 	}
@@ -362,7 +376,7 @@ export class SessionWriter {
 			},
 		});
 
-		fs.closeSync(this.fd);
+		if (this.persist) fs.closeSync(this.fd);
 	}
 
 	// ============================================

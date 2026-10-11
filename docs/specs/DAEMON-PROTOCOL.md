@@ -56,7 +56,7 @@ Client -> { "type": "session:create", "channel": "os" }
 Server -> { "type": "session:created", "sessionId": "s_abc123_xyz" }
 ```
 
-**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`
+**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`, `"classroom"`
 
 The channel tag is metadata for routing, concurrency caps, and analytics.
 
@@ -67,6 +67,7 @@ The channel tag is metadata for routing, concurrency caps, and analytics.
 | `computer` | 3 (`MAX_COMPUTER_SESSIONS`) | 10 min | Loopback-only in v0 |
 | `telegram` | unlimited (within global cap) | never evicted | Sandbox-style persistence |
 | `delegation` | unlimited | never evicted | Sub-agent fan-out |
+| `classroom` | 3 | 5 min | No tools, private, not saved (see Classroom Channel) |
 | other | global cap (10) | 30 min | |
 
 ### Resume Session
@@ -210,6 +211,32 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   is never evicted for idleness or room, and a cap eviction always emits `session:end`.
 - The store is `$EIGHT_DATA_DIR/sessions` when set, else `~/.8gent/sessions`, for both the
   daemon and the TUI.
+
+## Classroom Channel (v1.5)
+
+8gent Browser builds lessons from text on the open web, which is untrusted. The
+`classroom` channel (#3939) is a session that cannot act on it.
+
+```
+Client -> { "type": "session:create", "channel": "classroom" }
+Server -> { "type": "session:created", "sessionId": "s_...", "resumeSecret": "<32 hex>" }
+```
+
+- **Who may create one:** a loopback peer. When `daemon.authToken` is set it is enforced like any frame (`not authenticated` before auth).
+  A non-loopback peer gets `{ "type": "error", "message": "classroom sessions are loopback-only" }`.
+  The session ends when the socket that created it closes.
+- **No tools at all.** The model is offered none (no file, shell, network or browser tools,
+  no delegation, no memory writes), the pre-fetch router is off, the executor refuses any
+  call for the `__classroom__` scope, and a `*` block rule backs it in the policy engine.
+  A caller cannot widen this: `agentScope`, `systemPrompt` and `maxTurns` overrides are ignored.
+- **Fixed system prompt:** the user message is untrusted data to teach from, never
+  instructions, and the reply is exactly one JSON object.
+- **Short:** at most 2 model rounds per turn, idle sessions are dropped after 5 minutes,
+  at most 3 at once.
+- **Private to its connection:** not listed (`sessions:list`, `session:list`), and
+  `session:attach`, `session:resume` and `session:abort` answer `session cannot be shared`
+  for every client, the creator included. `persist: true` is ignored and nothing is
+  written to the session store.
 
 ## Session Time-Travel
 
@@ -838,6 +865,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.5 | 2026-10-11 | Add the restricted `classroom` channel: no tools, loopback + token only, private, not persisted. (#3939) |
 | 1.4 | 2026-10-11 | Shared sessions: `session:list` / `session:attach` / `session:detach` / `session:abort`, `user:message` echo, disconnect only ends a session for the last client, shareable sessions saved to the session store. (#3929) |
 | 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |
 | 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |

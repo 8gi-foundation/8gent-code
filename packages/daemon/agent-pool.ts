@@ -11,6 +11,14 @@ import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
+import {
+	CLASSROOM_AGENT_SCOPE,
+	CLASSROOM_CHANNEL,
+	CLASSROOM_IDLE_MS,
+	CLASSROOM_MAX_TURNS,
+	CLASSROOM_SESSION_CAP,
+	CLASSROOM_SYSTEM_PROMPT,
+} from "./classroom";
 import { bus } from "./events";
 import type { SessionJournal } from "./session-journal";
 
@@ -107,12 +115,14 @@ export const KNOWN_CHANNELS = [
 	"browser",
 	"table",
 	"tui",
+	"classroom",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
 /** Per-channel concurrency caps. Falls back to MAX_SESSIONS when unset. */
 const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
 	computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
+	classroom: CLASSROOM_SESSION_CAP,
 };
 
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
@@ -121,6 +131,8 @@ const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
 	// Table agent sessions are cheap to rebuild (deterministic sessionId) and
 	// should not linger holding a scoped agent; reap them faster than the default.
 	table: 10 * 60 * 1000, // 10 minutes
+	// Classroom sessions are one-shot lesson generators; do not let them linger.
+	classroom: CLASSROOM_IDLE_MS,
 };
 
 /** Channels that should never be evicted by the idle reaper. */
@@ -265,8 +277,15 @@ export class AgentPool {
 
 		const events = this.buildEventCallbacks(sessionId);
 
+		// Classroom (#3939) is fixed by the channel, never by the caller: no tools,
+		// a short turn budget, and the untrusted-data system prompt. Overrides for
+		// scope, prompt and turns are ignored here on purpose.
+		const isClassroom = channel === CLASSROOM_CHANNEL;
+
 		// Delegation sessions get more tool turns than Telegram chat
-		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
+		const maxTurns = isClassroom
+			? Math.min(overrides?.maxTurns ?? CLASSROOM_MAX_TURNS, CLASSROOM_MAX_TURNS)
+			: (overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns));
 
 		// F4: Table sessions must run inference on a LOCAL runtime. A Table agent
 		// processes UNTRUSTED channel text; if the runtime is cloud, that text
@@ -305,7 +324,7 @@ export class AgentPool {
 			baseUrl: overrides?.baseUrl,
 			// Optional per-session persona (officer character prompt). Undefined
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
-			systemPrompt: overrides?.systemPrompt,
+			systemPrompt: isClassroom ? CLASSROOM_SYSTEM_PROMPT : overrides?.systemPrompt,
 			workingDirectory: overrides?.workingDirectory ?? this.config.workingDirectory,
 			// The pool key was resolved for the pool's default runtime. A session
 			// whose runtime differs (an override, or a Table session forced local)
@@ -323,7 +342,9 @@ export class AgentPool {
 			// installTablePolicies() rules block run_command/network/write_file etc.
 			// The agent produces only a reply; the gated post_to_channel write path
 			// is driven by the gateway. Other channels keep the default scope.
-			agentScope: overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined),
+			agentScope: isClassroom
+				? CLASSROOM_AGENT_SCOPE
+				: (overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined)),
 			// Delegation runs UNATTENDED (the relay autonomy engine / missions
 			// dispatch through it with no human approving each tool). Mark it so the
 			// maker-checker gate enforces at the executor: branch pushes auto-approve
@@ -497,6 +518,14 @@ export class AgentPool {
 
 		this.sessions.delete(sessionId);
 		this.unjournal(sessionId);
+		// A destroyed session must not keep running its in-flight turn.
+		if (entry.busy) {
+			try {
+				entry.agent.abort();
+			} catch (err) {
+				console.error(`[agent-pool] abort on destroy failed for ${sessionId}: ${String(err)}`);
+			}
+		}
 		// #3554: queued messages never run on an ended session.
 		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
