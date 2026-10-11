@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import { Box, type DOMElement, useApp, useInput } from "ink";
+import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
 import {
 	applyDesignSystem,
 	t,
@@ -175,6 +175,7 @@ import {
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
+import { copyReply } from "./lib/copy-answer.js";
 import {
 	type SlashCommand,
 	builtInCommandsCoreFirst,
@@ -814,6 +815,8 @@ export function App({
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
+	// Raw stdout, for terminal sequences such as /copy's OSC 52.
+	const { stdout: inkStdout } = useStdout();
 
 	// Personality greetings (inline for independence)
 	const GREETINGS = [
@@ -3095,6 +3098,10 @@ export function App({
 
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
+					break;
+
+				case "copy":
+					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
 					break;
 
 				case "predict":
@@ -5462,6 +5469,8 @@ export function App({
 			activeTabId,
 			linkDaemonSession,
 			unlinkDaemon,
+			messages,
+			inkStdout,
 		],
 	);
 

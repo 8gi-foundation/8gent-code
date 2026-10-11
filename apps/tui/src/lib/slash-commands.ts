@@ -64,7 +64,8 @@ export type SlashCommand =
 	| "btw"
 	| "questions"
 	| "projects"
-	| "terminal";
+	| "terminal"
+	| "copy";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -449,6 +450,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Open a terminal tab in the current project (optional tab label)",
 		usage: "/terminal [label]",
+	},
+	{
+		name: "copy",
+		aliases: [],
+		description: "Copy the last answer to the clipboard (works over SSH)",
+		usage: "/copy",
 	},
 ];
 
