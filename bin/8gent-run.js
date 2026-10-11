@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { devNull } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +42,10 @@ if (!existsSync(cli)) {
 
 // --no-install: no import, an extension's included, ever installs a package
 // from the network (Bun's auto-install would otherwise run outside a project).
-const result = spawnSync("bun", ["--no-install", cli, ...process.argv.slice(2)], {
+// The same three flags as bin/8gent.ts's shebang: no package installs, no
+// .env file and no bunfig.toml from the folder 8gent is started in.
+const SAFE_BUN_FLAGS = ["--no-install", "--no-env-file", `--config=${devNull}`];
+const result = spawnSync("bun", [...SAFE_BUN_FLAGS, cli, ...process.argv.slice(2)], {
 	stdio: "inherit",
 	env: process.env,
 });
