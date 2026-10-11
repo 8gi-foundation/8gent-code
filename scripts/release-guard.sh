@@ -14,6 +14,12 @@
 #                                           write <dir>/SHA256SUMS; print file count
 #   release-guard.sh publish <tag> [min]    fail unless the release has >= min
 #                                           assets (default 1); then publish it
+#   release-guard.sh publish-complete <tag> <regex>...
+#                                           fail unless EVERY regex matches the
+#                                           name of an uploaded, non-empty asset;
+#                                           then publish. release-binaries.yml uses
+#                                           this so a release never goes public
+#                                           without its Windows .exe (#3803).
 #   release-guard.sh selftest               prove both guards locally, no network
 #
 # GH overrides the gh binary (the selftest uses a fake). publish needs GH_TOKEN.
@@ -70,6 +76,25 @@ publish() {
 	echo "release-guard: published ${tag} with ${count} asset(s)"
 }
 
+publish_complete() {
+	local tag="${1:-}"
+	[[ -n "$tag" ]] || die "publish-complete needs a tag"
+	shift
+	[[ $# -gt 0 ]] || die "publish-complete needs at least one asset name pattern"
+	local names
+	names="$("$GH" release view "$tag" --json assets --jq '.assets[] | select(.state == "uploaded" and .size > 0) | .name')" \
+		|| die "could not read release ${tag}"
+	local re missing=()
+	for re in "$@"; do
+		printf '%s\n' "$names" | grep -Eq -- "$re" || missing+=("$re")
+	done
+	if [[ ${#missing[@]} -gt 0 ]]; then
+		die "release ${tag} is missing assets matching: ${missing[*]}; left as draft, not published"
+	fi
+	"$GH" release edit "$tag" --draft=false >/dev/null || die "could not publish ${tag}"
+	echo "release-guard: published ${tag}; all $# required assets present"
+}
+
 selftest() {
 	local tmp pass=0 fail=0
 	tmp="$(mktemp -d)"
@@ -85,7 +110,8 @@ selftest() {
 	cat > "$tmp/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "release view") [[ -z "${FAKE_VIEW_FAIL:-}" ]] || exit 1; echo "${FAKE_COUNT}" ;;
+  "release view") [[ -z "${FAKE_VIEW_FAIL:-}" ]] || exit 1
+    case "$*" in *'.name'*) printf '%s\n' "${FAKE_NAMES:-}" ;; *) echo "${FAKE_COUNT}" ;; esac ;;
   "release edit") echo "$*" >> "${FAKE_LOG}" ;;
   *) exit 2 ;;
 esac
@@ -126,6 +152,18 @@ EOF
 	expect_pass "publish: enough assets passes" env GH="$tmp/gh" FAKE_COUNT=2 bash "$self" publish v9.9.9 2
 	if grep -q -- 'release edit v9.9.9 --draft=false' "$FAKE_LOG"; then ok "publish: flips draft=false"; else bad "publish: flips draft=false"; fi
 
+	# publish-complete: the Windows .exe is a hard requirement (#3803).
+	local req=('^8gent-windows-x64\.exe$' '^8gent-setup-.*-x64\.exe$' '^8gent-darwin-arm64$' '\.tgz$' '^SHA256SUMS$')
+	local all=$'8gent-windows-x64.exe\n8gent-setup-0.20.0-x64.exe\n8gent-darwin-arm64\n8gi-foundation-8gent-code-0.20.0.tgz\nSHA256SUMS'
+	: > "$FAKE_LOG"
+	expect_fail "publish-complete: no windows exe fails" env GH="$tmp/gh" FAKE_NAMES=$'8gent-darwin-arm64\n8gi-foundation-8gent-code-0.20.0.tgz\nSHA256SUMS' bash "$self" publish-complete v9.9.9 "${req[@]}"
+	expect_fail "publish-complete: empty release fails" env GH="$tmp/gh" FAKE_NAMES="" bash "$self" publish-complete v9.9.9 "${req[@]}"
+	expect_fail "publish-complete: no patterns fails" env GH="$tmp/gh" FAKE_NAMES="$all" bash "$self" publish-complete v9.9.9
+	expect_fail "publish-complete: gh view failure fails" env GH="$tmp/gh" FAKE_NAMES="$all" FAKE_VIEW_FAIL=1 bash "$self" publish-complete v9.9.9 "${req[@]}"
+	if [[ -s "$FAKE_LOG" ]]; then bad "publish-complete: incomplete release never calls edit"; else ok "publish-complete: incomplete release never calls edit"; fi
+	expect_pass "publish-complete: full set passes" env GH="$tmp/gh" FAKE_NAMES="$all" bash "$self" publish-complete v9.9.9 "${req[@]}"
+	if grep -q -- 'release edit v9.9.9 --draft=false' "$FAKE_LOG"; then ok "publish-complete: flips draft=false"; else bad "publish-complete: flips draft=false"; fi
+
 	echo "release-guard selftest: ${pass} passed, ${fail} failed"
 	[[ $fail -eq 0 ]]
 }
@@ -134,6 +172,7 @@ case "${1:-}" in
 	pack)     shift; pack "$@" ;;
 	stage)    shift; stage "$@" ;;
 	publish)  shift; publish "$@" ;;
+	publish-complete) shift; publish_complete "$@" ;;
 	selftest) selftest ;;
-	*) echo "usage: $0 pack <dir> | stage <dir> | publish <tag> [min] | selftest" >&2; exit 2 ;;
+	*) echo "usage: $0 pack <dir> | stage <dir> | publish <tag> [min] | publish-complete <tag> <regex>... | selftest" >&2; exit 2 ;;
 esac
