@@ -32,11 +32,13 @@
  *
  * The env keys that steer this (EIGHT_SEATBELT, EIGHT_DATA_DIR, EIGHT_HOME,
  * HOME) are snapshotted when this module loads, before the TUI's own .env
- * loader runs. A key whose live value equals what a .env file 8gent or Bun
- * would load declares for it is ignored (it came from that file): a command
- * that writes `EIGHT_SEATBELT=0` into ./.env must not turn the boundary off for
- * the next launch. A value the user really exported is kept, and
- * EIGHT_SEATBELT=require, the stricter setting, is always kept. EIGHT_FAKE_HOME is a test hook and is
+ * loader runs. A key that any .env file 8gent or Bun would load declares is
+ * ignored, whatever its value: Bun's dotenv parser (comments, quotes, $VAR and
+ * ${VAR} expansion, backticks) differs from any we could write, so comparing
+ * values is bypassable. A command that writes `EIGHT_SEATBELT=0` into ./.env
+ * must not turn the boundary off for the next launch. The cost: a user who
+ * both exports a key and declares it in such a .env loses the export for this
+ * boundary. EIGHT_SEATBELT=require, the stricter setting, is always kept. EIGHT_FAKE_HOME is a test hook and is
  * honoured only under NODE_ENV=test or BUN_ENV=test (themselves not from .env).
  */
 
@@ -98,7 +100,7 @@ type SecurityKey = (typeof SECURITY_ENV_KEYS)[number];
 
 export interface SecurityEnv {
 	values: Partial<Record<SecurityKey, string>>;
-	/** Keys whose live value matches a .env declaration, so ignored. */
+	/** Keys declared in a .env file, so ignored. */
 	ignored: SecurityKey[];
 }
 
@@ -113,9 +115,9 @@ export function dotenvCandidates(cwd: string = process.cwd(), home: string = os.
 	];
 }
 
-/** Every value each key is given (KEY=... or export KEY=...) across the given dotenv files. */
-export function dotenvDeclaredKeys(files: string[]): Map<string, Set<string>> {
-	const keys = new Map<string, Set<string>>();
+/** Keys declared (KEY=..., export KEY=..., any value form) in the given dotenv files. */
+export function dotenvDeclaredKeys(files: string[]): Set<string> {
+	const keys = new Set<string>();
 	for (const f of files) {
 		let text: string;
 		try {
@@ -123,30 +125,22 @@ export function dotenvDeclaredKeys(files: string[]): Map<string, Set<string>> {
 		} catch {
 			continue;
 		}
-		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(.*)$/gm)) {
-			let v = (m[2] as string).trim();
-			const q = v[0];
-			if ((q === '"' || q === "'") && v.length >= 2 && v.endsWith(q)) v = v.slice(1, -1);
-			const set = keys.get(m[1] as string) ?? new Set<string>();
-			set.add(v);
-			keys.set(m[1] as string, set);
-		}
+		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm)) keys.add(m[1] as string);
 	}
 	return keys;
 }
 
 /**
- * Pure: keep each security key unless its live value is one a .env file gives
- * it. EIGHT_SEATBELT=require is kept regardless: dropping it could only weaken.
+ * Pure: drop each security key any .env file declares, whatever the value.
+ * EIGHT_SEATBELT=require is kept regardless: dropping it could only weaken.
  */
-export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Map<string, Set<string>>): SecurityEnv {
+export function snapshotSecurityEnv(env: NodeJS.ProcessEnv, declared: Set<string>): SecurityEnv {
 	const values: SecurityEnv["values"] = {};
 	const ignored: SecurityKey[] = [];
 	for (const k of SECURITY_ENV_KEYS) {
 		const v = env[k];
 		if (v === undefined || v === "") continue;
-		const fromDotenv = declared.get(k)?.has(v) ?? false;
-		if (fromDotenv && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
+		if (declared.has(k) && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
 		else values[k] = v;
 	}
 	return { values, ignored };

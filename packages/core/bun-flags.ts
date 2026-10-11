@@ -39,3 +39,26 @@ export function emptyBunfig(platform: NodeJS.Platform = process.platform): strin
 export function safeBunFlags(platform: NodeJS.Platform = process.platform): string[] {
 	return ["--no-env-file", `--config=${emptyBunfig(platform)}`];
 }
+
+/** safeBunFlags() when `execPath` is the Bun runtime; [] for a compiled 8gent binary (built with autoload off). */
+export function bunFlagsFor(execPath: string, platform: NodeJS.Platform = process.platform): string[] {
+	const base = execPath.split(/[\\/]/).pop() ?? "";
+	return /^bun(\.exe)?$/i.test(base) ? safeBunFlags(platform) : [];
+}
+
+/**
+ * Absolute path of this install's own 8gent CLI entry: bin/8gent.ts in a
+ * checkout, dist/cli.js in an npm install. Never resolved against a cwd, so a
+ * routine or job running in some workspace cannot be pointed at that
+ * workspace's bin/8gent.ts.
+ */
+export function eightCliPath(): string | undefined {
+	for (const candidate of [
+		path.resolve(import.meta.dirname, "..", "..", "bin", "8gent.ts"),
+		path.resolve(import.meta.dirname, "..", "bin", "8gent.ts"),
+		path.resolve(import.meta.dirname, "cli.js"),
+	]) {
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	return undefined;
+}

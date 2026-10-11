@@ -19,7 +19,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { safeBunFlags } from "../../packages/core/bun-flags";
+import { bunFlagsFor, eightCliPath, safeBunFlags } from "../../packages/core/bun-flags";
 
 const REPO = path.resolve(import.meta.dirname, "../..");
 
@@ -124,6 +124,20 @@ describe("spawned Bun children", () => {
 		});
 	});
 
+	test("bunFlagsFor: flags for the Bun runtime, none for a compiled 8gent binary", () => {
+		expect(bunFlagsFor("/opt/homebrew/bin/bun", "darwin")).toEqual(safeBunFlags("darwin"));
+		expect(bunFlagsFor("C:\\bun\\bun.exe", "darwin")).toEqual(safeBunFlags("darwin"));
+		expect(bunFlagsFor("/usr/local/bin/8gent", "darwin")).toEqual([]);
+	});
+
+	test("cron and routines run 8gent's own CLI by absolute path, not cwd-relative bin/8gent.ts", () => {
+		const cli = eightCliPath();
+		expect(cli && path.isAbsolute(cli)).toBe(true);
+		expect(cli).toBe(path.join(REPO, "bin", "8gent.ts"));
+		for (const file of ["packages/cron/routines.ts", "packages/cron/index.ts"])
+			expect(fs.readFileSync(path.join(REPO, file), "utf8")).not.toContain('"bin/8gent.ts"');
+	});
+
 	test("Windows gets the shipped empty bunfig, POSIX /dev/null", () => {
 		expect(safeBunFlags("darwin")).toEqual(["--no-env-file", "--config=/dev/null"]);
 		const win = safeBunFlags("win32")[1] as string;
@@ -138,9 +152,11 @@ describe("spawned Bun children", () => {
 		["packages/orchestration/worktree-pool-agent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run"/],
 		["packages/orchestration/agent-adapters.ts", /\[\.\.\.safeBunFlags\(\), "run", "bin\/8gent\.ts"/],
 		["apps/tui/src/app.tsx", /\["bun", \.\.\.safeBunFlags\(\), "run", debugScript/],
-		// benchmark and demo run in the checkout root (cwd: root), keep its .env, drop any bunfig.
-		["bin/8gent.ts", /spawn\("bun", \[`--config=\$\{emptyBunfig\(\)\}`, "run", benchmarkPath/],
-		["bin/8gent.ts", /spawn\("bun", \[`--config=\$\{emptyBunfig\(\)\}`, "run", demoPath/],
+		["bin/8gent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run", benchmarkPath/],
+		["bin/8gent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run", demoPath/],
+		["packages/cron/routines.ts", /Bun\.spawn\(\["bun", \.\.\.safeBunFlags\(\), \.\.\.args\]/],
+		["packages/cron/index.ts", /Bun\.spawn\(\["bun", \.\.\.safeBunFlags\(\), "run", cli/],
+		["apps/tui/src/app.tsx", /execFileSync\(process\.execPath, \[\.\.\.bunFlagsFor\(process\.execPath\), "-e"/],
 	];
 	for (const [file, re] of SITES) {
 		test(`${file} passes safeBunFlags() (${re.source.slice(0, 40)})`, () => {
@@ -217,3 +233,56 @@ describe("package.json entry points", () => {
 		expect(src).toContain('"--no-compile-autoload-dotenv"');
 	});
 });
+
+describe("repo-wide: every Bun spawn passes the safe flags", () => {
+	// A call that starts `bun` or process.execPath. Covers spawn/spawnSync/exec*/Bun.spawn*
+	// with an argv array or a shell string, across line breaks.
+	const SPAWN =
+		/(?:\bspawn|\bspawnSync|\bexecFileSync|\bexecFile|Bun\.spawn|Bun\.spawnSync|\bexecSync|\bexec|spawnSafe|spawnShell)\s*\(\s*(?:\[\s*)?(?:"bun"|'bun'|process\.execPath|`bun\b|"bun\s|'bun\s)/g;
+	// Any of these within the call means the flags are there.
+	const SAFE = /safeBunFlags\(|bunFlagsFor\(|SAFE_BUN|--no-env-file/;
+	const ALLOW: Record<string, string> = {
+		"scripts/build-binaries.ts": "build tooling run in the repo root; compile output has autoload off",
+		"packages/eight/prompt.ts": "a code example inside a model prompt, not a spawn",
+	};
+	const ROOTS = ["packages", "apps", "bin", "scripts", "benchmarks"];
+	const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".next", "__tests__", "fixtures"]);
+
+	function* sources(dir: string): Generator<string> {
+		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+			const p = path.join(dir, e.name);
+			if (e.isDirectory()) {
+				if (!SKIP_DIRS.has(e.name)) yield* sources(p);
+			} else if (/\.(ts|tsx|js|mjs|cjs)$/.test(e.name) && !/\.(test|spec)\./.test(e.name)) {
+				yield p;
+			}
+		}
+	}
+
+	test("no unflagged spawn of bun or process.execPath outside the allowlist", () => {
+		const bad: string[] = [];
+		let seen = 0;
+		for (const root of ROOTS) {
+			for (const file of sources(path.join(REPO, root))) {
+				const rel = path.relative(REPO, file).split(path.sep).join("/");
+				if (ALLOW[rel]) continue;
+				const src = fs.readFileSync(file, "utf8");
+				for (const m of src.matchAll(SPAWN)) {
+					seen++;
+					if (!SAFE.test(src.slice(m.index, m.index + 400))) {
+						bad.push(`${rel}:${src.slice(0, m.index).split("\n").length}`);
+					}
+				}
+			}
+		}
+		expect(seen).toBeGreaterThan(10);
+		expect(bad).toEqual([]);
+	});
+
+	test("the scanner catches an unflagged spawn (control)", () => {
+		expect('Bun.spawn(["bun", "run", "x.ts"], {})'.match(SPAWN)).not.toBeNull();
+		expect(SAFE.test('Bun.spawn(["bun", "run", "x.ts"], {})')).toBe(false);
+		expect('execFileSync(process.execPath, ["-e", P])'.match(SPAWN)).not.toBeNull();
+	});
+});
+

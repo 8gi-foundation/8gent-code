@@ -11,7 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
-import { emptyBunfig, safeBunFlags } from "../packages/core/bun-flags";
+import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.18.0";
 
@@ -1052,9 +1052,8 @@ async function benchmarkCommand(args: string[]) {
 	}
 	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-	// cwd is the 8gent checkout, never the user's; its .env (keys) still loads, but a
-	// bunfig.toml dropped there by a shell command does not (#4013).
-	const proc = spawn("bun", [`--config=${emptyBunfig()}`, "run", benchmarkPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", benchmarkPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1071,9 +1070,8 @@ async function demoCommand(args: string[]) {
 	}
 	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-	// cwd is the 8gent checkout, never the user's; its .env (keys) still loads, but a
-	// bunfig.toml dropped there by a shell command does not (#4013).
-	const proc = spawn("bun", [`--config=${emptyBunfig()}`, "run", demoPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", demoPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});

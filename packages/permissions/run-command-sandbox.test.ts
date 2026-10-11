@@ -125,37 +125,62 @@ describe("protected set", () => {
 });
 
 describe("security env snapshot", () => {
-	const dotenv = (o: Record<string, string[]>) => new Map(Object.entries(o).map(([k, v]) => [k, new Set(v)]));
-
-	test("a key whose live value came from a .env file is ignored, others kept", () => {
+	test("a key any .env file declares is ignored, whatever its value; others kept", () => {
 		const snap = snapshotSecurityEnv(
 			{ EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" },
-			dotenv({ EIGHT_SEATBELT: ["0"] }),
+			new Set(["EIGHT_SEATBELT", "EIGHT_HOME"]),
 		);
-		expect(snap.values).toEqual({ EIGHT_DATA_DIR: "/d", EIGHT_HOME: "/e" });
-		expect(snap.ignored).toEqual(["EIGHT_SEATBELT"]);
+		expect(snap.values).toEqual({ EIGHT_DATA_DIR: "/d" });
+		expect(snap.ignored).toEqual(["EIGHT_SEATBELT", "EIGHT_HOME"]);
 	});
 
-	test("a value the user really set (differs from .env) is kept", () => {
-		const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: "0", EIGHT_HOME: "/real" }, dotenv({ EIGHT_SEATBELT: ["1"], EIGHT_HOME: ["/x"] }));
-		expect(snap.values).toEqual({ EIGHT_SEATBELT: "0", EIGHT_HOME: "/real" });
+	test("EIGHT_SEATBELT=require always survives, even when a .env declares it", () => {
+		const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: "require" }, new Set(["EIGHT_SEATBELT"]));
+		expect(snap.values).toEqual({ EIGHT_SEATBELT: "require" });
 		expect(snap.ignored).toEqual([]);
 	});
 
-	test("EIGHT_SEATBELT keeps the stricter value: require survives even from .env", () => {
-		const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: "require" }, dotenv({ EIGHT_SEATBELT: ["require"] }));
-		expect(snap.values).toEqual({ EIGHT_SEATBELT: "require" });
-	});
+	// The five forms 8SO found Bun parses differently from a naive parser. For each, Bun
+	// itself loads the file (so the live value is whatever Bun makes of it), and the key
+	// must still be ignored.
+	const FORMS = [
+		"EIGHT_SEATBELT=0 # c",
+		'EIGHT_SEATBELT="0" # c',
+		"EIGHT_SEATBELT=${Z}",
+		"EIGHT_SEATBELT=$Z",
+		"EIGHT_SEATBELT=`0`",
+	];
+	for (const line of FORMS) {
+		test(`ignored when Bun loads it from .env: ${line}`, () => {
+			const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
+			try {
+				const file = path.join(dir, ".env");
+				fs.writeFileSync(file, `Z=0\n${line}\n`);
+				const env = { ...process.env, Z: "0" };
+				delete env.EIGHT_SEATBELT;
+				const r = spawnSync("bun", ["--config=/dev/null", "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
+					cwd: dir,
+					env,
+					encoding: "utf8",
+				});
+				const live = r.stdout;
+				expect(live.length).toBeGreaterThan(0);
+				expect(live).not.toBe("require");
+				const snap = snapshotSecurityEnv({ EIGHT_SEATBELT: live }, dotenvDeclaredKeys([file]));
+				expect(snap.values.EIGHT_SEATBELT).toBeUndefined();
+				expect(snap.ignored).toEqual(["EIGHT_SEATBELT"]);
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	}
 
 	test("dotenv keys are parsed, with and without export", () => {
 		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
 		try {
 			fs.writeFileSync(path.join(dir, ".env"), "# c\nEIGHT_SEATBELT=0\n export NODE_ENV=\"test\"\nX = 1\n");
-			fs.writeFileSync(path.join(dir, ".env.local"), "EIGHT_SEATBELT='require'\n");
-			const keys = dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, ".env.local"), path.join(dir, "missing")]);
-			expect([...keys.keys()].sort()).toEqual(["EIGHT_SEATBELT", "NODE_ENV", "X"]);
-			expect([...(keys.get("EIGHT_SEATBELT") ?? [])].sort()).toEqual(["0", "require"]);
-			expect([...(keys.get("NODE_ENV") ?? [])]).toEqual(["test"]);
+			const keys = dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, "missing")]);
+			expect([...keys].sort()).toEqual(["EIGHT_SEATBELT", "NODE_ENV", "X"]);
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
@@ -165,7 +190,7 @@ describe("security env snapshot", () => {
 		expect(isTestMode({ NODE_ENV: "test" })).toBe(true);
 		expect(isTestMode({ BUN_ENV: "test" })).toBe(true);
 		expect(isTestMode({ NODE_ENV: "production" })).toBe(false);
-		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, dotenv({ NODE_ENV: ["test"] }));
+		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, new Set(["NODE_ENV"]));
 		expect(isTestMode(fromDotenv.values)).toBe(false);
 	});
 });

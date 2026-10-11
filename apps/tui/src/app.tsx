@@ -237,7 +237,7 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
-import { safeBunFlags } from "../../../packages/core/bun-flags.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
 	onRunCommandUnsandboxed,
 	runCommandSandboxStatus,
@@ -429,7 +429,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
