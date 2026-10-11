@@ -7,7 +7,7 @@
  * OpenAI-compatible endpoint; $HOME is faked.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +50,10 @@ beforeAll(async () => {
 	const script = join(home, "block.sh");
 	writeFileSync(script, `echo '{"block": true, "reason": "writes are frozen"}'\n`);
 	const hooks = join(home, "hooks.yaml");
-	writeFileSync(hooks, `- event: PreToolUse\n  matcher: write_file\n  command: sh ${script}\n`);
+	writeFileSync(
+		hooks,
+		`- event: PreToolUse\n  matcher: write_file\n  command: sh ${script}\n- event: PreToolUse\n  matcher: read_file\n  command: sh ${script}\n`,
+	);
 	ENV.EIGHT_HOOKS_YAML = hooks;
 	ENV.HOME = home;
 	ENV.EIGHT_DATA_DIR = join(home, ".8gent");
@@ -142,5 +145,76 @@ for (const [label, textTools, p] of [
 			expect(bodies.length).toBeGreaterThanOrEqual(2);
 			expect(JSON.stringify(bodies[1].messages)).toContain("writes are frozen");
 		});
+
+		test("a refused call starts nothing: no onToolStart, no beforeTool hook, ended as failed", async () => {
+			const starts: string[] = [];
+			const ends: Array<{ toolName: string; success: boolean }> = [];
+			const agent = new Agent({
+				model: "m",
+				runtime: "ollama",
+				workingDirectory: repo,
+				baseUrl: `http://127.0.0.1:${server.port}`,
+				events: {
+					onToolStart: (e: { toolName: string }) => starts.push(e.toolName),
+					onToolEnd: (e: { toolName: string; success: boolean }) => ends.push(e),
+				},
+			} as ConstructorParameters<typeof Agent>[0]);
+			const hooks = (await import("../hooks")).getHookManager();
+			const before: string[] = [];
+			const spy = spyOn(hooks, "executeHooks").mockImplementation(async (type, ctx) => {
+				if (type === "beforeTool") before.push(String(ctx?.tool));
+				return [];
+			});
+			try {
+				await agent.chat(PROMPT);
+			} finally {
+				spy.mockRestore();
+			}
+			expect(starts).not.toContain("write_file");
+			expect(before).not.toContain("write_file");
+			expect(ends.filter((e) => e.toolName === "write_file").every((e) => !e.success)).toBe(true);
+		});
 	});
 }
+
+describe("tool calls the harness makes itself go through the same gate", () => {
+	const build = () =>
+		new Agent({
+			model: "m",
+			runtime: "ollama",
+			workingDirectory: repo,
+			baseUrl: `http://127.0.0.1:${server.port}`,
+		} as ConstructorParameters<typeof Agent>[0]);
+
+	test("runToolForResume refuses what PreToolUse blocks", async () => {
+		const out = await build().runToolForResume("write_file", {
+			path: join(repo, "out.txt"),
+			content: "hello",
+		});
+		expect(out).toContain("writes are frozen");
+		expect(existsSync(join(repo, "out.txt"))).toBe(false);
+	});
+
+	test("the pre-tool router does not pre-fetch through a blocked tool", async () => {
+		writeFileSync(join(repo, "secret.txt"), "ROUTER_SECRET_BODY\n");
+		const agent = build();
+		const internals = agent as unknown as {
+			preToolRouter: { classify: () => unknown };
+			tryRunPreToolRouter: (m: string) => Promise<void>;
+		};
+		const route = (decision: unknown) => {
+			internals.preToolRouter.classify = () => decision;
+			return internals.tryRunPreToolRouter("look at it");
+		};
+		// read_file is blocked by the hook: nothing is pre-fetched.
+		await route({
+			strategy: "fileread",
+			confidence: 0.9,
+			args: { path: join(repo, "secret.txt") },
+		});
+		expect(JSON.stringify(agent.getMessageHistory())).not.toContain("ROUTER_SECRET_BODY");
+		// Control: list_files is not blocked, so the router still pre-fetches.
+		await route({ strategy: "glob", confidence: 0.9, args: { pattern: "*.txt" } });
+		expect(JSON.stringify(agent.getMessageHistory())).toContain("secret.txt");
+	});
+});
