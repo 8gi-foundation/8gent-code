@@ -10,8 +10,10 @@
  * Writes into <dir>:
  *   releases/download/v0.0.1/<asset> + SHA256SUMS   a compiled "8gent" printing v0.0.1
  *   releases/download/v0.0.2/<asset> + SHA256SUMS   the same, printing v0.0.2
- *   releases.json      v0.0.3 (no assets, the 1 Oct shape), v0.0.2, v0.0.1
+ *   releases/download/v0.0.4/<asset> + SHA256SUMS   printing v0.0.4, published as a PRERELEASE
+ *   releases.json      v0.0.4 (prerelease), v0.0.3 (no assets), v0.0.2, v0.0.1
  *   releases-old.json  v0.0.1 only (an install from here must not downgrade v0.0.2)
+ *   releases-evil.json v0.0.5 whose binary URL points off 127.0.0.1 (must be refused)
  *   install.sh, install-ps1.txt   copies, so the literal one-liners are tested
  *                                 (.txt so the test server sends text/plain, as GitHub raw does)
  * <asset> is this host's release asset name, as scripts/build-binaries.ts names it.
@@ -35,7 +37,7 @@ function hostAsset(): string {
 }
 
 const asset = hostAsset();
-const versions = ["0.0.1", "0.0.2"];
+const versions = ["0.0.1", "0.0.2", "0.0.4"];
 mkdirSync(dir, { recursive: true });
 
 for (const v of versions) {
@@ -53,14 +55,15 @@ for (const v of versions) {
 	writeFileSync(join(out, "SHA256SUMS"), `${sum}  ${asset}\n`);
 }
 
-const release = (v: string, withAssets: boolean) => ({
+// GitHub's key order: tag_name, draft, prerelease, then assets.
+const release = (v: string, withAssets: boolean, prerelease = false, assetBase = base) => ({
 	tag_name: `v${v}`,
 	draft: false,
-	prerelease: false,
+	prerelease,
 	assets: withAssets
 		? [asset, "SHA256SUMS"].map((name) => ({
 				name,
-				browser_download_url: `${base}/releases/download/v${v}/${name}`,
+				browser_download_url: `${name === asset ? assetBase : base}/releases/download/v${v}/${name}`,
 			}))
 		: [],
 });
@@ -68,12 +71,21 @@ const release = (v: string, withAssets: boolean) => ({
 writeFileSync(
 	join(dir, "releases.json"),
 	JSON.stringify(
-		[release("0.0.3", false), release("0.0.2", true), release("0.0.1", true)],
+		[
+			release("0.0.4", true, true),
+			release("0.0.3", false),
+			release("0.0.2", true),
+			release("0.0.1", true),
+		],
 		null,
 		2,
 	),
 );
 writeFileSync(join(dir, "releases-old.json"), JSON.stringify([release("0.0.1", true)], null, 2));
+writeFileSync(
+	join(dir, "releases-evil.json"),
+	JSON.stringify([release("0.0.5", true, false, "http://example.com")], null, 2),
+);
 copyFileSync(join(import.meta.dir, "..", "install.sh"), join(dir, "install.sh"));
 copyFileSync(join(import.meta.dir, "..", "install.ps1"), join(dir, "install-ps1.txt"));
 console.log(`fixture for ${asset} in ${dir}`);
