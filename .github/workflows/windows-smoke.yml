@@ -89,6 +89,45 @@ jobs:
           .\dist\bin\8gent-windows-x64.exe --version
           .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
 
+      - name: Compiled binary runs the daemon on loopback and opens a browser session
+        shell: pwsh
+        run: |
+          # The path a Windows user takes for 8gent Browser: `8gent daemon run`,
+          # then a client on ws://127.0.0.1:18789 opens a session. No model is called.
+          $home8 = Join-Path $env:RUNNER_TEMP "daemon-home"
+          New-Item -ItemType Directory -Force $home8 | Out-Null
+          $env:EIGHT_DATA_DIR = Join-Path $home8 ".8gent"
+          $env:EIGHT_DAEMON_PORT = "18797"
+          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "daemon","run" -NoNewWindow -PassThru -RedirectStandardOutput daemon.out -RedirectStandardError daemon.err
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { $h = Invoke-RestMethod -Uri http://127.0.0.1:18797/health -TimeoutSec 2; if ($h.status -eq "ok") { $ok = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ok) { throw "daemon did not answer /health within 30 s" }
+            $bound = Get-NetTCPConnection -LocalPort 18797 -State Listen | Select-Object -ExpandProperty LocalAddress
+            "listening on: $($bound -join ', ')"
+            if ($bound | Where-Object { $_ -ne "127.0.0.1" }) { throw "daemon run must listen on 127.0.0.1 only, got: $($bound -join ', ')" }
+            $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+            $ct = [Threading.CancellationToken]::None
+            $ws.ConnectAsync([Uri]"ws://127.0.0.1:18797", $ct).Wait(10000) | Out-Null
+            $req = [Text.Encoding]::UTF8.GetBytes('{"type":"session:create","channel":"browser"}')
+            $ws.SendAsync([ArraySegment[byte]]::new($req), "Text", $true, $ct).Wait(10000) | Out-Null
+            $got = ""
+            for ($i = 0; $i -lt 10 -and $got -notmatch "session:created"; $i++) {
+              $buf = [byte[]]::new(65536)
+              $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $ct)
+              if (-not $r.Wait(10000)) { break }
+              $got = [Text.Encoding]::UTF8.GetString($buf, 0, $r.Result.Count)
+            }
+            if ($got -notmatch "session:created") { throw "no session:created frame, last frame: $got" }
+            "browser session opened"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Content daemon.out, daemon.err -ErrorAction SilentlyContinue | Select-Object -Last 20
+          }
+
       # The TUI is embedded in the .exe (#2975). Launch it under ConPTY from a
       # hostile working directory and require a real first frame (a known TUI
       # string), not just the absence of two error strings (#3894).

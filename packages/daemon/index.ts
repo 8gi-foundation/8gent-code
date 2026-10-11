@@ -401,8 +401,11 @@ export async function main(): Promise<void> {
 		console.log("[daemon] registered daily CEO summary cron (9 AM)");
 	}
 
-	console.log(`[daemon] ready - ws://localhost:${config.port}`);
-	console.log(`[daemon] health check: http://localhost:${config.port}/health`);
+	// Name the address actually bound, so a 0.0.0.0 daemon never reads as loopback-only.
+	const bound = process.env.DAEMON_HOSTNAME || "0.0.0.0";
+	const healthHost = bound === "0.0.0.0" ? "localhost" : bound;
+	console.log(`[daemon] ready - ws://${bound}:${config.port}`);
+	console.log(`[daemon] health check: http://${healthHost}:${config.port}/health`);
 
 	if (localMode) {
 		console.log(`[daemon-local] listening on ws://127.0.0.1:${config.port}`);

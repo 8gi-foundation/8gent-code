@@ -474,9 +474,22 @@ const isSubcommand = (s: string | undefined): s is Subcommand =>
  * this install. Resolves to an exit code, or null while the daemon runs in the
  * foreground.
  */
+/**
+ * `8gent daemon run` (and the login service, which runs exactly that) is a
+ * personal daemon, so it listens on loopback unless DAEMON_HOSTNAME says
+ * otherwise. Without this the gateway's default of 0.0.0.0 applied: the
+ * daemon answered on every network interface with no token, and on Windows
+ * the first start raised a firewall prompt. Set DAEMON_HOSTNAME=0.0.0.0 to
+ * listen on every interface on purpose.
+ */
+export function applyRunDefaults(env: Record<string, string | undefined>): void {
+	if (!env.DAEMON_HOSTNAME) env.DAEMON_HOSTNAME = "127.0.0.1";
+}
+
 export async function daemonCommand(args: string[], program: string[]): Promise<number | null> {
 	const sub = args[0];
 	if (sub === "run") {
+		applyRunDefaults(process.env);
 		const { main } = await import("./index");
 		await main();
 		return null;

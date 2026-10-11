@@ -13,6 +13,8 @@ The daemon can run in the foreground or as a per-user service that starts when y
 
 `install` and `uninstall` are safe to repeat. Running `install` again rewrites the service definition and restarts the daemon, which is how you pick up a new `bun` or 8gent path. Running `uninstall` when nothing is installed succeeds.
 
+`8gent daemon run`, and so the service, listens on `127.0.0.1` only. Set `DAEMON_HOSTNAME=0.0.0.0` to listen on every interface on purpose.
+
 The service runs the same `8gent` you ran `install` with (a checkout, the npm package, or the compiled binary). Output goes to `~/.8gent/daemon.log`. The health check is `http://localhost:18789/health`.
 
 ## Per platform
