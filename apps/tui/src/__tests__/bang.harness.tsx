@@ -31,6 +31,14 @@ async function main() {
 	await waitFor(() => app.since(m).includes("Not sent to 8gent."), "!! result");
 	app.emit({ phase: "local", ok: app.since(m).includes("kept-local-xyz") });
 
+	// A credentials file: it runs and shows, but is never sent.
+	m = await app.submit("!echo credfile-zz9 # .env");
+	await waitFor(
+		() => app.since(m).includes("Not sent to 8gent: it reads a credentials file."),
+		"credentials refusal",
+	);
+	app.emit({ phase: "cred", shown: app.since(m).includes("credfile-zz9") });
+
 	m = await app.submit("!echo from-the-shell-abc");
 	await waitFor(() => app.since(m).includes("Goes to 8gent with your next message."), "! result");
 	app.emit({ phase: "send", ok: app.since(m).includes("from-the-shell-abc") });

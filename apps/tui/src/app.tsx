@@ -215,6 +215,7 @@ import {
 	bangChatLine,
 	bangContextBlock,
 	bangRunningLine,
+	killBangsOnExit,
 	parseBang,
 	planModeRefusal,
 	sendRefusal,
@@ -1799,12 +1800,11 @@ export function App({
 			runs.clear();
 		}
 	}, []);
-	// Never leave a shell command behind: unmount and process exit kill them.
+	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
 	useEffect(() => {
-		const onExit = () => stopBangRuns();
-		process.once("exit", onExit);
+		const uninstall = killBangsOnExit(() => stopBangRuns());
 		return () => {
-			process.off("exit", onExit);
+			uninstall();
 			stopBangRuns();
 		};
 	}, [stopBangRuns]);

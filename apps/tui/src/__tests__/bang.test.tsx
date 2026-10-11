@@ -41,6 +41,9 @@ test("!cmd reaches the model once; !!, stopped and Plan-mode lines never do; not
 		for (const t of next) expect(t).not.toContain("from-the-shell-abc");
 		// `!!` output never reaches the model.
 		for (const t of texts) expect(t).not.toContain("kept-local-xyz");
+		// A credentials-file command shows its output and never sends it.
+		expect(events.find((e) => e.phase === "cred")?.shown).toBeTrue();
+		for (const t of texts) expect(t).not.toContain("credfile-zz9");
 		// A stopped command never reaches the model either.
 		for (const t of texts) expect(t).not.toContain("setTimeout(() => {}, 20000)");
 

@@ -43,7 +43,13 @@ export function parseBang(input: string): BangCommand | null {
  * pre-spawn backstops run_command applies (#3993; switch to preSpawnRefusal
  * from packages/permissions/pre-spawn-backstops once #3997 lands).
  */
+// Files that hold credentials. Their output is never sent: the secret scanner
+// misses many names (OPENAI_API_KEY=... in a .env, #3203), so this does not
+// rely on it.
+const CREDENTIAL_FILES = /(^|[\s/'"])\.env(\.|\b)|\.npmrc|\.netrc|credentials|id_[a-z0-9]+(\b|$)/i;
+
 export function sendRefusal(command: string): string | null {
+	if (CREDENTIAL_FILES.test(command)) return "it reads a credentials file";
 	if (
 		/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) ||
 		/\.8gent["']?\s*[/\\]["']?settings/i.test(command)
@@ -214,6 +220,42 @@ export function bangContextBlock(b: BangCommand, r: BangResult): string {
 /** Your message with any pending shell output in front of it. */
 export function withShellContext(blocks: readonly string[] | undefined, message: string): string {
 	return blocks?.length ? `${blocks.join("\n\n")}\n\n${message}` : message;
+}
+
+/** The parts of `process` that killBangsOnExit uses. */
+export interface SignalHost {
+	on(event: string, fn: () => void): unknown;
+	removeListener(event: string, fn: () => void): unknown;
+	listenerCount(event: string): number;
+	kill(pid: number, signal: string): unknown;
+	pid: number;
+}
+
+/**
+ * Stop every running `!cmd` when the process exits or gets SIGTERM or SIGHUP.
+ * On a signal the handler removes itself and, if no other handler is left,
+ * raises the signal again so the process still ends (the same pattern as
+ * lib/mouse-input.ts, which re-raises SIGTERM). Returns the uninstaller.
+ */
+export function killBangsOnExit(
+	stop: () => void,
+	host: SignalHost = process as unknown as SignalHost,
+): () => void {
+	const onExit = () => stop();
+	const handlers = (["SIGTERM", "SIGHUP"] as const).map((sig) => {
+		const fn = (): void => {
+			stop();
+			host.removeListener(sig, fn);
+			if (host.listenerCount(sig) === 0) host.kill(host.pid, sig);
+		};
+		host.on(sig, fn);
+		return [sig, fn] as const;
+	});
+	host.on("exit", onExit);
+	return () => {
+		host.removeListener("exit", onExit);
+		for (const [sig, fn] of handlers) host.removeListener(sig, fn);
+	};
 }
 
 /** Messages to save: everything except `!cmd` chat lines. */

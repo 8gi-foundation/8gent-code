@@ -7,6 +7,7 @@ import {
 	bangContextBlock,
 	cleanOutput,
 	fenceFor,
+	killBangsOnExit,
 	parseBang,
 	planModeRefusal,
 	runBang,
@@ -83,6 +84,64 @@ describe("!cmd (#3918 D5)", () => {
 				"it touches ~/.8gent/settings.json",
 			),
 		).toEndWith("(exit 0) Not sent to 8gent: it touches ~/.8gent/settings.json.");
+	});
+
+	test("credentials files: run and shown, never sent", () => {
+		for (const cmd of [
+			"cat .env",
+			"cat ./.env.local",
+			"grep KEY '.env'",
+			"cat ~/.npmrc",
+			"cat ~/.netrc",
+			"cat ~/.aws/credentials",
+			"cat ~/.ssh/id_ed25519",
+			"cat ~/.ssh/id_rsa",
+		]) {
+			expect({ cmd, why: sendRefusal(cmd) }).toEqual({ cmd, why: "it reads a credentials file" });
+		}
+		for (const cmd of ["git status", "cat src/environment.ts", "ls envs", "echo $HOME"]) {
+			expect({ cmd, why: sendRefusal(cmd) }).toEqual({ cmd, why: null });
+		}
+	});
+
+	test("SIGTERM and SIGHUP stop running commands, then still end the process", () => {
+		const { EventEmitter } = require("node:events") as typeof import("node:events");
+		for (const sig of ["SIGTERM", "SIGHUP"]) {
+			const host = Object.assign(new EventEmitter(), {
+				pid: 42,
+				killed: [] as string[],
+				kill(_pid: number, s: string) {
+					this.killed.push(s);
+				},
+			});
+			let stopped = 0;
+			const uninstall = killBangsOnExit(() => stopped++, host);
+			host.emit(sig);
+			expect(stopped).toBe(1);
+			expect(host.listenerCount(sig)).toBe(0);
+			expect(host.killed).toEqual([sig]);
+			host.emit("exit");
+			expect(stopped).toBe(2);
+			uninstall();
+			expect(host.listenerCount("exit")).toBe(0);
+		}
+	});
+
+	test("another SIGTERM handler keeps its say: no re-raise while one is left", () => {
+		const { EventEmitter } = require("node:events") as typeof import("node:events");
+		const host = Object.assign(new EventEmitter(), {
+			pid: 1,
+			killed: 0,
+			kill() {
+				this.killed++;
+			},
+		});
+		host.on("SIGTERM", () => {});
+		let stopped = 0;
+		killBangsOnExit(() => stopped++, host);
+		host.emit("SIGTERM");
+		expect(stopped).toBe(1);
+		expect(host.killed).toBe(0);
 	});
 
 	test("Plan mode refuses shell lines", () => {
