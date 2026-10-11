@@ -145,7 +145,11 @@ jobs:
             npm publish release-assets/*.tgz --access public
           fi
 
-      - name: Publish the GitHub Release only if it has its assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/release-guard.sh publish "$GITHUB_REF_NAME" "$(cat release-asset-count)"
+      # #3803: this job no longer publishes the release. v0.18.1 and v0.19.0
+      # went public with only an npm tarball and no Windows .exe because
+      # publishing here did not wait for release-binaries.yml. The release
+      # stays a draft; the "Attach to GitHub Release" job in release-binaries.yml
+      # publishes it once the installers (including the Windows .exe) and this
+      # job's tarball are all on it and npm has the version.
+      - name: Leave the release as a draft for the installers
+        run: echo "release stays a draft until release-binaries.yml attaches the installers and publishes it"
