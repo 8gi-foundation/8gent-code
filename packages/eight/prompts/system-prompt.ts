@@ -291,7 +291,7 @@ export const SCRATCH_DIR_NOTE =
 
 /** Review focus (#3920): a review that cites every line it read buries the defect. */
 export const REVIEW_FOCUS_NOTE =
-	"**Reviews: cite only the lines that must change, not context or harmless edits.**";
+	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
 
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
