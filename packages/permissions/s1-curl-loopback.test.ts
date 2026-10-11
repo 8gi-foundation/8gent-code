@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
+import { _resetLoopbackAllowlistForTest } from "./loopback-allowlist";
 import { curlToLoopback } from "./s1-curl-loopback";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
@@ -44,7 +45,7 @@ class AlwaysDangerous implements DecideBackend {
 	}
 }
 
-// The exact command from the issue (port is the stub's). It has -L, which this lane refuses (8SO).
+// The exact command from the issue (port is the stub's). It has -L, allowed only to a listed loopback port (#3967).
 // ISSUE_NO_L is the same command with the redirect followed by a second loopback request.
 const ISSUE_CMD =
 	"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -L -D .tmp/headers.txt http://127.0.0.1:41873/login";
@@ -65,6 +66,7 @@ const PROXY_VARS = [
 ];
 const saved: Record<string, string | undefined> = {};
 const KEYS = [
+	"EIGHT_BROWSER_ALLOW_LOOPBACK",
 	SYSTEM_ONE_FLAG,
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	"EIGHT_HEADLESS",
@@ -310,21 +312,70 @@ describe("curlToLoopback refuses", () => {
 	});
 });
 
-describe("-L is refused (8SO: the redirect host cannot be pinned)", () => {
-	test("the issue's exact command, with -L, goes to the judge", () => {
-		expect(ok(ISSUE_CMD)).toBe(false);
+describe("-L follows redirects only to this run's listed loopback servers (#3967)", () => {
+	const LISTED = "http://127.0.0.1:41873/login";
+	beforeEach(() => {
+		process.env.EIGHT_BROWSER_ALLOW_LOOPBACK = "127.0.0.1:41873";
+		_resetLoopbackAllowlistForTest();
 	});
-	test("every spelling of -L is refused", () => {
+	afterEach(() => {
+		Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
+		_resetLoopbackAllowlistForTest();
+	});
+	test("the issue's exact command, with -L, to a listed port is ok", () => {
+		expect(ok(ISSUE_CMD)).toBe(true);
+	});
+	test("every spelling of -L to a listed port is ok", () => {
+		for (const c of [
+			`curl -sL ${LISTED}`,
+			`curl -s -L ${LISTED}`,
+			`curl -s --location ${LISTED}`,
+			`curl -sL -b .tmp/c.txt -c .tmp/c.txt ${LISTED}`,
+			`curl -sL -d x=1 ${LISTED}`,
+		]) {
+			expect(ok(c), c).toBe(true);
+		}
+	});
+	test("--max-redirs 0..5 is ok, above 5 is not", () => {
+		expect(ok(`curl -s -L --max-redirs 3 ${LISTED}`)).toBe(true);
+		expect(ok(`curl -s -L --max-redirs 5 ${LISTED}`)).toBe(true);
+		expect(ok(`curl -s -L --max-redirs 9 ${LISTED}`)).toBe(false);
+		expect(ok(`curl -s -L --max-redirs 50 ${LISTED}`)).toBe(false);
+		expect(ok(`curl -s --max-redirs 9 ${LISTED}`)).toBe(false);
+	});
+	test("-L to an unlisted loopback port is a deterministic refusal", () => {
 		for (const c of [
 			"curl -sL http://127.0.0.1:8080/",
-			"curl -s -L http://127.0.0.1:8080/",
-			"curl -s --location http://127.0.0.1:8080/",
-			"curl -s --location-trusted http://127.0.0.1:8080/",
-			"curl -sL -b .tmp/c.txt -c .tmp/c.txt http://127.0.0.1:8080/",
-			"curl -sL -d x=1 http://127.0.0.1:8080/",
+			`curl -sL ${LISTED} http://127.0.0.1:8080/`,
+			"curl -sL http://127.0.0.1/",
 		]) {
-			expect(ok(c), c).toBe(false);
+			const r = curlToLoopback(c, ws);
+			expect(r.ok, c).toBe(false);
+			expect((r as { refuse?: string }).refuse, c).toContain("Location");
 		}
+	});
+	test("-L to a non-loopback URL is no opinion (no refusal text)", () => {
+		for (const c of [
+			"curl -sL http://example.com/",
+			`curl -sL ${LISTED} http://example.com/`,
+			"curl -sL http://169.254.169.254/",
+		]) {
+			const r = curlToLoopback(c, ws);
+			expect(r.ok, c).toBe(false);
+			expect((r as { refuse?: string }).refuse, c).toBeUndefined();
+		}
+	});
+	test("--location-trusted stays refused, with no refusal text", () => {
+		const r = curlToLoopback(`curl -s --location-trusted ${LISTED}`, ws);
+		expect(r.ok).toBe(false);
+		expect((r as { refuse?: string }).refuse).toBeUndefined();
+	});
+	test("with no list at all, -L is refused", () => {
+		Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
+		_resetLoopbackAllowlistForTest();
+		const r = curlToLoopback(`curl -sL ${LISTED}`, ws);
+		expect(r.ok).toBe(false);
+		expect((r as { refuse?: string }).refuse).toContain("Location");
 	});
 });
 
@@ -455,7 +506,6 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 	});
 
 	for (const cmd of [
-		ISSUE_CMD,
 		"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -D .tmp/headers.txt http://example.com/login",
 		"curl -s https://api.github.com/",
 		"curl -s -K x.cfg http://127.0.0.1:8080/",
@@ -467,6 +517,37 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 			expect(r.guard?.backend).not.toBe("allowlist");
 		});
 	}
+
+	test("-L to a listed port passes without asking the judge", async () => {
+		process.env.EIGHT_BROWSER_ALLOW_LOOPBACK = "127.0.0.1:41873";
+		_resetLoopbackAllowlistForTest();
+		try {
+			const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+			expect(r.run).toBe(true);
+			expect(r.guard?.backend).toBe("allowlist");
+			expect(judge.asks).toBe(0);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
+			_resetLoopbackAllowlistForTest();
+		}
+	});
+
+	test("-L to an unlisted loopback port: blocked with the Location hint, judge never asked", async () => {
+		_resetLoopbackAllowlistForTest();
+		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		expect(r.run).toBe(false);
+		expect(r.message).toContain("Location");
+		expect(r.message).toContain("Drop -L");
+		expect(r.guard?.verdict).toBe("block");
+		expect(judge.asks).toBe(0);
+	});
+
+	test("-L to a non-loopback URL still goes to the judge", async () => {
+		const r = await systemOneGate("curl -sL http://example.com/", process.env, ws);
+		// Whatever the judge or rules decide, it is not this lane's refusal.
+		expect(r.message ?? "").not.toContain("Drop -L");
+		expect(r.guard?.backend).not.toBe("allowlist");
+	});
 
 	test("strict mode (Guarded) never skips the judge", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";

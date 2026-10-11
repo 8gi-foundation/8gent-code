@@ -21,7 +21,7 @@
  *   - every option is on the allowlist below and written exactly (no `--x=y`
  *     form, no abbreviation, no `--`). Anything else, including -K/--config,
  *     --proxy/-x, --unix-socket, --resolve, --connect-to, --proto*, --next,
- *     --output-dir, -L, -O, --trace*, --stderr, -w with `@file` or `%output{}`, is
+ *     --output-dir, --location-trusted, -O, --trace*, --stderr, -w with `@file` or `%output{}`, is
  *     refused;
  *   - every URL is `http://` or `https://` plus 127.0.0.1, localhost or [::1],
  *     then an optional port (1 to 65535) and a path. No userinfo, no `{}` or
@@ -40,11 +40,21 @@
  *     loopback request to the proxy, body and all), and no curlrc in $CURL_HOME,
  *     $XDG_CONFIG_HOME, ~ or ~/.config unless `-q` is the first argument.
  *
- * Redirects (-L/--location) are refused. curl cannot be told "loopback only"
- * for redirects (--proto-redir limits the scheme, never the host), so a hop
- * could reach 169.254.169.254 or the LAN (SSRF) with whatever the request
- * carries. A curl with -L goes to the judge as before. To follow a 302, make a
- * second loopback request to the Location it returned; this lane allows that.
+ * Redirects (-L/--location, #3967) are allowed only when EVERY URL in the
+ * command is on this run's explicit loopback allowlist (loopback-allowlist.ts:
+ * EIGHT_BROWSER_ALLOW_LOOPBACK or <workspace>/.8gent/allow-loopback.json,
+ * frozen at first read, reserved service ports never). curl cannot be told
+ * "loopback only" for redirects (--proto-redir limits the scheme, never the
+ * host), so a hop could reach 169.254.169.254 or the LAN (SSRF) with whatever
+ * the request carries. That risk is acceptable for a listed server only
+ * because the target is the session's own declared test server, not arbitrary
+ * loopback; a server we listed can still redirect off the box, and 8SO
+ * accepted that for the declared test server. The hop count is bounded:
+ * `--max-redirs N` takes N of 0 to 5 only (curl's own default with -L is 50).
+ * --location-trusted stays refused (it sends credentials to other hosts). A -L
+ * to a loopback URL that is NOT listed returns a deterministic refusal (the
+ * `refuse` text) instead of "no opinion", so the model is told what to do
+ * rather than meeting the judge; -L to a non-loopback URL stays "no opinion".
  *
  * Known limits, on purpose: only POSIX single or double quoting; no `-d` with
  * `&` unquoted; multiple files in -F `@a,b` are refused. TOCTOU (out of scope,
@@ -59,12 +69,17 @@ import * as path from "node:path";
 import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
+import { isAllowedLoopbackUrl } from "./loopback-allowlist";
 import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, WRITE_BAD_NAME, canon, symlinkBelow } from "./s1-run-in-project";
 
-export type CurlLoopback = { ok: true; reason: string } | { ok: false };
+export type CurlLoopback = { ok: true; reason: string } | { ok: false; refuse?: string };
 const NO: CurlLoopback = { ok: false };
+
+/** Told to the model when -L targets a loopback URL that is not on this run's list (#3967). */
+export const CURL_L_REFUSAL =
+	"Refused: curl -L follows redirects, and only this run's listed local servers may be followed. Drop -L, read the Location header (-D .tmp/headers.txt), and make a second curl to that address.";
 
 const MAX_WORDS = 60;
 const MAX_URLS = 6;
@@ -120,7 +135,7 @@ const VAL_LONG = new Map<string, string>([
 	["--request", "X"],
 	["--max-time", "m"],
 	["--connect-timeout", "m"],
-	["--max-redirs", "m"],
+	["--max-redirs", "maxredirs"],
 	["--write-out", "w"],
 	["--url", "url"],
 ]);
@@ -163,6 +178,7 @@ function splitWords(text: string): Word[] | null {
 interface St {
 	root: string;
 	urls: string[];
+	location: boolean;
 }
 
 /** Check one file the command touches. `-` is stdout for writes only. */
@@ -252,6 +268,8 @@ function applyValue(key: string, v: string, st: St): boolean {
 			return METHOD.test(v);
 		case "m":
 			return NUM.test(v);
+		case "maxredirs":
+			return /^[0-5]$/.test(v);
 		case "w":
 			return !v.includes("@") && !/%\{?output/i.test(v) && !v.includes("%{stderr}");
 		case "url":
@@ -278,6 +296,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 		const st: St = {
 			root: canon(cwd),
 			urls: [],
+			location: false,
 		};
 		let i = 1;
 		const qFirst = words[1] === "-q" || words[1] === "--disable";
@@ -288,6 +307,10 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 			const w = words[i];
 			if (w === "-" || w === "--") return NO;
 			if (w.startsWith("--")) {
+				if (w === "--location") {
+					st.location = true;
+					continue;
+				}
 				if (BOOL_LONG.has(w)) continue;
 				const key = VAL_LONG.get(w);
 				if (key === undefined || i + 1 >= words.length) return NO;
@@ -299,6 +322,10 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 				for (let j = 1; j < w.length; j++) {
 					const c = w[j];
 					if (BOOL_SHORT.has(c)) continue;
+					if (c === "L") {
+						st.location = true;
+						continue;
+					}
 					const key = VAL_SHORT.get(c);
 					if (key === undefined) return NO;
 					const rest = w.slice(j + 1);
@@ -315,9 +342,12 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 			st.urls.push(w);
 		}
 		if (st.urls.length === 0 || st.urls.length > MAX_URLS || !st.urls.every(urlOk)) return NO;
+		if (st.location && !st.urls.every((u) => isAllowedLoopbackUrl(u, cwd))) {
+			return { ok: false, refuse: CURL_L_REFUSAL };
+		}
 		return {
 			ok: true,
-			reason: `curl to a loopback server (${st.urls.length} URL${st.urls.length === 1 ? "" : "s"}) touching only files inside the workspace`,
+			reason: `curl to a loopback server (${st.urls.length} URL${st.urls.length === 1 ? "" : "s"}) touching only files inside the workspace${st.location ? "; -L follows redirects only because every URL is on this run's listed loopback servers (hops bounded by --max-redirs 0-5 when given, else curl's default)" : ""}`,
 		};
 	} catch {
 		return NO;
