@@ -229,7 +229,7 @@ export async function loadRunImage(
 	let absolute: string;
 	try {
 		const { safePath } = await import("./tools");
-		absolute = safePath(file, cwd);
+		absolute = safePath(file, cwd, "read");
 	} catch (err) {
 		return {
 			error: `Error: --image must be inside the working directory: ${err instanceof Error ? err.message : String(err)}`,
