@@ -7,8 +7,10 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
 
 const VERSION = "0.18.0";
 
@@ -32,6 +34,7 @@ const VERSION = "0.18.0";
 // only the compiled case needs EXEC_DIR.
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXEC_DIR = path.dirname(process.execPath);
+const TUI_CACHE_DIR = path.join(os.homedir(), ".8gent", "cache");
 
 // MODULE_DIR points into Bun's embedded filesystem rather than the user's disk.
 // It still passes `fs.existsSync`, but only the embedded modules are readable
@@ -1289,12 +1292,38 @@ async function tuiCommand(args: string[]) {
  */
 async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+	// A compiled binary may have no Bun on PATH, so it runs the bundle as its own
+	// Bun runtime (BUN_BE_BUN=1) with cwd config and .env files switched off
+	// (apps/tui/src/lib/embedded-bundle.ts, #3894).
+	let proc: ReturnType<typeof spawn>;
+	if (MODULE_IS_EMBEDDED) {
+		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
+		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: inv.env });
+	} else {
+		proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);
 		process.exit(1);
 	});
 	proc.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+}
+
+/**
+ * The compiled binary carries its own TUI bundle (scripts/build-binaries.ts
+ * embeds dist/tui.js, #2975). Bun can only execute a real file, so write it
+ * to ~/.8gent/cache/tui-<content hash>.js, verified by hash on every launch.
+ * Returns null outside a compiled binary or if the cache is not writable.
+ */
+function extractEmbeddedTui(): string | null {
+	const asset = (globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI;
+	if (typeof asset !== "string") return null;
+	try {
+		return materializeTui(fs.readFileSync(asset), TUI_CACHE_DIR);
+	} catch (err) {
+		console.error(`Could not prepare the embedded TUI: ${(err as Error).message}`);
+		return null;
+	}
 }
 
 /**
@@ -1311,6 +1340,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
  * of spawning bun against a phantom path.
  */
 function resolveTuiEntry(): string | null {
+	const embedded = extractEmbeddedTui();
+	if (embedded) return embedded;
 	for (const dir of [MODULE_DIR, EXEC_DIR]) {
 		const bundled = path.join(dir, "tui.js");
 		if (fs.existsSync(bundled)) return bundled;
