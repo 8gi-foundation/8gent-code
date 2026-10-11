@@ -485,13 +485,51 @@ describe.skipIf(WIN)("rename then rewrite does not launder a file (8SO F1)", () 
 		expect(rmOwn("rm -f cfg.txt")).toBeNull();
 	});
 
-	test("8SO F3: a command that adds a file to an ignored directory records nothing; a quiet one does", () => {
+	test("8SO F3: adding a file to an ignored directory does not stop recording", () => {
 		writeFileSync(join(ws, ".gitignore"), "out/\n");
 		mkdirSync(join(ws, "out"));
 		child("echo b > out/build.txt && echo x > made.txt");
-		expect(own("made.txt")).toBe(false);
-		child("echo y > quiet.txt");
-		expect(own("quiet.txt")).toBe(true);
+		expect(own("made.txt")).toBe(true);
+	});
+
+	test("8SO F4: nested move out of an ignored directory, with and without touch -r, stays judged", () => {
+		writeFileSync(join(ws, ".gitignore"), "secrets/\n");
+		const rows = [
+			"m''v secrets/sub/nkey cfg.txt && sed -i.b s/K/Z/ cfg.txt",
+			"m''v secrets/key cfg.txt && touch -r ref.txt secrets && sed -i.b s/K/Z/ cfg.txt",
+			"m''v secrets/sub/nkey cfg.txt && touch -r ref.txt secrets/sub secrets && sed -i.b s/K/Z/ cfg.txt",
+		];
+		for (const cmd of rows) {
+			rmSync(join(ws, "secrets"), { recursive: true, force: true });
+			rmSync(join(ws, "cfg.txt"), { force: true });
+			mkdirSync(join(ws, "secrets/sub"), { recursive: true });
+			writeFileSync(join(ws, "secrets/key"), "K=1\n");
+			writeFileSync(join(ws, "secrets/sub/nkey"), "K=2\n");
+			writeFileSync(join(ws, "ref.txt"), "r");
+			for (const d of ["secrets", "secrets/sub", "ref.txt"]) utimesSync(join(ws, d), OLD, OLD);
+			const rec2 = new CreatedFiles();
+			const done = rec2.watchCommand(ws, cmd);
+			execSync(cmd, { cwd: ws, stdio: "ignore", shell: "/bin/sh" });
+			done();
+			expect(rec2.createdBySession(join(ws, "cfg.txt"))).toBe(false);
+			expect(rmOfNothingOrOwn("rm -f cfg.txt", ws, rec2)).toBeNull();
+		}
+	});
+
+	test("8SO F4: generated-output directories are not enumerated; over 5,000 names inside an ignored directory records nothing for that command only", () => {
+		writeFileSync(join(ws, ".gitignore"), "node_modules/\nbig/\n");
+		mkdirSync(join(ws, "node_modules/pkg"), { recursive: true });
+		writeFileSync(join(ws, "node_modules/pkg/a.js"), "x");
+		child("rm node_modules/pkg/a.js; echo x > nm.txt");
+		expect(own("nm.txt")).toBe(true);
+		mkdirSync(join(ws, "big"));
+		for (let i = 0; i < 5_100; i++) writeFileSync(join(ws, `big/f${i}`), "");
+		child("echo x > over.txt");
+		expect(own("over.txt")).toBe(false);
+		expect(rec.watchStopped).toBe(false);
+		rmSync(join(ws, "big"), { recursive: true, force: true });
+		child("echo y > after.txt");
+		expect(own("after.txt")).toBe(true);
 	});
 
 	test("8SO F2: os.rename, renameSync, shutil.move, rename( are rename-class words", () => {

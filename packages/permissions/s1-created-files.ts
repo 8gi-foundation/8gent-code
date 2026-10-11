@@ -27,9 +27,10 @@
  *     in (mv keeps its mtime and birth time), a hard link, anything from a
  *     command during which an untracked name that was not this session's
  *     vanished, a tracked file newly went missing, or a gitignored name
- *     vanished or an ignored directory's mtime moved (a file inside it was
- *     added, removed or renamed; this also skips a command that writes build
- *     output into an ignored directory) (`git ls-files -o -d -t`, and
+ *     vanished or a name inside an ignored directory vanished (names are
+ *     enumerated recursively, no symlink followed, except node_modules, .git,
+ *     .next, dist, build, .cache, target and .turbo; more than 5,000 names
+ *     records nothing for that command only) (`git ls-files -o -d -t`, and
  *     `-o -i --directory`, each side); anything from a command whose text holds a
  *     rename-class word (mv, rename, install, rsync, ln, cp, ditto, git mv/rm/
  *     reset/stash/checkout/restore/clean/apply/...: "mv t.ts t2.ts && touch
@@ -80,7 +81,15 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { constants, closeSync, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
+import {
+	constants,
+	closeSync,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readdirSync,
+	realpathSync,
+} from "node:fs";
 import * as path from "node:path";
 import { decideRules, maskQuotes } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
@@ -134,25 +143,49 @@ const SLOW_SNAPSHOT_MS = 500;
 /** Names one record may remember as seen (#3514); past this it records nothing new. */
 const MAX_SEEN = 20_000;
 
-/** mtime in ns of the directory `abs` (lstat), or null when it cannot be read. */
-function dirMtimeNs(abs: string): bigint | null {
+/** Generated-output directories whose contents are not enumerated (#3514 F4). */
+const GENERATED_DIRS = new Set([
+	"node_modules",
+	".git",
+	".next",
+	"dist",
+	"build",
+	".cache",
+	"target",
+	".turbo",
+]);
+
+/**
+ * Adds the names under `dir` (recursive, relative to nothing: absolute) to `out`,
+ * without following symlinks and without entering GENERATED_DIRS. False once
+ * `out` holds more than MAX_UNTRACKED names or a directory cannot be read.
+ */
+function enumerate(dir: string, out: Set<string>): boolean {
+	let entries: import("node:fs").Dirent[];
 	try {
-		return lstatSync(abs, { bigint: true }).mtimeNs;
+		entries = readdirSync(dir, { withFileTypes: true });
 	} catch {
-		return null;
+		return false;
 	}
+	for (const e of entries) {
+		const abs = path.join(dir, e.name);
+		out.add(abs);
+		if (out.size > MAX_UNTRACKED) return false;
+		if (e.isDirectory() && !GENERATED_DIRS.has(e.name) && !enumerate(abs, out)) return false;
+	}
+	return true;
 }
 
 /** One `git ls-files -o -d -t` listing: untracked names and tracked names missing from the worktree. */
 interface Snapshot {
 	untracked: string[];
 	missing: Set<string>;
-	/**
-	 * Gitignored names, whole ignored directories collapsed to one entry. The value
-	 * is the directory's mtime in ns (changes when anything inside is added,
-	 * removed or renamed), or null for a plain file or an unreadable directory.
-	 */
-	ignored: Map<string, bigint | null>;
+	/** Gitignored names, whole ignored directories collapsed to one entry. */
+	ignored: Set<string>;
+	/** Every name inside those ignored directories (recursive, no symlink followed), except generated-output dirs. */
+	inside: Set<string>;
+	/** More than MAX_UNTRACKED names inside ignored directories: this command records nothing. */
+	overflow: boolean;
 }
 
 /**
@@ -194,13 +227,16 @@ function snapshot(cwd: string): Snapshot | null {
 		const out: Snapshot = {
 			untracked: [],
 			missing: new Set(),
-			ignored: new Map(
-				ignored.map((n) => {
-					const abs = path.resolve(root, n);
-					return [abs, n.endsWith("/") ? dirMtimeNs(abs) : null] as const;
-				}),
-			),
+			ignored: new Set(ignored.map((n) => path.resolve(root, n))),
+			inside: new Set(),
+			overflow: false,
 		};
+		for (const n of ignored) {
+			if (!n.endsWith("/")) continue;
+			const dir = path.resolve(root, n);
+			if (GENERATED_DIRS.has(path.basename(dir))) continue;
+			if (!enumerate(dir, out.inside)) out.overflow = true;
+		}
 		for (const e of entries) {
 			const abs = path.resolve(root, e.slice(2));
 			// "? name" untracked; "R name" (or "C") a tracked file missing from the worktree.
@@ -342,11 +378,10 @@ export class CreatedFiles {
 			for (const abs of after.missing) if (!before.missing.has(abs)) return;
 			// An ignored name vanished (.env moved by a script, a quoted or computed mv): same reason.
 			// A file inside an ignored directory is not listed (the directory is one name),
-			// so a directory whose mtime moved or that vanished counts too (8SO F3).
-			for (const [abs, mtime] of before.ignored) {
-				if (!after.ignored.has(abs)) return;
-				if (mtime !== after.ignored.get(abs)) return;
-			}
+			// so every name inside one is compared too (8SO F3, F4): by name, not by time.
+			if (before.overflow || after.overflow) return;
+			for (const abs of before.ignored) if (!after.ignored.has(abs)) return;
+			for (const abs of before.inside) if (!after.inside.has(abs)) return;
 			for (const [abs, id] of ours) {
 				// In place (same inode), or a fresh file the command wrote over it.
 				if (inodeOf(abs) === id || writtenSince(abs, start)) this.refresh(abs);
