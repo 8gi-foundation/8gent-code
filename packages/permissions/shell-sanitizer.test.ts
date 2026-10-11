@@ -327,6 +327,12 @@ describe("backslash-escaped char before # is not a comment (8SO #3880)", () => {
 		no("echo ${x:-|#} && echo PWNED");
 		no("cat \\<<EOF\nid\nEOF");
 	});
+	test("8SO hardening: ${x@P} prompt expansion is refused", () => {
+		no("echo ${x:='$(id)'}${x@P}");
+		no("echo ${x:='`id`'}${x@P}");
+		no("echo ${x:=\\$\\(id\\)}${x@P}");
+		no('echo "${x@P}"');
+	});
 	test("find -exec \\; stays allowed, a real comment still is one", () => {
 		expect(sanitizeShellCommand("find . -name x -exec echo {} \\;", "linux").safe).toBe(true);
 		expect(sanitizeShellCommand("echo ${#PATH}", "linux").safe).toBe(true);

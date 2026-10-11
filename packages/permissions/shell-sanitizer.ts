@@ -266,6 +266,11 @@ export function sanitizeShellCommand(
 		text = scan.outside + body;
 	}
 
+	// Bash 4.4+ prompt-expands ${x@P}, which runs command substitution held in x (8SO hardening).
+	if (/@P\}/.test(text) || (platform !== "win32" && /@P\}/.test(command))) {
+		return { safe: false, reason: "The ${var@P} expansion is not allowed" };
+	}
+
 	// Block command substitution: $(...) and backticks
 	if (/\$\(/.test(text)) {
 		return {
