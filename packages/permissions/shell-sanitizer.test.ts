@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand, hasUnquotedSemicolon, sanitizeShellCommand } from "./shell-sanitizer";
+import { hasUnquotedAmpersand, sanitizeShellCommand } from "./shell-sanitizer";
 
 const AMP_REASON =
 	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
@@ -302,9 +302,27 @@ describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-vid
 		expect(sanitizeShellCommand('echo "a\\";id', "linux").safe).toBe(false);
 		expect(sanitizeShellCommand("echo 'unterminated; id", "linux").safe).toBe(false);
 	});
-	test("win32: single quotes are not quoting", () => {
-		expect(hasUnquotedSemicolon("echo 'a;b'", "win32")).toBe(true);
-		expect(hasUnquotedSemicolon('echo "a;b"', "win32")).toBe(false);
+	test("win32 keeps the strict whole-line rule", () => {
+		expect(sanitizeShellCommand("echo 'a;b'", "win32").safe).toBe(false);
+	});
+});
+
+describe("backslash-escaped char before # is not a comment (8SO #3880)", () => {
+	const no = (c: string) => expect(sanitizeShellCommand(c, "linux").safe).toBe(false);
+	test("nine PoCs are refused", () => {
+		no("echo \\;# && echo PWNED");
+		no("echo \\;# ; echo PWNED");
+		no("echo \\;# $(echo PWNED)");
+		no("echo \\;# || id");
+		no("echo \\;# `id`");
+		no("echo \\;#'; echo PWNED");
+		no("echo a\\ # && echo PWNED");
+		no("echo \\(# && echo PWNED");
+		no("echo \\|# && id");
+	});
+	test("find -exec \\; stays allowed, a real comment still is one", () => {
+		expect(sanitizeShellCommand("find . -name x -exec echo {} \\;", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("echo hi # a; b", "linux").safe).toBe(true);
 	});
 });
 

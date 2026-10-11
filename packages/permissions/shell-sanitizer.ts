@@ -130,6 +130,8 @@ function scanQuotes(command: string): QuoteScan {
 	let lineBreak = false;
 	let dollarQuote = false;
 	let escapedDollarAt = -1;
+	/** Index of the character an unquoted backslash just escaped; a `#` after it is not a comment. */
+	let escapedAt = -1;
 	let heredoc: { word: string; dash: boolean } | undefined;
 	let headEnd = command.length;
 	for (let i = 0; i < command.length; i++) {
@@ -166,6 +168,8 @@ function scanQuotes(command: string): QuoteScan {
 			dq += ch;
 			continue;
 		}
+		// Unquoted, a backslash always takes the next character (bash); a `#` after it is no comment.
+		if (ch === "\\") escapedAt = i + 1;
 		if (ch === "\\" && (command[i + 1] === '"' || command[i + 1] === "'" || command[i + 1] === "\\" || command[i + 1] === ";")) {
 			i++;
 			continue;
@@ -183,7 +187,7 @@ function scanQuotes(command: string): QuoteScan {
 			outside += ch;
 			continue;
 		}
-		if (ch === "#" && (i === 0 || /[\s;|&(]/.test(command[i - 1]))) {
+		if (ch === "#" && (i === 0 || (escapedAt !== i - 1 && /[\s;|&(]/.test(command[i - 1])))) {
 			while (i + 1 < command.length && command[i + 1] !== "\n" && command[i + 1] !== "\r") i++;
 			continue;
 		}
@@ -202,69 +206,6 @@ function scanQuotes(command: string): QuoteScan {
 		outside += ch;
 	}
 	return { balanced: mode === "none", outside, doubled, ansiEscape, dollarQuote, lineBreak, heredoc, headEnd };
-}
-
-/**
- * Find a `;` that separates commands. On POSIX a `;` inside single or double
- * quotes, or escaped with a backslash, is plain text. cmd.exe does not treat
- * single quotes or `\\` as quoting, so on win32 any `;` outside double quotes
- * (and not `^`-escaped) counts.
- */
-export function hasUnquotedSemicolon(
-	command: string,
-	platform: NodeJS.Platform = process.platform,
-): boolean {
-	return scanSemicolon(command, platform) !== null;
-}
-
-/**
- * Scanner behind hasUnquotedSemicolon. On POSIX, bash `$'...'` and `$"..."`
- * quote differently (`\'` is an escaped quote inside `$'...'`), so this scanner
- * cannot track them; any `$'` or `$"` outside quotes is refused outright.
- */
-function scanSemicolon(
-	command: string,
-	platform: NodeJS.Platform,
-): "semicolon" | "dollar-quote" | null {
-	const win = platform === "win32";
-	let inSingle = false;
-	let inDouble = false;
-
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-
-		if (inSingle) {
-			if (ch === "'") inSingle = false;
-			continue;
-		}
-		if (inDouble) {
-			if (!win && ch === "\\") {
-				i++;
-				continue;
-			}
-			if (ch === '"') inDouble = false;
-			continue;
-		}
-
-		if (win ? ch === "^" : ch === "\\") {
-			i++;
-			continue;
-		}
-		if (ch === '"') {
-			inDouble = true;
-			continue;
-		}
-		if (ch === "'" && !win) {
-			inSingle = true;
-			continue;
-		}
-		if (!win && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) {
-			return "dollar-quote";
-		}
-		if (ch === ";") return "semicolon";
-	}
-	// An unterminated quote is a malformed command; refuse it rather than guess.
-	return inSingle || inDouble ? "semicolon" : null;
 }
 
 /**
