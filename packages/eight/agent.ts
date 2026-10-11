@@ -213,7 +213,9 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  */
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
-const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
+const SCREEN_LOCATE_NOTE =
+	"**To act on something in a screenshot: call `screen_locate` with the image path and the target in words, then use the point it returns.**";
+const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE, SCREEN_LOCATE_NOTE].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -1731,6 +1733,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
 			"describe_image",
+			"screen_locate",
 			// A spawned sub-agent has one task and no plan to report (#3583).
 			...localPlanTools(this.agentDepth),
 			"git_status",
