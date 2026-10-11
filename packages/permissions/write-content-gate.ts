@@ -21,6 +21,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { ToolG8 } from "./toolg8.js";
 
@@ -37,15 +38,15 @@ export const WRITE_CONTENT_TOOLS = new Set<string>([
 export type EditTarget =
 	| { kind: "ok"; idx: number }
 	| { kind: "none" }
-	| { kind: "ambiguous"; lines: number[] }
-	| { kind: "none-after"; startLine: number; lines: number[] };
+	| { kind: "ambiguous"; lines: number[]; more: boolean }
+	| { kind: "none-after"; startLine: number; lines: number[]; more: boolean };
 
-/** 1-based line number of a string offset. */
-function lineOf(original: string, idx: number): number {
-	let n = 1;
-	for (let i = original.indexOf("\n"); i !== -1 && i < idx; i = original.indexOf("\n", i + 1)) n++;
-	return n;
-}
+/** Match lines kept for a refusal; past this the text says "N+". */
+export const MAX_REPORTED_MATCHES = 20;
+const MAX_PATH_CHARS = 200;
+const LOG_ROTATE_BYTES = 1024 * 1024;
+
+const clipPath = (p: string) => (p.length > MAX_PATH_CHARS ? `${p.slice(0, MAX_PATH_CHARS)}...` : p);
 
 /**
  * Find where oldText goes (#3898). Zero matches: "none". One match: it.
@@ -53,52 +54,89 @@ function lineOf(original: string, idx: number): number {
  * With startLine, the first match that starts at or after that 1-based line
  * wins; if every match is earlier the file is not what the model read, so
  * "none-after" refuses rather than editing the wrong copy.
+ *
+ * One forward pass: line numbers come from a cursor that only moves ahead,
+ * and without startLine the scan stops after MAX_REPORTED_MATCHES matches.
+ * Overlapping matches count ("aa" in "aaa" is two), because an overlapping
+ * oldText is still an ambiguous anchor.
  */
 export function locateEdit(original: string, oldText: string, startLine?: number): EditTarget {
 	// indexOf("", i) never returns -1, so an empty oldText would loop forever.
 	if (oldText === "") return { kind: "none" };
-	const offsets: number[] = [];
+	const anchored = typeof startLine === "number" && Number.isFinite(startLine);
+	const lines: number[] = [];
+	let count = 0;
+	let firstIdx = -1;
+	let line = 1;
+	let nl = original.indexOf("\n");
 	for (let i = original.indexOf(oldText); i !== -1; i = original.indexOf(oldText, i + 1)) {
-		offsets.push(i);
+		while (nl !== -1 && nl < i) {
+			line++;
+			nl = original.indexOf("\n", nl + 1);
+		}
+		if (count === 0) firstIdx = i;
+		count++;
+		if (anchored && line >= (startLine as number)) return { kind: "ok", idx: i };
+		if (lines.length < MAX_REPORTED_MATCHES) lines.push(line);
+		else if (!anchored) break;
 	}
-	if (offsets.length === 0) return { kind: "none" };
-	const lines = offsets.map((o) => lineOf(original, o));
-	if (typeof startLine === "number" && Number.isFinite(startLine)) {
-		const at = lines.findIndex((l) => l >= startLine);
-		return at === -1
-			? { kind: "none-after", startLine, lines }
-			: { kind: "ok", idx: offsets[at] };
-	}
-	if (offsets.length > 1) return { kind: "ambiguous", lines };
-	return { kind: "ok", idx: offsets[0] };
+	if (count === 0) return { kind: "none" };
+	const more = count > MAX_REPORTED_MATCHES;
+	if (anchored) return { kind: "none-after", startLine: startLine as number, lines, more };
+	if (count > 1) return { kind: "ambiguous", lines, more };
+	return { kind: "ok", idx: firstIdx };
 }
+
+const lineList = (t: { lines: number[]; more: boolean }) =>
+	`${t.lines.join(", ")}${t.more ? ", ..." : ""}`;
 
 /** Model-visible refusal for a duplicate or stale-anchored edit, or null if the edit can proceed. */
 export function editRefusal(target: EditTarget, filePath: string): string | null {
+	const p = clipPath(filePath);
 	if (target.kind === "ambiguous") {
-		return `Error: oldText matches ${target.lines.length} times in ${filePath} (lines ${target.lines.join(", ")}). Nothing was written. Add surrounding lines to oldText so it is unique, or pass startLine to pick the copy at or after that line.`;
+		const n = target.more ? `${MAX_REPORTED_MATCHES}+` : String(target.lines.length);
+		return `Error: oldText matches ${n} times in ${p} (lines ${lineList(target)}). Nothing was written. Add surrounding lines to oldText so it is unique, or pass startLine to pick the copy at or after that line.`;
 	}
 	if (target.kind === "none-after") {
-		return `Error: oldText matches in ${filePath} only before line ${target.startLine} (lines ${target.lines.join(", ")}). Nothing was written. The file may have changed since you read it: read_file again and retry.`;
+		return `Error: oldText matches in ${p} only before line ${target.startLine} (lines ${lineList(target)}). Nothing was written. The file may have changed since you read it: read_file again and retry.`;
 	}
 	return null;
 }
 
 /**
  * Count refused edits (#3898): one JSON line per refusal in
- * ~/.8gent/edit-ambiguous.jsonl. No file text is logged, only the path,
- * the match lines and the oldText length. Never throws.
+ * ~/.8gent/edit-ambiguous.jsonl, rotated to .1 at 1 MB. No file text is
+ * logged, only the clipped path, up to 20 match lines and the oldText length.
+ * Never throws.
  */
 export function logEditRefusal(target: EditTarget, filePath: string, oldTextLength: number): void {
 	if (target.kind !== "ambiguous" && target.kind !== "none-after") return;
 	try {
-		const dir = path.join(process.env.HOME || ".", ".8gent");
+		const dir = path.join(process.env.HOME || os.homedir(), ".8gent");
 		fs.mkdirSync(dir, { recursive: true });
-		const rec = { ts: new Date().toISOString(), kind: target.kind, path: filePath, lines: target.lines, oldTextLength };
-		fs.appendFileSync(path.join(dir, "edit-ambiguous.jsonl"), `${JSON.stringify(rec)}\n`);
+		const file = path.join(dir, "edit-ambiguous.jsonl");
+		try {
+			if (fs.statSync(file).size > LOG_ROTATE_BYTES) fs.renameSync(file, `${file}.1`);
+		} catch {
+			// No log yet.
+		}
+		const rec = {
+			ts: new Date().toISOString(),
+			kind: target.kind,
+			path: clipPath(filePath),
+			lines: target.lines,
+			more: target.more,
+			oldTextLength,
+		};
+		fs.appendFileSync(file, `${JSON.stringify(rec)}\n`);
 	} catch {
 		// Logging must never change the edit's outcome.
 	}
+}
+
+/** Splice newText over the oldLength chars at idx, literally. Callers locate once with locateEdit. */
+export function applyAt(original: string, idx: number, oldLength: number, newText: string): string {
+	return original.slice(0, idx) + newText + original.slice(idx + oldLength);
 }
 
 /**
@@ -117,7 +155,7 @@ export function applyEdit(
 ): string | null {
 	const t = locateEdit(original, oldText, startLine);
 	if (t.kind !== "ok") return null;
-	return original.slice(0, t.idx) + newText + original.slice(t.idx + oldText.length);
+	return applyAt(original, t.idx, oldText.length, newText);
 }
 
 /**

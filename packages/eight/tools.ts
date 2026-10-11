@@ -148,7 +148,7 @@ import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import {
 	WRITE_CONTENT_TOOLS,
-	applyEdit,
+	applyAt,
 	editRefusal,
 	locateEdit,
 	logEditRefusal,
@@ -2715,7 +2715,8 @@ export class ToolExecutor {
 			logEditRefusal(located, filePath, oldText.length);
 			return refusal;
 		}
-		const newContent = applyEdit(content, oldText, newText, startLine);
+		const newContent =
+			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
 		if (newContent === null) {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the

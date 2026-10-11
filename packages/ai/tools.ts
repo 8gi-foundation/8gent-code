@@ -30,7 +30,7 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
+import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -472,7 +472,8 @@ const editFile = tool({
 			logEditRefusal(located, filePath, oldText.length);
 			return refusal;
 		}
-		const edited = applyEdit(content, oldText, newText, startLine);
+		const edited =
+			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);

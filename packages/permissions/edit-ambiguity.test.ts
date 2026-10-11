@@ -10,7 +10,7 @@ import * as path from "node:path";
 
 process.env.EIGHT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "edit-amb-data-"));
 
-const { applyEdit, locateEdit } = await import("./write-content-gate");
+const { applyEdit, locateEdit, editRefusal, logEditRefusal } = await import("./write-content-gate");
 const { ToolExecutor } = await import("../eight/tools");
 const { agentTools, setToolContext } = await import("../ai/tools");
 
@@ -39,7 +39,7 @@ describe("locateEdit / applyEdit", () => {
 		expect(applyEdit("a\nb\nc\n", "b", "B")).toBe("a\nB\nc\n");
 	});
 	test("duplicate is ambiguous with line numbers and applyEdit returns null", () => {
-		expect(locateEdit(DUP, "alpha();")).toEqual({ kind: "ambiguous", lines: [1, 3, 5] });
+		expect(locateEdit(DUP, "alpha();")).toEqual({ kind: "ambiguous", lines: [1, 3, 5], more: false });
 		expect(applyEdit(DUP, "alpha();", "x();")).toBeNull();
 	});
 	test("startLine picks the first copy at or after that line", () => {
@@ -56,6 +56,67 @@ describe("locateEdit / applyEdit", () => {
 	test("not found is unchanged", () => {
 		expect(locateEdit("abc", "zzz").kind).toBe("none");
 		expect(applyEdit("abc", "zzz", "y")).toBeNull();
+	});
+});
+
+describe("bounded work on hostile input (#3902 review)", () => {
+	const timed = <T,>(f: () => T): [T, number] => {
+		const t0 = performance.now();
+		const r = f();
+		return [r, performance.now() - t0];
+	};
+	test("20k duplicate lines: capped report, short text, under 200 ms", () => {
+		const big = "dup();\n".repeat(20000);
+		const [t, ms] = timed(() => locateEdit(big, "dup();"));
+		expect(ms).toBeLessThan(200);
+		expect(t).toMatchObject({ kind: "ambiguous", more: true });
+		const text = editRefusal(t, "x.ts") as string;
+		expect(text).toContain("matches 20+ times");
+		expect(text.length).toBeLessThan(600);
+	});
+	test("20k duplicates with a startLine near the end finds the copy fast", () => {
+		const big = "dup();\n".repeat(20000);
+		const [t, ms] = timed(() => locateEdit(big, "dup();", 19990));
+		expect(ms).toBeLessThan(200);
+		expect(t).toEqual({ kind: "ok", idx: 19989 * 7 });
+	});
+	test("1 MB of 'a' with oldText 'aa': overlapping matches stop at 20, under 200 ms", () => {
+		const big = "a".repeat(1_000_000);
+		const [t, ms] = timed(() => locateEdit(big, "aa"));
+		expect(ms).toBeLessThan(200);
+		expect(t).toMatchObject({ kind: "ambiguous", more: true });
+		expect((t as { lines: number[] }).lines).toHaveLength(20);
+	});
+	test("1 MB of 'a', startLine past the end, still bounded", () => {
+		const big = "a".repeat(1_000_000);
+		const [t, ms] = timed(() => locateEdit(big, "aa", 5));
+		expect(ms).toBeLessThan(200);
+		expect(t).toMatchObject({ kind: "none-after", more: true });
+		expect((t as { lines: number[] }).lines).toHaveLength(20);
+		expect((editRefusal(t, "x") as string).length).toBeLessThan(600);
+	});
+	test("a 10k-char path is clipped in the refusal text", () => {
+		const t = locateEdit("a\na\n", "a");
+		expect((editRefusal(t, "p".repeat(10000)) as string).length).toBeLessThan(700);
+	});
+	test("overlapping 'aa' in 'aaa' is ambiguous", () => {
+		expect(locateEdit("aaa", "aa").kind).toBe("ambiguous");
+	});
+	test("log record clips the path and keeps at most 20 lines", () => {
+		const t = locateEdit("dup\n".repeat(500), "dup");
+		logEditRefusal(t, "q".repeat(5000), 3);
+		const rec = logLines()[0];
+		expect(rec.path.length).toBeLessThan(250);
+		expect(rec.lines).toHaveLength(20);
+		expect(rec.more).toBe(true);
+	});
+	test("the log rotates past 1 MB", () => {
+		const d = path.join(dir, ".8gent");
+		fs.mkdirSync(d, { recursive: true });
+		fs.writeFileSync(path.join(d, "edit-ambiguous.jsonl"), "x".repeat(1_100_000));
+		logEditRefusal(locateEdit("a\na\n", "a"), "r.ts", 1);
+		expect(fs.existsSync(path.join(d, "edit-ambiguous.jsonl.1"))).toBe(true);
+		expect(fs.statSync(path.join(d, "edit-ambiguous.jsonl")).size).toBeLessThan(1000);
 	});
 });
 
