@@ -21,6 +21,7 @@
  * parser can be adjusted without a round-trip to the agent loop.
  */
 import { resolve as resolvePath } from "node:path";
+import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import type { AgentEventCallbacks } from "./types";
 
 export interface RunOptions {
@@ -523,7 +524,23 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 
 		const finalText = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
 
-		if (isStreamJson) {
+		if (isEmptyReplyNote(finalText)) {
+			// #3524: a blank model reply is not a finished turn, so a script must
+			// not read it as success.
+			exitCode = 1;
+			if (isStreamJson) {
+				emit({
+					type: "result",
+					subtype: "error",
+					session_id: sessionId,
+					ended_at: new Date().toISOString(),
+					error: finalText,
+					final_text: finalText,
+				});
+			} else {
+				process.stderr.write(`${finalText}\n`);
+			}
+		} else if (isStreamJson) {
 			emit({
 				type: "result",
 				subtype: "ok",

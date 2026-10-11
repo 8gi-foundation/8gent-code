@@ -1920,15 +1920,29 @@ describe("runTextToolAgent - empty final reply after tool work (#3091)", () => {
 		expect(result.unverified).toEqual([emptyReplyStall(2)]);
 	});
 
-	test("an empty reply with no tool work in the turn is left as it was", async () => {
-		const model = scriptedModel(["", "UNREACHED"]);
+	test("a blank reply with no tool work is checked, then ends as an explicit failure (#3524)", async () => {
+		for (const blank of ["", "  \n\t "]) {
+			const model = scriptedModel([blank, blank, blank, blank, "UNREACHED"]);
+			const result = await runTextToolAgent({
+				messages: [{ role: "user", content: "hi" }],
+				tools: [READ_FILE_TOOL],
+				call: model.call,
+			});
+			expect(model.calls()).toBe(1 + MAX_CONSECUTIVE_CHECKS);
+			expect(result.content).toBe(emptyReplyNote(0));
+			expect(result.unverified).toEqual([emptyReplyStall(0)]);
+		}
+	});
+
+	test("a blank first reply followed by a real one is returned as the answer (#3524)", async () => {
+		const model = scriptedModel(["  ", "DONE: Hello.", "UNREACHED"]);
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "hi" }],
 			tools: [READ_FILE_TOOL],
 			call: model.call,
 		});
-		expect(model.calls()).toBe(1);
-		expect(result.content).toBe("");
+		expect(model.calls()).toBe(2);
+		expect(result.content).toBe("Hello.");
 		expect(result.unverified).toEqual([]);
 	});
 
