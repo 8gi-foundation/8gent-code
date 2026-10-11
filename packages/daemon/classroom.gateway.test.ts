@@ -147,15 +147,16 @@ describe("session:create {channel: classroom}", () => {
 		c.close();
 	});
 
-	it("is refused when the daemon has no token configured", async () => {
+	it("works from loopback on a daemon with no token, and dies with its socket", async () => {
 		const c = new Client(open.port as number);
 		await c.ready;
 		c.send({ type: "session:create", channel: "classroom" });
-		const err = await c.next((f) => f.type === "error");
-		expect(err.message).toContain("authToken");
+		const created = await c.next((f) => f.type === "session:created");
 		await settle();
-		expect(openPool.live.size).toBe(0);
+		expect(openPool.live.get(created.sessionId)).toBe("classroom");
 		c.close();
+		await settle();
+		expect(openPool.live.has(created.sessionId)).toBe(false);
 	});
 
 	it("works from loopback with the token, and nobody else can reach it", async () => {

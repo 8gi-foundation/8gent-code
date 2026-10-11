@@ -621,7 +621,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 
 		// Initialize session persistence (v2)
-		this.sessionWriter = new SessionWriter(this.sessionId);
+		// A classroom session leaves no session file: its text is untrusted and private (#3939).
+		this.sessionWriter = new SessionWriter(
+			this.sessionId,
+			undefined,
+			undefined,
+			!isNoToolScope(config.agentScope),
+		);
 		// A Table officer is a colleague in a chat channel, not the orchestrator of a
 		// coding session. Appending the orchestrator/personality blocks told every
 		// officer "You are the orchestrator, you can spawn specialists" and re-listed

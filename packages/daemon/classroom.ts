@@ -65,16 +65,14 @@ export function installClassroomPolicies(): string[] {
 
 /**
  * Who may open a classroom session: an authenticated connection from a
- * loopback peer, and only when the daemon has a token configured. Returns an
- * error message, or null when allowed.
+ * loopback peer. A configured token is still enforced: the gateway rejects
+ * every frame before auth. Returns an error message, or null when allowed.
  */
 export function classroomCreateRefusal(opts: {
 	loopback: boolean;
 	authenticated: boolean;
-	tokenConfigured: boolean;
 }): string | null {
 	if (!opts.loopback) return "classroom sessions are loopback-only";
-	if (!opts.tokenConfigured) return "classroom sessions need daemon.authToken to be set";
 	if (!opts.authenticated) return "not authenticated";
 	return null;
 }

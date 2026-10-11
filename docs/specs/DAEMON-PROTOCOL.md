@@ -222,9 +222,9 @@ Client -> { "type": "session:create", "channel": "classroom" }
 Server -> { "type": "session:created", "sessionId": "s_...", "resumeSecret": "<32 hex>" }
 ```
 
-- **Who may create one:** an authenticated connection from a loopback peer, and only
-  when `daemon.authToken` is set. Otherwise `{ "type": "error", "message": "classroom sessions are loopback-only" }`,
-  `"classroom sessions need daemon.authToken to be set"` or `"not authenticated"`.
+- **Who may create one:** a loopback peer. When `daemon.authToken` is set it is enforced like any frame (`not authenticated` before auth).
+  A non-loopback peer gets `{ "type": "error", "message": "classroom sessions are loopback-only" }`.
+  The session ends when the socket that created it closes.
 - **No tools at all.** The model is offered none (no file, shell, network or browser tools,
   no delegation, no memory writes), the pre-fetch router is off, the executor refuses any
   call for the `__classroom__` scope, and a `*` block rule backs it in the policy engine.

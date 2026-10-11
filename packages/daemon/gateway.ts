@@ -409,7 +409,6 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				const refusal = classroomCreateRefusal({
 					loopback: isLoopbackAddress(state.remoteAddress),
 					authenticated: state.authenticated,
-					tokenConfigured: Boolean(config.authToken),
 				});
 				if (refusal) {
 					send(ws, { type: "error", message: refusal });
@@ -959,6 +958,12 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					} else if (state.isStoreRoute) {
 						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
+						// A classroom session dies with the socket that made it (#3939).
+						if (state.channel === CLASSROOM_CHANNEL) {
+							config.pool.destroySession(state.sessionId);
+							persistable.delete(state.sessionId);
+							resumeSecrets.forget(state.sessionId);
+						}
 						if (state.approvalBridge) channelApprovals.endSession(state.sessionId);
 						// A shared session goes on for the clients still on it (#3929):
 						// only the last one leaving ends it for listeners.
