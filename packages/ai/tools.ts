@@ -30,7 +30,7 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -449,19 +449,31 @@ const editFile = tool({
 		path: z.string().describe("Path to the file"),
 		oldText: z.string().describe("Text to find and replace"),
 		newText: z.string().describe("Replacement text"),
+		startLine: z
+			.number()
+			.int()
+			.optional()
+			.describe("1-based line; when oldText appears more than once, edit the copy at or after this line"),
 	}),
-	execute: async ({ path: filePath, oldText, newText }) => {
+	execute: async ({ path: filePath, oldText, newText, startLine }) => {
 		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
 		const noAnchor = emptyOldTextError(oldText, filePath);
 		if (noAnchor) return noAnchor;
-		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
+		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText, startLine });
 		if (blocked) return blocked;
 		const target = confinedWritePath(filePath);
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		const edited = applyEdit(content, oldText, newText);
+		const located = locateEdit(content, oldText, startLine);
+		const refusal = editRefusal(located, filePath);
+		if (refusal) {
+			logEditRefusal(located, filePath, oldText.length);
+			return refusal;
+		}
+		const edited =
+			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
