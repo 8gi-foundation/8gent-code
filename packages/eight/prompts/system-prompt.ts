@@ -293,6 +293,13 @@ export const SCRATCH_DIR_NOTE =
 export const REVIEW_FOCUS_NOTE =
 	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
 
+/**
+ * Local-server curl rules (#3942), one source for the full TOOL_PATTERNS_SEGMENT
+ * and the compact local prompt (#4034). Kept short for the compact budget.
+ */
+export const LOCAL_SERVER_CURL_SHORT =
+	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. On a 302 read the Location header and make a second curl.";
+
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 
@@ -388,7 +395,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-For a local server, use plain curl to 127.0.0.1 with cookie and header files under .tmp/; do not pass -L. On a 302, read the Location header and make a second loopback request.
+${LOCAL_SERVER_CURL_SHORT}
 
 ### Git Flow
 \`\`\`json
