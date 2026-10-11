@@ -629,7 +629,7 @@ export function analyzePiExtension(entry: string): PiStaticReport {
  * parameters so the Windows form is testable on any machine.
  */
 export function defaultPiExtensionsDir(
-	env: NodeJS.ProcessEnv = process.env,
+	env: Record<string, string | undefined> = process.env,
 	p: path.PlatformPath = path,
 	home: string = resolveHome(),
 ): string {

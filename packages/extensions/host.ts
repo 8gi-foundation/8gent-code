@@ -147,7 +147,7 @@ copy hotkeys tree import update extensions`.split(/\s+/),
 export function extensionsWanted(
 	opts: { interactive?: boolean } = {},
 	argv: readonly string[] = process.argv,
-	env: NodeJS.ProcessEnv = process.env,
+	env: Record<string, string | undefined> = process.env,
 ): boolean {
 	if (argv.includes("--no-extensions") || env.EIGHT_EXTENSIONS === "0") return false;
 	// Interactive TUI: on by default. Headless runs: only when asked.
@@ -163,7 +163,7 @@ export function extensionsWanted(
  */
 export function noInstallActive(
 	execArgv: readonly string[] = process.execArgv,
-	env: NodeJS.ProcessEnv = process.env,
+	env: Record<string, string | undefined> = process.env,
 	cwd: string = process.cwd(),
 ): boolean {
 	if (execArgv.includes("--no-install")) return true;
