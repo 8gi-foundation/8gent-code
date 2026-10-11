@@ -273,6 +273,17 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 		ok("cat <<'EOF'\nit's fine\nEOF");
 		no("cat <<'EOF'\nrun; id\nEOF", "Semicolon");
 	});
+	// 8SO review of #3880 (MED-4): a heredoc marker inside quotes or a comment is not a heredoc.
+	test("a heredoc marker inside quotes or after # does not hide the next line", () => {
+		no('echo "<<EOF"\ntouch PWN', "new line");
+		no("echo '<<EOF'\ntouch PWN", "new line");
+		no("echo hi # <<EOF\ntouch PWN", "new line");
+	});
+	test("a heredoc without its closing line is refused", () => {
+		no("cat <<EOF\nbody only", "closing line");
+		no("cat <<EOF", "closing line");
+		ok("cat <<EOF\nbody\nEOF");
+	});
 	test("Windows keeps the strict whole-line rules", () => {
 		expect(sanitizeShellCommand('echo "a; b"', "win32").safe).toBe(false);
 	});

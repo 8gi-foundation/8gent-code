@@ -88,6 +88,9 @@ export function hasUnquotedAmpersand(
 const NEWLINE_REASON =
 	"A new line outside quotes starts another command. Use separate run_command calls, or put the steps in a script file and run it with bash <file>";
 
+const HEREDOC_REASON =
+	"A heredoc needs its closing line after the body, so it cannot be checked. Put the text in a file instead";
+
 interface QuoteScan {
 	balanced: boolean;
 	/** The command with quoted content removed (the quote marks stay). */
@@ -98,6 +101,10 @@ interface QuoteScan {
 	ansiEscape: boolean;
 	/** An unquoted newline or carriage return, outside the quotes: a second command on the next line. */
 	lineBreak: boolean;
+	/** A heredoc marker found outside quotes and outside a comment; the scan stopped at the end of its line. */
+	heredoc?: { word: string; dash: boolean };
+	/** Index just past the scanned head (the newline that ends a heredoc line, else the command length). */
+	headEnd: number;
 }
 
 /**
@@ -119,6 +126,8 @@ function scanQuotes(command: string): QuoteScan {
 	let dq = "";
 	let ansiEscape = false;
 	let lineBreak = false;
+	let heredoc: { word: string; dash: boolean } | undefined;
+	let headEnd = command.length;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (mode === "single") {
@@ -157,6 +166,14 @@ function scanQuotes(command: string): QuoteScan {
 			i++;
 			continue;
 		}
+		if (ch === "<" && !heredoc && command[i + 1] === "<" && command[i - 1] !== "<" && command[i + 2] !== "<") {
+			const m = /^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(command.slice(i));
+			if (m) heredoc = { word: m[3], dash: m[1] === "-" };
+		}
+		if (ch === "\n" && heredoc) {
+			headEnd = i;
+			break;
+		}
 		if (ch === "\n" || ch === "\r") {
 			lineBreak = true;
 			outside += ch;
@@ -178,28 +195,7 @@ function scanQuotes(command: string): QuoteScan {
 		}
 		outside += ch;
 	}
-	return { balanced: mode === "none", outside, doubled, ansiEscape, lineBreak };
-}
-
-/**
- * The first heredoc (`<<WORD`, not the here-string `<<<`) starts a body that is
- * not shell text: split it off so its apostrophes do not unbalance the scan.
- * `rest` is whatever follows the terminator line: another command, so it is refused.
- */
-function splitHeredoc(command: string): { head: string; body: string; rest: string } {
-	const m = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1/.exec(command);
-	if (!m) return { head: command, body: "", rest: "" };
-	const nl = command.indexOf("\n", m.index);
-	if (nl < 0) return { head: command, body: "", rest: "" };
-	const lines = command.slice(nl + 1).split("\n");
-	const stripTabs = m[0].startsWith("<<-");
-	const end = lines.findIndex((l) => (stripTabs ? l.replace(/^\t+/, "") : l) === m[2]);
-	if (end < 0) return { head: command.slice(0, nl), body: command.slice(nl), rest: "" };
-	return {
-		head: command.slice(0, nl),
-		body: `\n${lines.slice(0, end + 1).join("\n")}`,
-		rest: lines.slice(end + 1).join("\n"),
-	};
+	return { balanced: mode === "none", outside, doubled, ansiEscape, lineBreak, heredoc, headEnd };
 }
 
 /**
@@ -213,8 +209,7 @@ export function sanitizeShellCommand(
 	// POSIX: text inside quotes is data (#3879). Windows keeps the strict whole-line rules.
 	let text = command;
 	if (platform !== "win32") {
-		const { head, body, rest } = splitHeredoc(command);
-		const scan = scanQuotes(head);
+		const scan = scanQuotes(command);
 		if (!scan.balanced) {
 			return {
 				safe: false,
@@ -238,7 +233,17 @@ export function sanitizeShellCommand(
 		if (scan.doubled.some((d) => d.includes("`"))) {
 			return { safe: false, reason: "Command substitution via backticks is not allowed" };
 		}
-		if (rest.trim() !== "") return { safe: false, reason: NEWLINE_REASON };
+		let body = "";
+		if (scan.heredoc) {
+			// The marker is real (outside quotes and comments). Its body must end with its own
+			// terminator line, and nothing may follow that line: that would be another command.
+			const lines = command.slice(scan.headEnd + 1).split("\n");
+			const word = scan.heredoc.word;
+			const end = scan.headEnd >= command.length ? -1 : lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
+			if (end < 0) return { safe: false, reason: HEREDOC_REASON };
+			if (lines.slice(end + 1).join("\n").trim() !== "") return { safe: false, reason: NEWLINE_REASON };
+			body = `\n${lines.slice(0, end + 1).join("\n")}`;
+		}
 		text = scan.outside + body;
 	}
 
