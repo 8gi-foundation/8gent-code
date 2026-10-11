@@ -9,8 +9,9 @@
  */
 import { existsSync, rmSync, unlinkSync } from "node:fs";
 
-const ATTEMPTS = 10;
-const WAIT_MS = 50;
+// 5 s in all: a fresh SQLite file on a Windows runner can stay locked (scanner, handle teardown) for seconds.
+const ATTEMPTS = 50;
+const WAIT_MS = 100;
 
 function pause(ms: number): void {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
