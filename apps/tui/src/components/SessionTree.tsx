@@ -16,7 +16,11 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useMemo, useState } from "react";
-import type { TreeEntry, TreeNode } from "../../../../packages/eight/session-store.js";
+import {
+	type TreeEntry,
+	type TreeNode,
+	cleanName,
+} from "../../../../packages/eight/session-store.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
 
@@ -85,7 +89,8 @@ export function flattenTree(roots: TreeNode[], leafId: string | null): TreeRow[]
 			depth,
 			kind: node.entry.type,
 			role,
-			preview: preview.replace(/\s+/g, " ").trim(),
+			// One line, and no escape sequence from a message reaches the terminal.
+			preview: cleanName(preview.replace(/\s+/g, " ")).trim(),
 			onPath: onPath.has(node.entry.id),
 			isLeaf: node.entry.id === leafId,
 			branchStart,

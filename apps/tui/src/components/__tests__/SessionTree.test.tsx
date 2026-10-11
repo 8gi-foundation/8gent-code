@@ -102,3 +102,16 @@ describe("SessionTreeView", () => {
 		expect(out).toContain("continue here");
 	});
 });
+
+test("previews with terminal escapes and newlines render as one clean line", () => {
+	const s = SessionStore.create({ cwd: dir }, dir);
+	s.append({ role: "user", content: "hi\u001b[2J\u001b]0;pwn\u0007\nthere\r" });
+	const rows = flattenTree(s.tree(), s.leafId);
+	expect(rows[0].preview).toBe("hi[2J]0;pwn there");
+	const out = renderToString(<SessionTreeView rows={rows} active={0} userOnly={false} />, {
+		columns: 100,
+	});
+	expect(out.replace(/\u001b\[[0-9;]*m/g, "")).not.toMatch(
+		/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/,
+	);
+});

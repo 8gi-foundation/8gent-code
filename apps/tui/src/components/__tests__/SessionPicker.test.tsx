@@ -221,3 +221,23 @@ test("ago", () => {
 	expect(ago(new Date(NOW - 3 * 3_600_000).toISOString(), NOW)).toBe("3h");
 	expect(ago(new Date(NOW - 50 * 3_600_000).toISOString(), NOW)).toBe("2d");
 });
+
+test("names and folders with terminal escapes render without control characters", () => {
+	const evil: SessionListItem = {
+		id: "evil1",
+		name: "\u001b]0;pwn\u0007\u001b[2Jok",
+		cwd: "/w/\u001b[31mred",
+		createdAt: "x",
+		lastActiveAt: new Date(NOW).toISOString(),
+		messageCount: 1,
+		format: "tree",
+		file: "x",
+	};
+	const state = { ...initialPickerState("all"), mode: "confirm-delete" as const };
+	const out = renderToString(<SessionPickerView state={state} rows={[evil]} now={NOW} />, {
+		columns: 140,
+	});
+	const raw = out.replace(/\u001b\[[0-9;]*m/g, ""); // Ink's own colour codes
+	expect(raw).not.toMatch(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/);
+	expect(raw).toContain("]0;pwn[2Jok");
+});

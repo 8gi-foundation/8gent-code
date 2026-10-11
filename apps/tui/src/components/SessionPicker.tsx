@@ -24,7 +24,7 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useMemo, useReducer } from "react";
-import { normalizeCwd } from "../../../../packages/eight/session-store.js";
+import { cleanName, normalizeCwd } from "../../../../packages/eight/session-store.js";
 import type { SessionListItem } from "../../../../packages/eight/session-store.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
@@ -291,7 +291,8 @@ export function SessionPickerView({
 			) : (
 				shown.map((s, i) => {
 					const isActive = start + i === state.active;
-					const label = s.name ?? `untitled ${s.id}`;
+					// Names and folders come from files: no escape sequence reaches the terminal.
+					const label = cleanName(s.name ?? `untitled ${s.id}`);
 					return (
 						<Box key={s.id}>
 							<Text color={isActive ? t.orange : t.textTertiary}>{isActive ? "◆ " : "○ "}</Text>
@@ -303,7 +304,7 @@ export function SessionPickerView({
 							{state.scope === "all" ? (
 								<Text color={t.textTertiary} wrap="truncate-start">
 									{" "}
-									{s.cwd}
+									{cleanName(s.cwd)}
 								</Text>
 							) : null}
 						</Box>
@@ -322,7 +323,7 @@ export function SessionPickerView({
 			) : null}
 			{state.mode === "confirm-delete" && selected ? (
 				<Text color={t.orange}>
-					Delete "{selected.name ?? selected.id}"? y / n (moved to trash)
+					Delete "{cleanName(selected.name ?? selected.id)}"? y / n (moved to trash)
 				</Text>
 			) : null}
 			<Box>
