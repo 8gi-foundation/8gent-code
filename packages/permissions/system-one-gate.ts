@@ -601,6 +601,27 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain run of the project's own script inside the workspace, with
+		// only workspace or /tmp paths in its environment and arguments, whose
+		// source (and local imports) spawns, fetches and deletes nothing (#3937).
+		try {
+			const { runInProject } = await import("./s1-run-in-project");
+			const run = runInProject(command, cwd);
+			if (run.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: run.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {
