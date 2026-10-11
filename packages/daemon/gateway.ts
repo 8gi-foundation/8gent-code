@@ -571,7 +571,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 		fetch(req, server) {
 			// Before any route or upgrade: refuse web pages that are not ours
 			// (cross-site WebSocket hijack) and foreign Host headers (DNS rebinding).
-			const refused = guardRequest(req, hostname);
+			const refused = guardRequest(req, hostname, config.port);
 			if (refused) return refused;
 
 			const url = new URL(req.url);

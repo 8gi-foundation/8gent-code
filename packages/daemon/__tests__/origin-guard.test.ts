@@ -25,18 +25,27 @@ describe("origin and host rules", () => {
 		expect(() => assertSafeBind("127.0.0.1", null)).not.toThrow();
 	});
 
-	it("allows native clients, loopback pages and eight:// pages; refuses the rest", () => {
-		expect(originAllowed(null, {})).toBe(true);
-		expect(originAllowed("http://localhost:3000", {})).toBe(true);
-		expect(originAllowed("http://127.0.0.1:18789", {})).toBe(true);
-		expect(originAllowed("eight://newtab", {})).toBe(true);
-		expect(originAllowed("https://evil.example", {})).toBe(false);
-		expect(originAllowed("http://localhost.evil.example", {})).toBe(false);
-		expect(originAllowed("null", {})).toBe(false);
-		expect(originAllowed("file://", {})).toBe(false);
-		expect(
-			originAllowed("https://os.8gi.org", { EIGHT_DAEMON_ALLOWED_ORIGINS: "https://os.8gi.org" }),
-		).toBe(true);
+	it("allows native clients and the daemon's own pages; refuses the rest", () => {
+		expect(originAllowed(null, 18789, {})).toBe(true);
+		// Pages the daemon serves itself: loopback on its own port.
+		expect(originAllowed("http://127.0.0.1:18789", 18789, {})).toBe(true);
+		expect(originAllowed("http://localhost:18789", 18789, {})).toBe(true);
+		// A local dev server on another port is refused by default.
+		expect(originAllowed("http://localhost:3000", 18789, {})).toBe(false);
+		expect(originAllowed("http://127.0.0.1", 18789, {})).toBe(false);
+		// The 8gent Browser sends no Origin, so no eight:// page is trusted.
+		expect(originAllowed("eight://newtab", 18789, {})).toBe(false);
+		expect(originAllowed("eight://evil", 18789, {})).toBe(false);
+		expect(originAllowed("https://evil.example", 18789, {})).toBe(false);
+		expect(originAllowed("http://localhost.evil.example:18789", 18789, {})).toBe(false);
+		expect(originAllowed("null", 18789, {})).toBe(false);
+		expect(originAllowed("file://", 18789, {})).toBe(false);
+		// Exact allowlist entries only.
+		const env = { EIGHT_DAEMON_ALLOWED_ORIGINS: "https://os.8gi.org,http://localhost:3000" };
+		expect(originAllowed("https://os.8gi.org", 18789, env)).toBe(true);
+		expect(originAllowed("http://localhost:3000", 18789, env)).toBe(true);
+		expect(originAllowed("https://os.8gi.org.evil.example", 18789, env)).toBe(false);
+		expect(originAllowed("http://localhost:3001", 18789, env)).toBe(false);
 	});
 
 	it("allows loopback Host headers and refuses rebinding names", () => {
@@ -55,7 +64,7 @@ describe("origin and host rules", () => {
 		const req = new Request("http://127.0.0.1:18789/", {
 			headers: { origin: "https://evil.example" },
 		});
-		expect(guardRequest(req, "127.0.0.1", {})?.status).toBe(403);
+		expect(guardRequest(req, "127.0.0.1", 18789, {})?.status).toBe(403);
 	});
 });
 
@@ -94,6 +103,13 @@ describe("the real gateway", () => {
 			},
 		});
 		expect(res.status).toBe(403);
+	});
+
+	it("refuses a local dev server on another port and an eight:// page with 403", async () => {
+		for (const origin of ["http://localhost:3000", "eight://evil"]) {
+			const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { origin } });
+			expect(res.status).toBe(403);
+		}
 	});
 
 	it("refuses a rebinding Host header with 403", async () => {

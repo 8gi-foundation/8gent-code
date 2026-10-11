@@ -5,9 +5,12 @@
  * in any browser on this machine can open ws://127.0.0.1:18789, and a DNS
  * rebinding page can reach the HTTP routes. So every request is checked:
  *
- *   Origin  absent (native clients: Bun, Node, Swift, the 8gent Browser main
- *           process), a loopback http(s) origin, an eight:// page, or one
- *           listed in EIGHT_DAEMON_ALLOWED_ORIGINS. Anything else gets 403.
+ *   Origin  absent (native clients: Bun, Node, Swift, and the 8gent Browser,
+ *           whose daemon client runs in the main process and sends none), a
+ *           page the daemon serves itself (loopback origin on the daemon's own
+ *           port, e.g. the huddle stage), or an exact entry in
+ *           EIGHT_DAEMON_ALLOWED_ORIGINS. Anything else gets 403, including
+ *           a local dev server on another port and any eight:// page.
  *   Host    a loopback name, the bound address, or one listed in
  *           EIGHT_DAEMON_ALLOWED_HOSTS. Anything else gets 403.
  *
@@ -54,6 +57,7 @@ function hostOnly(hostHeader: string): string {
 
 export function originAllowed(
 	origin: string | null,
+	daemonPort: number,
 	env: Record<string, string | undefined> = process.env,
 ): boolean {
 	if (origin === null) return true;
@@ -65,9 +69,9 @@ export function originAllowed(
 	} catch {
 		return false; // includes the opaque "null" origin of sandboxed and file:// pages
 	}
-	if (url.protocol === "eight:") return true;
 	if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-	return isLoopbackHost(url.hostname);
+	const port = url.port || (url.protocol === "https:" ? "443" : "80");
+	return isLoopbackHost(url.hostname) && port === String(daemonPort);
 }
 
 export function hostAllowed(
@@ -86,9 +90,10 @@ export function hostAllowed(
 export function guardRequest(
 	req: Request,
 	bindHost: string,
+	daemonPort: number,
 	env: Record<string, string | undefined> = process.env,
 ): Response | null {
-	if (!originAllowed(req.headers.get("origin"), env)) {
+	if (!originAllowed(req.headers.get("origin"), daemonPort, env)) {
 		return new Response("forbidden: origin not allowed", { status: 403 });
 	}
 	if (!hostAllowed(req.headers.get("host"), bindHost, env)) {

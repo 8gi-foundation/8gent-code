@@ -34,11 +34,12 @@ Two set-ups are covered: macOS (James) and Windows (Artale).
 - It listens on `127.0.0.1` only, so nothing on your network can reach it.
   `DAEMON_HOSTNAME=0.0.0.0` widens that, and the daemon refuses to start that
   way unless it has a token (`daemon.authToken` in `~/.8gent/config.json`).
-- Web pages are refused. A request carrying an `Origin` header is only served
-  when it comes from `localhost`, `127.0.0.1` or an `eight://` page; every
-  other site gets 403. Native programs (8gent Browser itself, the TUI, scripts)
-  send no `Origin` and are served. `EIGHT_DAEMON_ALLOWED_ORIGINS` (comma list)
-  adds an origin on purpose.
+- Web pages are refused. Native programs (8gent Browser, the TUI, scripts)
+  send no `Origin` and are served. A request that does carry an `Origin` is
+  only served when it is a page the daemon serves itself (`localhost` or
+  `127.0.0.1` on the daemon's own port); everything else gets 403, including a
+  local dev server on another port. `EIGHT_DAEMON_ALLOWED_ORIGINS` (comma
+  list, exact match such as `http://localhost:3000`) adds an origin on purpose.
 - The `Host` header must be a loopback name or the bound address, which stops
   DNS rebinding. `EIGHT_DAEMON_ALLOWED_HOSTS` adds a host name on purpose.
 
