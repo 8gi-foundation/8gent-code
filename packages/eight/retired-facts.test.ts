@@ -80,7 +80,7 @@ describe("RetiredFacts (#3811)", () => {
 	test("a 150k-digit run and a flood of tokens stay fast and bounded", () => {
 		const r = new RetiredFacts();
 		r.noteRead("/w/N.md", `obsolete: 111\n${"7".repeat(150_000)}\n${"1 ".repeat(100_000)}`);
-		let t0 = performance.now();
+		const t0 = performance.now();
 		expect(r.warn("/w/o.txt", "9".repeat(150_000))).toBe("");
 		const flood = Array.from({ length: 60_000 }, (_, i) => `obsolete ${100000 + i}`).join("\n");
 		const r2 = new RetiredFacts();
