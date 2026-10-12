@@ -5,6 +5,7 @@
  * Uses `gh` CLI for GitHub API and `git` for local operations.
  */
 
+import { safeBunFlags } from "../../../core/bun-flags";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -93,7 +94,7 @@ function validateCommittedCode(cwd: string): {
 
 		// Basic syntax: try to transpile with Bun
 		try {
-			execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+			execSync(`bun ${safeBunFlags().map((f) => JSON.stringify(f)).join(" ")} build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
 				cwd,
 				encoding: "utf-8",
 				timeout: 15000,

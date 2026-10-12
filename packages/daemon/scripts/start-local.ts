@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null
 /**
  * Canonical launcher for the local-mode daemon.
  *

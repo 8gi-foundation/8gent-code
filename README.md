@@ -171,6 +171,8 @@ Prefer no colour? `NO_COLOR=1 8gent`. See [docs/guides/no-color.md](docs/guides/
 
 ## Install
 
+New here, or coming from another terminal coding tool? Start with the [user guide](docs/user/README.md) (Windows first).
+
 Two ways to install. The **npm** path is smallest but needs [Bun](https://bun.sh) on your machine. The **standalone binary** embeds the Bun runtime, so it needs nothing else.
 
 ### npm (all platforms, needs Bun)

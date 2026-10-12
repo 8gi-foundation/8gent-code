@@ -458,18 +458,26 @@ describe("guards around imported code", () => {
 			server.stop(true);
 		}
 		expect(requests).toEqual([]);
-		// Every launcher passes the flag.
+		// Every launcher passes the flag: the shared safeBunFlags() (#4013) leads with it.
 		const repo = path.join(import.meta.dir, "..", "..");
+		const SAFE = "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null";
+		const { safeBunFlags } = await import("../core/bun-flags");
+		expect(safeBunFlags("darwin")[0]).toBe("--no-install");
+		expect(safeBunFlags("win32")[0]).toBe("--no-install");
 		const cli = readFileSync(path.join(repo, "bin", "8gent.ts"), "utf8");
-		expect(cli.split("\n")[0]).toBe(
-			"#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null",
-		);
-		expect(cli).toContain('["--no-install", "run", tuiPath');
+		expect(cli.split("\n")[0]).toBe(SAFE);
+		expect(cli).toContain('[...safeBunFlags(), "run", tuiPath');
+		expect(cli).toContain('[...safeBunFlags(), "run", benchmarkPath');
+		expect(cli).toContain('[...safeBunFlags(), "run", demoPath');
+		expect(cli).not.toMatch(/spawn\("bun", \["run"/);
 		const wrapper = readFileSync(path.join(repo, "bin", "8gent-run.js"), "utf8");
 		expect(wrapper).toContain(
-			'const SAFE_BUN_FLAGS = ["--no-install", "--no-env-file", `--config=${devNull}`];',
+			'const SAFE_BUN = ["--no-install", "--no-env-file", `--config=${bunfig}`];',
 		);
-		expect(wrapper).toContain('spawnSync("bun", [...SAFE_BUN_FLAGS, cli');
+		expect(wrapper).toContain('spawnSync("bun", [...SAFE_BUN, cli');
+		expect(readFileSync(path.join(repo, "bin", "8gent-cli.sh"), "utf8")).toContain(
+			"SAFE_BUN=(--no-install --no-env-file",
+		);
 		// Bun accepts exactly those flags (a typo would make every launch fail).
 		const probe = Bun.spawnSync([
 			process.execPath,
@@ -481,18 +489,28 @@ describe("guards around imported code", () => {
 		]);
 		expect(probe.exitCode).toBe(0);
 		expect(probe.stdout.toString()).toContain("--no-install");
-		expect(cli).toContain('["--no-install", "run", benchmarkPath');
-		expect(cli).toContain('["--no-install", "run", demoPath');
-		expect(cli).not.toMatch(/spawn\("bun", \["run"/);
 		expect(
 			readFileSync(path.join(repo, "apps", "tui", "src", "index.tsx"), "utf8").split("\n")[0],
-		).toBe("#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null");
+		).toBe(SAFE);
 		expect(readFileSync(path.join(repo, "packages", "cron", "index.ts"), "utf8")).toContain(
-			'["bun", "--no-install", "run", "bin/8gent.ts"',
+			'Bun.spawn(["bun", ...safeBunFlags(), "run", cli',
 		);
-		expect(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).scripts.test).toMatch(
-			/^bun --no-install test /,
+		// The CI and release gates check the exact line, with --no-install.
+		for (const gate of [
+			".github/workflows/ci.yml",
+			".github/workflows/release.yml",
+			".github/docker/linux-ci/run.sh",
+		]) {
+			expect(readFileSync(path.join(repo, gate), "utf8")).toContain(
+				`grep -qxF ${gate.endsWith(".sh") ? "'" : '"'}${SAFE}`,
+			);
+		}
+		expect(readFileSync(path.join(repo, "scripts", "build-finalize.js"), "utf8")).toContain(
+			`const SAFE_SHEBANG = "${SAFE}";`,
 		);
+		const pkg = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
+		expect(pkg.scripts.test).toMatch(/^bun --no-install test /);
+		expect(pkg.scripts.tui).toMatch(/^bun --no-install /);
 		expect(readFileSync(path.join(repo, "scripts", "test-sharded.sh"), "utf8")).toContain(
 			"bun --no-install test",
 		);

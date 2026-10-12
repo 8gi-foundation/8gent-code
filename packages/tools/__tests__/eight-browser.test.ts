@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
+import { curlToLoopback } from "../../permissions/s1-curl-loopback";
 import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
@@ -11,6 +12,7 @@ import {
 } from "../../permissions/tui-approval-channel";
 import {
 	type BrowserCall,
+	LOCAL_SERVER_CURL_NOTE,
 	_setProfileHomeForTest,
 	_setResolverForTest,
 	blockedForProfile,
@@ -663,6 +665,37 @@ describe("browserWithheldNote (a withheld browser says why and how to get it, #3
 		expect(note).toMatch(/loopback|private/);
 		expect(note).not.toContain("\u2014");
 	});
+	test("carries the local-server curl rules, the only copy a local text-tool session sees (#3941 follow-up)", () => {
+		const note = browserWithheldNote({}) ?? "";
+		expect(note).toContain(LOCAL_SERVER_CURL_NOTE);
+		expect(note).toContain("under .tmp/");
+		expect(note).toContain("never /tmp");
+		expect(note).toContain("Do not pass -L");
+		expect(note).toMatch(/no pipes, ; or &&/);
+	});
+	test("the example curl in the note passes System One's loopback lane as written", () => {
+		const example = /\((curl [^)]+)\)/.exec(LOCAL_SERVER_CURL_NOTE)?.[1];
+		expect(example).toBeDefined();
+		const ws = realpathSync(mkdtempSync(join(tmpdir(), "curl-note-")));
+		// The lane refuses when a proxy variable or a curlrc could redirect curl; isolate both, as
+		// permissions/s1-curl-loopback.test.ts does, so this checks the advice and not the runner.
+		const keys = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "HOME", "CURL_HOME", "XDG_CONFIG_HOME"];
+		const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+		for (const k of keys) Reflect.deleteProperty(process.env, k);
+		process.env.HOME = ws;
+		try {
+			const cmd = (example as string).replace("URL", "http://127.0.0.1:5173/login");
+			expect(curlToLoopback(cmd, ws).ok).toBe(true);
+			// The /tmp form the model kept choosing in the pilot does not pass; that is why the note says so.
+			expect(curlToLoopback("curl -s -c /tmp/cj.txt http://127.0.0.1:5173/", ws).ok).toBe(false);
+		} finally {
+			for (const k of keys) {
+				if (saved[k] === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = saved[k];
+			}
+			rmSync(ws, { recursive: true, force: true });
+		}
+	});
 	test("a bad profile name is still withheld; a valid one offers the tools so no note", () => {
 		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "../x" })).not.toBeNull();
 		expect(browserWithheldNote({ EIGHT_BROWSER_PROFILE: "eightgent" })).toBeNull();
@@ -1055,6 +1088,18 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 	const b64 = (t: string) => Buffer.from(t).toString("base64");
 	const hex = (t: string) => Buffer.from(t).toString("hex");
 	const refused = [
+		"cat ~/.8gent/browser-shots/last.png",
+		"cat /Users/x/.8gent/browser-shots/last.png",
+		"cat ~/.8gent/browser-history.json",
+		"cat ~/.8gent/./browser-history.json",
+		"cat ~/.8gent/x/../browser-shots/last.png",
+		"echo .8gent; cat ~/.8gent/browser-history.json",
+		"cd ~/.8gent && cat ./browser-history.json",
+		"cd ~/.8gent/rishi-pilot && cat ../browser-history.json",
+		"ln -s ~/.8gent l && cat l/browser-history.json",
+		"cat ~/.8gent/rishi-pilot/runs/x/browser-op-practice/../../../../browser-history.json",
+		"cat ~/.8gent//browser-shots/a",
+		"cat ~/.8gent/%62rowser-history.json",
 		"cat ~/.8gent/browser-control.token",
 		"cat $HOME/.8gent/browser-control.token",
 		"cat /Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
@@ -1122,6 +1167,8 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		// #3589: pulling a csrf token out of a login page is not a glob over the token file
 		"grep -o 'name=csrf value=[a-f0-9]*' page.html",
 		"curl -s -c jar.txt http://127.0.0.1:8080/ | grep -o 'value=[a-f0-9]*'",
+		// pilot run dir lives under ~/.8gent and is named after the scenario
+		"curl -s -m 10 -c /Users/x/.8gent/rishi-pilot/runs/2026-10-11_194806/browser-op-practice/work/cookie.txt -o /Users/x/.8gent/rishi-pilot/runs/2026-10-11_194806/browser-op-practice/work/login.html http://127.0.0.1:57420/",
 	];
 	for (const cmd of allowed)
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
