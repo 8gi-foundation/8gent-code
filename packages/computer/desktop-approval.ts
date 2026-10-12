@@ -76,30 +76,68 @@ function decodedLength(body: string, levels: number): number {
 	}
 }
 
-/** "text": "..." as a model writes it in a fenced tool_call. */
-const PLAIN_TEXT_ARG = /"text"(\s*):(\s*)"((?:[^"\\]|\\.)*)"/g;
-/** \"text\":\"...\" when the arguments are themselves a JSON string. */
-const ESCAPED_TEXT_ARG = /\\"text\\"(\s*):(\s*)\\"((?:[^"\\]|\\\\\\"|\\\\\\\\|\\\\[^"\\])*)\\"/g;
+/** A string body in either quote style: group 1 double-quoted, group 2 single-quoted. */
+const QUOTED = String.raw`(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`;
+/** A key: value pair at the first level, either quote style for each ("text": "..", 'Text': '..'). */
+const KEY_VALUE = new RegExp(`${QUOTED}(\\s*):(\\s*)${QUOTED}`, "g");
+/** The same pair when the arguments are themselves a JSON string: \"text\":\"...\". */
+const BODY2 = String.raw`(?:[^"\\]|\\\\\\"|\\\\\\\\|\\\\[^"\\])*`;
+const ESCAPED_KEY_VALUE = new RegExp(String.raw`\\"(${BODY2})\\"(\s*):(\s*)\\"(${BODY2})\\"`, "g");
+/** text="..." / text='...', the python call form desktop_type(text="..."). */
+const KWARG_TEXT = new RegExp(String.raw`\btext(\s*)=(\s*)${QUOTED}`, "gi");
 /** <parameter=text>...</parameter>, the native <tool_call> form. */
-const XML_TEXT_ARG = /<parameter=text>([\s\S]*?)<\/parameter>/g;
+const XML_TEXT_ARG = /<parameter=text>([\s\S]*?)<\/parameter>/gi;
+/** Names a tool whose text is typed into another app. */
+const NAMES_DESKTOP_TOOL = /desktop_(?:act|type)/i;
+
+/** A key as the model wrote it, decoded: "Text", a \\u-escaped "text" and 'text' are all `text`. */
+function isTextKey(raw: string, levels: number): boolean {
+	try {
+		let k = raw;
+		for (let i = 0; i < levels; i++) k = JSON.parse(`"${k}"`) as string;
+		return k.toLowerCase() === "text";
+	} catch {
+		return raw.replace(/\\(.)/g, "$1").toLowerCase() === "text";
+	}
+}
+
+/** Length of a quoted body: exact for JSON, one per escape otherwise. */
+function quotedLength(double: string | undefined, single: string | undefined): number {
+	if (double !== undefined) return decodedLength(double, 1);
+	return (single ?? "").replace(/\\(?:x[0-9a-f]{2}|u[0-9a-f]{4}|.)/gi, "_").length;
+}
 
 /**
- * Typed text out of a stored message (8SO, #4057). A local model writes its
- * tool calls into the reply, so a desktop_act/desktop_type call would put the
- * typed text in the session file and replay it on --continue. In any string
- * naming one of those tools, every `text` value becomes its length.
+ * Every `text` argument in a string becomes its length, in each shape a
+ * model writes a call: JSON or python quotes, any key case or escape, a JSON
+ * string of arguments, text="..." and <parameter=text>.
  */
-export function redactTypedText(s: string): string {
-	if (!/desktop_(?:act|type)/.test(s)) return s;
+function redactTextArgs(s: string): string {
 	return s
-		.replace(
-			ESCAPED_TEXT_ARG,
-			(_m, a: string, b: string, body: string) =>
-				`\\"textLength\\"${a}:${b}${decodedLength(body, 2)}`,
+		.replace(ESCAPED_KEY_VALUE, (m, key: string, a: string, b: string, body: string) =>
+			isTextKey(key, 2) ? `\\"textLength\\"${a}:${b}${decodedLength(body, 2)}` : m,
 		)
 		.replace(
-			PLAIN_TEXT_ARG,
-			(_m, a: string, b: string, body: string) => `"textLength"${a}:${b}${decodedLength(body, 1)}`,
+			KEY_VALUE,
+			(
+				m,
+				kd: string | undefined,
+				ks: string | undefined,
+				a: string,
+				b: string,
+				vd?: string,
+				vs?: string,
+			) => {
+				const q = kd !== undefined ? '"' : "'";
+				return isTextKey(kd ?? ks ?? "", kd !== undefined ? 1 : 0)
+					? `${q}textLength${q}${a}:${b}${quotedLength(vd, vs)}`
+					: m;
+			},
+		)
+		.replace(
+			KWARG_TEXT,
+			(_m, a: string, b: string, vd?: string, vs?: string) =>
+				`textLength${a}=${b}${quotedLength(vd, vs)}`,
 		)
 		.replace(
 			XML_TEXT_ARG,
@@ -107,14 +145,73 @@ export function redactTypedText(s: string): string {
 		);
 }
 
-/** redactTypedText on every string inside a message's content. */
+/**
+ * Typed text out of a stored message (8SO, #4057). A local model writes its
+ * tool calls into the reply, so a desktop_act/desktop_type call would put the
+ * typed text in the session file and replay it on --continue. In any string
+ * naming one of those tools, every `text` argument becomes its length.
+ */
+export function redactTypedText(s: string): string {
+	return NAMES_DESKTOP_TOOL.test(s) ? redactTextArgs(s) : s;
+}
+
+/** The fields a structured tool-call part keeps its arguments in. */
+const ARG_FIELDS = ["input", "args", "arguments", "parameters"] as const;
+
+function isDesktopTextTool(v: Record<string, unknown>): boolean {
+	return [v.toolName, v.name, v.tool].some(
+		(n) => typeof n === "string" && DESKTOP_TEXT_TOOLS.has(n.toLowerCase()),
+	);
+}
+
+/** `text` (any case) in an argument object becomes textLength. */
+function redactArgObject(o: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [k, x] of Object.entries(o)) {
+		if (k === "__proto__") continue;
+		if (k.toLowerCase() === "text") {
+			out.textLength = typeof x === "string" ? x.length : (JSON.stringify(x) ?? "").length;
+		} else out[k] = x;
+	}
+	return out;
+}
+
+/** Arguments as an object or a JSON string; anything else gets the string rules. */
+function redactArgs(v: unknown): unknown {
+	if (typeof v === "string") {
+		try {
+			const parsed: unknown = JSON.parse(v);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				return JSON.stringify(redactArgObject(parsed as Record<string, unknown>));
+			}
+		} catch {
+			/* not JSON: fall through */
+		}
+		return redactTextArgs(v);
+	}
+	if (v && typeof v === "object" && !Array.isArray(v))
+		return redactArgObject(v as Record<string, unknown>);
+	return v;
+}
+
+/**
+ * redactTypedText on every string inside a message's content, and for a
+ * structured tool-call part naming a desktop text tool ({toolName|name|tool,
+ * input|args|arguments|parameters}), the text in its arguments.
+ */
 export function redactTypedTextInMessage<T extends { role: string; content: unknown }>(m: T): T {
 	const walk = (v: unknown, depth: number): unknown => {
 		if (typeof v === "string") return redactTypedText(v);
 		if (depth > 32 || v === null || typeof v !== "object") return v;
 		if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+		const obj = v as Record<string, unknown>;
+		const desktop = isDesktopTextTool(obj);
 		const out: Record<string, unknown> = {};
-		for (const [k, x] of Object.entries(v)) out[k] = walk(x, depth + 1);
+		for (const [k, x] of Object.entries(obj)) {
+			if (k === "__proto__") continue;
+			const field = desktop && (ARG_FIELDS as readonly string[]).includes(k) ? redactArgs(x) : x;
+			out[k] = walk(field, depth + 1);
+		}
 		return out;
 	};
 	return { ...m, content: walk(m.content, 0) };
