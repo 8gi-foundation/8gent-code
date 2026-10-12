@@ -30,6 +30,9 @@ const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
+	// The diet ratio below measures what headless trims, so the browser tools local sessions now get by
+	// default (#3785) are left out here and bounded by their own test at the end of this file.
+	EIGHT_BROWSER_LOCAL: "0",
 };
 let home: string;
 let repo: string;
@@ -206,5 +209,18 @@ describe("headless prompt diet", () => {
 		expect(JSON.stringify(second.messages.slice(0, first.messages.length))).toBe(
 			JSON.stringify(first.messages),
 		);
+	}, 60_000);
+
+	test("local sessions get the browser tools headless too, at a bounded cost (#3785)", async () => {
+		const before = await run(true);
+		process.env.EIGHT_BROWSER_LOCAL = "";
+		try {
+			const [withBrowser] = await run(true);
+			const names = (withBrowser.tools ?? []).map((t) => t.function.name);
+			for (const n of ["browser_open", "browser_state", "browser_task", "browser_screenshot"]) expect(names).toContain(n);
+			expect(prefixChars(withBrowser) - prefixChars(before[0])).toBeLessThanOrEqual(2500);
+		} finally {
+			process.env.EIGHT_BROWSER_LOCAL = "0";
+		}
 	}, 60_000);
 });

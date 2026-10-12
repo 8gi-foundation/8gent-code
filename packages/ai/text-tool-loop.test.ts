@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { setDefaultLocalProfile } from "../tools/eight-browser";
 import {
 	cleanDegenerateReply,
 	COMPLETION_CHECK_MESSAGE,
@@ -2665,6 +2666,8 @@ describe("image attachments on tool results (#3641)", () => {
 });
 
 describe("unknownToolResult for a withheld browser tool (#3785)", () => {
+	// An in-process local Agent turn earlier in the run leaves the default local profile set; this case is the withheld one.
+	beforeEach(() => setDefaultLocalProfile(null));
 	test("a browser_* call that is not offered is told why and how to get it", () => {
 		const r = unknownToolResult("browser_open", ["read_file"]);
 		expect(r).toMatch(/^Error/);

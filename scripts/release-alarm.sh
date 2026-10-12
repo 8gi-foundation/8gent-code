@@ -6,7 +6,11 @@
 # workflows call this from a `failure()` job: it opens one P0 issue per
 # workflow and ref, or comments on the open one, with the run link.
 #
-#   release-alarm.sh <workflow-file> <ref> <run-url>
+#   release-alarm.sh <workflow-file> <ref> <run-url> [detail]
+#
+# `detail` replaces the default consequence line when the failure is narrower
+# than the whole release: release.yml passes one when the GitHub Release
+# shipped but the npm channel did not (#3658).
 #
 # Needs GH_TOKEN (issues: write) and REPO (owner/repo). GH overrides the gh
 # binary. Arguments only ever reach gh as separate argv entries, never shell source.
@@ -16,12 +20,13 @@ GH="${GH:-gh}"
 WORKFLOW="${1:?workflow file}"
 REF="${2:?ref}"
 RUN_URL="${3:?run url}"
+DETAIL="${4:-Until this is fixed and the run is re-run, the GitHub Release is not published and the one-line installers keep serving the previous version.}"
 : "${REPO:?REPO=owner/repo}"
 
 TITLE="Release failed: ${WORKFLOW} on ${REF}"
 BODY="${WORKFLOW} failed on ${REF}: ${RUN_URL}
 
-Until this is fixed and the run is re-run, the GitHub Release is not published and the one-line installers keep serving the previous version."
+${DETAIL}"
 
 N=""
 while IFS=$'\t' read -r num title; do

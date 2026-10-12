@@ -104,6 +104,15 @@ describe("slides-to-video join guidance (#3862)", () => {
 		expect(TOOL_CATALOG_SEGMENT).toContain("trailing newline");
 	});
 
+	it("shows the shell recipe: write deck.json, then `8gent deck render deck.json` (pilot media-brief-video, 12 Oct 2026)", () => {
+		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(text).toContain("write deck.json");
+			expect(text).toContain('{"slides":[{"title"');
+			expect(text).toContain("`8gent deck render deck.json out.mp4`");
+			expect(text).toContain("not ffmpeg by hand");
+		}
+	});
+
 	it("is present on the concise path the local TUI uses, within its budget", () => {
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(concise).toContain("segment count equals slide count");
