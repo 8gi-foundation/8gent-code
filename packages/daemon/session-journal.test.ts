@@ -984,16 +984,20 @@ describe("durable turns (#4082)", () => {
 		expect(entry.pendingTurn).toBeUndefined();
 	});
 
-	// POSIX only: asserts the child died of SIGKILL; Windows processes have no signals.
-	test.skipIf(process.platform === "win32")(
-		"a SIGKILLed process's running turn is continued once by the next pool",
+	// Every platform: a second process force-kills the child mid-turn (#4113).
+	test(
+		"a hard-killed process's running turn is continued once by the next pool",
 		async () => {
-			const script = path.join(path.dirname(journalPath), "crash-turn.ts");
+			const dir = path.dirname(journalPath);
+			const script = path.join(dir, "crash-turn.ts");
+			const ready = path.join(dir, "crash-turn.ready");
+			const survived = path.join(dir, "crash-turn.survived");
 			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
 			const journalMod = path.join(import.meta.dir, "session-journal.ts");
 			fs.writeFileSync(
 				script,
-				`import { AgentPool } from ${JSON.stringify(poolPath)};
+				`import { writeFileSync } from "node:fs";
+import { AgentPool } from ${JSON.stringify(poolPath)};
 import { SessionJournal } from ${JSON.stringify(journalMod)};
 const journal = new SessionJournal(${JSON.stringify(journalPath)});
 const pool = new AgentPool({ model: "none", runtime: "ollama", workingDirectory: ${JSON.stringify(root)} }, { journal });
@@ -1001,16 +1005,22 @@ pool.createSession("s_kill", "telegram");
 // A model call that never returns: the daemon dies mid-turn.
 pool.getAgent("s_kill").chat = () => new Promise(() => {});
 pool.chat("s_kill", "write twenty numbered lines to a file, one per tool call");
-process.kill(process.pid, "SIGKILL");
+writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+setTimeout(() => { writeFileSync(${JSON.stringify(survived)}, "1"); process.exit(0); }, 30_000);
 `,
 			);
 			const proc = Bun.spawn([process.execPath, script], {
 				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
 				stdout: "ignore",
-				stderr: "ignore",
+				stderr: "pipe",
 			});
+			await waitForFile(ready, proc);
+			await forceKillFromSecondProcess(proc.pid);
 			await proc.exited;
-			expect(proc.signalCode).toBe("SIGKILL");
+			expect(proc.exitCode).not.toBe(0);
+			if (process.platform !== "win32") expect(proc.signalCode).toBe("SIGKILL");
+			expect(isAlive(proc.pid)).toBe(false);
+			expect(fs.existsSync(survived)).toBe(false);
 
 			const journal = new mod.SessionJournal(journalPath);
 			const [entry] = journal.read();
