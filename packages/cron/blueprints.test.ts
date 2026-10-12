@@ -1,3 +1,4 @@
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -189,10 +190,18 @@ describe("a text slot stays inside the single prompt argument", () => {
 			const run = await mgr.trigger(r.id);
 			expect(run?.status).toBe("completed");
 			const argv = spawn.mock.calls[0][0] as unknown as string[];
-			expect(argv.slice(0, 4)).toEqual(["bun", "run", "bin/8gent.ts", "chat"]);
-			expect(argv[4]).toBe(r.prompt);
-			expect(argv[4]).toContain("--flag");
-			expect(argv.slice(5)).toEqual(["--yes", "--json"]);
+			// Safe Bun flags, then 8gent's own CLI by absolute path (#4013).
+			const flags = safeBunFlags();
+			expect(argv.slice(0, 1 + flags.length)).toEqual(["bun", ...flags]);
+			const rest = argv.slice(1 + flags.length);
+			expect(rest[0]).toBe("run");
+			const cli = eightCliPath();
+			if (cli === undefined) throw new Error("8gent CLI entry not found in this checkout");
+			expect(rest[1]).toBe(cli);
+			expect(rest[2]).toBe("chat");
+			expect(rest[3]).toBe(r.prompt);
+			expect(rest[3]).toContain("--flag");
+			expect(rest.slice(4)).toEqual(["--yes", "--json"]);
 		} finally {
 			spawn.mockRestore();
 		}

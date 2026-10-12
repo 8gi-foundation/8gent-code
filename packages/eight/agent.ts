@@ -65,15 +65,19 @@ import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validati
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
+	CompactionRecorder,
 	type CompressionStage,
 	DEFAULT_PROACTIVE_CONFIG,
 	ProactiveCompression,
 	type ProactiveResult,
+	compactHistory,
+	estimateMessageTokens,
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
 import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
+import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
@@ -89,6 +93,7 @@ import {
 	buildToolCatalogSegment,
 } from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
+import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -107,14 +112,6 @@ import {
 } from "./failover-provider-config";
 import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
-import {
-	type CheckpointEntry,
-	type Summarizer,
-	type AgentState as TwoStageAgentState,
-	TwoStageCompactor,
-	estimateMessageTokens,
-	twoStageCheckpointPrompt,
-} from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
@@ -136,6 +133,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
+import { layoutMeasureLine } from "./layout-measure";
 import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
 import {
 	ObservationPacker,
@@ -184,6 +182,11 @@ import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
+
+/** At most this many steers wait at once (D1); more are refused. */
+export const MAX_STEERS = 8;
+/** Largest steer accepted, in UTF-8 bytes. */
+export const MAX_STEER_BYTES = 16 * 1024;
 
 /**
  * Did the harness refuse this call before it ran (#3409)? Decided from the
@@ -291,11 +294,20 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
+	/**
+	 * Steering messages (D1), each stamped with the turn it was sent during
+	 * (null: sent while no turn ran). Only the running turn's own steers are
+	 * ever delivered into it.
+	 */
+	private steerQueue: Array<{ text: string; turn: number | null }> = [];
+	/** Id of the turn running now, or null between turns. */
+	private activeTurn: number | null = null;
+	private turnCounter = 0;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
-	private twoStageCompactor: TwoStageCompactor | null = null;
-	private twoStageCheckpoints: CheckpointEntry[] = [];
+	/** Where compactions are recorded (originals stay, undo works); null = not persisted. */
+	private compactionRecorder: CompactionRecorder | null = null;
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
@@ -313,6 +325,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	private turnTask = "";
+	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -406,13 +420,6 @@ export class Agent {
 			};
 		}
 
-		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
-		// rather than replacing it: the legacy single-threshold engine still
-		// guards hard limits; the two-stage path produces cheap mid-pressure
-		// checkpoints so context loss is gradual instead of cliff-edged.
-		// Summariser is a thin wrapper around the active provider's chat client;
-		// constructed lazily on first observe so providerConfig is in scope.
-		this.twoStageCompactor = null;
 
 		// AST index for AST-first retrieval. ensureIndexed returns the build the
 		// ToolExecutor above already started for this folder, so this only
@@ -823,6 +830,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (mm.isToolAllowed(toolName)) return null;
 		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
 	}
+
+	/**
+	 * The one refusal gate for a tool call, on both paths, before the tool runs:
+	 * the active mode's tool set, then YAML PreToolUse hooks. A string refuses
+	 * the call with that message; null lets it run. It only ever refuses: the
+	 * permission policy inside the tools still applies to every call it lets
+	 * through.
+	 */
+	private async refuseToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<string | null> {
+		const modeRefusal = this.modeRefusal(toolName);
+		if (modeRefusal) return modeRefusal;
+		const preResult = await this.hookManager.fire("PreToolUse", {
+			tool: toolName,
+			args,
+			sessionId: this.sessionId,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		if (preResult.blocked) {
+			console.log(`  [BLOCKED] ${toolName} - ${preResult.reason}`);
+			return `Hook blocked tool "${toolName}": ${preResult.reason}`;
+		}
+		return null;
+	}
+
 	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
@@ -890,9 +924,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const step = stepNumber++;
 				const startedAt = Date.now();
 
+				// The refusal gate runs first: a refused call never reaches the
+				// privacy tracker, the start event or a start row in the session
+				// file. Its refusal is still recorded below, as a failed call.
+				const refusal = await this.refuseToolCall(toolName, args);
+
 				// Track file paths for the privacy gate, matching the native path.
 				const toolPath = (args as { path?: unknown }).path;
 				if (
+					!refusal &&
 					typeof toolPath === "string" &&
 					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
 				) {
@@ -900,9 +940,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
 				}
 
-				console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
-				this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
-				this.sessionWriter.writeToolCall(
+				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
+				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
+				if (!refusal) this.sessionWriter.writeToolCall(
 					{
 						toolCallId,
 						name: toolName,
@@ -923,7 +963,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let shown = "";
 				let success = true;
 				try {
-					const refusal = this.modeRefusal(toolName);
 					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
 					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
@@ -1125,6 +1164,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
+				// Steering (D1): delivered after the running tool calls.
+				steer: () => this.drainSteers(),
 			});
 		};
 
@@ -1417,7 +1458,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: this.config.model,
 				baseUrl: this.config.baseUrl,
 			}),
-			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+			async () => {
+				// A new turn: steers left from an earlier turn are stale and are
+				// dropped, never delivered into this one (the caller had its chance
+				// to take them with takeQueuedSteers).
+				const turn = ++this.turnCounter;
+				this.steerQueue = [];
+				this.activeTurn = turn;
+				try {
+					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+				} finally {
+					if (this.activeTurn === turn) this.activeTurn = null;
+				}
+			},
 		);
 	}
 
@@ -1427,7 +1480,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
 	private turnEndNudge(): string | null {
-		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
+		return (
+			verifyNudgeFor(this.turnToolLedger) ??
+			this.executor.retiredTurnEndNudge() ??
+			completionSelfCheckNudge({
+				task: this.turnTask,
+				gitBaseline: this.turnGitBaseline,
+				cwd: this.config.workingDirectory || process.cwd(),
+				ledger: this.turnToolLedger,
+			})
+		);
 	}
 
 	private async runTurn(
@@ -1439,6 +1501,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnTask = userMessage;
+		this.turnGitBaseline = asksForCommit(userMessage)
+			? gitSnapshot(this.config.workingDirectory || process.cwd())
+			: null;
 		// write_file may open each deliverable once per turn (#3107).
 		this.executor.beginTurn();
 
@@ -1467,6 +1533,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
 				finishReason: "other",
 			});
+			// #3823: a model that sees the attachment never called read_image in 2 of 5
+			// design-mockup-practice runs (incl. the latest), so the measured layout
+			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
+			// over on the attach path too. Bounded, model-free, empty on any failure.
+			try {
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				if (measured) {
+					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+					// read_image on the same file this turn must not repeat the block.
+					this.executor.markLayoutSent(measured);
+				}
+			} catch {
+				// layout hints are best-effort; the image itself is already attached
+			}
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
@@ -1836,12 +1916,81 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				chatStartTime,
 				textForAgent,
 			});
+			await this.readServerContextWindow();
+			await this.compactIfNeeded(providerConfig);
 			if (sessionWatchdog) {
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
 			}
 			return textResult;
 		}
+
+		// What an allowed native tool call starts with (see gateToolCall below).
+		const nativeToolSteps = new Map<string, number | undefined>();
+		const startAllowedTool = async (event: {
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			stepNumber?: number;
+		}) => {
+			await this.hookManager.executeHooks("beforeTool", {
+				sessionId: this.sessionId,
+				tool: event.toolName,
+				toolInput: event.args,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			});
+
+			// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
+			const toolPath = event.args?.path as string | undefined;
+			if (
+				toolPath &&
+				["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
+			) {
+				this.recentFilePaths.push(toolPath);
+				// Keep bounded - only last 20 paths
+				if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+
+				const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+				if (gate.shouldForceLocal) {
+					const fallback = forceLocalModel(providerConfig.name);
+					if (fallback) {
+						console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+						console.log(
+							`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
+						);
+						providerConfig.name = fallback.provider as typeof providerConfig.name;
+						providerConfig.model = fallback.model;
+						// The forced-local provider resolves its own endpoint and key:
+						// the session's belong to the provider it is leaving (#3261).
+						providerConfig.apiKey = undefined;
+						providerConfig.baseURL = undefined;
+						providerConfig.headers = undefined;
+					}
+				}
+			}
+
+			console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
+
+			this.events.onToolStart?.({
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				args: event.args,
+				stepNumber: event.stepNumber,
+			});
+
+			this.sessionWriter.writeToolCall(
+				{
+					toolCallId: event.toolCallId,
+					name: event.toolName,
+					arguments: event.args,
+					success: true,
+					durationMs: 0,
+					startedAt: new Date().toISOString(),
+				},
+				undefined,
+				event.stepNumber,
+			);
+		};
 
 		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
@@ -1862,79 +2011,27 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
 			tools: effectiveTools,
+			// Steering (D1): delivered after the running tool calls.
+			steer: () => this.drainSteers(),
 
-			onToolCallStart: async (event) => {
-				const modeRefusal = this.modeRefusal(event.toolName);
-				if (modeRefusal) throw new Error(modeRefusal);
-				await this.hookManager.executeHooks("beforeTool", {
-					sessionId: this.sessionId,
-					tool: event.toolName,
-					toolInput: event.args,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
+			// Refusals live in the gate, inside each tool's execute: the SDK
+			// swallows a throw from onToolCallStart, so one there never stopped
+			// a call.
+			// The gate runs first; everything a call starts (beforeTool hooks, the
+			// privacy tracker, onToolStart, the session start row) happens only
+			// once it is allowed. onToolCallStart, which the SDK fires before
+			// execute, only remembers the step number for it.
+			gateToolCall: async (event) => {
+				const refusal = await this.refuseToolCall(event.toolName, event.args);
+				const stepNumber = nativeToolSteps.get(event.toolCallId);
+				nativeToolSteps.delete(event.toolCallId);
+				if (refusal) return refusal;
+				await startAllowedTool({ ...event, stepNumber });
+				return null;
+			},
 
-				// Fire YAML PreToolUse hooks - if any hook blocks, skip the tool
-				const preResult = await this.hookManager.fire("PreToolUse", {
-					tool: event.toolName,
-					args: event.args,
-					sessionId: this.sessionId,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
-				if (preResult.blocked) {
-					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
-					throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
-				}
-
-				// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
-				const toolPath = event.args?.path as string | undefined;
-				if (
-					toolPath &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
-				) {
-					this.recentFilePaths.push(toolPath);
-					// Keep bounded - only last 20 paths
-					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-
-					const gate = privacyGate(this.recentFilePaths, providerConfig.name);
-					if (gate.shouldForceLocal) {
-						const fallback = forceLocalModel(providerConfig.name);
-						if (fallback) {
-							console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
-							console.log(
-								`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
-							);
-							providerConfig.name = fallback.provider as typeof providerConfig.name;
-							providerConfig.model = fallback.model;
-							// The forced-local provider resolves its own endpoint and key:
-							// the session's belong to the provider it is leaving (#3261).
-							providerConfig.apiKey = undefined;
-							providerConfig.baseURL = undefined;
-							providerConfig.headers = undefined;
-						}
-					}
-				}
-
-				console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
-
-				this.events.onToolStart?.({
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-					args: event.args,
-					stepNumber: event.stepNumber,
-				});
-
-				this.sessionWriter.writeToolCall(
-					{
-						toolCallId: event.toolCallId,
-						name: event.toolName,
-						arguments: event.args,
-						success: true,
-						durationMs: 0,
-						startedAt: new Date().toISOString(),
-					},
-					undefined,
-					event.stepNumber,
-				);
+			onToolCallStart: (event) => {
+				nativeToolSteps.set(event.toolCallId, event.stepNumber);
 			},
 
 			onToolCallFinish: async (event) => {
@@ -2587,7 +2684,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
 			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
-				console.log("[verify-gate] change not checked yet - asking for one targeted check");
+				console.log(
+					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
+				);
 				// agentConfig already holds the provider that answered (chain step
 				// or hedge winner), so the follow-up goes to the same one.
 				const verifyAgent = createEightAgent(agentConfig);
@@ -2720,31 +2819,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			await this.readServerContextWindow();
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
-				try {
-					const stage = this.compaction.getStage(this.messageHistory);
-					const compactModel = createModel(providerConfig);
-					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
-					this.messageHistory = compacted;
-					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
-					);
-					this.events.onCompaction?.(compactionResult);
-				} catch (err) {
-					console.error("  [COMPRESSION] Failed:", (err as Error).message);
-				}
-			}
-
-			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%.
-			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				await this.observeTwoStage(providerConfig);
-			}
+			await this.compactIfNeeded(providerConfig);
 
 			// Move BMAD task to review/done if we had one
 			if (this.currentBmadTask) {
@@ -2936,6 +3011,58 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Steer the running turn (D1). The message joins the conversation as a user
+	 * message after the tool calls running now finish, before the next model
+	 * call, on both the text-tool and the native path. A message sent when no
+	 * further model call comes (the turn is answering, or no turn runs) stays
+	 * queued: read it with takeQueuedSteers() and send it as the next chat().
+	 * Blank text is ignored. Returns false when the steer was refused: the
+	 * queue already holds MAX_STEERS, or the text is over MAX_STEER_BYTES.
+	 */
+	steer(text: string): boolean {
+		if (text.trim() === "") return false;
+		if (this.steerQueue.length >= MAX_STEERS) return false;
+		if (Buffer.byteLength(text, "utf8") > MAX_STEER_BYTES) return false;
+		this.steerQueue.push({ text, turn: this.activeTurn });
+		return true;
+	}
+
+	/** Steering messages not delivered yet, in the order they were sent. */
+	queuedSteers(): readonly string[] {
+		return this.steerQueue.map((s) => s.text);
+	}
+
+	/**
+	 * Take the undelivered steering messages and clear the queue. Call it after
+	 * chat() resolves (send them as the follow-up turn) or after abort() (give
+	 * the text back to the person to edit).
+	 */
+	takeQueuedSteers(): string[] {
+		return this.steerQueue.splice(0).map((s) => s.text);
+	}
+
+	/**
+	 * Deliver this turn's queued steers into it: history, session file, event.
+	 * Nothing is delivered into an aborted turn, and a steer stamped with
+	 * another turn (or none) is never delivered; both stay for takeQueuedSteers.
+	 */
+	private drainSteers(): string[] {
+		const controller = this.abortController;
+		if (!controller || controller.signal.aborted) return [];
+		if (this.activeTurn === null) return [];
+		const mine = this.steerQueue.filter((s) => s.turn === this.activeTurn);
+		if (mine.length === 0) return [];
+		this.steerQueue = this.steerQueue.filter((s) => s.turn !== this.activeTurn);
+		const texts = mine.map((s) => s.text);
+		for (const text of texts) {
+			this.messageHistory.push({ role: "user", content: text });
+			this.sessionWriter.writeUserMessage(text);
+			this.events.onSteer?.({ text });
+		}
+		return texts;
+	}
+
+	/**
 	 * Abort the current generation. Called when user presses ESC during processing.
 	 */
 	abort(): void {
@@ -3049,51 +3176,45 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * One pass of the two-stage compactor (#2467) after a turn. Thresholds
-	 * resolve against the provider's known context window, the same one
-	 * ProactiveCompression uses (#3237: this used to read a `contextSize` that
-	 * ProviderConfig never carries, so every model was treated as 32,768).
+	 * The one compaction path (Pi parity E5): both the native and the text-tool
+	 * turn end here. ProactiveCompression decides and rewrites the history; a
+	 * summary is recorded in the session store as a compaction entry, so the
+	 * original messages stay in the file and undo works.
 	 */
-	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
+	private async compactIfNeeded(providerConfig: ProviderConfig): Promise<void> {
 		try {
-			if (!this.twoStageCompactor) {
-				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
-					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
-				this.twoStageCompactor = new TwoStageCompactor({
-					checkpointPct: 0.65,
-					compactPct: 0.8,
-					keepLastN: 4,
-					summarizer,
-				});
-			}
-			const state: TwoStageAgentState = {
-				messages: this.messageHistory,
-				checkpoints: this.twoStageCheckpoints,
-				provider: { contextSize: this.compactionContextWindow },
-			};
-			const result = await this.twoStageCompactor.observe(state);
-			if (result.action !== "none") {
-				console.log(
-					`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
+			// A headless run has no host saving its session: it keeps its own file.
+			if (!this.compactionRecorder && this.config.headless && this.compaction.shouldCompact(this.messageHistory)) {
+				this.attachCompactionStore(
+					SessionStore.create({
+						id: this.sessionId,
+						cwd: this.config.workingDirectory || process.cwd(),
+						model: this.config.model,
+						provider: this.config.runtime,
+					}),
 				);
 			}
+			const pass = await compactHistory({
+				engine: this.compaction,
+				history: this.messageHistory,
+				model: createModel(providerConfig),
+				recorder: this.compactionRecorder,
+			});
+			if (!pass) return;
+			this.messageHistory = pass.messages;
+			const r = pass.result;
+			console.log(
+				`  [COMPRESSION:${r.stage}] ${r.messagesRemoved} messages compressed, ${r.tokensBefore} -> ${r.tokensAfter} tokens`,
+			);
+			this.events.onCompaction?.(r);
 		} catch (err) {
-			console.error("  [TWO_STAGE] Failed:", (err as Error).message);
+			console.error("  [COMPRESSION] Failed:", (err as Error).message);
 		}
 	}
 
-	/** The model call behind a two-stage checkpoint. A method so tests can stand in for it. */
-	private async generateCheckpoint(
-		providerConfig: ProviderConfig,
-		prompt: string,
-	): Promise<string> {
-		const { generateText } = await import("ai");
-		const { text } = await generateText({
-			model: createModel(providerConfig),
-			prompt,
-			maxOutputTokens: 800,
-		});
-		return text;
+	/** Record this agent's compactions in `store` (a host that owns the session file). */
+	attachCompactionStore(store: SessionStore | null): void {
+		this.compactionRecorder = store ? new CompactionRecorder(store) : null;
 	}
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
@@ -3275,9 +3396,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * same executor (permissions, secret scrub) as a normal call. The caller
 	 * only uses it for tools whose replay class is "replay".
 	 */
-	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
-		const refusal = this.modeRefusal(toolName);
-		if (refusal) return Promise.resolve(refusal);
+	async runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// The same gate as a model's call: mode, PreToolUse, then (G1) extensions.
+		const refusal = await this.refuseToolCall(toolName, args);
+		if (refusal) return refusal;
 		return this.executor.execute(toolName, args);
 	}
 
@@ -3396,7 +3518,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (decision.strategy === "none" || decision.confidence <= 0.6) return;
 
 		const dispatch = mapStrategyToTool(decision);
-		if (!dispatch || this.modeRefusal(dispatch.tool)) return;
+		if (!dispatch || (await this.refuseToolCall(dispatch.tool, dispatch.args))) return;
 
 		try {
 			const result = await this.executor.execute(dispatch.tool, dispatch.args);

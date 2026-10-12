@@ -110,12 +110,14 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
+import { validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
@@ -158,7 +160,7 @@ import {
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
+import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -739,9 +741,24 @@ export class ToolExecutor {
 		});
 	}
 
+	/** Measured-layout blocks already in this turn's context (#3823), so read_image does not repeat them. */
+	private layoutNotesSent = new Set<string>();
+
+	/** The agent put this measured-layout block in front of the model already this turn. */
+	markLayoutSent(block: string): void {
+		this.layoutNotesSent.add(block);
+	}
+
+	/** The measured layout for read_image, or "" when there is none or the model already has it this turn. */
+	private async layoutForRead(file: string): Promise<string> {
+		const measured = await layoutMeasureLine(file);
+		return measured && !this.layoutNotesSent.has(measured) ? measured : "";
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();
+		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
 	}
 
@@ -2786,21 +2803,9 @@ export class ToolExecutor {
 		if (commandDir() !== this.workingDirectory) {
 			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
 		}
-		// Backstop (#3595): the file that lists post_message recipients is not
-		// for the shell. A minimum, not a parser: the allowlist is also frozen
-		// at process start, so an edit that slips past this cannot take effect.
-		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
-			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
-		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
-		if (commandTouchesAuditFiles(command))
-			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
-		// The session's own records are read-only to the shell too.
-		if (commandMutatesSessionRecords(command))
-			return `[PERMISSION DENIED] Command would change session records, which agent tools may not do: ${command}`;
-		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
-		// bump only; the boundary is seatbelting run_command (#3612).
-		if (touchesBrowserSecrets(command))
-			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
+		// The four pre-spawn backstops, shared with the native path (#3993).
+		const backstop = preSpawnRefusal(command);
+		if (backstop) return backstop;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
@@ -2867,6 +2872,9 @@ export class ToolExecutor {
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
+		const sandboxRefusal = runCommandSandboxRefusal();
+		if (sandboxRefusal) return sandboxRefusal;
+
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
 			const recordRedirects = watchRedirects(finalCommand, this.workingDirectory, this.createdFiles);
@@ -2878,7 +2886,8 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawnShell(finalCommand, {
+			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+			const proc = spawnShell(wrapRunCommand(finalCommand), {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
@@ -3004,12 +3013,12 @@ export class ToolExecutor {
 					2,
 				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
-				const measured = await layoutMeasureLine(absolutePath);
+				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);
-			const measured = await layoutMeasureLine(absolutePath);
+			const measured = await this.layoutForRead(absolutePath);
 			const info = JSON.stringify(
 				{
 					path: imageInfo.path,

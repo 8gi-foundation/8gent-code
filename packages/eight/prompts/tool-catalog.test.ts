@@ -118,9 +118,9 @@ describe("review focus guidance (#3920)", () => {
 
 describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 	it("tells the model to use plain loopback curl, files under .tmp/, no -L, and a second request on a 302", () => {
-		expect(TOOL_PATTERNS_SEGMENT).toContain("plain curl to 127.0.0.1");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("one plain curl per call");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("under .tmp/");
-		expect(TOOL_PATTERNS_SEGMENT).toContain("do not pass -L");
+		expect(TOOL_PATTERNS_SEGMENT).toContain("Do not pass -L");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("second loopback request");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("read that file with read_file next");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("never repeat the same command");

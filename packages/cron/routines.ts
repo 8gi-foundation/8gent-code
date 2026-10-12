@@ -12,6 +12,7 @@
  * daemon's cron tick loop. Each run spawns a headless agent session.
  */
 
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -213,11 +214,14 @@ export class RoutineManager {
 		};
 
 		try {
-			const args = ["run", "bin/8gent.ts", "chat", routine.prompt, "--yes", "--json"];
+			// 8gent's own CLI by absolute path, and no bunfig.toml or .env from routine.cwd (#4013).
+			const cli = eightCliPath();
+			if (!cli) throw new Error("8gent CLI entry not found for this install");
+			const args = ["run", cli, "chat", routine.prompt, "--yes", "--json"];
 
 			if (routine.model) args.push(`--model=${routine.model}`);
 
-			const proc = Bun.spawn(["bun", ...args], {
+			const proc = Bun.spawn(["bun", ...safeBunFlags(), ...args], {
 				stdout: "pipe",
 				stderr: "pipe",
 				cwd: routine.cwd || process.cwd(),

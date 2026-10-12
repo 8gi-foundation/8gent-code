@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import { Box, type DOMElement, useApp, useInput } from "ink";
+import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
 import {
 	applyDesignSystem,
 	t,
@@ -76,7 +76,7 @@ import {
 	ADHD_MODE_ENABLED_MSG,
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
-import { CommandInput } from "./components/command-input.js";
+import { CommandInput, slashMenuCompact } from "./components/command-input.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import pkgInfo from "../../../package.json" with { type: "json" };
@@ -173,13 +173,17 @@ import {
 	logToolEnd,
 	logToolStart,
 } from "./lib/session-logger.js";
+import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
+import { copyReply } from "./lib/copy-answer.js";
 import {
-	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
+	builtInCommandsCoreFirst,
+	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
@@ -208,6 +212,21 @@ import {
 import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import {
+	BANG_ID_PREFIX,
+	BANG_USAGE,
+	type BangRun,
+	bangChatLine,
+	bangContextBlock,
+	bangRunningLine,
+	killBangsOnExit,
+	parseBang,
+	planModeRefusal,
+	sendRefusal,
+	startBang,
+	withShellContext,
+	withoutBangLines,
+} from "./lib/bang-command.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
@@ -237,6 +256,12 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import {
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
@@ -423,7 +448,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
@@ -692,6 +718,14 @@ type ViewMode =
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
+// Pickers drawn over the chat, above the input, as the palette is. Since #2350
+// no other viewMode is drawn, so /model, /provider, /theme, Ctrl+L and
+// Ctrl+Shift+M set a view nobody saw (#3918 D3).
+const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
+	"model-select",
+	"provider-select",
+	"theme-select",
+]);
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
@@ -804,6 +838,8 @@ export function App({
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
+	// Raw stdout, for terminal sequences such as /copy's OSC 52.
+	const { stdout: inkStdout } = useStdout();
 
 	// Personality greetings (inline for independence)
 	const GREETINGS = [
@@ -1161,7 +1197,8 @@ export function App({
 	// View state — now driven by workspace tabs
 	const [viewMode, setViewMode] = useState<ViewMode>("chat");
 
-	// Bubble navigation state (Ctrl+L enters, Esc/Ctrl+L exits)
+	// Bubble navigation state. No key enters it: the bubble strip is not drawn
+	// since #2350, so its old Ctrl+L only took focus from the input (#3918).
 	const [isBubbleNavMode, setIsBubbleNavMode] = useState(false);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1406,7 +1443,7 @@ export function App({
 			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1639,6 +1676,8 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// The / menu is open: in a short terminal the focal strip steps aside for it.
+	const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 	// Real rows of the chat box after layout (#3019). The viewport guess
 	// overestimated it and messages overprinted.
 	const chatBoxRef = useRef<DOMElement>(null);
@@ -1772,6 +1811,27 @@ export function App({
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
 	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Output of `!cmd` lines waiting to go to the model with the tab's next
+	// message, keyed by tab id (#3918 D5).
+	const shellContextRef = useRef<Map<string, string[]>>(new Map());
+	// Running `!cmd` processes per tab, so Esc, tab close and exit can stop them.
+	const bangRunsRef = useRef<Map<string, Set<BangRun>>>(new Map());
+	const bangSeq = useRef(0);
+	const stopBangRuns = useCallback((tabId?: string) => {
+		for (const [id, runs] of bangRunsRef.current) {
+			if (tabId !== undefined && id !== tabId) continue;
+			for (const run of runs) run.cancel();
+			runs.clear();
+		}
+	}, []);
+	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
+	useEffect(() => {
+		const uninstall = killBangsOnExit(() => stopBangRuns());
+		return () => {
+			uninstall();
+			stopBangRuns();
+		};
+	}, [stopBangRuns]);
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -1972,18 +2032,6 @@ export function App({
 			return;
 		}
 
-		// Ctrl+L: toggle bubble navigation mode
-		if (key.ctrl && input === "l") {
-			setIsBubbleNavMode((prev) => {
-				if (!prev) {
-					const chatMsgs = messages.filter((m) => m.role !== "tool");
-					setSelectedBubbleIndex(Math.max(0, chatMsgs.length - 1));
-				}
-				return !prev;
-			});
-			return;
-		}
-
 		// Ctrl+N: toggle Notes tab
 		if (key.ctrl && input === "n") {
 			const notesTab = workspaceTabs.tabs.find((t) => t.type === "notes");
@@ -2032,7 +2080,7 @@ export function App({
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
 			if (activeSessionId && messages.length > 0) {
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -2042,6 +2090,7 @@ export function App({
 				});
 			}
 			flushSession();
+			stopBangRuns();
 			if (agent) agent.cleanup().catch(() => {});
 			exit();
 		}
@@ -2084,9 +2133,11 @@ export function App({
 			setExpandedView((prev) => !prev);
 		}
 
-		// Ctrl+M: open model picker overlay
-		if (key.ctrl && input === "m" && !key.shift) {
+		// Ctrl+L: open the model picker overlay (#3918 D3). Ctrl+M stays bound,
+		// but most terminals, Windows Terminal included, send it as Enter (B4).
+		if (key.ctrl && (input === "l" || (input === "m" && !key.shift))) {
 			setViewMode("model-select");
+			return;
 		}
 
 		// Ctrl+Shift+M: open provider picker overlay
@@ -2152,6 +2203,8 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				shellContextRef.current.delete(closingId);
+				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
@@ -2188,6 +2241,11 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			const bangs = bangRunsRef.current.get(activeTabId);
+			if (bangs && bangs.size > 0) {
+				stopBangRuns(activeTabId);
+				return;
+			}
 			if (isProcessing) {
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
@@ -2372,6 +2430,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -2405,6 +2471,15 @@ export function App({
 		},
 		[activeTabId],
 	);
+
+	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
+		const swap = (list: Message[]) =>
+			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
+		const cur = tabMessagesRef.current.get(tabId);
+		if (cur) tabMessagesRef.current.set(tabId, swap(cur));
+		setMessagesRaw((prev) => (prev.some((m) => m.id === id) ? swap(prev) : prev));
+	}, []);
 
 	/**
 	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
@@ -3082,58 +3157,22 @@ export function App({
 			switch (command) {
 				case "help":
 					addSystemMessage(
-						"Available commands:\n" +
-							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+E) - Show predicted next steps\n" +
-							"  /avenues - Show planned avenues\n" +
-							"  /design [task] - Get design system suggestions\n" +
-							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
-							"  /evidence - Show full evidence breakdown\n" +
-							"  /notes - Open scratchpad notes tab\n" +
-							"  /ideas - Open idea capture tab\n" +
-							"  /btw - Open sidequest queue tab\n" +
-							"  /questions - Open research questions tab\n" +
-							"  /projects - Open project overview tab\n" +
-							"  /terminal - Open a live terminal tab (PTY shell)\n" +
-							"  /auth [login|logout|status] - Authentication\n" +
-							"  /github [issues|pr|repos] - GitHub integration\n" +
-							"  /deploy - Trigger Vercel deploy\n" +
-							"  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
-							"  /pet [start|stop|deck|card] - Lil Eight companion\n" +
-							"  /voice record - Toggle voice input (Ctrl+R)\n" +
-							"  /vision - Vision & OCR model settings\n" +
-							"  /telegram - Connect a Telegram bot\n" +
-							"  /router - Task router settings\n" +
-							"  /plan - Show current plan status\n" +
-							"  /session [name|list|resume] - Named session management\n" +
-							"  /sessions [share|attach|stop|detach] - Shared sessions (with the 8gent Browser panel)\n" +
-							"  /fork [label] - Fork conversation at current message\n" +
-							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
-							"  /branch [list|switch <id>] - List or switch branches\n" +
-							"  /status - Show session status\n" +
-							"  /export - Export session as HTML\n" +
-							"  /clear - Clear messages\n" +
-							"  /quit - Exit 8gent Code\n" +
-							"  /skills - List loaded skills (optional)\n" +
-							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
+						`${formatSlashHelp(args[0]?.toLowerCase() === "all")}\n\n` +
 							"Keyboard shortcuts:\n" +
-							"  Tab - Accept ghost suggestion\n" +
-							"  Ctrl+T - New chat tab\n" +
-							"  Ctrl+W - Close current tab\n" +
-							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Permission mode: Plan, Ask, Guarded, Infinite\n" +
-							"  Ctrl+A - Toggle animations\n" +
-							"  Ctrl+S - Toggle sound\n" +
-							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header\n" +
-							"  Ctrl+X - Open or close the PLAN column\n" +
-							"  Ctrl+M - Model picker\n" +
-							"  Ctrl+Shift+M - Provider picker",
+							formatHotkeyRows(),
 					);
+					break;
+
+				case "hotkeys":
+					addSystemMessage(formatHotkeys());
 					break;
 
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
+					break;
+
+				case "copy":
+					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
 					break;
 
 				case "predict":
@@ -3455,7 +3494,7 @@ export function App({
 
 				case "quit":
 					if (activeSessionId && messages.length > 0) {
-						const serializable = messages.map((m) => ({
+						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
 						}));
@@ -3465,6 +3504,7 @@ export function App({
 						});
 					}
 					flushSession();
+					stopBangRuns();
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
@@ -4213,7 +4253,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,
@@ -5501,6 +5541,8 @@ export function App({
 			activeTabId,
 			linkDaemonSession,
 			unlinkDaemon,
+			messages,
+			inkStdout,
 		],
 	);
 
@@ -5662,6 +5704,40 @@ export function App({
 			return;
 		}
 
+		// `!cmd` runs a shell command here; its output goes with the next
+		// message. `!!cmd` runs it without sending (#3918 D5).
+		const bang = attached ? null : parseBang(input);
+		if (bang) {
+			const bangLine = (content: string): Message => ({
+				id: `${BANG_ID_PREFIX}${Date.now()}-${bangSeq.current++}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+			const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+			if (!bang.command || refused) {
+				appendToTab(tabId, bangLine(refused ?? BANG_USAGE));
+				return;
+			}
+			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
+			const running = bangLine(bangRunningLine(bang));
+			appendToTab(tabId, running);
+			const run = startBang(bang.command, projectCwd);
+			const runs = bangRunsRef.current.get(tabId) ?? new Set();
+			runs.add(run);
+			bangRunsRef.current.set(tabId, runs);
+			const result = await run.done;
+			runs.delete(run);
+			const withheld = bang.send ? sendRefusal(bang.command) : null;
+			if (bang.send && !withheld && !result.cancelled) {
+				const pending = shellContextRef.current.get(tabId) ?? [];
+				pending.push(bangContextBlock(bang, result));
+				shellContextRef.current.set(tabId, pending);
+			}
+			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
+			return;
+		}
+
 		// Linked to a shared session (#3929): the shared 8gent answers, and every
 		// surface on the session sees the message.
 		const daemonLink = daemonLinkRef.current;
@@ -5674,7 +5750,10 @@ export function App({
 			});
 			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
 			try {
-				daemonLink.client.prompt(input);
+				// Output from `!cmd` goes in front here too, once (#3918 D5).
+				const shellContext = shellContextRef.current.get(tabId);
+				shellContextRef.current.delete(tabId);
+				daemonLink.client.prompt(withShellContext(shellContext, input));
 			} catch (err) {
 				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -5749,8 +5828,14 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const messageForAgent = await expandSkillSlashCommand(message);
-			const routeHint = messageForAgent.trim() || "User attached an image.";
+			// A skill first, then a prompt template (#3918 G4); a line neither
+			// knows passes through unchanged.
+			const expanded = expandPromptSlashCommand(await expandSkillSlashCommand(message));
+			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
+			const shellContext = shellContextRef.current.get(tabId);
+			shellContextRef.current.delete(tabId);
+			const messageForAgent = withShellContext(shellContext, expanded);
+			const routeHint = expanded.trim() || "User attached an image.";
 
 			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
@@ -6688,33 +6773,35 @@ export function App({
 							))}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={shownModel.ran || "-"}
-							routeAsked={shownModel.asked}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-							lastTurnEndedAt={lastTurnEndedAt}
-							lastTurnSuccess={lastTurnSuccess}
-							animate={showAnimations}
-							width={chatWidth}
-						/>
+						{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							<LiveFocalStripWithGoal
+								goalClient={goalClient}
+								adhdMode={adhdMode}
+								mode={
+									agentMode === "Planning"
+										? "Planning"
+										: agentMode === "Implementing"
+											? "Implementing"
+											: agentMode === "Testing"
+												? "Testing"
+												: agentMode === "Debugging"
+													? "Debugging"
+													: "Researching"
+								}
+								activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+								route={shownModel.ran || "-"}
+								routeAsked={shownModel.asked}
+								tokens={tokenStr}
+								contextPct={contextPct}
+								approvalPending={isApprovalPending}
+								autonomous={infiniteModeActive}
+								isProcessing={isProcessing}
+								lastTurnEndedAt={lastTurnEndedAt}
+								lastTurnSuccess={lastTurnSuccess}
+								animate={showAnimations}
+								width={chatWidth}
+							/>
+						)}
 
 						<NoProviderNotice
 							checked={providerHealth.checked}
@@ -6748,12 +6835,16 @@ export function App({
 									onExecute={(name) => {
 										void handleSlashCommand(name as SlashCommand, []);
 									}}
-									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+									commands={builtInCommandsCoreFirst().map((c) => ({
 										name: c.name,
 										description: c.description,
 									}))}
 								/>
 							</Box>
+						)}
+
+						{PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && (
+							<Box flexShrink={0}>{renderMainContent()}</Box>
 						)}
 
 						{approvalPending && (
@@ -6764,8 +6855,13 @@ export function App({
 							/>
 						)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
+						<Box
+							flexShrink={0}
+							display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
+						>
 							<CommandInput
+								cwd={projectCwd}
+								onSlashMenuChange={setSlashMenuOpen}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={
@@ -6843,6 +6939,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>
