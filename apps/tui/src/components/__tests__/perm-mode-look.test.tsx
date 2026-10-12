@@ -409,9 +409,9 @@ describe("held by parent (#3174)", () => {
 			160,
 		);
 		await tick();
-		expect(frame()).toContain("Held at Plan: the parent agent allows no more");
+		expect(frame()).toContain("Held at Plan: the parent 8gent allows no more");
 		expect(permSwitchLine("plan", true)).toBe(
-			"Permissions: Held at Plan: the parent agent allows no more",
+			"Permissions: Held at Plan: the parent 8gent allows no more",
 		);
 	});
 });

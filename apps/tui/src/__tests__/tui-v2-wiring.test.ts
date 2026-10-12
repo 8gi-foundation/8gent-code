@@ -70,7 +70,7 @@ describe("turnEndedInError", () => {
 
 	test("a turn that ends on an error is a failed turn", () => {
 		expect(turnEndedInError([msg({ role: "assistant", content: "[Error] provider timed out" })] as any)).toBe(true);
-		expect(turnEndedInError([msg({ role: "system", content: "[Agent not ready] Nothing was run." })] as any)).toBe(true);
+		expect(turnEndedInError([msg({ role: "system", content: "[8gent not ready] Nothing was run." })] as any)).toBe(true);
 		// Stopped on a failed call with no reply after it.
 		expect(turnEndedInError([...call("1", "run_command", false)] as any)).toBe(true);
 		expect(turnEndedInError([] as any)).toBe(false);

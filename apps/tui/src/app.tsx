@@ -750,7 +750,7 @@ const SESSION_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["session-picker"
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
 const PLAN_EMPTY_LINE =
-	"No plan steps yet. They appear when the agent writes a PLAN: with numbered steps while working on a request.";
+	"No plan steps yet. They appear when the 8gent writes a PLAN: with numbered steps while working on a request.";
 const AVENUES_EMPTY_LINE =
 	"No avenues in this session. Nothing produces them yet, so this stays empty rather than showing guesses.";
 
@@ -1008,7 +1008,7 @@ export function App({
 	// Voice chat — adds messages to screen AND calls agent directly
 	const voiceChat = useVoiceChat({
 		onAgentMessage: async (transcript) => {
-			if (!agent || !agentReady) return "Agent not ready.";
+			if (!agent || !agentReady) return "8gent not ready.";
 			const clean = transcript
 				.replace(/\[_EOT_\]/g, "")
 				.replace(/<\|.*?\|>/g, "")
@@ -3514,7 +3514,7 @@ export function App({
 					// Session time-travel (#2757 step 2): restore the agent's message
 					// history from a checkpoint cut by the interval policy.
 					if (!agent) {
-						addSystemMessage("No active agent to rewind.");
+						addSystemMessage("No active 8gent to rewind.");
 						break;
 					}
 					if (args[0] === "list") {
@@ -4063,7 +4063,7 @@ export function App({
 				case "compact":
 					// Summarize current conversation
 					if (!agent) {
-						addSystemMessage("No agent active.");
+						addSystemMessage("No 8gent active.");
 						break;
 					}
 					addSystemMessage("Compacting conversation history...");
@@ -4102,14 +4102,14 @@ export function App({
 					if (agentSub === "list") {
 						if (orchestration.agents.length === 0) {
 							addSystemMessage(
-								"No active sub-agents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
+								"No active sub-8gents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
 							);
 						} else {
 							const lines = orchestration.agents.map(
 								(a) => `  ${a.icon} ${a.name} (${a.role}): ${a.status}\n    Task: ${a.task}`,
 							);
 							addSystemMessage(
-								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
+								`Active 8gents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
 							);
 						}
 					} else if (agentSub === "spawn") {
@@ -4127,7 +4127,7 @@ export function App({
 						const killId = args[1];
 						if (!killId) {
 							addSystemMessage(
-								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active agents.",
+								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active 8gents.",
 							);
 						} else {
 							const found = orchestration.agents.find(
@@ -4135,19 +4135,19 @@ export function App({
 							);
 							if (found) {
 								orchestration.killAgent(found.id);
-								addSystemMessage(`Killed agent: ${found.name} (${found.role})`);
+								addSystemMessage(`Killed 8gent: ${found.name} (${found.role})`);
 							} else {
-								addSystemMessage(`Agent "${killId}" not found.`);
+								addSystemMessage(`8gent "${killId}" not found.`);
 							}
 						}
 					} else if (agentSub === "auto") {
 						orchestration.toggleAutoSpawn();
 						addSystemMessage(
-							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-agents without asking." : "Eight will ask before spawning sub-agents."}`,
+							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-8gents without asking." : "Eight will ask before spawning sub-8gents."}`,
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
-							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active agents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an agent\n  /agent auto       Toggle auto-spawn`,
+							`8gent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active 8gents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active 8gents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an 8gent\n  /agent auto       Toggle auto-spawn`,
 						);
 					}
 					break;
@@ -4424,14 +4424,14 @@ export function App({
 					const subCommand = (args[1] || "").toLowerCase().trim();
 					if (!presetId) {
 						addSystemMessage(
-							`Usage: /spawn <agent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
+							`Usage: /spawn <8gent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
 						);
 						break;
 					}
 					const preset = getPreset(presetId);
 					if (!preset) {
 						addSystemMessage(
-							`Unknown agent "${presetId}". Available: ${listPresetIds().join(", ")}`,
+							`Unknown 8gent "${presetId}". Available: ${listPresetIds().join(", ")}`,
 						);
 						break;
 					}
@@ -4993,7 +4993,7 @@ export function App({
 				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
-						addSystemMessage("No agent active. Evidence needs a running session.");
+						addSystemMessage("No 8gent active. Evidence needs a running session.");
 						break;
 					}
 					const evidence = agent.getSessionEvidence();
@@ -5173,8 +5173,8 @@ export function App({
 							});
 							addSystemMessage(
 								next
-									? "TTS output enabled. Agent replies will be spoken."
-									: "TTS output disabled. Agent replies will be silent.",
+									? "TTS output enabled. 8gent replies will be spoken."
+									: "TTS output disabled. 8gent replies will be silent.",
 							);
 						})().catch((err) => {
 							addSystemMessage(
@@ -6104,7 +6104,7 @@ export function App({
 				const preset = getPreset(targetTabData.externalAgent.presetId);
 				if (!preset) {
 					addSystemMessage(
-						`[external-agent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
+						`[external 8gent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
 					);
 					setAgentRunningOnTab(tabId, false);
 					perTabAgents.setTabProcessing(tabId, false);
@@ -6318,7 +6318,7 @@ export function App({
 					id: `system-agent-not-ready-${Date.now()}`,
 					role: "system" as const,
 					content:
-						`[Agent not ready] Nothing was run. The agent for this tab has not finished starting (model: ${currentModel}).\n` +
+						`[8gent not ready] Nothing was run. The 8gent for this tab has not finished starting (model: ${currentModel}).\n` +
 						"Wait a moment and send again, or check the provider with /provider.",
 					timestamp: new Date(),
 				});
@@ -6874,7 +6874,7 @@ export function App({
 								</AppText>
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
-										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<MutedText>{m.role === "user" ? "You:" : "8gent:"}</MutedText>
 										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
 									</Box>
 								))}

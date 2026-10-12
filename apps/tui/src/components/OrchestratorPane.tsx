@@ -15,7 +15,7 @@
  *
  * Honesty rules carried through from packages/harness/SPEC.md: a field the
  * agent loop never reported renders as "-", never a made-up number. Empty
- * grid says "no agents running" - no placeholder rows.
+ * grid says "no 8gents running" - no placeholder rows.
  *
  * Space behavior (#2802): the grid caps at maxRows visible rows (active
  * tasks kept first) with an honest "+N more" line, and columns drop
@@ -173,7 +173,7 @@ export function OrchestratorPane({ rows, width, maxRows }: OrchestratorPaneProps
 				{showActive ? <Text color={t.dim}>{activeLabel}</Text> : null}
 			</Box>
 			{rows.length === 0 ? (
-				<Text color={t.dim}>no agents running</Text>
+				<Text color={t.dim}>no 8gents running</Text>
 			) : (
 				<Box flexDirection="column" width="100%">
 					<HeaderRow columns={columns} />

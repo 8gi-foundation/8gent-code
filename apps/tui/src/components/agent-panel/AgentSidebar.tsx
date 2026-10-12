@@ -55,7 +55,7 @@ export function AgentSidebar({ agents, activeAgentId }: AgentSidebarProps) {
 	return (
 		<Box flexDirection="column" width={30} borderStyle="single" borderColor="blue" paddingX={1}>
 			<Text color="blue" bold>
-				Agents ({agents.length + 1})
+				8gents ({agents.length + 1})
 			</Text>
 			<Divider />
 

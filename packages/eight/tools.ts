@@ -2839,7 +2839,7 @@ export class ToolExecutor {
 						`create UI component: ${path.basename(absolutePath)}`,
 					);
 					if (detection.needsDesign) {
-						designHint = `\n[Design Agent] This is a new UI file. Consider using suggest_design or query_design_system to ensure consistent design. Detected: ${detection.reason}`;
+						designHint = `\n[Design 8gent] This is a new UI file. Consider using suggest_design or query_design_system to ensure consistent design. Detected: ${detection.reason}`;
 					}
 				}
 			} catch {
@@ -3047,7 +3047,7 @@ export class ToolExecutor {
 				"Execute Shell Command",
 				isCommandDangerous(command)
 					? "This command may modify system files or cause data loss."
-					: "The agent wants to run a shell command.",
+					: "The 8gent wants to run a shell command.",
 				command,
 			);
 

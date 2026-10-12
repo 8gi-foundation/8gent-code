@@ -88,7 +88,7 @@ async function chatStream(prompt: string): Promise<string> {
 
 async function main() {
 	emit({ type: "session_start", model, cwd: process.cwd(), sessionId });
-	emit({ type: "ready", message: "Agent ready. Send prompts via stdin." });
+	emit({ type: "ready", message: "8gent ready. Send prompts via stdin." });
 
 	const rl = readline.createInterface({
 		input: process.stdin,
