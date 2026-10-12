@@ -6,8 +6,10 @@
  * 1280 * 28 * 28 pixels). If we let it, the model's coordinates live in a
  * space we never observe. So we do the resize ourselves to a size that is
  * already a fixed point of that function, and scale answers back exactly.
+ *
+ * sharp is loaded lazily (#3892): its native addon is not in the standalone
+ * Windows exe, so a static import would crash `8gent run` before any call.
  */
-import sharp from "sharp";
 import type { BBox, PreparedImage } from "./types.js";
 
 export const QWEN_FACTOR = 28;
@@ -41,10 +43,15 @@ export async function loadImage(image: Buffer | string): Promise<Buffer> {
 	return Buffer.from(await Bun.file(image).arrayBuffer());
 }
 
+async function loadSharp() {
+	return (await import("sharp")).default;
+}
+
 export async function prepareImage(
 	image: Buffer | string,
 	opts: { maxPixels?: number } = {},
 ): Promise<PreparedImage> {
+	const sharp = await loadSharp();
 	const src = await loadImage(image);
 	const meta = await sharp(src).metadata();
 	if (!meta.width || !meta.height) throw new Error("ground: could not read image size");

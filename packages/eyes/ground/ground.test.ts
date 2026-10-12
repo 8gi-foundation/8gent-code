@@ -3,13 +3,16 @@ import sharp from "sharp";
 import { parseBox, toImageSpace } from "./backends/qwen-vl.js";
 import { prepareImage, scaleBack, smartResize } from "./image.js";
 import { backendFromEnv, ground, shapeConfidence } from "./index.js";
-import { assertLoopback, NonLoopbackEndpointError } from "./loopback.js";
+import { NonLoopbackEndpointError, assertLoopback } from "./loopback.js";
 import type { GroundBackend, PreparedImage } from "./types.js";
 
 describe("assertLoopback", () => {
-	test.each(["http://127.0.0.1:11434", "http://localhost:1234", "http://[::1]:11434"])("allows %s", (u) => {
-		expect(() => assertLoopback(u)).not.toThrow();
-	});
+	test.each(["http://127.0.0.1:11434", "http://localhost:1234", "http://[::1]:11434"])(
+		"allows %s",
+		(u) => {
+			expect(() => assertLoopback(u)).not.toThrow();
+		},
+	);
 	test.each([
 		"http://10.0.0.5:11434",
 		"https://api.openai.com",
@@ -48,9 +51,9 @@ describe("assertLoopback", () => {
 
 describe("parseBox", () => {
 	test("bbox_2d in a fenced json block", () => {
-		expect(parseBox('```json\n[{"bbox_2d": [1098, 41, 1259, 90], "label": "Sign in"}]\n```')).toEqual([
-			1098, 41, 1259, 90,
-		]);
+		expect(
+			parseBox('```json\n[{"bbox_2d": [1098, 41, 1259, 90], "label": "Sign in"}]\n```'),
+		).toEqual([1098, 41, 1259, 90]);
 	});
 	test("reversed corners are ordered", () => {
 		expect(parseBox('{"bbox_2d":[50,60,10,20]}')).toEqual([10, 20, 50, 60]);
@@ -80,7 +83,9 @@ describe("image sizing", () => {
 		}
 	});
 	test("scaleBack maps prepared pixels to original pixels", async () => {
-		const png = await sharp({ create: { width: 2880, height: 1800, channels: 3, background: "#fff" } })
+		const png = await sharp({
+			create: { width: 2880, height: 1800, channels: 3, background: "#fff" },
+		})
 			.png()
 			.toBuffer();
 		const img = await prepareImage(png);
@@ -99,7 +104,9 @@ describe("shapeConfidence", () => {
 		expect(shapeConfidence([10, 10, 110, 50], 1440, 900, [10, 10, 110, 50], 1440, 900)).toBe(1);
 	});
 	test("a whole-page box is penalised", () => {
-		expect(shapeConfidence([0, 0, 1440, 900], 1440, 900, [0, 0, 1440, 900], 1440, 900)).toBeLessThan(0.7);
+		expect(
+			shapeConfidence([0, 0, 1440, 900], 1440, 900, [0, 0, 1440, 900], 1440, 900),
+		).toBeLessThan(0.7);
 	});
 	test("a box outside the model image is penalised", () => {
 		expect(shapeConfidence([10, 10, 50, 50], 100, 100, [10, 10, 500, 500], 100, 100)).toBe(0.7);
