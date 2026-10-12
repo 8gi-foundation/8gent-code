@@ -265,7 +265,6 @@ describe("chromeArgs lock-down flags (#4081)", () => {
 	test("every offline and no-script flag is in argv", () => {
 		const argv = chromeArgs("/p/page.html", "/o.png", 800, 600, "/prof", {});
 		for (const f of [
-			"--blink-settings=scriptEnabled=false",
 			"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 			"--disable-background-networking",
 			"--disable-component-update",
@@ -281,6 +280,11 @@ describe("chromeArgs lock-down flags (#4081)", () => {
 			expect(argv).toContain(f);
 		expect(argv).not.toContain("--no-sandbox");
 		expect(argv.some((a) => a.includes("EXCLUDE"))).toBe(false);
+		// Script is blocked by the page's CSP, not a blink setting: that setting also disables
+		// Chrome's own --screenshot command page, and the render produced nothing (#4124).
+		expect(argv.some((a) => a.startsWith("--blink-settings"))).toBe(false);
+		expect(RENDER_CSP).toContain("default-src 'none'");
+		expect(RENDER_CSP).not.toContain("script-src");
 		expect(chromeArgs("/p", "/o", 1, 1, "/x", { EIGHT_CHROME_NO_SANDBOX: "1" })).toContain("--no-sandbox");
 	});
 });

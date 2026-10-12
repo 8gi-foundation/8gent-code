@@ -170,8 +170,9 @@ export function chromeArgs(
 		"--disable-domain-reliability",
 		"--dns-prefetch-disable",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-		// A layout render needs no JavaScript; the CSP is the second lock, this the first.
-		"--blink-settings=scriptEnabled=false",
+		// No --blink-settings=scriptEnabled=false: Chrome runs --screenshot through its own
+		// chrome://headless command page, which needs script, so that flag left no screenshot
+		// (exit 0, #4124). The page's script is blocked by RENDER_CSP, first in the document.
 		"--host-resolver-rules=MAP * ~NOTFOUND",
 		"--proxy-server=http://127.0.0.1:9",
 		"--proxy-bypass-list=<-loopback>",
