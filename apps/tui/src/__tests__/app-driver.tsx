@@ -133,6 +133,8 @@ export function harnessEnv(
 	}
 	Object.assign(env, {
 		HOME: home,
+		// Windows os.homedir() reads USERPROFILE and ignores HOME, so the throwaway home needs both.
+		USERPROFILE: home,
 		OLLAMA_BASE_URL: base,
 		OLLAMA_HOST: base,
 		"8GENT_NO_INTRO": "1",
