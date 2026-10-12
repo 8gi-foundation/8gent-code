@@ -11,7 +11,7 @@
  * Synchronous, never throws.
  */
 
-import { execFileSync } from "node:child_process";
+import { type ExecFileSyncOptionsWithStringEncoding, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 
@@ -43,13 +43,15 @@ export function homeFromDscl(text: string): string | null {
 
 export type RunTool = (file: string, args: string[]) => string;
 
-const runTool: RunTool = (file, args) =>
-	execFileSync(file, args, {
+const runTool: RunTool = (file, args) => {
+	const options: ExecFileSyncOptionsWithStringEncoding = {
 		encoding: "utf8",
 		timeout: 2000,
 		stdio: ["ignore", "pipe", "ignore"],
-		env: {},
-	});
+		env: {} as NodeJS.ProcessEnv,
+	};
+	return execFileSync(file, args, options);
+};
 
 /** The database lookup for `platform`, with the tool runner and file reader injectable for tests. */
 export function passwdHomeFor(
