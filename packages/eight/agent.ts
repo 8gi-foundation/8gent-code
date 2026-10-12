@@ -1865,6 +1865,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_search",
 			"web_fetch",
 			"speak",
+			"render_video_deck",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",

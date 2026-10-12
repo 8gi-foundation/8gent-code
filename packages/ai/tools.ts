@@ -911,6 +911,32 @@ const makePdfTool = tool({
 	},
 });
 
+const renderVideoDeckTool = tool({
+	description:
+		"Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+	inputSchema: z.object({
+		spec: z.record(z.string(), z.unknown()).describe("The deck spec"),
+		out: z.string().optional().describe("Output .mp4 path inside the working directory (default deck.mp4)"),
+	}),
+	execute: async ({ spec, out }) => {
+		try {
+			const { resolveDeckOut } = await import("../eight/tools");
+			const wd = getToolContext().workingDirectory;
+			const target = resolveDeckOut(out, wd);
+			const blocked = gateWrite("render_video_deck", { path: target });
+			if (blocked) return blocked;
+			const { renderVideoDeck } = await import("../tools/video-deck");
+			return JSON.stringify(await renderVideoDeck({ spec, out: target, cwd: wd }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{ error: `render_video_deck failed: ${err instanceof Error ? err.message : String(err)}` },
+				null,
+				2,
+			);
+		}
+	},
+});
+
 const speakTool = tool({
 	description:
 		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
@@ -3327,6 +3353,7 @@ export const agentTools = bindToolContext({
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
 	speak: speakTool,
+	render_video_deck: renderVideoDeckTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;
