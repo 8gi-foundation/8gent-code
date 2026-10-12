@@ -47,7 +47,8 @@ beforeAll(async () => {
 	repo = mkdtempSync(join(tmpdir(), "toolgate-repo-"));
 	mkdirSync(join(home, ".8gent", "memory"), { recursive: true });
 	// A PreToolUse hook that blocks every write_file call.
-	const script = join(home, "block.sh");
+	// Forward slashes: the hook runs through the resolved shell (Git Bash on Windows), where a backslash is an escape.
+	const script = join(home, "block.sh").replace(/\\/g, "/");
 	writeFileSync(script, `echo '{"block": true, "reason": "writes are frozen"}'\n`);
 	// A PreToolUse hook that records what it was sent, then blocks desktop_type (nothing is typed).
 	const capture = join(home, "capture.sh");

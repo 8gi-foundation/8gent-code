@@ -16,7 +16,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand, sanitizeShellCommand } from "./shell-sanitizer";
+import { hasUnquotedAmpersand as rawAmp, sanitizeShellCommand as rawSanitize } from "./shell-sanitizer";
+
+// A test that names platform "win32" means cmd.exe. On a real Windows host with Git Bash the
+// resolved shell is POSIX, so say "cmd" explicitly instead of leaning on the host.
+type SanitizeKind = Parameters<typeof rawSanitize>[2];
+const sanitizeShellCommand = (c: string, p?: NodeJS.Platform, k?: SanitizeKind) =>
+	rawSanitize(c, p, k ?? (p === "win32" ? "cmd" : undefined));
+const hasUnquotedAmpersand = (c: string, p?: NodeJS.Platform, k?: SanitizeKind) =>
+	rawAmp(c, p, k ?? (p === "win32" ? "cmd" : undefined));
 
 const AMP_REASON =
 	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
@@ -349,5 +357,59 @@ describe("sanitizeShellCommand: bash $'...' quoting is refused (8SO)", () => {
 	test("a $ inside quotes or before other chars still passes", () => {
 		expect(sanitizeShellCommand("echo '$'", "linux").safe).toBe(true);
 		expect(sanitizeShellCommand('echo "cost $5"', "linux").safe).toBe(true);
+	});
+});
+
+describe("sanitizer follows the resolved shell (8SO S1 S2 S3)", () => {
+	const refused = (c: string, kind: "git-bash" | "cmd" | "powershell" | "posix") =>
+		sanitizeShellCommand(c, "win32", kind).safe === false;
+
+	test("Git Bash uses POSIX rules: ^ is not an escape", () => {
+		expect(refused("echo hi ^; touch PWNED", "git-bash")).toBe(true);
+		expect(refused("echo hi ^& touch PWNED", "git-bash")).toBe(true);
+	});
+
+	test("Git Bash single quotes count as quotes, so a quoted double quote does not hide a chain", () => {
+		expect(refused(`echo '"'; touch PWNED; echo '"'`, "git-bash")).toBe(true);
+		expect(refused(`echo 'a;b'`, "git-bash")).toBe(false);
+	});
+
+	test("cmd.exe keeps its own rules", () => {
+		expect(refused("echo hi ^; touch PWNED", "cmd")).toBe(false);
+		expect(refused("echo 'a'; touch PWNED", "cmd")).toBe(true);
+	});
+
+	test("an unquoted CR or LF is refused for every shell kind", () => {
+		for (const kind of ["git-bash", "cmd", "powershell", "posix"] as const) {
+			expect(refused("ls\ntouch PWNED", kind)).toBe(true);
+			expect(refused("ls\r\ntouch PWNED", kind)).toBe(true);
+		}
+	});
+
+	test("a quoted line break is data in POSIX and PowerShell", () => {
+		expect(refused("git commit -m 'a\nb'", "git-bash")).toBe(false);
+		expect(refused("echo 'a\nb'", "powershell")).toBe(false);
+	});
+
+	test("PowerShell refuses sub-expressions, script blocks, call operator and iex", () => {
+		for (const c of [
+			"ls (Remove-Item -Recurse -Force src)",
+			"echo (New-Item PWNED)",
+			"cat @(Set-Content PWNED x)",
+			"ls ${function:x}",
+			"ls .{ echo hi }",
+			"& calc",
+			"cat x.txt | iex",
+			"[IO.File]::Delete('x')",
+			"git log --% & calc",
+		]) {
+			expect(refused(c, "powershell")).toBe(true);
+		}
+	});
+
+	test("PowerShell allows plain commands, quoted parens and 2>&1", () => {
+		expect(refused("Get-ChildItem -Name src", "powershell")).toBe(false);
+		expect(refused("echo '(not code)'", "powershell")).toBe(false);
+		expect(refused("git status 2>&1", "powershell")).toBe(false);
 	});
 });

@@ -320,7 +320,7 @@ describe("ToolExecutor.execute - bash gate at the production chokepoint", () => 
 		const exec = new ToolExecutor(dir, "primary");
 		const out = join(dir, "out.txt");
 
-		const result = await exec.execute("run_command", { command: `echo content > ${out}` });
+		const result = await exec.execute("run_command", { command: `echo content > ${out.replace(/\\/g, "/")}` });
 
 		expect(result).not.toContain("[TOOLG8 BLOCKED]");
 		expect(existsSync(out)).toBe(true);

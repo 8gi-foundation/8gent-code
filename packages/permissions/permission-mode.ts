@@ -32,6 +32,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { SHELL_TOOL_NAMES } from "./shell-tools";
 
 export type PermissionMode = "plan" | "ask" | "guarded" | "infinite";
 
@@ -207,7 +208,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /** Shell tools whose command Plan mode lets through when it is provably read-only. */
-const SHELL_TOOLS = new Set(["run_command"]);
+const SHELL_TOOLS = SHELL_TOOL_NAMES;
 
 export const PLAN_MODE_MARKER = "[PLAN MODE]";
 
@@ -232,7 +233,7 @@ export async function planModeRefusal(
 		const command = typeof args.command === "string" ? args.command : "";
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
-			const r = readOnlyAllowlist(command);
+			const r = readOnlyAllowlist(command, { shell: toolName === "powershell" ? "powershell" : undefined });
 			if (r.verdict !== "pass-without-model") {
 				return planRefusalMessage(toolName, `the command is not provably read-only: ${r.reason}`);
 			}

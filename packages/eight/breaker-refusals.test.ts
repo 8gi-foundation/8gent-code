@@ -194,6 +194,8 @@ describe("refusedBeforeRun decides from the call, never the output", () => {
 	});
 	test("run_command the sanitizer allows counts, whatever it prints", () => {
 		expect(refusedBeforeRun("run_command", { command: "echo [BLOCKED] x" })).toBe(false);
+		expect(refusedBeforeRun("powershell", { command: "cd /tmp && ls" })).toBe(true);
+		expect(refusedBeforeRun("powershell", { command: "Get-Date" })).toBe(false);
 	});
 	test("mcp_call_tool and every other tool count, whatever they return", () => {
 		expect(refusedBeforeRun("mcp_call_tool", { server: "s", tool: "t", args: {} })).toBe(false);

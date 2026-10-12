@@ -83,6 +83,8 @@
  */
 
 import * as readline from "node:readline";
+import { activeShellKind } from "../core/shell";
+import { posixRulesApply } from "./shell-tools";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
@@ -531,7 +533,9 @@ export async function systemOneGate(
 	const allow = systemOneAllowlist(env);
 	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
 	let hint: string | undefined;
-	if (allow.enabled) {
+	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
+	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
+	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
