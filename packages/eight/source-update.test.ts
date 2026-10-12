@@ -624,18 +624,54 @@ describe("origin allowlist", () => {
 			expect(originTrusted(u, "8gent-browser")).toBe(false);
 	});
 
-	test("forge: only the host named by EIGHT_FORGE_HOST, only a repo called 8gent-browser; no guess without the setting", () => {
-		const u = "http://forge.test:3000/8gi/8gent-browser.git";
-		expect(originTrusted(u, "8gent-browser")).toBe(false);
+	test("forge: only the pinned owner's repo, over https or ssh, on the host named by EIGHT_FORGE_HOST", () => {
+		const u = "https://forge.test:3000/8gi-foundation/8gent-browser.git";
+		expect(originTrusted(u, "8gent-browser")).toBe(false); // no host configured, no guess
 		expect(originTrusted(u, "8gent-browser", "forge.test:3000")).toBe(true);
+		expect(
+			originTrusted(
+				"ssh://git@forge.test:3000/8gi-foundation/8gent-browser",
+				"8gent-browser",
+				"forge.test:3000",
+			),
+		).toBe(true);
 		expect(originTrusted(u, "8gent-code", "forge.test:3000")).toBe(false);
 		expect(
 			originTrusted(
-				"http://other.test:3000/8gi/8gent-browser.git",
+				"https://other.test:3000/8gi-foundation/8gent-browser.git",
 				"8gent-browser",
 				"forge.test:3000",
 			),
 		).toBe(false);
+		// EIGHT_FORGE_OWNER pins a different owner, exact match
+		expect(
+			originTrusted(
+				"https://forge.test:3000/artale/8gent-browser.git",
+				"8gent-browser",
+				"forge.test:3000",
+				"artale",
+			),
+		).toBe(true);
+		expect(originTrusted(u, "8gent-browser", "forge.test:3000", "artale")).toBe(false);
+	});
+
+	test("a foreign owner on the forge host, and a plain http forge origin, fall to the y/N prompt", async () => {
+		for (const url of [
+			"https://forge.test:3000/someone-else/8gent-browser.git",
+			"http://forge.test:3000/8gi-foundation/8gent-browser.git",
+		]) {
+			expect(originTrusted(url, "8gent-browser", "forge.test:3000")).toBe(false);
+			const asked: boolean[] = [];
+			const d = mk([], base({ "remote get-url": { stdout: `${url}\n` } }));
+			d.forgeHost = "forge.test:3000";
+			d.confirm = async (_q, o) => {
+				asked.push(o.strict);
+				return false;
+			};
+			const r = await updateCheckout(d, { ...opts, repo: "8gent-browser", yes: true });
+			expect(r.status).toBe("declined");
+			expect(asked).toEqual([true]);
+		}
 	});
 
 	test("a planted ~/8gent-browser with a foreign origin is declined by default and never installed or built", async () => {

@@ -132,7 +132,12 @@ export function parseOrigin(url: string): ParsedOrigin | null {
  * GitHub: only 8gi-foundation/<repo>, over https or ssh. Forge: any owner's <repo>
  * on the host named by EIGHT_FORGE_HOST (host or host:port), https, http or ssh.
  */
-export function originTrusted(url: string, repo: string, forgeHost?: string): boolean {
+export function originTrusted(
+	url: string,
+	repo: string,
+	forgeHost?: string,
+	forgeOwner = "8gi-foundation",
+): boolean {
 	const o = parseOrigin(url);
 	if (!o) return false;
 	if (o.host === "github.com" && (o.scheme === "https" || o.scheme === "ssh"))
@@ -142,8 +147,8 @@ export function originTrusted(url: string, repo: string, forgeHost?: string): bo
 		.toLowerCase()
 		.replace(/^[a-z]+:\/\//, "")
 		.replace(/\/+$/, "");
-	if (fh && o.host === fh)
-		return /^[^/]+\/[^/]+$/.test(o.repoPath) && o.repoPath.endsWith(`/${repo}`);
+	if (fh && o.host === fh && (o.scheme === "https" || o.scheme === "ssh"))
+		return o.repoPath === `${(forgeOwner || "8gi-foundation").trim().toLowerCase()}/${repo}`;
 	return false;
 }
 
@@ -322,6 +327,8 @@ export interface CheckoutDeps {
 	confirm?: (question: string, o: { strict: boolean }) => Promise<boolean>;
 	/** EIGHT_FORGE_HOST: the forge's host (or host:port) whose <repo> origins are trusted. */
 	forgeHost?: string;
+	/** EIGHT_FORGE_OWNER: the one owner trusted on the forge host (default 8gi-foundation). */
+	forgeOwner?: string;
 }
 
 export type CheckoutStatus =
@@ -524,7 +531,7 @@ export async function updateCheckout(
 					.filter(Boolean)
 			: [];
 	const originUrl = sanitizeForDisplay(remote.stdout.trim());
-	const trusted = originTrusted(originUrl, o.repo, d.forgeHost);
+	const trusted = originTrusted(originUrl, o.repo, d.forgeHost, d.forgeOwner);
 	if (!trusted || !o.yes) {
 		const q =
 			`${trusted ? "" : `WARNING: origin ${originUrl} is not a known ${o.repo} source.\n`}` +
@@ -747,6 +754,7 @@ export async function runSourceUpdate(
 		now: deps.now ?? (() => new Date()),
 		baseEnv: env,
 		forgeHost: env.EIGHT_FORGE_HOST,
+		forgeOwner: env.EIGHT_FORGE_OWNER,
 		confirm: deps.confirm ?? ((q) => defaultConfirm(q)),
 	};
 
