@@ -37,7 +37,14 @@ import {
 	snapshotSecurityEnv,
 	wrapRunCommand,
 } from "./run-command-sandbox";
+import { emptyBunfig } from "../core/bun-flags";
 import { BackgroundTaskManager } from "../tools/background";
+
+// Paths below are built with path.join so they match on Windows too, where
+// path.normalize spells "/nonexistent-h/.8gent" as "\\nonexistent-h\\.8gent".
+const H = path.join("/nonexistent-h", ".8gent");
+const E = path.join("/nonexistent-e", ".8gent");
+const D = path.normalize("/nonexistent-d");
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 	const saved: Record<string, string | undefined> = {};
@@ -73,7 +80,7 @@ describe("protected set", () => {
 				".env",
 				"keys.env",
 			])
-				expect(p.files).toContain(`/nonexistent-h/.8gent/${f}`);
+				expect(p.files).toContain(path.join(H, f));
 			for (const d of [
 				"extensions",
 				"prompts",
@@ -84,26 +91,34 @@ describe("protected set", () => {
 				"bin",
 				"policy-checksum",
 			])
-				expect(p.dirs).toContain(`/nonexistent-h/.8gent/${d}`);
-			expect(p.roots).toEqual(["/nonexistent-h/.8gent"]);
+				expect(p.dirs).toContain(path.join(H, d));
+			if (process.platform === "win32") {
+				// Windows: resolveHome prefers USERPROFILE over HOME (packages/core/home.ts),
+				// so the real profile's .8gent is a second root, and realpath adds the
+				// drive-letter spelling of each. POSIX keeps the exact one-root check.
+				expect(p.roots).toContain(H);
+				expect(p.roots).toContain(path.join(process.env.USERPROFILE || os.homedir(), ".8gent"));
+			} else {
+				expect(p.roots).toEqual([H]);
+			}
 		});
 	});
 
 	test("EIGHT_HOME (resolveHome) adds its .8gent as a root", () => {
 		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_HOME: "/nonexistent-e", EIGHT_DATA_DIR: undefined }, () => {
 			const p = protectedRunCommandPaths();
-			expect(p.roots).toContain("/nonexistent-h/.8gent");
-			expect(p.roots).toContain("/nonexistent-e/.8gent");
-			expect(p.files).toContain("/nonexistent-e/.8gent/hooks.yaml");
+			expect(p.roots).toContain(H);
+			expect(p.roots).toContain(E);
+			expect(p.files).toContain(path.join(E, "hooks.yaml"));
 		});
 	});
 
 	test("EIGHT_DATA_DIR adds the same set under the data dir", () => {
 		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: "/nonexistent-d" }, () => {
 			const p = protectedRunCommandPaths();
-			expect(p.roots).toContain("/nonexistent-d");
-			expect(p.files).toContain("/nonexistent-d/hooks.yaml");
-			expect(p.dirs).toContain("/nonexistent-d/extensions");
+			expect(p.roots).toContain(D);
+			expect(p.files).toContain(path.join(D, "hooks.yaml"));
+			expect(p.dirs).toContain(path.join(D, "extensions"));
 		});
 	});
 
@@ -158,7 +173,7 @@ describe("security env snapshot", () => {
 				fs.writeFileSync(file, `Z=0\n${line}\n`);
 				const env: NodeJS.ProcessEnv = { ...process.env, Z: "0" };
 				delete env.EIGHT_SEATBELT;
-				const r = spawnSync("bun", ["--config=/dev/null", "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
+				const r = spawnSync("bun", [`--config=${emptyBunfig()}`, "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
 					cwd: dir,
 					env,
 					encoding: "utf8",
@@ -182,7 +197,7 @@ describe("security env snapshot", () => {
 			fs.writeFileSync(file, "\uFEFFEIGHT_SEATBELT=0\n");
 			const env = { ...process.env };
 			delete env.EIGHT_SEATBELT;
-			const r = spawnSync("bun", ["--config=/dev/null", "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
+			const r = spawnSync("bun", [`--config=${emptyBunfig()}`, "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
 				cwd: dir,
 				env,
 				encoding: "utf8",

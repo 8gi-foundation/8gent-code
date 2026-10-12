@@ -15,6 +15,7 @@ import {
 	FOOTER_SEPARATOR,
 	buildFooterSegments,
 	fitFooterHints,
+	fitFooterRow,
 	fitFooterSegments,
 	fmSegmentWidth,
 	hintWidth,
@@ -282,5 +283,55 @@ describe("run_command without its OS sandbox is a footer segment (#4013)", () =>
 		expect(seg?.value).toBe("off");
 		expect(seg?.note).toBe("EIGHT_SEATBELT=0");
 		expect(seg?.color).toBe(infinite?.color);
+	});
+});
+
+describe("the sandbox segment never costs a hint (#4013, Windows parity)", () => {
+	const all = buildFooterSegments({
+		mode: "Planning",
+		permissions: "ask",
+		user: "someone",
+		providersLive: 1,
+		providersTotal: 2,
+		sandboxOff: "unsupported OS",
+	});
+	const withoutSandbox = all.filter((s) => s.key !== "sandbox");
+	const plain = (w: number) => {
+		const segments = fitFooterSegments(withoutSandbox, w);
+		const room = Math.max(0, w - segmentsWidth(segments) - 3);
+		return fitFooterHints(room, segments.some((s) => s.key === "perm"));
+	};
+
+	test("at every width, the row keeps every hint it would show with no sandbox segment", () => {
+		for (let w = 40; w <= 220; w++) {
+			const row = fitFooterRow(all, w);
+			for (const hint of plain(w)) expect(row.hints).toContain(hint);
+		}
+	});
+
+	test("[^C] quit shows wherever it shows without the segment", () => {
+		for (let w = 40; w <= 220; w++) {
+			if (plain(w).includes("^C quit")) expect(fitFooterRow(all, w).hints).toContain("^C quit");
+		}
+	});
+
+	test("wide: the full reason; tighter: 'sandbox off' alone; tightest: dropped", () => {
+		const shapes = new Set<string>();
+		for (let w = 40; w <= 400; w++) {
+			const seg = fitFooterRow(all, w).segments.find((s) => s.key === "sandbox");
+			shapes.add(seg ? (seg.note ? "full" : "short") : "none");
+		}
+		expect([...shapes].sort()).toEqual(["full", "none", "short"]);
+		const wide = fitFooterRow(all, 400).segments.find((s) => s.key === "sandbox");
+		expect(wide?.note).toBe("unsupported OS");
+		expect(wide?.value).toBe("off");
+	});
+
+	test("with the sandbox applied the row is exactly the plain fit", () => {
+		for (const w of [80, 120, 160]) {
+			const row = fitFooterRow(withoutSandbox, w);
+			expect(row.segments).toEqual(fitFooterSegments(withoutSandbox, w));
+			expect(row.hints).toEqual(plain(w));
+		}
 	});
 });
