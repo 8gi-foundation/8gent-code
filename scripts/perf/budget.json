@@ -1,0 +1,17 @@
+{
+  "_doc": "Median budgets in ms per process.platform. null = report-only. CI fails a metric only when its median exceeds budget x 1.25. Fill from the first CI run numbers, not local ones.",
+  "linux": {
+    "version_ms": null,
+    "headless_run.first_byte_ms": null,
+    "headless_run.first_model_ms": null,
+    "headless_run.exit_ms": null,
+    "tui_fake_tty.ready_ms": null
+  },
+  "win32": {
+    "version_ms": null,
+    "headless_run.first_byte_ms": null,
+    "headless_run.first_model_ms": null,
+    "headless_run.exit_ms": null,
+    "tui_fake_tty.ready_ms": null
+  }
+}

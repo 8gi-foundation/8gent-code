@@ -1,0 +1,73 @@
+# perf.yml - Startup timing on Linux and Windows (Pi parity row C3, #3918).
+#
+# Runs scripts/perf/startup.ts: `--version`, headless `run` against the stub model
+# server, and the real TUI App on a fake TTY (labelled as such, not terminal
+# startup). The JSON is uploaded as an artifact. The job fails only when a median
+# exceeds its entry in scripts/perf/budget.json by more than 25%; entries that are
+# null are report-only. Set the budget from these runners' numbers, not a laptop's.
+
+name: Perf
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/perf.yml"
+      - "scripts/perf/**"
+      - "scripts/ci/stub-model-server.ts"
+      - "bin/**"
+      - "apps/tui/**"
+      - "packages/**"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    name: Startup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Measure startup
+        shell: bash
+        run: bun scripts/perf/startup.ts --runs 5 --out "${RUNNER_TEMP}/perf-${{ matrix.os }}.json" --check | tee perf.log
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          { echo '### Startup timing (${{ matrix.os }})'; echo '```'; sed -n '/^metric/,/^wrote/p' perf.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: perf-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/perf-${{ matrix.os }}.json
+            perf.log
+          retention-days: 30
