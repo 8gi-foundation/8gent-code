@@ -27,6 +27,8 @@ describe("core command menu (#3918 D9)", () => {
 		expect(slashMenuRows("", ENTRIES).length).toBeLessThanOrEqual(SLASH_MENU_ROWS);
 		expect(CORE_SLASH_COMMANDS.has("settings")).toBeTrue();
 		expect(CORE_SLASH_COMMANDS.has("resume")).toBeTrue();
+		expect(CORE_SLASH_COMMANDS.has("copy")).toBeTrue();
+		expect(CORE_SLASH_COMMANDS.has("hotkeys")).toBeTrue();
 	});
 
 	test("every core command is a real built-in", () => {

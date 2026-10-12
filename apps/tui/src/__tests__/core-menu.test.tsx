@@ -10,7 +10,7 @@ test("bare / lists core commands; typing reaches the rest; /help all lists every
 	expect(bare).toContain("/model");
 	expect(bare).toContain("/settings");
 	expect(bare).toContain("/resume");
-	expect(bare).not.toContain("more, keep typing");
+	expect(bare).not.toContain("Up/Down to scroll");
 	for (const novelty of ["/dj ", "/pet ", "/music ", "/kanban ", "/vercel "]) {
 		expect(bare).not.toContain(novelty);
 	}

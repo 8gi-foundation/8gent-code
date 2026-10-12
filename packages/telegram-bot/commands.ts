@@ -5,6 +5,7 @@
  * Each command reads live state from disk and formats a rich response.
  */
 
+import { safeBunFlags } from "../core/bun-flags";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -329,7 +330,7 @@ async function handleStart(args: string, chatId: number, bot: any): Promise<void
 			return;
 		}
 
-		const proc = Bun.spawn(["bun", "run", scriptPath], {
+		const proc = Bun.spawn(["bun", ...safeBunFlags(), "run", scriptPath], {
 			cwd: join(HOME, "8gent-code"),
 			stdout: "ignore",
 			stderr: "ignore",

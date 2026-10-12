@@ -117,6 +117,7 @@ import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { systemOneGate } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
@@ -151,8 +152,8 @@ import {
 	WRITE_CONTENT_TOOLS,
 	applyAt,
 	editRefusal,
-	locateEdit,
 	logEditRefusal,
+	resolveEdit,
 	blockedToolMessage,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
@@ -740,9 +741,24 @@ export class ToolExecutor {
 		});
 	}
 
+	/** Measured-layout blocks already in this turn's context (#3823), so read_image does not repeat them. */
+	private layoutNotesSent = new Set<string>();
+
+	/** The agent put this measured-layout block in front of the model already this turn. */
+	markLayoutSent(block: string): void {
+		this.layoutNotesSent.add(block);
+	}
+
+	/** The measured layout for read_image, or "" when there is none or the model already has it this turn. */
+	private async layoutForRead(file: string): Promise<string> {
+		const measured = await layoutMeasureLine(file);
+		return measured && !this.layoutNotesSent.has(measured) ? measured : "";
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
 	beginTurn(): void {
 		this.openedThisTurn.clear();
+		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
 	}
 
@@ -1162,6 +1178,23 @@ export class ToolExecutor {
 							out: { type: "string", description: "Output .wav path inside the working directory" },
 						},
 						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "screen_locate",
+					description:
+						'[FILE] Point to click for a thing in a screenshot, named in words.',
+					parameters: {
+						type: "object",
+						properties: {
+							image: { type: "string", description: "Screenshot path" },
+							target: { type: "string", description: "e.g. the Sign in button" },
+							viewport: { type: "string", description: 'Optional "WxH" for cssX/cssY' },
+						},
+						required: ["image", "target"],
 					},
 				},
 			},
@@ -1714,6 +1747,7 @@ export class ToolExecutor {
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
 		edit_file: "write_file",
@@ -2084,6 +2118,11 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "screen_locate": {
+				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
+				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
+				return screenLocate({ image, target: String(args.target ?? ""), viewport: args.viewport as string | undefined });
+			}
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
 
@@ -2716,15 +2755,13 @@ export class ToolExecutor {
 		// gate checked (String.replace would expand `$&` etc. in newText).
 		// A duplicate oldText is refused, never silently applied to the first
 		// copy (#3898); the refusal is logged so it can be counted.
-		const located = locateEdit(content, oldText, startLine);
-		const refusal = editRefusal(located, filePath);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
 		if (refusal) {
-			logEditRefusal(located, filePath, oldText.length);
+			logEditRefusal(resolved, filePath, oldText.length);
 			return refusal;
 		}
-		const newContent =
-			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
-		if (newContent === null) {
+		if (resolved.kind !== "ok") {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the
 			// bytes written must be the bytes the policy gate checked.
@@ -2733,11 +2770,15 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
+		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, newContent);
 		recordEdit();
 
+		if (resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
 
@@ -2856,6 +2897,9 @@ export class ToolExecutor {
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
+		const sandboxRefusal = runCommandSandboxRefusal();
+		if (sandboxRefusal) return sandboxRefusal;
+
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
 			const recordRedirects = watchRedirects(finalCommand, this.workingDirectory, this.createdFiles);
@@ -2867,7 +2911,8 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawnShell(finalCommand, {
+			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+			const proc = spawnShell(wrapRunCommand(finalCommand), {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
@@ -2993,12 +3038,12 @@ export class ToolExecutor {
 					2,
 				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
-				const measured = await layoutMeasureLine(absolutePath);
+				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);
-			const measured = await layoutMeasureLine(absolutePath);
+			const measured = await this.layoutForRead(absolutePath);
 			const info = JSON.stringify(
 				{
 					path: imageInfo.path,
