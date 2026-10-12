@@ -33,8 +33,13 @@ async function main() {
 	const complete = (): string | null => {
 		const s = strip(app.raw());
 		const head = s.lastIndexOf("8gent Code v");
-		const foot = s.indexOf("[^C] quit", head);
-		return head >= 0 && foot >= 0 ? s.slice(head, foot + 9) : null;
+		// The footer row starts with the mode. Its right end varies (on CI a
+		// "providers 1/3" field pushes "[^C] quit" past 120 columns), so the
+		// row is matched by its start and taken whole.
+		const foot = s.indexOf("\nmode ", head);
+		if (head < 0 || foot < 0) return null;
+		const end = s.indexOf("\n", foot + 1);
+		return end < 0 ? null : s.slice(head, end);
 	};
 	const dump = () => strip(app.raw()).slice(-3000);
 	const picked = (f: string | null) =>

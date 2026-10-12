@@ -31,7 +31,7 @@ for (const rows of [12, 18]) {
 		expect((inside.match(/(?:> | {2})\/[a-z-]+ /g) ?? []).length).toBe(visible);
 		expect(inside).toContain(`1-${visible} of 14, Up/Down to scroll`);
 		expect(lines[bottom]).not.toMatch(/\/[a-z]/);
-		expect(lines.at(-1)).toContain("[^C] quit");
+		expect(lines.at(-1)).toMatch(/^mode \S+ \[\^Y\]/);
 		expect(lines.length).toBeLessThanOrEqual(rows);
 
 		const scroll = events.find((e) => e.phase === "scroll") as {
