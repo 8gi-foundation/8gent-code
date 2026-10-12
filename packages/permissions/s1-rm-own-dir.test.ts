@@ -156,6 +156,18 @@ describe.skipIf(process.platform === "win32")(
 				expect(rec.createdDirBySession(join(ws, "a"))).toBe(true);
 				expect(rec.createdDirBySession(join(ws, "a/b"))).toBe(true);
 			});
+			test("an older directory renamed onto the path while mkdir runs is not recorded (8SO, #4106)", () => {
+				put("prior/note.txt");
+				Bun.sleepSync(1100);
+				// The window: the watch starts, then something else renames an older directory onto
+				// `win` before the mkdir would have made it.
+				const done = watchRedirects("mkdir -p win", ws, rec);
+				renameSync(join(ws, "prior"), join(ws, "win"));
+				done();
+				expect(rec.createdDirBySession(join(ws, "win"))).toBe(false);
+				put("win/later.txt");
+				expect(rmOwnDir("rm -rf win", ws, rec).ok).toBe(false);
+			});
 			test("a directory that existed before is never recorded", () => {
 				sh("mkdir -p old");
 				expect(rec.createdDirBySession(join(ws, "old"))).toBe(false);

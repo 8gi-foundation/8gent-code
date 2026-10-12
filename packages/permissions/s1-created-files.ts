@@ -330,8 +330,11 @@ const MAX_MKDIR = 16;
  * Bracket a mkdir-only command (#4105): call before it runs, and call the
  * result after it exits. Records each directory the command made: a path,
  * or an ancestor of it, that was absent before, is a real directory after,
- * and whose realpath is inside the realpath of `cwd`. Any other command
- * records nothing. Never throws.
+ * whose realpath is inside the realpath of `cwd`, and that was born no
+ * earlier than one second before the command started (8SO on #4106: an older
+ * directory renamed onto the path during the command keeps its old birth
+ * time, so it is not recorded; the second of slack covers coarse clocks).
+ * Any other command records nothing. Never throws.
  */
 export function watchMkdir(command: string, cwd: string, record: CreatedFiles): () => void {
 	try {
@@ -353,6 +356,7 @@ export function watchMkdir(command: string, cwd: string, record: CreatedFiles): 
 		if (paths.length === 0 || paths.length > MAX_MKDIR) return () => {};
 		if (decideRules(text).rules.length > 0) return () => {};
 		const root = realpathSync(cwd);
+		const since = BigInt(Date.now() - 1000) * 1_000_000n;
 		const fresh: string[] = [];
 		for (const p of paths) {
 			let cur = path.resolve(cwd, p.replace(/\/$/, ""));
@@ -365,7 +369,9 @@ export function watchMkdir(command: string, cwd: string, record: CreatedFiles): 
 			for (const abs of fresh) {
 				try {
 					const key = keyOf(abs);
-					if (key && inside(key, root) && key !== root) record.recordDir(abs);
+					if (!key || !inside(key, root) || key === root) continue;
+					const st = lstatSync(abs, { bigint: true });
+					if (st.isDirectory() && st.birthtimeNs >= since) record.recordDir(abs);
 				} catch {
 					// Recording is best effort; it never affects the command.
 				}
