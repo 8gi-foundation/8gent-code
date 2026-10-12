@@ -47,6 +47,8 @@ export interface SpeakInput {
 	voice?: string;
 	/** Absolute .wav path, already checked by the caller; omitted: the creative folder. */
 	out?: string;
+	/** Abort kills the engine: SIGTERM to its process group, SIGKILL after KILL_GRACE_MS. */
+	signal?: AbortSignal;
 }
 
 export interface SpeakResult {
@@ -62,11 +64,36 @@ const supertonicBin = () => process.env.EIGHT_SUPERTONIC_BIN?.trim() || pyenvBin
 const kittenPy = () => process.env.EIGHT_KITTEN_PY?.trim() || pyenvBin("python");
 const creativeDir = () => path.join(resolveHome(), ".8gent", "creative");
 
-function run(cmd: string, args: string[]): Promise<boolean> {
+/** Grace between SIGTERM and SIGKILL when a caller aborts the engine. */
+export const KILL_GRACE_MS = 1000;
+
+function run(cmd: string, args: string[], signal?: AbortSignal): Promise<boolean> {
 	return new Promise((resolve) => {
-		const child = spawn(cmd, args, { stdio: "ignore" });
-		child.on("error", () => resolve(false));
-		child.on("close", (code) => resolve(code === 0));
+		if (signal?.aborted) return resolve(false);
+		// Own process group (POSIX) so the engine and anything it forked can be signalled together.
+		const detached = process.platform !== "win32";
+		const child = spawn(cmd, args, { stdio: "ignore", detached });
+		const send = (sig: NodeJS.Signals) => {
+			try {
+				if (detached && child.pid) process.kill(-child.pid, sig);
+				else child.kill(sig);
+			} catch {
+				/* already gone */
+			}
+		};
+		let hard: ReturnType<typeof setTimeout> | undefined;
+		const onAbort = () => {
+			send("SIGTERM");
+			hard = setTimeout(() => send("SIGKILL"), KILL_GRACE_MS);
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+		const done = (ok: boolean) => {
+			clearTimeout(hard);
+			signal?.removeEventListener("abort", onAbort);
+			resolve(ok);
+		};
+		child.on("error", () => done(false));
+		child.on("close", (code) => done(code === 0));
 	});
 }
 
@@ -76,15 +103,15 @@ const KITTEN_SCRIPT =
 
 const nonEmpty = (p: string) => fs.existsSync(p) && fs.statSync(p).size > 44;
 
-async function synth(engine: Engine, id: string, text: string, out: string): Promise<boolean> {
+async function synth(engine: Engine, id: string, text: string, out: string, signal?: AbortSignal): Promise<boolean> {
 	if (engine === "supertonic") {
 		const bin = supertonicBin();
 		if (!fs.existsSync(bin)) return false;
-		return (await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text])) && nonEmpty(out);
+		return (await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text], signal)) && nonEmpty(out);
 	}
 	const py = kittenPy();
 	if (!fs.existsSync(py)) return false;
-	return (await run(py, ["-c", KITTEN_SCRIPT, text, out, id])) && nonEmpty(out);
+	return (await run(py, ["-c", KITTEN_SCRIPT, text, out, id], signal)) && nonEmpty(out);
 }
 
 /** Duration in seconds from a PCM wav header; throws if it is not a wav. */
@@ -126,6 +153,7 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 	const pin = SPEAK_VOICES[voice];
 	if (!pin) throw new Error(`unknown voice "${voice}"; choose one of: ${Object.keys(SPEAK_VOICES).join(", ")}`);
 
+	const signal = input.signal;
 	const out = resolveOut(input.out);
 	fs.mkdirSync(path.dirname(out), { recursive: true });
 	fs.rmSync(out, { force: true });
@@ -136,7 +164,8 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 			? [["supertonic", pin.id], ["kitten", "Jasper"]]
 			: [["kitten", pin.id], ["supertonic", "M2"]];
 	for (const [engine, id] of ladder) {
-		if (await synth(engine, id, text, out)) {
+		if (signal?.aborted) throw new Error("speak aborted");
+		if (await synth(engine, id, text, out, signal)) {
 			return { path: out, durationSec: wavDurationSec(out), voice, engine, kind: "audio" };
 		}
 		fs.rmSync(out, { force: true });

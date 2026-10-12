@@ -1865,6 +1865,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_search",
 			"web_fetch",
 			"speak",
+			"render_video_deck",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",
@@ -2152,6 +2153,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			permission: this.config.permission,
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
+			allowedPaths: this.config.allowedPaths,
 			tools: effectiveTools,
 			// Steering (D1): delivered after the running tool calls.
 			steer: () => this.drainSteers(),
