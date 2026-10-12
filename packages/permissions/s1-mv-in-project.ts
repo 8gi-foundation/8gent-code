@@ -50,9 +50,16 @@
  *     anywhere below it, and no more than 2000 entries;
  *   - a directory is not moved into itself.
  *
+ * Also (#4073): `cp [-n] [-v] <file>... <dest>` under the same endpoint rules,
+ * for regular files only (no -r, no directories, no symlinks), and a glob
+ * (`*` or `?`) in the last segment of a source, expanded here the way the shell
+ * would (sorted, never a dotfile, never a name starting with `-`, at least one
+ * match, at most 200, each match then checked as a written operand). The
+ * pilot's `mv inbox/note-*.txt inbox/notes/` is this case.
+ *
  * Not covered on purpose: moves that leave the workspace or arrive from
  * outside it, overwrites (a move over an existing file always reaches the
- * judge), globs and variables, symlink endpoints, more sources than a
+ * judge), variables and any other glob form, symlink endpoints, more sources than a
  * directory destination can hold without a clash, and any `-t` form.
  *
  * Known window, the same as s1-rm-single.ts: a process of this uid could swap
@@ -69,6 +76,12 @@ import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 const MV_FLAG = /^-[nvf]+$/;
+/** cp copies files only: no -r/-R/-a (trees), -f, -L/-H/-P (link following), -p, -i, -t, -T. */
+const CP_FLAG = /^-[nv]+$/;
+/** A glob is `*` or `?` in the LAST segment of a source only; nothing else is expanded (#4073). */
+const GLOB_PLAIN = /^[A-Za-z0-9._/+,=@:*? -]+$/;
+/** Most files one glob may expand to before the command goes to review. */
+const MAX_GLOB = 200;
 /** Dependency lockfiles and project manifests: project state, never moved without review (lower-cased). */
 const PROTECTED_NAMES = new Set([
 	"bun.lock",
@@ -266,24 +279,75 @@ export function stripDot(p: string): string {
 }
 
 /**
+ * Replace a `*`/`?` in the last segment of a source operand of `mv`/`cp` with
+ * the names it matches, or return null (no opinion). Pure shell semantics for
+ * the simple case only: the directory part has no glob, the flags and the
+ * destination have none, dotfiles never match, and nothing starting with `-`
+ * is produced. Every produced name is then checked as a written operand.
+ */
+function expandGlobs(text: string, cwd: string): string | null {
+	if (process.platform === "win32" || !GLOB_PLAIN.test(text)) return null;
+	const words = text.split(/ +/);
+	if (words[0] !== "mv" && words[0] !== "cp") return null;
+	const args = words.slice(1);
+	const isOperand = (a: string) => !a.startsWith("-");
+	const operands = args.filter(isOperand);
+	if (operands.length < 2) return null;
+	if (/[*?]/.test(operands[operands.length - 1])) return null;
+	if (args.some((a) => !isOperand(a) && /[*?]/.test(a))) return null;
+	const root = realpathSync(cwd);
+	const out: string[] = [words[0]];
+	let globs = 0;
+	for (const a of args) {
+		if (!isOperand(a) || !/[*?]/.test(a)) {
+			out.push(a);
+			continue;
+		}
+		if (++globs > 1) return null;
+		const op = stripDot(a);
+		const cut = op.lastIndexOf("/");
+		const dir = cut < 0 ? "" : op.slice(0, cut);
+		const pat = op.slice(cut + 1);
+		if (/[*?]/.test(dir) || pat === "" || !plainRelative(dir === "" ? "x" : dir)) return null;
+		const dirAbs = realpathSync(path.resolve(root, dir));
+		if (!inside(dirAbs, root)) return null;
+		const re = new RegExp(
+			`^${pat.replace(/[.+,=@:-]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`,
+		);
+		const names = readdirSync(dirAbs)
+			.filter((n) => !n.startsWith(".") && !n.startsWith("-") && re.test(n))
+			.sort();
+		if (names.length === 0 || names.length > MAX_GLOB) return null;
+		for (const n of names) out.push(dir === "" ? n : `${dir}/${n}`);
+	}
+	return globs === 1 ? out.join(" ") : null;
+}
+
+/**
  * ok when `command` is `mv` or `git mv`, `[-n] [-v] <src>... <dest>`, with every endpoint
  * inside `cwd` and nothing overwritten; see the header for every condition.
  */
 export function moveInProject(command: string, cwd: string | undefined): MoveInProject {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
-		const text = command.trim();
+		let text = command.trim();
+		if (/[*?]/.test(text)) {
+			const expanded = expandGlobs(text, cwd);
+			if (!expanded) return NO;
+			text = expanded;
+		}
 		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
 		const words = text.split(/ +/);
 		// `git mv` is the same move through the index (#3826); `git -C`, `git -c`
 		// and any other word between `git` and `mv` never match.
 		const isGit = words[0] === "git" && words[1] === "mv";
-		if (words[0] !== "mv" && !isGit) return NO;
+		const isCp = words[0] === "cp";
+		if (words[0] !== "mv" && !isGit && !isCp) return NO;
 		if (decideRules(text).rules.length !== 0) return NO;
 		const args = words.slice(isGit ? 2 : 1);
 		const flags = args.filter((a) => a.startsWith("-"));
 		const operands = args.filter((a) => !a.startsWith("-")).map(stripDot);
-		if (flags.some((f) => !MV_FLAG.test(f))) return NO;
+		if (flags.some((f) => !(isCp ? CP_FLAG : MV_FLAG).test(f))) return NO;
 		// `git mv -f` overwrites through the index; only plain `mv -f` is covered (#3943).
 		if (isGit && flags.some((f) => f.includes("f"))) return NO;
 		if (operands.length < 2 || !operands.every(plainRelative)) return NO;
@@ -320,6 +384,8 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 			if (!inside(srcAbs, root) || srcAbs === root) return NO;
 			const st = lstatOrNull(srcAbs);
 			if (!st || st.isSymbolicLink() || !(st.isFile() || st.isDirectory())) return NO;
+			// cp copies single regular files only; a directory needs -r and review.
+			if (isCp && !st.isFile()) return NO;
 			const realParent = realpathSync(path.dirname(srcAbs));
 			if (!inside(realParent, root)) return NO;
 			const realSrc = path.join(realParent, path.basename(srcAbs));
@@ -353,7 +419,7 @@ export function moveInProject(command: string, cwd: string | undefined): MoveInP
 		}
 		return {
 			ok: true,
-			reason: `${isGit ? "git mv" : "mv"} of ${moves.length === 1 ? "one path" : `${moves.length} paths`} inside the workspace, nothing overwritten`,
+			reason: `${isGit ? "git mv" : isCp ? "cp" : "mv"} of ${moves.length === 1 ? "one path" : `${moves.length} paths`} inside the workspace, nothing overwritten`,
 		};
 	} catch {
 		return NO;

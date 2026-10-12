@@ -260,7 +260,7 @@ describe("moveInProject refuses", () => {
 		["mv onto Gemini.md in a folder", "mv inbox/note-1.txt inbox/notes/Gemini.md"],
 		["a variable target", "mv inbox/note-1.txt $HOME/"],
 		["a variable source", "mv $F inbox/notes/"],
-		["a glob source", "mv inbox/note-*.txt inbox/notes/"],
+		["a glob in the destination", "mv inbox/note-1.txt inbox/no*/"],
 		["a quoted path", 'mv "inbox/note-1.txt" inbox/notes/'],
 		["a command substitution", "mv inbox/note-1.txt $(pwd)/x"],
 		["a chained command", "mv inbox/note-1.txt inbox/notes/ && rm -rf inbox"],
@@ -272,7 +272,7 @@ describe("moveInProject refuses", () => {
 		["several sources into a non-directory", "mv inbox/note-1.txt inbox/note-2.txt inbox/new.txt"],
 		["a directory into itself", "mv inbox inbox/notes/inbox"],
 		["one operand", "mv inbox/note-1.txt"],
-		["not an mv", "cp inbox/note-1.txt inbox/notes/"],
+		["cp -r of a directory", "cp -r plain inbox/plain-copy"],
 		["a repository buried below a directory", "mv deep inbox/notes/"],
 		["a directory holding a dotfile", "mv withenv inbox/notes/"],
 		["a directory that contains protected paths", "mv packages inbox/notes/"],
@@ -369,6 +369,126 @@ describe("moveInProject path rules on any OS", () => {
 			expect(windowsAliasOperand(o, "win32"), o).toBe(false);
 		expect(windowsAliasOperand("hooks.", "linux")).toBe(false);
 		expect(windowsAliasOperand("PACKAGE~1", "darwin")).toBe(false);
+	});
+});
+
+describe("globs and cp inside the workspace (#4073)", () => {
+	beforeEach(() => {
+		mkdirSync(join(ws, "inbox", "deeper", "x"), { recursive: true });
+		writeFileSync(join(ws, "inbox", "deeper", "a-1.txt"), "x");
+		writeFileSync(join(ws, "inbox", "deeper", "a-2.txt"), "x");
+		writeFileSync(join(ws, "inbox", ".hidden.txt"), "x");
+	});
+
+	for (const cmd of [
+		"mv inbox/note-*.txt inbox/notes/",
+		"mv inbox/doc-*.md inbox/docs/",
+		"mv inbox/sheet-*.csv inbox/sheets-new",
+		"mv inbox/note-?.txt inbox/deeper/x/",
+		"mv inbox/deeper/a-*.txt inbox/notes/",
+		"mv -n inbox/doc-*.md inbox/docs/",
+		"cp inbox/note-1.txt inbox/notes/copy-1.txt",
+		"cp -n inbox/doc-1.md inbox/docs/",
+		"cp inbox/note-*.txt inbox/deeper/x/",
+		"cp inbox/deeper/a-1.txt inbox/deeper/x/b.txt",
+	]) {
+		test(`allows: ${cmd}`, () => {
+			if (cmd.includes("sheets-new")) mkdirSync(join(ws, "inbox", "sheets-new"));
+			expect(moveInProject(cmd, ws).ok).toBe(true);
+		});
+	}
+
+	for (const cmd of [
+		"mv inbox/note-*.txt /tmp/",
+		"mv inbox/note-*.txt ../",
+		"mv inbox/note-*.txt ..",
+		"mv inbox/note-*.txt ~/.8gent/",
+		"mv inbox/note-*.txt /Users/x/.8gent/skills/",
+		"mv ../*.txt inbox/notes/",
+		"mv inbox/../../*.txt inbox/notes/",
+		"mv /etc/pass* inbox/notes/",
+		"mv inbox/*/*.txt inbox/notes/",
+		"mv inbox/note-*.txt inbox/notes/ ; rm -rf inbox",
+		"mv inbox/note-*.txt inbox/notes/ && rm -rf inbox",
+		"mv inbox/note-*.txt $(pwd)/x/",
+		"mv inbox/note-*.txt `pwd`/x/",
+		"mv inbox/note-*.txt inbox/notes/ | cat",
+		"mv inbox/nothing-*.txt inbox/notes/",
+		"mv *.json inbox/notes/",
+		"mv inbox/note-[12].txt inbox/notes/",
+		"mv inbox/n{ote-1,ote-2}.txt inbox/notes/",
+		"mv inbox/.hid* inbox/notes/",
+		"mv inbox/note-*.txt inbox/doc-*.md inbox/notes/",
+		"cp -r inbox inbox/notes/inbox",
+		"cp -a inbox/note-1.txt inbox/notes/x.txt",
+		"cp -f inbox/note-1.txt inbox/notes/note-9.txt",
+		"cp inbox/note-1.txt inbox/notes/note-9.txt",
+		"cp inbox/note-1.txt /tmp/x.txt",
+		"cp inbox/note-1.txt ../x.txt",
+		"cp inbox/note-1.txt ~/.8gent/x.txt",
+		"cp -r ~/.ssh inbox/notes/",
+		"cp ~/.ssh/id_rsa inbox/notes/",
+		"cp /Users/x/.ssh/id_rsa inbox/notes/",
+		"cp .env inbox/notes/e.txt",
+		"cp inbox/note-1.txt inbox/notes/ && rm -rf inbox",
+		"cp inbox/note-1.txt inbox/notes/x.txt; cat /etc/passwd",
+		"cp inbox/note-*.txt $(pwd)/x/",
+		"cp -t inbox/notes inbox/note-1.txt",
+		"cp packages/permissions/policy-engine.ts inbox/notes/p.txt",
+	]) {
+		test(`still judged: ${cmd}`, () => {
+			expect(moveInProject(cmd, ws).ok).toBe(false);
+		});
+	}
+
+	test("a glob that matches a symlink is refused", () => {
+		symlinkSync(outside, join(ws, "inbox", "link-out"));
+		expect(moveInProject("mv inbox/link-* inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("cp inbox/link-* inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a glob that matches a file linking out is refused, the rest not moved either", () => {
+		writeFileSync(join(outside, "secret.txt"), "s");
+		symlinkSync(join(outside, "secret.txt"), join(ws, "inbox", "note-evil.txt"));
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("cp inbox/note-*.txt inbox/deeper/x/", ws).ok).toBe(false);
+	});
+
+	test("a symlinked directory in the source path is refused", () => {
+		symlinkSync(outside, join(ws, "escape-dir"));
+		writeFileSync(join(outside, "o-1.txt"), "x");
+		expect(moveInProject("mv escape-dir/o-*.txt inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("cp escape-dir/o-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a glob landing on an existing name is refused (nothing overwritten)", () => {
+		writeFileSync(join(ws, "inbox", "notes", "note-1.txt"), "old");
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a file named like a flag is never expanded", () => {
+		writeFileSync(join(ws, "-n"), "x");
+		writeFileSync(join(ws, "-rf"), "x");
+		expect(moveInProject("mv * inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("the judge is never asked for the pilot commands, and still decides the risky ones", async () => {
+		const ok = await systemOneGate("mv inbox/note-*.txt inbox/notes/", process.env, ws);
+		expect(ok.run).toBe(true);
+		expect(judge.asks).toBe(0);
+		const cp = await systemOneGate("cp inbox/note-1.txt inbox/notes/c.txt", process.env, ws);
+		expect(cp.run).toBe(true);
+		expect(judge.asks).toBe(0);
+		for (const cmd of [
+			"mv inbox/note-*.txt /tmp/",
+			"mv inbox/note-*.txt ~/.8gent/",
+			"cp -r ~/.ssh inbox/notes/",
+			"mv inbox/note-*.txt inbox/notes/ && rm -rf inbox",
+		]) {
+			const r = await systemOneGate(cmd, process.env, ws);
+			expect(r.run, cmd).toBe(false);
+		}
+		expect(judge.asks).toBeGreaterThan(0);
 	});
 });
 

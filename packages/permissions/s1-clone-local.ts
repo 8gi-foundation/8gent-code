@@ -168,10 +168,35 @@ function accountHome(): string | undefined {
 				typeof passwdHomeOverride === "function" ? passwdHomeOverride() : passwdHomeOverride;
 			return v ?? undefined;
 		}
-		return userInfo().homedir;
+		return passwdHome() ?? userInfo().homedir;
 	} catch {
 		return undefined;
 	}
+}
+
+let passwdHomeCache: string | null | undefined;
+/**
+ * The account database's home for this uid, never $HOME. Bun's os.userInfo()
+ * honours $HOME, so a pilot run whose HOME is a child of its run directory made
+ * the run directory look like an ancestor of the account home and refused the
+ * sibling-repo clone (#4073). A POSIX shell with an empty environment expands
+ * `~` from the passwd lookup. Null when that cannot be read (callers fall back).
+ */
+function passwdHome(): string | null {
+	if (passwdHomeCache !== undefined) return passwdHomeCache;
+	passwdHomeCache = null;
+	try {
+		const out = execFileSync("/bin/sh", ["-c", "echo ~"], {
+			encoding: "utf8",
+			timeout: 2000,
+			stdio: ["ignore", "pipe", "ignore"],
+			env: {},
+		}).trim();
+		if (out.startsWith("/") && out !== "/" && !out.includes("\n")) passwdHomeCache = out;
+	} catch {
+		// Unreadable: no opinion, the caller falls back.
+	}
+	return passwdHomeCache;
 }
 
 /** Lower-cased candidates for `h`: as written, and with its nearest existing ancestor resolved. */
