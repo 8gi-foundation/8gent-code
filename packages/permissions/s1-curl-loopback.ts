@@ -16,7 +16,7 @@
  *     `~`, `*`, `?`, `&`, `;`, `|`, `<`, `>`, `(`, `{`, `#`, `!`, `[`, no
  *     leading `=`), single quotes hold anything printable but `'`, double
  *     quotes anything printable but `"`, `$`, backtick and `!`, with `\` only before a letter or digit (literal there, e.g. -w "%{http_code}\n"). No
- *     pipes, redirects, substitution or env assignments. decideRules fires
+ *     redirects, substitution or env assignments. decideRules fires
  *     nothing and there is no prompt-control text;
  *   - every option is on the allowlist below and written exactly (no `--x=y`
  *     form, no abbreviation, no `--`). Anything else, including -K/--config,
@@ -39,6 +39,14 @@
  *   - no http(s)/ALL proxy variable in the environment (curl would send the
  *     loopback request to the proxy, body and all), and no curlrc in $CURL_HOME,
  *     $XDG_CONFIG_HOME, ~ or ~/.config unless `-q` is the first argument.
+ *
+ * One trailing pipe into a stdin-only text filter is allowed (pilot 11 Oct 19:36,
+ * `curl -s -c .tmp/cj.txt URL | grep -o 'name=csrf value=[a-f0-9]*'`): `grep`
+ * (flags from a fixed letter set, exactly one pattern, no file, no -f/-r/-e),
+ * `head`/`tail` (`-N` or `-n N`), or `wc` (`-l`, `-c`, `-w`). Nothing after the
+ * filter, no second pipe, no `||`, `|&`. A piped command is refused when GREP_OPTIONS,
+ * GREP_COLOR or GREP_COLORS is set in the environment (grep would read options from it). The filter reads only the pipe, so it
+ * cannot reach a file, a host or a shell.
  *
  * Redirects (-L/--location) are refused for every URL (#3967, 8SO): curl
  * cannot be told "loopback only" for redirects (--proto-redir limits the
@@ -170,6 +178,50 @@ function splitWords(text: string): Word[] | null {
 	return words;
 }
 
+const GREP_FLAGS = /^-[oEFiqvcnwxsh]+$/;
+const GREP_ENV = /^GREP_(OPTIONS|COLORS?)$/i;
+const COUNT = /^\d{1,4}$/;
+
+/** Split `curl ... | filter` at the single unquoted pipe: [left, right|null], or null when unsafe. */
+function splitPipe(text: string): [string, string | null] | null {
+	let quote = "";
+	let at = -1;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (quote) {
+			if (c === quote) quote = "";
+		} else if (c === "'" || c === '"') quote = c;
+		else if (c === "|") {
+			if (at !== -1 || text[i + 1] === "|" || text[i + 1] === "&") return null;
+			at = i;
+		}
+	}
+	if (at === -1) return [text, null];
+	return [text.slice(0, at).trim(), text.slice(at + 1).trim()];
+}
+
+/** True when `text` is one stdin-only filter: grep, head, tail or wc, written exactly. */
+function stdinFilterOk(text: string): boolean {
+	const w = splitWords(text);
+	if (!w || w.length < 2 || w.length > 5) return false;
+	const rest = w.slice(1);
+	switch (w[0]) {
+		case "grep": {
+			const pat = rest[rest.length - 1];
+			const flags = rest.slice(0, -1);
+			return !pat.startsWith("-") && flags.every((f) => GREP_FLAGS.test(f));
+		}
+		case "head":
+		case "tail":
+			if (rest.length === 1) return /^-\d{1,4}$/.test(rest[0]);
+			return rest.length === 2 && rest[0] === "-n" && COUNT.test(rest[1]);
+		case "wc":
+			return rest.length === 1 && /^-[lcw]$/.test(rest[0]);
+		default:
+			return false;
+	}
+}
+
 interface St {
 	root: string;
 	urls: string[];
@@ -283,7 +335,13 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 		const text = command.trim();
 		if (!text.startsWith("curl ") || promptControlText(text) !== null) return NO;
 		if (decideRules(text).rules.length !== 0) return NO;
-		const words = splitWords(text);
+		const piped = splitPipe(text);
+		if (!piped) return NO;
+		if (piped[1] !== null) {
+			if (!stdinFilterOk(piped[1])) return NO;
+			for (const k of Object.keys(process.env)) if (GREP_ENV.test(k) && process.env[k]) return NO;
+		}
+		const words = splitWords(piped[0]);
 		if (!words || words.length < 2 || words.length > MAX_WORDS || words[0] !== "curl") return NO;
 
 		const st: St = {
