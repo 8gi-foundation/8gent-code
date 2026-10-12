@@ -626,3 +626,63 @@ describe("trashSession", () => {
 		expect(trashSession("../x", dir)).toBe(false);
 	});
 });
+
+describe("typed desktop text in every call shape is stored as its length (8SO, #4057)", () => {
+	const B = String.fromCharCode(92);
+	const SECRET = "hunter2 pw";
+	const shapes: Array<[string, unknown]> = [
+		[
+			"structured part, toolName + input",
+			[{ type: "tool-call", toolName: "desktop_type", input: { text: SECRET } }],
+		],
+		[
+			"structured part, name + args object",
+			[{ type: "tool-call", name: "desktop_act", args: { target: "f", text: SECRET } }],
+		],
+		[
+			"structured part, tool + arguments JSON string",
+			[{ tool: "desktop_type", arguments: JSON.stringify({ text: SECRET }) }],
+		],
+		[
+			"structured part, parameters with an upper-case key",
+			[{ toolName: "desktop_type", parameters: { Text: SECRET } }],
+		],
+		[
+			"structured part, python-style arguments string",
+			[{ name: "desktop_type", arguments: `text="${SECRET}"` }],
+		],
+		["python dict call", `desktop_type({'text': '${SECRET}'})`],
+		["python kwarg call, double quotes", `desktop_type(text="${SECRET}")`],
+		["python kwarg call, single quotes", `desktop_type(text='${SECRET}')`],
+		["upper-case Text key", `{"name":"desktop_type","arguments":{"Text":"${SECRET}"}}`],
+		["unicode-escaped key", `{"name":"desktop_type","arguments":{"te${B}u0078t":"${SECRET}"}}`],
+		[
+			"escaped key inside a JSON-string of arguments",
+			JSON.stringify({ name: "desktop_type", arguments: JSON.stringify({ TEXT: SECRET }) }),
+		],
+		[
+			"upper-case XML parameter",
+			`<function=desktop_type><parameter=Text>${SECRET}</parameter></function>`,
+		],
+	];
+	for (const [label, content] of shapes) {
+		test(label, () => {
+			const s = SessionStore.create({ cwd: "/work/d" }, dir);
+			s.append(asst("typing") as { role: string; content: unknown });
+			s.append({ role: "assistant", content });
+			const file = fs.readFileSync(s.file, "utf-8");
+			expect(file).not.toContain("hunter2");
+			expect(file).toMatch(/textLength/);
+			expect(JSON.stringify(SessionStore.open(s.id, dir)?.messages())).not.toContain("hunter2");
+		});
+	}
+
+	test("a structured part for another tool keeps its text", () => {
+		const s = SessionStore.create({ cwd: "/work/d" }, dir);
+		const content = [
+			{ type: "tool-call", toolName: "write_file", input: { path: "a", text: "kept" } },
+		];
+		s.append({ role: "assistant", content });
+		expect(SessionStore.open(s.id, dir)?.messages()[0].content).toEqual(content);
+	});
+});

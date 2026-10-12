@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
+import { loggableToolArgs } from "../computer/desktop-approval";
 import { jsonSchema, tool as sdkTool } from "ai";
 import { agentTools } from "../ai/tools";
 import {
@@ -898,7 +899,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (modeRefusal) return modeRefusal;
 		const preResult = await this.hookManager.fire("PreToolUse", {
 			tool: toolName,
-			args,
+			// Hooks never see typed desktop text (8SO, #4057).
+			args: loggableToolArgs(toolName, args),
 			sessionId: this.sessionId,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
 		});
@@ -1050,13 +1052,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
 				}
 
-				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
-				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
+				// Everything below that records the call sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(toolName, args);
+				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args: loggedArgs, stepNumber: step });
 				if (!refusal) this.sessionWriter.writeToolCall(
 					{
 						toolCallId,
 						name: toolName,
-						arguments: args,
+						arguments: loggedArgs,
 						success: true,
 						durationMs: 0,
 						startedAt: new Date(startedAt).toISOString(),
@@ -1127,7 +1131,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName,
 					toolCallId,
-					args,
+					args: loggedArgs,
 					success,
 					durationMs,
 					stepNumber: step,
@@ -1917,6 +1921,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"desktop_hover",
 			"desktop_windows",
 			"desktop_clipboard",
+			// Grounded, gated, verified act through the local grounder.
+			"desktop_act",
 		];
 		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
 		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
@@ -2062,10 +2068,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			args: Record<string, unknown>;
 			stepNumber?: number;
 		}) => {
+			// Everything that records the call sees typed desktop text as its length (#4057).
+			const loggedArgs = loggableToolArgs(event.toolName, event.args);
 			await this.hookManager.executeHooks("beforeTool", {
 				sessionId: this.sessionId,
 				tool: event.toolName,
-				toolInput: event.args,
+				toolInput: loggedArgs,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
 
@@ -2098,12 +2106,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 			}
 
-			console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
+			console.log(`  -> ${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
 
 			this.events.onToolStart?.({
 				toolName: event.toolName,
 				toolCallId: event.toolCallId,
-				args: event.args,
+				args: loggedArgs,
 				stepNumber: event.stepNumber,
 			});
 
@@ -2111,7 +2119,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				{
 					toolCallId: event.toolCallId,
 					name: event.toolName,
-					arguments: event.args,
+					arguments: loggedArgs,
 					success: true,
 					durationMs: 0,
 					startedAt: new Date().toISOString(),
@@ -2166,6 +2174,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			onToolCallFinish: async (event) => {
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+				// The in-memory ledger and loop checks keep the real args; everything
+				// that records or hands the call on sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(event.toolName, event.args as Record<string, unknown>);
 
 				// Honesty ledger (issue #2747): record the REAL outcome. The executor
 				// returns error STRINGS for most failures, so a "successful" event
@@ -2238,7 +2249,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName: event.toolName,
 					toolCallId: event.toolCallId,
-					args: event.args,
+					args: loggedArgs,
 					success: event.success,
 					durationMs: event.durationMs,
 					stepNumber: event.stepNumber,
@@ -2253,7 +2264,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// is opted in; scrubbing happens at finalize, before anything is written.
 				this.kernel.recordToolStep({
 					tool: event.toolName,
-					argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
+					argsSummary: JSON.stringify(loggedArgs ?? {}).slice(0, 300),
 					ok: event.success,
 					durationMs: event.durationMs,
 				});
@@ -2279,7 +2290,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Update proactive planner context
 				this.planner.updatePredictionContext({
-					recentCommands: [`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`],
+					recentCommands: [`${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 100)})`],
 					...(event.toolName === "write_file" || event.toolName === "edit_file"
 						? { modifiedFiles: [String(event.args.path)] }
 						: {}),
@@ -2330,7 +2341,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				await this.hookManager.executeHooks("afterTool", {
 					sessionId: this.sessionId,
 					tool: event.toolName,
-					toolInput: event.args,
+					toolInput: loggedArgs,
 					toolOutput: resultStr,
 					duration: event.durationMs,
 					workingDirectory: this.config.workingDirectory || process.cwd(),
@@ -2341,7 +2352,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.fire("PostToolUse", {
 						workingDirectory: this.config.workingDirectory || process.cwd(),
 						tool: event.toolName,
-						args: event.args,
+						args: loggedArgs,
 						result: resultStr.slice(0, 2000),
 						success: event.success,
 						durationMs: event.durationMs,
