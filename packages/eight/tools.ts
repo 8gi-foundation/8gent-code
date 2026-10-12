@@ -2829,7 +2829,7 @@ export class ToolExecutor {
 			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
-		const backstop = preSpawnRefusal(command);
+		const backstop = preSpawnRefusal(command, this.workingDirectory);
 		if (backstop) return backstop;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);
