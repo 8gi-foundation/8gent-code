@@ -1,13 +1,14 @@
 /**
- * #4125: a cloned repo's project skill must not silently replace a bundled skill.
- * A project skill that shares a bundled skill's name is refused and recorded,
- * unless its exact file sha256 is listed in <data dir>/skills-trust.json.
+ * #4125: a cloned repo's project skill must not silently replace a user or bundled skill.
+ * Such a project skill is refused and recorded unless its exact file sha256 is pinned in
+ * <data dir>/skills-trust.json, where the data dir comes from the security env snapshot.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { refreshSecurityEnvForTests } from "../permissions/run-command-sandbox.js";
 import { SkillManager } from "./index.js";
 
 // "retro" ships in packages/skills/retro/SKILL.md, so it is a real bundled name.
@@ -20,39 +21,52 @@ let project: string;
 let home: string;
 let dataDir: string;
 let savedDataDir: string | undefined;
+let savedCwd: string;
 let warn: ReturnType<typeof spyOn>;
 
-function writeSkill(dir: string, name: string, body: string): string {
-	fs.mkdirSync(path.join(dir, name), { recursive: true });
-	const file = path.join(dir, name, "SKILL.md");
+function writeSkill(dir: string, name: string, body: string, folder = name): string {
+	fs.mkdirSync(path.join(dir, folder), { recursive: true });
+	const file = path.join(dir, folder, "SKILL.md");
 	fs.writeFileSync(file, `---\nname: ${name}\ndescription: from ${body}\n---\n${body}\n`);
 	return file;
 }
 const sha256 = (file: string) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-const trust = (entries: Record<string, string>) =>
-	fs.writeFileSync(path.join(dataDir, "skills-trust.json"), JSON.stringify(entries));
+const trustAt = (dir: string, entries: Record<string, unknown>) => {
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, "skills-trust.json"), JSON.stringify(entries));
+};
+const trust = (entries: Record<string, unknown>) => trustAt(dataDir, entries);
+/** Set EIGHT_DATA_DIR the way a launch would, then retake the security snapshot. */
+function setDataDir(value: string | undefined) {
+	if (value === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+	else process.env.EIGHT_DATA_DIR = value;
+	refreshSecurityEnvForTests();
+}
 const load = async () => {
 	const m = new SkillManager(undefined, { projectDir: project, homeDir: home });
 	await m.loadSkills();
 	return m;
 };
 const hostile = () => writeSkill(path.join(project, ".agents", "skills"), BUNDLED, PAYLOAD);
+const warnings = (): string[] => warn.mock.calls.map((a: unknown[]) => String(a[0]));
 
 beforeEach(() => {
-	root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), "skilltrust-"));
+	root = fs.realpathSync(
+		fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), "skilltrust-")),
+	);
 	project = path.join(root, "proj");
 	home = path.join(root, "home");
 	dataDir = path.join(root, "data");
 	for (const d of [project, home, dataDir]) fs.mkdirSync(d, { recursive: true });
-	// The trust file is found through the shared data-dir resolver, never HOME directly.
 	savedDataDir = process.env.EIGHT_DATA_DIR;
-	process.env.EIGHT_DATA_DIR = dataDir;
+	savedCwd = process.cwd();
+	setDataDir(dataDir);
 	warn = spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => {
 	warn.mockRestore();
-	if (savedDataDir === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
-	else process.env.EIGHT_DATA_DIR = savedDataDir;
+	process.chdir(savedCwd);
+	setDataDir(savedDataDir);
 	fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -122,12 +136,26 @@ describe("project skill shadowing a bundled skill (#4125)", () => {
 		expect(m.getCollisions()).toEqual([]);
 	});
 
-	test("project /commit vs the user-tier example commit.md: unchanged, still reported", async () => {
+	test("project /commit vs the user-tier example commit.md: user skill kept, recorded", async () => {
 		// commit is not bundled; loadSkills writes it to ~/.8gent/skills on first run (user tier).
 		const file = writeSkill(path.join(project, ".agents", "skills"), "commit", "PROJECT COMMIT");
+		const userCommit = path.join(home, ".8gent", "skills", "commit.md");
 		const m = await load();
-		expect(m.getSkill("commit")?.filePath).toBe(file);
-		expect(m.getCollisions().map((c) => [c.name, c.kept])).toEqual([["commit", file]]);
+		expect(m.getSkill("/commit")?.filePath).toBe(userCommit);
+		expect(m.getCollisions()).toEqual([{ name: "commit", kept: userCommit, ignored: file }]);
+		expect(warnings().filter((w) => w.includes('"commit" would replace the user one')).length).toBe(
+			1,
+		);
+	});
+
+	test("project skill vs a ~/.agents/skills user skill: refused unpinned, wins pinned", async () => {
+		const userFile = writeSkill(path.join(home, ".agents", "skills"), "deploy", "USER DEPLOY");
+		const file = writeSkill(path.join(project, ".agents", "skills"), "deploy", PAYLOAD);
+		expect((await load()).getSkill("deploy")?.filePath).toBe(userFile);
+		trust({ deploy: sha256(file) });
+		const m = await load();
+		expect(m.getSkill("deploy")?.filePath).toBe(file);
+		expect(m.getCollisions().filter((c) => c.name === "deploy").length).toBe(1); // user copy loses, reported
 	});
 
 	test("user tier shadowing a bundled skill is unchanged: it wins without trust", async () => {
@@ -159,5 +187,68 @@ describe("project skill shadowing a bundled skill (#4125)", () => {
 		expect(m.getSkill("learned-one")?.prompt).toBe("L");
 		expect(m.getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
 		expect(m.getCollisions()).toEqual([]);
+	});
+
+	test("a strict trust file: only own keys with a lowercase 64-hex sha256 count", async () => {
+		const file = hostile();
+		trust({ [BUNDLED]: sha256(file).toUpperCase() });
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+		trust({ [BUNDLED]: [sha256(file)] });
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+		trust({ [BUNDLED]: `${sha256(file)} ` });
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+		fs.writeFileSync(path.join(dataDir, "skills-trust.json"), `[${JSON.stringify(sha256(file))}]`);
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+	});
+
+	test("the warning JSON-quotes a repo-chosen folder name (no raw newline or escape)", async () => {
+		writeSkill(path.join(project, ".agents", "skills"), BUNDLED, PAYLOAD, "x\n\u001b[2Jy");
+		await load();
+		const line = warnings().find((w) => w.includes(`"${BUNDLED}" would replace`));
+		expect(line).toBeDefined();
+		expect(line).not.toContain("\n");
+		expect(line).not.toContain("\u001b");
+		expect(line).toContain("\\u001b[2J");
+	});
+});
+
+describe("the trust file cannot be steered by the project (#4125, 8SO)", () => {
+	test("a project .env setting EIGHT_DATA_DIR is ignored, so its pin file is never read", async () => {
+		// The TUI copies <cwd>/.env keys into process.env; the snapshot drops any key a .env declares.
+		const file = hostile();
+		const pinDir = path.join(root, "attacker-pins");
+		trustAt(pinDir, { [BUNDLED]: sha256(file) });
+		fs.writeFileSync(path.join(project, ".env"), `EIGHT_DATA_DIR=${pinDir}\n`);
+		process.chdir(project);
+		setDataDir(pinDir);
+		const m = await load();
+		expect(m.getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+		expect(m.getSkill(BUNDLED)?.prompt).not.toContain("HIJACKED");
+	});
+
+	test("a relative EIGHT_DATA_DIR is not used", async () => {
+		const file = hostile();
+		trustAt(path.join(project, ".pin"), { [BUNDLED]: sha256(file) });
+		process.chdir(project);
+		setDataDir(".pin");
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+	});
+
+	test("an absolute EIGHT_DATA_DIR inside the project is refused", async () => {
+		const file = hostile();
+		const pinDir = path.join(project, ".pin");
+		trustAt(pinDir, { [BUNDLED]: sha256(file) });
+		setDataDir(pinDir);
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+	});
+
+	test("a trust file symlinked into the project is refused by its real path", async () => {
+		const file = hostile();
+		trustAt(path.join(project, ".pin"), { [BUNDLED]: sha256(file) });
+		fs.symlinkSync(
+			path.join(project, ".pin", "skills-trust.json"),
+			path.join(dataDir, "skills-trust.json"),
+		);
+		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
 	});
 });

@@ -13,10 +13,12 @@
  * once per process (console.warn) and always available from getCollisions(). A user skill
  * shadowing a bundled or learned one is the expected override and is not reported.
  *
- * Exception (#4125): a project skill (from whatever repo is the cwd) may not replace a bundled
- * skill unless the project file's sha256 is pinned in <data dir>/skills-trust.json as
- * { "<name>": "<sha256>" }. Otherwise the project file is skipped and the refusal is reported
- * like any other collision. Editing a pinned file changes its hash, so it is refused again.
+ * Exception (#4125): a project skill (from whatever repo is the cwd) may not replace a user or
+ * bundled skill unless the project file's sha256 is pinned in <data dir>/skills-trust.json as
+ * { "<name>": "<sha256>" }. Otherwise the project file is skipped, the user or bundled skill is
+ * kept, and the refusal is reported like any other collision. Editing a pinned file changes its
+ * hash, so it is refused again. The data dir is taken from the security env snapshot, never from
+ * a .env the project ships, and a trust file inside the project is never read.
  *
  * Skill format:
  * ---
@@ -36,7 +38,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
-import { getDataDir } from "../daemon/data-dir.js";
+import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
 import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
 import type { PolicyDecision } from "../permissions/types.js";
 import { enforceSkillScope } from "./capability-scope.js";
@@ -310,30 +312,42 @@ function warnCollisionOnce(c: SkillCollision, message?: string): void {
 	);
 }
 
-/** name -> sha256 pins from <data dir>/skills-trust.json. Missing or unreadable means no trust. */
-function readSkillTrust(file: string): Record<string, string> {
-	try {
-		const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf-8"));
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? (parsed as Record<string, string>)
-			: {};
-	} catch {
-		return {};
-	}
-}
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const SKILL_TRUST_FILE = "skills-trust.json";
 
-/** Bundled skill name -> file, so a project skill can be checked before the bundled tier loads. */
-function bundledSkillNames(): Map<string, string> {
+/**
+ * name -> sha256 pins from skills-trust.json. Missing or unreadable means no trust; only
+ * own keys whose value is a lowercase 64-hex sha256 count, everything else is ignored.
+ */
+function readSkillTrust(file: string | undefined): Map<string, string> {
 	const out = new Map<string, string>();
-	for (const filePath of discoverBundledSkillMdFiles()) {
-		try {
-			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
-			if (!out.has(frontmatter.name)) out.set(frontmatter.name, filePath);
-		} catch {
-			// Unparseable bundled files are reported when the bundled tier loads.
-		}
+	if (!file) return out;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+	} catch {
+		return out;
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+	for (const name of Object.keys(parsed)) {
+		if (!Object.hasOwn(parsed, name)) continue;
+		const value = (parsed as Record<string, unknown>)[name];
+		if (typeof value === "string" && SHA256_HEX.test(value)) out.set(name, value);
 	}
 	return out;
+}
+
+/** Skill name -> first file defining it, so project skills can be checked before later tiers load. */
+function skillNamesIn(files: string[], into: Map<string, string>): Map<string, string> {
+	for (const filePath of files) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			if (!into.has(frontmatter.name)) into.set(frontmatter.name, filePath);
+		} catch {
+			// Unparseable files are reported when their own tier loads.
+		}
+	}
+	return into;
 }
 
 export class SkillManager {
@@ -353,9 +367,9 @@ export class SkillManager {
 	/** Where each loaded skill came from, for collision reports. */
 	private skillOrigin: Map<string, { filePath: string; tier: SkillTier }> = new Map();
 	private collisions: SkillCollision[] = [];
-	/** Bundled names and trust pins for the current loadSkills() pass (#4125). */
-	private bundledByName: Map<string, string> = new Map();
-	private trust: Record<string, string> | undefined;
+	/** User and bundled names a project skill may not replace unpinned (#4125), per loadSkills(). */
+	private guardedByName: Map<string, { filePath: string; tier: "user" | "bundled" }> = new Map();
+	private trust: Map<string, string> | undefined;
 
 	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
 		this.projectDir = options.projectDir;
@@ -382,11 +396,33 @@ export class SkillManager {
 		this.aliasToCanonical.clear();
 		this.skillOrigin.clear();
 		this.collisions = [];
-		this.bundledByName = bundledSkillNames();
 		this.trust = undefined;
 
 		const home = this.homeDir ?? os.homedir();
 		const project = this.projectDir ?? process.cwd();
+
+		// The user dir (and its example skill) exists before project skills are checked against it.
+		if (!fs.existsSync(this.skillsDirectory)) {
+			fs.mkdirSync(this.skillsDirectory, { recursive: true });
+			// Create example skill
+			this.createExampleSkill();
+		}
+		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
+		const userNames = skillNamesIn(
+			[
+				...skillFiles.map((f) => path.join(this.skillsDirectory, f)),
+				...collectNestedSkillMdPaths(path.join(home, ".agents", "skills")),
+				...collectNestedSkillMdPaths(path.join(home, ".claude", "skills")),
+			],
+			new Map(),
+		);
+		const bundledNames = skillNamesIn(discoverBundledSkillMdFiles(), new Map());
+		this.guardedByName = new Map();
+		for (const [name, filePath] of bundledNames)
+			this.guardedByName.set(name, { filePath, tier: "bundled" });
+		for (const [name, filePath] of userNames)
+			this.guardedByName.set(name, { filePath, tier: "user" });
+
 		const seenSkillPaths = new Set<string>();
 		const ingestNested = (root: string, tier: SkillTier) => {
 			for (const filePath of collectNestedSkillMdPaths(root)) {
@@ -402,12 +438,6 @@ export class SkillManager {
 		ingestNested(path.join(project, ".claude", "skills"), "project");
 
 		// 2. User: ~/.8gent/skills flat .md, then ~/.agents/skills, then ~/.claude/skills.
-		if (!fs.existsSync(this.skillsDirectory)) {
-			fs.mkdirSync(this.skillsDirectory, { recursive: true });
-			// Create example skill
-			this.createExampleSkill();
-		}
-		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
 		for (const file of skillFiles) {
 			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), "user");
 		}
@@ -486,26 +516,52 @@ export class SkillManager {
 		};
 	}
 
+	/**
+	 * <data dir>/skills-trust.json, or undefined when no trustworthy location exists.
+	 * The data dir comes from the security env snapshot (taken before any .env is loaded, and
+	 * ignoring keys a .env declares), absolute only, else <home>/.8gent. A trust file whose real
+	 * path is inside the project is refused: the repo being loaded cannot vouch for itself.
+	 */
+	private skillTrustFile(): string | undefined {
+		const home = this.homeDir ?? os.homedir();
+		const dataDir = securityEnvSnapshot().values.EIGHT_DATA_DIR;
+		const root = dataDir && path.isAbsolute(dataDir) ? dataDir : path.join(home, ".8gent");
+		const file = path.join(root, SKILL_TRUST_FILE);
+		const project = realpathLoose(path.resolve(this.projectDir ?? process.cwd()));
+		const real = realpathLoose(file);
+		// Running from home itself is not a cloned repo; ~/.8gent is then the user's own.
+		if (project === realpathLoose(home)) return file;
+		if (real === project || real.startsWith(project + path.sep)) return undefined;
+		return file;
+	}
+
 	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
 		try {
 			const bytes = fs.readFileSync(filePath);
 			const { frontmatter, body } = parseFrontmatter(bytes.toString("utf-8"));
-			const bundledFile = this.bundledByName.get(frontmatter.name);
-			if (tier === "project" && bundledFile && !this.skillOrigin.has(frontmatter.name)) {
-				const trustFile = path.join(getDataDir(), "skills-trust.json");
+			const guarded = this.guardedByName.get(frontmatter.name);
+			if (
+				tier === "project" &&
+				guarded &&
+				guarded.filePath !== filePath &&
+				!this.skillOrigin.has(frontmatter.name)
+			) {
+				const trustFile = this.skillTrustFile();
 				this.trust ??= readSkillTrust(trustFile);
 				const hash = createHash("sha256").update(bytes).digest("hex");
-				if (this.trust[frontmatter.name] !== hash) {
+				if (this.trust.get(frontmatter.name) !== hash) {
 					const c: SkillCollision = {
 						name: frontmatter.name,
-						kept: bundledFile,
+						kept: guarded.filePath,
 						ignored: filePath,
 					};
 					this.collisions.push(c);
+					// Paths are JSON-quoted: a repo picks its folder names, which may hold newlines or escapes.
 					warnCollisionOnce(
 						c,
-						`[skills] Project skill "${c.name}" would replace the bundled one; kept bundled. ` +
-							`To trust ${filePath}, add "${c.name}": "${hash}" to ${trustFile}`,
+						`[skills] Project skill ${JSON.stringify(c.name)} would replace the ${guarded.tier} one; ` +
+							`kept ${guarded.tier}. To trust ${JSON.stringify(filePath)}, add ` +
+							`${JSON.stringify(c.name)}: "${hash}" to ${JSON.stringify(trustFile ?? SKILL_TRUST_FILE)}`,
 					);
 					return;
 				}

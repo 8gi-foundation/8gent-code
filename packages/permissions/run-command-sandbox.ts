@@ -12,6 +12,7 @@
  *   ~/.8gent/{audit/,audit.jsonl,permissions-audit.jsonl}
  *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
  *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
+ *   ~/.8gent/skills-trust.json (which project skills may replace user/bundled ones)
  *
  * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
  * those are set, and each path
@@ -67,6 +68,7 @@ export const PROTECTED_DATA_FILES = [
 	"allow-loopback.json", // the browser's trusted loopback port list (#3785, 8SO)
 	"keybindings.json",
 	"update-resume.json",
+	"skills-trust.json", // sha256 pins that let a project skill replace a user/bundled one (#4125, 8SO)
 ] as const;
 
 /** Directories whose whole tree is protected, relative to a data dir. */
