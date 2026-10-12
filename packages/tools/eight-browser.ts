@@ -14,14 +14,27 @@
  *
  * Named profile (#3622, paired with 8gent-browser #82): EIGHT_BROWSER_PROFILE=<name> points every call at
  * that profile's own isolated 8gent Browser instance (its token and port file under
- * ~/.8gent/browser-profiles/<name>/), never the person's logged-in default profile. A bad name, or a profile
- * that is not running, is an error: there is no fallback to the default token or port 7980.
+ * ~/.8gent/browser-profiles/<name>/), never the person's logged-in default profile. A bad name is an
+ * error: there is no fallback to the default token or port 7980.
+ *
+ * Local sessions (#3785): with EIGHT_BROWSER_PROFILE unset, a local-model session uses the isolated
+ * profile "eight-local" (setDefaultLocalProfile, called by agent.ts), started on demand with a minimal
+ * environment. EIGHT_BROWSER_LOCAL=0 opts out (no browser tools for local models, as before). Inside an
+ * isolated profile, loopback is reachable only on the run's own listed ports (loopback-allowlist.ts).
  */
 
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { join, posix as pathPosix, win32 as pathWin32 } from "node:path";
+import { join, posix as pathPosix, resolve as resolvePath, win32 as pathWin32 } from "node:path";
+import {
+	RESERVED_LOOPBACK_PORTS,
+	allowedLoopbackPorts,
+	ignoredWorkspaceAllowlist,
+	isAllowedLoopbackUrl,
+} from "../permissions/loopback-allowlist";
 import {
 	BlockedDestinationError,
 	type Resolver,
@@ -33,7 +46,7 @@ export type BrowserCall = (cmd: string, args?: Record<string, unknown>) => Promi
 export type BrowserAction =
 	| { action: "open"; url: string }
 	| { action: "left_click"; index?: number; selector?: string }
-	| { action: "type"; selector: string; text: string }
+	| { action: "type"; selector?: string; index?: number; text: string }
 	| { action: "wait_for"; selector: string; timeout_ms?: number }
 	| { action: "scroll"; dy: number };
 
@@ -293,7 +306,13 @@ export function resolveSecretText(
 
 export function validateBrowserAction(
 	raw: unknown,
-	opts: { isolated?: boolean } = {},
+	opts: {
+		isolated?: boolean;
+		/** Isolated only: true for a loopback URL on one of the run's own listed ports (#3785). */
+		allowedLoopback?: (url: string) => boolean;
+		/** Isolated only: a line added to a refusal, e.g. that a workspace allowlist was ignored. */
+		refusalNote?: () => string | null;
+	} = {},
 ): Check<BrowserAction> {
 	if (!raw || typeof raw !== "object") return { ok: false, error: "action must be an object" };
 	const a = raw as Record<string, unknown>;
@@ -302,8 +321,14 @@ export function validateBrowserAction(
 		case "open": {
 			if (typeof a.url !== "string" || !/^https?:\/\//.test(a.url))
 				return { ok: false, error: "open.url must be http(s)" };
-			const why = opts.isolated ? blockedForProfile(a.url) : null;
-			if (why) return { ok: false, error: `open.url refused in this browser profile: ${why}` };
+			const why = opts.isolated && !opts.allowedLoopback?.(a.url) ? blockedForProfile(a.url) : null;
+			if (why) {
+				const note = opts.refusalNote?.();
+				return {
+					ok: false,
+					error: `open.url refused in this browser profile: ${why}${note ? ` ${note}` : ""}`,
+				};
+			}
 			return { ok: true, action: { action: "open", url: a.url } };
 		}
 		case "left_click": {
@@ -313,12 +338,17 @@ export function validateBrowserAction(
 				return { ok: false, error: "left_click needs index or selector" };
 			return { ok: true, action: { action: "left_click", index, selector: sel } };
 		}
-		case "type":
-			if (!sel || typeof a.text !== "string")
-				return { ok: false, error: "type needs selector and text" };
+		case "type": {
+			const index =
+				Number.isInteger(a.index) && (a.index as number) >= 0 ? (a.index as number) : undefined;
+			if ((!sel && index === undefined) || typeof a.text !== "string")
+				return { ok: false, error: "type needs index or selector, and text" };
 			if (a.text.length > LIMITS.maxTypeLength)
 				return { ok: false, error: `type.text > ${LIMITS.maxTypeLength} chars` };
-			return { ok: true, action: { action: "type", selector: sel, text: a.text } };
+			return sel
+				? { ok: true, action: { action: "type", selector: sel, text: a.text } }
+				: { ok: true, action: { action: "type", index, text: a.text } };
+		}
 		case "wait_for": {
 			if (!sel) return { ok: false, error: "wait_for needs selector" };
 			const t =
@@ -352,17 +382,55 @@ export function _setProfileHomeForTest(home: string | null): void {
 	profileHomeOverride = home;
 }
 
+// ── Default local profile (#3785) ────────────────────────────────────────────
+// A local-model session with no EIGHT_BROWSER_PROFILE used to get no browser at all, so local models
+// fell back to curl for ordinary browser tasks. Now agent.ts declares a default isolated profile for
+// local providers (never by writing process.env), and every rule of a named profile holds for it.
+
+/** The isolated profile a local session uses when EIGHT_BROWSER_PROFILE is unset. */
+export const LOCAL_BROWSER_PROFILE = "eight-local";
+let defaultLocalProfile: string | null = null;
+
+/** Declare (or clear, with null) the profile used when EIGHT_BROWSER_PROFILE is unset. The name must
+ *  be a valid slug, so the default can never be the default profile or resolve to the default token. */
+export function setDefaultLocalProfile(name: string | null): void {
+	if (name !== null && (!PROFILE_NAME.test(name) || name === "default"))
+		throw new Error(
+			`default local browser profile must be a slug; refusing ${JSON.stringify(name)}`,
+		);
+	defaultLocalProfile = name;
+	// Freeze the trusted loopback port list now, at session start (8SO): a file a tool writes before
+	// the first browser call must change nothing.
+	allowedLoopbackPorts(process.env, profileHomeOverride ?? homedir());
+}
+
+/** The declared default, or null when none applies: EIGHT_BROWSER_LOCAL=0 opts out and the opt-in
+ *  browser-use backend never gets an isolated profile. */
+function localDefault(env: Env): string | null {
+	if (defaultLocalProfile === null) return null;
+	if (env.EIGHT_BROWSER_LOCAL === "0" || env.EIGHT_BROWSER_BACKEND === "browser-use") return null;
+	return defaultLocalProfile;
+}
+
+/** True when the profile in use is the declared default, not an explicit EIGHT_BROWSER_PROFILE. */
+export function usingDefaultLocalProfile(env: Env = process.env): boolean {
+	const name = env.EIGHT_BROWSER_PROFILE;
+	return (name === undefined || name === "") && localDefault(env) !== null;
+}
+
 /**
- * The named 8gent Browser profile this process uses, or null for the default profile (unset, empty or
- * "default"). A name that is not a short lowercase slug throws: it never falls back to the default profile,
- * and since it cannot contain "/" or "." it can never resolve to the default token.
+ * The named 8gent Browser profile this process uses, or null for the default profile ("default", or
+ * unset/empty with no local default declared). A name that is not a short lowercase slug throws: it never
+ * falls back to the default profile, and since it cannot contain "/" or "." it can never resolve to the
+ * default token.
  */
 export function browserProfile(
 	env: Env = process.env,
 	home: string = profileHomeOverride ?? homedir(),
 ): BrowserProfile | null {
-	const name = env.EIGHT_BROWSER_PROFILE;
-	if (name === undefined || name === "" || name === "default") return null;
+	let name = env.EIGHT_BROWSER_PROFILE;
+	if (name === undefined || name === "") name = localDefault(env) ?? undefined;
+	if (name === undefined || name === "default") return null;
 	if (!PROFILE_NAME.test(name))
 		throw new Error(
 			`EIGHT_BROWSER_PROFILE must be a lowercase slug (a-z, 0-9, -; 2-32 chars, starting with a letter); refusing ${JSON.stringify(name)}`,
@@ -408,7 +476,8 @@ export const LOCAL_SERVER_CURL_NOTE =
 	"(curl -s -c .tmp/cj.txt -b .tmp/cj.txt -o .tmp/page.html URL), then read_file them. " +
 	"Do not pass -L: on a 302, read the Location header and make a second loopback request.";
 
-/** Browser tools a local-model session may see: none unless a named profile is configured. */
+/** Browser tools a local-model session may see: the four 8gent Browser tools whenever an isolated
+ *  profile applies (an explicit EIGHT_BROWSER_PROFILE, or the local default), none otherwise. */
 export function localBrowserTools(env: Env = process.env): string[] {
 	return isolatedBrowser(env)
 		? ["browser_open", "browser_state", "browser_task", "browser_screenshot"]
@@ -422,22 +491,162 @@ export function localBrowserTools(env: Env = process.env): string[] {
  */
 export function browserWithheldNote(env: Env = process.env): string | null {
 	if (localBrowserTools(env).length > 0) return null;
-	return (
-		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
-		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
-		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
-		"into password fields. For a local web app, follow the local-server curl rules in your instructions."
+	const tools =
+		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: ";
+	if (env.EIGHT_BROWSER_LOCAL === "0" && (env.EIGHT_BROWSER_PROFILE ?? "") === "")
+		return `${tools}EIGHT_BROWSER_LOCAL=0 turned off the session's own isolated browser profile. Unset it to get them back. For a local web app, follow the local-server curl rules in your instructions.`;
+	return `${tools}no isolated browser profile is configured. To get them, leave EIGHT_BROWSER_PROFILE unset (the session starts its own isolated profile) or set it to a running 8gent Browser profile. Even then they open loopback only on ports listed in EIGHT_BROWSER_ALLOW_LOOPBACK and never open other private addresses. For a local web app, follow the local-server curl rules in your instructions.`;
+}
+
+// ── Start on demand (#3785) ──────────────────────────────────────────────────
+// A named profile whose port file is absent is launched once per process, as its own detached
+// 8gent Browser instance, with an environment built from scratch: no API keys, no tokens, nothing
+// inherited from this process. The port is fresh (never 7980, never a reserved service port) and the
+// browser learns the run's own loopback ports through EIGHT_BROWSER_ALLOW_LOOPBACK. One attempt per
+// profile per process: a failed launch stays failed, with the same short reason, until the next process.
+
+/** Everything a launch needs; handed to the spawner so tests can fake the whole thing. */
+export type BrowserLaunchSpec = {
+	bin: string;
+	profile: string;
+	port: number;
+	env: Record<string, string>;
+	portFile: string;
+	tokenFile: string;
+};
+/** Resolves when the child has exited (or could not be started), with a short reason. */
+export type BrowserSpawnFn = (spec: BrowserLaunchSpec) => { exited: Promise<string> };
+
+let spawnOverride: BrowserSpawnFn | null = null;
+/** Test seam: fake the process launch. Never set outside tests. */
+export function _setSpawnForTest(fn: BrowserSpawnFn | null): void {
+	spawnOverride = fn;
+	launches.clear();
+}
+
+const realSpawn: BrowserSpawnFn = (spec) => ({
+	exited: new Promise((done) => {
+		try {
+			const child = spawn(spec.bin, [], {
+				env: spec.env as NodeJS.ProcessEnv,
+				detached: true,
+				stdio: "ignore",
+				windowsHide: true,
+			});
+			child.once("error", (e: Error) => done(`spawn failed: ${e.message}`));
+			child.once("exit", (code: number | null, signal: string | null) =>
+				done(`exited with ${signal ?? `code ${code}`}`),
+			);
+			child.unref();
+		} catch (e) {
+			done(`spawn failed: ${(e as Error).message}`);
+		}
+	}),
+});
+
+/** The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications or ~/Applications. */
+export function browserBinary(env: Env = process.env, home: string = homedir()): string | null {
+	if (env.EIGHT_BROWSER_APP) return env.EIGHT_BROWSER_APP;
+	if (process.platform !== "darwin") return null;
+	const rel = join("8gent Browser.app", "Contents", "MacOS", "8gent Browser");
+	for (const dir of ["/Applications", join(home, "Applications")]) {
+		const p = join(dir, rel);
+		if (existsSync(p)) return p;
+	}
+	return null;
+}
+
+/** A free TCP port on loopback that is not the default control port or a reserved service port. */
+function freePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const srv = createServer();
+		srv.once("error", reject);
+		srv.listen(0, "127.0.0.1", () => {
+			const addr = srv.address();
+			const port = typeof addr === "object" && addr ? addr.port : 0;
+			srv.close(() => {
+				if (port === DEFAULT_CONTROL_PORT || RESERVED_LOOPBACK_PORTS.has(port) || port <= 0)
+					return resolve(freePort());
+				resolve(port);
+			});
+		});
+	});
+}
+
+const LAUNCH_WAIT_MS = 20_000;
+const launches = new Map<string, Promise<void>>();
+
+/** The actionable error for a launch that did not produce a running profile. */
+const launchError = (reason: string) =>
+	new Error(
+		`8gent Browser could not start (${reason}). For a local web app use run_command with curl instead.`,
+	);
+
+async function launchOnce(profile: BrowserProfile, home: string, env: Env): Promise<void> {
+	const bin = browserBinary(env, home);
+	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
+	const port = await freePort();
+	const ports = [...allowedLoopbackPorts(env, home)];
+	// Built fresh: only what the browser needs to run and find its profile. Never the parent env.
+	const childEnv: Record<string, string> = {
+		HOME: home,
+		PATH: env.PATH ?? "/usr/bin:/bin",
+		EIGHT_BROWSER_PROFILE: profile.name,
+		EIGHT_BROWSER_CONTROL_PORT: String(port),
+		EIGHT_BROWSER_ALLOW_LOOPBACK: ports.map((p) => `127.0.0.1:${p}`).join(","),
+	};
+	for (const k of ["TMPDIR", "USER"] as const) if (env[k]) childEnv[k] = env[k] as string;
+	const spec: BrowserLaunchSpec = {
+		bin,
+		profile: profile.name,
+		port,
+		env: childEnv,
+		portFile: profile.portFile,
+		tokenFile: profile.tokenFile,
+	};
+	const { exited } = (spawnOverride ?? realSpawn)(spec);
+	const exit = exited.then((reason) => ({ reason }));
+	const deadline = Date.now() + LAUNCH_WAIT_MS;
+	while (Date.now() < deadline) {
+		if (existsSync(profile.portFile) && existsSync(profile.tokenFile)) return;
+		const r = await Promise.race([exit, new Promise<null>((res) => setTimeout(res, 100))]);
+		if (r) {
+			if (existsSync(profile.portFile) && existsSync(profile.tokenFile)) return;
+			throw launchError(r.reason);
+		}
+	}
+	throw launchError(
+		`profile "${profile.name}" published no port within ${LAUNCH_WAIT_MS / 1000} s`,
 	);
 }
 
-/** Where to connect: a named profile's own token and published port, else the default token and port. */
-function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
+/** Start the profile's browser if its port file is absent. One attempt per profile per process. */
+async function ensureRunning(profile: BrowserProfile, home: string, env: Env): Promise<void> {
+	if (existsSync(profile.portFile)) return;
+	let p = launches.get(profile.name);
+	if (!p) {
+		p = launchOnce(profile, home, env);
+		launches.set(profile.name, p);
+	}
+	await p;
+}
+
+export type TransportOpts = {
+	port?: number;
+	tokenFile?: string;
+	env?: Env;
+};
+
+/** Where to connect: a named profile's own token and published port (starting the profile when it
+ *  is not running), else the default token and port. */
+async function endpoint(opts: TransportOpts): Promise<{
 	port: number;
 	tokenFile: string;
 	profile?: string;
-} {
+}> {
 	const env = opts.env ?? process.env;
-	const profile = browserProfile(env);
+	const home = profileHomeOverride ?? homedir();
+	const profile = browserProfile(env, home);
 	if (profile) {
 		// Defence in depth (8SO HIGH-2): a process configured for a named profile never reaches the
 		// default browser, whatever port or token file a caller passes.
@@ -455,6 +664,7 @@ function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
 			port: opts.port ?? (Number(env.EIGHT_BROWSER_CONTROL_PORT) || DEFAULT_CONTROL_PORT),
 			tokenFile: opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
 		};
+	await ensureRunning(profile, home, env);
 	let raw: string;
 	try {
 		raw = readFileSync(profile.portFile, "utf8").trim();
@@ -473,17 +683,9 @@ function endpoint(opts: { port?: number; tokenFile?: string; env?: Env }): {
 }
 
 /** WebSocket transport: one authenticated round trip per command, as 8b-web does. */
-export function wsTransport(
-	opts: { port?: number; tokenFile?: string; env?: Env } = {},
-): BrowserCall {
-	return (cmd, args = {}) => {
-		let port: number;
-		let tokenFile: string;
-		try {
-			({ port, tokenFile } = endpoint(opts));
-		} catch (e) {
-			return Promise.reject(e);
-		}
+export function wsTransport(opts: TransportOpts = {}): BrowserCall {
+	return async (cmd, args = {}) => {
+		const { port, tokenFile } = await endpoint(opts);
 		return new Promise((resolve, reject) => {
 			let token: string;
 			try {
@@ -535,6 +737,9 @@ type Rect = { x: number; y: number; w: number; h: number };
 type El = {
 	index: number;
 	tag: string;
+	role?: string;
+	/** Accessible name from the browser (label[for], wrapping label, aria, placeholder, title), never a typed value. */
+	name?: string;
 	text: string;
 	rect?: Rect;
 	checked?: boolean;
@@ -654,7 +859,10 @@ function browserUnder8gent(lower: string): boolean {
 
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
-	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
+	const lists =
+		/readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(
+			command,
+		);
 	for (const view of decodedViews(command)) {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
@@ -739,8 +947,36 @@ const SECRET_FIELDS = [
 	"[contenteditable]",
 ].join(",");
 
+/** PNG dimensions from the IHDR chunk (width and height at bytes 16-23, big-endian), or null. */
+export function pngSize(png: Buffer): { w: number; h: number } | null {
+	if (png.length < 24 || png.toString("latin1", 1, 4) !== "PNG") return null;
+	if (png.toString("latin1", 12, 16) !== "IHDR") return null;
+	const w = png.readUInt32BE(16);
+	const h = png.readUInt32BE(20);
+	return w > 0 && h > 0 ? { w, h } : null;
+}
+
+/** The role a model acts on, from the ARIA role when the browser reports one, else the tag. */
+function roleOf(tag: string, role?: string): string {
+	if (role) return role.toLowerCase();
+	switch (tag) {
+		case "a":
+			return "link";
+		case "button":
+		case "summary":
+			return "button";
+		case "select":
+			return "combobox";
+		case "input":
+		case "textarea":
+			return "textbox";
+		default:
+			return tag || "element";
+	}
+}
+
 export function createEightBrowser(
-	call: BrowserCall = wsCall,
+	callArg?: BrowserCall,
 	/** isolated: a named profile (#3622). No typing into secret fields, no private hosts. */
 	opts: {
 		settleMs?: number;
@@ -751,15 +987,36 @@ export function createEightBrowser(
 		resolve?: Resolver;
 		/** Secrets file for {{secret:NAME}} placeholders (default EIGHT_BROWSER_SECRETS_FILE; "" disables). */
 		secretsFile?: string;
+		/** The run's workspace, only to report a workspace allow-loopback.json that was ignored: in an
+		 *  isolated profile loopback is reachable only on trusted listed ports (EIGHT_BROWSER_ALLOW_LOOPBACK
+		 *  or ~/.8gent/allow-loopback.json, #3785, 8SO). */
+		workspace?: string | (() => string | undefined);
+		/** Environment for the allowlist and profile rules (default process.env). */
+		env?: Env;
 	} = {},
 ) {
 	const isolated = () => (typeof opts.isolated === "function" ? opts.isolated() : !!opts.isolated);
+	const env = () => opts.env ?? process.env;
+	const workspace = () =>
+		typeof opts.workspace === "function" ? opts.workspace() : opts.workspace;
+	const call: BrowserCall = callArg ?? wsTransport({ env: opts.env });
 	const settle = opts.settleMs ?? 400;
-	const destinationBlocked = (url: string) =>
-		blockedBrowserDestination(url, {
+	/** Isolated profile: is `url` one of the run's own loopback servers (trusted list only)? */
+	const ownLoopback = (url: string): boolean =>
+		isolated() && isAllowedLoopbackUrl(url, env(), profileHomeOverride ?? homedir());
+	const ignoredNote = () => ignoredWorkspaceAllowlist(workspace());
+	const destinationBlocked = async (url: string) => {
+		if (ownLoopback(url)) return null;
+		const why = await blockedBrowserDestination(url, {
 			allowLoopback: isolated() ? [] : (opts.allowLoopback ?? loopbackAllowlist()),
 			resolve: opts.resolve ?? testResolver ?? undefined,
 		});
+		// A repo's own allow-loopback.json is never trusted; say it was ignored rather than stay silent.
+		const ignored = why && isolated() ? ignoredNote() : null;
+		return ignored ? `${why} ${ignored}` : why;
+	};
+	/** The default local profile (#3785) never reads a secrets file: nothing in ~/.8gent is its to use. */
+	const secretsFile = () => (usingDefaultLocalProfile(env()) ? "" : opts.secretsFile);
 	/** Does `selector` reach a password, payment or contenteditable field? Asked of the page
 	 *  itself, so it holds for any selector. Fails closed: an error reply (a malformed
 	 *  selector) or anything but an elements array counts as secret. */
@@ -770,6 +1027,13 @@ export function createEightBrowser(
 		});
 		if (!r || r.ok === false || !Array.isArray(r.elements)) return true;
 		return r.elements.length > 0;
+	};
+	/** The same question for a type step by index: the element's rect must be a known, visible one,
+	 *  and must not be among the page's secret fields. Fails closed on a missing or hidden element. */
+	const secretIndex = async (tabId: string, els: El[], index: number): Promise<boolean> => {
+		const el = els[index];
+		if (!el || el.hidden || !el.rect) return true;
+		return (await rects(tabId, SECRET_FIELDS)).has(JSON.stringify(el.rect));
 	};
 	const owned = new Set<string>();
 	const resolvedSecrets = new Map<string, string>(); // real value -> placeholder, for scrubbing output
@@ -790,12 +1054,44 @@ export function createEightBrowser(
 		);
 	const elements = async (tabId: string): Promise<El[]> => {
 		const r = await call("page.query", { tabId });
+		const raw: Array<El & { visible?: boolean }> = r?.elements ?? [];
 		// page.query has no checked flag; match :checked elements back by rect so a toggle click is observable.
 		const on = await rects(tabId, ":checked");
 		const pw = await rects(tabId, "input[type=password]"); // value is never rendered, typed by us or not
-		return (r?.elements ?? []).map((e: El & { visible?: boolean }) => {
-			const el: El = { index: e.index, tag: e.tag, text: e.text, rect: e.rect };
+		// A browser that reports role and name per element (8gent-browser page.query) needs nothing more.
+		// An older one does not: input types and ARIA roles are matched back by rect, so the list still
+		// reads `[n] role "name"` the way the grounding lane expects (#4043).
+		const reported = raw.every((e) => typeof e.role === "string");
+		const roles: Array<[string, Set<string>]> = reported
+			? []
+			: [
+					[
+						"checkbox",
+						await rects(
+							tabId,
+							"input[type=checkbox],[role=checkbox],input[type=radio],[role=radio]",
+						),
+					],
+					[
+						"button",
+						await rects(
+							tabId,
+							"input[type=submit],input[type=button],input[type=reset],[role=button]",
+						),
+					],
+					["link", await rects(tabId, "[role=link]")],
+				];
+		return raw.map((e) => {
 			const key = JSON.stringify(e.rect);
+			const byRect = e.rect ? roles.find(([, set]) => set.has(key))?.[0] : undefined;
+			const el: El = {
+				index: e.index,
+				tag: e.tag,
+				role: roleOf(e.tag, e.role ?? byRect),
+				text: e.text,
+				rect: e.rect,
+			};
+			if (typeof e.name === "string" && e.name.trim()) el.name = clipped(e.name);
 			if (e.visible === false) el.hidden = true; // kept for stable indices, never rendered (hidden csrf values)
 			if (e.rect && on.has(key)) el.checked = true;
 			if (e.rect && pw.has(key)) el.secret = true;
@@ -831,12 +1127,22 @@ export function createEightBrowser(
 				title: o.title,
 				elements: o.els
 					.filter((e) => !e.hidden)
-					.map((e) => `[${e.index}] ${e.tag}${e.checked ? " (checked)" : ""} ${shown(e)}`.trim()),
+					.map(
+						(e) =>
+							`[${e.index}] ${e.role ?? roleOf(e.tag)} ${label(e)}${e.checked ? " (checked)" : ""}`,
+					),
 				text: o.text.slice(0, 3_000),
 			}),
 		);
 	const shown = (e: El) =>
 		e.secret ? "(password field)" : typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text;
+	/** The element's accessible name, quoted: the browser's computed name when it reports one (never a
+	 *  field's value), else its text. A password field's or a typed value's text is never shown. */
+	const label = (e: El) => {
+		if (e.name && !typed.has(e.name))
+			return `${JSON.stringify(e.name)}${e.secret ? " (password field)" : ""}`;
+		return e.secret || typed.has(e.text) ? shown(e) : JSON.stringify(e.text);
+	};
 	const indexGuard = (els: El[], index?: number): string | null => {
 		if (index === undefined) return null;
 		if (!els[index]) return `index ${index} out of range (${els.length} elements)`;
@@ -885,7 +1191,10 @@ export function createEightBrowser(
 	};
 
 	async function open(url: string): Promise<string> {
-		const v = validateBrowserAction({ action: "open", url }, { isolated: isolated() });
+		const v = validateBrowserAction(
+			{ action: "open", url },
+			{ isolated: isolated(), allowedLoopback: ownLoopback, refusalNote: ignoredNote },
+		);
 		if (!v.ok) return `browser_open failed: ${v.error}`;
 		const blocked = await destinationBlocked(url);
 		if (blocked) return `browser_open failed: ${blocked}`;
@@ -923,7 +1232,11 @@ export function createEightBrowser(
 		const plan: BrowserAction[] = [];
 		let before = await observe(id);
 		for (const [i, r] of raw.entries()) {
-			const v = validateBrowserAction(r, { isolated: isolated() });
+			const v = validateBrowserAction(r, {
+				isolated: isolated(),
+				allowedLoopback: ownLoopback,
+				refusalNote: ignoredNote,
+			});
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
 			if (v.action.action === "open") {
 				const blocked = await destinationBlocked(v.action.url);
@@ -931,23 +1244,46 @@ export function createEightBrowser(
 			}
 
 			if (v.action.action === "type" && hasSecretPlaceholder(v.action.text)) {
-				const r = resolveSecretText(v.action.text, before.url, opts.secretsFile);
+				const r = resolveSecretText(v.action.text, before.url, secretsFile());
 				if (!r.ok) return fail(`dry run: step ${i}: ${r.error}`);
 			}
 			plan.push(v.action);
 		}
-		const refuseSecret = (i: number, sel: string) =>
+		type TypeStep = Extract<BrowserAction, { action: "type" }>;
+		const typeTarget = (a: TypeStep) => a.selector ?? `index ${a.index}`;
+		const refuseSecret = (i: number, a: TypeStep) =>
 			fail(
-				`step ${i}: ${sel} is a password or payment field; this browser profile never types into one`,
+				`step ${i}: ${typeTarget(a)} is a password or payment field; this browser profile types into one only on the run's own listed loopback server`,
 				steps,
 			);
 		const steps: Record<string, unknown>[] = [];
-		if (isolated())
-			for (const [i, a] of plan.entries())
-				if (a.action === "type" && (await secretField(id, a.selector)))
-					return refuseSecret(i, a.selector);
+		/** Secret-field check for a type step, by selector or by index. */
+		const secretTarget = (a: TypeStep, els: El[]) =>
+			a.selector !== undefined
+				? secretField(id, a.selector)
+				: secretIndex(id, els, a.index as number);
+		// Isolated profile: a password or payment field is typed into only on an allowed loopback page,
+		// the run's own test server (#3785). The dry run judges by where the plan will be; the live
+		// check below judges by where the page is.
+		if (isolated()) {
+			let planUrl = before.url;
+			for (const [i, a] of plan.entries()) {
+				if (a.action === "open") planUrl = a.url;
+				if (a.action !== "type") continue;
+				if (a.index !== undefined) {
+					const err = indexGuard(before.els, a.index);
+					if (err) return fail(`dry run: step ${i}: ${err}`);
+				}
+				if (!ownLoopback(planUrl) && (await secretTarget(a, before.els))) return refuseSecret(i, a);
+			}
+		}
 		for (const [i, a] of plan.entries()) {
 			if (a.action === "open") break;
+			if (a.action === "type" && a.index !== undefined) {
+				const err = indexGuard(before.els, a.index);
+				if (err) return fail(`dry run: step ${i}: ${err}`);
+				continue;
+			}
 			if (a.action !== "left_click") continue;
 			const err = indexGuard(before.els, a.index);
 			if (err) return fail(`dry run: step ${i}: ${err}`);
@@ -957,13 +1293,18 @@ export function createEightBrowser(
 			const row: Record<string, unknown> = { step: i, action: a.action, attempts: 1 };
 			if (a.action === "type") {
 				// Re-checked live: an earlier step may have changed the page since the dry run.
-				if (isolated() && (await secretField(id, a.selector))) return refuseSecret(i, a.selector);
-				row.selector = a.selector;
+				if (a.index !== undefined) {
+					const err = indexGuard(before.els, a.index);
+					if (err) return fail(`step ${i}: ${err}`, steps);
+					row.index = a.index;
+				} else row.selector = a.selector;
+				if (isolated() && !ownLoopback(before.url) && (await secretTarget(a, before.els)))
+					return refuseSecret(i, a);
 				row.text_len = a.text.length;
 				let text = a.text;
 				if (hasSecretPlaceholder(a.text)) {
 					// Resolved now, against the page as it is now: an earlier step may have moved it.
-					const r = resolveSecretText(a.text, before.url, opts.secretsFile);
+					const r = resolveSecretText(a.text, before.url, secretsFile());
 					if (!r.ok) return fail(`step ${i}: ${r.error}`, steps);
 					text = r.text;
 					for (const [placeholder, value] of r.values) resolvedSecrets.set(value, placeholder);
@@ -971,10 +1312,17 @@ export function createEightBrowser(
 				if (text) typed.add(clipped(text));
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
-					const r = await call("page.type", { tabId: id, selector: a.selector, text });
+					const r = await call("page.type", {
+						tabId: id,
+						selector: a.selector,
+						index: a.index,
+						text,
+					});
 					if (r?.ok === false) row.error = r.error;
-					const got = (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]
-						?.text;
+					const got =
+						a.selector !== undefined
+							? (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]?.text
+							: (await call("page.query", { tabId: id }))?.elements?.[a.index as number]?.text;
 					row.verified = got === clipped(text);
 					if (row.verified) break;
 				}
@@ -1016,18 +1364,36 @@ export function createEightBrowser(
 		return JSON.stringify({ ok: true, steps, page: JSON.parse(render(id, before)) });
 	}
 
-	/** Screenshot an owned tab to `path` (default: 8gent Browser's own ~/.8gent/browser-shots file). */
+	/** Screenshot an owned tab to `path` (default: 8gent Browser's own ~/.8gent/browser-shots file).
+	 *  Returns `<absolute png path> <W>x<H>`, the size read from the PNG header (or the browser's
+	 *  reported viewport), so a grounding model can map coordinates without opening the file. */
 	async function screenshot(path?: string, tabId?: string): Promise<string> {
 		try {
 			const r = await call("page.screenshot", { tabId: own(tabId) });
 			if (r?.ok === false) return `browser_screenshot failed: ${r.error}`;
-			if (!path)
-				return String(r?.savedTo ?? "browser_screenshot failed: 8gent Browser saved no file");
-			writeFileSync(
-				path,
-				Buffer.from(String(r?.dataUrl ?? "").replace(/^data:image\/\w+;base64,/, ""), "base64"),
-			);
-			return path;
+			const png =
+				typeof r?.dataUrl === "string"
+					? Buffer.from(r.dataUrl.replace(/^data:image\/\w+;base64,/, ""), "base64")
+					: null;
+			let file: string;
+			if (path) {
+				if (!png) return "browser_screenshot failed: 8gent Browser sent no image";
+				writeFileSync(path, png);
+				file = resolvePath(path);
+			} else {
+				if (!r?.savedTo) return "browser_screenshot failed: 8gent Browser saved no file";
+				file = resolvePath(String(r.savedTo));
+			}
+			let size = png ? pngSize(png) : null;
+			if (!size) {
+				try {
+					size = pngSize(readFileSync(file));
+				} catch {}
+			}
+			const vp = r?.viewport;
+			if (!size && vp && Number.isInteger(vp.width) && Number.isInteger(vp.height))
+				size = { w: vp.width, h: vp.height };
+			return size ? `${file} ${size.w}x${size.h}` : file;
 		} catch (e) {
 			return `browser_screenshot failed: ${(e as Error).message}`;
 		}

@@ -64,6 +64,7 @@ export const PROTECTED_DATA_FILES = [
 	"mcp.json",
 	".env",
 	"keys.env",
+	"allow-loopback.json", // the browser's trusted loopback port list (#3785, 8SO)
 	"keybindings.json",
 	"update-resume.json",
 ] as const;
