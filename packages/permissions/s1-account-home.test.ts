@@ -50,4 +50,22 @@ describe("account home lookup", () => {
 		expect(passwdHomeFor("darwin", 501, down, undefined, () => "james")).toBe("/Users/james");
 		expect(passwdHomeFor("darwin", 501, dscl, undefined, () => "../evil")).toBeNull();
 	});
+
+	test("macOS: the user name comes from /usr/bin/id -un, not from USER or os.userInfo()", () => {
+		const calls: string[][] = [];
+		const prev = process.env.USER;
+		process.env.USER = "mallory";
+		try {
+			const run = (f: string, a: string[]) => {
+				calls.push([f, ...a]);
+				return f === "/usr/bin/id" ? "james\n" : "NFSHomeDirectory: /Users/james\n";
+			};
+			expect(passwdHomeFor("darwin", 501, run)).toBe("/Users/james");
+			expect(calls[0]).toEqual(["/usr/bin/id", "-un"]);
+			expect(calls[1]).toEqual(["/usr/bin/dscl", ".", "-read", "/Users/james", "NFSHomeDirectory"]);
+		} finally {
+			if (prev === undefined) Reflect.deleteProperty(process.env, "USER");
+			else process.env.USER = prev;
+		}
+	});
 });

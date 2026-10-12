@@ -57,7 +57,7 @@ export function passwdHomeFor(
 	uid: number,
 	run: RunTool = runTool,
 	readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
-	userName: () => string = () => userInfo().username,
+	userName: () => string = () => run("/usr/bin/id", ["-un"]).trim(),
 ): string | null {
 	try {
 		if (platform === "darwin") {

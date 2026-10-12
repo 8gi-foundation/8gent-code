@@ -535,6 +535,34 @@ describe("glob expansion matches the shell or has no opinion (#4073, 8SO)", () =
 		expect(moveInProject("mv inbox/.hid-*.txt inbox/notes/", ws).ok).toBe(false);
 	});
 
+	test("a workspace inside EIGHT_HOME or EIGHT_DATA_DIR has no glob lane, run-dir exception included", () => {
+		const eh = realpathSync(tempDir("s1-eh-"));
+		const dd = realpathSync(tempDir("s1-dd-"));
+		const saved = [process.env.EIGHT_HOME, process.env.EIGHT_DATA_DIR];
+		const inEh = join(eh, ".8gent", "work");
+		const ehRun = join(eh, ".8gent", "rishi-pilot", "runs", "r1", "work");
+		const inDd = join(dd, "work");
+		for (const d of [inEh, ehRun, inDd]) {
+			mkdirSync(join(d, "inbox", "notes"), { recursive: true });
+			writeFileSync(join(d, "inbox", "note-1.txt"), "x");
+		}
+		process.env.EIGHT_HOME = eh;
+		process.env.EIGHT_DATA_DIR = dd;
+		try {
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", inEh).ok).toBe(false);
+			// the narrow exception is only for the default ~/.8gent
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ehRun).ok).toBe(false);
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", inDd).ok).toBe(false);
+			// a plain written operand is still the old lane
+			expect(moveInProject("mv inbox/note-1.txt inbox/notes/", inDd).ok).toBe(true);
+		} finally {
+			for (const [k, v] of [["EIGHT_HOME", saved[0]], ["EIGHT_DATA_DIR", saved[1]]] as const) {
+				if (v === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = v;
+			}
+		}
+	});
+
 	test("a workspace inside ~/.8gent has no glob lane, but a pilot run dir does", () => {
 		const home = realpathSync(tempDir("s1-home-"));
 		const h = process.env.HOME;

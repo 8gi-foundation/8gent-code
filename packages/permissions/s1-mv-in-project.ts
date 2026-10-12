@@ -73,6 +73,7 @@ import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { accountHome } from "./s1-account-home";
+import { protectedDataRoots } from "./run-command-sandbox";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
@@ -337,26 +338,38 @@ function expandGlobs(text: string, cwd: string): string | null {
 const PLAIN_NAME = /^[A-Za-z0-9._+,=@:-]+$/;
 
 /**
- * True when `root` (a real path) is inside the account's `~/.8gent` data tree,
- * where globs never expand on trust. A pilot run directory under
- * `~/.8gent/rishi-pilot/runs/` is an ordinary workspace and is fine.
+ * True when `root` (a real path) is inside any protected data root
+ * (`protectedDataRoots()`: ~/.8gent, EIGHT_HOME's .8gent, EIGHT_DATA_DIR), where
+ * globs never expand on trust. The one exception is a pilot run directory under
+ * the DEFAULT `~/.8gent/rishi-pilot/runs/`, which is an ordinary workspace.
  */
 function inProtectedDataRoot(root: string): boolean {
-	const homes = new Set<string>();
+	const defaults = new Set<string>();
 	for (const h of [accountHome(), process.env.HOME]) {
 		if (!h) continue;
-		homes.add(h);
+		defaults.add(path.join(h, ".8gent"));
 		try {
-			homes.add(realpathSync(h));
+			defaults.add(path.join(realpathSync(h), ".8gent"));
 		} catch {
 			// not resolvable: keep the written form
 		}
 	}
-	for (const h of homes) {
-		const data = path.join(h, ".8gent");
+	const roots = new Set<string>();
+	for (const r of [...protectedDataRoots(), ...defaults]) {
+		roots.add(r);
+		try {
+			roots.add(realpathSync(r));
+		} catch {
+			// missing: keep the written form
+		}
+	}
+	for (const data of roots) {
 		if (!inside(root, data)) continue;
-		const runs = path.join(data, "rishi-pilot", "runs");
-		return !(root !== runs && inside(root, runs));
+		if (defaults.has(data)) {
+			const runs = path.join(data, "rishi-pilot", "runs");
+			if (root !== runs && inside(root, runs)) continue;
+		}
+		return true;
 	}
 	return false;
 }
