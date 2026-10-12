@@ -101,9 +101,9 @@ export const RENDER_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-
 
 /**
  * Write a sanitised copy of the page into `dir` and return its path. The copy
- * carries a CSP that blocks every subresource, loses <base> and meta refresh
- * (they could point the render at another file), and has the images that sit
- * inside the page's own folder inlined as data: URIs, so the page still looks
+ * carries a CSP that blocks every subresource and all script, loses <base> and has
+ * every http-equiv disarmed (a refresh could point the render at another file), and
+ * has the images that sit inside the page's own folder inlined as data: URIs, so the page still looks
  * right while no other file or address can be reached.
  */
 export function prepareSafeCopy(htmlPath: string, dir: string): string {
@@ -127,6 +127,10 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	html = html
 		.replace(/<base\b[^>]*>/gi, "")
 		.replace(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*>/gi, "")
+		// The match above reads the value, which entities (&#114;efresh) or a quoted ">" slip
+		// past. An attribute NAME cannot be entity-encoded, so every http-equiv is disarmed:
+		// no page-supplied refresh can navigate to an unsanitised file that would run script.
+		.replace(/\bhttp-equiv\b/gi, "data-blocked-http-equiv")
 		.replace(/(\bsrc\s*=\s*)(["'])([^"']*)\2/gi, (m, pre, q, ref) => {
 			const d = inline(ref);
 			return d ? `${pre}${q}${d}${q}` : m;

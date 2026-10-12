@@ -14,6 +14,7 @@ import { ToolExecutor } from "../../eight/tools";
 import type { Band, LayoutMeasure } from "../../eight/layout-measure";
 import * as http from "node:http";
 import * as os from "node:os";
+import { pathToFileURL } from "node:url";
 import { MAX_HTML_BYTES, RENDER_CSP, chromeArgs, compareLayout, describeDiff, findChrome, noScreenshotMessage, pairBands, prepareSafeCopy, renderHtml, renderSafe } from "../layout-compare";
 import { measureLayout } from "../../eight/layout-measure";
 
@@ -348,12 +349,41 @@ describe("prepareSafeCopy (#4081)", () => {
 		}
 	});
 
+	test("a meta refresh is disarmed even when its value is entity-encoded or holds a quoted > (#4124)", () => {
+		for (const tag of [
+			'<meta http-equiv="&#114;efresh" content="0;url=file:///etc/passwd">',
+			'<meta content="0;url=file:///x?>" http-equiv="refresh">',
+			"<META HTTP-EQUIV='Refresh' CONTENT='0;url=sibling.html'>",
+		]) {
+			const p = page(`<html><head>${tag}</head><body>x</body></html>`);
+			const copy = fs.readFileSync(prepareSafeCopy(p.file, p.out), "utf8");
+			// Only the injected CSP meta keeps a live http-equiv, and it comes first.
+			expect(copy.match(/(?<![-\w])http-equiv\b/gi)).toHaveLength(1);
+			expect(copy.startsWith('<meta http-equiv="Content-Security-Policy"')).toBe(true);
+		}
+	});
+
 	test("a page over the size cap is refused", () => {
 		const p = page("x".repeat(MAX_HTML_BYTES + 1));
 		expect(() => prepareSafeCopy(p.file, p.out)).toThrow(/limit/);
 	});
 });
 
+const OUTSIDE_BLOCK = '<div style="width:600px;height:300px;background:#000"></div>';
+/** Share of near-black pixels inside `r` of a PNG. */
+async function darkFraction(file: string, r: { x: number; y: number; w: number; h: number }): Promise<number> {
+	const { data, info } = await sharp(file).flatten({ background: "#ffffff" }).raw().toBuffer({ resolveWithObject: true });
+	let dark = 0;
+	let total = 0;
+	for (let y = r.y; y < Math.min(r.y + r.h, info.height); y++) {
+		for (let x = r.x; x < Math.min(r.x + r.w, info.width); x++) {
+			const i = (y * info.width + x) * info.channels;
+			total++;
+			if (data[i] < 64 && data[i + 1] < 64 && data[i + 2] < 64) dark++;
+		}
+	}
+	return total ? dark / total : 0;
+}
 const chrome = findChrome();
 const requireChrome = process.env.EIGHT_REQUIRE_CHROME === "1";
 if (requireChrome) {
@@ -370,21 +400,6 @@ describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)"
 		"fake <head> in a comment": (port, o) =>
 			`<!-- <head> --><script src="http://127.0.0.1:${port}/x.js"></script><html><head></head><body style="margin:0"><iframe src="${o}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
 	};
-	const OUTSIDE_BLOCK = '<div style="width:600px;height:300px;background:#000"></div>';
-	/** Share of near-black pixels inside `r` of a PNG. */
-	async function darkFraction(file: string, r: { x: number; y: number; w: number; h: number }): Promise<number> {
-		const { data, info } = await sharp(file).flatten({ background: "#ffffff" }).raw().toBuffer({ resolveWithObject: true });
-		let dark = 0;
-		let total = 0;
-		for (let y = r.y; y < Math.min(r.y + r.h, info.height); y++) {
-			for (let x = r.x; x < Math.min(r.x + r.w, info.width); x++) {
-				const i = (y * info.width + x) * info.channels;
-				total++;
-				if (data[i] < 64 && data[i + 1] < 64 && data[i + 2] < 64) dark++;
-			}
-		}
-		return total ? dark / total : 0;
-	}
 	for (const [name, build] of Object.entries(shapes)) {
 		test(`${name}: no connection to a local listener, no outside iframe`, async () => {
 			let connections = 0;
@@ -449,6 +464,60 @@ describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)"
 			} finally {
 				server.close();
 			}
+		}, 60_000);
+	}
+});
+
+describe.skipIf(!chrome)("real Chrome runs no page script: the CSP alone stops it (#4124)", () => {
+	// Each shape tries to paint the outside block with script. Rendered raw (no CSP; the network
+	// locks are irrelevant, nothing loads from the network) the block must appear, which proves
+	// the shape's script really runs in this Chrome. Rendered through renderSafe it must not.
+	const PAINT =
+		"var d=document.createElement('div');d.style.cssText='width:600px;height:300px;background:#000;margin:20px';(document.body||document.documentElement).appendChild(d)";
+	const FRAME = 'style="border:0;width:700px;height:400px"';
+	const shapes: Record<string, (sibling: string) => string> = {
+		"script before <head>": () => `<script>${PAINT}</script><html><head></head><body style="margin:0"></body></html>`,
+		"script in the body": () => `<html><head></head><body style="margin:0"><script>${PAINT}</script></body></html>`,
+		"img onerror": () => `<html><body style="margin:0"><img src="x" onerror="${PAINT}"></body></html>`,
+		"svg script": () => `<html><body style="margin:0"><svg width="10" height="10"><script>${PAINT}</script></svg></body></html>`,
+		"iframe srcdoc script": () => `<html><body style="margin:0"><iframe ${FRAME} srcdoc="<script>${PAINT}</script>"></iframe></body></html>`,
+		"iframe javascript: src": () =>
+			`<html><body style="margin:0"><iframe ${FRAME} src="javascript:'<div style=width:600px;height:300px;background:#000;margin:20px></div>'"></iframe></body></html>`,
+		"entity-encoded meta refresh to an unsanitised sibling": (sibling) =>
+			`<html><head><meta http-equiv="&#114;efresh" content="0;url=${sibling}"></head><body style="margin:0">x</body></html>`,
+		"meta refresh with a quoted > to an unsanitised sibling": (sibling) =>
+			`<html><head><meta content="0;url=${sibling}?>" http-equiv="refresh"></head><body style="margin:0">x</body></html>`,
+	};
+	for (const [name, build] of Object.entries(shapes)) {
+		test(`${name}: paints with script when raw, paints nothing through renderSafe`, async () => {
+			const dir = tempDir("layout-compare-script-");
+			const site = path.join(dir, "site");
+			fs.mkdirSync(site);
+			const sibling = path.join(site, "sibling.html");
+			fs.writeFileSync(sibling, `<html><body style="margin:0"><script>${PAINT}</script></body></html>`);
+			const file = path.join(site, "index.html");
+			fs.writeFileSync(file, build(pathToFileURL(sibling).href));
+			const work = path.join(dir, "work");
+			fs.mkdirSync(work);
+			const probe = path.join(site, "probe.html");
+			fs.writeFileSync(probe, "<body>probe</body>");
+			try {
+				await renderSafe(chrome as string, probe, path.join(work, "probe.png"), 200, 100, work);
+			} catch (e) {
+				if (requireChrome) throw e;
+				console.warn("Chrome cannot start here; skipping the live script test");
+				return;
+			}
+			const whole = { x: 0, y: 0, w: 800, h: 600 };
+			await renderHtml(chrome as string, file, path.join(work, "raw.png"), 800, 600, path.join(work, "raw-profile"));
+			expect(await darkFraction(path.join(work, "raw.png"), whole)).toBeGreaterThan(0.3);
+			await renderSafe(chrome as string, file, path.join(work, "safe.png"), 800, 600, work);
+			const got = await measureLayout(path.join(work, "safe.png"));
+			for (const b of got?.bands ?? []) {
+				expect(b.h).toBeLessThanOrEqual(50);
+				for (const sp of b.spans) expect(sp.w).toBeLessThanOrEqual(50);
+			}
+			expect(await darkFraction(path.join(work, "safe.png"), whole)).toBeLessThan(0.02);
 		}, 60_000);
 	}
 });
