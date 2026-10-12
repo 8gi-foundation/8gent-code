@@ -32,6 +32,7 @@ import { join, posix as pathPosix, resolve as resolvePath, win32 as pathWin32 } 
 import {
 	RESERVED_LOOPBACK_PORTS,
 	allowedLoopbackPorts,
+	ignoredWorkspaceAllowlist,
 	isAllowedLoopbackUrl,
 } from "../permissions/loopback-allowlist";
 import {
@@ -309,6 +310,8 @@ export function validateBrowserAction(
 		isolated?: boolean;
 		/** Isolated only: true for a loopback URL on one of the run's own listed ports (#3785). */
 		allowedLoopback?: (url: string) => boolean;
+		/** Isolated only: a line added to a refusal, e.g. that a workspace allowlist was ignored. */
+		refusalNote?: () => string | null;
 	} = {},
 ): Check<BrowserAction> {
 	if (!raw || typeof raw !== "object") return { ok: false, error: "action must be an object" };
@@ -319,7 +322,13 @@ export function validateBrowserAction(
 			if (typeof a.url !== "string" || !/^https?:\/\//.test(a.url))
 				return { ok: false, error: "open.url must be http(s)" };
 			const why = opts.isolated && !opts.allowedLoopback?.(a.url) ? blockedForProfile(a.url) : null;
-			if (why) return { ok: false, error: `open.url refused in this browser profile: ${why}` };
+			if (why) {
+				const note = opts.refusalNote?.();
+				return {
+					ok: false,
+					error: `open.url refused in this browser profile: ${why}${note ? ` ${note}` : ""}`,
+				};
+			}
 			return { ok: true, action: { action: "open", url: a.url } };
 		}
 		case "left_click": {
@@ -579,7 +588,7 @@ async function launchOnce(
 	const bin = browserBinary(env, home);
 	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
 	const port = await freePort();
-	const ports = workspace ? [...allowedLoopbackPorts(workspace, env)] : [];
+	const ports = [...allowedLoopbackPorts(env, home)];
 	// Built fresh: only what the browser needs to run and find its profile. Never the parent env.
 	const childEnv: Record<string, string> = {
 		HOME: home,
@@ -964,8 +973,9 @@ export function createEightBrowser(
 		resolve?: Resolver;
 		/** Secrets file for {{secret:NAME}} placeholders (default EIGHT_BROWSER_SECRETS_FILE; "" disables). */
 		secretsFile?: string;
-		/** The run's workspace. In an isolated profile, loopback is reachable only on the ports its
-		 *  allowlist names (EIGHT_BROWSER_ALLOW_LOOPBACK, <workspace>/.8gent/allow-loopback.json, #3785). */
+		/** The run's workspace, only to report a workspace allow-loopback.json that was ignored: in an
+		 *  isolated profile loopback is reachable only on trusted listed ports (EIGHT_BROWSER_ALLOW_LOOPBACK
+		 *  or ~/.8gent/allow-loopback.json, #3785, 8SO). */
 		workspace?: string | (() => string | undefined);
 		/** Environment for the allowlist and profile rules (default process.env). */
 		env?: Env;
@@ -977,17 +987,19 @@ export function createEightBrowser(
 		typeof opts.workspace === "function" ? opts.workspace() : opts.workspace;
 	const call: BrowserCall = callArg ?? wsTransport({ workspace, env: opts.env });
 	const settle = opts.settleMs ?? 400;
-	/** Isolated profile: is `url` one of the run's own loopback servers? Never without a workspace. */
-	const ownLoopback = (url: string): boolean => {
-		const ws = workspace();
-		return isolated() && !!ws && isAllowedLoopbackUrl(url, ws, env());
-	};
+	/** Isolated profile: is `url` one of the run's own loopback servers (trusted list only)? */
+	const ownLoopback = (url: string): boolean =>
+		isolated() && isAllowedLoopbackUrl(url, env(), profileHomeOverride ?? homedir());
+	const ignoredNote = () => ignoredWorkspaceAllowlist(workspace());
 	const destinationBlocked = async (url: string) => {
 		if (ownLoopback(url)) return null;
-		return blockedBrowserDestination(url, {
+		const why = await blockedBrowserDestination(url, {
 			allowLoopback: isolated() ? [] : (opts.allowLoopback ?? loopbackAllowlist()),
 			resolve: opts.resolve ?? testResolver ?? undefined,
 		});
+		// A repo's own allow-loopback.json is never trusted; say it was ignored rather than stay silent.
+		const ignored = why && isolated() ? ignoredNote() : null;
+		return ignored ? `${why} ${ignored}` : why;
 	};
 	/** The default local profile (#3785) never reads a secrets file: nothing in ~/.8gent is its to use. */
 	const secretsFile = () => (usingDefaultLocalProfile(env()) ? "" : opts.secretsFile);
@@ -1150,7 +1162,7 @@ export function createEightBrowser(
 	async function open(url: string): Promise<string> {
 		const v = validateBrowserAction(
 			{ action: "open", url },
-			{ isolated: isolated(), allowedLoopback: ownLoopback },
+			{ isolated: isolated(), allowedLoopback: ownLoopback, refusalNote: ignoredNote },
 		);
 		if (!v.ok) return `browser_open failed: ${v.error}`;
 		const blocked = await destinationBlocked(url);
@@ -1189,7 +1201,11 @@ export function createEightBrowser(
 		const plan: BrowserAction[] = [];
 		let before = await observe(id);
 		for (const [i, r] of raw.entries()) {
-			const v = validateBrowserAction(r, { isolated: isolated(), allowedLoopback: ownLoopback });
+			const v = validateBrowserAction(r, {
+				isolated: isolated(),
+				allowedLoopback: ownLoopback,
+				refusalNote: ignoredNote,
+			});
 			if (!v.ok) return fail(`dry run: step ${i}: ${v.error}`);
 			if (v.action.action === "open") {
 				const blocked = await destinationBlocked(v.action.url);

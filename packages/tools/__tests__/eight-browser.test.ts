@@ -10,7 +10,7 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../../permissions/tui-approval-channel";
-import { _resetLoopbackAllowlistForTest } from "../../permissions/loopback-allowlist";
+import { RESERVED_LOOPBACK_PORTS, _resetLoopbackAllowlistForTest } from "../../permissions/loopback-allowlist";
 import {
 	type BrowserCall,
 	type BrowserLaunchSpec,
@@ -1562,7 +1562,14 @@ describeNotWin(
 			);
 			const app = fakeApp(Number(server.port), "fresh-tok");
 			try {
-				_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+				const home = mkdtempSync(join(tmpdir(), "8b-launch-home-"));
+				// The trusted user-level list (8SO): ~/.8gent/allow-loopback.json. The workspace file above is ignored.
+				mkdirSync(join(home, ".8gent"), { recursive: true });
+				writeFileSync(
+					join(home, ".8gent", "allow-loopback.json"),
+					JSON.stringify({ allow: ["127.0.0.1:5174", "localhost:7980"] }),
+				);
+				_setProfileHomeForTest(home);
 				const env = {
 					EIGHT_BROWSER_PROFILE: "eightgent",
 					EIGHT_BROWSER_APP: "/fake/8gent Browser",
@@ -1593,11 +1600,12 @@ describeNotWin(
 				expect(spec.env.EIGHT_BROWSER_PROFILE).toBe("eightgent");
 				expect(Number(spec.env.EIGHT_BROWSER_CONTROL_PORT)).toBe(spec.port);
 				expect(spec.port).not.toBe(7980);
-				expect([7980, 18789, 18790, 11434, 1234, 21434]).not.toContain(spec.port);
-				// The run's own ports only: env list plus workspace file; the reserved 7980 entry dropped.
+				expect([...RESERVED_LOOPBACK_PORTS]).not.toContain(spec.port);
+				// Trusted sources only: env list plus ~/.8gent/allow-loopback.json; the workspace file's 5173
+				// is ignored and the reserved 7980 entry dropped.
 				expect(spec.env.EIGHT_BROWSER_ALLOW_LOOPBACK.split(",").sort()).toEqual([
 					"127.0.0.1:3000",
-					"127.0.0.1:5173",
+					"127.0.0.1:5174",
 				]);
 				expect(JSON.stringify(spec.env)).not.toMatch(/sk-never|OPENROUTER|ANTHROPIC/);
 			} finally {
@@ -1699,7 +1707,7 @@ describe("isolated profile: loopback only on the run's own listed ports (#3785)"
 		);
 		expect(ok.ok).toBe(true);
 	});
-	test("the workspace file lists ports too; the list is read once per workspace", async () => {
+	test("a workspace allow-loopback.json is ignored, and the refusal says so (8SO)", async () => {
 		const ws = workspace();
 		mkdirSync(join(ws, ".8gent"));
 		writeFileSync(
@@ -1714,22 +1722,17 @@ describe("isolated profile: loopback only on the run's own listed ports (#3785)"
 			env: {},
 			resolve: publicDns,
 		});
-		expect(await b.open(at("http", "127.0.0.1:4321/"))).not.toMatch(/failed/);
-		writeFileSync(
-			join(ws, ".8gent", "allow-loopback.json"),
-			JSON.stringify({ allow: ["127.0.0.1:4321", "127.0.0.1:4322"] }),
-		);
-		expect(await b.open(at("http", "127.0.0.1:4322/"))).toMatch(/failed/); // frozen at first read
+		const out = await b.open(at("http", "127.0.0.1:4321/"));
+		expect(out).toMatch(/failed|Refused/);
+		expect(out).toContain("Ignored .8gent/allow-loopback.json");
+		expect(site.calls).not.toContain("nav.go");
 	});
-	test("without a workspace an isolated profile allows no loopback at all, whatever the env says", async () => {
+	test("an isolated profile with only the env list opens just the listed port, no workspace needed", async () => {
+		const env: Record<string, string> = { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5173" };
 		const site = nextSite();
-		const b = createEightBrowser(site.call, {
-			settleMs: 0,
-			isolated: true,
-			env: { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5173" },
-			resolve: publicDns,
-		});
-		expect(await b.open(at("http", "127.0.0.1:5173/"))).toMatch(/failed/);
+		const b = createEightBrowser(site.call, { settleMs: 0, isolated: true, env, resolve: publicDns });
+		expect(await b.open(at("http", "127.0.0.1:5173/"))).not.toMatch(/failed/);
+		expect(await b.open(at("http", "127.0.0.1:5175/"))).toMatch(/failed|Refused/);
 	});
 	test("the non-isolated path is unchanged: its own allowLoopback list, no workspace needed", async () => {
 		const site = nextSite();
