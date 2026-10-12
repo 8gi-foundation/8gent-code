@@ -13,7 +13,7 @@
  */
 import { type CoordSpace, QwenVlBackend } from "./backends/qwen-vl.js";
 import { prepareImage, scaleBack } from "./image.js";
-import { assertLoopback } from "./loopback.js";
+import { assertLocalModel, assertLoopback } from "./loopback.js";
 import type { BBox, GroundBackend, GroundInput, GroundOutcome } from "./types.js";
 
 export type {
@@ -24,7 +24,12 @@ export type {
 	GroundResult,
 	GroundFailure,
 } from "./types.js";
-export { assertLoopback, NonLoopbackEndpointError } from "./loopback.js";
+export {
+	assertLocalModel,
+	assertLoopback,
+	CloudModelError,
+	NonLoopbackEndpointError,
+} from "./loopback.js";
 
 interface Preset {
 	model: string;
@@ -79,10 +84,12 @@ export function backendFromEnv(
 	}
 	const endpoint = env.EIGHT_GROUND_ENDPOINT || preset.endpoint;
 	assertLoopback(endpoint);
+	const model = env.EIGHT_GROUND_MODEL || preset.model;
+	assertLocalModel(model);
 	const coords = (env.EIGHT_GROUND_COORDS as CoordSpace | undefined) || preset.coords;
 	return new QwenVlBackend({
 		id: name,
-		model: env.EIGHT_GROUND_MODEL || preset.model,
+		model,
 		endpoint,
 		transport: preset.transport,
 		coords,
@@ -135,6 +142,7 @@ export async function ground(
 	if (!instruction) return fail("empty instruction");
 	try {
 		assertLoopback(backend.endpoint);
+		assertLocalModel(backend.model);
 	} catch (err) {
 		return fail((err as Error).message);
 	}
