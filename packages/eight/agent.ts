@@ -86,6 +86,7 @@ import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orches
 import {
 	NARRATION_NOTE,
 	SCRATCH_DIR_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
 	SLIDES_TO_VIDEO_NOTE,
 	buildToolCatalogSegment,
 } from "./prompts/system-prompt";
@@ -137,6 +138,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
+import { layoutMeasureLine } from "./layout-measure";
 import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
 import {
 	ObservationPacker,
@@ -213,7 +215,7 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  */
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
-const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
+const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE, LOCAL_SERVER_CURL_SHORT].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -567,7 +569,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// one-shot run, so the remember nudge goes too.
 		const compactLocalPrompt = config.headless
 			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
-			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}\n${LOCAL_SERVER_CURL_SHORT}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -1543,6 +1545,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
 				finishReason: "other",
 			});
+			// #3823: a model that sees the attachment never called read_image in 2 of 5
+			// design-mockup-practice runs (incl. the latest), so the measured layout
+			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
+			// over on the attach path too. Bounded, model-free, empty on any failure.
+			try {
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				if (measured) {
+					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+					// read_image on the same file this turn must not repeat the block.
+					this.executor.markLayoutSent(measured);
+				}
+			} catch {
+				// layout hints are best-effort; the image itself is already attached
+			}
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
