@@ -28,7 +28,14 @@ async function main() {
 	} finally {
 		// Windows will not delete a folder that is some process's working directory (EBUSY).
 		process.chdir(back);
-		fs.rmSync(dir, { recursive: true, force: true });
+		try {
+			fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+		} catch (e) {
+			// The app's file watcher can hold the folder open until exit on Windows; it is under the
+			// run's temp dir, which the test sweep removes. Elsewhere any failure still throws.
+			const code = (e as NodeJS.ErrnoException).code;
+			if (!(process.platform === "win32" && (code === "EBUSY" || code === "EPERM"))) throw e;
+		}
 	}
 	process.exit(0);
 }
