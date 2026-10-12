@@ -1,0 +1,1068 @@
+{
+ "about": "Shell commands issued by 8gent-code in the latest 3 passing local pilot runs of each credited sovereignty scenario (ops, code_question, state_handoff, orchestration, docs_decks, research, code_fix, troubleshooting, go_ahead), verbatim from the run session logs (home directory rewritten). System One must keep allowing every one without the judge.",
+ "commands": [
+  {
+   "command": "git checkout -b feat/slug-accents",
+   "scenarios": [
+    "ops-commit-branch"
+   ]
+  },
+  {
+   "command": "git push -u origin feat/slug-accents",
+   "scenarios": [
+    "ops-commit-branch"
+   ]
+  },
+  {
+   "command": "git log --oneline",
+   "scenarios": [
+    "ops-commit-branch"
+   ]
+  },
+  {
+   "command": "git checkout -b feat/slug-accents && git add src/slugify.ts && git commit -m \"feat(slugify): strip accents before slugifying\"",
+   "scenarios": [
+    "ops-commit-branch"
+   ]
+  },
+  {
+   "command": "git branch --show-current && echo \"---LOG---\" && git log --oneline -5 && echo \"---REMOTE---\" && git remote -v",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -8",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git remote -v",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git fetch origin",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline d92bd98..origin/main",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline d92bd98..feat/shout",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff d92bd98 origin/main --stat",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff d92bd98 feat/shout --stat",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git show origin/main -- src/greet.ts test/greet.test.ts",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git show origin/feat/shout -- src/greet.ts test/greet.test.ts",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git rebase origin/main",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git add src/greet.ts test/greet.test.ts",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "bun test",
+   "scenarios": [
+    "approve-go-ahead-practice",
+    "l3-bugfix",
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "bun test 2>&1 | tail -n 30",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -3",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git status",
+   "scenarios": [
+    "ops-rebase-push",
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "GIT_EDITOR=true git rebase --continue",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git branch -v",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git checkout feat/shout",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git push --force-with-lease origin feat/shout",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -4",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git fetch origin main 2>&1; echo \"---BRANCH---\"; git branch --show-current; echo \"---LOG---\"; git log --oneline -10; echo \"---REMOTES---\"; git remote -v",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git fetch origin main",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -10",
+   "scenarios": [
+    "ops-rebase-push",
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline origin/main -10",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline 7188030..0d20da1",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git show 4f5574f --stat",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff 7188030 4f5574f",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff 7188030 0d20da1",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline --all -10",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git rebase origin/main 2>&1",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git -c core.editor=true rebase --continue",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "bun test 2>&1",
+   "scenarios": [
+    "approve-go-ahead-practice",
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git fetch origin && echo \"---BRANCH---\" && git branch -vv && echo \"---LOG---\" && git log --oneline -15 && echo \"---STATUS---\" && git status",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git branch -vv",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -15",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline origin/main -5",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline feat/shout -5",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git merge-base feat/shout origin/main",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff --stat origin/main feat/shout",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff 31f9118 17844f2 -- src/greet.ts test/greet.test.ts",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git diff 31f9118 4fc9c47 -- src/greet.ts test/greet.test.ts",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "git log --oneline -5",
+   "scenarios": [
+    "ops-rebase-push"
+   ]
+  },
+  {
+   "command": "ls -la && echo \"---backups---\" && ls -la backups 2>&1; echo \"---app-data---\" && ls -la app-data",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la",
+   "scenarios": [
+    "ops-cron-backup",
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la scripts",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la app-data",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la backups",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la logs",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "sed -i '' 's/^BACKUP_SRC=data$/BACKUP_SRC=app-data/' config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "sed -i '' 's/^BACKUP_DEST=backup$/BACKUP_DEST=backups/' config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "cd \"$(pwd)\" && ./scripts/nightly-backup.sh",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "./scripts/nightly-backup.sh",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "tar -tzf backups/backup-2026-10-03.tar.gz",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la && echo \"---backups---\" && ls -la backups 2>&1; echo \"---data---\"; ls -la data 2>&1; echo \"---app-data---\"; ls -la app-data 2>&1; echo \"---date---\"; date +%F",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "date +%F",
+   "scenarios": [
+    "approve-go-ahead-practice",
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la backups 2>&1",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "sed -i '' 's|^BACKUP_SRC=data|BACKUP_SRC=app-data|' config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "sed -i '' 's|^BACKUP_DEST=backup$|BACKUP_DEST=backups|' config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "ls -la backups/",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "mkdir -p backups logs && ls -la",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "mkdir -p backups logs",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "cat ops/crontab",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "cat config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "sed -i '' 's/^BACKUP_SRC=data$/BACKUP_SRC=app-data/; s/^BACKUP_DEST=backup$/BACKUP_DEST=backups/' config/backup.env",
+   "scenarios": [
+    "ops-cron-backup"
+   ]
+  },
+  {
+   "command": "grep -n \"smoke\\|test\\|onboarding\" package.json",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "grep -n \"onboarding\\|Onboarding\\|smoke\\|main\\|register\\|runTest\\|describe\\|suite\" scripts/smoke.ts | head -60",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cd /workspace 2>/dev/null; grep -n \"process.argv\\|argv\\|filter\\|--only\\|includes\\|startsWith\" scripts/smoke.ts | head -40",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "grep -n \"parseFlags\\|flags\\.\\|--strict\\|--skip-network\\|filter\\|category\\|only\" scripts/smoke.ts | head -40",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "bun run smoke 2>&1 | grep -i onboarding",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cd /workspace && bun run smoke:fast 2>&1 | grep -i onboarding",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "bun run smoke:fast 2>&1 | grep -i onboarding",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cat ~/.8gent/smoke-report.json | grep -A2 -i onboarding",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "echo \"HOME=$HOME\"; ls -la \"$HOME/.8gent/\" 2>&1 | head -30",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "find \"$HOME/.8gent\" -name 'smoke-report.json' 2>/dev/null; echo \"---\"; ls -la /home/user/.8gent/ 2>&1 | head",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "find $HOME/.8gent -name smoke-report.json 2>&1 | head",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cd /workspace && bun run smoke:fast > /tmp/smoke-out.txt 2>&1; echo \"exit=$?\"",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "bun run smoke:fast",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cat package.json | grep -A40 '\"scripts\"'",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "find . -path ./node_modules -prune -o -type f \\( -name '*onboard*' -o -name '*Onboard*' \\) -print 2>/dev/null | head -50",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "grep -rl \"onboarding\" packages apps tests --include=\"*.test.ts\" --include=\"*.test.tsx\" -i 2>/dev/null | head -50",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cd /root/8gent-code && bun test packages/onboarding/tests/ 2>&1 | head -100",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "grep -rli \"onboard\" --include=\"*.test.ts\" --include=\"*.test.tsx\" packages/ apps/ tests/ 2>/dev/null",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "find packages apps tests -iname \"*onboard*\" 2>/dev/null",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "grep -rl \"onboard\" --include=\"*.test.ts\" packages apps tests",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "find . -path ./node_modules -prune -o -name \"*.test.ts\" -print | grep -i onboard",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "cd /root/8gent-code && bun test packages/self-autonomy/onboard-yes.test.ts packages/self-autonomy/onboarding-voice.test.ts packages/self-autonomy/onboarding-copy.test.ts packages/self-autonomy/onboarding-probe.test.ts apps/tui/src/lib/onboarding-chat.test.ts",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "bun test packages/self-autonomy/onboard-yes.test.ts packages/self-autonomy/onboarding-voice.test.ts packages/self-autonomy/onboarding-copy.test.ts packages/self-autonomy/onboarding-probe.test.ts apps/tui/src/lib/onboarding-chat.test.ts",
+   "scenarios": [
+    "tui-style-concise"
+   ]
+  },
+  {
+   "command": "bun test test/slug.test.ts 2>&1 | tail -20",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "echo \"=== notes ===\"; cat notes/8TO.md notes/8DO.md notes/8MO.md; echo \"=== button.css ===\"; cat web/button.css; echo \"=== ABOUT.md head ===\"; head -5 ABOUT.md",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "mkdir -p notes",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "bun test test/slug.test.ts",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "node -e 'function L(h){h=h.replace(\"#\",\"\");const r=parseInt(h.slice(0,2),16)/255,g=parseInt(h.slice(2,4),16)/255,b=parseInt(h.slice(4,6),16)/255;const f=c=>c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b)}const a=L(\"1a1a1a\"),b=L(\"e6e6e6\");const hi=Math.max(a,b),lo=Math.min(a,b);console.log(\"ratio\",((hi+0.05)/(lo+0.05)).toFixed(2))'",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "mkdir -p notes && printf '%s\\n' 'Changed .save-button text color from #b0b0b0 to #1a1a1a, raising contrast against the #e6e6e6 background to ~15:1 (>=4.5:1 WCAG AA).' > notes/8DO.md",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "node -e \"const L=h=>{h=h.slice(1);const r=parseInt(h.slice(0,2),16)/255,g=parseInt(h.slice(2,4),16)/255,b=parseInt(h.slice(4,6),16)/255;const f=c=>c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b)};const a=L('1a1a1a'),b=L('e6e6e6');const hi=Math.max(a,b),lo=Math.min(a,b);console.log('ratio',((hi+0.05)/(lo+0.05)).toFixed(2))\"",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "python3 -c \"\ndef L(h):\n    h=h[1:]\n    r=255 and int(h[0:2],16)/255\n    g=int(h[2:4],16)/255\n    b=int(h[4:6],16)/255\n    f=lambda c: c/12.92 if c<=0.03928 else ((c+0.055)/1.055)**2.4\n    return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b)\na=L('1f1f1f'); b=L('e6e6e6')\nhi=max(a,b); lo=min(a,b)\nprint('ratio', round((hi+0.05)/(lo+0.05),2))\n\"",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "python3 -c \"print(round((((0.902+0.055)/1.055)**2.4+0.05)/(((0.1216+0.055)/1.055)**2.4+0.05),2))\"",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "cd /home/user/.8gent/rishi-pilot/runs/2026-10-11_040818/orch-route-three/work && bun test test/slug.test.ts",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "cd /home/user/.8gent/rishi-pilot/runs/2026-10-11_040818/orch-route-three/work && echo \"WORD COUNT:\" && sed -n '3p' ABOUT.md | wc -w && echo \"LINE:\" && sed -n '3p' ABOUT.md",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "sed -n '3p' /home/user/.8gent/rishi-pilot/runs/2026-10-11_040818/orch-route-three/work/ABOUT.md",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "ls -la src/slug.ts test/slug.test.ts web/button.css ABOUT.md 2>&1; echo \"---NOTES---\"; ls -la notes/ 2>&1",
+   "scenarios": [
+    "orch-route-three"
+   ]
+  },
+  {
+   "command": "git log --oneline -20 && echo \"---STATUS---\" && git ls-files",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 3771 -o pid,stat,command 2>/dev/null; echo \"exit=$?\"",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la; echo \"---config---\"; ls -la config 2>/dev/null; echo \"---run---\"; ls -la run; echo \"---logs---\"; ls -la logs",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline -20",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git ls-files",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 3771 -o pid,ppid,stat,command",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show cba11b0 --stat",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la config run out logs 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "kill -0 3771",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show 002a73f:config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git checkout 002a73f -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "rm -f run/worker.lock",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "cat config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "WORKER_WAIT_SECS=10 ./worker.sh",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls run/ ; echo \"---LOG---\"; cat logs/worker.log",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls run/",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 31480 -o pid,stat,etime,command 2>/dev/null; echo \"---exit $?\"; ls -la config 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline -10; echo \"===\"; git status",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 31480 -o pid,stat,command",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show 2c61415 --stat",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline --all -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "kill -0 31480",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show e785c95:config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la config",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git checkout e785c95 -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la config/",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "cat logs/worker.log",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "pwd && echo \"---\" && ls -la && echo \"--- config ---\" && ls -la config 2>/dev/null && echo \"--- data ---\" && ls -la data && echo \"--- run ---\" && ls -la run && echo \"--- logs ---\" && ls -la logs && echo \"--- git log ---\" && git log --oneline -20",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 33847 -o pid,stat,command 2>&1; echo \"---\"; ls -la",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline --all -- config/rates.json 2>&1; echo \"===\"; git log --oneline -10 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 33847 -o pid,stat,command 2>&1 || echo \"NOT RUNNING\"",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show 924128f:config/rates.json 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "head -5 data/orders.csv",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --all --oneline",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --all --oneline -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show --stat 819c613",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git log --oneline --all",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git show 819c613 -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "git checkout 45d8efe -- config/rates.json",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ps -p 33847 -o pid,stat,command",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "cat /proc/33847/stat 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "cat /proc/33847/cmdline 2>&1",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "ls -la run/",
+   "scenarios": [
+    "troubleshoot-practice"
+   ]
+  },
+  {
+   "command": "curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:64919/health",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s http://127.0.0.1:64919/rates.json -o data/rates.json && echo \"FETCHED $(wc -c < data/rates.json) bytes\"",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s http://127.0.0.1:64919/rates.json -o data/rates.json",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "ls -l data/rates.json",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "ls -la data/ 2>/dev/null; echo \"---\"; curl -s -w \"HTTP %{http_code}\\n\" http://127.0.0.1:65131/health",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s -w \"HTTP:%{http_code}\" http://127.0.0.1:65131/health",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s http://127.0.0.1:65131/rates.json",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "ls -la . 2>/dev/null; echo \"---HOME---\"; ls -la ~ 2>/dev/null | head -40",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "find . -maxdepth 3 -iname \"*note*\" 2>/dev/null | head -40; echo \"---8gent---\"; ls -la .8gent 2>/dev/null; ls -la ~/.8gent 2>/dev/null",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s http://127.0.0.1:65494/health",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "curl -s http://127.0.0.1:65494/rates.json",
+   "scenarios": [
+    "handoff-resume-practice"
+   ]
+  },
+  {
+   "command": "cd /home/user/.8gent/rishi-pilot/runs/2026-10-10_001935/approve-go-ahead-practice/work && bun test 2>&1",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "git status --short",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "date +%Y-%m-%d",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "bun test 2>&1 || npx bun test 2>&1 || echo \"NO_BUN\"",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "bun -e \"JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('package.json valid JSON, version=' + require('./package.json').version)\"",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "bun -e \"console.log('version=' + require('./package.json').version)\"",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "bun test 2>&1 | head -40",
+   "scenarios": [
+    "approve-go-ahead-practice"
+   ]
+  },
+  {
+   "command": "mkdir -p deck && echo ok",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "mkdir -p deck",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "ls deck",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "wc -l deck/deck.md",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "ls deck && echo \"---\" && wc -l deck/deck.md",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "pwd",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "ls -la packages/decide",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "ls -la deck",
+   "scenarios": [
+    "l2-solo-deck"
+   ]
+  },
+  {
+   "command": "bun test 2>&1 | head -100",
+   "scenarios": [
+    "l3-bugfix"
+   ]
+  },
+  {
+   "command": "bun test 2>&1 | tail -60",
+   "scenarios": [
+    "l3-bugfix"
+   ]
+  }
+ ]
+}
