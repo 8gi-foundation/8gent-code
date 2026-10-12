@@ -22,6 +22,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { safeBunFlags } from "../core/bun-flags";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -228,7 +229,8 @@ export const eightAdapter: AgentAdapter = {
 	},
 
 	spawn(task: string, options: AgentSpawnOptions = {}): AgentHandle {
-		const args = ["run", "bin/8gent.ts", "chat", task, "--json"];
+		// cwd may be any workspace: never its bunfig.toml or .env (#4013).
+		const args = [...safeBunFlags(), "run", "bin/8gent.ts", "chat", task, "--json"];
 		if (options.autoApprove) args.push("--yes");
 		if (options.model) args.push(`--model=${options.model}`);
 

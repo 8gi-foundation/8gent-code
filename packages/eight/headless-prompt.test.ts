@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
+import { LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
 import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
@@ -166,6 +166,18 @@ describe("headless prompt diet", () => {
 		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
 		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
 		expect(headless.messages[0].content).toContain(NARRATION_NOTE);
+	}, 60_000);
+
+	test("both compact local prompts carry the local-server curl rules (#4034)", async () => {
+		for (const headless of [true, false]) {
+			const [b] = await run(headless);
+			const sys = b.messages[0].content;
+			expect(sys).toContain(LOCAL_SERVER_CURL_SHORT);
+			expect(sys).toContain(".tmp/");
+			expect(sys).toContain("never /tmp");
+			expect(sys).toContain("Location header");
+			expect(sys).not.toContain("\u2014");
+		}
 	}, 60_000);
 
 	test("headless does not advertise tools the run does not offer", async () => {

@@ -3,13 +3,14 @@
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { getSkillManager } from "../../../../packages/skills/index.js";
+import { loadPromptTemplates } from "../../../../packages/extensions/prompts.js";
 import {
 	BUILT_IN_SLASH_COMMANDS,
 	type BuiltInSlashCommandDef,
 	type SlashCommand,
 } from "./slash-commands.js";
 
-type SlashRegistryKind = "builtin" | "skill";
+type SlashRegistryKind = "builtin" | "skill" | "prompt";
 
 export interface SlashRegistryEntry {
 	token: string;
@@ -20,6 +21,8 @@ export interface SlashRegistryEntry {
 	kind: SlashRegistryKind;
 	builtInName?: SlashCommand;
 	skillName?: string;
+	/** A prompt template (#3918 G4): the Markdown file it expands to. */
+	templateFile?: string;
 }
 
 export interface SlashRegistry {
@@ -35,8 +38,14 @@ export interface ResolvedSlashInput {
 export function mergeSlashEntries(
 	builtInEntries: SlashRegistryEntry[],
 	skillEntries: SlashRegistryEntry[],
+	promptEntries: SlashRegistryEntry[] = [],
 ): SlashRegistry {
 	const byToken = new Map<string, SlashRegistryEntry>();
+	// A template never shadows a built-in or a skill of the same name: it is
+	// set first and overwritten by either.
+	for (const entry of promptEntries) {
+		byToken.set(entry.token, entry);
+	}
 	for (const entry of builtInEntries) {
 		byToken.set(entry.token, entry);
 	}
@@ -117,12 +126,40 @@ async function buildSkillEntries(): Promise<SlashRegistryEntry[]> {
 	return out;
 }
 
+/**
+ * Prompt templates (#3918 G4): each ~/.8gent/prompts/<name>.md is /name in
+ * the menu. Typing it sends the file's text with $1, $@ filled in
+ * (packages/extensions/prompts.ts, prompt-slash.ts). No home directory, or an
+ * unreadable folder, means no entries rather than a failed menu.
+ */
+export function buildPromptEntries(
+	templates: ReturnType<typeof loadPromptTemplates> = safeLoadTemplates(),
+): SlashRegistryEntry[] {
+	return templates.map((t) => ({
+		token: normalizeToken(t.name),
+		name: t.name,
+		canonicalName: t.name,
+		description: t.description || "Prompt template",
+		usage: `/${t.name} [arguments]`,
+		kind: "prompt",
+		templateFile: t.file,
+	}));
+}
+
+function safeLoadTemplates(): ReturnType<typeof loadPromptTemplates> {
+	try {
+		return loadPromptTemplates();
+	} catch {
+		return [];
+	}
+}
+
 export function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 	return BUILT_IN_SLASH_COMMANDS;
 }
 
 export async function getSlashRegistry(): Promise<SlashRegistry> {
-	return mergeSlashEntries(buildBuiltInEntries(), await buildSkillEntries());
+	return mergeSlashEntries(buildBuiltInEntries(), await buildSkillEntries(), buildPromptEntries());
 }
 
 export function resolveSlashInput(

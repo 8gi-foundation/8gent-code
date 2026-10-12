@@ -30,6 +30,7 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
 import {
@@ -1365,6 +1366,9 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
 		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
@@ -1372,7 +1376,8 @@ async function runShellCommand(command: string): Promise<string> {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
+		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+		const proc = spawnShell(wrapRunCommand(finalCommand), {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
