@@ -66,8 +66,9 @@ jobs:
           curl -fsSL -o ollama-install.sh https://ollama.com/install.sh
           sh ollama-install.sh
           sudo systemctl stop ollama || true
-          # Listen on all interfaces so task containers can reach the runner.
-          OLLAMA_HOST=0.0.0.0:11434 nohup ollama serve > ollama.log 2>&1 &
+          # Listen on all interfaces so task containers can reach the runner. The 8gent system
+          # prompt plus tools is about 5k tokens; Ollama defaults to 4k and would cut the task off.
+          OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_HOST=0.0.0.0:11434 nohup ollama serve > ollama.log 2>&1 &
           for i in $(seq 1 30); do curl -fs localhost:11434/api/tags >/dev/null && break; sleep 2; done
           ollama pull "$MODEL"
           ollama list
