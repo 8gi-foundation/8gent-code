@@ -6,7 +6,9 @@
  * when something actually needs attention.
  */
 
+import { join } from "node:path";
 import { getNextDueJob } from "./cron";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 
 export interface HeartbeatConfig {
@@ -15,11 +17,23 @@ export interface HeartbeatConfig {
 	enabled: boolean;
 }
 
-const DEFAULT_CONFIG: HeartbeatConfig = {
-	intervalMs: 30 * 60 * 1000,
-	taskQueuePath: `${process.env.HOME}/.8gent/task-queue.json`,
-	enabled: true,
-};
+/** task-queue.json under the data dir (EIGHT_DATA_DIR, then os.homedir()/.8gent; #4111). */
+export function taskQueuePath(): string {
+	return join(getDataDir(), "task-queue.json");
+}
+
+/** inbox.json under the data dir (#4111). */
+export function inboxPath(): string {
+	return join(getDataDir(), "inbox.json");
+}
+
+function defaultConfig(): HeartbeatConfig {
+	return {
+		intervalMs: 30 * 60 * 1000,
+		taskQueuePath: taskQueuePath(),
+		enabled: true,
+	};
+}
 
 export interface HeartbeatResult {
 	timestamp: string;
@@ -44,9 +58,8 @@ async function checkTaskQueue(path: string): Promise<number> {
 
 async function checkUnreadMessages(): Promise<number> {
 	// Check for unread messages across channels
-	const inboxPath = `${process.env.HOME}/.8gent/inbox.json`;
 	try {
-		const file = Bun.file(inboxPath);
+		const file = Bun.file(inboxPath());
 		if (!(await file.exists())) return 0;
 		const msgs = await file.json();
 		return Array.isArray(msgs) ? msgs.filter((m: any) => !m.read).length : 0;
@@ -78,7 +91,7 @@ async function runHeartbeat(config: HeartbeatConfig): Promise<HeartbeatResult> {
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startHeartbeat(config: Partial<HeartbeatConfig> = {}): void {
-	const cfg = { ...DEFAULT_CONFIG, ...config };
+	const cfg = { ...defaultConfig(), ...config };
 	if (!cfg.enabled) return;
 
 	// Run immediately on start
