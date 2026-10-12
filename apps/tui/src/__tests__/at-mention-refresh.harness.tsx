@@ -11,6 +11,7 @@ import { bootApp, tick, waitFor } from "./app-driver.js";
 async function main() {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-at-refresh-"));
 	fs.writeFileSync(path.join(dir, "alpha-first.ts"), "");
+	const back = process.cwd();
 	process.chdir(dir);
 	try {
 		const app = await bootApp(160, 50);
@@ -25,6 +26,8 @@ async function main() {
 		await waitFor(() => app.since(m).includes("beta-later.ts"), "file made later listed");
 		app.emit({ phase: "refresh", ok: true });
 	} finally {
+		// Windows will not delete a folder that is some process's working directory (EBUSY).
+		process.chdir(back);
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 	process.exit(0);

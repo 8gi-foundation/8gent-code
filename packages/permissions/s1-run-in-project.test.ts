@@ -113,7 +113,7 @@ export function markDone(todos: Todo[], id: number): boolean {
 
 // Windows has no /tmp: the writable temp root there is the machine's temp directory, as forward
 // slashes and with the 8.3 short name resolved (the command grammar takes neither backslashes nor "~").
-const TMP = process.platform === "win32" ? realpathSync(tmpdir()).replaceAll("\\", "/") : "/tmp";
+const TMP = process.platform === "win32" ? realpathSync.native(tmpdir()).replaceAll("\\", "/") : "/tmp";
 const wsF = () => ws.replaceAll("\\", "/");
 let ws: string;
 let outside: string;
@@ -152,7 +152,8 @@ function mk(files: Record<string, string>): string {
 }
 
 beforeEach(() => {
-	ws = tempDir("s1-run-ws-");
+	// realpath: on Windows the temp dir is the 8.3 form (RUNNER~1), and the command grammar takes no "~".
+	ws = realpathSync.native(tempDir("s1-run-ws-"));
 	outside = tempDir("s1-run-out-");
 	put("src/cli.ts", PILOT_CLI);
 	put("src/store.ts", PILOT_STORE);

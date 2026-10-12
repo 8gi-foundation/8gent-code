@@ -167,7 +167,8 @@ describe("curlToLoopback allows", () => {
 		}
 	});
 	test("an absolute path inside the workspace", () => {
-		expect(ok(`curl -s -c ${realpathSync(ws).replaceAll("\\", "/")}/.tmp/jar.txt http://127.0.0.1:8080/`)).toBe(true);
+		const cmd = `curl -s -c ${realpathSync.native(ws).replaceAll("\\", "/")}/.tmp/jar.txt http://127.0.0.1:8080/`;
+		expect(ok(cmd), `${cmd} (cwd ${ws})`).toBe(true);
 	});
 });
 

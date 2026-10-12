@@ -54,14 +54,14 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import * as path from "node:path";
 import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
-import { SECRET, WRITE_BAD_NAME, canon, symlinkBelow } from "./s1-run-in-project";
+import { SECRET, WRITE_BAD_NAME, canon, realpathSync, symlinkBelow } from "./s1-run-in-project";
 
 export type CurlLoopback = { ok: true; reason: string } | { ok: false };
 const NO: CurlLoopback = { ok: false };

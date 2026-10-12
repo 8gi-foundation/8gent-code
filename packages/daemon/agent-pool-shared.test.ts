@@ -4,9 +4,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDir } from "../../tests/temp-dirs";
 
 let dir: string;
 const savedData = process.env.EIGHT_DATA_DIR;
@@ -23,7 +24,8 @@ beforeAll(async () => {
 afterAll(() => {
 	if (savedData === undefined) delete process.env.EIGHT_DATA_DIR;
 	else process.env.EIGHT_DATA_DIR = savedData;
-	rmSync(dir, { recursive: true, force: true });
+	// Windows keeps the pool's open files locked until the process ends; removeDir leaves that to the run-end sweep.
+	removeDir(dir);
 });
 
 describe("pool room and attached sessions (#3929)", () => {

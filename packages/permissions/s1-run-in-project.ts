@@ -61,13 +61,22 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync as nodeRealpath } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { hasDotSegment, protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
+
+/**
+ * realpath that also expands Windows 8.3 short names (RUNNER~1 -> runneradmin): the JS realpath
+ * leaves them as written, so two spellings of one folder would compare unequal, and "~" is not
+ * in the command grammar. Identical to realpathSync everywhere else.
+ */
+export function realpathSync(p: string): string {
+	return process.platform === "win32" ? nodeRealpath.native(p) : nodeRealpath(p);
+}
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 const ENV_ASSIGN = /^([A-Z][A-Z0-9_]*)=([A-Za-z0-9._/+,@:-]*)$/;
