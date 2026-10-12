@@ -373,6 +373,14 @@ describe("moveInProject path rules on any OS", () => {
 	});
 });
 
+/**
+ * The glob lane expands `*` and `?` the way a POSIX shell would and has no
+ * opinion anywhere else: on Windows expandGlobs() answers null, so a glob
+ * always goes to the judge there. A written operand is the old lane on every OS.
+ */
+const GLOB_LANE = process.platform !== "win32";
+const hasGlob = (cmd: string) => /[*?]/.test(cmd);
+
 describe("globs and cp inside the workspace (#4073)", () => {
 	beforeEach(() => {
 		mkdirSync(join(ws, "inbox", "deeper", "x"), { recursive: true });
@@ -395,7 +403,7 @@ describe("globs and cp inside the workspace (#4073)", () => {
 	]) {
 		test(`allows: ${cmd}`, () => {
 			if (cmd.includes("sheets-new")) mkdirSync(join(ws, "inbox", "sheets-new"));
-			expect(moveInProject(cmd, ws).ok).toBe(true);
+			expect(moveInProject(cmd, ws).ok).toBe(hasGlob(cmd) ? GLOB_LANE : true);
 		});
 	}
 
@@ -474,12 +482,13 @@ describe("globs and cp inside the workspace (#4073)", () => {
 	});
 
 	test("the judge is never asked for the pilot commands, and still decides the risky ones", async () => {
+		// With no glob lane (win32) the glob reaches the judge, who says dangerous: one ask.
 		const ok = await systemOneGate("mv inbox/note-*.txt inbox/notes/", process.env, ws);
-		expect(ok.run).toBe(true);
-		expect(judge.asks).toBe(0);
+		expect(ok.run).toBe(GLOB_LANE);
+		expect(judge.asks).toBe(GLOB_LANE ? 0 : 1);
 		const cp = await systemOneGate("cp inbox/note-1.txt inbox/notes/c.txt", process.env, ws);
 		expect(cp.run).toBe(true);
-		expect(judge.asks).toBe(0);
+		expect(judge.asks).toBe(GLOB_LANE ? 0 : 1);
 		for (const cmd of [
 			"mv inbox/note-*.txt /tmp/",
 			"mv inbox/note-*.txt ~/.8gent/",
@@ -498,13 +507,21 @@ describe("glob expansion matches the shell or has no opinion (#4073, 8SO)", () =
 		writeFileSync(join(ws, "inbox", "keep.tmp"), "x");
 	});
 
+	// NTFS refuses a name with a newline, so on Windows the file can never exist: the
+	// OS turns the write away, and the glob still goes to the judge (no lane there).
+	const impossibleName = process.platform === "win32";
+
 	test("a newline-named file the glob would match goes to the judge", () => {
-		writeFileSync(join(ws, "inbox", "note-x\ny.txt"), "x");
+		const put = () => writeFileSync(join(ws, "inbox", "note-x\ny.txt"), "x");
+		if (impossibleName) expect(put).toThrow();
+		else put();
 		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
 	});
 
 	test("a newline-named symlink the glob would match goes to the judge", () => {
-		symlinkSync(outside, join(ws, "inbox", "note-z\nq.txt"));
+		const link = () => symlinkSync(outside, join(ws, "inbox", "note-z\nq.txt"));
+		if (impossibleName) expect(link).toThrow();
+		else link();
 		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
 		expect(moveInProject("cp inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
 	});
@@ -519,7 +536,7 @@ describe("glob expansion matches the shell or has no opinion (#4073, 8SO)", () =
 
 	test("an 'a b.txt' file the glob would match goes to the judge", () => {
 		writeFileSync(join(ws, "inbox", "note a b.txt"), "x");
-		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(true);
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(GLOB_LANE);
 		expect(moveInProject("mv inbox/note*.txt inbox/notes/", ws).ok).toBe(false);
 		expect(moveInProject("mv inbox/note?a?b.txt inbox/notes/", ws).ok).toBe(false);
 	});
@@ -577,7 +594,7 @@ describe("glob expansion matches the shell or has no opinion (#4073, 8SO)", () =
 		try {
 			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", bad).ok).toBe(false);
 			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", join(home, ".8gent")).ok).toBe(false);
-			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", run).ok).toBe(true);
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", run).ok).toBe(GLOB_LANE);
 		} finally {
 			_setPasswdHomeForTests(undefined);
 			process.env.HOME = h;

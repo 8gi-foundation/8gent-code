@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
 import { curlToLoopback } from "../../permissions/s1-curl-loopback";
 import {
@@ -356,7 +356,9 @@ describe("8gent Browser driver", () => {
 				: site.call(cmd, args);
 		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
-		expect(await b.screenshot()).toBe("/tmp/8b/shot.png 1024x768");
+		// The reported file comes back resolved for this OS: on Windows a rooted POSIX
+		// spelling lands on the current drive (D:\tmp\8b\shot.png on the CI runner).
+		expect(await b.screenshot()).toBe(`${resolve("/tmp/8b/shot.png")} 1024x768`);
 	});
 });
 

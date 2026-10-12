@@ -51,8 +51,9 @@ beforeAll(async () => {
 	const script = join(home, "block.sh").replace(/\\/g, "/");
 	writeFileSync(script, `echo '{"block": true, "reason": "writes are frozen"}'\n`);
 	// A PreToolUse hook that records what it was sent, then blocks desktop_type (nothing is typed).
-	const capture = join(home, "capture.sh");
-	writeFileSync(capture, `cat > ${join(home, "desktop-hook.json")}\nsh ${script}\n`);
+	// Same forward slashes for the capture script and the file it writes, for the same reason.
+	const capture = join(home, "capture.sh").replace(/\\/g, "/");
+	writeFileSync(capture, `cat > ${join(home, "desktop-hook.json").replace(/\\/g, "/")}\nsh ${script}\n`);
 	const hooks = join(home, "hooks.yaml");
 	writeFileSync(
 		hooks,

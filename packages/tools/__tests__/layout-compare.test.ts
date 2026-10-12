@@ -8,6 +8,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import sharp from "sharp";
+import { fakeExecutable } from "../../../tests/fake-exe";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { ToolExecutor } from "../../eight/tools";
 import type { Band, LayoutMeasure } from "../../eight/layout-measure";
@@ -21,6 +22,23 @@ afterAll(cleanupTempDirs);
 const W = 1280;
 const H = 900;
 type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * A stand-in Chrome: "renders" by copying a pre-drawn PNG to the --screenshot=
+ * path it is given, and creates the --user-data-dir= it is handed, as Chrome would.
+ */
+function fakeChromeSource(renderPng: string): string {
+	return [
+		'const fs = require("node:fs");',
+		"let out = null;",
+		"for (const a of process.argv.slice(2)) {",
+		'  if (a.startsWith("--screenshot=")) out = a.slice("--screenshot=".length);',
+		'  if (a.startsWith("--user-data-dir=")) fs.mkdirSync(a.slice("--user-data-dir=".length), { recursive: true });',
+		"}",
+		`if (out) fs.copyFileSync(${JSON.stringify(renderPng)}, out);`,
+		"",
+	].join("\n");
+}
 
 async function draw(dir: string, name: string, boxes: Box[]): Promise<string> {
 	const px = Buffer.alloc(W * H * 3, 255);
@@ -79,14 +97,9 @@ describe("describeDiff", () => {
 });
 
 describe("compareLayout with a stub browser", () => {
+	// A real executable on every OS (tests/fake-exe.ts): Windows cannot spawn a shell script.
 	function stubChrome(dir: string, renderPng: string): string {
-		const bin = path.join(dir, "fake-chrome");
-		fs.writeFileSync(
-			bin,
-			`#!/bin/sh\nfor a in "$@"; do case "$a" in --screenshot=*) out="\${a#--screenshot=}";; esac; done\ncp "${renderPng}" "$out"\n`,
-		);
-		fs.chmodSync(bin, 0o755);
-		return bin;
+		return fakeExecutable(dir, "fake-chrome", fakeChromeSource(renderPng));
 	}
 
 	test("reports a block that sits 60px too low, and a similarity under 1", async () => {
@@ -150,12 +163,7 @@ describe("compare_layout is read-only (#4081)", () => {
 		fs.writeFileSync(path.join(ws, "index.html"), '<html><body><img src="mock.png"></body></html>');
 		const bins = tempDir("layout-compare-bin-");
 		const render = await draw(bins, "render.png", [{ x: 240, y: 70, w: 180, h: 30 }]);
-		const bin = path.join(bins, "fake-chrome");
-		fs.writeFileSync(
-			bin,
-			`#!/bin/sh\nfor a in "$@"; do case "$a" in --screenshot=*) out="\${a#--screenshot=}";; --user-data-dir=*) mkdir -p "\${a#--user-data-dir=}";; esac; done\ncp "${render}" "$out"\n`,
-		);
-		fs.chmodSync(bin, 0o755);
+		const bin = fakeExecutable(bins, "fake-chrome", fakeChromeSource(render));
 		const before = snapshot(ws);
 		const tmpBefore = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("8gent-compare-"));
 		const prev = process.env.EIGHT_CHROME_BIN;
