@@ -52,6 +52,10 @@ const savedHeadless = process.env.EIGHT_HEADLESS;
 let ws: string;
 let home: string;
 let ran: string[];
+let pm: PM;
+let hooks: Hooks;
+let origCheck: PM["checkPermission"];
+let origHooks: Hooks["executeHooks"];
 let executor: ToolExecutor;
 let calls: number;
 let server: ReturnType<typeof Bun.serve>;
@@ -103,14 +107,21 @@ beforeEach(() => {
 		calibrationDir: mkdtempSync(join(tmpdir(), "run-instead-nocal-")),
 	});
 	executor = new ToolExecutor(ws, "run-instead");
-	(executor as unknown as { permissionManager: PM }).permissionManager.checkPermission = () =>
-		"allowed";
+	// Both managers can be process singletons: save the originals and put them back after each test,
+	// or every later test in this bun process runs with the deny policy off (8SO on #4102).
+	pm = (executor as unknown as { permissionManager: PM }).permissionManager;
+	hooks = (executor as unknown as { hookManager: Hooks }).hookManager;
+	origCheck = pm.checkPermission;
+	origHooks = hooks.executeHooks;
+	pm.checkPermission = () => "allowed";
 	ran = [];
-	(executor as unknown as { hookManager: Hooks }).hookManager.executeHooks = async (type, data) => {
+	hooks.executeHooks = async (type, data) => {
 		if (type === "afterCommand" && data.command) ran.push(data.command);
 	};
 });
 afterEach(() => {
+	pm.checkPermission = origCheck;
+	hooks.executeHooks = origHooks;
 	rmSync(ws, { recursive: true, force: true });
 	rmSync(home, { recursive: true, force: true });
 });
