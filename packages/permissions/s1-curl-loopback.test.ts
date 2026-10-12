@@ -11,7 +11,6 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { _resetLoopbackAllowlistForTest } from "./loopback-allowlist";
 import { curlToLoopback } from "./s1-curl-loopback";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
@@ -312,70 +311,45 @@ describe("curlToLoopback refuses", () => {
 	});
 });
 
-describe("-L follows redirects only to this run's listed loopback servers (#3967)", () => {
-	const LISTED = "http://127.0.0.1:41873/login";
-	beforeEach(() => {
-		process.env.EIGHT_BROWSER_ALLOW_LOOPBACK = "127.0.0.1:41873";
-		_resetLoopbackAllowlistForTest();
-	});
-	afterEach(() => {
-		Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
-		_resetLoopbackAllowlistForTest();
-	});
-	test("the issue's exact command, with -L, to a listed port is ok", () => {
-		expect(ok(ISSUE_CMD)).toBe(true);
-	});
-	test("every spelling of -L to a listed port is ok", () => {
+describe("-L is refused for everyone, with the way forward (#3967, 8SO)", () => {
+	const URL = "http://127.0.0.1:41873/login";
+	test("every spelling of -L to loopback is a deterministic refusal naming Location", () => {
 		for (const c of [
-			`curl -sL ${LISTED}`,
-			`curl -s -L ${LISTED}`,
-			`curl -s --location ${LISTED}`,
-			`curl -sL -b .tmp/c.txt -c .tmp/c.txt ${LISTED}`,
-			`curl -sL -d x=1 ${LISTED}`,
-		]) {
-			expect(ok(c), c).toBe(true);
-		}
-	});
-	test("--max-redirs 0..5 is ok, above 5 is not", () => {
-		expect(ok(`curl -s -L --max-redirs 3 ${LISTED}`)).toBe(true);
-		expect(ok(`curl -s -L --max-redirs 5 ${LISTED}`)).toBe(true);
-		expect(ok(`curl -s -L --max-redirs 9 ${LISTED}`)).toBe(false);
-		expect(ok(`curl -s -L --max-redirs 50 ${LISTED}`)).toBe(false);
-		expect(ok(`curl -s --max-redirs 9 ${LISTED}`)).toBe(false);
-	});
-	test("-L to an unlisted loopback port is a deterministic refusal", () => {
-		for (const c of [
-			"curl -sL http://127.0.0.1:8080/",
-			`curl -sL ${LISTED} http://127.0.0.1:8080/`,
-			"curl -sL http://127.0.0.1/",
+			ISSUE_CMD,
+			`curl -sL ${URL}`,
+			`curl -s -L ${URL}`,
+			`curl -s --location ${URL}`,
+			`curl -sL -b .tmp/c.txt -c .tmp/c.txt ${URL}`,
+			`curl -sL -d x=1 ${URL}`,
+			`curl -s -L --max-redirs 1 ${URL}`,
 		]) {
 			const r = curlToLoopback(c, ws);
 			expect(r.ok, c).toBe(false);
 			expect((r as { refuse?: string }).refuse, c).toContain("Location");
 		}
 	});
+	test("an env or workspace list does not unlock -L", () => {
+		process.env.EIGHT_BROWSER_ALLOW_LOOPBACK = "127.0.0.1:41873";
+		try {
+			expect(ok(`curl -sL ${URL}`)).toBe(false);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
+		}
+	});
 	test("-L to a non-loopback URL is no opinion (no refusal text)", () => {
-		for (const c of [
-			"curl -sL http://example.com/",
-			`curl -sL ${LISTED} http://example.com/`,
-			"curl -sL http://169.254.169.254/",
-		]) {
+		for (const c of ["curl -sL http://example.com/", `curl -sL ${URL} http://example.com/`, "curl -sL http://169.254.169.254/"]) {
 			const r = curlToLoopback(c, ws);
 			expect(r.ok, c).toBe(false);
 			expect((r as { refuse?: string }).refuse, c).toBeUndefined();
 		}
 	});
 	test("--location-trusted stays refused, with no refusal text", () => {
-		const r = curlToLoopback(`curl -s --location-trusted ${LISTED}`, ws);
+		const r = curlToLoopback(`curl -s --location-trusted ${URL}`, ws);
 		expect(r.ok).toBe(false);
 		expect((r as { refuse?: string }).refuse).toBeUndefined();
 	});
-	test("with no list at all, -L is refused", () => {
-		Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
-		_resetLoopbackAllowlistForTest();
-		const r = curlToLoopback(`curl -sL ${LISTED}`, ws);
-		expect(r.ok).toBe(false);
-		expect((r as { refuse?: string }).refuse).toContain("Location");
+	test("the second request the refusal asks for passes", () => {
+		expect(ok(ISSUE_NO_L)).toBe(true);
 	});
 });
 
@@ -518,22 +492,7 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 		});
 	}
 
-	test("-L to a listed port passes without asking the judge", async () => {
-		process.env.EIGHT_BROWSER_ALLOW_LOOPBACK = "127.0.0.1:41873";
-		_resetLoopbackAllowlistForTest();
-		try {
-			const r = await systemOneGate(ISSUE_CMD, process.env, ws);
-			expect(r.run).toBe(true);
-			expect(r.guard?.backend).toBe("allowlist");
-			expect(judge.asks).toBe(0);
-		} finally {
-			Reflect.deleteProperty(process.env, "EIGHT_BROWSER_ALLOW_LOOPBACK");
-			_resetLoopbackAllowlistForTest();
-		}
-	});
-
-	test("-L to an unlisted loopback port: blocked with the Location hint, judge never asked", async () => {
-		_resetLoopbackAllowlistForTest();
+	test("-L to loopback: blocked with the Location hint, judge never asked", async () => {
 		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
 		expect(r.run).toBe(false);
 		expect(r.message).toContain("Location");
