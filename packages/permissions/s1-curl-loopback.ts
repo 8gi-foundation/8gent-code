@@ -48,8 +48,8 @@
  * host), so a hop could reach 169.254.169.254 or the LAN (SSRF) with whatever
  * the request carries. That risk is acceptable for a listed server only
  * because the target is the session's own declared test server, not arbitrary
- * loopback; a server we listed can still redirect off the box, and 8SO
- * accepted that for the declared test server. The hop count is bounded:
+ * loopback. A listed server can still redirect off the box: that residual
+ * risk is open for 8SO review (#3967). The hop count is bounded:
  * `--max-redirs N` takes N of 0 to 5 only (curl's own default with -L is 50).
  * --location-trusted stays refused (it sends credentials to other hosts). A -L
  * to a loopback URL that is NOT listed returns a deterministic refusal (the
