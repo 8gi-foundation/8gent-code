@@ -54,6 +54,17 @@ jobs:
       - name: Test
         run: bun run test
 
+      # compare_layout renders pages in a real Chrome (#4080). ubuntu-latest ships
+      # google-chrome; this step fails, not skips, if it is missing or cannot start,
+      # so the offline guarantees are proven on every run.
+      - name: compare_layout offline guarantees (real Chrome)
+        env:
+          EIGHT_REQUIRE_CHROME: "1"
+          EIGHT_CHROME_NO_SANDBOX: "1"
+        run: |
+          google-chrome --version
+          bun test packages/tools/__tests__/layout-compare.test.ts
+
       - name: Computer-use smoke (Phase 3)
         run: bun run packages/eight/scripts/computer-use-suite.ts
 

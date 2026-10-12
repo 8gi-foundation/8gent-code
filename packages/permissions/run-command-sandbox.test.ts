@@ -80,6 +80,7 @@ describe("protected set", () => {
 				"mcp.json",
 				".env",
 				"keys.env",
+				"allow-loopback.json",
 			])
 				expect(p.files).toContain(path.join(H, f));
 			for (const d of [
@@ -535,6 +536,7 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		"echo x > ~/.8gent/bin/new-tool",
 		"echo EIGHT_SEATBELT=0 >> ~/.8gent/.env",
 		"echo x > ~/.8gent/keys.env",
+		"echo '{\"allow\":[\"127.0.0.1:5173\"]}' > ~/.8gent/allow-loopback.json",
 		"echo '{}' > ~/.8gent/mcp.json",
 		"echo x > ~/.8gent/policies.yaml",
 		"echo x > ~/.8gent/policy-checksum",

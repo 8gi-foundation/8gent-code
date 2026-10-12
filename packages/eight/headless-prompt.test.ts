@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
+import { LOCAL_LOGIN_NOTE, LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
 import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
@@ -30,6 +30,9 @@ const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
+	// The diet ratio below measures what headless trims, so the browser tools local sessions now get by
+	// default (#3785) are left out here and bounded by their own test at the end of this file.
+	EIGHT_BROWSER_LOCAL: "0",
 };
 let home: string;
 let repo: string;
@@ -173,6 +176,8 @@ describe("headless prompt diet", () => {
 			expect(sys).toContain(".tmp/");
 			expect(sys).toContain("never /tmp");
 			expect(sys).toContain("Location header");
+			// The login note (#4072) travels with the curl rules on both paths.
+			expect(sys).toContain(LOCAL_LOGIN_NOTE);
 			expect(sys).not.toContain("\u2014");
 		}
 	}, 60_000);
@@ -204,5 +209,18 @@ describe("headless prompt diet", () => {
 		expect(JSON.stringify(second.messages.slice(0, first.messages.length))).toBe(
 			JSON.stringify(first.messages),
 		);
+	}, 60_000);
+
+	test("local sessions get the browser tools headless too, at a bounded cost (#3785)", async () => {
+		const before = await run(true);
+		process.env.EIGHT_BROWSER_LOCAL = "";
+		try {
+			const [withBrowser] = await run(true);
+			const names = (withBrowser.tools ?? []).map((t) => t.function.name);
+			for (const n of ["browser_open", "browser_state", "browser_task", "browser_screenshot"]) expect(names).toContain(n);
+			expect(prefixChars(withBrowser) - prefixChars(before[0])).toBeLessThanOrEqual(2500);
+		} finally {
+			process.env.EIGHT_BROWSER_LOCAL = "0";
+		}
 	}, 60_000);
 });

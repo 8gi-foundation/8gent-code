@@ -24,6 +24,13 @@ export type PolicyActionType =
 	| "write_file"
 	| "read_file"
 	| "delete_file"
+	/**
+	 * Render an HTML page headless and measure it (compare_layout, #4080). READ-ONLY:
+	 * reads files in the workspace, writes nothing there (the browser profile and
+	 * screenshot live in an OS temp dir removed afterwards), so it is allowed in
+	 * plan, architect and review modes and is not a shadow-denied side effect.
+	 */
+	| "render_page"
 	| "run_command"
 	| "git_push"
 	| "git_commit"

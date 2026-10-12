@@ -216,7 +216,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "rewind",
 		aliases: ["rw"],
-		description: "Time-travel: rewind agent state to an earlier checkpoint",
+		description: "Time-travel: rewind 8gent state to an earlier checkpoint",
 		usage: "/rewind [n|list]",
 	},
 	{
@@ -360,7 +360,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "agent",
 		aliases: ["agents", "ag"],
-		description: "Manage sub-agents (list, spawn, kill, auto, settings)",
+		description: "Manage child 8gents (list, spawn, kill, auto, settings)",
 		usage: "/agent [list|spawn|kill|auto|settings]",
 	},
 	{
@@ -379,7 +379,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "spawn",
 		aliases: [],
 		description:
-			"Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
+			"Spawn an external 8gent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
 		usage: "/spawn <claude|codex|hermes|openclaw|pi|8gent>",
 	},
 	{
@@ -398,7 +398,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "term",
 		aliases: [],
 		description:
-			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive agent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
+			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive 8gent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
 		usage: "/term [shell|<preset>|<command...>]",
 	},
 	{

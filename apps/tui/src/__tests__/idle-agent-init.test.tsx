@@ -89,7 +89,7 @@ test("idle TUI does not poll /api/tags from the agent-init effect", async () => 
  * launch: each accidental re-run re-probed once the readiness cache expired.
  * With the loop gone, an init that ends not ready schedules its own retry.
  * Ollama answers 503 for the first seconds, then comes up; a prompt sent
- * after that must reach it instead of "[Agent not ready]".
+ * after that must reach it instead of "[8gent not ready]".
  */
 test("a provider that comes up after launch is still picked up", async () => {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-idle-recover-"));

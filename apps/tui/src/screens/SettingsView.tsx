@@ -94,15 +94,15 @@ const CATEGORIES: Category[] = [
 			{
 				id: "voice.ttsVoice",
 				label: "TTS voice (fallback)",
-				description: "macOS voice name used when a tab has no per-agent voice (e.g. Ava, Samantha, Daniel).",
+				description: "macOS voice name used when a tab has no per-8gent voice (e.g. Ava, Samantha, Daniel).",
 				kind: "text",
 				get: (s) => s.voice.ttsVoice,
 				set: (s, v) => ({ ...s, voice: { ...s.voice, ttsVoice: String(v) } }),
 			},
 			{
 				id: "voice.outputEnabled",
-				label: "Speak agent replies",
-				description: "When on, agent responses are spoken via macOS TTS by default.",
+				label: "Speak 8gent replies",
+				description: "When on, 8gent responses are spoken via macOS TTS by default.",
 				kind: "toggle",
 				get: (s) => s.voice.outputEnabled,
 				set: (s, v) => ({

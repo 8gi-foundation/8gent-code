@@ -53,6 +53,8 @@ import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import {
 	SessionJournal,
+	autoContinueEnabled,
+	continueInterruptedTurns,
 	resumeJournaledSessions,
 	resumeOnBootEnabled,
 	settleInterruptedToolCalls,
@@ -259,15 +261,18 @@ export async function main(): Promise<void> {
 	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
 	// them back from their newest checkpoint after a crash or power cut. A tool
 	// call that was running at the crash is re-run only if it is a read; any
-	// other is reported to the model as not replayed (#3653).
+	// other is reported to the model as not replayed (#3653). With
+	// EIGHT_AUTO_CONTINUE=1 as well, a turn that was running at the crash is
+	// continued once, after the restore and the settle (#4082).
 	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
 	pool = new AgentPool(poolConfig, journal ? { journal } : {});
 	if (journal) {
 		const t0 = Date.now();
 		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
-		await settleInterruptedToolCalls(journal, pool);
+		const settled = await settleInterruptedToolCalls(journal, pool);
+		const continued = autoContinueEnabled() ? continueInterruptedTurns(journal, pool, settled) : [];
 		console.log(
-			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms`,
+			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms, ${continued.filter((c) => c.outcome !== "abandoned").length} interrupted turn(s) continued (EIGHT_AUTO_CONTINUE=${autoContinueEnabled() ? "1" : "off"})`,
 		);
 	}
 

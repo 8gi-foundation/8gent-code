@@ -486,6 +486,7 @@ function coppaGate(action: string, context: PolicyContext): PolicyDecision | nul
  */
 const PATH_GUARDED_ACTIONS = new Set<string>([
 	"read_file",
+	"render_page",
 	"write_file",
 	"delete_file",
 	"edit_file",

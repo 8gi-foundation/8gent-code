@@ -340,6 +340,19 @@ export const LOCAL_SERVER_CURL_SHORT =
 	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. Do not pass -L: on a 302 read the Location header and make a second curl.";
 
 /**
+ * The test login for a local server (#4072, run 2026-10-12_155723): read_file hides a
+ * "Password: ..." line as [REDACTED:secret_assignment], the model rebuilt the value from an
+ * `od -c` dump, typed E as e, and both sign-ins were 401. The recipe keeps the value out of
+ * the transcript (8SO on #4091: a stripped label defeats the redactor, which matches on the
+ * label): sed's `w` flag copies the line, relabelled as a form field, into .tmp/login and
+ * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
+ * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
+ * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ */
+export const LOCAL_LOGIN_NOTE =
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
+
+/**
  * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
  * local model composing the video with raw ffmpeg in run_command instead of calling
  * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
@@ -439,7 +452,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-${LOCAL_SERVER_CURL_NOTE} A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command.
+${LOCAL_SERVER_CURL_NOTE} A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command. ${LOCAL_LOGIN_NOTE}
 
 ### Git Flow
 \`\`\`json
