@@ -796,7 +796,9 @@ describeNotWin("wsTransport with a named profile", () => {
 	test("fails closed, without connecting, when the profile is not running and cannot be started", async () => {
 		// Other files in one bun process reset the module-level spawn seam; pin it here (the full CI run saw it unset).
 		_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
-		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
+		// A binary path must resolve or the launch fails earlier with "no app found" (always on Linux, where no
+		// app bundle is searched); the spawn seam never runs it.
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
 		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
 		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
 			/8gent Browser could not start \(test spawn refused\).*run_command with curl/,
