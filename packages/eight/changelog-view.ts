@@ -55,9 +55,18 @@ export function latestSections(sections: ChangelogSection[], n: number): Changel
 	return n >= 1 ? sections.slice(0, Math.floor(n)) : [];
 }
 
-/** Join sections into display text. */
+/** Drop control characters (ESC, CSI, BEL, NUL, C1) so changelog text cannot drive the terminal. Keeps newline and tab. */
+export function sanitizeForDisplay(text: string): string {
+	return text
+		.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+}
+
+/** Join sections into display text, with control characters removed. */
 export function formatSections(sections: ChangelogSection[]): string {
-	return sections.map((s) => s.body).join("\n\n");
+	return sanitizeForDisplay(sections.map((s) => s.body).join("\n\n"));
 }
 
 /**

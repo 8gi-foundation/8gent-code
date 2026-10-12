@@ -84,6 +84,28 @@ describe("collisions and non-chord rows", () => {
 		const r = validateKeybindings({ "Switch to tab by number": "Ctrl+N" });
 		expect(r.errors[0]).toContain("cannot be rebound");
 	});
+	test("permission mode, stop and quit cannot be rebound", () => {
+		for (const name of ["Permission mode: Plan, Ask, Guarded, Infinite", "Stop the running task, or close the open view", "Save the session and quit"]) {
+			const r = validateKeybindings({ [name]: "Ctrl+K" });
+			expect(r.overrides).toEqual({});
+			expect(r.errors.length).toBe(1);
+		}
+	});
+	test("nothing may be bound onto Enter, Esc, Tab, Up or Down", () => {
+		for (const k of ["Enter", "Esc", "Tab", "Up", "Down"]) {
+			const r = validateKeybindings({ "Model picker": k });
+			expect(r.overrides).toEqual({});
+			expect(r.errors[0]).toContain("reserved");
+		}
+	});
+	test("a swap of Enter and Shift+Tab is refused on both sides", () => {
+		const r = validateKeybindings({
+			"Permission mode: Plan, Ask, Guarded, Infinite": "Enter",
+			"Send the message (queued while a task runs)": "Shift+Tab",
+		});
+		expect(r.overrides).toEqual({});
+		expect(r.errors.length).toBe(2);
+	});
 	test("table sanity: Ctrl+C row exists", () => {
 		expect(KEYBINDINGS.some((b) => b.keys === "Ctrl+C")).toBe(true);
 	});

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatSections, latestSections, loadChangelog, parseChangelog, sectionsSince } from "./changelog-view.js";
+import { sanitizeForDisplay, formatSections, latestSections, loadChangelog, parseChangelog, sectionsSince } from "./changelog-view.js";
 
 const MD = `# Changelog
 
@@ -49,5 +49,13 @@ describe("changelog-view", () => {
 	});
 	test("a folder with no changelog gives []", () => {
 		expect(loadChangelog("/nonexistent-dir-xyz")).toEqual([]);
+	});
+});
+
+describe("sanitizeForDisplay", () => {
+	test("strips escape sequences and control characters, keeps text, newlines and tabs", () => {
+		const evil = "ok\x1b[2J\x1b]0;pwned\x07 line\r\nnext\ttab\x00\x08\x9b";
+		expect(sanitizeForDisplay(evil)).toBe("ok line\nnext\ttab");
+		expect(formatSections([{ version: "1.0.0", heading: "", body: "## [1.0.0]\n\x1b[31mred\x1b[0m" }])).toBe("## [1.0.0]\nred");
 	});
 });

@@ -30,6 +30,7 @@ describe("createBugReport", () => {
 		expect(rep.version).toBe("9.9.9");
 		expect(rep.os.platform).toBe(process.platform);
 		expect(rep.uploaded).toBe(false);
+		expect(rep.before_sharing).toContain("Read every file");
 		expect(rep.redactedSecrets).toBeGreaterThanOrEqual(1);
 		for (const f of ["session.jsonl", "log-tail.txt", "report.json"]) {
 			const t = readFileSync(join(dir, f), "utf8");

@@ -38,6 +38,11 @@ export function actionId(action: string): string {
 		.join("-");
 }
 
+/** Keys that stay where they are: rebinding these actions could move quit, stop or the permission mode. */
+const LOCKED_ACTION_KEYS = new Set(["Ctrl+C", "Esc", "Shift+Tab"]);
+/** Plain keys no action may be bound onto: they carry send, stop, focus and history. */
+const RESERVED_TARGETS = new Set(["Enter", "Esc", "Tab", "Up", "Down"]);
+
 const MODS = ["ctrl", "alt", "shift"] as const;
 const NAMED = new Set(["enter", "esc", "tab", "space", "backspace", "delete", "up", "down", "left", "right", "home", "end", "pageup", "pagedown"]);
 
@@ -96,10 +101,13 @@ export function validateKeybindings(input: unknown, table: readonly KeyBinding[]
 			errors.push(`"${name}": this action cannot be rebound (it is not a single key).`);
 			continue;
 		}
-		const isQuit = normalizeChord(row.keys) === "Ctrl+C";
-		if (isQuit && chord === "Ctrl+C") continue;
-		if (isQuit) {
-			errors.push(`"${name}": Ctrl+C always saves and quits; it cannot be moved.`);
+		const own = normalizeChord(row.keys) as string;
+		if (LOCKED_ACTION_KEYS.has(own)) {
+			if (chord !== own) errors.push(`"${name}": this action (${own}) is fixed and cannot be rebound.`);
+			continue;
+		}
+		if (RESERVED_TARGETS.has(chord)) {
+			errors.push(`"${name}": ${chord} is reserved and cannot be bound to another action.`);
 			continue;
 		}
 		if (chord === "Ctrl+C") {

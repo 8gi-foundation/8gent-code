@@ -124,6 +124,7 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 				files: files.filter((f) => f !== "report.json"),
 				redactedSecrets: redacted,
 				uploaded: false,
+				before_sharing: "Read every file in this folder before you share it. Secrets are redacted on a best-effort basis, so check for anything private.",
 			},
 			null,
 			2,
