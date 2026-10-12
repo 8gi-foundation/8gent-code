@@ -20,13 +20,20 @@ export async function screenLocate(
 	opts: { backend?: GroundBackend } = {},
 ): Promise<string> {
 	const vp = args.viewport ? parseViewport(args.viewport) : null;
-	if (args.viewport && !vp) return `Error: viewport must look like "1280x800", got "${args.viewport}"`;
+	if (args.viewport && !vp)
+		return `Error: viewport must look like "1280x800", got "${args.viewport}"`;
 	const r = await ground({ image: args.image, instruction: args.target }, opts);
 	if (!r.ok) return `Not found: ${r.reason}`;
 	if (r.confidence < SCREEN_LOCATE_MIN_CONFIDENCE) {
 		return `Not found: "${args.target}" (confidence ${r.confidence}). Try a more specific description.`;
 	}
-	const out: Record<string, unknown> = { x: r.x, y: r.y, bbox: r.bbox, confidence: r.confidence, space: "image" };
+	const out: Record<string, unknown> = {
+		x: r.x,
+		y: r.y,
+		bbox: r.bbox,
+		confidence: r.confidence,
+		space: "image",
+	};
 	if (vp) {
 		const img = await prepareImage(args.image);
 		out.cssX = Math.round((r.x * vp[0]) / img.origWidth);
@@ -34,4 +41,23 @@ export async function screenLocate(
 		out.space = "image; cssX/cssY are viewport CSS pixels";
 	}
 	return JSON.stringify(out);
+}
+
+/**
+ * screen_locate needs a screenshot to look at, so a local session gets it only
+ * with a screenshot source: 8gent Browser tools, the desktop tools, or an
+ * explicit EIGHT_SCREEN_LOCATE=1 for sessions that are handed image files.
+ * Offering it everywhere cost 466 chars of the headless prompt budget for a
+ * tool with nothing to point at.
+ */
+export function screenLocateOffered(opts: {
+	browserTools: number;
+	desktopTools: boolean;
+	env?: Record<string, string | undefined>;
+}): boolean {
+	return (
+		opts.browserTools > 0 ||
+		opts.desktopTools ||
+		(opts.env ?? process.env).EIGHT_SCREEN_LOCATE === "1"
+	);
 }

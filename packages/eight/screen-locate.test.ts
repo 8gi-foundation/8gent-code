@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { rmRetry } from "../../tests/rm-retry";
+import { screenLocate, screenLocateOffered } from "../eyes/ground/screen-locate";
 import type { BBox, GroundBackend } from "../eyes/ground/types";
-import { screenLocate } from "../eyes/ground/screen-locate";
 import { ToolExecutor } from "./tools";
 
 let dir: string;
@@ -37,7 +37,12 @@ describe("screen_locate", () => {
 		const { prepareImage } = await import("../eyes/ground/image");
 		const p = await prepareImage(png);
 		const box: BBox = [p.width * 0.4, p.height * 0.4, p.width * 0.6, p.height * 0.6];
-		const out = JSON.parse(await screenLocate({ image: png, target: "the button", viewport: "1280x800" }, { backend: fake(box) }));
+		const out = JSON.parse(
+			await screenLocate(
+				{ image: png, target: "the button", viewport: "1280x800" },
+				{ backend: fake(box) },
+			),
+		);
 		expect(out.x).toBeGreaterThan(1200);
 		expect(out.x).toBeLessThan(1360);
 		expect(out.cssX).toBeGreaterThan(600);
@@ -48,7 +53,9 @@ describe("screen_locate", () => {
 	});
 
 	test("without viewport returns image space only", async () => {
-		const out = JSON.parse(await screenLocate({ image: png, target: "x" }, { backend: fake([100, 100, 200, 200]) }));
+		const out = JSON.parse(
+			await screenLocate({ image: png, target: "x" }, { backend: fake([100, 100, 200, 200]) }),
+		);
 		expect(out.cssX).toBeUndefined();
 		expect(out.space).toBe("image");
 	});
@@ -62,12 +69,17 @@ describe("screen_locate", () => {
 		// Box covering the whole frame scores below 0.5 (not a control).
 		const { prepareImage } = await import("../eyes/ground/image");
 		const p = await prepareImage(png);
-		const out = await screenLocate({ image: png, target: "x" }, { backend: fake([0, 0, p.width + 400, p.height + 400]) });
+		const out = await screenLocate(
+			{ image: png, target: "x" },
+			{ backend: fake([0, 0, p.width + 400, p.height + 400]) },
+		);
 		expect(out).toStartWith("Not found:");
 	});
 
 	test("bad viewport is an error", async () => {
-		expect(await screenLocate({ image: png, target: "x", viewport: "wide" }, { backend: fake(null) })).toStartWith("Error:");
+		expect(
+			await screenLocate({ image: png, target: "x", viewport: "wide" }, { backend: fake(null) }),
+		).toStartWith("Error:");
 	});
 });
 
@@ -75,15 +87,32 @@ describe("screen_locate tool wiring", () => {
 	test("is declared and in the local tool list", () => {
 		const defs = new ToolExecutor(dir).getToolDefinitions() as { function: { name: string } }[];
 		expect(defs.map((d) => d.function.name)).toContain("screen_locate");
+	});
+
+	test("offered to a local session only with a screenshot source", () => {
+		expect(screenLocateOffered({ browserTools: 0, desktopTools: false, env: {} })).toBe(false);
+		expect(screenLocateOffered({ browserTools: 4, desktopTools: false, env: {} })).toBe(true);
+		expect(screenLocateOffered({ browserTools: 0, desktopTools: true, env: {} })).toBe(true);
+		expect(
+			screenLocateOffered({
+				browserTools: 0,
+				desktopTools: false,
+				env: { EIGHT_SCREEN_LOCATE: "1" },
+			}),
+		).toBe(true);
 		const src = require("node:fs").readFileSync(join(import.meta.dir, "agent.ts"), "utf8");
-		expect(src).toMatch(/CORE_TOOLS = \[[\s\S]*?"screen_locate"[\s\S]*?\];/);
+		expect(src).toContain(
+			"screenLocateOffered({ browserTools: localBrowserTools().length, desktopTools: cuaConfigured })",
+		);
 	});
 
 	test("path guard refuses credential paths", async () => {
 		const ex = new ToolExecutor(dir);
 		for (const image of ["~/.ssh/id_rsa", "/etc/passwd", "../../../.env"]) {
 			// Same refusal read_file gives: the guard throws before any model call.
-			await expect(ex.execute("screen_locate", { image, target: "x" })).rejects.toThrow(/blocked|outside/i);
+			await expect(ex.execute("screen_locate", { image, target: "x" })).rejects.toThrow(
+				/blocked|outside/i,
+			);
 		}
 	});
 });
