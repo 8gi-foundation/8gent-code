@@ -48,3 +48,24 @@ export async function loopbackFetch(
 	assertLoopback(target.toString());
 	return fetch(target, { ...init, redirect: "error" });
 }
+
+export class CloudModelError extends Error {
+	constructor(model: string) {
+		super(
+			`grounding model "${model}" is a cloud model; a loopback Ollama forwards it off this machine, so screenshots would leave. Use a local model.`,
+		);
+		this.name = "CloudModelError";
+	}
+}
+
+/**
+ * A loopback endpoint is not enough: Ollama serves "<name>:cloud" and
+ * "<name>-cloud" tags by forwarding the request, frames included, to a remote
+ * service. Refuse any model name with a cloud suffix on the tag or the name.
+ */
+export function assertLocalModel(model: string): string {
+	const m = model.trim().toLowerCase();
+	if (!m) throw new CloudModelError(model);
+	if (/(?:^|[:\-/])cloud$/.test(m) || /:[^:]*-cloud$/.test(m)) throw new CloudModelError(model);
+	return model;
+}
