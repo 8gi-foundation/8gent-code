@@ -412,6 +412,25 @@ describe("cloneLocalIntoProject refuses", () => {
 		}
 	});
 
+	test("a $HOME inside the parent does not make it broad even without a passwd override (#4073)", () => {
+		// The pilot layout: HOME is <run dir>/home and the workspace is <run dir>/work.
+		// Bun's os.userInfo() follows $HOME, so the account home is read from the passwd lookup.
+		const h = process.env.HOME;
+		process.env.HOME = join(container, "home");
+		_setPasswdHomeForTests(undefined);
+		try {
+			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(true);
+			expect(
+				cloneLocalIntoProject(`git clone ${realpathSync(container)}/shared-notes.git notes`, ws).ok,
+			).toBe(true);
+			// Still refused: a URL, and a path outside the workspace parent.
+			expect(cloneLocalIntoProject("git clone https://example.com/x.git notes", ws).ok).toBe(false);
+			expect(cloneLocalIntoProject(`git clone ${outside}/shared-notes.git notes`, ws).ok).toBe(false);
+		} finally {
+			process.env.HOME = h;
+		}
+	});
+
 	test("no working directory", () => {
 		expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", undefined).ok).toBe(false);
 	});

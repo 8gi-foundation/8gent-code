@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { activeShellKind } from "../core/shell";
 import { blockedReason, commandArgvs } from "./always-blocked";
 import {
 	type GitState,
@@ -20,6 +21,7 @@ import {
 	repoGitState,
 } from "./command-policy";
 import { currentPermissionMode } from "./permission-mode.js";
+import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
 /**
@@ -848,7 +850,7 @@ export class PermissionManager {
 	/**
 	 * Check if a command is pre-approved (safe or user-allowed)
 	 */
-	isAllowed(command: string): boolean {
+	isAllowed(command: string, shell: ActiveShellKind = activeShellKind()): boolean {
 		const normalizedCmd = command.toLowerCase().trim();
 
 		// Check if explicitly denied
@@ -860,6 +862,10 @@ export class PermissionManager {
 		if (this.approvedCommands.has(normalizedCmd)) {
 			return true;
 		}
+
+		// The safe-prefix list reads POSIX quoting; under PowerShell, or a cmd.exe
+		// line with ^ or %, it cannot judge the line, so only a session approval counts.
+		if (!posixRulesApply(command, shell)) return false;
 
 		// Safe prefixes and the user's allowed patterns approve a line only when
 		// EVERY segment of it matches one (#3748): `cat x | <anything>` no longer
@@ -1118,7 +1124,7 @@ export class PermissionManager {
 	 * Check permission for a command without prompting
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
-	checkPermission(command: string): "allowed" | "denied" | "ask" {
+	checkPermission(command: string, shell?: ActiveShellKind): "allowed" | "denied" | "ask" {
 		// INFINITE MODE: Allow everything except always-blocked commands, and
 		// ask for the ask-every-time list (#3765).
 		// An always-blocked command anywhere on the line is denied in every mode (#3768).
@@ -1152,7 +1158,7 @@ export class PermissionManager {
 		}
 
 		// Check if allowed
-		if (this.isAllowed(command)) {
+		if (this.isAllowed(command, shell)) {
 			return "allowed";
 		}
 

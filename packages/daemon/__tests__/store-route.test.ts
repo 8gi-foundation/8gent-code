@@ -67,6 +67,7 @@ fs.writeFileSync(
 	`# config\nAWS_KEY=${FAKE_AWS_KEY}\nother=ok\n`,
 );
 
+const savedHome = process.env.HOME;
 beforeAll(() => {
 	process.env.EIGHT_DATA_DIR = DATA_DIR;
 	process.env.EIGHT_WORKSPACE_ROOT = WORKSPACE;
@@ -84,6 +85,9 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+	// HOME was pointed at TMP above; leaving it there broke later files in the same process.
+	if (savedHome === undefined) delete process.env.HOME;
+	else process.env.HOME = savedHome;
 	delete process.env.EIGHT_DATA_DIR;
 	delete process.env.EIGHT_WORKSPACE_ROOT;
 	try {

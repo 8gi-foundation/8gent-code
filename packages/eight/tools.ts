@@ -35,7 +35,8 @@ import { layoutMeasureLine } from "./layout-measure";
 import { writeShapeLine } from "../ai/write-shape";
 import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
-import { killProcessTree, spawnShell } from "../core/shell";
+import { loadSettings } from "../settings/store";
+import { type ResolvedShell, killProcessTree, activeShellKind, resolvePowerShell, spawnShell, withForcedShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
@@ -61,6 +62,20 @@ import {
 	imageToDesktop,
 } from "../computer";
 import { DESKTOP_POLICY_ACTION, desktopPolicyContext } from "../computer/desktop-policy";
+import {
+	DESKTOP_ACT_TOOL_DEF,
+	DesktopActSession,
+	desktopAct,
+	detectScreenScale,
+	validateDesktopActArgs,
+} from "../computer/desktop-act";
+import {
+	askOnTerminal,
+	desktopApprovalCard,
+	desktopApprovalDetails,
+	redactDesktopArgs,
+} from "../computer/desktop-approval";
+import { desktopPreflight } from "../computer/preflight";
 import {
 	detectDesignNeed,
 	getAvailableDesignSystems,
@@ -118,7 +133,7 @@ import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
-import { systemOneGate } from "../permissions/system-one-gate";
+import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionHolder,
@@ -185,6 +200,30 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
 
 /**
+ * A chained command the sanitizer refuses comes back as its pieces, so a piece
+ * System One's loopback lane will refuse on its own is named in the same
+ * refusal (#4072). The browser-op pilot sent `curl -sL ...; cat ...`, was told
+ * only to split it, resent the curl with -L and was blocked a second time.
+ * Only the lane's deterministic refusal is used, only in the mode where the
+ * lane runs (system-one-gate), so this never says more than System One would.
+ * A piece that is not a loopback curl, or a split that lands inside quotes,
+ * gives no hint rather than a wrong one.
+ */
+export async function chainedPieceRefusal(
+	command: string,
+	cwd: string,
+	env: Record<string, string | undefined> = process.env,
+): Promise<string | undefined> {
+	if (systemOneMode(env) !== "default") return undefined;
+	const { curlToLoopback } = await import("../permissions/s1-curl-loopback");
+	for (const piece of command.split(/;|&&|\|\|/)) {
+		const c = curlToLoopback(piece.trim(), cwd);
+		if (!c.ok && c.refuse) return c.refuse;
+	}
+	return undefined;
+}
+
+/**
  * Replay class per tool (#3653), used when a crashed session resumes with a
  * tool call that was still running (EIGHT_RESUME_ON_BOOT=1).
  *  - "replay": a checked local read with no side effect; safe to run again.
@@ -209,6 +248,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"write_file",
 	"edit_file",
 	"run_command",
+	"powershell",
 	"git_checkout",
 	"git_create_branch",
 	"git_add",
@@ -219,6 +259,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"post_message",
 	"spawn_agent",
 	"speak",
+	"render_video_deck",
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
@@ -414,6 +455,13 @@ export function confineWrite(named: string, workingDirectory: string): string {
 	const st = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
 	return target;
+}
+
+/** Where render_video_deck may write: a .mp4 inside the working directory, no symlinks. */
+export function resolveDeckOut(out: unknown, workingDirectory: string): string {
+	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
+	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
+	return confineWrite(named, workingDirectory);
 }
 
 /** A path a tool may read: inside the working directory after following every link. */
@@ -621,12 +669,39 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 	return { ...args, actions };
 }
 
+/** The PowerShell for the optional `powershell` tool: win32 only, and only when settings.shell.powershellTool is on. */
+function powershellToolShell(): ResolvedShell | undefined {
+	if (process.platform !== "win32") return undefined;
+	try {
+		if (!loadSettings().shell?.powershellTool) return undefined;
+	} catch {
+		return undefined;
+	}
+	return resolvePowerShell();
+}
+
+const POWERSHELL_TOOL_DEF = {
+	type: "function",
+	function: {
+		name: "powershell",
+		description:
+			"[SHELL] Windows only. Runs a PowerShell command (-NoProfile -NonInteractive) and returns stdout/stderr. Use for Windows-native work (Get-ChildItem, registry, services); use run_command for git, bun, npm and POSIX tools. Same permission checks as run_command.",
+		parameters: {
+			type: "object",
+			properties: { command: { type: "string", description: "PowerShell command to run" } },
+			required: ["command"],
+		},
+	},
+};
+
 /** Policy action class for every one-file extension tool call (G1). */
 export const EXTENSION_POLICY_ACTION = "extension_call" as const;
 
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
+	/** Step cap and repeat stop for desktop_act, per executor lifetime. */
+	private desktopActSession = new DesktopActSession();
 	private hookManager: HookManager;
 	private toolG8: ToolG8;
 	private agentId: string;
@@ -1201,6 +1276,22 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "render_video_deck",
+					description:
+						"[MEDIA] Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
+					parameters: {
+						type: "object",
+						properties: {
+							spec: { type: "object", description: "The deck spec described above" },
+							out: { type: "string", description: "Output .mp4 path inside the working directory (default deck.mp4)" },
+						},
+						required: ["spec"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "screen_locate",
 					description:
 						'[FILE] Point to click for a thing in a screenshot, named in words.',
@@ -1630,6 +1721,7 @@ export class ToolExecutor {
 			},
 			// Desktop Computer Use tools (Power #10)
 			...getComputerToolDefs(),
+			DESKTOP_ACT_TOOL_DEF,
 			{
 				type: "function",
 				function: {
@@ -1751,6 +1843,8 @@ export class ToolExecutor {
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
+			// Windows only, off by default (settings.shell.powershellTool).
+			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
 		];
 	}
 
@@ -1787,12 +1881,14 @@ export class ToolExecutor {
 		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
+		render_video_deck: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
 		notebook_insert_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
+		powershell: "run_command",
 		git_push: "git_push",
 		git_commit: "git_commit",
 		web_search: "network_request",
@@ -1925,7 +2021,11 @@ export class ToolExecutor {
 		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
 		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
 		const writeTarget = (
-			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
+			toolName === "film_craft"
+				? filmWrites[0]
+				: toolName === "speak" || toolName === "render_video_deck"
+					? args.out
+					: args.path
 		) as string | undefined;
 		// A one-file extension tool (G1) has a dynamic name, so it maps by
 		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
@@ -2153,6 +2253,14 @@ export class ToolExecutor {
 					: run();
 			}
 
+			case "powershell": {
+				const shell = powershellToolShell();
+				if (!shell) return "Error: the powershell tool is off. Use run_command.";
+				return withForcedShell(shell, () =>
+					this.runCommand(args.command as string, args.timeout as number | undefined, undefined, shell),
+				);
+			}
+
 			// Multi-agent orchestration
 			case "spawn_agent":
 				return this.handleSpawnAgent(
@@ -2188,6 +2296,21 @@ export class ToolExecutor {
 					);
 				} catch (err) {
 					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
+
+			case "render_video_deck": {
+				try {
+					const out = resolveDeckOut(args.out, this.workingDirectory);
+					// An edit-scoped sub-agent renders only into its scope (same check as write_file).
+					const scoped = editScopeViolation("render_video_deck", { out: args.out ?? "deck.mp4" }, this.workingDirectory, this.allowedPaths);
+					if (scoped) return scoped;
+					const { renderVideoDeck } = await import("../tools/video-deck");
+					return JSON.stringify(
+						await renderVideoDeck({ spec: args.spec, out, cwd: this.workingDirectory }),
+					);
+				} catch (err) {
+					return `Error: render_video_deck failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
 			}
 
@@ -2397,6 +2520,8 @@ export class ToolExecutor {
 				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 			case "run_computer_task":
 				return this.handleRunComputerTask(args.goal as string, args.maxSteps as number | undefined);
+			case "desktop_act":
+				return this.handleDesktopAct(args);
 
 			// Browser Use tools
 			case "browser_open":
@@ -2871,21 +2996,22 @@ export class ToolExecutor {
 		command: string,
 		timeoutSec?: number,
 		env?: Record<string, string | undefined>,
+		windowsShell?: ResolvedShell,
 	): Promise<string> {
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () =>
-				this.runCommand(command, timeoutSec, env),
+				this.runCommand(command, timeoutSec, env, windowsShell),
 			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
 		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
+			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env, windowsShell));
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
 		const backstop = preSpawnRefusal(command, this.workingDirectory);
 		if (backstop) return backstop;
 		const mode = currentPermissionMode();
-		const permissionCheck = this.permissionManager.checkPermission(command);
+		const permissionCheck = this.permissionManager.checkPermission(command, activeShellKind(windowsShell));
 
 		if (permissionCheck === "denied") {
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
@@ -2894,9 +3020,13 @@ export class ToolExecutor {
 		// Validate command for shell injection before asking anyone: a command
 		// the sanitizer will refuse must not raise an approval card, or the
 		// person approves it and then sees it blocked anyway (#3055).
-		const validation = sanitizeShellCommand(command);
+		const validation = sanitizeShellCommand(command, process.platform, activeShellKind(windowsShell));
 		if (!validation.safe) {
-			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+			// A piece of the chain System One would refuse on its own is named now,
+			// so the pieces are not resent as they are and blocked again (#4072).
+			const piece = await chainedPieceRefusal(command, this.workingDirectory, systemOneEnvFor(mode));
+			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
+			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
@@ -2969,6 +3099,7 @@ export class ToolExecutor {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
+				windowsShell,
 				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
@@ -3970,6 +4101,49 @@ export class ToolExecutor {
 	}
 
 	/**
+	 * desktop_act: ground the target with the local grounder, ask, act, verify.
+	 * The outer gate admitted only the read half (act_resolve); the act is
+	 * gated here as click / type / press, so a block stays a block and a
+	 * require_approval rule reaches the person with the point on the card.
+	 * EIGHT_DESKTOP_ACT_DRY=<png> runs the whole flow against a saved frame
+	 * and records the act instead of executing it.
+	 */
+	private async handleDesktopAct(args: Record<string, unknown>): Promise<string> {
+		const parsed = validateDesktopActArgs(args);
+		if (typeof parsed === "string") return parsed;
+		const dry = process.env.EIGHT_DESKTOP_ACT_DRY;
+		const { ground } = await import("../eyes/ground");
+		const result = await desktopAct(
+			parsed,
+			{
+				dryRun: !!dry,
+				preflight: () => desktopPreflight(),
+				screenshot: () => {
+					if (dry) {
+						return { ok: true, path: dry, coordMap: { captureX: 0, captureY: 0, captureWidth: 0, captureHeight: 0, imageWidth: 0, imageHeight: 0 } };
+					}
+					return computerScreenshot({});
+				},
+				ground: (image, instruction) => ground({ image, instruction }),
+				policy: (ctx) => this.toolG8.gate(this.agentId, DESKTOP_POLICY_ACTION as PolicyActionType, ctx),
+				// Every act reaches the person; the card carries the exact text and
+				// the crop, the log carries neither (desktop-approval.ts).
+				approve: (req, reason) =>
+					this.askDesktopApproval("desktop_act", {}, reason, {
+						card: desktopApprovalCard(req, reason),
+						details: desktopApprovalDetails(req, reason),
+					}),
+				click: (point, button, count) => computerClick({ point, button, count }),
+				type: (text) => computerType({ text }),
+				press: (keys) => computerPress({ keys }),
+				screenScale: () => (dry ? 1 : detectScreenScale()),
+			},
+			this.desktopActSession,
+		);
+		return JSON.stringify(result);
+	}
+
+	/**
 	 * A desktop action the policy says needs the person (#3213). Returns null
 	 * when they approved, or the refusal to hand back to the model. With no
 	 * person to ask (headless, no approval card) it refuses: desktop control
@@ -3979,18 +4153,31 @@ export class ToolExecutor {
 		toolName: string,
 		args: Record<string, unknown>,
 		reason: string | undefined,
+		card?: { card: string; details: string },
 	): Promise<string | null> {
-		if (this.permissionManager.isInfiniteMode()) return null;
 		const browser = toolName.startsWith("browser_");
-		const request = {
-			action: browser ? "Browser control" : "Desktop control",
-			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
-		};
+		// Infinite lifts the browser card only. Desktop control reaches every
+		// app the person has open, so it asks in every mode, Infinite included.
+		if (browser && this.permissionManager.isInfiniteMode()) return null;
+		const why = reason ?? "This desktop action needs your approval.";
+		// What may be logged: never typed text (8SO). The card is separate.
+		const details =
+			card?.details ??
+			`${why} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : redactDesktopArgs(args))}`;
+		const shown = card?.card ?? `${toolName}: ${details}`;
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
-			approved = (await requestTuiApproval(request)) === true;
+			// `full`: the card is laid out whole or answered "unfit", never cut.
+			approved =
+				(await requestTuiApproval(
+					browser
+						? { action: "Browser control", details }
+						: { action: "Desktop control", details, command: shown, full: true },
+				)) === true;
 		} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
-			approved = await this.permissionManager.requestPermission(request.action, request.details);
+			approved = browser
+				? await this.permissionManager.requestPermission("Browser control", details)
+				: await askOnTerminal(shown);
 		} else {
 			return `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
 		}
@@ -4239,3 +4426,4 @@ function timeSince(date: Date): string {
 	const days = Math.floor(hours / 24);
 	return `${days}d`;
 }
+

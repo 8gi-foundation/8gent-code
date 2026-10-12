@@ -313,7 +313,8 @@ describe("persistence ownership", () => {
 		expect(persistable.has("s_free")).toBe(true);
 	});
 
-	it("session files are owner-only", () => {
+	// Windows has no POSIX mode bits: stat reports 0o666 for any file, so the 0600 check cannot hold there.
+	it.skipIf(process.platform === "win32")("session files are owner-only", () => {
 		store.save("s_mode", [{ role: "user", content: "x" }], {});
 		expect(statSync(join(dir, "sessions", "tree", "s_mode.jsonl")).mode & 0o777).toBe(0o600);
 	});

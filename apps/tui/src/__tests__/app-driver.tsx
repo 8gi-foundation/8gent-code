@@ -133,6 +133,8 @@ export function harnessEnv(
 	}
 	Object.assign(env, {
 		HOME: home,
+		// Windows os.homedir() reads USERPROFILE and ignores HOME, so the throwaway home needs both.
+		USERPROFILE: home,
 		// The test process pins these to ONE shared temp dir for the whole run
 		// (tests/preload-temp-home.ts), and the store prefers EIGHT_DATA_DIR over
 		// HOME. Inherited, every harness would write its sessions into that shared

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { removeDir } from "../../tests/temp-dirs";
 import { clearIndex, ensureIndexed } from "./index";
 import {
 	awaitIndex,
@@ -467,7 +468,8 @@ describe("a repo larger than one rg output chunk", () => {
 	}, 60_000);
 
 	afterAll(() => {
-		fs.rmSync(big, { recursive: true, force: true });
+		// Windows may still hold the folder from a ripgrep just run over it (EBUSY).
+		removeDir(big);
 	});
 
 	// These check what is found, not how fast: a generous rg limit and test

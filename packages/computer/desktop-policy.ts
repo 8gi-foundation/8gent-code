@@ -12,6 +12,8 @@
  * An unknown desktop tool maps to its own name, which no allow rule lists,
  * so the engine's desktop default (ask the person) applies.
  */
+import { normalizeKeys } from "./keys";
+
 export const DESKTOP_POLICY_ACTION = "desktop_use";
 
 export function desktopPolicyContext(
@@ -26,7 +28,8 @@ export function desktopPolicyContext(
 		case "desktop_type":
 			return { action: "type" };
 		case "desktop_press":
-			return { action: "press", keys: input.keys };
+			// Canonical spelling, so the YAML key rules see "cmd+shift+q" for "Shift+Command+Q".
+			return { action: "press", keys: normalizeKeys(String(input.keys ?? "")) };
 		case "desktop_scroll":
 			return { action: "scroll" };
 		case "desktop_drag":
@@ -50,6 +53,11 @@ export function desktopPolicyContext(
 			return { action: "safe_list" };
 		case "desktop_accessibility_tree":
 			return { action: "screenshot" }; // read-only equivalent under default policy
+		case "desktop_act":
+			// The pre-gate covers only the read half (screenshot + ground). The
+			// act itself is gated inside handleDesktopAct as click/type/press
+			// with the real point on the card (packages/computer/desktop-act.ts).
+			return { action: "act_resolve" };
 		default:
 			return { action: tool };
 	}

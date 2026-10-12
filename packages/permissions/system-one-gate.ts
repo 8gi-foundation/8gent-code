@@ -83,6 +83,8 @@
  */
 
 import * as readline from "node:readline";
+import { activeShellKind } from "../core/shell";
+import { posixRulesApply } from "./shell-tools";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
@@ -531,7 +533,9 @@ export async function systemOneGate(
 	const allow = systemOneAllowlist(env);
 	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
 	let hint: string | undefined;
-	if (allow.enabled) {
+	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
+	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
+	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
@@ -627,7 +631,23 @@ export async function systemOneGate(
 		// every file stays inside the workspace (#3941). Default mode only.
 		try {
 			const { curlToLoopback } = await import("./s1-curl-loopback");
-			const c = mode === "default" ? curlToLoopback(command, cwd) : { ok: false as const };
+			const c: { ok: boolean; reason?: string; refuse?: string } =
+				mode === "default" ? curlToLoopback(command, cwd) : { ok: false };
+			if (!c.ok && c.refuse) {
+				// Deterministic refusal (#3967): tell the model what to do, no judge call.
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: c.refuse,
+				};
+				return {
+					run: false,
+					guard,
+					message: blockMessage(guard, "unknown", c.refuse, command),
+				};
+			}
 			if (c.ok) {
 				return {
 					run: true,

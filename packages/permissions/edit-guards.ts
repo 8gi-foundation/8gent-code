@@ -36,9 +36,16 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
 	"notebook_delete_cell",
 	// speak writes a wav to its `out` path (#3596).
 	"speak",
+	// render_video_deck writes an mp4 to its `out` path.
+	"render_video_deck",
 	// film_craft writes a bed wav or a recipe folder (#3599); see filmCraftWriteTargets.
 	"film_craft",
 ]);
+
+/** The argument that names the file a scoped write tool writes: `out` for the media tools, else `path`. */
+export function scopedWriteTarget(toolName: string, args: Record<string, unknown> | undefined): unknown {
+	return toolName === "speak" || toolName === "render_video_deck" ? args?.out : args?.path;
+}
 
 /**
  * What a film_craft call writes, as the model named it (#3599): action=bed its wav,
@@ -98,7 +105,7 @@ export function editScopeViolation(
 		target = targets.find((t) => !isInside(t)) ?? targets[0];
 	} else {
 		// speak names its file in `out`, deck_theme in `deck`, everything else in `path`.
-		const named = isDeckTheme ? args.deck : toolName === "speak" ? args.out : args.path;
+		const named = isDeckTheme ? args.deck : scopedWriteTarget(toolName, args);
 		target = typeof named === "string" ? named.trim() : "";
 		// deck_theme writes the deck and a <theme>.css beside it: both must be in scope.
 		targets = [target];

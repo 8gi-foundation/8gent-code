@@ -65,11 +65,14 @@ export const PROTECTED_DATA_FILES = [
 	".env",
 	"keys.env",
 	"allow-loopback.json", // the browser's trusted loopback port list (#3785, 8SO)
+	"keybindings.json",
+	"update-resume.json",
 ] as const;
 
 /** Directories whose whole tree is protected, relative to a data dir. */
 export const PROTECTED_DATA_DIRS = [
 	"extensions",
+	"themes",
 	"prompts",
 	"packages",
 	"browser-profiles",

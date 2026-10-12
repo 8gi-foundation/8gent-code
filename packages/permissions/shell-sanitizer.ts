@@ -14,51 +14,55 @@
  * check.
  */
 
+import { type ShellKind, activeShellKind } from "../core/shell";
+
 export interface ShellSanitizeResult {
 	safe: boolean;
 	reason?: string;
 }
 
+/** How a shell parses the line: cmd.exe, a POSIX shell (also Git Bash), or PowerShell. */
+type Dialect = "cmd" | "posix" | "pwsh";
+
 /**
- * Find a single `&` that separates commands, ignoring the harmless forms.
- *
- * POSIX (bash/sh): `&` ends a command and backgrounds it, so `a & b` runs both.
- * Windows (cmd.exe, which spawnShell uses there): `&` chains commands outright.
- * Either way it is a second command the guard never looked at.
- *
- * Allowed, because they are not command separators:
- * - inside quotes: POSIX single or double quotes; cmd.exe double quotes only
- *   (cmd.exe does not treat single quotes as quoting)
- * - escaped: POSIX `\&`; cmd.exe `^&` (cmd.exe does not treat `\` as an escape)
- * - redirections: `2>&1`, `>&2`, `<&0` on both; `&>file` / `&>>file` on POSIX
- *
- * `&&` is left to the dedicated && rule. Returns true when a separator is found.
+ * Pick the dialect from the shell the command will really run in. With no
+ * `kind`: the process's own platform follows the RESOLVED shell (Git Bash is
+ * POSIX, not cmd.exe); an explicit foreign `platform` keeps its historic
+ * default (win32 = cmd.exe, anything else = POSIX).
  */
-export function hasUnquotedAmpersand(
-	command: string,
-	platform: NodeJS.Platform = process.platform,
-): boolean {
-	const win = platform === "win32";
+function dialectFor(platform: NodeJS.Platform, kind?: ShellKind | "posix"): Dialect {
+	const k = kind ?? (platform === process.platform ? activeShellKind() : platform === "win32" ? "cmd" : "posix");
+	return k === "cmd" ? "cmd" : k === "powershell" ? "pwsh" : "posix";
+}
+
+type Finding = "semicolon" | "dollar-quote" | "newline" | "amp" | "pwsh-construct";
+
+/**
+ * Walk the characters outside quotes and escapes. `visit` returns a Finding to
+ * stop. An unterminated quote is malformed and reported as "semicolon".
+ *  - POSIX: '..' and ".." quote, backslash escapes (also inside "..").
+ *  - cmd.exe: only ".." quotes, `^` escapes, a quote of any kind never hides CR/LF.
+ *  - PowerShell: '..' and ".." quote, no backslash escape (backtick is refused earlier).
+ */
+function walk(command: string, d: Dialect, visit: (ch: string, i: number) => Finding | null): Finding | null {
+	if (d === "cmd" && /[\r\n]/.test(command)) return "newline";
 	let inSingle = false;
 	let inDouble = false;
-
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
-
 		if (inSingle) {
 			if (ch === "'") inSingle = false;
 			continue;
 		}
 		if (inDouble) {
-			if (!win && ch === "\\") {
-				i++; // POSIX: backslash escapes the next char inside double quotes
+			if (d === "posix" && ch === "\\") {
+				i++;
 				continue;
 			}
 			if (ch === '"') inDouble = false;
 			continue;
 		}
-
-		if (win ? ch === "^" : ch === "\\") {
+		if (d === "cmd" ? ch === "^" : d === "posix" && ch === "\\") {
 			i++; // escaped: skip the next char, whatever it is
 			continue;
 		}
@@ -66,23 +70,84 @@ export function hasUnquotedAmpersand(
 			inDouble = true;
 			continue;
 		}
-		if (ch === "'" && !win) {
+		if (ch === "'" && d !== "cmd") {
 			inSingle = true;
 			continue;
 		}
-		if (ch !== "&") continue;
+		const found = visit(ch, i);
+		if (found) return found;
+	}
+	return inSingle || inDouble ? "semicolon" : null;
+}
 
+/** An unquoted CR or LF ends a command in every shell. */
+function scanNewline(command: string, d: Dialect): boolean {
+	return walk(command, d, (ch) => (ch === "\n" || ch === "\r" ? "newline" : null)) === "newline";
+}
+
+/**
+ * Find a single `&` that separates commands, ignoring the harmless forms.
+ * POSIX `&` backgrounds, cmd.exe `&` chains, PowerShell `&` calls: a second
+ * command the guard never looked at. Allowed: inside quotes, escaped (POSIX
+ * `\&`, cmd.exe `^&`), and the redirections `2>&1`, `>&2`, `<&0` (`&>file` on
+ * POSIX). `&&` is left to the dedicated && rule. PowerShell refuses every
+ * other unquoted `&`.
+ */
+export function hasUnquotedAmpersand(
+	command: string,
+	platform: NodeJS.Platform = process.platform,
+	kind?: ShellKind | "posix",
+): boolean {
+	const d = dialectFor(platform, kind);
+	return walk(command, d, (ch, i) => {
+		if (ch !== "&") return null;
 		const prev = command[i - 1];
 		const next = command[i + 1];
-		if (next === "&") {
-			i++; // `&&`: handled by its own rule
-			continue;
-		}
-		if (prev === ">" || prev === "<") continue; // 2>&1, >&2, <&0
-		if (!win && next === ">") continue; // &>file, &>>file (bash)
-		return true;
-	}
-	return false;
+		if (next === "&") return null; // `&&`: its own rule (skipping the pair is below)
+		if (prev === "&") return null;
+		if (prev === ">" || prev === "<") return null;
+		if (d !== "cmd" && d !== "pwsh" && next === ">") return null; // &>file (bash)
+		return "amp";
+	}) === "amp";
+}
+
+/**
+ * Find a `;` that separates commands. In POSIX and PowerShell a `;` inside
+ * quotes is plain text. cmd.exe treats single quotes and `\` as plain text, so
+ * there any `;` outside double quotes (and not `^`-escaped) counts.
+ */
+export function hasUnquotedSemicolon(
+	command: string,
+	platform: NodeJS.Platform = process.platform,
+	kind?: ShellKind | "posix",
+): boolean {
+	return scanSemicolon(command, dialectFor(platform, kind)) !== null;
+}
+
+/**
+ * On POSIX, bash `$'...'` and `$"..."` quote differently (`\'` is an escaped
+ * quote inside `$'...'`), so this scanner cannot track them; any `$'` or `$"`
+ * outside quotes is refused outright.
+ */
+function scanSemicolon(command: string, d: Dialect): "semicolon" | "dollar-quote" | null {
+	const f = walk(command, d, (ch, i) => {
+		if (d === "posix" && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) return "dollar-quote";
+		return ch === ";" ? "semicolon" : null;
+	});
+	return f === "semicolon" || f === "dollar-quote" ? f : null;
+}
+
+/** PowerShell evaluates `(...)`, `@(...)`, `{...}`, `${...}`, `::` and `--%` outside quotes. */
+function scanPwshConstructs(command: string): boolean {
+	const hit =
+		walk(command, "pwsh", (ch, i) => {
+			if (ch === "(" || ch === "{") return "pwsh-construct";
+			if (ch === "$" && command[i + 1] === "{") return "pwsh-construct";
+			if (ch === ":" && command[i + 1] === ":") return "pwsh-construct";
+			if (ch === "-" && command.startsWith("--%", i)) return "pwsh-construct";
+			return null;
+		}) === "pwsh-construct";
+	return hit || /(^|[\s|])(iex|invoke-expression|icm|invoke-command)(?=\s|$)/i.test(command);
 }
 
 const NEWLINE_REASON =
@@ -211,82 +276,149 @@ function scanQuotes(command: string): QuoteScan {
 
 /**
  * Validate a command before it reaches the shell.
- * Returns { safe: false, reason } for a blocked command.
+ * Returns { safe: false, reason } for a blocked command. `kind` is the shell
+ * that will parse it; omitted, it follows the resolved shell on this machine.
+ *
+ * POSIX shells (also Git Bash on Windows) get the quote-aware scan from #3879:
+ * text inside quotes is data. cmd.exe and PowerShell keep the strict dialect
+ * walk, where a quote never hides a line break and PowerShell evaluates
+ * (...), {...} and friends outside quotes.
  */
 export function sanitizeShellCommand(
 	command: string,
 	platform: NodeJS.Platform = process.platform,
+	kind?: ShellKind | "posix",
 ): ShellSanitizeResult {
-	// POSIX: text inside quotes is data (#3879). Windows keeps the strict whole-line rules.
-	let text = command;
-	let dollarQuote = false;
-	if (platform !== "win32") {
-		const scan = scanQuotes(command);
-		if (!scan.balanced) {
+	const d = dialectFor(platform, kind);
+	// Encoded and expansion-trick forms hide the real command from every later check (8SO).
+	const hidden = refuseHiddenCommand(command, d);
+	if (hidden) return hidden;
+	return d === "posix" ? sanitizePosix(command, platform, kind) : sanitizeStrict(command, d, platform, kind);
+}
+
+const ENCODED_COMMAND = "encodedcommand";
+const ENCODED_ARGUMENTS = "encodedarguments";
+/** powershell / pwsh as a program word (also a path ending in powershell.exe), not a longer name. */
+const INVOKES_PWSH = /(^|[^A-Za-z0-9_.-])(powershell|pwsh)(\.exe)?(?![A-Za-z0-9_-])/i;
+const INVOKES_CMD = /(^|[^A-Za-z0-9_.-])cmd(\.exe)?(?![A-Za-z0-9_-])/i;
+
+/**
+ * True when `token` (quotes already stripped) is PowerShell's -EncodedCommand
+ * or any prefix PowerShell accepts for it: -e, -ec, -en, -enc, -enco ... up to
+ * the full name, case-insensitive, dash or (for powershell.exe) slash, with an
+ * optional `:value`. `-Encoding` is not a prefix of it, so Out-File -Encoding
+ * is untouched. -EncodedArguments (the sibling) is refused from -encodeda on.
+ */
+function isEncodedCommandFlag(token: string, allowSlash: boolean): boolean {
+	const m = /^([-\u2013\u2014\u2015]|\/)([A-Za-z]+)(?:[:=].*)?$/.exec(token);
+	if (!m) return false;
+	if (m[1] === "/" && !allowSlash) return false;
+	const w = m[2].toLowerCase();
+	if (w === "ec" || ENCODED_COMMAND.startsWith(w)) return true; // -ec is PowerShell's own alias, not a prefix
+	return w.length >= 8 && ENCODED_ARGUMENTS.startsWith(w);
+}
+
+/** A token that reads as a parameter: starts with - or /, or an en dash, em dash or horizontal bar. */
+const FLAG_LIKE = /^[-/\u2013\u2014\u2015]/;
+/** Characters that expand, escape or vanish inside a PowerShell parameter name, so it cannot be read as written. */
+const FLAG_HIDING_CHARS = /[$%!^\\'"`]/;
+
+function refuseHiddenCommand(command: string, d: Dialect): ShellSanitizeResult | null {
+	const invokesPwsh = INVOKES_PWSH.test(command);
+	if (d === "pwsh" || invokesPwsh) {
+		const raw = command.split(/\s+/).filter((t) => t !== "");
+		// PowerShell drops quotes, ^ and \ inside a parameter name (-"enc", -e""nc, -^enc, -\enc), so strip them all.
+		const tokens = raw.map((t) => t.replace(/['"^\\]/g, ""));
+		// Inside the PowerShell host only the dash form is a parameter; powershell.exe also takes /.
+		const smuggled = raw.some((t) => FLAG_LIKE.test(t) && FLAG_HIDING_CHARS.test(t));
+		if (smuggled || tokens.some((t) => isEncodedCommandFlag(t, invokesPwsh))) {
 			return {
 				safe: false,
 				reason:
-					"Unbalanced quotes in the command, so it cannot be checked. Close the quote or escape the apostrophe, or put the text in a file",
+					"PowerShell -EncodedCommand (and its abbreviations -e, -ec, -enc ...) hides the command from the check and is not allowed (a parameter name that holds quotes, ^, \\ or $ is refused too). Pass the command as plain text",
 			};
 		}
-		if (scan.ansiEscape) {
-			return {
-				safe: false,
-				reason: "A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
-			};
-		}
-		if (scan.commentAmbiguous) {
-			return {
-				safe: false,
-				reason: "A # followed by a quote mark or new line cannot be checked. Remove the comment, or put the steps in a script file",
-			};
-		}
-		if (scan.lineBreak) {
-			return { safe: false, reason: NEWLINE_REASON };
-		}
-		// Bash still expands these inside double quotes.
-		if (scan.doubled.some((d) => /\$\(/.test(d))) {
-			return { safe: false, reason: "Command substitution $(...) is not allowed" };
-		}
-		if (scan.doubled.some((d) => d.includes("`"))) {
-			return { safe: false, reason: "Command substitution via backticks is not allowed" };
-		}
-		let body = "";
-		if (scan.heredoc) {
-			// The marker is real (outside quotes). Its body must end with its own
-			// terminator line, and nothing may follow that line: that would be another command.
-			const lines = command.slice(scan.headEnd + 1).split("\n");
-			const word = scan.heredoc.word;
-			const end = scan.headEnd >= command.length ? -1 : lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
-			if (end < 0) return { safe: false, reason: HEREDOC_REASON };
-			if (lines.slice(end + 1).join("\n").trim() !== "") return { safe: false, reason: NEWLINE_REASON };
-			body = `\n${lines.slice(0, end + 1).join("\n")}`;
-		}
-		dollarQuote = scan.dollarQuote;
-		text = scan.outside + body;
 	}
+	if (d === "cmd" || INVOKES_CMD.test(command)) {
+		// cmd.exe expands % and ! inside double quotes too, and drops ^ before it parses, so scan both forms.
+		for (const text of [command, command.replace(/\^/g, "")]) {
+			if (/%[^%:\s"]+:[^%\r\n]*%/.test(text)) {
+				return {
+					safe: false,
+					reason:
+						"cmd.exe %VAR:~n,m% and %VAR:a=b% expansion builds text the check cannot read and is not allowed. Write the value out",
+				};
+			}
+			if (/![^!\s"]+!/.test(text)) {
+				return {
+					safe: false,
+					reason:
+						"cmd.exe delayed expansion !VAR! may be on and builds text the check cannot read, so it is not allowed. Write the value out",
+				};
+			}
+		}
+	}
+	return null;
+}
+
+function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellKind | "posix"): ShellSanitizeResult {
+	// Text inside quotes is data (#3879).
+	const scan = scanQuotes(command);
+	if (!scan.balanced) {
+		return {
+			safe: false,
+			reason:
+				"Unbalanced quotes in the command, so it cannot be checked. Close the quote or escape the apostrophe, or put the text in a file",
+		};
+	}
+	if (scan.ansiEscape) {
+		return {
+			safe: false,
+			reason: "A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
+		};
+	}
+	if (scan.commentAmbiguous) {
+		return {
+			safe: false,
+			reason: "A # followed by a quote mark or new line cannot be checked. Remove the comment, or put the steps in a script file",
+		};
+	}
+	if (scan.lineBreak) {
+		return { safe: false, reason: NEWLINE_REASON };
+	}
+	// Bash still expands these inside double quotes.
+	if (scan.doubled.some((q) => /\$\(/.test(q))) {
+		return { safe: false, reason: "Command substitution $(...) is not allowed" };
+	}
+	if (scan.doubled.some((q) => q.includes("`"))) {
+		return { safe: false, reason: "Command substitution via backticks is not allowed" };
+	}
+	let body = "";
+	if (scan.heredoc) {
+		// The marker is real (outside quotes). Its body must end with its own
+		// terminator line, and nothing may follow that line: that would be another command.
+		const lines = command.slice(scan.headEnd + 1).split("\n");
+		const word = scan.heredoc.word;
+		const end = scan.headEnd >= command.length ? -1 : lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
+		if (end < 0) return { safe: false, reason: HEREDOC_REASON };
+		if (lines.slice(end + 1).join("\n").trim() !== "") return { safe: false, reason: NEWLINE_REASON };
+		body = `\n${lines.slice(0, end + 1).join("\n")}`;
+	}
+	const text = scan.outside + body;
 
 	// Bash 4.4+ prompt-expands ${x@P}, which runs command substitution held in x (8SO hardening).
-	if (/@P\}/.test(text) || (platform !== "win32" && /@P\}/.test(command))) {
+	if (/@P\}/.test(text) || /@P\}/.test(command)) {
 		return { safe: false, reason: "The ${var@P} expansion is not allowed" };
 	}
 
-	// Block command substitution: $(...) and backticks
 	if (/\$\(/.test(text)) {
-		return {
-			safe: false,
-			reason: "Command substitution $(...) is not allowed",
-		};
+		return { safe: false, reason: "Command substitution $(...) is not allowed" };
 	}
 	if (/`/.test(text)) {
-		return {
-			safe: false,
-			reason: "Command substitution via backticks is not allowed",
-		};
+		return { safe: false, reason: "Command substitution via backticks is not allowed" };
 	}
 
-	// Block semicolon chaining: ; cmd. On POSIX `text` has quoted content removed (#3879,
-	// #3932), so only an unquoted `;` blocks. On win32 the whole line is checked.
+	// Only an unquoted `;` blocks (#3879, #3932).
 	if (/;/.test(text)) {
 		return {
 			safe: false,
@@ -294,17 +426,14 @@ export function sanitizeShellCommand(
 		};
 	}
 
-	// Bash $'...' and $"..." quote differently from plain quotes (#3932, 8SO). A plain $'...'
-	// span without a backslash is read as a span by the scan above, but main refuses any
-	// unquoted $' or $" outright, so keep that.
-	if (dollarQuote) {
+	// Bash $'...' and $"..." quote differently from plain quotes (#3932, 8SO): refuse any unquoted one.
+	if (scan.dollarQuote) {
 		return {
 			safe: false,
 			reason: "Bash $'...' and $\"...\" quoting is not allowed. Use plain quotes instead",
 		};
 	}
 
-	// Block && and || chaining
 	if (/&&/.test(text)) {
 		return {
 			safe: false,
@@ -318,13 +447,102 @@ export function sanitizeShellCommand(
 		};
 	}
 
-	// Block a single & separating commands anywhere in the line (background job
-	// on POSIX, chaining on cmd.exe), including a trailing background `&`.
-	if (hasUnquotedAmpersand(command, platform)) {
+	if (hasUnquotedAmpersand(command, platform, kind)) {
 		return {
 			safe: false,
 			reason:
 				"Command chaining or background execution with & is not allowed. Use separate run_command calls instead",
+		};
+	}
+
+	return { safe: true };
+}
+
+/** cmd.exe: a `;` anywhere counts, quotes do not hide it; only a `^` escape does. */
+function cmdHasSemicolon(command: string): boolean {
+	for (let i = 0; i < command.length; i++) {
+		if (command[i] === "^") i++;
+		else if (command[i] === ";") return true;
+	}
+	return false;
+}
+
+/** cmd.exe and PowerShell: the strict dialect walk over the whole line. */
+function sanitizeStrict(
+	command: string,
+	d: Dialect,
+	platform: NodeJS.Platform,
+	kind?: ShellKind | "posix",
+): ShellSanitizeResult {
+	// Block command substitution: $(...) and backticks
+	if (/\$\(/.test(command)) {
+		return {
+			safe: false,
+			reason: "Command substitution $(...) is not allowed",
+		};
+	}
+	if (/`/.test(command)) {
+		return {
+			safe: false,
+			reason: "Command substitution via backticks is not allowed",
+		};
+	}
+
+	// A CR or LF outside quotes starts a second command in every shell.
+	if (scanNewline(command, d)) {
+		return {
+			safe: false,
+			reason: "A line break starts a second command and is not allowed. Use separate run_command calls instead",
+		};
+	}
+
+	// Block semicolon chaining: ; cmd. A `;` inside quotes is data, not a
+	// separator (e.g. magick -annotate 'a;b'), so only an unquoted one blocks.
+	// cmd.exe keeps the strict whole-line rule: a `;` blocks, quoted or not, unless `^`-escaped.
+	const semi = d === "cmd" ? (cmdHasSemicolon(command) ? "semicolon" : null) : scanSemicolon(command, d);
+	if (semi === "dollar-quote") {
+		return {
+			safe: false,
+			reason: "Bash $'...' and $\"...\" quoting is not allowed. Use plain quotes instead",
+		};
+	}
+	if (semi) {
+		return {
+			safe: false,
+			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
+		};
+	}
+
+	// Block && and || chaining
+	if (/&&/.test(command)) {
+		return {
+			safe: false,
+			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
+		};
+	}
+	if (/\|\|/.test(command)) {
+		return {
+			safe: false,
+			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",
+		};
+	}
+
+	// Block a single & separating commands anywhere in the line (background job
+	// on POSIX, chaining on cmd.exe, call operator in PowerShell).
+	if (hasUnquotedAmpersand(command, platform, kind)) {
+		return {
+			safe: false,
+			reason:
+				"Command chaining or background execution with & is not allowed. Use separate run_command calls instead",
+		};
+	}
+
+	// PowerShell runs code inside (...), @(...), {...}, ${...} and Invoke-Expression.
+	if (d === "pwsh" && scanPwshConstructs(command)) {
+		return {
+			safe: false,
+			reason:
+				"PowerShell sub-expressions ( ), { }, ${ }, ::, --% and Invoke-Expression are not allowed. Use separate powershell calls with plain arguments",
 		};
 	}
 

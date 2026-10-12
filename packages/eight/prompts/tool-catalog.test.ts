@@ -16,14 +16,19 @@ import {
 	LOCAL_SERVER_CURL_SHORT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
+	environmentNote,
 } from "./system-prompt.js";
 
 /**
  * Size cap for the concise catalog the local TUI sends on every request.
  * Raising it is a deliberate decision (it costs every local turn), not a
- * fix for a failing test. Smallest value that fits today: 2156 (#3920).
+ * fix for a failing test. Smallest value that fits today: 2203 (#3920, with the one-line OS and shell note).
  */
-const CONCISE_CATALOG_MAX_BYTES = 2156;
+const POSIX_CAP = 2203;
+// The Windows environment line names the shell and is longer than the POSIX one; the budget
+// for everything else stays fixed, so a Windows host gets exactly the difference.
+const CONCISE_CATALOG_MAX_BYTES =
+	POSIX_CAP + Buffer.byteLength(environmentNote()) - Buffer.byteLength(environmentNote({ platform: "linux" }));
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {
@@ -130,7 +135,7 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 	it("the compact short form is under 300 chars, has no em dash, and keeps the core rules", () => {
 		expect(LOCAL_SERVER_CURL_SHORT.length).toBeLessThanOrEqual(300);
 		expect(LOCAL_SERVER_CURL_SHORT).not.toContain("\u2014");
-		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Location header"])
+		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Do not pass -L", "Location header"])
 			expect(LOCAL_SERVER_CURL_SHORT).toContain(rule);
 	});
 });

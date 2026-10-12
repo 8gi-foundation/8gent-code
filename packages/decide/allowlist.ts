@@ -43,6 +43,8 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { activeShellKind } from "../core/shell";
+import { type ActiveShellKind, posixRulesApply } from "../permissions/shell-tools";
 import { promptControlText } from "./guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "./rules";
 
@@ -51,6 +53,8 @@ export type AllowlistVerdict = "pass-without-model" | "no-opinion";
 export interface AllowlistOptions {
 	/** Also pass `bun test` (it runs the repo's test code). Default false. */
 	bunTest?: boolean;
+	/** The shell that will parse the line. Default: the resolved shell on this machine. */
+	shell?: ActiveShellKind;
 }
 
 export interface AllowlistResult {
@@ -285,6 +289,7 @@ function dollarInDoubleQuotes(s: string): boolean {
 export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}): AllowlistResult {
 	try {
 		if (!command.trim()) return none("empty command");
+		if (!posixRulesApply(command, opts.shell ?? activeShellKind())) return none("the shell does not parse this line the POSIX way");
 		if (promptControlText(command) !== null) return none("carries prompt-control text");
 		const rules = decideRules(command);
 		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);

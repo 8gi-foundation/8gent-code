@@ -29,7 +29,10 @@ describe("observeUnauthorized", () => {
 	test("writes under the test's temp $HOME, never the real ~/.8gent (#3240)", () => {
 		const realHome = homedir();
 		expect(OBSERVED_LOG.startsWith(`${realHome}${sep}`)).toBe(false);
-		expect(OBSERVED_LOG.startsWith(`${process.env.HOME}${sep}`)).toBe(true);
+		expect(
+			OBSERVED_LOG.startsWith(`${process.env.HOME}${sep}`),
+			`${OBSERVED_LOG} vs HOME=${process.env.HOME} EIGHT_HOME=${process.env.EIGHT_HOME}`,
+		).toBe(true);
 	});
 
 	test("records a group message so another process can read it", () => {

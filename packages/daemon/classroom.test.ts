@@ -9,9 +9,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDir } from "../../tests/temp-dirs";
 import { evaluatePolicy } from "../permissions/policy-engine";
 import {
 	CLASSROOM_AGENT_SCOPE,
@@ -86,7 +87,8 @@ afterAll(() => {
 	else process.env.HOME = savedEnv.HOME;
 	if (savedEnv.DATA === undefined) delete process.env.EIGHT_DATA_DIR;
 	else process.env.EIGHT_DATA_DIR = savedEnv.DATA;
-	rmSync(dir, { recursive: true, force: true });
+	// Windows keeps the pool's open files locked until the process ends (EBUSY); removeDir leaves that to the run-end sweep.
+	removeDir(dir);
 });
 
 function makePool() {

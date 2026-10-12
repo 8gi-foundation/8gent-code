@@ -145,6 +145,16 @@ export interface MusicSettings {
 	volume: number;
 }
 
+export interface ShellSettings {
+	/**
+	 * Windows only. Full path to the shell run_command uses (bash.exe, pwsh.exe,
+	 * cmd.exe). Empty = auto: Git Bash if installed, else PowerShell 7, else cmd.exe.
+	 */
+	path: string;
+	/** Windows only. Offer the model a separate `powershell` tool. Default false. */
+	powershellTool: boolean;
+}
+
 export interface Settings {
 	version: 1;
 	voice: VoiceSettings;
@@ -155,6 +165,7 @@ export interface Settings {
 	agents: AgentsSettings;
 	retry: RetrySettings;
 	music: MusicSettings;
+	shell: ShellSettings;
 }
 
 export type SettingsKey = keyof Settings;

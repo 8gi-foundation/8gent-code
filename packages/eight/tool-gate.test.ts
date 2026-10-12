@@ -8,7 +8,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
@@ -47,12 +47,16 @@ beforeAll(async () => {
 	repo = mkdtempSync(join(tmpdir(), "toolgate-repo-"));
 	mkdirSync(join(home, ".8gent", "memory"), { recursive: true });
 	// A PreToolUse hook that blocks every write_file call.
-	const script = join(home, "block.sh");
+	// Forward slashes: the hook runs through the resolved shell (Git Bash on Windows), where a backslash is an escape.
+	const script = join(home, "block.sh").replace(/\\/g, "/");
 	writeFileSync(script, `echo '{"block": true, "reason": "writes are frozen"}'\n`);
+	// A PreToolUse hook that records what it was sent, then blocks desktop_type (nothing is typed).
+	const capture = join(home, "capture.sh");
+	writeFileSync(capture, `cat > ${join(home, "desktop-hook.json")}\nsh ${script}\n`);
 	const hooks = join(home, "hooks.yaml");
 	writeFileSync(
 		hooks,
-		`- event: PreToolUse\n  matcher: write_file\n  command: sh ${script}\n- event: PreToolUse\n  matcher: read_file\n  command: sh ${script}\n`,
+		`- event: PreToolUse\n  matcher: write_file\n  command: sh ${script}\n- event: PreToolUse\n  matcher: read_file\n  command: sh ${script}\n- event: PreToolUse\n  matcher: desktop_type\n  command: sh ${capture}\n`,
 	);
 	ENV.EIGHT_HOOKS_YAML = hooks;
 	ENV.HOME = home;
@@ -185,6 +189,14 @@ describe("tool calls the harness makes itself go through the same gate", () => {
 			workingDirectory: repo,
 			baseUrl: `http://127.0.0.1:${server.port}`,
 		} as ConstructorParameters<typeof Agent>[0]);
+
+	test("a PreToolUse hook is sent the typed text's length, never the text (8SO, #4057)", async () => {
+		const out = await build().runToolForResume("desktop_type", { text: "hunter2 secret" });
+		expect(out).toContain("writes are frozen");
+		const sent = readFileSync(join(home, "desktop-hook.json"), "utf-8");
+		expect(sent).not.toContain("hunter2");
+		expect(JSON.parse(sent).args).toEqual({ textLength: 14 });
+	});
 
 	test("runToolForResume refuses what PreToolUse blocks", async () => {
 		const out = await build().runToolForResume("write_file", {

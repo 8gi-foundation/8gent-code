@@ -253,7 +253,7 @@ const state: ThemeState = {
 
 /** Read the themes folder into the registry. Never throws. */
 function scanUserThemes(): void {
-	const r = loadUserThemes(Object.keys(dark));
+	const r = loadUserThemes(Object.keys(dark), undefined, { dark, light } as unknown as Record<"dark" | "light", Record<string, string>>);
 	userThemes = new Map(r.themes.map((u) => [u.name, u]));
 	userThemeSkipped = r.skipped;
 }

@@ -15,13 +15,13 @@
  *     subset: unquoted words use plain characters only (no `$`, backtick, `\`,
  *     `~`, `*`, `?`, `&`, `;`, `|`, `<`, `>`, `(`, `{`, `#`, `!`, `[`, no
  *     leading `=`), single quotes hold anything printable but `'`, double
- *     quotes anything printable but `"`, `$`, backtick, `\` and `!`. No
+ *     quotes anything printable but `"`, `$`, backtick and `!`, with `\` only before a letter or digit (literal there, e.g. -w "%{http_code}\n"). No
  *     redirects, substitution or env assignments. decideRules fires
  *     nothing and there is no prompt-control text;
  *   - every option is on the allowlist below and written exactly (no `--x=y`
  *     form, no abbreviation, no `--`). Anything else, including -K/--config,
  *     --proxy/-x, --unix-socket, --resolve, --connect-to, --proto*, --next,
- *     --output-dir, -L, -O, --trace*, --stderr, -w with `@file` or `%output{}`, is
+ *     --output-dir, --location-trusted, -O, --trace*, --stderr, -w with `@file` or `%output{}`, is
  *     refused;
  *   - every URL is `http://` or `https://` plus 127.0.0.1, localhost or [::1],
  *     then an optional port (1 to 65535) and a path. No userinfo, no `{}` or
@@ -48,11 +48,14 @@
  * GREP_COLOR or GREP_COLORS is set in the environment (grep would read options from it). The filter reads only the pipe, so it
  * cannot reach a file, a host or a shell.
  *
- * Redirects (-L/--location) are refused. curl cannot be told "loopback only"
- * for redirects (--proto-redir limits the scheme, never the host), so a hop
- * could reach 169.254.169.254 or the LAN (SSRF) with whatever the request
- * carries. A curl with -L goes to the judge as before. To follow a 302, make a
- * second loopback request to the Location it returned; this lane allows that.
+ * Redirects (-L/--location) are refused for every URL (#3967, 8SO): curl
+ * cannot be told "loopback only" for redirects (--proto-redir limits the
+ * scheme, never the host), and even a dev server the person listed can
+ * redirect to 169.254.169.254 or the LAN (SSRF) with whatever the request
+ * carries. --location-trusted is refused too. A -L that otherwise passes this
+ * lane gets a deterministic refusal (the `refuse` text) instead of the judge,
+ * so the model is told the way forward: drop -L, read the Location header and
+ * make a second loopback request, which this lane allows.
  *
  * Known limits, on purpose: only POSIX single or double quoting; no `-d` with
  * `&` unquoted; multiple files in -F `@a,b` are refused. TOCTOU (out of scope,
@@ -62,17 +65,21 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import * as path from "node:path";
 import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
-import { protectedRel } from "./s1-mv-in-project";
+import { protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
-import { SECRET, WRITE_BAD_NAME, canon, symlinkBelow } from "./s1-run-in-project";
+import { SECRET, WRITE_BAD_NAME, canon, realpathSync, symlinkBelow } from "./s1-run-in-project";
 
-export type CurlLoopback = { ok: true; reason: string } | { ok: false };
+export type CurlLoopback = { ok: true; reason: string } | { ok: false; refuse?: string };
 const NO: CurlLoopback = { ok: false };
+
+/** Told to the model when a loopback curl uses -L (#3967): the way forward instead of the judge. */
+export const CURL_L_REFUSAL =
+	"Refused: curl -L follows redirects, which could leave this machine. Drop -L, read the Location header (-D .tmp/headers.txt), and make a second curl to that address.";
 
 const MAX_WORDS = 60;
 const MAX_URLS = 6;
@@ -153,7 +160,10 @@ function splitWords(text: string): Word[] | null {
 			const end = text.indexOf(c, i + 1);
 			if (end === -1) return null;
 			const body = text.slice(i + 1, end);
-			if (c === '"' && /[$`\\!]/.test(body)) return null;
+			// Inside double quotes a backslash before a letter or digit is literal in POSIX sh, bash and zsh
+			// (curl's own -w "...\n" escapes, pilot 12 Oct). Any other backslash, including a trailing one
+			// that would escape the closing quote, is refused.
+			if (c === '"' && (/[$`!]/.test(body) || /\\(?![A-Za-z0-9])/.test(body))) return null;
 			cur += body;
 			has = true;
 			i = end + 1;
@@ -215,6 +225,7 @@ function stdinFilterOk(text: string): boolean {
 interface St {
 	root: string;
 	urls: string[];
+	location: boolean;
 }
 
 /** Check one file the command touches. `-` is stdout for writes only. */
@@ -229,7 +240,7 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 	if (!inside(abs, st.root)) return false;
 	const rel = path.relative(st.root, abs);
 	if (rel === "" || SECRET.test(rel) || protectedRel(rel)) return false;
-	const segs = rel.split("/");
+	const segs = relSegments(rel);
 	if (segs.some((s) => s.startsWith(".") && s !== ".tmp")) return false;
 	if (write) {
 		// Outputs only under the workspace's .tmp/ directory.
@@ -336,6 +347,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 		const st: St = {
 			root: canon(cwd),
 			urls: [],
+			location: false,
 		};
 		let i = 1;
 		const qFirst = words[1] === "-q" || words[1] === "--disable";
@@ -346,6 +358,10 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 			const w = words[i];
 			if (w === "-" || w === "--") return NO;
 			if (w.startsWith("--")) {
+				if (w === "--location") {
+					st.location = true;
+					continue;
+				}
 				if (BOOL_LONG.has(w)) continue;
 				const key = VAL_LONG.get(w);
 				if (key === undefined || i + 1 >= words.length) return NO;
@@ -357,6 +373,10 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 				for (let j = 1; j < w.length; j++) {
 					const c = w[j];
 					if (BOOL_SHORT.has(c)) continue;
+					if (c === "L") {
+						st.location = true;
+						continue;
+					}
 					const key = VAL_SHORT.get(c);
 					if (key === undefined) return NO;
 					const rest = w.slice(j + 1);
@@ -373,6 +393,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 			st.urls.push(w);
 		}
 		if (st.urls.length === 0 || st.urls.length > MAX_URLS || !st.urls.every(urlOk)) return NO;
+		if (st.location) return { ok: false, refuse: CURL_L_REFUSAL };
 		return {
 			ok: true,
 			reason: `curl to a loopback server (${st.urls.length} URL${st.urls.length === 1 ? "" : "s"}) touching only files inside the workspace`,

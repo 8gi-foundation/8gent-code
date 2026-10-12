@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
 export const GITHUB_REPO = "8gi-foundation/8gent-code";
@@ -345,14 +346,23 @@ export function probeVersionWithTimeout(
 	return new Promise((resolve) => {
 		let out = "";
 		let done = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		const finish = (v: string) => {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
 			resolve(v);
 		};
-		const p = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
-		const timer = setTimeout(() => {
+		let p: ReturnType<typeof spawn>;
+		try {
+			p = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+		} catch {
+			// Bun on Windows throws (EFTYPE, EACCES) for a file it cannot execute instead of emitting
+			// "error"; an unrunnable binary reads as "" either way.
+			finish("");
+			return;
+		}
+		timer = setTimeout(() => {
 			p.kill("SIGKILL");
 			finish("");
 		}, timeoutMs);
@@ -478,7 +488,7 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 	if (ch === "source") {
 		return {
 			status: "source",
-			message: "This 8gent runs from a source checkout. Update it with: git pull && bun install",
+			message: "This 8gent runs from a source checkout. Update it with: 8gent update",
 		};
 	}
 
@@ -552,8 +562,8 @@ export function bundledChangelogPath(fromDir: string): string | null {
 	if (typeof embedded === "string" && existsSync(embedded)) return embedded;
 	let dir = fromDir.replace(/^file:\/\//, "");
 	for (let i = 0; i < 6; i++) {
-		const candidate = `${dir}/CHANGELOG.md`;
-		if (existsSync(candidate) && existsSync(`${dir}/package.json`)) return candidate;
+		const candidate = join(dir, "CHANGELOG.md");
+		if (existsSync(candidate) && existsSync(join(dir, "package.json"))) return candidate;
 		const up = dir.replace(/[\\/][^\\/]*$/, "");
 		if (!up || up === dir) break;
 		dir = up;

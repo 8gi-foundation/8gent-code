@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
+import { loggableToolArgs } from "../computer/desktop-approval";
 import { jsonSchema, tool as sdkTool } from "ai";
 import { agentTools } from "../ai/tools";
 import {
@@ -106,6 +107,7 @@ import {
 	LOCAL_SERVER_CURL_SHORT,
 	SLIDES_TO_VIDEO_NOTE,
 	buildToolCatalogSegment,
+	environmentNote,
 } from "./prompts/system-prompt";
 import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
 import { SessionStore } from "./session-store";
@@ -194,6 +196,7 @@ import {
 } from "../ai";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { isShellToolName } from "../permissions/shell-tools";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
@@ -214,9 +217,11 @@ export const MAX_STEER_BYTES = 16 * 1024;
  * runCommand). Every other refusal still counts as a call, as before #3409.
  */
 export function refusedBeforeRun(toolName: string, args: Record<string, unknown>): boolean {
-	if (toolName !== "run_command") return false;
+	if (!isShellToolName(toolName)) return false;
 	const command = args.command;
-	return typeof command === "string" && !sanitizeShellCommand(command).safe;
+	if (typeof command !== "string") return false;
+	const kind = toolName === "powershell" ? "powershell" : undefined;
+	return !sanitizeShellCommand(command, process.platform, kind).safe;
 }
 
 /**
@@ -226,6 +231,7 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
 const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE, LOCAL_SERVER_CURL_SHORT].join("\n");
+const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote()}`;
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -577,8 +583,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// not offer (desktop_*, lsp_*, gh_*). No person shares personal facts in a
 		// one-shot run, so the remember nudge goes too.
 		const compactLocalPrompt = config.headless
-			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
-			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}\n${LOCAL_SERVER_CURL_SHORT}`;
+			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${headlessToolNotes()}`
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, cwd: process.cwd(), omit: localCatalogOmissions(config.role, this.agentDepth) })}\n${LOCAL_SERVER_CURL_SHORT}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -904,7 +910,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (modeRefusal) return modeRefusal;
 		const preResult = await this.hookManager.fire("PreToolUse", {
 			tool: toolName,
-			args,
+			// Hooks never see typed desktop text (8SO, #4057).
+			args: loggableToolArgs(toolName, args),
 			sessionId: this.sessionId,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
 		});
@@ -1056,13 +1063,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
 				}
 
-				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
-				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
+				// Everything below that records the call sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(toolName, args);
+				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args: loggedArgs, stepNumber: step });
 				if (!refusal) this.sessionWriter.writeToolCall(
 					{
 						toolCallId,
 						name: toolName,
-						arguments: args,
+						arguments: loggedArgs,
 						success: true,
 						durationMs: 0,
 						startedAt: new Date(startedAt).toISOString(),
@@ -1133,7 +1142,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName,
 					toolCallId,
-					args,
+					args: loggedArgs,
 					success,
 					durationMs,
 					stepNumber: step,
@@ -1862,6 +1871,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_search",
 			"web_fetch",
 			"speak",
+			"render_video_deck",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",
@@ -1926,6 +1936,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"desktop_hover",
 			"desktop_windows",
 			"desktop_clipboard",
+			// Grounded, gated, verified act through the local grounder.
+			"desktop_act",
 		];
 		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
 		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
@@ -2071,10 +2083,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			args: Record<string, unknown>;
 			stepNumber?: number;
 		}) => {
+			// Everything that records the call sees typed desktop text as its length (#4057).
+			const loggedArgs = loggableToolArgs(event.toolName, event.args);
 			await this.hookManager.executeHooks("beforeTool", {
 				sessionId: this.sessionId,
 				tool: event.toolName,
-				toolInput: event.args,
+				toolInput: loggedArgs,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
 
@@ -2107,12 +2121,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 			}
 
-			console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
+			console.log(`  -> ${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
 
 			this.events.onToolStart?.({
 				toolName: event.toolName,
 				toolCallId: event.toolCallId,
-				args: event.args,
+				args: loggedArgs,
 				stepNumber: event.stepNumber,
 			});
 
@@ -2120,7 +2134,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				{
 					toolCallId: event.toolCallId,
 					name: event.toolName,
-					arguments: event.args,
+					arguments: loggedArgs,
 					success: true,
 					durationMs: 0,
 					startedAt: new Date().toISOString(),
@@ -2148,6 +2162,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			permission: this.config.permission,
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
+			allowedPaths: this.config.allowedPaths,
 			tools: effectiveTools,
 			// Steering (D1): delivered after the running tool calls.
 			steer: () => this.drainSteers(),
@@ -2175,6 +2190,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			onToolCallFinish: async (event) => {
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+				// The in-memory ledger and loop checks keep the real args; everything
+				// that records or hands the call on sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(event.toolName, event.args as Record<string, unknown>);
 
 				// Honesty ledger (issue #2747): record the REAL outcome. The executor
 				// returns error STRINGS for most failures, so a "successful" event
@@ -2247,7 +2265,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName: event.toolName,
 					toolCallId: event.toolCallId,
-					args: event.args,
+					args: loggedArgs,
 					success: event.success,
 					durationMs: event.durationMs,
 					stepNumber: event.stepNumber,
@@ -2262,7 +2280,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// is opted in; scrubbing happens at finalize, before anything is written.
 				this.kernel.recordToolStep({
 					tool: event.toolName,
-					argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
+					argsSummary: JSON.stringify(loggedArgs ?? {}).slice(0, 300),
 					ok: event.success,
 					durationMs: event.durationMs,
 				});
@@ -2288,7 +2306,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Update proactive planner context
 				this.planner.updatePredictionContext({
-					recentCommands: [`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`],
+					recentCommands: [`${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 100)})`],
 					...(event.toolName === "write_file" || event.toolName === "edit_file"
 						? { modifiedFiles: [String(event.args.path)] }
 						: {}),
@@ -2339,7 +2357,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				await this.hookManager.executeHooks("afterTool", {
 					sessionId: this.sessionId,
 					tool: event.toolName,
-					toolInput: event.args,
+					toolInput: loggedArgs,
 					toolOutput: resultStr,
 					duration: event.durationMs,
 					workingDirectory: this.config.workingDirectory || process.cwd(),
@@ -2350,7 +2368,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.fire("PostToolUse", {
 						workingDirectory: this.config.workingDirectory || process.cwd(),
 						tool: event.toolName,
-						args: event.args,
+						args: loggedArgs,
 						result: resultStr.slice(0, 2000),
 						success: event.success,
 						durationMs: event.durationMs,

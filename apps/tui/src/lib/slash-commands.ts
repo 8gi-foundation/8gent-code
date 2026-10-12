@@ -12,6 +12,7 @@ export type SlashCommand =
 	| "provider"
 	| "voice"
 	| "theme"
+	| "reload"
 	| "infinite"
 	| "onboarding"
 	| "preferences"
@@ -31,6 +32,7 @@ export type SlashCommand =
 	| "history"
 	| "continue"
 	| "compact"
+	| "update"
 	| "chat"
 	| "agent"
 	| "github"
@@ -124,8 +126,14 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "theme",
 		aliases: ["t"],
-		description: "Pick a TUI theme from the design systems, or set light / dark / auto",
+		description: "Pick a TUI theme (built in or your own), or set light / dark / auto",
 		usage: "/theme [name|default|status|light|dark|auto]",
+	},
+	{
+		name: "reload",
+		aliases: [],
+		description: "Re-read your theme files from ~/.8gent/themes",
+		usage: "/reload",
 	},
 	{
 		name: "infinite",
@@ -330,6 +338,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["cont", "last"],
 		description: "Continue most recent session automatically",
 		usage: "/continue",
+	},
+	{
+		name: "update",
+		aliases: ["upgrade"],
+		description: "Update 8gent, then reopen this session on the new version",
+		usage: "/update [--force]",
 	},
 	{
 		name: "compact",
