@@ -239,11 +239,6 @@ function runYamlHookCommand(
 				});
 			});
 
-			// A hook that decides without reading stdin (`echo '{"block": true}'`) can exit before the
-			// payload is written. EPIPE then surfaces as an 'error' event on the pipe; with no listener it
-			// is an uncaught exception that kills whichever test or turn is running. The exit code and
-			// stdout are the hook's answer, so a write the hook did not want is not a failure.
-			proc.stdin.on("error", () => {});
 			// Send payload as JSON to stdin
 			proc.stdin.write(JSON.stringify(payload));
 			proc.stdin.end();
