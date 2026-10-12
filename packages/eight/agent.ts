@@ -1804,9 +1804,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
+		// A headless one-shot run (`8gent run`) has no human to answer, so it acts on
+		// the request as written instead of asking.
 		if (
 			needsClarification(textForAgent) &&
 			!imageBase64 &&
+			this.config.headless !== true &&
 			!isNoToolScope(this.config.agentScope)
 		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
