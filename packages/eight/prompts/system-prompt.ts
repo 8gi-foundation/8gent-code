@@ -342,11 +342,15 @@ export const LOCAL_SERVER_CURL_SHORT =
 /**
  * The test login for a local server (#4072, run 2026-10-12_155723): read_file hides a
  * "Password: ..." line as [REDACTED:secret_assignment], the model rebuilt the value from an
- * `od -c` dump, typed E as e, and both sign-ins were 401. Sits next to the curl rules in the
- * full prompt (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ * `od -c` dump, typed E as e, and both sign-ins were 401. The recipe keeps the value out of
+ * the transcript (8SO on #4091: a stripped label defeats the redactor, which matches on the
+ * label): sed's `w` flag copies the line, relabelled as a form field, into .tmp/login and
+ * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
+ * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
+ * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
  */
 export const LOCAL_LOGIN_NOTE =
-	"A test login in a project file may show as [REDACTED:...] in read_file: print that one line with run_command (sed -n 's/^Password: *//p' FILE) and send the value exactly as printed, case included; never retype it from a byte dump.";
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
 
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: use `render_video_deck` (JSON spec), not ffmpeg. By hand, segment count equals slide count; never loop over a file lacking a trailing newline.**";
