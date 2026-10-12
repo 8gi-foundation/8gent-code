@@ -120,6 +120,23 @@ export interface AgentsSettings {
 	names: AgentNames;
 }
 
+export interface RetrySettings {
+	/**
+	 * Retries per model request after a failure. null = built-in default (the
+	 * AI SDK's own, or 8 attempts for OpenRouter ":free" models). Valid: whole
+	 * number 0-20; anything else falls back to the default.
+	 */
+	maxRetries: number | null;
+	/** Longest wait between two retries after a rate limit, in ms. Valid 1000-600000. Default 30000. */
+	maxDelayMs: number;
+	/**
+	 * A streamed model reply that sends no bytes for this long is torn down, in
+	 * ms. null = built-in default (5 minutes; EIGHT_STREAM_IDLE_MS still wins).
+	 * Valid 1000-86400000.
+	 */
+	httpIdleTimeoutMs: number | null;
+}
+
 export interface MusicSettings {
 	/**
 	 * The DJ's volume (0-150, mpv's scale), remembered across tracks and
@@ -136,6 +153,7 @@ export interface Settings {
 	providers: ProvidersSettings;
 	ui: UISettings;
 	agents: AgentsSettings;
+	retry: RetrySettings;
 	music: MusicSettings;
 }
 

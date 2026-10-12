@@ -152,8 +152,8 @@ import {
 	WRITE_CONTENT_TOOLS,
 	applyAt,
 	editRefusal,
-	locateEdit,
 	logEditRefusal,
+	resolveEdit,
 	blockedToolMessage,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
@@ -621,6 +621,9 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 	return { ...args, actions };
 }
 
+/** Policy action class for every one-file extension tool call (G1). */
+export const EXTENSION_POLICY_ACTION = "extension_call" as const;
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -692,6 +695,11 @@ export class ToolExecutor {
 			permission?: PermissionModeHolder;
 			visionCapable?: () => Promise<boolean>;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
+			/**
+			 * A person is at the keyboard (G1 extension_call policy). Default: not
+			 * unattended and both stdin and stdout are terminals.
+			 */
+			attended?: boolean;
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
@@ -702,6 +710,9 @@ export class ToolExecutor {
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
+		this.attended =
+			options.attended ??
+			(!this.unattended && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY));
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
 		this.openOnWrite = options.openOnWrite ?? true;
 		this.commitGate = new CommitGate(workingDirectory, (command, timeoutSec) =>
@@ -1184,6 +1195,23 @@ export class ToolExecutor {
 							out: { type: "string", description: "Output .wav path inside the working directory" },
 						},
 						required: ["text"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "screen_locate",
+					description:
+						'[FILE] Point to click for a thing in a screenshot, named in words.',
+					parameters: {
+						type: "object",
+						properties: {
+							image: { type: "string", description: "Screenshot path" },
+							target: { type: "string", description: "e.g. the Sign in button" },
+							viewport: { type: "string", description: 'Optional "WxH" for cssX/cssY' },
+						},
+						required: ["image", "target"],
 					},
 				},
 			},
@@ -1728,14 +1756,35 @@ export class ToolExecutor {
 
 	private rateLimiter = new RateLimiter();
 
+	/** Is a person at the keyboard? Decides the extension_call default policy (G1). */
+	private readonly attended: boolean;
+
+	/** One-file extension tools (G1), set by the agent that owns this executor. */
+	private extensionRunner: {
+		has(name: string): boolean;
+		run(name: string, args: Record<string, unknown>): Promise<string>;
+	} | null = null;
+
+	/**
+	 * Route extension tools through this executor (G1), so they pass the same
+	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
+	 * tools, and their output is scrubbed, filtered and chipped the same way.
+	 */
+	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
+		this.extensionRunner = runner;
+	}
+
 	/**
 	 * Map tool names to policy action types for ToolG8 gate evaluation.
+	 * Extension tools (G1) are not listed: their names are dynamic, so
+	 * executeRaw maps any tool the extension runner has to EXTENSION_POLICY_ACTION.
 	 */
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
 		edit_file: "write_file",
@@ -1878,18 +1927,25 @@ export class ToolExecutor {
 		const writeTarget = (
 			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
 		) as string | undefined;
+		// A one-file extension tool (G1) has a dynamic name, so it maps by
+		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
+		const isExtension = this.extensionRunner?.has(toolName) === true;
 		const mappedAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
-					: undefined);
+					: isExtension
+						? (EXTENSION_POLICY_ACTION as PolicyActionType)
+						: undefined);
 		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
+				// Unattended sessions ask before an extension tool runs (default policy).
+				...(isExtension ? { tool: toolName, attended: this.attended } : {}),
 				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
@@ -1930,6 +1986,15 @@ export class ToolExecutor {
 					gateResult.alternative,
 				);
 			}
+		}
+
+		// One-file extension tools (G1): after every gate above, never in a Table
+		// session. execute() then scrubs, filters and chips the result.
+		if (this.extensionRunner?.has(toolName)) {
+			if (this.agentId === "__table__") {
+				return `Error: extension tool "${toolName}" is not available in this session; nothing was run.`;
+			}
+			return this.extensionRunner.run(toolName, args);
 		}
 
 		// Delegate windowed-session orchestration tools to their own module so the
@@ -2106,6 +2171,11 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "screen_locate": {
+				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
+				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
+				return screenLocate({ image, target: String(args.target ?? ""), viewport: args.viewport as string | undefined });
+			}
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
 
@@ -2738,15 +2808,13 @@ export class ToolExecutor {
 		// gate checked (String.replace would expand `$&` etc. in newText).
 		// A duplicate oldText is refused, never silently applied to the first
 		// copy (#3898); the refusal is logged so it can be counted.
-		const located = locateEdit(content, oldText, startLine);
-		const refusal = editRefusal(located, filePath);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
 		if (refusal) {
-			logEditRefusal(located, filePath, oldText.length);
+			logEditRefusal(resolved, filePath, oldText.length);
 			return refusal;
 		}
-		const newContent =
-			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
-		if (newContent === null) {
+		if (resolved.kind !== "ok") {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the
 			// bytes written must be the bytes the policy gate checked.
@@ -2755,11 +2823,15 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
+		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, newContent);
 		recordEdit();
 
+		if (resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
 
@@ -2810,7 +2882,7 @@ export class ToolExecutor {
 			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
-		const backstop = preSpawnRefusal(command);
+		const backstop = preSpawnRefusal(command, this.workingDirectory);
 		if (backstop) return backstop;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(command);

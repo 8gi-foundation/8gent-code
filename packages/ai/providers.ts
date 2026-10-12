@@ -8,6 +8,8 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { modelFetchAsFetch } from "./model-fetch";
+import { loadSettings } from "../settings/store";
+import { resolveRetrySettings } from "../settings/retry";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 
@@ -149,10 +151,17 @@ function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
  * Get retry config for free models.
  * Free models allow 1000 calls/day but have per-minute rate limits.
  * Use exponential backoff: 2s, 4s, 8s, 16s, 32s across 8 attempts.
+ *
+ * `settings.retry.maxRetries` (global file, or a project file through the
+ * allowlist) overrides the count; an invalid value falls back to 3, or 8 for
+ * free models (C4).
  */
-export function getRetryConfig(config: ProviderConfig): { maxRetries: number } {
+export function getRetryConfig(
+	config: ProviderConfig,
+	retry: Parameters<typeof resolveRetrySettings>[0] = loadSettings().retry,
+): { maxRetries: number } {
 	const isFreeModel = typeof config.model === "string" && config.model.includes(":free");
-	return { maxRetries: isFreeModel ? 8 : 3 };
+	return { maxRetries: resolveRetrySettings(retry).maxRetries ?? (isFreeModel ? 8 : 3) };
 }
 
 function getApiKeyFromEnv(name: ProviderName): string | undefined {

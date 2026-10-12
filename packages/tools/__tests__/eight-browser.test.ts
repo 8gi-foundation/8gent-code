@@ -794,6 +794,8 @@ describeNotWin("wsTransport with a named profile", () => {
 	// curl alternative, never by connecting to the default browser. A port file with no token file is
 	// still "not running": nothing is launched over a half-published profile.
 	test("fails closed, without connecting, when the profile is not running and cannot be started", async () => {
+		// Other files in one bun process reset the module-level spawn seam; pin it here (the full CI run saw it unset).
+		_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
 		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
 		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
 		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(

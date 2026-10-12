@@ -12,10 +12,17 @@
  */
 
 import { touchesBrowserSecrets } from "../tools/eight-browser";
-import { commandMutatesSessionRecords, commandTouchesAuditFiles } from "./path-guard";
+import {
+	commandMutatesSessionRecords,
+	commandTouchesAuditFiles,
+	commandWritesStartupCode,
+} from "./path-guard";
 
-/** The refusal for `command`, or null when none of the backstops applies. */
-export function preSpawnRefusal(command: string): string | null {
+/**
+ * The refusal for `command`, or null when none of the backstops applies. `cwd` is the
+ * directory the command runs in, so relative paths and `cd` resolve as the shell will.
+ */
+export function preSpawnRefusal(command: string, cwd: string = process.cwd()): string | null {
 	// #3595: the file that lists post_message recipients is not for the shell. A minimum,
 	// not a parser: the allowlist is also frozen at process start.
 	if (
@@ -32,5 +39,8 @@ export function preSpawnRefusal(command: string): string | null {
 	// #3622 (8SO HIGH-2): the 8gent Browser control tokens and profile dirs.
 	if (touchesBrowserSecrets(command))
 		return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
+	// #4009 (8SO F2): hooks, extensions, prompts and packages run at start; read-only to the shell.
+	if (commandWritesStartupCode(command, cwd))
+		return `[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages, which agent tools may not do: ${command}`;
 	return null;
 }

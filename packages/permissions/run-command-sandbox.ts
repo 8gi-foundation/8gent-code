@@ -487,3 +487,22 @@ export function wrapRunCommand(command: string): string {
 	const bwrap = findBwrap() as string;
 	return [bwrap, ...buildBwrapArgs(), "/bin/sh", "-c", command].map(shellQuote).join(" ");
 }
+
+/**
+ * The argv form of wrapRunCommand, for tools that spawn a binary with an args
+ * array and no shell (the native git and gh tools, #3998). Returns the full argv
+ * to spawn: sandbox-exec -p <profile> or bwrap <binds> in front of `bin args`,
+ * never a shell. Git runs repository config (fsmonitor, hooks, aliases,
+ * sshCommand), so the same kernel boundary applies. Same rules as
+ * wrapRunCommand when no boundary applies: report, or throw under require.
+ */
+export function wrapRunCommandArgv(bin: string, args: readonly string[]): string[] {
+	const status = runCommandSandboxStatus();
+	if (!status.applied) {
+		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
+		reportUnsandboxed(status, [bin, ...args].join(" "));
+		return [bin, ...args];
+	}
+	if (status.mechanism === "seatbelt") return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
+	return [findBwrap() as string, ...buildBwrapArgs(), bin, ...args];
+}

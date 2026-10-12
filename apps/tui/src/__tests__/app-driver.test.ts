@@ -27,6 +27,18 @@ test("harness env drops every *_API_KEY and points the decider at the fake", () 
 	expect(over.EIGHT_DECIDE_OLLAMA_HOST).toBe("http://127.0.0.1:8");
 });
 
+test("harness env gives each harness its own home and data dir, whatever the parent pinned", () => {
+	const env = harnessEnv(
+		"http://127.0.0.1:9",
+		"/tmp/h",
+		{},
+		{ HOME: "/shared", EIGHT_HOME: "/shared", EIGHT_DATA_DIR: "/shared/.8gent" },
+	);
+	expect(env.HOME).toBe("/tmp/h");
+	expect(env.EIGHT_HOME).toBe("/tmp/h");
+	expect(env.EIGHT_DATA_DIR).toBe(path.join("/tmp/h", ".8gent"));
+});
+
 test("a harness that hangs is killed at the deadline and reported", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-hang-"));
 	const hang = path.join(dir, "hang.ts");

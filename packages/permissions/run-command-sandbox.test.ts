@@ -36,6 +36,7 @@ import {
 	sandboxFooterReason,
 	snapshotSecurityEnv,
 	wrapRunCommand,
+	wrapRunCommandArgv,
 } from "./run-command-sandbox";
 import { emptyBunfig } from "../core/bun-flags";
 import { BackgroundTaskManager } from "../tools/background";
@@ -325,6 +326,58 @@ describe("wrapping", () => {
 				expect(runCommandSandboxRefusal()).toContain("EIGHT_SEATBELT=require");
 				expect(() => wrapRunCommand("echo hi")).toThrow(RunCommandSandboxRequired);
 				expect(() => new BackgroundTaskManager(home).startTask("echo hi")).toThrow(RunCommandSandboxRequired);
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("argv form: no shell, wrapped exactly when a boundary applies (#3998 git/gh tools)", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-argv-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: undefined, EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
+				const s = runCommandSandboxStatus();
+				const argv = wrapRunCommandArgv("git", ["status", "x; y"]);
+				expect(argv.slice(-3)).toEqual(["git", "status", "x; y"]);
+				expect(argv).not.toContain("/bin/sh");
+				expect(argv).not.toContain("-c");
+				if (!s.applied) expect(argv).toEqual(["git", "status", "x; y"]);
+				else if (s.mechanism === "seatbelt") {
+					expect(argv.slice(0, 2)).toEqual(["/usr/bin/sandbox-exec", "-p"]);
+					expect(argv[2]).toBe(buildRunCommandProfile());
+				} else expect(path.basename(argv[0] as string)).toBe("bwrap");
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("argv form: an unwrapped run is reported like the shell form", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-argv-audit-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
+				const seen: string[] = [];
+				const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
+				expect(wrapRunCommandArgv("git", ["status"])).toEqual(["git", "status"]);
+				off();
+				expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
+				const line = fs.readFileSync(path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"), "utf8");
+				expect(JSON.parse(line.trim())).toMatchObject({ event: "run_command_unsandboxed", command: "git status" });
+			});
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("argv form: EIGHT_SEATBELT=require refuses to run unwrapped", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-argv-req-")));
+		try {
+			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "require" }, () => {
+				if (runCommandSandboxStatus().applied) {
+					expect(wrapRunCommandArgv("git", ["status"]).slice(-2)).toEqual(["git", "status"]);
+					return;
+				}
+				expect(() => wrapRunCommandArgv("git", ["status"])).toThrow(RunCommandSandboxRequired);
 			});
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
