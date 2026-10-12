@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
  * 8gent Code - Main CLI Entry Point
  *
@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
+import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.18.0";
 
@@ -68,7 +69,9 @@ function repoRoot(): string | null {
 // same install: the compiled binary alone, or the runtime plus this module
 // (bin/8gent.ts from a checkout, dist/cli.js from npm).
 function daemonProgram(): string[] {
-	const self = MODULE_IS_EMBEDDED ? [] : [fileURLToPath(import.meta.url)];
+	// The service starts in $HOME: Bun must not read a bunfig.toml or .env there (#4013).
+	// A compiled binary is built with config autoload off (scripts/build-binaries.ts).
+	const self = MODULE_IS_EMBEDDED ? [] : [...safeBunFlags(), fileURLToPath(import.meta.url)];
 	return [process.execPath, ...self, "daemon", "run"];
 }
 
@@ -100,7 +103,8 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
-  update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
+  update [--check]            Update 8gent through the channel it was installed from (binary release
+                              or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
@@ -109,6 +113,9 @@ COMMANDS:
   install <preset>            Interactively install a /spawn preset CLI (claude, codex,
                               hermes, openclaw, pi, 8gent). Runs the install recipe with
                               full stdio so you can answer prompts + complete OAuth.
+  install npm:<name>@<ver>    Install an npm package into ~/.8gent/packages, pinned by the
+                              registry integrity. No scripts run, no dependencies installed.
+  packages [list|remove|verify]  Installed packages: list them, remove one, re-check one
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -190,10 +197,14 @@ OPTIONS:
   --cwd=<dir>    Override working directory
   --fast         Start in fast mode (use fastest available model)
   --resume       Resume last session (or --resume=<name> for specific)
-  --continue <id>  Resume a specific session by ID or name
+  --continue [id] Resume this folder's latest session (or the one named by id)
+  -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
+  --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
+  --tools a,b    With -p: allow only these tools
+  --no-session   With -p: do not save the run
+  --session-dir <dir>  With -p: read and write sessions there
   --infinite     Enable infinite mode (autonomous until done)
-  --pet          Also spawn Lil Eight dock companion (auto with tui)
-  --no-pet       Disable dock pet auto-spawn
+  --pet          Also start the Lil Eight dock companion (off by default)
   --rpc          Start in JSON-RPC mode (headless, stdin/stdout)
 
 EXAMPLES:
@@ -297,8 +308,17 @@ async function main() {
 
 	let args = process.argv.slice(2);
 
+	// -p / --print / --mode json|text: one prompt, no TUI (stdin is prepended when piped).
+	// --mode rpc is the same server as --rpc.
+	const { headlessRoute, continueTarget } = await import("../packages/eight/run.ts");
+	const headless = headlessRoute(args);
+	if (headless === "run") {
+		const { runRunCommand } = await import("../packages/eight/run.ts");
+		process.exit(await runRunCommand(args));
+	}
+
 	// --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
-	if (args.includes("--rpc")) {
+	if (args.includes("--rpc") || headless === "rpc") {
 		const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
 		await startRPCServer();
 		return;
@@ -389,7 +409,7 @@ async function main() {
 	if (args.includes("--pet") || args.includes("-pet")) {
 		const filtered = args.filter((a) => a !== "--pet" && a !== "-pet");
 		if (filtered.length === 0) {
-			await petCommand(["start"]);
+			await tuiCommand(["--pet"]);
 			return;
 		}
 		// Otherwise it's a flag on another command - handled by tuiCommand
@@ -413,12 +433,24 @@ async function main() {
 		}
 	}
 
-	// --continue <id> = resume specific session
-	const continueIdx = args.indexOf("--continue");
-	if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
-		const sessionId = args[continueIdx + 1];
-		args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
-		args.unshift("tui", `--resume=${sessionId}`);
+	// --continue = the latest session of this folder; --continue <id> = that session.
+	const cont = continueTarget(args);
+	if (cont) {
+		let sessionId = cont.id;
+		if (!sessionId) {
+			const { defaultRunSessionStore } = await import("../packages/eight/run-session.ts");
+			const latest = defaultRunSessionStore().latestForCwd(process.cwd());
+			if (latest) {
+				console.log(
+					`Continuing session: ${latest.name || latest.id} (${latest.model ?? "unknown"}, ${latest.messageCount} msgs)`,
+				);
+				sessionId = latest.id;
+			} else {
+				console.log("No earlier session in this folder. Starting fresh.");
+			}
+		}
+		args = cont.rest;
+		args.unshift("tui", ...(sessionId ? [`--resume=${sessionId}`] : []));
 	}
 
 	// Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
@@ -560,7 +592,7 @@ async function main() {
 
 		case "update":
 		case "upgrade":
-			await updateCommand();
+			await updateCommand(restArgs);
 			break;
 
 		case "permissions":
@@ -577,6 +609,12 @@ async function main() {
 			await installCommand(restArgs);
 			break;
 
+		case "packages": {
+			const { runPackagesCommand } = await import("../packages/eight/cli-maintenance.ts");
+			process.exitCode = runPackagesCommand(restArgs);
+			break;
+		}
+
 		case "publish":
 			await publishCommand(restArgs);
 			break;
@@ -589,40 +627,17 @@ async function main() {
 }
 
 /**
- * `8gent update` — pull the latest 8gent from npm. Uses --force to
- * defeat the EEXIST collision on the `8` / `8gent` / `8gent-code`
- * bin symlinks that npm refuses to overwrite by default.
- *
- * No flags. No surprises. Just: tell user what's about to happen,
- * run npm install -g @latest --force, stream output, print restart
- * hint when done.
+ * `8gent update [--check]`: packages/eight/self-update.ts decides and installs.
+ * It updates through the channel this 8gent was installed from (a release
+ * binary, or npm) and never installs a lower version. `--check` reports only.
  */
-async function updateCommand(): Promise<void> {
-	const { spawn } = await import("node:child_process");
-	console.log(`Current: v${VERSION}`);
-	console.log(`Updating @8gi-foundation/8gent-code to latest from npm...`);
-	console.log(`(uses --force to overwrite stale bin symlinks)\n`);
-
-	const proc = spawn(
-		"npm",
-		["install", "-g", "@8gi-foundation/8gent-code@latest", "--force"],
-		{ stdio: "inherit" },
-	);
-
-	await new Promise<void>((resolve) => {
-		proc.on("exit", (code) => {
-			if (code === 0) {
-				console.log(`\nDone. Restart your terminal session, then run \`8gent\` to use the new version.`);
-			} else {
-				console.error(`\nUpdate failed (exit ${code}). Try manually:`);
-				console.error(`  npm install -g @8gi-foundation/8gent-code@latest --force`);
-			}
-			resolve();
-		});
-		proc.on("error", (err) => {
-			console.error(`\nCouldn't run npm: ${err.message}`);
-			resolve();
-		});
+async function updateCommand(args: string[]): Promise<void> {
+	const { runUpdateCommand } = await import("../packages/eight/cli-maintenance.ts");
+	process.exitCode = await runUpdateCommand(args, {
+		currentVersion: VERSION,
+		modulePath: import.meta.url,
+		embedded: MODULE_IS_EMBEDDED,
+		execPath: process.execPath,
 	});
 }
 
@@ -756,9 +771,16 @@ async function keysCommand(args: string[]): Promise<void> {
  * via isInstalled() and report success/failure with next steps.
  */
 async function installCommand(args: string[]): Promise<void> {
-	const presetId = (args[0] || "").toLowerCase().trim();
+	const spec = (args[0] || "").trim();
+	// `npm:<name>@<version>` is a package, pinned by integrity (packages/marketplace/install.ts).
+	if (spec.startsWith("npm:")) {
+		const { runInstallNpmCommand } = await import("../packages/eight/cli-maintenance.ts");
+		process.exitCode = await runInstallNpmCommand(spec);
+		return;
+	}
+	const presetId = spec.toLowerCase();
 	if (!presetId) {
-		console.error(`Usage: 8gent install <preset>`);
+		console.error(`Usage: 8gent install <preset> | npm:<name>@<version>`);
 		console.error(`Available presets: claude, codex, hermes, openclaw, pi, 8gent`);
 		process.exit(1);
 	}
@@ -1049,7 +1071,8 @@ async function benchmarkCommand(args: string[]) {
 	}
 	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", benchmarkPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1066,7 +1089,8 @@ async function demoCommand(args: string[]) {
 	}
 	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", demoPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", demoPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1254,11 +1278,11 @@ async function spawnPet(sessionId?: string) {
 async function tuiCommand(args: string[]) {
 	console.log(BANNER);
 
-	// Auto-spawn pet unless --no-pet
-	const noPet = args.includes("--no-pet");
+	// The pet is opt-in: `8gent --pet` (C2). --no-pet is still accepted and wins.
+	const wantPet = args.includes("--pet") && !args.includes("--no-pet");
 	const filteredArgs = args.filter((a) => a !== "--no-pet" && a !== "--pet");
 
-	if (!noPet) {
+	if (wantPet) {
 		await spawnPet();
 	}
 
@@ -1300,7 +1324,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
 		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: inv.env });
 	} else {
-		proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
+		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], { stdio: "inherit" });
 	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);

@@ -8,6 +8,8 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import { harnessNote } from "./context-note";
+import { chatMessages } from "./session-messages";
+import type { SessionStore } from "./session-store";
 
 export interface CompactionConfig {
 	enabled: boolean;
@@ -30,6 +32,12 @@ export interface CompactionResult {
 	messagesRemoved: number;
 	filesRead: string[];
 	filesModified: string[];
+	/**
+	 * Messages after the summary that were kept verbatim. Set only when the
+	 * history was replaced by a summary plus that tail, which is the one shape a
+	 * session-store compaction entry can describe (CompactionRecorder).
+	 */
+	kept?: number;
 }
 type Message = { role: string; content: string };
 
@@ -62,7 +70,7 @@ function estimateTokens(text: string): number {
 	return Math.ceil(text.length / 4);
 }
 
-function estimateMessageTokens(messages: Message[]): number {
+export function estimateMessageTokens(messages: Message[]): number {
 	let total = 0;
 	for (const m of messages) total += estimateTokens(m.content) + 4;
 	return total;
@@ -98,7 +106,7 @@ const PROMPT_SUFFIX =
 export class CompactionEngine {
 	private config: CompactionConfig;
 	private fileTracker = new FileTracker();
-	private previousSummary: string | null = null;
+	protected previousSummary: string | null = null;
 
 	constructor(config: Partial<CompactionConfig> = {}) {
 		this.config = { ...DEFAULT_COMPACTION_CONFIG, ...config };
@@ -200,6 +208,7 @@ export class CompactionEngine {
 				messagesRemoved: toSummarize.length,
 				filesRead: Array.from(this.fileTracker.read),
 				filesModified: Array.from(this.fileTracker.modified),
+				kept: toKeep.length,
 			},
 		};
 	}
@@ -342,6 +351,7 @@ export class ProactiveCompression extends CompactionEngine {
 					messagesRemoved: messages.length - nuked.length,
 					filesRead: Array.from(this.getFileTracker().read),
 					filesModified: Array.from(this.getFileTracker().modified),
+					kept: nuked.length - 1,
 				},
 			};
 		}
@@ -392,12 +402,32 @@ export class ProactiveCompression extends CompactionEngine {
 		const recent = messages.slice(cut);
 		const old = messages.slice(1, cut);
 
+		// Nothing older than the kept tail: no summary call, history unchanged.
+		if (old.length === 0) {
+			return {
+				messages,
+				result: {
+					summary: this.previousSummary ?? "",
+					tokensBefore,
+					tokensAfter: tokensBefore,
+					messagesRemoved: 0,
+					filesRead: [],
+					filesModified: [],
+				},
+			};
+		}
+
 		const serialized = old.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
+		// An earlier summary is the base to update, not text to re-read from a
+		// truncated copy: decisions from before this window must survive.
+		const prevBlock = this.previousSummary
+			? `<previous-summary>\n${this.previousSummary}\n</previous-summary>\n\nUpdate the previous summary with the new conversation; keep everything in it that is still true.\n\n`
+			: "";
 
 		// Step 1: Summarize
 		const { text: historySummary } = await generateText({
 			model,
-			prompt: `Summarize this conversation into a structured checkpoint.\n\n<conversation>\n${serialized}\n</conversation>\n\nFormat:\n## Goal\n## Progress\n## Key Decisions\n## Files Touched\n## Next Steps`,
+			prompt: `${prevBlock}Summarize this conversation into a structured checkpoint.\n\n<conversation>\n${serialized}\n</conversation>\n\nFormat:\n## Goal\n## Progress\n## Key Decisions\n## Files Touched\n## Next Steps`,
 			maxOutputTokens: 800,
 		});
 
@@ -426,6 +456,7 @@ export class ProactiveCompression extends CompactionEngine {
 			),
 		};
 
+		this.previousSummary = fullSummary;
 		const compacted = [systemMsg, summaryMsg, ...recent];
 		const tokensAfter = estimateMessageTokens(compacted);
 
@@ -438,6 +469,7 @@ export class ProactiveCompression extends CompactionEngine {
 				messagesRemoved: old.length,
 				filesRead: Array.from(tracker.read),
 				filesModified: Array.from(tracker.modified),
+				kept: recent.length,
 			},
 		};
 	}
@@ -458,4 +490,84 @@ export class ProactiveCompression extends CompactionEngine {
 		const lastTwo = messages.slice(-2);
 		return [systemMsg, ...lastTwo];
 	}
+}
+
+
+// ===========================================================================
+// The one compaction path (Pi parity row E5)
+//
+// Every turn, text-tool or native, ends with compactHistory(). It decides with
+// ProactiveCompression (the only compactor), rewrites the in-memory history,
+// and records any summary in the session store as a compaction entry: the
+// original messages stay in the file and undoCompaction() brings them back.
+// ===========================================================================
+
+/**
+ * Mirrors the agent's history into a session store and records compactions in
+ * it. Messages are appended once each (tracked by identity), so the file holds
+ * every original even after the in-memory history is rewritten.
+ */
+export class CompactionRecorder {
+	private seen = new WeakSet<object>();
+	private first = true;
+
+	constructor(readonly store: SessionStore) {}
+
+	/** Put every chat message of `history` not yet in the file into it. */
+	sync(history: Message[]): void {
+		if (this.first) {
+			// The file may already hold an earlier run of this session: align on the prefix.
+			this.first = false;
+			this.store.syncTranscript(chatMessages(history));
+			for (const m of history) this.seen.add(m);
+			return;
+		}
+		for (const m of history) {
+			if (this.seen.has(m)) continue;
+			this.seen.add(m);
+			for (const c of chatMessages([m])) this.store.append(c);
+		}
+	}
+
+	/** Record `result` as a compaction entry. Returns its id, or null when the result has no summary-plus-tail shape. */
+	record(result: CompactionResult, tail: Message[]): string | null {
+		if (result.kept === undefined) return null;
+		// The kept tail is the last `kept` messages of the history; the file's
+		// transcript drops harness notes, so count the tail the same way.
+		for (const m of tail) this.seen.add(m);
+		return this.store.compact(result.summary, {
+			keepLast: chatMessages(tail).length,
+			tokensBefore: result.tokensBefore,
+			tokensAfter: result.tokensAfter,
+		});
+	}
+}
+
+export interface CompactionPass {
+	messages: Message[];
+	result: ProactiveResult;
+	/** Id of the compaction entry written to the session store, when one was. */
+	entryId: string | null;
+}
+
+/**
+ * One compaction decision. Null when the history is under the threshold.
+ * With a recorder, the originals are synced to the session file first and a
+ * summary result is recorded as a compaction entry.
+ */
+export async function compactHistory(opts: {
+	engine: ProactiveCompression;
+	history: Message[];
+	model: LanguageModel;
+	recorder?: CompactionRecorder | null;
+}): Promise<CompactionPass | null> {
+	const { engine, history, model, recorder } = opts;
+	if (!engine.shouldCompact(history)) return null;
+	recorder?.sync(history);
+	const { messages, result } = await engine.compactProactive(history, model);
+	let entryId: string | null = null;
+	if (recorder && result.kept !== undefined && result.messagesRemoved > 0) {
+		entryId = recorder.record(result, messages.slice(messages.length - result.kept));
+	}
+	return { messages, result, entryId };
 }

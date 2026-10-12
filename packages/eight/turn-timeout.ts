@@ -38,6 +38,9 @@
  *    EIGHT_STREAM_IDLE_MS=0 turns the gap off and restores wall time only.
  */
 
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
+
 export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 
 /** Floor so a misconfigured env can never make attempts effectively instant. */
@@ -154,7 +157,12 @@ export function resolveStreamIdleMs(
 	env: Record<string, string | undefined> = process.env,
 ): number | null {
 	const raw = (env.EIGHT_STREAM_IDLE_MS ?? "").trim();
-	if (raw === "") return DEFAULT_STREAM_IDLE_MS;
+	if (raw === "") {
+		// Not set in the environment: settings.retry.httpIdleTimeoutMs (C4), validated, else the default.
+		// Only for the real environment, so a test passing its own env object stays pure.
+		const fromSettings = env === process.env ? resolveRetrySettings(loadSettings().retry).httpIdleTimeoutMs : undefined;
+		return fromSettings ?? DEFAULT_STREAM_IDLE_MS;
+	}
 	if (raw.toLowerCase() === "off") return null;
 	const parsed = Number(raw);
 	if (!Number.isFinite(parsed)) return DEFAULT_STREAM_IDLE_MS;

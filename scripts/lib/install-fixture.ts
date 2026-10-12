@@ -27,6 +27,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { safeBunFlags } from "../../packages/core/bun-flags";
 
 const [dir, base] = process.argv.slice(2);
 if (!dir || !base) {
@@ -50,7 +51,8 @@ for (const v of versions) {
 	mkdirSync(out, { recursive: true });
 	const src = join(dir, `fake-${v}.ts`);
 	writeFileSync(src, `console.log("8gent Code v${v}");\n`);
-	const r = spawnSync("bun", ["build", "--compile", src, "--outfile", join(out, asset)], {
+	// No cwd bunfig.toml or .env, and no auto-install (#4013).
+	const r = spawnSync("bun", [...safeBunFlags(), "--no-install", "build", "--compile", src, "--outfile", join(out, asset)], {
 		stdio: "inherit",
 	});
 	if (r.status !== 0) process.exit(r.status ?? 1);
