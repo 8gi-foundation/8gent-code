@@ -142,6 +142,32 @@ describe("project settings over global (N2)", () => {
 		expect(r.settings.models.tabs.engineer.model).toBe("auto:free");
 	});
 
+	test("Ollama cloud model ids (-cloud, :cloud) are refused for a local tab", () => {
+		for (const model of ["gpt-oss:120b-cloud", "qwen3-coder:480b-cloud", "deepseek-v3.1:671b-cloud", "foo:cloud", " Foo:CLOUD ", "X-CLOUD"]) {
+			writeProject({ models: { tabs: { engineer: { model } } } });
+			const r = loadSettingsReport(proj);
+			expect(r.settings.models.tabs.engineer.model).toBe(DEFAULT_SETTINGS.models.tabs.engineer.model);
+			expect(r.ignored.map((i) => i.path)).toContain("models.tabs.engineer.model");
+		}
+	});
+
+	test("an Ollama cloud model id is allowed for a tab the user already runs on a hosted provider", () => {
+		writeGlobal({ models: { tabs: { engineer: { provider: "openrouter", model: "g/model" } } } });
+		writeProject({ models: { tabs: { engineer: { model: "gpt-oss:120b-cloud" } } } });
+		const r = loadSettingsReport(proj);
+		expect(r.ignored).toEqual([]);
+		expect(r.settings.models.tabs.engineer.model).toBe("gpt-oss:120b-cloud");
+	});
+
+	test("near misses (cloudy-model, mycloud:7b) stay allowed on a local tab", () => {
+		for (const model of ["cloudy-model", "mycloud:7b", "cloud:7b", "cloud-model"]) {
+			writeProject({ models: { tabs: { engineer: { model } } } });
+			const r = loadSettingsReport(proj);
+			expect(r.ignored).toEqual([]);
+			expect(r.settings.models.tabs.engineer.model).toBe(model);
+		}
+	});
+
 	test("isLoopbackBaseURL: loopback hosts only, no lookalikes", () => {
 		for (const u of ["http://127.0.0.1:11435/v1", "http://localhost:1234/v1", "http://[::1]:8080/v1", "HTTP://LOCALHOST/v1"])
 			expect(isLoopbackBaseURL(u)).toBe(true);

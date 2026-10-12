@@ -77,12 +77,13 @@ const pickableProvider =
 /**
  * Model ids that route to a hosted provider whatever the provider key says:
  * "auto:free" is resolved to OpenRouter by resolveModel, and ":free" ids are
- * OpenRouter's free tier. A project may name one only when that tab's global
+ * OpenRouter's free tier; names ending "-cloud" or ":cloud" are Ollama cloud
+ * models, which run off-machine even through a loopback Ollama. A project may name one only when that tab's global
  * provider is already non-loopback (the user already sends that tab off-machine).
  */
 export function impliesHostedProvider(model: string): boolean {
 	const m = model.trim().toLowerCase();
-	return m === "auto:free" || m.endsWith(":free");
+	return m === "auto:free" || m.endsWith(":free") || m.endsWith("-cloud") || m.endsWith(":cloud");
 }
 const projectModel =
 	(tab: (typeof TABS)[number]): Validator =>
