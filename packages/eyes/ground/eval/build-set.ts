@@ -19,7 +19,6 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import sharp from "sharp";
 import { call, sleep } from "./browser.js";
 import { PAGES } from "./pages.js";
 import { tuiFrames } from "./tui-frames.js";
@@ -108,6 +107,7 @@ async function oneX(srcId: string): Promise<void> {
 	if (!s) return;
 	const f = 1 / s.scale;
 	const id = `${srcId}-1x`;
+	const sharp = (await import("sharp")).default;
 	await sharp(join(out, s.png))
 		.resize(Math.round(s.viewport.w), Math.round(s.viewport.h), { fit: "fill" })
 		.png()
