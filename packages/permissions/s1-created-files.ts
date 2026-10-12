@@ -23,6 +23,17 @@
  * later writes to a recorded file (write_file, edit_file, a redirect) refresh
  * the entry.
  *
+ * Directories (#4105): a run_command that is only `mkdir [-p] [-v] DIR...`
+ * records each directory it made, that is each path (and, for a missing
+ * parent, each ancestor) that was absent just before the command, is a real
+ * directory just after it, and sits inside the working directory. The entry
+ * keeps device, inode and birth time; a directory renamed, replaced or made
+ * by anything else does not count, and a directory that already existed is
+ * never recorded. Where the file system reports no birth time, nothing is
+ * recorded. A directory write_file makes for a new file's parent is not
+ * recorded (it is made before the write is watched). Read by
+ * s1-rm-own-dir.ts.
+ *
  * A file that existed before the session wrote to it is never recorded: an
  * overwrite or a `>` truncation of a pre-existing file is a modification, not
  * a creation.
@@ -93,8 +104,44 @@ export function pathAbsent(abs: string): boolean {
 	}
 }
 
+/**
+ * The identity of `abs` when it is a real directory (lstat: not a symlink):
+ * device, inode and birth time. Null when it is not, or when the file system
+ * reports no birth time (0), since then a recreated directory could pass for
+ * the old one.
+ */
+export function dirIdentity(abs: string): Identity | null {
+	try {
+		const st = lstatSync(abs, { bigint: true });
+		if (!st.isDirectory() || st.birthtimeNs <= 0n) return null;
+		return [st.dev, st.ino, st.birthtimeNs].join(":");
+	} catch {
+		return null;
+	}
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
+	private readonly dirs = new Map<string, Identity>();
+
+	/** Record `abs` as a directory this session created, if it is now a real directory. */
+	recordDir(abs: string): void {
+		const key = keyOf(abs);
+		const id = dirIdentity(abs);
+		if (key && id) this.dirs.set(key, id);
+	}
+
+	/** True when `abs` is a directory this session created, and still that same directory. */
+	createdDirBySession(abs: string): boolean {
+		const key = keyOf(abs);
+		if (!key) return false;
+		const want = this.dirs.get(key);
+		return !!want && want === dirIdentity(abs);
+	}
+
+	get dirCount(): number {
+		return this.dirs.size;
+	}
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {
@@ -253,7 +300,8 @@ export function watchRedirects(
 	record: CreatedFiles | undefined,
 ): () => void {
 	if (!record) return () => {};
-	const watches: Array<() => void> = [];
+	// A mkdir-only command records the directories it makes (#4105).
+	const watches: Array<() => void> = [watchMkdir(command, cwd, record)];
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
 		if (decideRules(command).rules.length > 0) return () => {};
@@ -272,4 +320,58 @@ export function watchRedirects(
 	return () => {
 		for (const w of watches) w();
 	};
+}
+
+/** `mkdir` with only -p / -v flags and 1 to 16 plain relative paths, nothing else on the line. */
+const MKDIR_FLAG = /^-[pv]+$/;
+const MAX_MKDIR = 16;
+
+/**
+ * Bracket a mkdir-only command (#4105): call before it runs, and call the
+ * result after it exits. Records each directory the command made: a path,
+ * or an ancestor of it, that was absent before, is a real directory after,
+ * and whose realpath is inside the realpath of `cwd`. Any other command
+ * records nothing. Never throws.
+ */
+export function watchMkdir(command: string, cwd: string, record: CreatedFiles): () => void {
+	try {
+		const text = command.trim();
+		if (!PLAIN_PATH.test(text.replace(/ /g, "_"))) return () => {};
+		const [bin, ...args] = text.split(/ +/);
+		if (bin !== "mkdir") return () => {};
+		const paths: string[] = [];
+		for (const a of args) {
+			if (a.startsWith("-")) {
+				if (paths.length > 0 || !MKDIR_FLAG.test(a)) return () => {};
+				continue;
+			}
+			const segs = a.replace(/\/$/, "").split("/");
+			if (a.startsWith("/") || segs.some((s) => s === "" || s === "." || s === ".."))
+				return () => {};
+			paths.push(a);
+		}
+		if (paths.length === 0 || paths.length > MAX_MKDIR) return () => {};
+		if (decideRules(text).rules.length > 0) return () => {};
+		const root = realpathSync(cwd);
+		const fresh: string[] = [];
+		for (const p of paths) {
+			let cur = path.resolve(cwd, p.replace(/\/$/, ""));
+			while (cur !== path.dirname(cur) && pathAbsent(cur)) {
+				fresh.push(cur);
+				cur = path.dirname(cur);
+			}
+		}
+		return () => {
+			for (const abs of fresh) {
+				try {
+					const key = keyOf(abs);
+					if (key && inside(key, root) && key !== root) record.recordDir(abs);
+				} catch {
+					// Recording is best effort; it never affects the command.
+				}
+			}
+		};
+	} catch {
+		return () => {};
+	}
 }
