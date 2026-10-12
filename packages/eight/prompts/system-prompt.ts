@@ -397,7 +397,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-${LOCAL_SERVER_CURL_NOTE}
+${LOCAL_SERVER_CURL_NOTE} A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command.
 
 ### Git Flow
 \`\`\`json
