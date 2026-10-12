@@ -57,7 +57,7 @@ export interface ExtensionCommand {
 	name: string;
 	description?: string;
 	/** Gets the text after /name. A returned string is shown to the person. */
-	run: (args: string, ctx: ExtensionContext) => string | void | Promise<string | void>;
+	run: (args: string, ctx: ExtensionContext) => string | undefined | Promise<string | undefined>;
 }
 
 export interface ToolCallEvent {
@@ -66,7 +66,7 @@ export interface ToolCallEvent {
 }
 
 /** Return { block: true } to refuse the call; anything else lets it through. */
-export type ToolCallDecision = { block: true; reason?: string } | undefined | void;
+export type ToolCallDecision = { block: true; reason?: string } | undefined;
 
 export interface ExtensionAPI {
 	registerTool(tool: ExtensionTool): void;

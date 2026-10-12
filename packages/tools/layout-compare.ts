@@ -64,7 +64,7 @@ export function findChrome(
 			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 		);
 	} else if (process.platform === "win32") {
-		for (const base of [env["PROGRAMFILES"], env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
+		for (const base of [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
 			if (base) candidates.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
 		}
 	} else {
