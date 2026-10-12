@@ -109,7 +109,9 @@ export const RENDER_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-
 export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	const size = fs.statSync(htmlPath).size;
 	if (size > MAX_HTML_BYTES) throw new Error(`the HTML is ${size} bytes, over the ${MAX_HTML_BYTES} byte limit`);
-	let html = fs.readFileSync(htmlPath, "utf8");
+	// No leading BOM (one is written below) and no ESC: ISO-2022-JP's escape sequences
+	// print nothing, so "http<ESC>(B-equiv" would decode to a live http-equiv.
+	let html = fs.readFileSync(htmlPath, "utf8").replace(/^\uFEFF+/, "").replace(/\x1b/g, "");
 	const root = fs.realpathSync(path.dirname(htmlPath));
 	const inline = (ref: string): string | null => {
 		const clean = ref.trim().split(/[?#]/)[0];
@@ -142,9 +144,11 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
 	// First thing in the document, never after a text match: a script before <head>,
 	// or a fake <head> inside a comment, must not run ahead of the policy. A meta
-	// before <html> is parsed into the implicit head. Keep a leading BOM and doctype first.
-	const lead = /^\uFEFF?\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? (html.startsWith("\uFEFF") ? "\uFEFF" : "");
-	const withMeta = `${lead}${meta}${html.slice(lead.length)}`;
+	// before <html> is parsed into the implicit head. A doctype stays first. Exactly one
+	// UTF-8 BOM leads, so Chrome decodes as UTF-8 and ignores any page <meta charset>
+	// (a second U+FEFF would be text, opening the body before the CSP meta).
+	const lead = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
+	const withMeta = `\uFEFF${lead}${meta}${html.slice(lead.length)}`;
 	const out = path.join(dir, "page.html");
 	fs.writeFileSync(out, withMeta);
 	return out;

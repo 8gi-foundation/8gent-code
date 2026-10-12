@@ -359,7 +359,24 @@ describe("prepareSafeCopy (#4081)", () => {
 			const copy = fs.readFileSync(prepareSafeCopy(p.file, p.out), "utf8");
 			// Only the injected CSP meta keeps a live http-equiv, and it comes first.
 			expect(copy.match(/(?<![-\w])http-equiv\b/gi)).toHaveLength(1);
-			expect(copy.startsWith('<meta http-equiv="Content-Security-Policy"')).toBe(true);
+			expect(copy.startsWith('\uFEFF<meta http-equiv="Content-Security-Policy"')).toBe(true);
+		}
+	});
+
+	test("the copy is UTF-8 with exactly one BOM before the CSP meta, and no ESC survives (#4124)", () => {
+		for (const shape of [
+			'<meta charset="iso-2022-jp"><meta http\x1b(B-equiv="refresh" content="0;url=file:///etc/passwd">x',
+			"\uFEFF\uFEFF<!doctype html><p>x</p>",
+			"<p>no bom</p>",
+		]) {
+			const p = page(shape);
+			const out = prepareSafeCopy(p.file, p.out);
+			const bytes = fs.readFileSync(out);
+			expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+			const copy = bytes.toString("utf8");
+			expect(copy.match(/\uFEFF/g)).toHaveLength(1);
+			expect(copy.replace(/^\uFEFF(<!doctype[^>]*>)?/i, "").startsWith('<meta http-equiv="Content-Security-Policy"')).toBe(true);
+			expect(copy).not.toContain("\x1b");
 		}
 	});
 
@@ -488,6 +505,9 @@ describe.skipIf(!chrome)("real Chrome runs no page script: the CSP alone stops i
 			`<html><head><meta http-equiv="&#114;efresh" content="0;url=${sibling}"></head><body style="margin:0">x</body></html>`,
 		"meta refresh with a quoted > to an unsanitised sibling": (sibling) =>
 			`<html><head><meta content="0;url=${sibling}?>" http-equiv="refresh"></head><body style="margin:0">x</body></html>`,
+		// Written as UTF-8 bytes; in ISO-2022-JP "ESC ( B" prints nothing, so Chrome reads http-equiv.
+		"iso-2022-jp charset with an escape-split http-equiv refresh to an unsanitised sibling": (sibling) =>
+			`<html><head><meta charset="iso-2022-jp"><meta http\x1b(B-equiv="refresh" content="0;url=${sibling}"></head><body style="margin:0">x</body></html>`,
 	};
 	for (const [name, build] of Object.entries(shapes)) {
 		test(`${name}: paints with script when raw, paints nothing through renderSafe`, async () => {
