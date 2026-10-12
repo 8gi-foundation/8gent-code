@@ -47,7 +47,11 @@ import {
 } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
-import { capabilityToolMode, knownContextWindow, ollamaContextWindowLookup } from "../orchestration/local-model-detect";
+import {
+	capabilityToolMode,
+	knownContextWindow,
+	ollamaContextWindowLookup,
+} from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -72,13 +76,22 @@ import {
 } from "./compaction";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
 import { postMessageAvailable } from "../ai/post-message";
-import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
+import {
+	emptyReplyNote,
+	emptyReplyStall,
+	splitToolImageAttachment,
+	stripDoneMarker,
+} from "../ai/text-tool-loop";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
-import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
+import {
+	browserProfileWarning,
+	browserWithheldNote,
+	localBrowserTools,
+} from "../tools/eight-browser";
 
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -89,7 +102,12 @@ import {
 	SLIDES_TO_VIDEO_NOTE,
 	buildToolCatalogSegment,
 } from "./prompts/system-prompt";
-import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
+import {
+	localCatalogOmissions,
+	localDelegationTools,
+	localPlanTools,
+	planningGateInstruction,
+} from "./local-tool-scope";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -137,7 +155,13 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
-import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
+import {
+	CONTEXT_NOTE_HEADER,
+	type SentSections,
+	contextNote,
+	harnessNote,
+	withStyleReminder,
+} from "./context-note";
 import {
 	ObservationPacker,
 	ObservationStore,
@@ -213,9 +237,12 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  */
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
-const SCREEN_LOCATE_NOTE =
-	"**To act on something in a screenshot: call `screen_locate` with the image path and the target in words, then use the point it returns.**";
-const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE, SCREEN_LOCATE_NOTE].join("\n");
+const HEADLESS_TOOL_NOTES = [
+	HEADLESS_WEB_NOTE,
+	NARRATION_NOTE,
+	SCRATCH_DIR_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -316,8 +343,11 @@ export class Agent {
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
-	private serverContextWindow: { baseUrl: string; model: string; engine: ProactiveCompression } | null =
-		null;
+	private serverContextWindow: {
+		baseUrl: string;
+		model: string;
+		engine: ProactiveCompression;
+	} | null = null;
 	/** Injectable for tests; the real lookup reads /api/ps and /api/show. */
 	private contextWindowLookup: typeof ollamaContextWindowLookup = ollamaContextWindowLookup;
 	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
@@ -549,8 +579,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// system prompt, never inside it (#3222). Table officers never get them.
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
 		const globalMemoriesBlock = recallGlobalMemoriesSync();
-		this.sessionMemoryContext =
-			isVerbatimScope(config.agentScope) ? "" : globalMemoriesBlock + priorSessionsBlock;
+		this.sessionMemoryContext = isVerbatimScope(config.agentScope)
+			? ""
+			: globalMemoriesBlock + priorSessionsBlock;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -607,20 +638,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-				? // #3487: the user context (style, name, role, language, board briefing)
-					// trails the project instructions so the cached prefix stays stable (#3222).
-					// The board briefing goes only to a model on this machine (#3236 rule).
-					compactLocalPrompt +
+					? // #3487: the user context (style, name, role, language, board briefing)
+						// trails the project instructions so the cached prefix stays stable (#3222).
+						// The board briefing goes only to a model on this machine (#3236 rule).
+						compactLocalPrompt +
 						projectInstructionsBlock +
 						(onBox ? userContextBlock : userContextNoBoard)
-				: basePrompt +
-					vesselContext +
-					userContextBlock +
-					personalityBlock +
-					orchestratorBlock +
-					deferredToolBlock +
-					languageInstruction +
-					projectInstructionsBlock,
+					: basePrompt +
+						vesselContext +
+						userContextBlock +
+						personalityBlock +
+						orchestratorBlock +
+						deferredToolBlock +
+						languageInstruction +
+						projectInstructionsBlock,
 		});
 		// #3487: a turn can be rerouted to another local provider after this
 		// prompt is built (resolveToolCapableModel, callLocalModelWithReroute), and
@@ -653,10 +684,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// capabilities they do not have - drowning their own persona + honesty rules
 		// and producing rigid "PLAN: 1. 2. 3." replies with fake shell blocks. Table
 		// sessions therefore use their supplied prompt VERBATIM.
-		const systemPromptFull =
-			isVerbatimScope(this.config.agentScope)
-				? basePrompt + languageInstruction
-				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
+		const systemPromptFull = isVerbatimScope(this.config.agentScope)
+			? basePrompt + languageInstruction
+			: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
 		// TurnRecord with it. Avoids re-hashing per turn for large prompts.
 		this.turnJournal = new TurnJournal(this.sessionId);
@@ -954,18 +984,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				if (!refusal) console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
 				if (!refusal) this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
-				if (!refusal) this.sessionWriter.writeToolCall(
-					{
-						toolCallId,
-						name: toolName,
-						arguments: args,
-						success: true,
-						durationMs: 0,
-						startedAt: new Date(startedAt).toISOString(),
-					},
-					undefined,
-					step,
-				);
+				if (!refusal)
+					this.sessionWriter.writeToolCall(
+						{
+							toolCallId,
+							name: toolName,
+							arguments: args,
+							success: true,
+							durationMs: 0,
+							startedAt: new Date(startedAt).toISOString(),
+						},
+						undefined,
+						step,
+					);
 
 				// `result` is what the loop gets, attachment included; `shown` is the
 				// text part, and the only thing the ledger, the session file, the
@@ -1273,7 +1304,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				run: runTurn,
 				// A named provider stays put: reroute only within it (#3746).
 				pinned: this.config.providerPinned,
-				pinnedMessage: (model, error) => pinnedProviderError(effectiveProvider, model, error).message,
+				pinnedMessage: (model, error) =>
+					pinnedProviderError(effectiveProvider, model, error).message,
 				onReroute: (missing, chosen) => {
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
@@ -1907,10 +1939,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				providerName,
 				providerModel: providerConfig.model,
 				// A withheld browser says so up front (#3785); a __table__ session has no browser by design.
-				instructions:
-					isVerbatimScope(this.config.agentScope)
-						? effectiveInstructions
-						: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
+				instructions: isVerbatimScope(this.config.agentScope)
+					? effectiveInstructions
+					: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
@@ -2767,8 +2798,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				!isNoToolScope(this.config.agentScope) &&
 				(this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled)
 			) {
-				const toolCallsSucceeded =
-					this.sessionEvidence.filter((e) => !e.verified).length === 0;
+				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
 				const responseForKernel = flavoredContent;
@@ -3183,9 +3213,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const used = estimateMessageTokens(this.messageHistory);
 		if (used < this.compactionContextWindow * 0.65) return;
 		this.serverContextWindow = null;
-		const window = await this.contextWindowLookup({ baseUrl: pending.baseUrl, model: pending.model }).catch(
-			() => null,
-		);
+		const window = await this.contextWindowLookup({
+			baseUrl: pending.baseUrl,
+			model: pending.model,
+		}).catch(() => null);
 		if (!window) {
 			console.error(
 				`  [COMPRESSION] could not read the context window for ${pending.model}; using ${this.compactionContextWindow}`,
