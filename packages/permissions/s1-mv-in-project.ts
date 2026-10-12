@@ -72,6 +72,7 @@ import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
+import { accountHome } from "./s1-account-home";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
@@ -296,6 +297,7 @@ function expandGlobs(text: string, cwd: string): string | null {
 	if (/[*?]/.test(operands[operands.length - 1])) return null;
 	if (args.some((a) => !isOperand(a) && /[*?]/.test(a))) return null;
 	const root = realpathSync(cwd);
+	if (inProtectedDataRoot(root)) return null;
 	const out: string[] = [words[0]];
 	let globs = 0;
 	for (const a of args) {
@@ -308,19 +310,55 @@ function expandGlobs(text: string, cwd: string): string | null {
 		const cut = op.lastIndexOf("/");
 		const dir = cut < 0 ? "" : op.slice(0, cut);
 		const pat = op.slice(cut + 1);
-		if (/[*?]/.test(dir) || pat === "" || !plainRelative(dir === "" ? "x" : dir)) return null;
+		// A leading dot in the pattern would match dotfiles by hand: no opinion.
+		if (/[*?]/.test(dir) || pat === "" || pat.startsWith(".") || !plainRelative(dir === "" ? "x" : dir))
+			return null;
 		const dirAbs = realpathSync(path.resolve(root, dir));
 		if (!inside(dirAbs, root)) return null;
+		// `s`: `*` and `?` match newline and CR as in the shell; `u`: one code point, astral included.
 		const re = new RegExp(
-			`^${pat.replace(/[.+,=@:-]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`,
+			`^${pat.replace(/[.+]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`,
+			"su",
 		);
 		const names = readdirSync(dirAbs)
-			.filter((n) => !n.startsWith(".") && !n.startsWith("-") && re.test(n))
+			.filter((n) => !n.startsWith(".") && re.test(n))
 			.sort();
 		if (names.length === 0 || names.length > MAX_GLOB) return null;
+		// Every entry the shell would match must be a plain word. One odd name (flag-like,
+		// spaced, newline, non-ASCII) means the shell would hand mv something this lane cannot
+		// write back as words, so the whole command goes to the judge.
+		if (names.some((n) => n.startsWith("-") || !PLAIN_NAME.test(n))) return null;
 		for (const n of names) out.push(dir === "" ? n : `${dir}/${n}`);
 	}
 	return globs === 1 ? out.join(" ") : null;
+}
+
+/** A name that survives being written back into a space-separated command. */
+const PLAIN_NAME = /^[A-Za-z0-9._+,=@:-]+$/;
+
+/**
+ * True when `root` (a real path) is inside the account's `~/.8gent` data tree,
+ * where globs never expand on trust. A pilot run directory under
+ * `~/.8gent/rishi-pilot/runs/` is an ordinary workspace and is fine.
+ */
+function inProtectedDataRoot(root: string): boolean {
+	const homes = new Set<string>();
+	for (const h of [accountHome(), process.env.HOME]) {
+		if (!h) continue;
+		homes.add(h);
+		try {
+			homes.add(realpathSync(h));
+		} catch {
+			// not resolvable: keep the written form
+		}
+	}
+	for (const h of homes) {
+		const data = path.join(h, ".8gent");
+		if (!inside(root, data)) continue;
+		const runs = path.join(data, "rishi-pilot", "runs");
+		return !(root !== runs && inside(root, runs));
+	}
+	return false;
 }
 
 /**

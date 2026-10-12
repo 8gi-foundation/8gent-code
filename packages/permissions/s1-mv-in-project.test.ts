@@ -10,11 +10,12 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
+import { _setPasswdHomeForTests } from "./s1-account-home";
 import { singleFileDelete } from "./s1-rm-single";
 import {
 	generatedDataName,
@@ -489,6 +490,70 @@ describe("globs and cp inside the workspace (#4073)", () => {
 			expect(r.run, cmd).toBe(false);
 		}
 		expect(judge.asks).toBeGreaterThan(0);
+	});
+});
+
+describe("glob expansion matches the shell or has no opinion (#4073, 8SO)", () => {
+	beforeEach(() => {
+		writeFileSync(join(ws, "inbox", "keep.tmp"), "x");
+	});
+
+	test("a newline-named file the glob would match goes to the judge", () => {
+		writeFileSync(join(ws, "inbox", "note-x\ny.txt"), "x");
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a newline-named symlink the glob would match goes to the judge", () => {
+		symlinkSync(outside, join(ws, "inbox", "note-z\nq.txt"));
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("cp inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a -tevil file goes to the judge", () => {
+		writeFileSync(join(ws, "inbox", "-tevil"), "x");
+		expect(moveInProject("mv inbox/* inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("mv * inbox/notes/", ws).ok).toBe(false);
+		writeFileSync(join(ws, "-tevil"), "x");
+		expect(moveInProject("mv * inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("an 'a b.txt' file the glob would match goes to the judge", () => {
+		writeFileSync(join(ws, "inbox", "note a b.txt"), "x");
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(true);
+		expect(moveInProject("mv inbox/note*.txt inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("mv inbox/note?a?b.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("an astral or non-ASCII name matched by ? or * goes to the judge", () => {
+		writeFileSync(join(ws, "inbox", "note-\u{1F600}.txt"), "x");
+		expect(moveInProject("mv inbox/note-?.txt inbox/notes/", ws).ok).toBe(false);
+		expect(moveInProject("mv inbox/note-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a pattern that starts with a dot has no opinion", () => {
+		writeFileSync(join(ws, "inbox", ".hid-1.txt"), "x");
+		expect(moveInProject("mv inbox/.hid-*.txt inbox/notes/", ws).ok).toBe(false);
+	});
+
+	test("a workspace inside ~/.8gent has no glob lane, but a pilot run dir does", () => {
+		const home = realpathSync(tempDir("s1-home-"));
+		const h = process.env.HOME;
+		const bad = join(home, ".8gent", "skills-work");
+		const run = join(home, ".8gent", "rishi-pilot", "runs", "r1", "work");
+		for (const d of [bad, run, join(home, ".8gent")]) {
+			mkdirSync(join(d, "inbox", "notes"), { recursive: true });
+			writeFileSync(join(d, "inbox", "note-1.txt"), "x");
+		}
+		_setPasswdHomeForTests(home);
+		process.env.HOME = home;
+		try {
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", bad).ok).toBe(false);
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", join(home, ".8gent")).ok).toBe(false);
+			expect(moveInProject("mv inbox/note-*.txt inbox/notes/", run).ok).toBe(true);
+		} finally {
+			_setPasswdHomeForTests(undefined);
+			process.env.HOME = h;
+		}
 	});
 });
 
