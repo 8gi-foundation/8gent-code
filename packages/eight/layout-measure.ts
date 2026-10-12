@@ -146,6 +146,6 @@ export async function layoutMeasureLine(file: string | Buffer): Promise<string> 
 		`  content column x=${m.column.left}..${m.column.right} (width ${m.column.width}px, left margin ${m.column.left}px, right margin ${m.width - m.column.right}px${m.centered ? ", centered" : ""})`,
 		"  content bands, top to bottom (y is the top edge, h the height, x the left edge, w the width):",
 		...rows,
-		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins.`,
+		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins. Once index.html is written, call compare_layout with it and the mock-up file: it renders your page and lists every block that is off, in pixels. Fix those and run it again.`,
 	].join("\n");
 }

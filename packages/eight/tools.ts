@@ -634,11 +634,17 @@ const MCP_LEAN_TOOL_DEFS = [
 /** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
 const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
-const getEightBrowser = () => {
+/** The workspace of the executor that last used the browser: the source of its loopback allowlist. */
+let browserWorkspace: string | undefined;
+const getEightBrowser = (workspace: string) => {
+	browserWorkspace = workspace;
 	if (!eightBrowser) {
-		// A named profile (#3622) is the bot's own login-free browser: it never types into password or
-		// payment fields and never opens loopback or private hosts.
-		eightBrowser = createEightBrowser(undefined, { isolated: () => isolatedBrowser() });
+		// A named profile (#3622) is the bot's own login-free browser: it never opens private hosts, and
+		// reaches loopback, or types into a password field, only on the run's own listed ports (#3785).
+		eightBrowser = createEightBrowser(undefined, {
+			isolated: () => isolatedBrowser(),
+			workspace: () => browserWorkspace,
+		});
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -1270,6 +1276,22 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "compare_layout",
+					description:
+						"[FILE] Renders an HTML page with the local browser at the size of a reference image (a design mock-up) and compares it band by band, returning each block's offset in pixels and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
+					parameters: {
+						type: "object",
+						properties: {
+							html: { type: "string", description: "Path to the HTML file you wrote" },
+							reference: { type: "string", description: "Path to the mock-up image (png, jpg)" },
+						},
+						required: ["html", "reference"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "render_video_deck",
 					description:
 						"[MEDIA] Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
@@ -1744,7 +1766,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a new 8gent Browser tab and return its state: tab id, URL, title, numbered actionable elements, page text. Use for web interaction, form filling, scraping dynamic pages. Then act with browser_task actions.",
+						"Open a URL in a new 8gent Browser tab and return its tab id, title, numbered elements and page text.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1767,7 +1789,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_state",
 					description:
-						"Get the current browser page state: URL, title, and all clickable/interactive elements with their indices. Use after browser_open to see what you can interact with.",
+						"Re-read the current tab: URL, title and the numbered elements ([n] role \"name\") that browser_task acts on.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1784,7 +1806,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=email]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Sensitive clicks (sign in, buy, delete, send...) ask the person first.",
+						"Run verified steps in the tab: type{index|selector,text}, left_click{index|selector}, wait_for{selector}, open{url}, scroll{dy}.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1815,7 +1837,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_screenshot",
 					description:
-						"Take a screenshot of an 8gent Browser tab opened with browser_open. Returns the file path where the screenshot was saved.",
+						"Screenshot the current tab to a .png and return '<path> <W>x<H>'.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1872,6 +1894,10 @@ export class ToolExecutor {
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		// READ-ONLY class: reads the html and the reference inside the workspace and writes
+		// nothing there (Chrome profile and screenshot go to an OS temp dir, removed after).
+		// Own class so policy can target it, but allowed in plan, architect and review.
+		compare_layout: "render_page",
 		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
@@ -2019,7 +2045,9 @@ export class ToolExecutor {
 				? filmWrites[0]
 				: toolName === "speak" || toolName === "render_video_deck"
 					? args.out
-					: args.path
+					: toolName === "compare_layout"
+						? args.html
+						: args.path
 		) as string | undefined;
 		// A one-file extension tool (G1) has a dynamic name, so it maps by
 		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
@@ -2273,6 +2301,12 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "compare_layout": {
+				const html = safePath(String(args.html ?? ""), this.workingDirectory, "read");
+				const reference = safePath(String(args.reference ?? ""), this.workingDirectory, "read");
+				const { compareLayout } = await import("../tools/layout-compare");
+				return compareLayout(html, reference, this.workingDirectory);
+			}
 			case "screen_locate": {
 				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
 				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
@@ -4260,7 +4294,7 @@ export class ToolExecutor {
 		session?: string,
 	): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().open(url);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).open(url);
 			return browserOpen(url, { browser, session });
 		} catch (err) {
 			return `browser_open failed: ${err}`;
@@ -4269,7 +4303,7 @@ export class ToolExecutor {
 
 	private async handleBrowserState(session?: string): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().state(session);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).state(session);
 			return browserState(session);
 		} catch (err) {
 			return `browser_state failed: ${err}`;
@@ -4290,7 +4324,7 @@ export class ToolExecutor {
 				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
 				const approve = async (what: string) =>
 					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
-				return await getEightBrowser().run(actions, session, approve);
+				return await getEightBrowser(this.workingDirectory).run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
@@ -4311,7 +4345,7 @@ export class ToolExecutor {
 				} else if (isolatedBrowser()) {
 					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
-				return await getEightBrowser().screenshot(out, session);
+				return await getEightBrowser(this.workingDirectory).screenshot(out, session);
 			}
 			return browserScreenshot(filePath, session);
 		} catch (err) {

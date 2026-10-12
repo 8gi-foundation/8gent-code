@@ -571,3 +571,290 @@ describe("replay set review (#3653)", () => {
 		expect(note).not.toContain(token);
 	});
 });
+
+/**
+ * #4082: a turn that was running at the crash is journaled before it runs
+ * and, with EIGHT_AUTO_CONTINUE=1, continued exactly once on the next boot.
+ */
+describe("durable turns (#4082)", () => {
+	function fakePool(missing: string[] = []) {
+		const calls: Array<{ sessionId: string; text: string; continuation: boolean }> = [];
+		const notes: string[] = [];
+		const pool: import("./session-journal").ContinuePool = {
+			async chat(sessionId, text, _turn, options) {
+				calls.push({ sessionId, text, continuation: options.continuation });
+				return "ok";
+			},
+			getAgent: (id) => (missing.includes(id) ? null : { addHarnessNote: (b) => notes.push(b) }),
+		};
+		return { pool, calls, notes };
+	}
+
+	const journal = (p: string) => new mod.SessionJournal(p);
+
+	test("EIGHT_AUTO_CONTINUE=1 enables, anything else does not", () => {
+		expect(mod.autoContinueEnabled({ EIGHT_AUTO_CONTINUE: "1" })).toBe(true);
+		expect(mod.autoContinueEnabled({})).toBe(false);
+		expect(mod.autoContinueEnabled({ EIGHT_AUTO_CONTINUE: "true" })).toBe(false);
+	});
+
+	test("the pool journals the turn before it runs, scrubbed, and drops it when the turn ends", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_turn", "api");
+		const agent = pool.getAgent("s_turn") as any;
+		const token = `ghp_${"a1B2c3D4e5".repeat(3)}abcdef`;
+		let seen: import("./session-journal").PendingTurn | undefined;
+		agent.chat = async () => {
+			seen = journal.read()[0].pendingTurn;
+			return "done";
+		};
+		await pool.chat("s_turn", `deploy the site with ${token}`);
+		expect(seen?.id).toMatch(/^t_/);
+		expect(seen?.attempts).toBe(0);
+		expect(seen?.text).toContain("deploy the site");
+		expect(seen?.text).not.toContain(token);
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+
+		// A turn that ends in an error is finished too: nothing to continue.
+		agent.chat = async () => {
+			throw new Error("model down");
+		};
+		expect(await pool.chat("s_turn", "again")).toContain("[error]");
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+	});
+
+	test("a crash after turn-started is continued exactly once; a crash during the continuation does not loop", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_cut",
+			channel: "api",
+			ttSessionId: "session_cut",
+			createdAt: 1,
+			pendingTurn: { id: "t_one", text: "deploy the site", startedAt: 2, attempts: 0 },
+		});
+
+		// First boot after the crash: one continuation, journaled before it runs.
+		const first = fakePool();
+		expect(mod.continueInterruptedTurns(journal, first.pool, [])).toEqual([
+			{ sessionId: "s_cut", turnId: "t_one", attempts: 1, outcome: "continued" },
+		]);
+		expect(first.calls).toHaveLength(1);
+		expect(first.calls[0].sessionId).toBe("s_cut");
+		expect(first.calls[0].continuation).toBe(true);
+		expect(first.calls[0].text).toContain("[resume] continued-after-crash");
+		expect(first.calls[0].text).toContain("deploy the site");
+		expect(journal.read()[0].pendingTurn).toEqual({
+			id: "t_one",
+			text: "deploy the site",
+			startedAt: 2,
+			attempts: 1,
+		});
+
+		// The fake pool never ends the turn: the daemon died again during the
+		// continuation. Second boot: nothing runs, the turn is abandoned.
+		const second = fakePool();
+		expect(mod.continueInterruptedTurns(journal, second.pool, [])).toEqual([
+			{ sessionId: "s_cut", turnId: "t_one", attempts: 2, outcome: "abandoned" },
+		]);
+		expect(second.calls).toHaveLength(0);
+		expect(second.notes).toHaveLength(1);
+		expect(second.notes[0]).toContain("not continued again");
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+
+		// Third boot: nothing pending, nothing to do.
+		const third = fakePool();
+		expect(mod.continueInterruptedTurns(journal, third.pool, [])).toEqual([]);
+		expect(third.calls).toHaveLength(0);
+	});
+
+	test("a session that could not be recreated is skipped", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_gone",
+			channel: "api",
+			ttSessionId: "session_gone",
+			createdAt: 1,
+			pendingTurn: { id: "t_g", text: "x", startedAt: 1, attempts: 0 },
+		});
+		const f = fakePool(["s_gone"]);
+		expect(mod.continueInterruptedTurns(journal, f.pool, [])).toEqual([]);
+		expect(journal.read()[0].pendingTurn!.attempts).toBe(0);
+	});
+
+	test("an unconfirmed write continues from the pre-tool checkpoint with a verify instruction, keeping the journaled turn", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_mid_write",
+			channel: "api",
+			ttSessionId: "session_mid_write",
+			createdAt: 1,
+			inFlight: [{ id: "w1", tool: "write_file", args: { path: "out.txt" }, startedAt: 2 }],
+			pendingTurn: { id: "t_w", text: "write the notes", startedAt: 1, attempts: 0 },
+		});
+		const store = new TimeTravelStore({ dataDir: ttDir });
+		store.save("session_mid_write", [{ role: "user", content: "write the notes" }], {
+			reason: "interval",
+			toolCallCount: 1,
+		});
+
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, store);
+		const settled = await mod.settleInterruptedToolCalls(journal, pool);
+		const agent = pool.getAgent("s_mid_write") as any;
+		let prompt = "";
+		let duringTurn: import("./session-journal").PendingTurn | undefined;
+		const ran = new Promise<void>((resolve) => {
+			agent.chat = async (text: string) => {
+				prompt = text;
+				duringTurn = journal.read()[0].pendingTurn;
+				resolve();
+				return "continued";
+			};
+		});
+		const [r] = mod.continueInterruptedTurns(journal, pool, settled);
+		expect(r.outcome).toBe("continued-from-checkpoint");
+		await ran;
+		expect(prompt).toContain("not replayed");
+		expect(prompt).toContain("check whether they took effect");
+		expect(prompt).toContain("write the notes");
+		// The continuation runs the journaled turn, not a new one.
+		expect(duringTurn).toEqual({ id: "t_w", text: "write the notes", startedAt: 1, attempts: 1 });
+		// The session is at the pre-tool checkpoint, then the settle note.
+		const history = agent.getMessageHistory().slice(1);
+		expect(history[0]).toEqual({ role: "user", content: "write the notes" });
+		expect(history[1].content).toContain("write_file");
+		expect(history[1].content).toContain("not replayed, needs confirmation");
+		// Once the continuation returns, the turn is finished.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+	});
+
+	test("with the flag off, resume and settle leave the pending turn alone and run nothing", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_off",
+			channel: "api",
+			ttSessionId: "session_off",
+			createdAt: 1,
+			pendingTurn: { id: "t_off", text: "deploy the site", startedAt: 1, attempts: 0 },
+		});
+		const pool = newPool(journal);
+		const agent = pool.getAgent("s_off") ?? null;
+		expect(agent).toBeNull();
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		await mod.settleInterruptedToolCalls(journal, pool);
+		expect(journal.read()[0].pendingTurn).toEqual({
+			id: "t_off",
+			text: "deploy the site",
+			startedAt: 1,
+			attempts: 0,
+		});
+		expect(pool.getAgent("s_off")!.getMessageHistory().slice(1)).toEqual([]);
+	});
+
+	test("an oversized pending turn on disk is capped on read, an oversized id drops the turn", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		const entry = (sessionId: string, turn: Record<string, unknown>) => ({
+			sessionId,
+			channel: "api",
+			ttSessionId: `session_${sessionId}`,
+			createdAt: 1,
+			pendingTurn: turn,
+		});
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					entry("s_big_text", { id: "t_big", text: "x".repeat(50_000), startedAt: 1, attempts: 0 }),
+					entry("s_big_id", { id: "t".repeat(300), text: "ok", startedAt: 1, attempts: 0 }),
+				],
+			}),
+		);
+		const [bigText, bigId] = new mod.SessionJournal(journalPath).read();
+		expect(bigText.pendingTurn!.text.length).toBeLessThan(4050);
+		expect(bigText.pendingTurn!.text).toEndWith("... (50000 chars)");
+		expect(bigId.sessionId).toBe("s_big_id");
+		expect(bigId.pendingTurn).toBeUndefined();
+		// The capped text is what the continuation carries.
+		const f = fakePool();
+		mod.continueInterruptedTurns(journal(journalPath), f.pool, []);
+		expect(f.calls[0].text.length).toBeLessThan(5000);
+		expect(f.calls[0].text).toContain("gated command in this automatic continuation");
+	});
+
+	test("a malformed pending turn is dropped, the session entry is kept", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{
+						sessionId: "s_bad_turn",
+						channel: "api",
+						ttSessionId: "session_bad_turn",
+						createdAt: 1,
+						pendingTurn: { id: "t", text: "x", attempts: -1 },
+					},
+				],
+			}),
+		);
+		const [entry] = new mod.SessionJournal(journalPath).read();
+		expect(entry.sessionId).toBe("s_bad_turn");
+		expect(entry.pendingTurn).toBeUndefined();
+	});
+
+	// POSIX only: asserts the child died of SIGKILL; Windows processes have no signals.
+	test.skipIf(process.platform === "win32")(
+		"a SIGKILLed process's running turn is continued once by the next pool",
+		async () => {
+			const script = path.join(path.dirname(journalPath), "crash-turn.ts");
+			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
+			const journalMod = path.join(import.meta.dir, "session-journal.ts");
+			fs.writeFileSync(
+				script,
+				`import { AgentPool } from ${JSON.stringify(poolPath)};
+import { SessionJournal } from ${JSON.stringify(journalMod)};
+const journal = new SessionJournal(${JSON.stringify(journalPath)});
+const pool = new AgentPool({ model: "none", runtime: "ollama", workingDirectory: ${JSON.stringify(root)} }, { journal });
+pool.createSession("s_kill", "telegram");
+// A model call that never returns: the daemon dies mid-turn.
+pool.getAgent("s_kill").chat = () => new Promise(() => {});
+pool.chat("s_kill", "write twenty numbered lines to a file, one per tool call");
+process.kill(process.pid, "SIGKILL");
+`,
+			);
+			const proc = Bun.spawn([process.execPath, script], {
+				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
+				stdout: "ignore",
+				stderr: "ignore",
+			});
+			await proc.exited;
+			expect(proc.signalCode).toBe("SIGKILL");
+
+			const journal = new mod.SessionJournal(journalPath);
+			const [entry] = journal.read();
+			expect(entry.sessionId).toBe("s_kill");
+			expect(entry.pendingTurn?.text).toBe("write twenty numbered lines to a file, one per tool call");
+			expect(entry.pendingTurn?.attempts).toBe(0);
+
+			const pool = newPool(journal);
+			mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+			const settled = await mod.settleInterruptedToolCalls(journal, pool);
+			const prompts: string[] = [];
+			(pool.getAgent("s_kill") as any).chat = async (text: string) => {
+				prompts.push(text);
+				return "continued";
+			};
+			const [r] = mod.continueInterruptedTurns(journal, pool, settled);
+			expect(r.outcome).toBe("continued");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(prompts).toHaveLength(1);
+			expect(prompts[0]).toContain("write twenty numbered lines");
+			expect(journal.read()[0].pendingTurn).toBeUndefined();
+		},
+		60_000,
+	);
+});
