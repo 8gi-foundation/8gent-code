@@ -4,10 +4,14 @@
  * Skills are markdown files with frontmatter that define reusable workflows.
  * They provide specialized prompts and tool configurations for common tasks.
  *
- * Skills load order (later steps skip if name already taken):
- * 1. ~/.8gent/skills/ flat .md files (user overrides all)
- * 2. Project: .claude/skills/<name>/SKILL.md under process.cwd() (repo overrides bundled defaults)
+ * Precedence (first one found wins; a name collision is recorded, see getCollisions()):
+ * 1. Project: <cwd>/.agents/skills/<name>/SKILL.md, then <cwd>/.claude/skills/<name>/SKILL.md
+ * 2. User: ~/.8gent/skills/*.md, then ~/.agents/skills/<name>/SKILL.md, then ~/.claude/skills/<name>/SKILL.md
  * 3. Bundled: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
+ * 4. Learned: ~/.8gent/learned-skills/*.md
+ * Project beats user beats bundled. A collision between two project/user skills is reported
+ * once per process (console.warn) and always available from getCollisions(). A project or
+ * user skill shadowing a bundled or learned one is the expected override and is not reported.
  *
  * Skill format:
  * ---
@@ -275,6 +279,31 @@ function discoverBundledSkillMdFiles(): string[] {
 // Skill Manager
 // ============================================
 
+type SkillTier = "project" | "user" | "bundled" | "learned";
+
+export interface SkillManagerOptions {
+	/** Project root for .agents/skills and .claude/skills. Default process.cwd(). */
+	projectDir?: string;
+	/** Home dir for ~/.agents/skills, ~/.claude/skills, ~/.8gent/skills. Default os.homedir(). */
+	homeDir?: string;
+}
+
+export interface SkillCollision {
+	name: string;
+	/** File that won (higher precedence). */
+	kept: string;
+	/** File that was ignored. */
+	ignored: string;
+}
+
+const warnedCollisions = new Set<string>();
+function warnCollisionOnce(c: SkillCollision): void {
+	const key = `${c.name}\0${c.kept}\0${c.ignored}`;
+	if (warnedCollisions.has(key)) return;
+	warnedCollisions.add(key);
+	console.warn(`[skills] Skill "${c.name}" defined twice: using ${c.kept}, ignoring ${c.ignored}`);
+}
+
 export class SkillManager {
 	private skills: Map<string, Skill> = new Map();
 	/** Normalized lookup key (no leading slash, lowercased) -> canonical skill name */
@@ -287,9 +316,22 @@ export class SkillManager {
 	private capabilityRefs: Map<string, number> = new Map();
 	/** Default audit hook applied when installSkill is called without an override. */
 	private defaultAuditOptions: CapabilityAuditOptions | undefined;
+	private projectDir: string | undefined;
+	private homeDir: string | undefined;
+	/** Where each loaded skill came from, for collision reports. */
+	private skillOrigin: Map<string, { filePath: string; tier: SkillTier }> = new Map();
+	private collisions: SkillCollision[] = [];
 
-	constructor(skillsDirectory?: string) {
-		this.skillsDirectory = skillsDirectory || path.join(os.homedir(), ".8gent", "skills");
+	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
+		this.projectDir = options.projectDir;
+		this.homeDir = options.homeDir;
+		this.skillsDirectory =
+			skillsDirectory || path.join(this.homeDir ?? os.homedir(), ".8gent", "skills");
+	}
+
+	/** Name collisions found by the last loadSkills(): winner kept, loser listed. */
+	getCollisions(): SkillCollision[] {
+		return [...this.collisions];
 	}
 
 	/** Set a default audit sink so install/uninstall write capability events automatically. */
@@ -303,47 +345,48 @@ export class SkillManager {
 	async loadSkills(): Promise<Skill[]> {
 		this.skills.clear();
 		this.aliasToCanonical.clear();
+		this.skillOrigin.clear();
+		this.collisions = [];
 
-		// Ensure directory exists
+		const home = this.homeDir ?? os.homedir();
+		const project = this.projectDir ?? process.cwd();
+		const seenSkillPaths = new Set<string>();
+		const ingestNested = (root: string, tier: SkillTier) => {
+			for (const filePath of collectNestedSkillMdPaths(root)) {
+				// De-duped so a project that equals home is not ingested twice.
+				if (seenSkillPaths.has(filePath)) continue;
+				seenSkillPaths.add(filePath);
+				this.tryIngestSkillFile(filePath, tier);
+			}
+		};
+
+		// 1. Project (repo-local). .agents/skills is the cross-tool convention, .claude/skills the Claude one.
+		ingestNested(path.join(project, ".agents", "skills"), "project");
+		ingestNested(path.join(project, ".claude", "skills"), "project");
+
+		// 2. User: ~/.8gent/skills flat .md, then ~/.agents/skills, then ~/.claude/skills.
 		if (!fs.existsSync(this.skillsDirectory)) {
 			fs.mkdirSync(this.skillsDirectory, { recursive: true });
 			// Create example skill
 			this.createExampleSkill();
 		}
-
-		const files = fs.readdirSync(this.skillsDirectory);
-		const skillFiles = files.filter((f) => f.endsWith(".md"));
-
+		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
 		for (const file of skillFiles) {
-			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), false);
+			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), "user");
 		}
+		ingestNested(path.join(home, ".agents", "skills"), "user");
+		ingestNested(path.join(home, ".claude", "skills"), "user");
 
-		// Discover .claude/skills from BOTH the project (repo-local override) and the
-		// user's GLOBAL ~/.claude/skills. The global root was missing, so the daemon
-		// brain could not see James's local Claude skills - only repo-bundled ones.
-		// De-duped so a project that equals home is not ingested twice.
-		const claudeSkillsRoots = [
-			path.join(process.cwd(), ".claude", "skills"),
-			path.join(os.homedir(), ".claude", "skills"),
-		];
-		const seenSkillPaths = new Set<string>();
-		for (const root of claudeSkillsRoots) {
-			for (const filePath of collectNestedSkillMdPaths(root)) {
-				if (seenSkillPaths.has(filePath)) continue;
-				seenSkillPaths.add(filePath);
-				this.tryIngestSkillFile(filePath, true);
-			}
-		}
-
+		// 3. Bundled
 		for (const filePath of discoverBundledSkillMdFiles()) {
-			this.tryIngestSkillFile(filePath, true);
+			this.tryIngestSkillFile(filePath, "bundled");
 		}
 
 		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
 		if (fs.existsSync(LEARNED_DIR)) {
 			const learnedFiles = fs.readdirSync(LEARNED_DIR).filter((f) => f.endsWith(".md"));
 			for (const file of learnedFiles) {
-				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), true);
+				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), "learned");
 			}
 		}
 
@@ -405,13 +448,28 @@ export class SkillManager {
 		};
 	}
 
-	private tryIngestSkillFile(filePath: string, skipIfExists: boolean): void {
+	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
 		try {
 			const content = fs.readFileSync(filePath, "utf-8");
 			const { frontmatter, body } = parseFrontmatter(content);
-			if (skipIfExists && this.skills.has(frontmatter.name)) return;
+			const winner = this.skillOrigin.get(frontmatter.name);
+			if (winner) {
+				// Shadowing a bundled/learned skill is the expected override; two
+				// project/user skills with one name is a real collision: report it.
+				if (tier !== "bundled" && tier !== "learned") {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: winner.filePath,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					warnCollisionOnce(c);
+				}
+				return;
+			}
 			const skill = this.buildSkillFromParsed(filePath, frontmatter, body);
 			this.skills.set(skill.name, skill);
+			this.skillOrigin.set(skill.name, { filePath, tier });
 			this.registerLookupKeys(skill.name, frontmatter);
 		} catch (err) {
 			console.warn(`[skills] Failed to load ${filePath}: ${err}`);
