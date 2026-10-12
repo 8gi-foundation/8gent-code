@@ -7,7 +7,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -24,6 +24,8 @@ import {
 } from "./system-one-gate";
 
 afterAll(cleanupTempDirs);
+
+type Env = Record<string, string | undefined>;
 
 class AlwaysDangerous implements DecideBackend {
 	readonly name = "stub";
@@ -61,7 +63,7 @@ const MSG =
 let ws: string;
 let home: string;
 let outside: string;
-let env: NodeJS.ProcessEnv;
+let env: Env;
 let judge: AlwaysDangerous;
 const saved: Record<string, string | undefined> = {};
 const KEYS = [SYSTEM_ONE_FLAG, SYSTEM_ONE_ALLOWLIST_FLAG, "EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT"];
@@ -94,8 +96,8 @@ function botEnv(base = "http://127.0.0.1:61686", extra = "") {
 	);
 }
 /** A clean environment: only what a shell needs, HOME the throwaway home. */
-function cleanEnv(): NodeJS.ProcessEnv {
-	const e: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: home, EIGHT_HEADLESS: "1" };
+function cleanEnv(): Env {
+	const e = { PATH: process.env.PATH, HOME: home, EIGHT_HEADLESS: "1" };
 	return e;
 }
 
@@ -129,8 +131,8 @@ afterEach(() => {
 	Reflect.deleteProperty(process.env, SYSTEM_ONE_FLAG);
 });
 
-const lane = (c: string, e: NodeJS.ProcessEnv = env) => tgSendFromEnv(c, ws, e);
-const ok = (c: string, e?: NodeJS.ProcessEnv) => lane(c, e).ok;
+const lane = (c: string, e: Env = env) => tgSendFromEnv(c, ws, e);
+const ok = (c: string, e?: Env) => lane(c, e).ok;
 /** Write `body` as .tmp/s.sh and ask the lane about `sh .tmp/s.sh`. */
 const script = (body: string) => {
 	put(".tmp/s.sh", body);
@@ -428,43 +430,172 @@ describe("tgSendFromEnv refuses deterministically", () => {
 	});
 });
 
+/** A loopback Bot API stand-in that records every request. */
+function stub() {
+	const calls: Array<{ path: string; chat: string | null; text: string | null }> = [];
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(req) {
+			const url = new URL(req.url);
+			const form = new URLSearchParams(await req.text());
+			calls.push({ path: url.pathname, chat: form.get("chat_id"), text: form.get("text") });
+			return Response.json({ ok: true, result: { message_id: 1 } });
+		},
+	});
+	return { calls, server };
+}
+/** Run `text` the way both executors do: `/bin/sh -c`, in the workspace, with the checked env. */
+async function shC(text: string, e: Env = env) {
+	const run = Bun.spawn(["/bin/sh", "-c", text], {
+		cwd: ws,
+		env: e,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const out = await new Response(run.stdout).text();
+	const err = await new Response(run.stderr).text();
+	return { code: await run.exited, out, err };
+}
+const OPT = { canRunInstead: true };
+
 describe("the allowed script does what the lane says (real sh, real loopback server)", () => {
 	test("exactly one sendMessage to the stated chat, token only in the path, text from the file", async () => {
-		const calls: Array<{ path: string; chat: string | null; text: string | null }> = [];
-		const server = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			async fetch(req) {
-				const url = new URL(req.url);
-				const form = new URLSearchParams(await req.text());
-				calls.push({ path: url.pathname, chat: form.get("chat_id"), text: form.get("text") });
-				return Response.json({ ok: true, result: { message_id: 1 } });
-			},
-		});
+		const { calls, server } = stub();
 		try {
 			botEnv(`http://127.0.0.1:${server.port}`);
-			expect(ok(PILOT_CMD)).toBe(true);
-			chmodSync(join(ws, ".tmp/send.sh"), 0o644);
-			const run = Bun.spawn(["sh", ".tmp/send.sh"], {
-				cwd: ws,
-				env,
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const out = await new Response(run.stdout).text();
-			expect(await run.exited).toBe(0);
+			const r = lane(PILOT_CMD);
+			expect(r.ok).toBe(true);
+			const res = await shC((r as { body: string }).body);
+			expect(res.code).toBe(0);
 			expect(calls).toEqual([{ path: `/bot${TOKEN}/sendMessage`, chat: CHAT, text: MSG }]);
-			expect(out).not.toContain(TOKEN);
+			expect(res.out + res.err).not.toContain(TOKEN);
 		} finally {
 			server.stop(true);
 		}
 	});
 });
 
-describe("systemOneGate with the lane", () => {
-	test("runs the pilot's command without asking the judge", async () => {
+describe("8SO hold on #4102", () => {
+	test("(a) the gate hands back the checked bytes; a script swapped after the check never runs", async () => {
+		const { calls, server } = stub();
+		try {
+			botEnv(`http://127.0.0.1:${server.port}`);
+			const g = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
+			expect(g.run).toBe(true);
+			expect(g.runInstead).toBe(PILOT_SCRIPT);
+			// A write_file racing the run_command (same SDK step) replaces the script.
+			const pwned = join(ws, "pwned");
+			writeFileSync(join(ws, ".tmp/send.sh"), `touch ${pwned}\n`);
+			const res = await shC(g.runInstead as string);
+			expect(res.code).toBe(0);
+			expect(existsSync(pwned)).toBe(false);
+			expect(calls.length).toBe(1);
+			// Running the path, as before this fix, would have run the swapped file.
+			await shC("sh .tmp/send.sh");
+			expect(existsSync(pwned)).toBe(true);
+		} finally {
+			server.stop(true);
+		}
+	});
+	test("(a) a caller that cannot run the checked bytes never gets the lane's allow", async () => {
 		const r = await systemOneGate(PILOT_CMD, env, ws);
+		expect(r.guard?.backend).not.toBe("allowlist");
+		expect(r.runInstead).toBeUndefined();
+		const off = await systemOneGate(PILOT_CMD, env, ws, undefined, { canRunInstead: false });
+		expect(off.guard?.backend).not.toBe("allowlist");
+	});
+	test("(a) a hardlinked script or text@ file (nlink 2) is not a workspace file", () => {
+		linkSync(join(outside, "send.sh"), join(ws, ".tmp/hard.sh"));
+		expect(ok("sh .tmp/hard.sh")).toBe(false);
+		writeFileSync(join(home, "secret.txt"), "id_rsa contents");
+		linkSync(join(home, "secret.txt"), join(ws, ".tmp/hard.txt"));
+		const r = script(
+			`. ~/.config/tg-notify/bot.env\n${CURL.replace(".tmp/msg.txt", ".tmp/hard.txt")}`,
+		);
+		expect(r.ok).toBe(false);
+		expect((r as { refuse?: string }).refuse).toBeUndefined();
+	});
+	test("(b) a bot.env line led by NBSP or BOM runs as a command in sh (no assignment), and the lane refuses it", async () => {
+		const pwned = join(ws, "pwned");
+		for (const lead of ["\u00a0", "\ufeff"]) {
+			put(
+				".config/tg-notify/bot.env",
+				`TELEGRAM_API_BASE=http://127.0.0.1:1\nTELEGRAM_BOT_TOKEN=${TOKEN}\n${lead}touch ${pwned}\n`,
+				home,
+			);
+			expect(ok(PILOT_CMD), JSON.stringify(lead)).toBe(false);
+		}
+		// The bytes are live: sh does not see an assignment there, it tries to run the line as a command.
+		const res = await shC(". ~/.config/tg-notify/bot.env");
+		expect(res.err).toMatch(/not found|command/i);
+	});
+	test("(b) other bytes outside printable ASCII, tab and newline in bot.env (CR, NUL, UTF-8)", () => {
+		for (const bad of ["\r", "\u0000", "\u00e9", "\u000b"]) {
+			put(
+				".config/tg-notify/bot.env",
+				`TELEGRAM_API_BASE=http://127.0.0.1:1${bad}\nTELEGRAM_BOT_TOKEN=${TOKEN}\n`,
+				home,
+			);
+			expect(ok(PILOT_CMD), JSON.stringify(bad)).toBe(false);
+		}
+	});
+	test("(b) leading spaces or tabs before an assignment are refused (no trim), blank and comment lines pass", () => {
+		put(
+			".config/tg-notify/bot.env",
+			` TELEGRAM_API_BASE=http://127.0.0.1:1\nTELEGRAM_BOT_TOKEN=${TOKEN}\n`,
+			home,
+		);
+		expect(ok(PILOT_CMD)).toBe(false);
+		put(
+			".config/tg-notify/bot.env",
+			`\t \n  # note\nTELEGRAM_API_BASE=http://127.0.0.1:1\nTELEGRAM_BOT_TOKEN=${TOKEN}\n`,
+			home,
+		);
+		expect(ok(PILOT_CMD)).toBe(true);
+	});
+	test("(c) SHELLOPTS=xtrace with PS4 runs code and prints the token; the lane refuses it and its siblings", async () => {
+		const traced = { ...env, SHELLOPTS: "xtrace", PS4: "$(echo PS4RAN)+ " };
+		expect(ok(PILOT_CMD, traced)).toBe(false);
+		for (const extra of [
+			{ SHELLOPTS: "xtrace" },
+			{ BASHOPTS: "extglob" },
+			{ PS4: "+ " },
+			{ IFS: "/" },
+		])
+			expect(ok(PILOT_CMD, { ...env, ...extra }), JSON.stringify(extra)).toBe(false);
+		// What it would have done: bash as sh imports SHELLOPTS, runs PS4, and traces the URL.
+		const { server } = stub();
+		try {
+			botEnv(`http://127.0.0.1:${server.port}`);
+			const res = await shC(PILOT_SCRIPT, traced);
+			expect(res.err).toContain("PS4RAN+ ");
+			expect(res.err).toContain(TOKEN);
+		} finally {
+			server.stop(true);
+		}
+	});
+	test("(d) PATH with '.', an empty entry, a relative entry or a workspace directory is refused", () => {
+		const base = process.env.PATH ?? "/usr/bin:/bin";
+		for (const p of [
+			`.:${base}`,
+			`${base}:`,
+			`:${base}`,
+			`bin:${base}`,
+			`${ws}/bin:${base}`,
+			`${ws}/escape/../bin:${base}`,
+			"",
+		])
+			expect(ok(PILOT_CMD, { ...env, PATH: p }), p).toBe(false);
+		expect(ok(PILOT_CMD, { ...env, PATH: "/usr/bin:/bin" })).toBe(true);
+	});
+});
+
+describe("systemOneGate with the lane", () => {
+	test("runs the pilot's command without asking the judge, handing back the checked bytes", async () => {
+		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
 		expect(r.run).toBe(true);
+		expect(r.runInstead).toBe(PILOT_SCRIPT);
 		expect(r.guard?.backend).toBe("allowlist");
 		expect(r.guard?.reason).toContain("loopback Bot API");
 		expect(judge.asks).toBe(0);
@@ -479,15 +610,15 @@ describe("systemOneGate with the lane", () => {
 		expect(r.message).not.toContain(TOKEN);
 		expect(judge.asks).toBe(0);
 	});
-	test("a real Telegram host in bot.env is not the lane's: the judge decides (and blocks here)", async () => {
+	test("a real Telegram host in bot.env is not the lane's: the judge decides", async () => {
 		botEnv("https://api.telegram.org");
-		const r = await systemOneGate(PILOT_CMD, { ...env, [SYSTEM_ONE_FLAG]: undefined }, ws);
+		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
 		expect(r.guard?.backend).not.toBe("allowlist");
-		expect(r.guard?.reason ?? "").not.toContain("loopback Bot API");
+		expect(r.runInstead).toBeUndefined();
 	});
 	test("strict mode (Guarded) never allows through the lane, but still refuses a token", async () => {
 		const strict = { ...env, [SYSTEM_ONE_FLAG]: "1" };
-		const r = await systemOneGate(PILOT_CMD, strict, ws);
+		const r = await systemOneGate(PILOT_CMD, strict, ws, undefined, OPT);
 		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
 		const t = await systemOneGate(`curl -s http://127.0.0.1:1/bot${TOKEN}/getMe`, strict, ws);
@@ -495,11 +626,17 @@ describe("systemOneGate with the lane", () => {
 		expect(t.guard?.reason).toBe(TG_TOKEN_IN_ARGV_REFUSAL);
 	});
 	test("EIGHT_S1_ALLOWLIST=0 turns the lane off with the rest of the allowlist", async () => {
-		const r = await systemOneGate(PILOT_CMD, { ...env, [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" }, ws);
+		const r = await systemOneGate(
+			PILOT_CMD,
+			{ ...env, [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" },
+			ws,
+			undefined,
+			OPT,
+		);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 	test("without a cwd the lane has no opinion", async () => {
-		const r = await systemOneGate(PILOT_CMD, env);
+		const r = await systemOneGate(PILOT_CMD, env, undefined, undefined, OPT);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

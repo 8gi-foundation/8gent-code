@@ -237,6 +237,12 @@ export interface SystemOneGateResult {
 	thresholds?: SystemOneThresholds;
 	/** Set when the verdict was escalate: true approved, false declined, null no human. */
 	humanApproved?: boolean | null;
+	/**
+	 * Set only for a caller that passed `canRunInstead`: the exact text to run with `/bin/sh -c` in
+	 * place of `command`, because what was checked is these bytes, not the file the command names
+	 * (s1-tg-send.ts, 8SO on #4102). A caller given this must run it, never `command`.
+	 */
+	runInstead?: string;
 }
 
 /** Ask a human. true approve, false decline, null when no human can be asked. */
@@ -527,6 +533,7 @@ export async function systemOneGate(
 	env: Record<string, string | undefined> = process.env,
 	cwd?: string,
 	created?: CreatedFiles,
+	opts: { canRunInstead?: boolean } = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
@@ -553,9 +560,12 @@ export async function systemOneGate(
 				const shown = redactBotToken(command, env);
 				return { run: false, guard, message: blockMessage(guard, "unknown", tg.refuse, shown) };
 			}
-			if (tg.ok && mode === "default") {
+			// Allowed only for a caller that will run the checked body (runInstead); for any other
+			// caller the lane has no opinion and the judge decides.
+			if (tg.ok && mode === "default" && opts.canRunInstead === true) {
 				return {
 					run: true,
+					runInstead: tg.body,
 					guard: {
 						verdict: "allow",
 						pYes: Number.NaN,

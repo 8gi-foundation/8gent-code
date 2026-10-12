@@ -1373,7 +1373,10 @@ const backgroundOutput = tool({
  * Shared by the shell runner and the argv runner, so a git or gh tool is
  * judged exactly as the same command typed into run_command would be.
  */
-async function commandRefusal(command: string): Promise<string | null> {
+async function commandRefusal(
+	command: string,
+	out?: { runInstead?: string },
+): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
 	// Judged in the tool's working directory, so relative paths and `cd` resolve as
@@ -1396,13 +1399,16 @@ async function commandRefusal(command: string): Promise<string | null> {
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
+	// canRunInstead only when the caller passed `out` and will run out.runInstead (#4102).
 	const systemOne = await systemOneGate(
 		command,
 		systemOneEnvFor(mode),
 		ctx.workingDirectory,
 		ctx.createdFiles,
+		{ canRunInstead: out !== undefined },
 	);
 	if (!systemOne.run) return systemOne.message as string;
+	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
 
 	if (
 		permissionCheck === "ask" &&
@@ -1431,7 +1437,8 @@ async function runShellCommand(command: string): Promise<string> {
 	const ctx = getToolContext();
 	const hookManager = getHookManager();
 
-	const refusal = await commandRefusal(command);
+	const checked: { runInstead?: string } = {};
+	const refusal = await commandRefusal(command, checked);
 	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
@@ -1447,6 +1454,8 @@ async function runShellCommand(command: string): Promise<string> {
 	if (command.includes("npm init") && !command.includes("-y")) {
 		finalCommand = `${command} -y`;
 	}
+	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
+	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;

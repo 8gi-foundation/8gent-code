@@ -31,8 +31,19 @@
  *   - its TELEGRAM_API_BASE is `http(s)://` 127.0.0.1, localhost or [::1] with an optional port and no
  *     path, and TELEGRAM_BOT_TOKEN is set. The token therefore goes only to this machine. On a real
  *     machine (api.telegram.org) the lane has no opinion and the judge, then the person, decide;
- *   - no proxy variable and no curlrc unless `-q` is first (curlEnvRefusal), no BASH_ENV or ENV, no
- *     exported shell function (BASH_FUNC_*): nothing can run before or instead of curl.
+ *   - no proxy variable and no curlrc unless `-q` is first (curlEnvRefusal), no BASH_ENV, ENV,
+ *     SHELLOPTS, BASHOPTS, PS4 or IFS, no exported shell function (BASH_FUNC_*): nothing can run
+ *     before or instead of curl, and xtrace cannot print the expanded URL (8SO, #4102);
+ *   - every PATH entry is absolute and resolves outside the workspace (pathOutsideWorkspace, shared
+ *     with the deck-render lane): sh and curl cannot be found in the workspace;
+ *   - the script and the text@ file each have one link (nlink 1): a hardlink to a file outside the
+ *     workspace (a $HOME secret) is not a workspace file.
+ *
+ * The caller runs the checked bytes, not the path (8SO, #4102): an ok carries `body`, and the gate
+ * allows only when its caller opted in (`canRunInstead`) and hands back `runInstead`, which the
+ * executor runs with `/bin/sh -c` in place of `sh FILE`. A write_file racing this run_command (the
+ * SDK starts same-step tool calls together) can change the file, never what runs. A caller that
+ * cannot run the body (a background shell spawn) never gets this lane's allow.
  *
  * Deterministic refusals (a block with the way forward, no judge), in any System One mode:
  *   - TG_TOKEN_IN_ARGV_REFUSAL: a curl command, or the script above, with a Bot API token written
@@ -40,8 +51,12 @@
  *     process list, the transcript and the session log; the model is told to source the env file;
  *   - CURL_L_REFUSAL (from s1-curl-loopback.ts): the script's curl uses -L/--location.
  *
- * Known limits, on purpose: only the sendMessage method; TOCTOU (out of scope, accepted by 8SO for the
- * sibling lanes): the script, the text file or bot.env can change between this check and the spawn.
+ * What leaves the box: text@ reads only a workspace file and sends it only to the loopback base in
+ * bot.env. Accepted residuals, on purpose (8SO, #4102): a local port that forwards off the machine
+ * (an ssh -L or a proxy listening on 127.0.0.1) carries the message and the token wherever it goes;
+ * the text file and bot.env can still change between this check and the spawn (TOCTOU, as for the
+ * sibling lanes), and either change can only reach that same loopback base. Only the sendMessage
+ * method.
  *
  * Synchronous, never throws.
  */
@@ -52,11 +67,15 @@ import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import { CURL_L_REFUSAL } from "./s1-curl-loopback";
+import { pathOutsideWorkspace } from "./s1-deck-render";
 import { protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
 
-export type TgSend = { ok: true; reason: string } | { ok: false; refuse?: string };
+type Env = Record<string, string | undefined>;
+
+/** `body` is the exact script text that was checked: the caller runs it in place of `sh FILE`. */
+export type TgSend = { ok: true; reason: string; body: string } | { ok: false; refuse?: string };
 const NO: TgSend = { ok: false };
 
 /** Told to the model when a Bot API token is written into a command or the send script. */
@@ -76,6 +95,8 @@ const API_BASE = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?\
 const UNQUOTED = /^[A-Za-z0-9._/+,=@:%-]$/;
 const NUM = /^\d{1,4}(\.\d{1,3})?$/;
 const CHAT = /^chat_id=-?\d{1,20}$/;
+/** Set in the environment, any of these runs code, changes parsing, or traces the token (8SO, #4102). */
+const SHELL_ENV = new Set(["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "IFS"]);
 
 /** Sentinels for the only expansions allowed, inside double quotes. */
 const BASE = "\u0001B";
@@ -102,21 +123,25 @@ function workspaceFile(p: string, root: string): { abs: string; rel: string } | 
 	if (/\.env$/i.test(path.basename(f.rel))) return null;
 	if (symlinkBelow(root, f.lexical)) return null;
 	const st = lstatSync(f.abs, { throwIfNoEntry: false });
-	if (!st || !st.isFile() || st.size > MAX_BYTES) return null;
+	// nlink 1: a hardlink to a file outside the workspace passes every path check above (8SO, #4102).
+	if (!st || !st.isFile() || st.nlink !== 1 || st.size > MAX_BYTES) return null;
 	return { abs: f.abs, rel: f.rel };
 }
 
 /** bot.env parsed, when it is plain TELEGRAM_* assignments only; else null. */
-function readBotEnv(env: NodeJS.ProcessEnv): Map<string, string> | null {
+function readBotEnv(env: Env): Map<string, string> | null {
 	const home = env.HOME;
 	if (!home || !path.isAbsolute(home)) return null;
 	const file = path.join(home, ".config", "tg-notify", "bot.env");
 	const st = lstatSync(file, { throwIfNoEntry: false });
 	if (!st || !st.isFile() || st.size > MAX_BYTES) return null;
+	const text = readFileSync(file, "utf8");
+	// Printable ASCII, tab and newline only, and no trim(): JS trim() strips U+00A0 and U+FEFF, which
+	// sh does not, so a line led by one would pass here and run as a command there (8SO, #4102).
+	if (/[^\x20-\x7e\n\t]/.test(text)) return null;
 	const vars = new Map<string, string>();
-	for (const raw of readFileSync(file, "utf8").split("\n")) {
-		const line = raw.trim();
-		if (line === "" || line.startsWith("#")) continue;
+	for (const line of text.split("\n")) {
+		if (/^[ \t]*$/.test(line) || /^[ \t]*#/.test(line)) continue;
 		const m = ENV_LINE.exec(line);
 		if (!m) return null;
 		vars.set(m[1], m[2].replace(/^"|"$/g, ""));
@@ -125,7 +150,7 @@ function readBotEnv(env: NodeJS.ProcessEnv): Map<string, string> | null {
 }
 
 /** True when `text` carries a Bot API token: the generic shape, or bot.env's own token. */
-function hasToken(text: string, env: NodeJS.ProcessEnv): boolean {
+function hasToken(text: string, env: Env): boolean {
 	if (TOKEN_SHAPE.test(text)) return true;
 	try {
 		const tok = readBotEnv(env)?.get("TELEGRAM_BOT_TOKEN");
@@ -136,7 +161,7 @@ function hasToken(text: string, env: NodeJS.ProcessEnv): boolean {
 }
 
 /** `text` with every Bot API token replaced by `<token>`, so a refusal never echoes the secret. */
-export function redactBotToken(text: string, env: NodeJS.ProcessEnv = process.env): string {
+export function redactBotToken(text: string, env: Env = process.env): string {
 	let out = text.replace(new RegExp(TOKEN_SHAPE.source, "g"), "<token>");
 	try {
 		const tok = readBotEnv(env)?.get("TELEGRAM_BOT_TOKEN");
@@ -207,14 +232,14 @@ function scriptLines(body: string): [string, string] | null {
 function curlLine(
 	line: string,
 	root: string,
-	env: NodeJS.ProcessEnv,
+	env: Env,
 ): { ok: true; rel: string | null } | { refuse: string } | null {
 	const words = splitWords(line);
 	if (!words || words.length < 2 || words.length > 20 || words[0] !== "curl") return null;
 	let i = 1;
 	const qFirst = words[1] === "-q" || words[1] === "--disable";
 	if (qFirst) i = 2;
-	if (curlEnvRefusal(qFirst, env) !== null) return null;
+	if (curlEnvRefusal(qFirst, env as NodeJS.ProcessEnv) !== null) return null;
 	let url = 0;
 	let chat = 0;
 	let text = 0;
@@ -269,7 +294,7 @@ function curlLine(
 export function tgSendFromEnv(
 	command: string,
 	cwd: string | undefined,
-	env: NodeJS.ProcessEnv = process.env,
+	env: Env = process.env,
 ): TgSend {
 	try {
 		const text = command.trim();
@@ -286,9 +311,10 @@ export function tgSendFromEnv(
 		if (!lines || !SOURCE.test(lines[0]) || !/^curl\s/.test(lines[1])) return NO;
 		if (hasToken(body, env)) return { ok: false, refuse: TG_TOKEN_IN_ARGV_REFUSAL };
 		for (const k of Object.keys(env)) {
-			if ((k === "BASH_ENV" || k === "ENV") && env[k]) return NO;
+			if (SHELL_ENV.has(k) && env[k] !== undefined) return NO;
 			if (k.startsWith("BASH_FUNC_")) return NO;
 		}
+		if (!pathOutsideWorkspace(root, env.PATH ?? process.env.PATH ?? "")) return NO;
 		const vars = readBotEnv(env);
 		if (!vars || !vars.get("TELEGRAM_BOT_TOKEN")) return NO;
 		const base = API_BASE.exec(vars.get("TELEGRAM_API_BASE") ?? "");
@@ -299,6 +325,7 @@ export function tgSendFromEnv(
 		if ("refuse" in c) return { ok: false, refuse: c.refuse };
 		return {
 			ok: true,
+			body,
 			reason: `tg-notify sendMessage from ${script.rel} to the loopback Bot API in bot.env (${vars.get("TELEGRAM_API_BASE")}), token read from the env file${c.rel ? `, text from ${c.rel}` : ""}`,
 		};
 	} catch {
