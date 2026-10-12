@@ -19,6 +19,7 @@ import {
 	LOCAL_SERVER_CURL_NOTE,
 	PROFILE_MIN_VERSION,
 	_setHostSandboxedForTest,
+	_setKillForTest,
 	_setLaunchWaitForTest,
 	_setProfileHomeForTest,
 	_setResolverForTest,
@@ -1926,6 +1927,56 @@ describeNotWin("a launch that cannot run the profile never stays running (#4103)
 			groupGone = true;
 		}
 		expect(groupGone).toBe(true);
+	}, 10_000);
+
+	test("a group already gone (ESRCH) never gets a bare-pid signal, which could hit a reused pid (8SO)", async () => {
+		const calls: [number, string][] = [];
+		_setKillForTest((pid, sig) => {
+			calls.push([pid, sig]);
+			const e = new Error("kill ESRCH") as NodeJS.ErrnoException;
+			e.code = "ESRCH";
+			throw e;
+		});
+		try {
+			_setSpawnForTest(() => ({ exited: new Promise<string>(() => {}), pid: 424242, detached: true }));
+			_setLaunchWaitForTest(100);
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(/published no port/);
+			expect(calls).toEqual([
+				[-424242, "SIGTERM"],
+				[-424242, "SIGKILL"],
+			]);
+		} finally {
+			_setKillForTest(null);
+		}
+	}, 10_000);
+
+	test("EPERM on the group falls back to the pid itself", async () => {
+		const calls: [number, string][] = [];
+		_setKillForTest((pid, sig) => {
+			calls.push([pid, sig]);
+			if (pid < 0) {
+				const e = new Error("kill EPERM") as NodeJS.ErrnoException;
+				e.code = "EPERM";
+				throw e;
+			}
+		});
+		try {
+			_setSpawnForTest(() => ({ exited: new Promise<string>(() => {}), pid: 424243, detached: true }));
+			_setLaunchWaitForTest(100);
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(/published no port/);
+			expect(calls).toEqual([
+				[-424243, "SIGTERM"],
+				[424243, "SIGTERM"],
+				[-424243, "SIGKILL"],
+				[424243, "SIGKILL"],
+			]);
+		} finally {
+			_setKillForTest(null);
+		}
 	}, 10_000);
 
 	test("a child that writes the default token instead of the profile's is stopped at once, no curl hint", async () => {

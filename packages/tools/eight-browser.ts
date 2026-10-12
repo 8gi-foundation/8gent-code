@@ -737,6 +737,18 @@ const launches = new Map<string, Promise<void>>();
 
 const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 
+let killFn: (pid: number, sig: NodeJS.Signals) => void = (pid, sig) => {
+	process.kill(pid, sig);
+};
+/** Test seam: replace process.kill for stopChild. null restores it. Never set outside tests. */
+export function _setKillForTest(fn: ((pid: number, sig: NodeJS.Signals) => void) | null): void {
+	killFn =
+		fn ??
+		((pid, sig) => {
+			process.kill(pid, sig);
+		});
+}
+
 /** Stop a launched child that did not publish a port: SIGTERM to its process group (it was started
  *  detached), then SIGKILL after STOP_GRACE_MS. Returns the clause the error carries. */
 async function stopChild(
@@ -746,12 +758,15 @@ async function stopChild(
 	const pid = handle.pid;
 	if (!pid) return "";
 	const group = handle.detached === true && process.platform !== "win32";
+	// ESRCH on the group means the leader exited and was reaped: a bare-pid signal then could only
+	// reach a reused pid, so the pid itself is tried only on EPERM (8SO review of #4104).
 	const send = (sig: NodeJS.Signals) => {
 		try {
-			process.kill(group ? -pid : pid, sig);
-		} catch {
+			killFn(group ? -pid : pid, sig);
+		} catch (e) {
+			if (!group || (e as NodeJS.ErrnoException).code !== "EPERM") return;
 			try {
-				process.kill(pid, sig);
+				killFn(pid, sig);
 			} catch {
 				// already gone
 			}
