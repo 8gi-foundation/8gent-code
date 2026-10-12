@@ -33,6 +33,8 @@ export interface EightAgentConfig {
 	permission?: import("../permissions/permission-mode").PermissionModeHolder;
 	/** Files this agent created (#3177), shared with its ToolExecutor so both tool paths record into one place. */
 	createdFiles?: import("../permissions/s1-created-files").CreatedFiles;
+	/** Edit scope of this agent; the media write tools refuse outside it. */
+	allowedPaths?: string[];
 	/** Tools to use (default: all agentTools) */
 	tools?: ToolSet;
 	/** Max output tokens per step (default: 4096 for local, unlimited for cloud) */
@@ -175,6 +177,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		runtime: config.runtime ?? getRuntimeParams(),
 		permission: config.permission,
 		createdFiles: config.createdFiles,
+		allowedPaths: config.allowedPaths,
 	};
 
 	const model = createModel(config.provider);

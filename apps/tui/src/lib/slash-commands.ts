@@ -32,6 +32,7 @@ export type SlashCommand =
 	| "history"
 	| "continue"
 	| "compact"
+	| "update"
 	| "chat"
 	| "agent"
 	| "github"
@@ -337,6 +338,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["cont", "last"],
 		description: "Continue most recent session automatically",
 		usage: "/continue",
+	},
+	{
+		name: "update",
+		aliases: ["upgrade"],
+		description: "Update 8gent, then reopen this session on the new version",
+		usage: "/update [--force]",
 	},
 	{
 		name: "compact",

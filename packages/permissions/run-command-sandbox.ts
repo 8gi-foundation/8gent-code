@@ -65,6 +65,7 @@ export const PROTECTED_DATA_FILES = [
 	".env",
 	"keys.env",
 	"keybindings.json",
+	"update-resume.json",
 ] as const;
 
 /** Directories whose whole tree is protected, relative to a data dir. */

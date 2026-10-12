@@ -36,7 +36,7 @@ import {
 	wrapRunCommand,
 	wrapRunCommandArgv,
 } from "../permissions/run-command-sandbox";
-import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
@@ -65,6 +65,8 @@ export interface ToolContext {
 	permission?: PermissionModeHolder;
 	/** Files this agent created, shared with its ToolExecutor (#3177); undefined: none recorded. */
 	createdFiles?: CreatedFiles;
+	/** Edit scope of a scoped agent; the media write tools refuse outside it. */
+	allowedPaths?: string[];
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -904,6 +906,35 @@ const makePdfTool = tool({
 					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
 					hint: "Provide exactly one of markdown/html/htmlPath/mdPath. Ensure ~/.8gent/bin/make-pdf is installed.",
 				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+const renderVideoDeckTool = tool({
+	description:
+		"Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+	inputSchema: z.object({
+		spec: z.record(z.string(), z.unknown()).describe("The deck spec"),
+		out: z.string().optional().describe("Output .mp4 path inside the working directory (default deck.mp4)"),
+	}),
+	execute: async ({ spec, out }) => {
+		try {
+			const { resolveDeckOut } = await import("../eight/tools");
+			const wd = getToolContext().workingDirectory;
+			const target = resolveDeckOut(out, wd);
+			const ctx = getToolContext();
+			const scoped = editScopeViolation("render_video_deck", { out: out ?? "deck.mp4" }, wd, ctx.allowedPaths);
+			if (scoped) return scoped;
+			const blocked = gateWrite("render_video_deck", { path: target });
+			if (blocked) return blocked;
+			const { renderVideoDeck } = await import("../tools/video-deck");
+			return JSON.stringify(await renderVideoDeck({ spec, out: target, cwd: wd }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{ error: `render_video_deck failed: ${err instanceof Error ? err.message : String(err)}` },
 				null,
 				2,
 			);
@@ -3327,6 +3358,7 @@ export const agentTools = bindToolContext({
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
 	speak: speakTool,
+	render_video_deck: renderVideoDeckTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

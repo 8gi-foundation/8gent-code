@@ -235,6 +235,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"post_message",
 	"spawn_agent",
 	"speak",
+	"render_video_deck",
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
@@ -430,6 +431,13 @@ export function confineWrite(named: string, workingDirectory: string): string {
 	const st = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
 	return target;
+}
+
+/** Where render_video_deck may write: a .mp4 inside the working directory, no symlinks. */
+export function resolveDeckOut(out: unknown, workingDirectory: string): string {
+	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
+	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
+	return confineWrite(named, workingDirectory);
 }
 
 /** A path a tool may read: inside the working directory after following every link. */
@@ -1254,6 +1262,22 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "render_video_deck",
+					description:
+						"[MEDIA] Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
+					parameters: {
+						type: "object",
+						properties: {
+							spec: { type: "object", description: "The deck spec described above" },
+							out: { type: "string", description: "Output .mp4 path inside the working directory (default deck.mp4)" },
+						},
+						required: ["spec"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "screen_locate",
 					description:
 						'[FILE] Point to click for a thing in a screenshot, named in words.',
@@ -1847,6 +1871,7 @@ export class ToolExecutor {
 		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
+		render_video_deck: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
@@ -1986,7 +2011,13 @@ export class ToolExecutor {
 		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
 		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
 		const writeTarget = (
-			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : toolName === "compare_layout" ? args.html : args.path
+			toolName === "film_craft"
+				? filmWrites[0]
+				: toolName === "speak" || toolName === "render_video_deck"
+					? args.out
+					: toolName === "compare_layout"
+						? args.html
+						: args.path
 		) as string | undefined;
 		// A one-file extension tool (G1) has a dynamic name, so it maps by
 		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
@@ -2263,6 +2294,21 @@ export class ToolExecutor {
 					);
 				} catch (err) {
 					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
+
+			case "render_video_deck": {
+				try {
+					const out = resolveDeckOut(args.out, this.workingDirectory);
+					// An edit-scoped sub-agent renders only into its scope (same check as write_file).
+					const scoped = editScopeViolation("render_video_deck", { out: args.out ?? "deck.mp4" }, this.workingDirectory, this.allowedPaths);
+					if (scoped) return scoped;
+					const { renderVideoDeck } = await import("../tools/video-deck");
+					return JSON.stringify(
+						await renderVideoDeck({ spec: args.spec, out, cwd: this.workingDirectory }),
+					);
+				} catch (err) {
+					return `Error: render_video_deck failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
 			}
 
