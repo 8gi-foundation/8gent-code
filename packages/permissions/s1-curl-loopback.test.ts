@@ -311,6 +311,66 @@ describe("curlToLoopback refuses", () => {
 	});
 });
 
+describe("one trailing stdin-only filter", () => {
+	const C = "curl -s -c .tmp/cj.txt http://127.0.0.1:55376/";
+	for (const f of [
+		"grep -o 'name=csrf value=[a-f0-9]*'",
+		"grep -oE 'csrf value=[a-f0-9]+'",
+		"grep -i Weekly",
+		"head -50",
+		"head -n 5",
+		"tail -3",
+		"wc -l",
+	]) {
+		test(`allows | ${f}`, () => expect(ok(`${C} | ${f}`)).toBe(true));
+	}
+	for (const f of [
+		"grep -f patterns.txt",
+		"grep -r csrf .",
+		"grep csrf .env",
+		"grep -e x -e y",
+		"grep -- -x",
+		"sh",
+		"bash -c id",
+		"tee out.txt",
+		"xargs curl",
+		"head -50 /etc/passwd",
+		"sed -n 1p",
+		"grep x | grep y",
+		"grep x > out",
+		"grep x; ls",
+	]) {
+		test(`refuses | ${f}`, () => expect(ok(`${C} | ${f}`)).toBe(false));
+	}
+	test("refuses || and |& and a pipe inside the curl part to a bad URL", () => {
+		expect(ok(`${C} || true`)).toBe(false);
+		expect(ok(`${C} |& grep x`)).toBe(false);
+		expect(ok("curl -s http://example.com/ | grep x")).toBe(false);
+		expect(ok("curl -s -L http://127.0.0.1:55376/ | grep x")).toBe(false);
+	});
+	for (const k of ["GREP_OPTIONS", "GREP_COLOR", "GREP_COLORS"]) {
+		test(`${k} set: a piped command is refused, a bare curl still passes`, () => {
+			process.env[k] = "--color=always";
+			try {
+				expect(ok(`${C} | grep -o csrf`)).toBe(false);
+				expect(ok(`${C} | head -5`)).toBe(false);
+				expect(ok(C)).toBe(true);
+			} finally {
+				Reflect.deleteProperty(process.env, k);
+			}
+		});
+	}
+	test("a quoted pipe is not a pipe", () => {
+		expect(ok("curl -s -H 'X: a|b' http://127.0.0.1:55376/")).toBe(true);
+	});
+	test("the pilot's command passes the gate without asking the judge", async () => {
+		const r = await systemOneGate(`${C} | grep -o 'name=csrf value=[a-f0-9]*'`, process.env, ws);
+		expect(r.run).toBe(true);
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(judge.asks).toBe(0);
+	});
+});
+
 describe("-L is refused (8SO: the redirect host cannot be pinned)", () => {
 	test("the issue's exact command, with -L, goes to the judge", () => {
 		expect(ok(ISSUE_CMD)).toBe(false);

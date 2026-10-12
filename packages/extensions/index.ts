@@ -40,6 +40,21 @@ export function getExtensionManager(): ExtensionManager {
 export { craftExtension, type CraftOptions, type CraftResult } from "./crafter";
 
 export {
+	ExtensionHost,
+	defaultExtensionsDir,
+	defineExtension,
+	type ExtensionAPI,
+	type ExtensionCommand,
+	type ExtensionContext,
+	type ExtensionFactory,
+	type ExtensionLoadResult,
+	type ExtensionTool,
+	type ExtensionToolParameters,
+	type ToolCallDecision,
+	type ToolCallEvent,
+} from "./host";
+
+export {
 	defaultPromptsDir,
 	expandPromptCommand,
 	expandTemplate,
