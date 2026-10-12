@@ -15,7 +15,6 @@
  * packages/eight/tools.ts (handleDesktopAct).
  */
 import { spawnSync } from "node:child_process";
-import sharp from "sharp";
 import type { GroundOutcome } from "../eyes/ground";
 import type { CommandResult, Point, ScreenshotResult } from "./types";
 
@@ -175,7 +174,13 @@ export function _resetScreenScale(): void {
 	cachedScale = null;
 }
 
+/** sharp is loaded lazily (#3892): a static import crashes the standalone Windows exe. */
+async function loadSharp() {
+	return (await import("sharp")).default;
+}
+
 async function regionRaw(path: string, left: number, top: number, size: number) {
+	const sharp = await loadSharp();
 	const img = sharp(path);
 	const meta = await img.metadata();
 	const w = meta.width ?? 0;
@@ -210,6 +215,7 @@ export async function frameChange(
 		regionRaw(after, imagePoint.x - VERIFY_RADIUS, imagePoint.y - VERIFY_RADIUS, size),
 	]);
 	if (fractionDiffering(a, b) > 0.01) return "near point";
+	const sharp = await loadSharp();
 	const [fa, fb] = await Promise.all(
 		[before, after].map((p) => sharp(p).resize(128, 128, { fit: "fill" }).raw().toBuffer()),
 	);
