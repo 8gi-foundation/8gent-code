@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { CURL_L_REFUSAL, curlToLoopback } from "./s1-curl-loopback";
+import { CURL_L_REFUSAL, CURL_OUT_NAME_REFUSAL, curlToLoopback } from "./s1-curl-loopback";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_FLAG,
@@ -614,6 +614,70 @@ describe("systemOneGate with -L to loopback: refused without a judge call", () =
 	test("-L to a non-loopback URL still goes to the judge", async () => {
 		const r = await systemOneGate("curl -sL http://example.com/", process.env, ws);
 		expect(r.message ?? "").not.toContain("Drop -L");
+		expect(r.guard?.backend).not.toBe("allowlist");
+	});
+});
+
+describe("an output under .tmp/ with a script or config name: refused without a judge call (#4072)", () => {
+	// The exact command from pilot run 2026-10-12_172356 seq 22 (styles.css and index.html passed the lane; app.js fell to the judge).
+	const APP_JS = "curl -s http://127.0.0.1:65395/app.js -o .tmp/app.js";
+	test("the pilot's command gets the name refusal, not NO", () => {
+		expect(curlToLoopback(APP_JS, ws)).toEqual({ ok: false, refuse: CURL_OUT_NAME_REFUSAL });
+	});
+	test("the same fetch saved with a plain data name passes", () => {
+		expect(ok("curl -s http://127.0.0.1:65395/app.js -o .tmp/app.js.txt")).toBe(true);
+		expect(ok("curl -s http://127.0.0.1:65395/app.js -o .tmp/app-js")).toBe(true);
+	});
+	test("every write option and every spelling of a bad name", () => {
+		for (const c of [
+			"curl -s http://127.0.0.1:8080/ -o .tmp/a.ts",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/a.sh",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/a.py",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/a.yml",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/package.json",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/x.config.js",
+			"curl -s http://127.0.0.1:8080/ --output .tmp/a.mjs",
+			"curl -s http://127.0.0.1:8080/ -c .tmp/jar.sh",
+			"curl -s http://127.0.0.1:8080/ -D .tmp/headers.toml",
+			"curl -s -o.tmp/a.js http://127.0.0.1:8080/",
+		]) {
+			expect((curlToLoopback(c, ws) as { refuse?: string }).refuse, c).toBe(CURL_OUT_NAME_REFUSAL);
+		}
+	});
+	test("a bad name outside .tmp/, or any other fault, is still plain NO (the judge decides as before)", () => {
+		for (const c of [
+			"curl -s http://127.0.0.1:8080/ -o app.js",
+			"curl -s http://127.0.0.1:8080/ -o src/app.js",
+			"curl -s http://127.0.0.1:8080/ -o /tmp/app.js",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/../app.js",
+			"curl -s http://127.0.0.1:8080/ -o .tmp/node_modules/a.js",
+			"curl -s http://example.com/app.js -o .tmp/app.txt",
+			"curl -s http://127.0.0.1:8080/ -T .env",
+		]) {
+			expect(curlToLoopback(c, ws), c).toEqual({ ok: false });
+		}
+	});
+	test("a bad name never passes with the rest of the command bad: a refusal is a block (-L, a non-loopback URL)", () => {
+		for (const c of [
+			"curl -sL http://127.0.0.1:8080/ -o .tmp/a.js",
+			"curl -s http://example.com/ -o .tmp/a.js",
+		]) {
+			const r = curlToLoopback(c, ws);
+			expect(r.ok, c).toBe(false);
+		}
+	});
+	test("the gate blocks with the hint and never asks the judge", async () => {
+		const r = await systemOneGate(APP_JS, process.env, ws);
+		expect(r.run).toBe(false);
+		expect(r.guard?.verdict).toBe("block");
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(r.message).toContain(CURL_OUT_NAME_REFUSAL);
+		expect(judge.asks).toBe(0);
+	});
+	test("strict mode (Guarded) goes to the judge, not the hint", async () => {
+		process.env[SYSTEM_ONE_FLAG] = "1";
+		const r = await systemOneGate(APP_JS, process.env, ws);
+		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

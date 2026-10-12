@@ -57,6 +57,11 @@
  * so the model is told the way forward: drop -L, read the Location header and
  * make a second loopback request, which this lane allows.
  *
+ * An output (-o, -c, -D) under .tmp/ whose name is a script, template or config
+ * (WRITE_BAD_NAME: .js, .ts, .sh, .py, .yml, package.json, ...) is refused the
+ * same deterministic way (#4072): CURL_OUT_NAME_REFUSAL tells the model to save
+ * with a plain data name. Nothing is allowed that was not allowed before.
+ *
  * Known limits, on purpose: only POSIX single or double quoting; no `-d` with
  * `&` unquoted; multiple files in -F `@a,b` are refused. TOCTOU (out of scope,
  * accepted by 8SO): a path can be swapped for a symlink between this check and
@@ -80,6 +85,17 @@ const NO: CurlLoopback = { ok: false };
 /** Told to the model when a loopback curl uses -L (#3967): the way forward instead of the judge. */
 export const CURL_L_REFUSAL =
 	"Refused: curl -L follows redirects, which could leave this machine. Drop -L, read the Location header (-D .tmp/headers.txt), and make a second curl to that address.";
+
+/**
+ * Told to the model when the only thing wrong is the output file's name (#4072, pilot 12 Oct 17:27:
+ * `curl -s http://127.0.0.1:PORT/app.js -o .tmp/app.js` fell to the judge, pYes 0.45, blocked, while
+ * styles.css and index.html passed this lane). A script, template or config name under .tmp/ is
+ * refused here (WRITE_BAD_NAME) and stays refused: the way forward is a plain data name.
+ * The refusal fires at the option, before the URLs are read, so its text assumes nothing
+ * about the host: a non-loopback URL renamed that way still goes to the judge.
+ */
+export const CURL_OUT_NAME_REFUSAL =
+	"Refused: a curl output under .tmp/ may not have a script, template or config name (.js, .ts, .sh, .py, .yml, .toml, package.json ...). Save it as .tmp/<name>.txt and read that file; every other rule for the command still applies.";
 
 const MAX_WORDS = 60;
 const MAX_URLS = 6;
@@ -226,6 +242,13 @@ interface St {
 	root: string;
 	urls: string[];
 	location: boolean;
+	/** Set when a write under .tmp/ failed only on its name: the command gets CURL_OUT_NAME_REFUSAL. */
+	badName?: string;
+}
+
+/** The lane's answer when an option was refused: the name refusal when that was the fault, else no opinion. */
+function failed(st: St): CurlLoopback {
+	return st.badName ? { ok: false, refuse: CURL_OUT_NAME_REFUSAL } : NO;
 }
 
 /** Check one file the command touches. `-` is stdout for writes only. */
@@ -245,7 +268,10 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 	if (write) {
 		// Outputs only under the workspace's .tmp/ directory.
 		if (segs[0] !== ".tmp" || segs.length < 2 || segs.includes("node_modules")) return false;
-		if (WRITE_BAD_NAME.test(path.basename(abs))) return false;
+		if (WRITE_BAD_NAME.test(path.basename(abs))) {
+			st.badName = p;
+			return false;
+		}
 		// .tmp must be a real directory inside the workspace (absent is fine: nothing to redirect),
 		// and no component under it, a dangling final one included, may be a symlink.
 		const tmp = path.join(st.root, ".tmp");
@@ -365,7 +391,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 				if (BOOL_LONG.has(w)) continue;
 				const key = VAL_LONG.get(w);
 				if (key === undefined || i + 1 >= words.length) return NO;
-				if (!applyValue(key, words[++i], st)) return NO;
+				if (!applyValue(key, words[++i], st)) return failed(st);
 				continue;
 			}
 			if (w.startsWith("-")) {
@@ -385,7 +411,7 @@ export function curlToLoopback(command: string, cwd: string | undefined): CurlLo
 						if (i + 1 >= words.length) return NO;
 						value = words[++i];
 					}
-					if (!applyValue(key, value, st)) return NO;
+					if (!applyValue(key, value, st)) return failed(st);
 					break;
 				}
 				continue;
