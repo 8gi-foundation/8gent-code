@@ -11,8 +11,9 @@
  * measures the render with the same band measurement used on the reference,
  * pairs the bands, and reports per-band offsets plus a similarity number.
  *
- * Local only: Chrome runs with every host name unresolvable, so a page cannot
- * reach the network. Deterministic: same files in, same numbers out. Any
+ * Local only: Chrome runs with every host name unresolvable and a dead proxy,
+ * and the page is rendered from a sanitised copy under a CSP that blocks every
+ * subresource, so it can reach neither the network nor another file. Deterministic: same files in, same numbers out. Any
  * failure returns a plain sentence, never throws.
  */
 
@@ -32,7 +33,27 @@ const MAX_REPORT_ROWS = 40;
 const OK_PX = 2;
 const SIM_WIDTH = 320;
 
-export function findChrome(env: Record<string, string | undefined> = process.env): string | null {
+/** True when `file` is `dir` or sits inside it. */
+function insideDir(file: string, dir: string): boolean {
+	let base = path.resolve(dir);
+	try {
+		base = fs.realpathSync(base);
+	} catch {
+		// a workspace that does not exist holds nothing
+	}
+	const rel = path.relative(base, path.resolve(file));
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Find a Chrome or Chromium to render with. Only an absolute path to a real
+ * file counts, and never one inside the workspace: the model can write files
+ * there, so a binary found there is code it chose to run.
+ */
+export function findChrome(
+	env: Record<string, string | undefined> = process.env,
+	workspace: string = process.cwd(),
+): string | null {
 	const candidates: string[] = [];
 	if (env.EIGHT_CHROME_BIN?.trim()) candidates.push(env.EIGHT_CHROME_BIN.trim());
 	if (process.platform === "darwin") {
@@ -53,10 +74,84 @@ export function findChrome(env: Record<string, string | undefined> = process.env
 			}
 		}
 	}
-	return candidates.find((c) => fs.existsSync(c)) ?? null;
+	return (
+		candidates.find((c) => {
+			if (!path.isAbsolute(c)) return false;
+			try {
+				if (!fs.statSync(c).isFile()) return false;
+				return !insideDir(fs.realpathSync(c), workspace) && !insideDir(c, workspace);
+			} catch {
+				return false;
+			}
+		}) ?? null
+	);
 }
 
-/** Render an HTML file to a PNG at width x height. Network is off: no host name resolves. */
+export const MAX_HTML_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
+const IMAGE_MIME: Record<string, string> = {
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+};
+/** Nothing loads except inline styles and data: images. No script, frame, font or fetch. */
+export const RENDER_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+
+/**
+ * Write a sanitised copy of the page into `dir` and return its path. The copy
+ * carries a CSP that blocks every subresource, loses <base> and meta refresh
+ * (they could point the render at another file), and has the images that sit
+ * inside the page's own folder inlined as data: URIs, so the page still looks
+ * right while no other file or address can be reached.
+ */
+export function prepareSafeCopy(htmlPath: string, dir: string): string {
+	const size = fs.statSync(htmlPath).size;
+	if (size > MAX_HTML_BYTES) throw new Error(`the HTML is ${size} bytes, over the ${MAX_HTML_BYTES} byte limit`);
+	let html = fs.readFileSync(htmlPath, "utf8");
+	const root = fs.realpathSync(path.dirname(htmlPath));
+	const inline = (ref: string): string | null => {
+		const clean = ref.trim().split(/[?#]/)[0];
+		if (!clean || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("//")) return null;
+		const mime = IMAGE_MIME[path.extname(clean).toLowerCase()];
+		if (!mime) return null;
+		try {
+			const real = fs.realpathSync(path.resolve(root, decodeURIComponent(clean)));
+			if (!insideDir(real, root) || fs.statSync(real).size > MAX_INLINE_IMAGE_BYTES) return null;
+			return `data:${mime};base64,${fs.readFileSync(real).toString("base64")}`;
+		} catch {
+			return null;
+		}
+	};
+	html = html
+		.replace(/<base\b[^>]*>/gi, "")
+		.replace(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*>/gi, "")
+		.replace(/(\bsrc\s*=\s*)(["'])([^"']*)\2/gi, (m, pre, q, ref) => {
+			const d = inline(ref);
+			return d ? `${pre}${q}${d}${q}` : m;
+		})
+		.replace(/url\(\s*(["']?)([^"')]*)\1\s*\)/gi, (m, q, ref) => {
+			const d = inline(ref);
+			return d ? `url(${q}${d}${q})` : m;
+		});
+	const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
+	const withMeta = /<head\b[^>]*>/i.test(html)
+		? html.replace(/<head\b[^>]*>/i, (h) => `${h}${meta}`)
+		: /<html\b[^>]*>/i.test(html)
+			? html.replace(/<html\b[^>]*>/i, (h) => `${h}<head>${meta}</head>`)
+			: `${meta}${html}`;
+	const out = path.join(dir, "page.html");
+	fs.writeFileSync(out, withMeta);
+	return out;
+}
+
+/**
+ * Render an HTML file to a PNG at width x height. Offline by construction: every
+ * host name fails to resolve and all traffic, loopback and LAN included, goes to
+ * a dead proxy. Chrome runs in its own process group, which is killed on timeout
+ * and when it exits, so no renderer is left behind.
+ */
 export function renderHtml(
 	chrome: string,
 	htmlPath: string,
@@ -74,27 +169,53 @@ export function renderHtml(
 			"--no-first-run",
 			"--no-default-browser-check",
 			"--disable-extensions",
-			"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost",
+			"--host-resolver-rules=MAP * ~NOTFOUND",
+			"--proxy-server=http://127.0.0.1:9",
+			"--proxy-bypass-list=<-loopback>",
 			"--virtual-time-budget=2000",
 			`--user-data-dir=${profileDir}`,
 			`--window-size=${width},${height}`,
 			`--screenshot=${out}`,
 			pathToFileURL(htmlPath).href,
 		];
-		const child = spawn(chrome, args, { stdio: "ignore" });
+		const useGroup = process.platform !== "win32";
+		const child = spawn(chrome, args, { stdio: "ignore", detached: useGroup });
+		const killGroup = () => {
+			try {
+				if (useGroup && child.pid) process.kill(-child.pid, "SIGKILL");
+				else child.kill("SIGKILL");
+			} catch {
+				// already gone
+			}
+		};
 		const timer = setTimeout(() => {
-			child.kill("SIGKILL");
+			killGroup();
 			reject(new Error(`the render did not finish in ${RENDER_TIMEOUT_MS / 1000}s`));
 		}, RENDER_TIMEOUT_MS);
 		child.on("error", (e) => {
 			clearTimeout(timer);
+			killGroup();
 			reject(e);
 		});
 		child.on("exit", () => {
 			clearTimeout(timer);
+			killGroup();
 			fs.existsSync(out) ? resolve() : reject(new Error("the browser produced no screenshot"));
 		});
 	});
+}
+
+/** Sanitise `htmlPath` (see prepareSafeCopy) and render the copy. */
+export async function renderSafe(
+	chrome: string,
+	htmlPath: string,
+	out: string,
+	width: number,
+	height: number,
+	dir: string,
+): Promise<void> {
+	const copy = prepareSafeCopy(htmlPath, dir);
+	await renderHtml(chrome, copy, out, width, height, path.join(dir, "profile"));
 }
 
 export type BandPair = { ref: Band; got: Band | null };
@@ -222,10 +343,10 @@ export function describeDiff(ref: LayoutMeasure, got: LayoutMeasure, similarity:
 }
 
 /** Render `html` and compare it with `reference`. Always resolves to a sentence. */
-export async function compareLayout(htmlPath: string, referencePath: string): Promise<string> {
+export async function compareLayout(htmlPath: string, referencePath: string, workspace: string = process.cwd()): Promise<string> {
 	if (!fs.existsSync(htmlPath)) return `compare_layout: ${htmlPath} does not exist. Write the page first.`;
 	if (!fs.existsSync(referencePath)) return `compare_layout: reference image ${referencePath} does not exist.`;
-	const chrome = findChrome();
+	const chrome = findChrome(process.env, workspace);
 	if (!chrome) return "compare_layout: no Chrome or Chromium found, so the page cannot be rendered here. Set EIGHT_CHROME_BIN to one.";
 	const ref = await measureLayout(referencePath);
 	if (!ref) return "compare_layout: could not measure the reference image.";
@@ -234,7 +355,7 @@ export async function compareLayout(htmlPath: string, referencePath: string): Pr
 		const out = path.join(tmp, "render.png");
 		const width = Math.min(ref.width, MAX_VIEWPORT);
 		const height = Math.min(ref.height, MAX_VIEWPORT);
-		await renderHtml(chrome, htmlPath, out, width, height, path.join(tmp, "profile"));
+		await renderSafe(chrome, htmlPath, out, width, height, tmp);
 		const got = await measureLayout(out);
 		if (!got) return "compare_layout: your page rendered blank. Check the HTML.";
 		const similarity = await pixelSimilarity(referencePath, out, ref.width, ref.height);

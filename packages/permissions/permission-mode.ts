@@ -191,6 +191,8 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"lsp_diagnostics",
 	"read_image",
 	"describe_image",
+	// Read-only: renders into an OS temp dir, writes nothing to the workspace (#4080).
+	"compare_layout",
 	"read_pdf",
 	"read_pdf_page",
 	"search_pdf",

@@ -1840,7 +1840,10 @@ export class ToolExecutor {
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
-		compare_layout: "read_file",
+		// READ-ONLY class: reads the html and the reference inside the workspace and writes
+		// nothing there (Chrome profile and screenshot go to an OS temp dir, removed after).
+		// Own class so policy can target it, but allowed in plan, architect and review.
+		compare_layout: "render_page",
 		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
@@ -1983,7 +1986,7 @@ export class ToolExecutor {
 		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
 		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
 		const writeTarget = (
-			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
+			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : toolName === "compare_layout" ? args.html : args.path
 		) as string | undefined;
 		// A one-file extension tool (G1) has a dynamic name, so it maps by
 		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
@@ -2241,7 +2244,7 @@ export class ToolExecutor {
 				const html = safePath(String(args.html ?? ""), this.workingDirectory, "read");
 				const reference = safePath(String(args.reference ?? ""), this.workingDirectory, "read");
 				const { compareLayout } = await import("../tools/layout-compare");
-				return compareLayout(html, reference);
+				return compareLayout(html, reference, this.workingDirectory);
 			}
 			case "screen_locate": {
 				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
