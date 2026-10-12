@@ -735,6 +735,8 @@ type El = {
 	index: number;
 	tag: string;
 	role?: string;
+	/** Accessible name from the browser (label[for], wrapping label, aria, placeholder, title), never a typed value. */
+	name?: string;
 	text: string;
 	rect?: Rect;
 	checked?: boolean;
@@ -1027,23 +1029,34 @@ export function createEightBrowser(
 		);
 	const elements = async (tabId: string): Promise<El[]> => {
 		const r = await call("page.query", { tabId });
+		const raw: Array<El & { visible?: boolean }> = r?.elements ?? [];
 		// page.query has no checked flag; match :checked elements back by rect so a toggle click is observable.
 		const on = await rects(tabId, ":checked");
 		const pw = await rects(tabId, "input[type=password]"); // value is never rendered, typed by us or not
-		// Nor a role: input types and ARIA roles are matched back by rect too, so the list reads
-		// `[n] role "name"` the way the grounding lane expects (#4043).
-		const roles: Array<[string, Set<string>]> = [
-			[
-				"checkbox",
-				await rects(tabId, "input[type=checkbox],[role=checkbox],input[type=radio],[role=radio]"),
-			],
-			[
-				"button",
-				await rects(tabId, "input[type=submit],input[type=button],input[type=reset],[role=button]"),
-			],
-			["link", await rects(tabId, "[role=link]")],
-		];
-		return (r?.elements ?? []).map((e: El & { visible?: boolean; role?: string }) => {
+		// A browser that reports role and name per element (8gent-browser page.query) needs nothing more.
+		// An older one does not: input types and ARIA roles are matched back by rect, so the list still
+		// reads `[n] role "name"` the way the grounding lane expects (#4043).
+		const reported = raw.every((e) => typeof e.role === "string");
+		const roles: Array<[string, Set<string>]> = reported
+			? []
+			: [
+					[
+						"checkbox",
+						await rects(
+							tabId,
+							"input[type=checkbox],[role=checkbox],input[type=radio],[role=radio]",
+						),
+					],
+					[
+						"button",
+						await rects(
+							tabId,
+							"input[type=submit],input[type=button],input[type=reset],[role=button]",
+						),
+					],
+					["link", await rects(tabId, "[role=link]")],
+				];
+		return raw.map((e) => {
 			const key = JSON.stringify(e.rect);
 			const byRect = e.rect ? roles.find(([, set]) => set.has(key))?.[0] : undefined;
 			const el: El = {
@@ -1053,6 +1066,7 @@ export function createEightBrowser(
 				text: e.text,
 				rect: e.rect,
 			};
+			if (typeof e.name === "string" && e.name.trim()) el.name = clipped(e.name);
 			if (e.visible === false) el.hidden = true; // kept for stable indices, never rendered (hidden csrf values)
 			if (e.rect && on.has(key)) el.checked = true;
 			if (e.rect && pw.has(key)) el.secret = true;
@@ -1097,8 +1111,13 @@ export function createEightBrowser(
 		);
 	const shown = (e: El) =>
 		e.secret ? "(password field)" : typed.has(e.text) ? `(typed, ${e.text.length} chars)` : e.text;
-	/** The element's accessible name, quoted; a password field or a value we typed is never shown. */
-	const label = (e: El) => (e.secret || typed.has(e.text) ? shown(e) : JSON.stringify(e.text));
+	/** The element's accessible name, quoted: the browser's computed name when it reports one (never a
+	 *  field's value), else its text. A password field's or a typed value's text is never shown. */
+	const label = (e: El) => {
+		if (e.name && !typed.has(e.name))
+			return `${JSON.stringify(e.name)}${e.secret ? " (password field)" : ""}`;
+		return e.secret || typed.has(e.text) ? shown(e) : JSON.stringify(e.text);
+	};
 	const indexGuard = (els: El[], index?: number): string | null => {
 		if (index === undefined) return null;
 		if (!els[index]) return `index ${index} out of range (${els.length} elements)`;

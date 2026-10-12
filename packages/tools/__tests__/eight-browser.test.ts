@@ -359,6 +359,41 @@ describe("8gent Browser driver", () => {
 });
 
 describe("state rendering", () => {
+	test("a labelled input reads by its accessible name from the browser, never its value (#4043)", async () => {
+		const pageQuery = {
+			ok: true,
+			elements: [
+				{ index: 0, tag: "input", role: "textbox", name: "Username", text: "pilot-user", visible: true },
+				{ index: 1, tag: "input", role: "textbox", name: "Password", text: "", visible: true },
+				{ index: 2, tag: "input", role: "checkbox", name: "Weekly digest", text: "on", visible: true },
+				{ index: 3, tag: "button", role: "button", name: "Sign in", text: "Sign in", visible: true },
+			],
+		};
+		const selectorCalls: string[] = [];
+		const call: BrowserCall = async (cmd, args = {}) => {
+			if (cmd === "tab.open") return { id: "t9" };
+			if (cmd === "page.read")
+				return { snapshot: { url: "http://127.0.0.1:5/", title: "x", text: "" } };
+			if (cmd === "page.query" && typeof args.selector === "string") {
+				selectorCalls.push(args.selector);
+				return { ok: true, elements: [] };
+			}
+			if (cmd === "page.query") return pageQuery;
+			return { ok: true };
+		};
+		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		const out = await b.open("http://127.0.0.1:5/");
+		expect(JSON.parse(out).elements).toEqual([
+			'[0] textbox "Username"',
+			'[1] textbox "Password"',
+			'[2] checkbox "Weekly digest"',
+			'[3] button "Sign in"',
+		]);
+		expect(out).not.toContain("pilot-user");
+		// Role and name came from the browser, so no rect-matching role queries were made.
+		expect(selectorCalls.some((sel) => sel.includes("[role=link]"))).toBe(false);
+	});
+
 	test("password fields are always masked, even when the agent did not type them", async () => {
 		const b = createEightBrowser(fakeSite({ prefilledPassword: "autofilled-pw" }).call, {
 			allowLoopback: ["127.0.0.1:5"],
