@@ -554,7 +554,9 @@ describe("SecretScanner - 8SO: auth headers and cookies", () => {
 		[`token was Bearer ${V32} ok`, V32],
 		[`> X-Api-Key: ${V32}`, V32],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 
 	it("keeps the scheme word and Set-Cookie attributes", () => {
 		expect(scrub(`Authorization: Bearer ${V32}`).scrubbed).toBe("Authorization: Bearer [REDACTED:auth_header]");
@@ -576,7 +578,9 @@ describe("SecretScanner - 8SO: CLI flags", () => {
 		[`curl -u 'admin:${V20}' https://x`, V20],
 		[`curl --user "admin:${V20}" https://x`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 
 	it("keeps the rest of the command", () => {
 		expect(scrub(`curl -u admin:${V20} https://x`).scrubbed).toBe("curl -u admin:[REDACTED:cli_password] https://x");
@@ -596,7 +600,9 @@ describe("SecretScanner - 8SO: punctuation tails", () => {
 		[`PASSWORD=ab"cd${V20}`, V20],
 		[`password = "${V20} ${V20}"`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 
 	it("cuts at , only in JSON or YAML flow context", () => {
 		expect(scrub(`{password: ${V20}, user: bob}`).scrubbed).toBe("{password: [REDACTED:secret_assignment], user: bob}");
@@ -614,7 +620,9 @@ describe("SecretScanner - 8SO: URL userinfo", () => {
 		[`https://${V20}@github.com/a/b`, V20],
 		[`mongodb://u:${V20}@h1,h2/db?authSource=admin`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 
 	it("keeps host and path", () => {
 		expect(scrub(`postgres://u:p@ss${V20}@host/db`).scrubbed).toBe("postgres://u:[REDACTED:url_password]@host/db");
@@ -635,7 +643,9 @@ describe("SecretScanner - 8SO: short values and name families", () => {
 		[`PRIVATE_KEY=config.${V20}`, V20],
 		[`"private_key_id": "${rand(40, HEX, 34)}"`, rand(40, HEX, 34)],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 });
 
 describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
@@ -648,7 +658,9 @@ describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
 		[`set API_KEY=${V32}`, V32],
 		[`"password":\n  "${V20}"`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => expectHidden(input, secret));
+	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
+		expectHidden(input, secret);
+	});
 
 	it("redacts a YAML block scalar under a secret-named key and keeps the next key", () => {
 		const out = scrub(`db:\n  private_key: |\n    ${V32}\n    ${V44}\n  host: x\n`);
@@ -675,7 +687,9 @@ describe("SecretScanner - 8SO: extra provider shapes", () => {
 		["twilio", `SK${rand(32, HEX, 44)}`, rand(32, HEX, 44)],
 		["slack webhook", `https://hooks.slack.com/services/T${rand(8, ALNUM, 45)}/B${rand(8, ALNUM, 46)}/${rand(24, ALNUM, 47)}`, rand(24, ALNUM, 47)],
 	];
-	for (const [label, input, secret] of cases) it(`hides ${label}`, () => expectHidden(input, secret));
+	for (const [label, input, secret] of cases) it(`hides ${label}`, () => {
+		expectHidden(input, secret);
+	});
 });
 
 describe("SecretScanner - 8SO: false positives stay untouched", () => {
