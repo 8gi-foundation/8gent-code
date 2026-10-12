@@ -1579,7 +1579,7 @@ describeNotWin(
 					PATH: "/usr/bin:/bin",
 					HOME: "/not/the/profile/home",
 				};
-				const call = wsTransport({ env, workspace });
+				const call = wsTransport({ env });
 				expect(await call("tab.open", { url: "https://example.com/" })).toEqual({ id: "t9" });
 				await call("tab.open", { url: "https://example.com/" });
 				expect(tokens).toEqual(["fresh-tok", "fresh-tok"]);

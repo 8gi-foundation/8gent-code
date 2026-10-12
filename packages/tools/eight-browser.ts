@@ -579,12 +579,7 @@ const launchError = (reason: string) =>
 		`8gent Browser could not start (${reason}). For a local web app use run_command with curl instead.`,
 	);
 
-async function launchOnce(
-	profile: BrowserProfile,
-	home: string,
-	env: Env,
-	workspace: string | undefined,
-): Promise<void> {
+async function launchOnce(profile: BrowserProfile, home: string, env: Env): Promise<void> {
 	const bin = browserBinary(env, home);
 	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
 	const port = await freePort();
@@ -623,16 +618,11 @@ async function launchOnce(
 }
 
 /** Start the profile's browser if its port file is absent. One attempt per profile per process. */
-async function ensureRunning(
-	profile: BrowserProfile,
-	home: string,
-	env: Env,
-	workspace: string | undefined,
-): Promise<void> {
+async function ensureRunning(profile: BrowserProfile, home: string, env: Env): Promise<void> {
 	if (existsSync(profile.portFile)) return;
 	let p = launches.get(profile.name);
 	if (!p) {
-		p = launchOnce(profile, home, env, workspace);
+		p = launchOnce(profile, home, env);
 		launches.set(profile.name, p);
 	}
 	await p;
@@ -642,8 +632,6 @@ export type TransportOpts = {
 	port?: number;
 	tokenFile?: string;
 	env?: Env;
-	/** The run's workspace: the source of the loopback ports a launched browser may open. */
-	workspace?: string | (() => string | undefined);
 };
 
 /** Where to connect: a named profile's own token and published port (starting the profile when it
@@ -673,8 +661,7 @@ async function endpoint(opts: TransportOpts): Promise<{
 			port: opts.port ?? (Number(env.EIGHT_BROWSER_CONTROL_PORT) || DEFAULT_CONTROL_PORT),
 			tokenFile: opts.tokenFile ?? join(homedir(), ".8gent", "browser-control.token"),
 		};
-	const workspace = typeof opts.workspace === "function" ? opts.workspace() : opts.workspace;
-	await ensureRunning(profile, home, env, workspace);
+	await ensureRunning(profile, home, env);
 	let raw: string;
 	try {
 		raw = readFileSync(profile.portFile, "utf8").trim();
@@ -985,7 +972,7 @@ export function createEightBrowser(
 	const env = () => opts.env ?? process.env;
 	const workspace = () =>
 		typeof opts.workspace === "function" ? opts.workspace() : opts.workspace;
-	const call: BrowserCall = callArg ?? wsTransport({ workspace, env: opts.env });
+	const call: BrowserCall = callArg ?? wsTransport({ env: opts.env });
 	const settle = opts.settleMs ?? 400;
 	/** Isolated profile: is `url` one of the run's own loopback servers (trusted list only)? */
 	const ownLoopback = (url: string): boolean =>
