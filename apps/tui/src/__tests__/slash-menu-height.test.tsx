@@ -16,6 +16,7 @@ for (const rows of [12, 18]) {
 				SHELL_ROWS: String(rows),
 			},
 		);
+		// On failure the harness's message carries the last frame it saw.
 		expect(events.find((e) => e.phase === "error")).toBeUndefined();
 		const frame = String(events.find((e) => e.phase === "open")?.frame ?? "");
 		const lines = frame.split("\n");
@@ -38,8 +39,9 @@ for (const rows of [12, 18]) {
 			last: string;
 			top: string;
 		};
-		expect(new Set(scroll.seen.filter(Boolean))).toEqual(new Set(CORE_SLASH_COMMANDS));
+		expect(scroll.seen).toHaveLength(CORE_SLASH_COMMANDS.size);
+		expect(new Set(scroll.seen)).toEqual(new Set(CORE_SLASH_COMMANDS));
 		expect(scroll.last).toBe("skills");
 		expect(scroll.top).toBe("clear");
-	}, 90000);
+	}, 60000);
 }
