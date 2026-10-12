@@ -20,6 +20,7 @@ import {
 	renameSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -344,6 +345,19 @@ describe.skipIf(process.platform === "win32")(
 				writeFileSync(join(ws, ".tmp/serve.sh"), LOOPBACK_SERVE(ws));
 				expect(ok(PILOT_RUN)).toBe(false);
 			});
+			// macOS only: APFS moves the birth time back when mtime is set earlier,
+			// which is how a file older than this process is made here (Linux cannot).
+			test.skipIf(process.platform !== "darwin")(
+				"a file the record vouches for but born before this process started",
+				() => {
+					own(".tmp/aged.sh", "echo hi\n");
+					const abs = join(ws, ".tmp/aged.sh");
+					utimesSync(abs, new Date("2020-01-01"), new Date("2020-01-01"));
+					rec.record(abs);
+					expect(rec.createdBySession(abs)).toBe(true);
+					expect(ok("bash .tmp/aged.sh")).toBe(false);
+				},
+			);
 			test("a symlink, even to the session's own script", () => {
 				symlinkSync(join(ws, ".tmp/serve.sh"), join(ws, ".tmp/link.sh"));
 				expect(ok("bash .tmp/link.sh")).toBe(false);

@@ -54,6 +54,9 @@
  * DNS rebinding could read what it serves over loopback (8SO note on #4123);
  * a follow-up candidate is refusing to serve the workspace root.
  *
+ * Linux and macOS only: on win32 the lane refuses (its file checks, birth
+ * time and nlink are POSIX-shaped), and says so in the block message.
+ *
  * Synchronous, never throws.
  */
 
@@ -83,6 +86,9 @@ const SINCE_NS = BigInt(Math.floor(performance.timeOrigin) - 1000) * 1_000_000n;
 
 const WHAT_PASSES =
 	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace: no quotes, `$`, backticks, `..` or here-docs.";
+
+const WIN32_HINT =
+	"Running a session script without review works on Linux and macOS only; on Windows it goes to the checker.";
 
 function hint(why: string): RunOwnScript {
 	return { ok: false, hint: `${why} ${WHAT_PASSES}` };
@@ -187,7 +193,9 @@ export function runOwnScript(
 	created: CreatedFiles | undefined,
 ): RunOwnScript {
 	try {
-		if (process.platform === "win32" || !cwd || !path.isAbsolute(cwd) || !created) return NO;
+		if (process.platform === "win32")
+			return COMMAND.test(command) ? { ok: false, hint: WIN32_HINT } : NO;
+		if (!cwd || !path.isAbsolute(cwd) || !created) return NO;
 		const m = COMMAND.exec(command);
 		if (!m) return NO;
 		const [, interp, rel] = m as unknown as [string, string, string];
