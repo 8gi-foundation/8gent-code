@@ -185,3 +185,40 @@ describe("config.json apiKey names no provider (#3261)", () => {
 		}
 	}, 30000);
 });
+
+describe("config.json is found without HOME (#4109)", () => {
+	test("HOME unset, USERPROFILE set: loadPoolConfig reads <os.homedir()>/.8gent/config.json", async () => {
+		const os = await import("node:os");
+		const profile = mkdtempSync(join(tmpdir(), "pool4109-profile-"));
+		const keep = {
+			HOME: process.env.HOME,
+			USERPROFILE: process.env.USERPROFILE,
+			EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR,
+		};
+		// Windows resolves os.homedir() from USERPROFILE; the Scheduled Task sets no HOME.
+		const homedirSpy = spyOn(os, "homedir").mockImplementation(
+			() => process.env.USERPROFILE as string,
+		);
+		try {
+			delete process.env.HOME;
+			delete process.env.EIGHT_DATA_DIR;
+			process.env.USERPROFILE = profile;
+			const { mkdirSync } = await import("node:fs");
+			mkdirSync(join(profile, ".8gent"), { recursive: true });
+			writeFileSync(
+				join(profile, ".8gent", "config.json"),
+				JSON.stringify({ runtime: "lmstudio", model: "win-user-m" }),
+			);
+			const cfg = await loadPoolConfig();
+			expect(cfg.model).toBe("win-user-m");
+			expect(cfg.runtime).toBe("lmstudio");
+		} finally {
+			homedirSpy.mockRestore();
+			for (const [k, v] of Object.entries(keep)) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+			rmSync(profile, { recursive: true, force: true });
+		}
+	});
+});
