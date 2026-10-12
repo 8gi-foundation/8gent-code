@@ -69,7 +69,7 @@ beforeAll(async () => {
 	nativeIn = (cwd) => async (name, args) => {
 		ai.setToolContext({ workingDirectory: cwd });
 		const t = (
-			ai.agentTools as Record<string, { execute: (i: unknown, o: unknown) => Promise<unknown> }>
+			ai.agentTools as unknown as Record<string, { execute: (i: unknown, o: unknown) => Promise<unknown> }>
 		)[name];
 		try {
 			return String(await t.execute(args, opts));
@@ -155,6 +155,11 @@ describe("run_command writes are refused on both paths, before spawn (#4009)", (
 		"ln -s $HOME/evil.ts ~/.8gent/extensions/evil",
 		"cd ~/.8gent && echo evil > hooks.yaml",
 		"echo evil > ./.8gent/hooks.yaml",
+		// #3952 narrowed the browser-secret check: a browser-named path under a
+		// startup dir is no longer refused by that check, so this one must hold.
+		"cp evil.ts ~/.8gent/extensions/browser-helper/index.ts",
+		"echo evil > ~/.8gent/prompts/browser.md",
+		"mkdir -p ~/.8gent/packages/browser && cp evil.ts ~/.8gent/packages/browser/x.js",
 	];
 	for (const command of COMMANDS) {
 		test(command, async () => {
@@ -195,5 +200,42 @@ describe("a project-local .8gent/ is not affected (#4009)", () => {
 	test("the backstop passes a project-local .8gent/ write", () => {
 		expect(preSpawnRefusal("echo x > .8gent/hooks.yaml", project)).toBeNull();
 		expect(preSpawnRefusal("cp a.ts .8gent/extensions/a.ts", project)).toBeNull();
+	});
+});
+
+// The shared commandRefusal gate (#4001) judges every shell and argv command in the
+// tool's working directory, not process.cwd(): a relative path or a git write is
+// resolved where the command will actually run.
+describe("the startup-code check resolves against the tool's working directory (#4009, #4001)", () => {
+	const DENIED = "[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages";
+	const ext = path.join(dot, "extensions", "ext1");
+
+	test("process.cwd() is outside the fake home, so the two judgements differ", () => {
+		expect(fs.realpathSync(process.cwd()).startsWith(home)).toBe(false);
+		expect(preSpawnRefusal("echo evil > hooks.yaml", process.cwd())).toBeNull();
+		expect(preSpawnRefusal("git checkout main", process.cwd())).toBeNull();
+		expect(preSpawnRefusal("echo evil > hooks.yaml", dot)).toStartWith(DENIED);
+		expect(preSpawnRefusal("git checkout main", ext)).toStartWith(DENIED);
+	});
+
+	test("shell path: a relative write run from ~/.8gent is refused on both tool paths", async () => {
+		const command = "echo evil > hooks.yaml";
+		expect(await nativeIn(dot)("run_command", { command })).toStartWith(DENIED);
+		expect(await text(dot)("run_command", { command })).toStartWith(DENIED);
+		unchanged();
+	});
+
+	test("shell path: git checkout inside an extension dir is refused", async () => {
+		const command = "git checkout main";
+		expect(await nativeIn(ext)("run_command", { command })).toStartWith(DENIED);
+		expect(await text(ext)("run_command", { command })).toStartWith(DENIED);
+		unchanged();
+	});
+
+	test("argv path: the native git tools are judged in the working directory too", async () => {
+		expect(await nativeIn(ext)("git_checkout", { branch: "main" })).toStartWith(DENIED);
+		expect(await nativeIn(ext)("git_create_branch", { branch: "evil" })).toStartWith(DENIED);
+		expect(await nativeIn(dot)("git_checkout", { branch: "main" })).toStartWith(DENIED);
+		unchanged();
 	});
 });

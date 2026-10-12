@@ -39,7 +39,9 @@ export type EditTarget =
 	| { kind: "ok"; idx: number }
 	| { kind: "none" }
 	| { kind: "ambiguous"; lines: number[]; more: boolean }
-	| { kind: "none-after"; startLine: number; lines: number[]; more: boolean };
+	| { kind: "none-after"; startLine: number; lines: number[]; more: boolean }
+	/** A whitespace-only match was found but applying it would change bytes the model did not ask to change. */
+	| { kind: "ws-refused"; reason: string; lines: number[]; more: boolean };
 
 /** Match lines kept for a refusal; past this the text says "N+". */
 export const MAX_REPORTED_MATCHES = 20;
@@ -91,11 +93,14 @@ const lineList = (t: { lines: number[]; more: boolean }) =>
 	`${t.lines.join(", ")}${t.more ? ", ..." : ""}`;
 
 /** Model-visible refusal for a duplicate or stale-anchored edit, or null if the edit can proceed. */
-export function editRefusal(target: EditTarget, filePath: string): string | null {
+export function editRefusal(target: EditTarget | ResolvedEdit, filePath: string): string | null {
 	const p = clipPath(filePath);
 	if (target.kind === "ambiguous") {
 		const n = target.more ? `${MAX_REPORTED_MATCHES}+` : String(target.lines.length);
 		return `Error: oldText matches ${n} times in ${p} (lines ${lineList(target)}). Nothing was written. Add surrounding lines to oldText so it is unique, or pass startLine to pick the copy at or after that line.`;
+	}
+	if (target.kind === "ws-refused") {
+		return `Error: oldText did not match exactly; the only candidate (after whitespace matching, line ${target.lines[0]}) was refused: ${target.reason} Nothing was written. read_file the region and retry with its exact text.`;
 	}
 	if (target.kind === "none-after") {
 		return `Error: oldText matches in ${p} only before line ${target.startLine} (lines ${lineList(target)}). Nothing was written. The file may have changed since you read it: read_file again and retry.`;
@@ -109,8 +114,8 @@ export function editRefusal(target: EditTarget, filePath: string): string | null
  * logged, only the clipped path, up to 20 match lines and the oldText length.
  * Never throws.
  */
-export function logEditRefusal(target: EditTarget, filePath: string, oldTextLength: number): void {
-	if (target.kind !== "ambiguous" && target.kind !== "none-after") return;
+export function logEditRefusal(target: EditTarget | ResolvedEdit, filePath: string, oldTextLength: number): void {
+	if (target.kind !== "ambiguous" && target.kind !== "none-after" && target.kind !== "ws-refused") return;
 	try {
 		const dir = path.join(process.env.HOME || os.homedir(), ".8gent");
 		fs.mkdirSync(dir, { recursive: true });
@@ -134,6 +139,147 @@ export function logEditRefusal(target: EditTarget, filePath: string, oldTextLeng
 	}
 }
 
+/** What an edit resolves to: the splice to perform, or why not. */
+export type ResolvedEdit =
+	| {
+			kind: "ok";
+			idx: number;
+			oldLength: number;
+			newText: string;
+			/** 1-based line of a whitespace-only match; undefined for an exact match. */
+			matchedLine?: number;
+	  }
+	| Exclude<EditTarget, { kind: "ok" }>;
+
+/** Work budget for the whitespace scan, in characters compared plus one per line; past it, no guess. */
+export const MAX_WS_COMPARISONS = 20_000_000;
+/** Lines longer than this are never whitespace-matched (minified or generated text). */
+const MAX_WS_LINE = 4096;
+
+const stripLine = (l: string) => l.replace(/^\s+|\s+$/g, "");
+const leadWs = (l: string) => /^[ \t]*/.exec(l)?.[0] ?? "";
+
+/**
+ * Re-indent newText by the leading-whitespace mapping the matched block
+ * implies (oldText line indent -> file line indent). Null when the mapping is
+ * not a function or a newText line has an indent that is not in the map (no prefix
+ * guessing: nested lines would be shifted once instead of scaled).
+ */
+function reindent(oldLines: string[], fileLines: string[], newText: string): string | null {
+	const map = new Map<string, string>();
+	for (let i = 0; i < oldLines.length; i++) {
+		if (stripLine(oldLines[i]) === "") continue;
+		const a = leadWs(oldLines[i]);
+		const b = leadWs(fileLines[i]);
+		if (map.has(a) && map.get(a) !== b) return null;
+		map.set(a, b);
+	}
+	if (map.size === 0) return null;
+	if ([...map].every(([a, b]) => a === b)) return newText;
+	const out: string[] = [];
+	for (const line of newText.split("\n")) {
+		if (stripLine(line) === "") {
+			out.push(line);
+			continue;
+		}
+		const l = leadWs(line);
+		const rest = line.slice(l.length);
+		const direct = map.get(l);
+		if (direct !== undefined) out.push(direct + rest);
+		else return null;
+	}
+	return out.join("\n");
+}
+
+/**
+ * One resolver for every edit_file path (tools.ts, packages/ai/tools.ts and
+ * the write gate), so the gate checks the bytes that are written.
+ *
+ * Exact match first (locateEdit rules). If there is none, a block that matches
+ * line for line with only leading/trailing whitespace stripped (CR included,
+ * never internal collapse) and is unique (or picked by startLine) is used,
+ * with newText re-indented by the block's own indent mapping. Refused, never
+ * guessed: inconsistent indent mapping, CRLF mismatch, and markdown hard
+ * breaks (trailing two spaces) that the edit would drop.
+ */
+export function resolveEdit(
+	original: string,
+	oldText: string,
+	newText: string,
+	startLine?: number,
+	filePath?: string,
+): ResolvedEdit {
+	const t = locateEdit(original, oldText, startLine);
+	if (t.kind === "ok") return { kind: "ok", idx: t.idx, oldLength: oldText.length, newText };
+	if (t.kind !== "none") return t;
+
+	const lines = original.split("\n");
+	const want = oldText.split("\n");
+	const trailingNewline = want.length > 1 && want[want.length - 1] === "";
+	if (trailingNewline) want.pop();
+	if (want.length === 0 || stripLine(oldText) === "") return t;
+	if (want.some((l) => l.length > MAX_WS_LINE)) return t;
+	const wantS = want.map(stripLine);
+	const fileS = lines.map((l) => (l.length > MAX_WS_LINE ? null : stripLine(l)));
+	const anchored = typeof startLine === "number" && Number.isFinite(startLine);
+
+	let budget = MAX_WS_COMPARISONS;
+	const found: number[] = [];
+	for (let i = 0; i + want.length <= lines.length; i++) {
+		budget -= 1 + wantS[0].length;
+		if (budget < 0) return t;
+		if (fileS[i] !== wantS[0]) continue;
+		let ok = true;
+		for (let j = 1; j < want.length; j++) {
+			budget -= 1 + wantS[j].length;
+			if (budget < 0) return t;
+			if (fileS[i + j] !== wantS[j]) {
+				ok = false;
+				break;
+			}
+		}
+		if (ok) found.push(i);
+		if (found.length > MAX_REPORTED_MATCHES) break;
+	}
+	let at: number;
+	if (anchored) {
+		const pick = found.find((i) => i + 1 >= (startLine as number));
+		if (pick === undefined) return t;
+		at = pick;
+	} else {
+		if (found.length !== 1) return t;
+		at = found[0];
+	}
+	if (trailingNewline && at + want.length >= lines.length) return t;
+
+	const refuse = (reason: string): ResolvedEdit => ({ kind: "ws-refused", reason, lines: [at + 1], more: false });
+	const fileBlock = lines.slice(at, at + want.length);
+	const fileHasCr = fileBlock.some((l) => l.endsWith("\r"));
+	if (fileHasCr !== oldText.includes("\r")) {
+		return refuse("the file block uses different line endings (CRLF) than oldText, so the file would end up mixed.");
+	}
+	if (fileHasCr && !newText.split("\n").slice(0, -1).every((l) => l.endsWith("\r"))) {
+		return refuse("the file block uses CRLF but newText lines do not end with CR.");
+	}
+	if (filePath && /\.(md|markdown|mdx)$/i.test(filePath)) {
+		for (let j = 0; j < want.length; j++) {
+			if (/\S {2,}\r?$/.test(fileBlock[j]) && !/\S {2,}\r?$/.test(want[j])) {
+				return refuse("it would drop a markdown hard line break (two trailing spaces).");
+			}
+		}
+	}
+	const re = reindent(want, fileBlock, newText);
+	if (re === null) return refuse("the indentation of oldText does not map consistently onto the file, so newText cannot be re-indented safely.");
+
+	let offset = 0;
+	for (let i = 0; i < at; i++) offset += lines[i].length + 1;
+	let oldLength = fileBlock.reduce((n, l) => n + l.length, 0) + (fileBlock.length - 1);
+	if (trailingNewline) oldLength += 1;
+	// A CR on the block's last line that oldText did not send stays in the file.
+	else if (fileBlock[fileBlock.length - 1].endsWith("\r") && !want[want.length - 1].endsWith("\r")) oldLength -= 1;
+	return { kind: "ok", idx: offset, oldLength, newText: re, matchedLine: at + 1 };
+}
+
 /** Splice newText over the oldLength chars at idx, literally. Callers locate once with locateEdit. */
 export function applyAt(original: string, idx: number, oldLength: number, newText: string): string {
 	return original.slice(0, idx) + newText + original.slice(idx + oldLength);
@@ -152,10 +298,11 @@ export function applyEdit(
 	oldText: string,
 	newText: string,
 	startLine?: number,
+	filePath?: string,
 ): string | null {
-	const t = locateEdit(original, oldText, startLine);
+	const t = resolveEdit(original, oldText, newText, startLine, filePath);
 	if (t.kind !== "ok") return null;
-	return applyAt(original, t.idx, oldText.length, newText);
+	return applyAt(original, t.idx, t.oldLength, t.newText);
 }
 
 /**
@@ -168,11 +315,13 @@ export function editedLines(
 	oldText: string,
 	newText: string,
 	startLine?: number,
+	filePath?: string,
 ): string | null {
-	const t = locateEdit(original, oldText, startLine);
+	const t = resolveEdit(original, oldText, newText, startLine, filePath);
 	if (t.kind !== "ok") return null;
 	const idx = t.idx;
-	const result = original.slice(0, idx) + newText + original.slice(idx + oldText.length);
+	newText = t.newText;
+	const result = original.slice(0, idx) + newText + original.slice(idx + t.oldLength);
 	const start = idx === 0 ? 0 : result.lastIndexOf("\n", idx - 1) + 1;
 	const insertEnd = idx + newText.length;
 	// If newText ends with a newline, stop there rather than pulling in the
@@ -212,6 +361,7 @@ export function writtenContentFor(
 						oldText,
 						newText,
 						typeof args.startLine === "number" ? args.startLine : undefined,
+						p,
 					);
 					if (lines !== null) return lines;
 				} catch {

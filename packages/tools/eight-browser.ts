@@ -396,6 +396,18 @@ export function browserProfileWarning(env: Env = process.env): string | null {
 	}
 }
 
+/**
+ * How to drive a local web app with curl so System One's loopback lane (permissions/s1-curl-loopback.ts)
+ * passes it without asking the judge. One source for the full prompt (TOOL_PATTERNS_SEGMENT) and the
+ * withheld-browser note, which is the only one of the two a local text-tool session receives: the compact
+ * local prompt has no TOOL_PATTERNS_SEGMENT, so before this the local model never saw these rules.
+ */
+export const LOCAL_SERVER_CURL_NOTE =
+	"For a local server (127.0.0.1 or localhost), use run_command with one plain curl per call: no pipes, ; or &&. " +
+	"Keep cookie, header and output files under .tmp/ in the project, never /tmp " +
+	"(curl -s -c .tmp/cj.txt -b .tmp/cj.txt -o .tmp/page.html URL), then read_file them. " +
+	"Do not pass -L: on a 302, read the Location header and make a second loopback request.";
+
 /** Browser tools a local-model session may see: none unless a named profile is configured. */
 export function localBrowserTools(env: Env = process.env): string[] {
 	return isolatedBrowser(env)
@@ -414,7 +426,7 @@ export function browserWithheldNote(env: Env = process.env): string | null {
 		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
 		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
 		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
-		"into password fields, so for a local web app use run_command with curl."
+		"into password fields. For a local web app, follow the local-server curl rules in your instructions."
 	);
 }
 
@@ -577,6 +589,9 @@ function globRe(seg: string): RegExp {
  *  String.fromCharCode / chr() lists decoded. */
 function decodedViews(command: string): string[] {
 	const views = [command];
+	// %xx (URL-style) escapes, so %62rowser-history cannot hide a name.
+	if (/%[0-9a-f]{2}/i.test(command))
+		views.push(command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))));
 	views.push(
 		command
 			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
@@ -618,6 +633,25 @@ function blankSearchPattern(seg: string): string {
 	return seg;
 }
 
+/**
+ * Per-token check for "browser" under .8gent. Every token holding .8gent is posix-normalised (so ./, //,
+ * and x/.. cannot hide a browser-* name) and judged from its last .8gent on; a token that normalises
+ * .8gent away fails closed. Any token without .8gent that names browser is refused too (cd ~/.8gent &&
+ * cat ./browser-history.json, ../browser-shots, a symlink alias). Only a browser-named directory deeper
+ * inside an .8gent path (the pilot run dir .../browser-op-practice/) is allowed.
+ */
+function browserUnder8gent(lower: string): boolean {
+	for (const tok of lower.split(/[\s;|&()<>=]+/)) {
+		if (tok.includes(".8gent")) {
+			const n = pathPosix.normalize(tok.replace(/\\/g, "/"));
+			const at = n.lastIndexOf(".8gent");
+			if (at < 0) return true;
+			if (/^browser/.test(n.slice(at).replace(/^\.8gent[^/]*\/*/, ""))) return true;
+		} else if (tok.includes("browser")) return true;
+	}
+	return false;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
 	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
@@ -625,10 +659,10 @@ export function touchesBrowserSecrets(command: string): boolean {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
 		const lower = flat.toLowerCase();
-		if (/browser-(control|profiles|[*?[{$])/.test(lower)) return true;
+		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
+			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower)) return true;
 			if (lists) return true;
 		}
 		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read

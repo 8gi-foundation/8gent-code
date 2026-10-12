@@ -9,7 +9,7 @@
  * - Slash command support (/kanban, /predict, /avenues)
  */
 
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -17,7 +17,7 @@ import {
 	getSuggestionSourceLabel,
 	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
-import type { SlashCommand } from "../lib/slash-commands.js";
+import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
 	getBuiltInSlashCommands,
@@ -31,6 +31,7 @@ import {
 	parseGoCommand,
 } from "../lib/goal-client.js";
 import { t } from "../theme.js";
+import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { Blink } from "./fade-transition.js";
@@ -87,6 +88,10 @@ interface CommandInputProps {
 	/** An approval card is pending: the status line says the turn waits on the
 	 *  person and stops spinning, and the placeholder points at the card (#3118). */
 	approvalPending?: boolean;
+	/** Project folder the `@` file list comes from. Defaults to process.cwd(). */
+	cwd?: string;
+	/** Told when the / menu opens or closes (a short terminal makes room for it). */
+	onSlashMenuChange?: (open: boolean) => void;
 }
 
 /** The status line while an approval card waits on the person (#3118). */
@@ -153,6 +158,8 @@ export function CommandInput({
 	transformInputValue,
 	allowEmptySubmit = false,
 	approvalPending = false,
+	cwd = process.cwd(),
+	onSlashMenuChange,
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
@@ -207,14 +214,42 @@ export function CommandInput({
 		};
 	}, []);
 
+	// `@` file mention (#3918 D2): the files matching the @token at the end
+	// of the input. Each time a mention opens, the list reloads in the
+	// background from the project folder (the old list shows meanwhile), so
+	// new files appear and typing never waits on git.
+	const mention = useMemo(() => mentionAtEnd(value), [value]);
+	const mentionActive = mention !== null;
+	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
+	const [mentionIndex, setMentionIndex] = useState(0);
+	useEffect(() => {
+		if (!mentionActive) return;
+		let cancelled = false;
+		void listProjectFiles(cwd).then((files) => {
+			if (!cancelled) setProjectFiles({ cwd, files });
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [mentionActive, cwd]);
+	const mentionMatches = useMemo(
+		() => (mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : []),
+		[mention, projectFiles],
+	);
+	useEffect(() => setMentionIndex(0), [mention?.query]);
+	const mentionOpen = mention !== null && mentionMatches.length > 0;
+
 	// Ghost suggestion hook
-	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+	const { suggestion, accept, dismiss, isVisible: ghostShown } = useGhostSuggestion(value, {
 		isGitRepo,
 		currentBranch,
 		planNextStep,
 		recentCommands,
 		extraContextSuggestions: extraSlashContext,
 	});
+	// Never offer a shell line: Tab would complete a command nobody typed
+	// (#3918 D5, 8SO).
+	const isVisible = ghostShown && !isShellSuggestion(value, suggestion?.text);
 
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
@@ -222,9 +257,58 @@ export function CommandInput({
 		setShowSlashHelp(t.startsWith("/") && !t.slice(1).includes(" "));
 	}, [value]);
 
+	// The menu's rows, how many fit this terminal, and the picked one.
+	// Up/Down scroll through every row; Tab puts the picked command in.
+	const { stdout } = useStdout();
+	const terminalRows = stdout?.rows ?? 24;
+	const slashVisible = slashMenuVisibleRows(terminalRows);
+	const slashFilter = value.trimStart().slice(1);
+	const slashRows = useMemo(
+		() => (showSlashHelp ? slashMenuRows(slashFilter, slashRegistryEntries) : []),
+		[showSlashHelp, slashFilter, slashRegistryEntries],
+	);
+	const [slashIndex, setSlashIndex] = useState(0);
+	useEffect(() => setSlashIndex(0), [slashFilter]);
+	const slashOpen = !isProcessing && showSlashHelp && slashRows.length > 0;
+	useEffect(() => onSlashMenuChange?.(slashOpen), [slashOpen, onSlashMenuChange]);
+
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
+			// An open @ file list takes Tab, Up and Down before anything else.
+			if (mentionOpen && mention) {
+				if (key.tab && !key.shift) {
+					const file = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+					if (file) setValue(applyMention(value, mention.start, file));
+					return;
+				}
+				if (key.upArrow) {
+					setMentionIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setMentionIndex((i) => Math.min(mentionMatches.length - 1, i + 1));
+					return;
+				}
+			}
+
+			// An open / menu takes Up, Down and Tab.
+			if (slashOpen) {
+				if (key.upArrow) {
+					setSlashIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setSlashIndex((i) => Math.min(slashRows.length - 1, i + 1));
+					return;
+				}
+				if (key.tab && !key.shift) {
+					const row = slashRows[Math.min(slashIndex, slashRows.length - 1)];
+					if (row) setValue(`/${row.name} `);
+					return;
+				}
+			}
+
 			// Tab to accept ghost suggestion. Not Shift+Tab: Ink sets key.tab for
 			// it too, and Shift+Tab switches the permission mode (#3170).
 			if (key.tab && !key.shift && isVisible && suggestion) {
@@ -431,9 +515,19 @@ export function CommandInput({
 				</Box>
 			)}
 
+			{/* @ file mention list */}
+			{!isProcessing && mentionOpen && (
+				<FileMentionList files={mentionMatches} selected={mentionIndex} />
+			)}
+
 			{/* Slash command help */}
 			{!isProcessing && showSlashHelp && (
-				<SlashCommandHelp filter={value.trimStart().slice(1)} entries={slashRegistryEntries} />
+				<SlashCommandHelp
+					rows={slashRows}
+					selected={slashIndex}
+					visible={slashVisible}
+					compact={slashMenuCompact(terminalRows)}
+				/>
 			)}
 		</Box>
 	);
@@ -582,35 +676,127 @@ function getProcessingLabel(stage: string): string {
 	}
 }
 
-// Slash command help dropdown (built-ins + loaded skills)
-function SlashCommandHelp({
-	filter,
-	entries,
-}: {
-	filter: string;
-	entries: SlashRegistryEntry[];
-}) {
-	const f = filter.toLowerCase();
-	const filtered = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
+function isCoreEntry(entry: SlashRegistryEntry): boolean {
+	return (
+		entry.kind === "builtin" &&
+		entry.builtInName !== undefined &&
+		entry.name === entry.canonicalName &&
+		isCoreSlashCommand(entry.builtInName)
+	);
+}
 
-	const combined = filtered.map((entry) => ({
+/**
+ * Rows for the `/` menu. A bare `/` lists the core commands only; once a
+ * letter is typed every command and skill whose name starts with it shows,
+ * core commands first. Nothing is removed: a hidden command still runs when
+ * typed (#3918, Pi gap D9).
+ */
+export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): SlashRegistryEntry[] {
+	const f = filter.toLowerCase();
+	if (f === "") {
+		return entries.filter(isCoreEntry).toSorted((a, b) => a.name.localeCompare(b.name));
+	}
+	const matches = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
+	return [...matches.filter(isCoreEntry), ...matches.filter((e) => !isCoreEntry(e))];
+}
+
+export const SLASH_MENU_ROWS = 14;
+/** Below this many terminal rows the menu drops its frame and the focal strip steps aside. */
+export const SLASH_MENU_COMPACT_BELOW = 30;
+/**
+ * Terminal rows the TUI keeps around the menu, measured in the real App
+ * (slash-menu-height.test.tsx). Framed: header, tabs, frame, focal strip,
+ * input, footer, and the menu's margin, border, title and position line.
+ * Compact: the same without the focal strip, margin, border and title. The
+ * App's frame is itself two rows shorter than the terminal.
+ */
+export const SLASH_MENU_CHROME = { framed: 18, compact: 11 } as const;
+
+export function slashMenuCompact(terminalRows: number): boolean {
+	return terminalRows < SLASH_MENU_COMPACT_BELOW;
+}
+
+/** Menu rows that fit a terminal `terminalRows` tall: min(14, rows - chrome), at least 1. */
+export function slashMenuVisibleRows(terminalRows: number): number {
+	const chrome = slashMenuCompact(terminalRows) ? SLASH_MENU_CHROME.compact : SLASH_MENU_CHROME.framed;
+	return Math.max(1, Math.min(SLASH_MENU_ROWS, terminalRows - chrome));
+}
+
+/** The window of `total` rows, `visible` tall, that keeps `selected` in view. */
+export function slashMenuWindow(total: number, selected: number, visible: number): { start: number; end: number } {
+	if (total <= visible) return { start: 0, end: total };
+	const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), total - visible));
+	return { start, end: start + visible };
+}
+
+// Slash command help dropdown (built-ins + loaded skills)
+export function SlashCommandHelp({
+	rows,
+	selected,
+	visible,
+	compact = false,
+}: {
+	rows: SlashRegistryEntry[];
+	selected: number;
+	visible: number;
+	compact?: boolean;
+}) {
+	if (rows.length === 0) return null;
+	const { start, end } = slashMenuWindow(rows.length, selected, visible);
+	const combined = rows.slice(start, end).map((entry, i) => ({
 		key: `${entry.kind}:${entry.token}`,
 		label: entry.name,
 		description: entry.description,
+		picked: start + i === selected,
 	}));
 
-	if (combined.length === 0) return null;
+	return (
+		<Box
+			flexDirection="column"
+			borderStyle={compact ? undefined : "round"}
+			borderColor={t.frame}
+			paddingX={1}
+			marginTop={compact ? 0 : 1}
+			flexShrink={0}
+		>
+			{!compact && (
+				<Text color={t.heading} bold>
+					COMMANDS
+				</Text>
+			)}
+			{combined.map((row) => (
+				// One line per row, cut at the edge: a wrapped row would push the
+				// menu past the rows the terminal has.
+				<Text key={row.key} wrap="truncate-end">
+					<Text color={row.picked ? t.heading : t.textPrimary}>
+						{row.picked ? "> " : "  "}/{row.label}
+					</Text>
+					<Text color={t.textTertiary}> {row.description}</Text>
+				</Text>
+			))}
+			{rows.length > end - start && (
+				<Text color={t.textTertiary}>
+					{`${start + 1}-${end} of ${rows.length}, Up/Down to scroll, Tab to pick`}
+				</Text>
+			)}
+		</Box>
+	);
+}
 
+const MENTION_ROWS = 8;
+
+// The @ file list: matching files, the picked one marked, Tab to insert.
+function FileMentionList({ files, selected }: { files: string[]; selected: number }) {
 	return (
 		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
 			<Text color={t.heading} bold>
-				COMMANDS
+				FILES <Text color={t.textTertiary}>Up/Down to pick, Tab to insert</Text>
 			</Text>
-			{combined.slice(0, 14).map((row) => (
-				<Box key={row.key}>
-					<Text color={t.textPrimary}>/{row.label}</Text>
-					<Text color={t.textTertiary}> {row.description}</Text>
-				</Box>
+			{files.map((file, i) => (
+				<Text key={file} color={i === selected ? t.textPrimary : t.textTertiary}>
+					{i === selected ? "> " : "  "}
+					{file}
+				</Text>
 			))}
 		</Box>
 	);
@@ -810,4 +996,9 @@ function parseSlashCommand(input: string): { command: SlashCommand; args: string
 	if (!cmd) return null;
 
 	return { command: cmd.name, args };
+}
+
+/** True when accepting the ghost text would leave a `!` shell line in the input. */
+export function isShellSuggestion(value: string, ghost: string | undefined): boolean {
+	return `${value}${ghost ?? ""}`.trimStart().startsWith("!");
 }
