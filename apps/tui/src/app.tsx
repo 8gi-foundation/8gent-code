@@ -256,6 +256,12 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import {
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
@@ -442,7 +448,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
@@ -2423,6 +2430,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -4238,7 +4253,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,
@@ -6924,6 +6939,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

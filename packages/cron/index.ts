@@ -5,6 +5,7 @@
  * and runs 8gent commands via Bun.spawn when due.
  */
 
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -126,8 +127,11 @@ export class CronManager {
 			job.lastRun = now.toISOString();
 			// Fire and forget - spawn 8gent with the job's command
 			const args = job.command.split(/\s+/);
+			// The daemon runs in $HOME: 8gent's own CLI by absolute path, no cwd bunfig.toml or .env (#4013).
+			const cli = eightCliPath();
+			if (!cli) continue;
 			try {
-				Bun.spawn(["bun", "run", "bin/8gent.ts", ...args], {
+				Bun.spawn(["bun", ...safeBunFlags(), "run", cli, ...args], {
 					stdout: "ignore",
 					stderr: "ignore",
 				});

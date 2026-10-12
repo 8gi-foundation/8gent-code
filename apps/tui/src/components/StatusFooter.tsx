@@ -17,8 +17,8 @@
  *   in the hint row. The hints fill the columns the status leaves, right-
  *   aligned, most used first; [^P] palette leads because the palette lists
  *   every command.
- * - Orange means "look here": Infinite, and a System One judge that failed
- *   to load (shell commands fail closed).
+ * - Orange means "look here": Infinite, a System One judge that failed
+ *   to load (shell commands fail closed), and a shell with no OS sandbox.
  */
 
 import { Box, Text } from "ink";
@@ -87,6 +87,8 @@ export interface FooterData {
 	providersTotal?: number;
 	user?: string;
 	judge?: JudgeState;
+	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
+	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
 }
@@ -152,6 +154,17 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			label: "judge",
 			value: d.judge,
 			color: d.judge === "failed" ? ui.orange : ui.muted,
+			priority: 1,
+		});
+	}
+	if (d.sandboxOff) {
+		out.push({
+			key: "sandbox",
+			label: "sandbox",
+			value: "off",
+			note: d.sandboxOff,
+			// Shell commands can write 8gent's startup files: a state a person must not miss.
+			color: ui.orange,
 			priority: 1,
 		});
 	}
@@ -284,6 +297,40 @@ export function fitFooterHints(width: number, permShown = false, djTrack = false
 	return out;
 }
 
+/**
+ * The footer row: segments plus the hints the columns they leave can hold.
+ * The "sandbox off" segment (#4013) may push lower segments out, but never
+ * a hint: [^C] quit must not leave the row because the shell is unsandboxed
+ * (on Windows it never is). When the full segment would cost a hint it
+ * drops its reason ("sandbox off"), then, only if that still costs one, the
+ * row is exactly what it would be without it.
+ */
+export function fitFooterRow(
+	all: FooterSegment[],
+	width: number,
+	leading = false,
+	dj = false,
+): { segments: FooterSegment[]; hints: string[] } {
+	const hintsFor = (segments: FooterSegment[]) =>
+		fitFooterHints(
+			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
+			segments.some((s) => s.key === "perm"),
+			dj,
+		);
+	const sandbox = all.find((s) => s.key === "sandbox");
+	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
+	const base = fitFooterSegments(without, width, leading);
+	const baseHints = hintsFor(base);
+	if (!sandbox) return { segments: base, hints: baseHints };
+	for (const seg of [sandbox, { ...sandbox, note: undefined }]) {
+		const candidate = all.map((s) => (s === sandbox ? seg : s));
+		const segments = fitFooterSegments(candidate, width, leading);
+		const hints = hintsFor(segments);
+		if (segments.includes(seg) && hints.length >= baseHints.length) return { segments, hints };
+	}
+	return { segments: base, hints: baseHints };
+}
+
 /** A permission switch the footer is announcing (#3174). */
 export interface FooterToast {
 	mode: PermissionMode;
@@ -379,15 +426,14 @@ export function StatusSegments({
 }) {
 	const all = buildFooterSegments(data);
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
-	const segments = toastFit ? toastFit.segments : fitFooterSegments(all, width, leading);
-	const hints =
-		toastFit || notice
-			? []
-			: fitFooterHints(
-					Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
-					segments.some((s) => s.key === "perm"),
-					dj,
-				);
+	const row = fitFooterRow(all, width, leading, dj);
+	// A notice takes the hint slot, so no hint is at stake: every segment that fits shows.
+	const segments = toastFit
+		? toastFit.segments
+		: notice
+			? fitFooterSegments(all, width, leading)
+			: row.segments;
+	const hints = toastFit || notice ? [] : row.hints;
 	const segRef = useRef(null);
 	const hintRef = useRef(null);
 	const spans = footerClickSpans(segments, hints, leading);
