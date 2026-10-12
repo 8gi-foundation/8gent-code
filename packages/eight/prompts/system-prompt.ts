@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../core/home";
+import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
@@ -294,8 +295,9 @@ export const REVIEW_FOCUS_NOTE =
 	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
 
 /**
- * Local-server curl rules (#3942), one source for the full TOOL_PATTERNS_SEGMENT
- * and the compact local prompt (#4034). Kept short for the compact budget.
+ * Short form of LOCAL_SERVER_CURL_NOTE (tools/eight-browser.ts, the full prompt's copy) for the
+ * compact local prompt, which local models get instead of TOOL_PATTERNS_SEGMENT (#4034). Kept
+ * short for the headless prompt budget (headless-prompt.test.ts, 60% rule).
  */
 export const LOCAL_SERVER_CURL_SHORT =
 	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. On a 302 read the Location header and make a second curl.";
@@ -395,7 +397,7 @@ This is enforced at the infrastructure level: read_file on large code files will
 \`\`\`
 
 ### Local servers
-${LOCAL_SERVER_CURL_SHORT}
+${LOCAL_SERVER_CURL_NOTE}
 
 ### Git Flow
 \`\`\`json
