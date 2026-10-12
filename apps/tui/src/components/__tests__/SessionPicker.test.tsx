@@ -98,7 +98,8 @@ describe("visibleSessions", () => {
 		expect(
 			press([
 				["", { tab: true }],
-				["/", {}],
+				// SessionStore stores path.resolve(cwd): "\\work\\b" with a drive letter on Windows.
+				[path.sep, {}],
 				["b", {}],
 			]).rows.map((r) => r.id),
 		).toEqual([ids.other]);

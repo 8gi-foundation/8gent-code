@@ -136,6 +136,10 @@ export function isWindowsDeviceName(basename: string): boolean {
 function isDeviceFile(resolved: string, raw: string, platform: NodeJS.Platform): boolean {
 	// Posix device tree.
 	if (resolved.startsWith("/dev/") || resolved === "/dev") return true;
+	// On win32 resolve() turns "/dev/tty" into "D:\dev\tty", but the commands run in a POSIX
+	// shell (Git Bash), where the spelling the model wrote IS the device. Judge that spelling too.
+	const asWritten = path.posix.normalize(raw.replaceAll("\\", "/"));
+	if (asWritten.startsWith("/dev/") || asWritten === "/dev") return true;
 	// Windows device names (NUL, CON, PRN ...) only enforced on win32 to avoid
 	// false positives for files literally named "NUL" on case-sensitive FS.
 	if (platform === "win32") {
