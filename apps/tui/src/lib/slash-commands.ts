@@ -65,7 +65,9 @@ export type SlashCommand =
 	| "questions"
 	| "projects"
 	| "terminal"
-	| "copy";
+	| "copy"
+	| "tree"
+	| "import";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -182,14 +184,26 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "export",
 		aliases: ["save"],
-		description: "Export current session as self-contained HTML",
-		usage: "/export",
+		description: "Export the session: <file>.jsonl for the session file, else HTML",
+		usage: "/export [file.jsonl]",
+	},
+	{
+		name: "import",
+		aliases: [],
+		description: "Import a session file written by /export <file>.jsonl",
+		usage: "/import <file.jsonl>",
+	},
+	{
+		name: "tree",
+		aliases: [],
+		description: "The session tree: pick any earlier message and continue from it",
+		usage: "/tree",
 	},
 	{
 		name: "fork",
 		aliases: ["f"],
-		description: "Fork conversation at current message",
-		usage: "/fork [label]",
+		description: "Copy the conversation so far into a new session and continue there",
+		usage: "/fork [name]",
 	},
 	{
 		name: "rewind",
@@ -290,8 +304,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "resume",
 		aliases: ["res"],
-		description: "Resume a recent session (pick from last 5)",
-		usage: "/resume",
+		description: "Resume a session: searchable picker, or /resume <id or name>",
+		usage: "/resume [id|name]",
 	},
 	{
 		name: "session",

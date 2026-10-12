@@ -44,6 +44,9 @@ export function parseTuiArgv(argv: string[]): ParsedTuiCli {
 			if (next && !next.startsWith("-")) {
 				out.sessionResume = next;
 				i++;
+			} else {
+				// Bare --resume: the TUI opens the session picker (#3918 E3).
+				out.sessionResume = "";
 			}
 			continue;
 		}

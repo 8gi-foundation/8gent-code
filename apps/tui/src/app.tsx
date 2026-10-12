@@ -36,7 +36,15 @@ import {
 } from "../../../packages/local-model-server/index.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
-import { SessionTree } from "../../../packages/eight/session-tree.js";
+import {
+	type SessionListItem,
+	SessionStore,
+	type TreeNode,
+	listSessions,
+	trashSession,
+} from "../../../packages/eight/session-store.js";
+import { SessionPicker } from "./components/SessionPicker.js";
+import { SessionTree } from "./components/SessionTree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	ActivityMonitor,
@@ -706,7 +714,9 @@ type ViewMode =
 	| "history"
 	| "music"
 	| "message-viewer"
-	| "theme-select";
+	| "theme-select"
+	| "session-picker"
+	| "session-tree";
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
@@ -717,7 +727,12 @@ const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
 	"model-select",
 	"provider-select",
 	"theme-select",
+	"session-picker",
+	"session-tree",
 ]);
+// These two read their own keys (Ctrl+N, Ctrl+S, Ctrl+R, Ctrl+D, Tab, Esc),
+// so the App's global key handler stays out while they are open (#3918 E3, E4).
+const SESSION_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["session-picker", "session-tree"]);
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
@@ -1124,6 +1139,7 @@ export function App({
 		};
 	}, []);
 
+
 	// Animation settings
 	const [showAnimations, setShowAnimations] = useState(true);
 	const [soundEnabled, setSoundEnabled] = useState(false);
@@ -1145,8 +1161,13 @@ export function App({
 	// are never hardcoded - the header used to read "main" whatever branch
 	// was checked out, #2921).
 
-	// Session branching tree
-	const sessionTreeRef = useRef(new SessionTree());
+	// The /resume picker's rows and the /tree view's data (#3918 E3, E4). The
+	// session of record is the JSONL tree store (packages/eight/session-store.ts),
+	// written through sessionMgr; nothing is kept in a second in-memory tree.
+	const [pickerSessions, setPickerSessions] = useState<SessionListItem[]>([]);
+	const [treeView, setTreeView] = useState<{ tree: TreeNode[]; leafId: string | null } | null>(
+		null,
+	);
 
 	// Planning state (legacy predicted-step board)
 	const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>({
@@ -1447,6 +1468,7 @@ export function App({
 		}, 5_000);
 		return () => clearInterval(timer);
 	}, [activeSessionId, messages, currentModel, currentProvider]);
+
 
 	// Fetch models dynamically based on selected provider
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
@@ -1997,6 +2019,8 @@ export function App({
 	useInput((input, key) => {
 		// A pending approval card owns Y/N/E/S; useApprovalCard settles it.
 		if (isApprovalKeyClaimed(input, key)) return;
+		// The session picker and the tree read their own keys; only Ctrl+C passes.
+		if (SESSION_VIEWS.has(viewMode) && !(key.ctrl && input === "c")) return;
 
 
 		// Ctrl+P: toggle the command palette overlay.
@@ -3134,6 +3158,72 @@ export function App({
 	// Handle slash commands. Async so individual cases (e.g. /spawn with
 	// auto-install) can await long-running side effects without blocking
 	// or hacking around it via .then() chains.
+	/**
+	 * Write the chat to the tree store now and return the store, so /tree,
+	 * /fork and /export see every message, not only what the 5 s autosave
+	 * caught (#3918 E1). Null when no session is active.
+	 */
+	const saveSessionNow = useCallback((): SessionStore | null => {
+		if (!activeSessionId) return null;
+		const serializable = withoutBangLines(messages).map((m) => ({
+			role: m.role,
+			content: m.content,
+		}));
+		sessionMgr.update(activeSessionId, serializable, {
+			model: currentModel,
+			provider: currentProvider,
+		});
+		lastSaveCount.current = messages.length;
+		return sessionMgr.store(activeSessionId);
+	}, [activeSessionId, messages, sessionMgr, currentModel, currentProvider]);
+
+	/** Stored messages as chat bubbles. */
+	const restoredBubbles = (stored: ReadonlyArray<{ role: string; content: unknown }>): Message[] =>
+		stored.map((m, i) => ({
+			id: `restored-${Date.now()}-${i}`,
+			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
+			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+			timestamp: new Date(),
+		}));
+
+	/**
+	 * Make a stored session the active one and show its transcript (E3). The
+	 * 8gent's own context is not reloaded: the Agent has no history setter
+	 * yet, so the line says what was restored and nothing more.
+	 */
+	const openStoredSession = useCallback(
+		(id: string): boolean => {
+			const found = sessionMgr.get(id);
+			if (!found) {
+				addSystemMessage(`Session "${id}" could not be loaded.`);
+				return false;
+			}
+			setActiveSessionId(found.id);
+			setMessages(restoredBubbles(found.messages));
+			lastSaveCount.current = found.messages.length;
+			addSystemMessage(
+				`Resumed "${found.name || found.id}": ${found.messageCount} messages, ${found.model}, ${found.cwd}. Transcript restored.`,
+			);
+			return true;
+		},
+		[sessionMgr, addSystemMessage, setMessages],
+	);
+
+	/** Open the /resume picker over every session with at least one message (E3). */
+	const openSessionPicker = useCallback(() => {
+		saveSessionNow();
+		setPickerSessions(listSessions());
+		setViewMode("session-picker");
+	}, [saveSessionNow]);
+
+	// `--resume` with no id: the picker, once the session list can be read (E3).
+	const bootPickerShown = useRef(false);
+	useEffect(() => {
+		if (sessionResume !== "" || bootPickerShown.current || !activeSessionId) return;
+		bootPickerShown.current = true;
+		openSessionPicker();
+	}, [sessionResume, activeSessionId, openSessionPicker]);
+
 	const handleSlashCommand = useCallback(
 		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
@@ -3251,6 +3341,26 @@ export function App({
 					break;
 
 				case "export": {
+					// /export <file>.jsonl writes the session file itself (E7); anything
+					// else is the HTML export.
+					if (args[0]?.toLowerCase().endsWith(".jsonl")) {
+						const store = saveSessionNow();
+						if (!store) {
+							addSystemMessage("No session yet.");
+							break;
+						}
+						const target = pathMod.resolve(process.cwd(), args[0]);
+						try {
+							const text = store.exportJSONL();
+							fs.writeFileSync(target, text, { mode: 0o600 });
+							addSystemMessage(
+								`Session exported to ${target} (${store.messages().length} messages). /import ${args[0]} brings it back.`,
+							);
+						} catch (e) {
+							addSystemMessage(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+						}
+						break;
+					}
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
@@ -3329,17 +3439,24 @@ export function App({
 				}
 
 				case "fork": {
-					const tree = sessionTreeRef.current;
-					const tip = tree.tipId;
-					if (!tip) {
+					// Copy the conversation so far into a new session file and continue
+					// there; the original keeps its name and stays as it was (E4).
+					const store = saveSessionNow();
+					if (!store || store.allEntries().length === 0) {
 						addSystemMessage("No messages to fork from.");
 						break;
 					}
-					const label = args.length > 0 ? args.join(" ") : undefined;
-					const branchId = tree.fork(tip, label);
-					addSystemMessage(
-						`Forked at current message. New branch: ${branchId} (${label || branchId})\nUse /branch list to see all branches.`,
-					);
+					const name = args.length > 0 ? args.join(" ") : undefined;
+					try {
+						const child = store.fork(undefined, { name });
+						setActiveSessionId(child.id);
+						lastSaveCount.current = messages.length;
+						addSystemMessage(
+							`Forked into session ${child.id}${name ? ` "${name}"` : ""}. This chat continues there; ${store.name ? `"${store.name}"` : store.id} is unchanged. /resume lists both.`,
+						);
+					} catch (e) {
+						addSystemMessage(`Fork failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
@@ -3403,31 +3520,41 @@ export function App({
 				}
 
 				case "branch": {
-					const tree = sessionTreeRef.current;
+					// The tree store's branches: one leaf per branch (E4). /tree shows the
+					// same with every entry; /branch switch continues from a leaf.
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
 					const sub = args[0];
 					if (!sub || sub === "list") {
-						const branches = tree.getBranches();
-						const lines = branches.map((b) => {
-							const active = b.id === tree.activeBranch ? " *" : "";
-							return `  ${b.id}${active} - ${b.label} (${b.messageCount} msgs)`;
+						const leaves = store.leaves();
+						if (leaves.length === 0) {
+							addSystemMessage("No branches: the session has no messages yet.");
+							break;
+						}
+						const lines = leaves.map((leaf) => {
+							const active = leaf.id === store.leafId ? " *" : "";
+							const count = store.messages(leaf.id).length;
+							const preview =
+								leaf.type === "message"
+									? String(leaf.message.content).replace(/\s+/g, " ").slice(0, 60)
+									: leaf.type;
+							return `  ${leaf.id}${active} - ${count} msgs - ${preview}`;
 						});
-						addSystemMessage(`Branches:\n${lines.join("\n")}`);
+						addSystemMessage(`Branches (leaf entries, * = current):\n${lines.join("\n")}\n/tree shows every entry.`);
 					} else if (sub === "switch" && args[1]) {
 						try {
-							const history = tree.switchBranch(args[1]);
-							const restored = history.map((n) => ({
-								id: n.id,
-								role: n.role as "user" | "assistant" | "system",
-								content: typeof n.content === "string" ? n.content : JSON.stringify(n.content),
-								timestamp: new Date(n.timestamp),
-							}));
-							setMessages(restored);
-							addSystemMessage(`Switched to branch: ${args[1]}`);
-						} catch (e: any) {
-							addSystemMessage(`Branch error: ${e.message}`);
+							store.branch(args[1]);
+							setMessages(restoredBubbles(store.messages(args[1])));
+							lastSaveCount.current = store.messages(args[1]).length;
+							addSystemMessage(`Continuing from entry ${args[1]}.`);
+						} catch (e) {
+							addSystemMessage(`Branch error: ${e instanceof Error ? e.message : String(e)}`);
 						}
 					} else {
-						addSystemMessage("Usage: /branch [list|switch <id>]");
+						addSystemMessage("Usage: /branch [list|switch <entry id>]");
 					}
 					break;
 				}
@@ -3777,25 +3904,60 @@ export function App({
 
 				case "resume": {
 					historyPickDaemonRef.current = false;
-					// Show interactive session picker from local sessions
-					const resumeSessions = sessionMgr.list(50);
-					if (resumeSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
+					// /resume <id or name> opens it; bare /resume opens the searchable
+					// picker over the tree store (#3918 E3).
+					if (args.length > 0) {
+						const found = sessionMgr.resume(args.join(" "));
+						if (!found) addSystemMessage(`Session "${args.join(" ")}" not found. /resume lists them.`);
+						else openStoredSession(found.id);
 						break;
 					}
-					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
-						_id: s.id,
-						sessionId: s.id,
-						title: s.name || `Session ${s.createdAt.slice(0, 10)}`,
-						messageCount: s.messageCount,
-						model: s.model,
-						workingDirectory: s.cwd,
-						gitBranch: s.branch,
-						startedAt: new Date(s.createdAt).getTime(),
-						lastActiveAt: new Date(s.lastActiveAt).getTime(),
-					}));
-					setHistoryConversations(resumeEntries);
-					setViewMode("history");
+					openSessionPicker();
+					break;
+				}
+
+				case "tree": {
+					// The session's tree (every branch), to continue from any entry (E4).
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
+					if (store.allEntries().length === 0) {
+						addSystemMessage("The session has no messages yet.");
+						break;
+					}
+					setTreeView({ tree: store.tree(), leafId: store.leafId });
+					setViewMode("session-tree");
+					break;
+				}
+
+				case "import": {
+					// /import <file>.jsonl: a session exported with /export (E7).
+					const file = args[0];
+					if (!file) {
+						addSystemMessage("Usage: /import <file>.jsonl");
+						break;
+					}
+					const target = pathMod.resolve(process.cwd(), file);
+					let text: string;
+					try {
+						text = fs.readFileSync(target, "utf-8");
+					} catch (e) {
+						addSystemMessage(`Could not read ${target}: ${e instanceof Error ? e.message : String(e)}`);
+						break;
+					}
+					try {
+						saveSessionNow();
+						const imported = SessionStore.importJSONL(text, { cwd: process.cwd() });
+						// Open first: opening replaces the transcript, the line goes after it.
+						openStoredSession(imported.id);
+						addSystemMessage(
+							`Imported ${pathMod.basename(target)} as session ${imported.id} (${imported.messages().length} messages).`,
+						);
+					} catch (e) {
+						addSystemMessage(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
@@ -5776,8 +5938,6 @@ export function App({
 			content: bubbleContent,
 			timestamp: new Date(),
 		});
-		// Track in session tree
-		sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", bubbleContent);
 		// Session logger: user message
 		logMessage(tabId, tabTitle, "user", bubbleContent);
 
@@ -6016,8 +6176,6 @@ export function App({
 					}
 					// Clear image after sending
 					if (img) imageInput.removeImage();
-					const treePreview = (reply ?? "").trim().slice(0, 160) || "(tools only)";
-					sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", treePreview);
 					if (tabId === activeTabId) {
 						setLastResponseTime(Date.now() - cmdStartTime);
 						setStatus("success");
@@ -6324,6 +6482,55 @@ export function App({
 						}}
 						onCancel={() => setViewMode("chat")}
 						provider={currentProvider}
+					/>
+				);
+
+			case "session-picker":
+				return (
+					<SessionPicker
+						isOpen
+						sessions={pickerSessions}
+						cwd={process.cwd()}
+						onOpen={(id) => {
+							setViewMode("chat");
+							openStoredSession(id);
+						}}
+						onRename={(id, name) => {
+							sessionMgr.rename(id, name);
+							setPickerSessions(listSessions());
+						}}
+						onDelete={(id) => {
+							if (trashSession(id)) {
+								if (id === activeSessionId) setActiveSessionId(null);
+								addSystemMessage(`Session ${id} moved to the sessions trash folder.`);
+							}
+							setPickerSessions(listSessions());
+						}}
+						onClose={() => setViewMode("chat")}
+					/>
+				);
+
+			case "session-tree":
+				return (
+					<SessionTree
+						isOpen
+						tree={treeView?.tree ?? []}
+						leafId={treeView?.leafId ?? null}
+						onSelect={(entryId) => {
+							setViewMode("chat");
+							const store = activeSessionId ? sessionMgr.store(activeSessionId) : null;
+							if (!store) return;
+							try {
+								store.branch(entryId);
+								const onPath = store.messages(entryId);
+								setMessages(restoredBubbles(onPath));
+								lastSaveCount.current = onPath.length;
+								addSystemMessage(`Continuing from entry ${entryId} (${onPath.length} messages on this path).`);
+							} catch (e) {
+								addSystemMessage(`Could not continue from ${entryId}: ${e instanceof Error ? e.message : String(e)}`);
+							}
+						}}
+						onClose={() => setViewMode("chat")}
 					/>
 				);
 
