@@ -124,3 +124,50 @@ describe("user themes in theme.ts", () => {
 		expect(themeStatus().designSystem).toBeNull();
 	});
 });
+
+describe("user theme hardening", () => {
+	test("control characters never reach the skipped list or the picker", () => {
+		put("evil\u001b[2J\u202e.json", { base: "dark", orange: "#FF8800" });
+		put("keyed.json", { base: "dark", "bad\u001b[2Jkey\u202e": "#FFF" });
+		put("ok.json", { base: "dark", label: "Ok\u001b]0;pwn\u0007\u202e Theme\u2028", description: "d\u001b[2Je", orange: "#FF8800" });
+		reloadUserThemes();
+		const bad = userThemeProblems().map((p) => p.file + p.reason).join("");
+		expect(bad).toContain("evil.json");
+		expect(bad).toContain("badkey");
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: the point of the test
+		expect(/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u202a-\u202e\u2028\u2029]/.test(bad)).toBeFalse();
+		const row = themeChoices().find((r) => r.value === "user:ok");
+		expect(row?.label).toBe("Ok Theme");
+		expect(row?.description).toBe("de");
+	});
+
+	test("invisible text is rejected", () => {
+		put("ghost.json", { base: "dark", textPrimary: "#0A0908" });
+		reloadUserThemes();
+		expect(themeChoices().some((r) => r.value === "user:ghost")).toBeFalse();
+		expect(userThemeProblems().find((p) => p.file === "ghost.json")?.reason).toContain("textPrimary");
+	});
+
+	test("danger colour equal to bg is rejected", () => {
+		put("nored.json", { base: "dark", bg: "#E5503A" , textPrimary: "#000000", textSecondary: "#000000", cream: "#000000", prose: "#000000"});
+		put("nored2.json", { base: "dark", red: "#0A0908" });
+		reloadUserThemes();
+		expect(userThemeProblems().find((p) => p.file === "nored2.json")?.reason).toContain('"red"');
+		expect(themeChoices().some((r) => r.value === "user:nored2")).toBeFalse();
+	});
+
+	test("muted or frame equal to bg is rejected", () => {
+		put("nomuted.json", { base: "dark", muted: "#0A0908" });
+		put("noframe.json", { base: "dark", frame: "#0A0908" });
+		reloadUserThemes();
+		expect(userThemeProblems().find((p) => p.file === "nomuted.json")?.reason).toContain('"muted"');
+		expect(userThemeProblems().find((p) => p.file === "noframe.json")?.reason).toContain('"frame"');
+		expect(themeChoices().some((r) => r.value === "user:nomuted")).toBeFalse();
+	});
+
+	test("a normal theme passes", () => {
+		put("fine.json", { base: "dark", orange: "#FF8800", bg: "#140C06" });
+		reloadUserThemes();
+		expect(themeChoices().some((r) => r.value === "user:fine")).toBeTrue();
+	});
+});

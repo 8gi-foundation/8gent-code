@@ -84,6 +84,7 @@ describe("protected set", () => {
 				expect(p.files).toContain(path.join(H, f));
 			for (const d of [
 				"extensions",
+				"themes",
 				"prompts",
 				"packages",
 				"browser-profiles",

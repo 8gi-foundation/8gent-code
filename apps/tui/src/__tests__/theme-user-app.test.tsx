@@ -10,4 +10,13 @@ test("/theme picker lists a valid user theme and not a broken one", async () => 
 	expect(picker?.listed).toBeTrue();
 	expect(picker?.description).toBeTrue();
 	expect(picker?.brokenListed).toBeFalse();
+	const picked = events.find((e) => e.phase === "picked");
+	expect(picked?.applied).toBeTrue();
+	expect(picked?.error).toBeFalse();
+	expect(picked?.userTheme).toBe("ember");
+	expect(picked?.designSystem).toBeNull();
+	const text = events.find((e) => e.phase === "text");
+	expect(text?.applied).toBeTrue();
+	expect(text?.userTheme).toBe("ember");
+	expect(events.find((e) => e.phase === "reload")?.mentionsBroken).toBeTrue();
 }, 90000);

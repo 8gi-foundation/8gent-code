@@ -22,6 +22,24 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../../../packages/core/home.js";
+import { contrastHex } from "../theme/design-systems.js";
+
+/**
+ * Strip anything that can drive a terminal or reorder text from a string that
+ * came from a theme file: ESC sequences (CSI, OSC, others), C0 except tab, DEL,
+ * C1, bidi controls and the line/paragraph separators.
+ */
+export function sanitizeThemeText(s: string): string {
+	return String(s)
+		.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, "") // OSC
+		.replace(/\u001b\[[0-?]*[ -/]*[@-~]?/g, "") // CSI
+		.replace(/\u001b[\s\S]?/g, "") // other ESC
+		.replace(/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g, "");
+}
+
+/** Palette keys that must stay legible, with their WCAG minimum against bg. */
+const TEXT_KEYS = ["textPrimary", "textSecondary", "textTertiary", "cream", "prose", "muted", "heading"] as const;
+const ALERT_KEYS = ["red", "orange", "frame"] as const; // danger/error, and the warning/permission accent
 
 export type UserThemeBase = "dark" | "light";
 
@@ -72,10 +90,11 @@ export function parseUserTheme(
 	name: string,
 	raw: unknown,
 	paletteKeys: readonly string[],
+	bases?: Record<UserThemeBase, Record<string, string>>,
 ): { ok: true; theme: UserTheme } | { ok: false; reason: string } {
 	const fail = (reason: string) => ({ ok: false as const, reason });
 	if (!NAME_RE.test(name)) {
-		return fail(`file name "${name}" must be letters, digits, - or _ (max 64) before .json`);
+		return fail(`file name "${sanitizeThemeText(name)}" must be letters, digits, - or _ (max 64) before .json`);
 	}
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
 		return fail("the file must contain a JSON object");
@@ -92,8 +111,10 @@ export function parseUserTheme(
 		if (typeof v !== "string" || !v.trim() || v.length > 80) {
 			return fail(`"${k}" must be a non-empty string of at most 80 characters`);
 		}
-		if (k === "label") label = v.trim();
-		else description = v.trim();
+		const clean = sanitizeThemeText(v).trim();
+		if (!clean) return fail(`"${k}" is empty after removing control characters`);
+		if (k === "label") label = clean;
+		else description = clean;
 	}
 	const valid = new Set(paletteKeys);
 	const overrides: Record<string, string> = {};
@@ -101,15 +122,35 @@ export function parseUserTheme(
 	for (const [k, v] of Object.entries(obj)) {
 		if (RESERVED.has(k)) continue;
 		if (!valid.has(k)) {
-			problems.push(`unknown key "${k}"`);
+			problems.push(`unknown key "${sanitizeThemeText(k)}"`);
 		} else if (typeof v !== "string" || !HEX_RE.test(v)) {
-			problems.push(`"${k}" is not a hex colour like #RRGGBB or #RGB (got ${JSON.stringify(v)})`);
+			problems.push(`"${sanitizeThemeText(k)}" is not a hex colour like #RRGGBB or #RGB (got ${sanitizeThemeText(JSON.stringify(v))})`);
 		} else {
 			overrides[k] = normaliseHex(v);
 		}
 	}
 	if (problems.length) return fail(problems.join("; "));
 	if (Object.keys(overrides).length === 0) return fail("sets no colours");
+	if (bases) {
+		const merged = { ...bases[obj.base], ...overrides };
+		const bg = merged.bg;
+		const low: string[] = [];
+		if (bg) {
+			for (const k of TEXT_KEYS) {
+				if (k in overrides || "bg" in overrides) {
+					const c = merged[k];
+					if (c && contrastHex(c, bg) < 4.5) low.push(`"${k}" is ${contrastHex(c, bg).toFixed(1)}:1 on bg, needs 4.5:1`);
+				}
+			}
+			for (const k of ALERT_KEYS) {
+				if (k in overrides || "bg" in overrides) {
+					const c = merged[k];
+					if (c && contrastHex(c, bg) < 3) low.push(`"${k}" is ${contrastHex(c, bg).toFixed(1)}:1 on bg, needs 3:1`);
+				}
+			}
+		}
+		if (low.length) return fail(`unreadable: ${low.join("; ")}`);
+	}
 	return { ok: true, theme: { name, base: obj.base, label, description, overrides } };
 }
 
@@ -117,6 +158,7 @@ export function parseUserTheme(
 export function loadUserThemes(
 	paletteKeys: readonly string[],
 	dir: string = userThemesDir(),
+	bases?: Record<UserThemeBase, Record<string, string>>,
 ): UserThemeLoad {
 	const out: UserThemeLoad = { themes: [], skipped: [] };
 	let files: string[];
@@ -133,12 +175,12 @@ export function loadUserThemes(
 		try {
 			raw = JSON.parse(readFileSync(join(dir, file), "utf-8"));
 		} catch (err) {
-			out.skipped.push({ file, reason: `not valid JSON (${(err as Error).message})` });
+			out.skipped.push({ file: sanitizeThemeText(file), reason: sanitizeThemeText(`not valid JSON (${(err as Error).message})`) });
 			continue;
 		}
-		const r = parseUserTheme(name, raw, paletteKeys);
+		const r = parseUserTheme(name, raw, paletteKeys, bases);
 		if (r.ok) out.themes.push(r.theme);
-		else out.skipped.push({ file, reason: r.reason });
+		else out.skipped.push({ file: sanitizeThemeText(file), reason: sanitizeThemeText(r.reason) });
 	}
 	return out;
 }
