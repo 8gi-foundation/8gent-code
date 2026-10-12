@@ -30,7 +30,8 @@
  *
  * Tool calls that were running when the daemon died (#3653) are journaled as
  * they start and dropped as they end. On boot, settleInterruptedToolCalls
- * re-runs only those whose replay class is "replay" (local reads). Every
+ * re-runs only those recorded as "replay" (local reads) under a policy that
+ * still classes them that way (#4118). Every
  * other call is NOT run again: the model gets a harness note saying it was
  * not replayed and needs confirmation, so a write, command, push or message
  * is never silently repeated.
@@ -40,7 +41,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { scrub as scrubSecrets } from "../eight/secret-scanner";
-import { toolReplayClass } from "../eight/tools";
+import {
+	isReplayClass,
+	REPLAY_POLICY_VERSION,
+	type ReplayClass,
+	toolReplayClass,
+} from "../eight/tools";
 import type { SessionOverrides } from "./agent-pool";
 
 export interface JournalEntry {
@@ -84,7 +90,16 @@ export interface InFlightToolCall {
 	/** Full args for a replayable call; a short summary for any other. */
 	args: Record<string, unknown>;
 	startedAt: number;
+	/**
+	 * Replay class when the call started (#4118). Optional: a journal written
+	 * before it existed, or with a value this build does not know, degrades to
+	 * "ask" and is never re-run.
+	 */
+	cls?: ReplayClass;
 }
+
+/** On-disk shape of the journal file. Not the replay policy: see REPLAY_POLICY_VERSION. */
+const JOURNAL_FORMAT_VERSION = 1;
 
 /** Longest string arg kept on disk for a call that is never replayed. */
 const ARG_SUMMARY_CHARS = 200;
@@ -143,6 +158,12 @@ function isValidInFlight(v: unknown): v is InFlightToolCall {
 	);
 }
 
+/** An unrecognised recorded class is dropped, so the call degrades to "ask". */
+function normalizeInFlight(call: InFlightToolCall): InFlightToolCall {
+	if (call.cls !== undefined && !isReplayClass(call.cls)) delete call.cls;
+	return call;
+}
+
 function isValidPendingTurn(v: unknown): v is PendingTurn {
 	return (
 		isPlainObject(v) &&
@@ -199,7 +220,7 @@ export class SessionJournal {
 			for (const e of parsed.sessions as unknown[]) {
 				if (isValidJournalEntry(e)) {
 					// A malformed call or turn is dropped; the session entry is kept.
-					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight);
+					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight).map(normalizeInFlight);
 					if (e.pendingTurn !== undefined && !isValidPendingTurn(e.pendingTurn)) {
 						delete e.pendingTurn;
 					} else if (e.pendingTurn && e.pendingTurn.text.length > TURN_TEXT_CHARS + 32) {
@@ -229,7 +250,7 @@ export class SessionJournal {
 	markToolStart(sessionId: string, call: InFlightToolCall): void {
 		this.updateInFlight(sessionId, (calls) => [
 			...calls.filter((c) => c.id !== call.id),
-			{ ...call, args: journalArgs(call.tool, call.args) },
+			{ ...call, cls: toolReplayClass(call.tool), args: journalArgs(call.tool, call.args) },
 		]);
 	}
 
@@ -301,7 +322,14 @@ export class SessionJournal {
 		try {
 			const fd = fs.openSync(tmp, "w", 0o600);
 			try {
-				fs.writeSync(fd, JSON.stringify({ version: 1, sessions }));
+				fs.writeSync(
+					fd,
+					JSON.stringify({
+						version: JOURNAL_FORMAT_VERSION,
+						replayPolicy: REPLAY_POLICY_VERSION,
+						sessions,
+					}),
+				);
 				fs.fsyncSync(fd);
 			} finally {
 				fs.closeSync(fd);
@@ -460,7 +488,11 @@ export async function settleInterruptedToolCalls(
 			"[resume] The daemon stopped while these tool calls were running. It has restarted.",
 		];
 		for (const call of [...calls].sort((a, b) => a.startedAt - b.startedAt)) {
-			const cls = toolReplayClass(call.tool);
+			// Re-run only a call recorded as a read under a policy that still
+			// calls it one. No recorded class, or a different one, is "ask".
+			const current = toolReplayClass(call.tool);
+			const mismatch = call.cls !== undefined && call.cls !== current;
+			const cls: ReplayClass = call.cls === undefined || mismatch ? "ask" : current;
 			if (cls === "replay") {
 				let output: string;
 				try {
@@ -474,8 +506,9 @@ export async function settleInterruptedToolCalls(
 				lines.push(`- ${describeCall(call)}: re-run (read only, safe to replay). Result:\n${output}`);
 				result.replayed.push(call.id);
 			} else {
-				const why =
-					cls === "never"
+				const why = mismatch
+					? "It was recorded under a different replay policy"
+					: cls === "never"
 						? "It changes something (file, shell, git, network or a message)"
 						: "Its replay class is unknown";
 				lines.push(
