@@ -235,6 +235,19 @@ export async function chainedPieceRefusal(
 export type ReplayClass = "replay" | "never" | "ask";
 
 /**
+ * Version of the replay policy below, written into the session journal.
+ * RULE: bump this whenever REPLAY_SAFE_TOOLS, NEVER_REPLAY_TOOLS or
+ * NEVER_REPLAY_PREFIXES change. Each journaled call also records the class it
+ * started under, and resume refuses to re-run a call whose class has changed
+ * since (8SO review, #4118).
+ */
+export const REPLAY_POLICY_VERSION = 1;
+
+export function isReplayClass(v: unknown): v is ReplayClass {
+	return v === "replay" || v === "never" || v === "ask";
+}
+
+/**
  * Only reads with no side effect that pass the same path and policy checks
  * as a live call: read_file (safePath + ToolG8 read_file) and git_log (no
  * repo-configured helpers run). Language-server tools can start a server that
@@ -242,8 +255,10 @@ export type ReplayClass = "replay" | "never" | "ask";
  * textconv helpers; the PDF, notebook, outline and listing readers take paths
  * without the full checks. Those stay "ask" (#3653 review).
  */
+// Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
 const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
+// Changing this set: bump REPLAY_POLICY_VERSION.
 const NEVER_REPLAY_TOOLS = new Set([
 	"write_file",
 	"edit_file",
@@ -274,7 +289,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"run_computer_task",
 ]);
 
-/** Prefixes whose tools act on the desktop or a browser: never replayed. */
+/** Prefixes whose tools act on the desktop or a browser: never replayed. Changing: bump REPLAY_POLICY_VERSION. */
 const NEVER_REPLAY_PREFIXES = ["desktop_", "browser_"];
 
 export function toolReplayClass(toolName: string): ReplayClass {

@@ -432,8 +432,20 @@ describe("interrupted tool calls on resume", () => {
 			ttSessionId: "session_mid_tool",
 			createdAt: 1,
 			inFlight: [
-				{ id: "w1", tool: "write_file", args: { path: "out-3653.txt" }, startedAt: 2 },
-				{ id: "r1", tool: "read_file", args: { path: "notes-3653.txt" }, startedAt: 3 },
+				{
+					id: "w1",
+					tool: "write_file",
+					cls: "never",
+					args: { path: "out-3653.txt" },
+					startedAt: 2,
+				},
+				{
+					id: "r1",
+					tool: "read_file",
+					cls: "replay",
+					args: { path: "notes-3653.txt" },
+					startedAt: 3,
+				},
 			],
 		});
 		const store = new TimeTravelStore({ dataDir: ttDir });
@@ -488,6 +500,151 @@ describe("interrupted tool calls on resume", () => {
 });
 
 /**
+ * 8SO review of the replay wording (#4118, group msg 5611): the note says what
+ * is knowable about an interrupted call. A missing class is unknown, a class
+ * recorded under a different policy says so, and a genuine "never" says it
+ * changed something. The wording is asserted because collapsing the messages
+ * is how the defect arose.
+ */
+describe("replay class on resume (#4118)", () => {
+	const UNKNOWN = "Its replay class is unknown";
+	const CHANGES = "It changes something (file, shell, git, network or a message)";
+	const OTHER_POLICY = "It was recorded under a different replay policy";
+
+	async function settleOne(call: {
+		id: string;
+		tool: string;
+		cls?: import("./session-journal").InFlightToolCall["cls"];
+		args?: Record<string, unknown>;
+	}) {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_cls",
+			channel: "api",
+			ttSessionId: "session_cls",
+			createdAt: 1,
+			inFlight: [{ startedAt: 1, args: {}, ...call }],
+		});
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		const [settled] = await mod.settleInterruptedToolCalls(journal, pool);
+		const history = pool.getAgent("s_cls")!.getMessageHistory();
+		return { settled, note: String(history[history.length - 1].content) };
+	}
+
+	test("a call with no recorded class resolves to ask and says unknown, not changes something", async () => {
+		const { settled, note } = await settleOne({
+			id: "w0",
+			tool: "write_file",
+			args: { path: "x.txt" },
+		});
+		expect(settled.notReplayed).toEqual(["w0"]);
+		expect(note).toContain(UNKNOWN);
+		expect(note).not.toContain(CHANGES);
+		expect(note).not.toContain(OTHER_POLICY);
+	});
+
+	test("a read with no recorded class is not re-run", async () => {
+		const { settled, note } = await settleOne({
+			id: "r0",
+			tool: "read_file",
+			args: { path: "a.txt" },
+		});
+		expect(settled.replayed).toEqual([]);
+		expect(settled.notReplayed).toEqual(["r0"]);
+		expect(note).toContain(UNKNOWN);
+	});
+
+	test("a call recorded under a different policy says so and is not re-run", async () => {
+		const asRead = await settleOne({
+			id: "w2",
+			tool: "write_file",
+			cls: "replay",
+			args: { path: "x.txt" },
+		});
+		expect(asRead.settled.notReplayed).toEqual(["w2"]);
+		expect(asRead.note).toContain(OTHER_POLICY);
+		expect(asRead.note).not.toContain(UNKNOWN);
+		expect(asRead.note).not.toContain(CHANGES);
+
+		// A class that is a read now but was not when the call started is still not re-run.
+		const nowRead = await settleOne({
+			id: "r2",
+			tool: "read_file",
+			cls: "never",
+			args: { path: "a.txt" },
+		});
+		expect(nowRead.settled.replayed).toEqual([]);
+		expect(nowRead.note).toContain(OTHER_POLICY);
+	});
+
+	test("a genuine never says it changes something, not unknown", async () => {
+		const { settled, note } = await settleOne({
+			id: "w3",
+			tool: "write_file",
+			cls: "never",
+			args: { path: "x.txt" },
+		});
+		expect(settled.notReplayed).toEqual(["w3"]);
+		expect(note).toContain(CHANGES);
+		expect(note).not.toContain(UNKNOWN);
+		expect(note).not.toContain(OTHER_POLICY);
+	});
+
+	test("a running call is journaled with its class and the policy version", async () => {
+		const { REPLAY_POLICY_VERSION } = await import("../eight/tools");
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_rec", "api");
+		const events = (pool.getAgent("s_rec") as any).events;
+		events.onToolStart({ toolName: "read_file", toolCallId: "c1", args: { path: "a.txt" } });
+		events.onToolStart({ toolName: "write_file", toolCallId: "c2", args: { path: "b.txt" } });
+		events.onToolStart({ toolName: "some_new_tool", toolCallId: "c3", args: {} });
+		expect(journal.read()[0].inFlight!.map((c) => c.cls)).toEqual(["replay", "never", "ask"]);
+		const onDisk = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+		expect(typeof REPLAY_POLICY_VERSION).toBe("number");
+		expect(onDisk.replayPolicy).toBe(REPLAY_POLICY_VERSION);
+	});
+
+	test("a pre-upgrade journal (no class) passes validation, an unrecognised class degrades to ask", async () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{
+						sessionId: "s_old",
+						channel: "api",
+						ttSessionId: "session_old",
+						createdAt: 1,
+						inFlight: [
+							{ id: "old1", tool: "write_file", args: { path: "x.txt" }, startedAt: 1 },
+							{
+								id: "odd1",
+								tool: "read_file",
+								cls: "sometimes",
+								args: { path: "a.txt" },
+								startedAt: 2,
+							},
+						],
+					},
+				],
+			}),
+		);
+		const journal = new mod.SessionJournal(journalPath);
+		const [entry] = journal.read();
+		expect(entry.inFlight!.map((c) => c.id)).toEqual(["old1", "odd1"]);
+		expect(entry.inFlight!.map((c) => c.cls)).toEqual([undefined, undefined]);
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		const [settled] = await mod.settleInterruptedToolCalls(journal, pool);
+		expect(settled.replayed).toEqual([]);
+		expect(settled.notReplayed).toEqual(["old1", "odd1"]);
+	});
+});
+
+/**
  * 8SO review of #3698: the replay set holds only reads that have no side
  * effects and pass the standard path and policy checks, and journal text is
  * scrubbed of secrets.
@@ -529,7 +686,9 @@ describe("replay set review (#3653)", () => {
 			channel: "api",
 			ttSessionId: "session_escape",
 			createdAt: 1,
-			inFlight: [{ id: "r9", tool: "read_file", args: { path: secretFile }, startedAt: 1 }],
+			inFlight: [
+				{ id: "r9", tool: "read_file", cls: "replay", args: { path: secretFile }, startedAt: 1 },
+			],
 		});
 		const pool = newPool(journal);
 		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
