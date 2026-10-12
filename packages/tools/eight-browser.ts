@@ -399,6 +399,9 @@ export function setDefaultLocalProfile(name: string | null): void {
 			`default local browser profile must be a slug; refusing ${JSON.stringify(name)}`,
 		);
 	defaultLocalProfile = name;
+	// Freeze the trusted loopback port list now, at session start (8SO): a file a tool writes before
+	// the first browser call must change nothing.
+	allowedLoopbackPorts(process.env, profileHomeOverride ?? homedir());
 }
 
 /** The declared default, or null when none applies: EIGHT_BROWSER_LOCAL=0 opts out and the opt-in

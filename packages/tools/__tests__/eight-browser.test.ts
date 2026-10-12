@@ -1699,6 +1699,32 @@ describeNotWin(
 	},
 );
 
+describe("the trusted port list is frozen at session start (8SO)", () => {
+	afterEach(() => {
+		setDefaultLocalProfile(null);
+		_setProfileHomeForTest(null);
+		_resetLoopbackAllowlistForTest();
+	});
+	test("a ~/.8gent/allow-loopback.json written after setDefaultLocalProfile and before the first browser_open changes nothing", async () => {
+		const home = mkdtempSync(join(tmpdir(), "8b-freeze-home-"));
+		try {
+			_setProfileHomeForTest(home);
+			_resetLoopbackAllowlistForTest();
+			setDefaultLocalProfile(LOCAL_BROWSER_PROFILE); // session start
+			mkdirSync(join(home, ".8gent"), { recursive: true });
+			writeFileSync(
+				join(home, ".8gent", "allow-loopback.json"),
+				JSON.stringify({ allow: ["127.0.0.1:5173"] }),
+			);
+			const site = fakeSite();
+			const b = createEightBrowser(site.call, { settleMs: 0, isolated: true, env: process.env });
+			expect(await b.open("http://127.0.0.1:5173/")).toMatch(/failed|Refused/);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("isolated profile: loopback only on the run's own listed ports (#3785)", () => {
 	afterEach(() => _resetLoopbackAllowlistForTest());
 	const at = (scheme: string, rest: string) => `${scheme}:/` + `/${rest}`;
