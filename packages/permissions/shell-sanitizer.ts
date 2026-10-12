@@ -3,9 +3,9 @@
  * - ToolExecutor.run_command (packages/eight/tools.ts)
  * - the AI SDK run_command tool (packages/ai/tools.ts)
  *
- * Blocks command substitution and command chaining, while allowing safe
- * operators like pipes and redirects. One function, so the two paths cannot
- * drift apart.
+ * Blocks command substitution, process substitution and command chaining,
+ * while allowing safe operators like pipes and redirects. One function, so the
+ * two paths cannot drift apart.
  *
  * Quoted text is data (#3879), so a string passed to `bash -c`, `sh -c` or
  * `eval` in quotes now passes this check even when it holds `;` or `&&`. This
@@ -36,6 +36,13 @@ function dialectFor(platform: NodeJS.Platform, kind?: ShellKind | "posix"): Dial
 }
 
 type Finding = "semicolon" | "dollar-quote" | "newline" | "amp" | "pwsh-construct";
+
+/**
+ * Process substitution `<(cmd)` / `>(cmd)` runs cmd exactly as `$(cmd)` does, with the
+ * output on a pipe path instead of inline, so it is judged wherever `$(` is judged.
+ */
+const PROCESS_SUBSTITUTION = /[<>]\(/;
+const PROCESS_SUBSTITUTION_REASON = "Process substitution <(...) and >(...) is not allowed";
 
 /**
  * Walk the characters outside quotes and escapes. `visit` returns a Finding to
@@ -177,10 +184,11 @@ interface QuoteScan {
 }
 
 /**
- * POSIX quote scan (#3879). `;`, `&&`, `||` inside quotes are data, and `$(`
- * or a backtick inside SINGLE quotes is data; inside double quotes bash still
- * expands them, so the caller keeps refusing those. A backslash only escapes a
- * quote mark, `;` (#3932) or another backslash here, so `\;` and `\$(` stay refused as before.
+ * POSIX quote scan (#3879). `;`, `&&`, `||` inside quotes are data, and `$(`,
+ * `<(`, `>(` or a backtick inside SINGLE quotes is data; inside double quotes
+ * the caller keeps refusing all of those, exactly as for `$(`. A backslash only
+ * escapes a quote mark, `;` (#3932) or another backslash here, so `\;`, `\$(`
+ * and `\<(` stay refused as before.
  * An unquoted `$'...'` (ANSI-C) span with a backslash in it is refused: bash
  * ends it differently from a plain quote, and a wrong guess hides a command.
  * `#` is NOT treated as a comment start (8SO round 3): comment skipping was a
@@ -386,9 +394,13 @@ function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellK
 	if (scan.lineBreak) {
 		return { safe: false, reason: NEWLINE_REASON };
 	}
-	// Bash still expands these inside double quotes.
+	// Bash still expands these inside double quotes. Process substitution is
+	// held to the same rule as $( so the two cannot drift apart.
 	if (scan.doubled.some((q) => /\$\(/.test(q))) {
 		return { safe: false, reason: "Command substitution $(...) is not allowed" };
+	}
+	if (scan.doubled.some((q) => PROCESS_SUBSTITUTION.test(q))) {
+		return { safe: false, reason: PROCESS_SUBSTITUTION_REASON };
 	}
 	if (scan.doubled.some((q) => q.includes("`"))) {
 		return { safe: false, reason: "Command substitution via backticks is not allowed" };
@@ -413,6 +425,9 @@ function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellK
 
 	if (/\$\(/.test(text)) {
 		return { safe: false, reason: "Command substitution $(...) is not allowed" };
+	}
+	if (PROCESS_SUBSTITUTION.test(text)) {
+		return { safe: false, reason: PROCESS_SUBSTITUTION_REASON };
 	}
 	if (/`/.test(text)) {
 		return { safe: false, reason: "Command substitution via backticks is not allowed" };
@@ -474,12 +489,15 @@ function sanitizeStrict(
 	platform: NodeJS.Platform,
 	kind?: ShellKind | "posix",
 ): ShellSanitizeResult {
-	// Block command substitution: $(...) and backticks
+	// Block command substitution ($(...) and backticks) and process substitution (<(...), >(...))
 	if (/\$\(/.test(command)) {
 		return {
 			safe: false,
 			reason: "Command substitution $(...) is not allowed",
 		};
+	}
+	if (PROCESS_SUBSTITUTION.test(command)) {
+		return { safe: false, reason: PROCESS_SUBSTITUTION_REASON };
 	}
 	if (/`/.test(command)) {
 		return {

@@ -755,9 +755,10 @@ const clipped = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 120);
 // logged-in browser. The real fix is seatbelting run_command (#3612); until that merges the
 // bot's launcher does not set EIGHT_BROWSER_PROFILE. After decoding escapes, base64/hex
 // literals and char codes, and stripping quoting, this refuses:
-//   - the token and profile names (browser-control, browser-profiles, browser-*);
+//   - the browser state names (browser-control, browser-profiles, browser-history, browser-shots, browser-*);
 //   - ".8gent" with a glob, a $variable or browser/token/control/profile after it;
-//   - ".8gent" in a command that lists directories (readdir, listdir, ls, find, glob...);
+//   - a directory listing (readdir, listdir, ls, find, glob...) of ".8gent" itself or of a browser-* child
+//     of it; a listing deeper inside .8gent (a pilot run dir) is not a listing of the secrets;
 //   - any glob segment, other than a bare "*", that could expand to one of those names.
 
 const SECRET_NAMES = [
@@ -838,21 +839,55 @@ function blankSearchPattern(seg: string): string {
 	return seg;
 }
 
+/** The browser state under .8gent: the control token and port, the profiles, the history and the shots. */
+const BROWSER_STATE_NAME = /browser-(control|profiles|history|shots)/;
+
+/** The command split on shell separators (quotes already stripped by the caller). */
+const shellTokens = (lower: string) => lower.split(/[\s;|&()<>=]+/);
+
 /**
- * Per-token check for "browser" under .8gent. Every token holding .8gent is posix-normalised (so ./, //,
- * and x/.. cannot hide a browser-* name) and judged from its last .8gent on; a token that normalises
- * .8gent away fails closed. Any token without .8gent that names browser is refused too (cd ~/.8gent &&
- * cat ./browser-history.json, ../browser-shots, a symlink alias). Only a browser-named directory deeper
- * inside an .8gent path (the pilot run dir .../browser-op-practice/) is allowed.
+ * For a token holding .8gent: the posix-normalised path from its last .8gent on, with the .8gent
+ * directory name stripped ("" is the directory itself). null when normalising removed .8gent
+ * (x/.8gent/..), which every caller treats as fail closed.
+ */
+function tailUnder8gent(tok: string): string | null {
+	const n = pathPosix.normalize(tok.replace(/\\/g, "/"));
+	const at = n.lastIndexOf(".8gent");
+	return at < 0 ? null : n.slice(at).replace(/^\.8gent[^/]*\/*/, "");
+}
+
+/**
+ * Per-token check for browser state under .8gent. Every token holding .8gent is posix-normalised (so ./,
+ * //, and x/.. cannot hide a browser-* name) and judged from its last .8gent on; a token that normalises
+ * .8gent away fails closed. A token without .8gent is refused only when it names the browser state
+ * (cd ~/.8gent && cat ./browser-history.json, ../browser-shots, a symlink alias); a name that merely
+ * starts with "browser" (the pilot run dir browser-op-practice/) is a path, not state. Only a
+ * browser-named directory deeper inside an .8gent path (.../runs/x/browser-op-practice/) is allowed.
  */
 function browserUnder8gent(lower: string): boolean {
-	for (const tok of lower.split(/[\s;|&()<>=]+/)) {
+	for (const tok of shellTokens(lower)) {
 		if (tok.includes(".8gent")) {
-			const n = pathPosix.normalize(tok.replace(/\\/g, "/"));
-			const at = n.lastIndexOf(".8gent");
-			if (at < 0) return true;
-			if (/^browser/.test(n.slice(at).replace(/^\.8gent[^/]*\/*/, ""))) return true;
-		} else if (tok.includes("browser")) return true;
+			const tail = tailUnder8gent(tok);
+			if (tail === null || /^browser/.test(tail)) return true;
+		} else if (BROWSER_STATE_NAME.test(tok)) return true;
+	}
+	return false;
+}
+
+/**
+ * True when a token names the .8gent directory itself (~/.8gent, ~/.8gent/, ~/.8gent/x/.., the
+ * os.listdir argument) or a browser-* child of it. A path deeper inside .8gent
+ * (~/.8gent/rishi-pilot/runs/...) is not the secrets' directory, so listing it is allowed. A relative
+ * step up in the same command (cd ~/.8gent/x/runs; ls ../..) cannot be resolved per token and fails closed.
+ */
+function names8gentDir(lower: string): boolean {
+	for (const tok of shellTokens(lower)) {
+		if (!tok.includes(".8gent")) {
+			if (/(^|\/)\.\.(\/|$)/.test(tok)) return true;
+			continue;
+		}
+		const tail = tailUnder8gent(tok);
+		if (tail === null || tail === "" || /^browser-/.test(tail)) return true;
 	}
 	return false;
 }
@@ -871,7 +906,8 @@ export function touchesBrowserSecrets(command: string): boolean {
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
 			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower)) return true;
-			if (lists) return true;
+			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
+			if (lists && names8gentDir(lower)) return true;
 		}
 		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
 		// as a glob over browser-control.token. Only that one word is blanked (see blankSearchPattern);

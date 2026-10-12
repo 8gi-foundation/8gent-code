@@ -1253,6 +1253,71 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
 });
 
+describe("touchesBrowserSecrets: a browser-named run dir and a listing deeper inside .8gent are not secrets (8SO, after #3950)", () => {
+	const run = "/Users/x/.8gent/rishi-pilot/runs/2026-10-12_101500/browser-op-practice";
+	const allowed = [
+		`ls ${run}`,
+		`ls -la ${run}`,
+		`ls ${run}/work`,
+		`find ${run} -name result.json`,
+		"ls ~/.8gent/rishi-pilot/runs",
+		"ls -la /Users/x/.8gent/rishi-pilot/runs/2026-10-12_101500",
+		"cd ~/.8gent/runs; cat browser-op-practice/TASK.txt",
+		"cd ~/.8gent/rishi-pilot/runs; ls",
+		"cd ~/.8gent/rishi-pilot/runs; ls browser-op-practice",
+		"cd ~/.8gent/runs && cat browser-op-practice/TASK.txt",
+		"cat ~/.8gent/runs/browser-op-practice/TASK.txt",
+		"cat browser-op-practice/TASK.txt",
+		"grep -r TODO ~/.8gent/rishi-pilot/runs/2026-10-12_101500",
+		"rg result ~/.8gent/rishi-pilot/runs",
+		`python3 -c "import os;print(os.listdir(os.path.expanduser('~/.8gent/rishi-pilot/runs')))"`,
+	];
+	for (const cmd of allowed)
+		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
+
+	// Every shape the narrowed lines still refuse: the state names without .8gent, and a listing of
+	// .8gent itself or of a browser-* child, in every spelling that normalises to one.
+	const refused = [
+		"cd ~/.8gent && cat ./browser-history.json",
+		"cd ~/.8gent/rishi-pilot && cat ../browser-history.json",
+		"cd ~/.8gent/runs; cat ../browser-control.token",
+		"cd ~/.8gent/runs; cat ../browser-shots/last.png",
+		"cd ~/.8gent/runs; ls ../browser-profiles",
+		"ln -s ~/.8gent l && cat l/browser-history.json",
+		"ln -s ~/.8gent l && cat l/browser-control.port",
+		"ls ~/.8gent",
+		"ls ~/.8gent/",
+		"ls -la ~/.8gent",
+		"ls ~/.8gent/.",
+		"ls ~/.8gent/rishi-pilot/..",
+		"ls ~/.8gent/rishi-pilot/../",
+		"ls ~/.8gent//",
+		"ls /Users/x/.8gent",
+		"find ~/.8gent -name x",
+		"find ~/.8gent/rishi-pilot/.. -name x",
+		"ls ~/.8gent/browser-profiles",
+		"ls ~/.8gent/browser-profiles/eightgent",
+		"ls ~/.8gent/browser-shots",
+		"find ~/.8gent/browser-shots -name '*.png'",
+		"grep -r x ~/.8gent",
+		"grep -r x ~/.8gent/",
+		"rg x ~/.8gent",
+		"cd ~/.8gent; ls",
+		"cd ~/.8gent/rishi-pilot/runs; ls ../..",
+		"cd ~/.8gent/runs; ls ..",
+		"cd ~/.8gent/runs; cd ..; ls",
+		"cd ~/.8gent/runs && find .. -name x",
+		"cat ~/.8gent/rishi-pilot/runs/x/browser-op-practice/../../../../browser-history.json",
+		`python -c "import os;print(os.listdir(os.path.expanduser('~/.8gent')))"`,
+		`python -c "import os;print(os.listdir(os.path.expanduser('~/.8gent/')))"`,
+		`bun -e "console.log(require('fs').readdirSync(require('os').homedir()+'/.8gent'))"`,
+		`bun -e "console.log(require('fs').readdirSync(require('os').homedir()+'/.8gent/browser-profiles'))"`,
+		`node -e "console.log(require('fs').readdirSync(process.env.HOME+'/.8gent/rishi-pilot/..'))"`,
+	];
+	for (const cmd of refused)
+		test(`refuses: ${cmd.slice(0, 90)}`, () => expect(touchesBrowserSecrets(cmd)).toBe(true));
+});
+
 describe("ToolExecutor.runCommand refuses browser-secret commands before anything runs", () => {
 	test("cat, bun -e, python -c and node -e are all denied", async () => {
 		const exec = new ToolExecutor(mkdtempSync(join(tmpdir(), "rc-guard-")), "rc-guard");
