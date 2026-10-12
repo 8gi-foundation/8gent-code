@@ -1,0 +1,257 @@
+// Kill-and-resume proof for the daemon (#4107). Runs on Windows CI and locally.
+//
+// Starts the daemon with resume-on-boot and auto-continue on, has a session
+// start a slow shell command, hard-kills the daemon mid-command (TerminateProcess
+// on Windows, SIGKILL elsewhere: no shutdown handler runs, like a power cut or
+// Stop-Process -Force), starts it again and requires that:
+//   - the journal was written on this platform's paths while the command ran,
+//   - the session comes back and the cut command is reported as not replayed,
+//   - the turn is continued and finishes,
+//   - the command ran exactly once.
+// The model is a stub served from this process, so no model or network is used.
+//
+// Usage: bun scripts/ci/durable-kill-resume.ts <daemon command...>
+//   e.g. bun scripts/ci/durable-kill-resume.ts .\dist\bin\8gent-windows-x64.exe daemon run
+//        bun scripts/ci/durable-kill-resume.ts bun bin/8gent.ts daemon run
+import { type ChildProcess, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const daemonArgv = process.argv.slice(2);
+if (daemonArgv.length === 0) {
+	console.error("usage: bun scripts/ci/durable-kill-resume.ts <daemon command...>");
+	process.exit(2);
+}
+const MODEL_PORT = Number(process.env.STUB_PORT ?? 8191);
+const DAEMON_PORT = Number(process.env.EIGHT_DAEMON_PORT ?? 18798);
+const root = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "kill-resume-"));
+const home = path.join(root, "home");
+const dataDir = path.join(home, ".8gent");
+const work = path.join(root, "work");
+for (const d of [dataDir, work]) fs.mkdirSync(d, { recursive: true });
+const journalPath = path.join(dataDir, "sessions-journal.json");
+const runsFile = path.join(work, "runs.txt");
+// One command, because run_command refuses chaining: a script that records its
+// start, then outlives the kill. Git Bash runs it on windows-latest
+// (packages/core/shell.ts), sh elsewhere.
+const COMMAND = "sh slow.sh";
+fs.writeFileSync(path.join(work, "slow.sh"), "echo start >> runs.txt\nsleep 60\n");
+const RESUME_MARK = "[resume] continued-after-crash";
+
+const fail = (msg: string): never => {
+	console.error(`FAIL: ${msg}`);
+	for (const f of ["daemon-1.log", "daemon-2.log"]) {
+		const p = path.join(root, f);
+		if (fs.existsSync(p))
+			console.error(
+				`--- ${f} (last 40 lines)\n${fs.readFileSync(p, "utf8").split("\n").slice(-40).join("\n")}`,
+			);
+	}
+	cleanup();
+	process.exit(1);
+};
+
+// ----- stub model -----
+let continuation = "";
+const toolReply = `\`\`\`tool_call\n${JSON.stringify({ name: "run_command", arguments: { command: COMMAND } })}\n\`\`\``;
+const model = Bun.serve({
+	port: MODEL_PORT,
+	hostname: "127.0.0.1",
+	async fetch(req) {
+		const url = new URL(req.url);
+		if (url.pathname.endsWith("/models"))
+			return Response.json({ object: "list", data: [{ id: "stub", object: "model" }] });
+		if (!url.pathname.endsWith("/chat/completions"))
+			return new Response("not found", { status: 404 });
+		const body = (await req.json()) as {
+			stream?: boolean;
+			messages?: Array<{ role: string; content?: unknown }>;
+		};
+		const msgs = body.messages ?? [];
+		const text = msgs
+			.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "")))
+			.join("\n");
+		let content: string;
+		if (text.includes(RESUME_MARK)) {
+			continuation = text;
+			content = "DONE: checked runs.txt after the restart, the command already ran once";
+		} else if (msgs.some((m) => m.role === "assistant")) {
+			content = "DONE";
+		} else {
+			content = toolReply;
+		}
+		if (!body.stream) {
+			return Response.json({
+				id: "stub",
+				object: "chat.completion",
+				model: "stub",
+				choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+			});
+		}
+		const frame = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+		const stream = [
+			frame({
+				id: "stub",
+				choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],
+			}),
+			frame({ id: "stub", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+			"data: [DONE]\n\n",
+		].join("");
+		return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+	},
+});
+
+// ----- daemon -----
+let daemon: ChildProcess | null = null;
+function startDaemon(n: number): ChildProcess {
+	const log = fs.openSync(path.join(root, `daemon-${n}.log`), "w");
+	const child = spawn(daemonArgv[0], daemonArgv.slice(1), {
+		cwd: work,
+		stdio: ["ignore", log, log],
+		env: {
+			...process.env,
+			HOME: home,
+			USERPROFILE: home,
+			EIGHT_DATA_DIR: dataDir,
+			EIGHT_TIMETRAVEL_DIR: path.join(dataDir, "timetravel"),
+			EIGHT_DAEMON_PORT: String(DAEMON_PORT),
+			EIGHT_RESUME_ON_BOOT: "1",
+			EIGHT_AUTO_CONTINUE: "1",
+			EIGHT_CHECKPOINT_EVERY: "1",
+			DEFAULT_RUNTIME: "ollama",
+			DEFAULT_MODEL: "stub",
+			OLLAMA_HOST: `http://127.0.0.1:${MODEL_PORT}`,
+			EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9",
+		},
+	});
+	fs.closeSync(log);
+	return child;
+}
+function cleanup() {
+	try {
+		daemon?.kill("SIGKILL");
+	} catch {}
+	model.stop(true);
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function until<T>(
+	what: string,
+	ms: number,
+	probe: () => T | undefined | false | Promise<T | undefined | false>,
+): Promise<T> {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		try {
+			const v = await probe();
+			if (v) return v;
+		} catch {}
+		await sleep(250);
+	}
+	return fail(`timed out after ${ms / 1000}s waiting for ${what}`);
+}
+const healthy = () =>
+	until(
+		"daemon /health",
+		60_000,
+		async () => (await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`)).ok,
+	);
+type JournalEntry = {
+	sessionId: string;
+	inFlight?: Array<{ tool: string }>;
+	pendingTurn?: unknown;
+};
+const journal = (): JournalEntry[] =>
+	JSON.parse(fs.readFileSync(journalPath, "utf8")).sessions ?? [];
+const runs = () =>
+	fs.existsSync(runsFile)
+		? fs
+				.readFileSync(runsFile, "utf8")
+				.split(/\r?\n/)
+				.filter((l) => l.trim() === "start").length
+		: 0;
+
+// ----- 1. start work, wait until the command is running -----
+daemon = startDaemon(1);
+await healthy();
+const ws = new WebSocket(`ws://127.0.0.1:${DAEMON_PORT}`);
+await until("websocket open", 10_000, () => ws.readyState === WebSocket.OPEN);
+let sessionId = "";
+let lastError = "";
+ws.onmessage = (e) => {
+	const m = JSON.parse(String(e.data));
+	if (m.type === "session:created") sessionId = m.sessionId;
+	if (m.type === "error") lastError = String(m.message);
+};
+ws.send(JSON.stringify({ type: "session:create", channel: "api" }));
+await until("session:created", 10_000, () => sessionId);
+// The session's 8gent is built asynchronously after session:created, so a
+// prompt sent too early is refused with "session not found". Resend only then.
+for (let attempt = 1; ; attempt++) {
+	lastError = "";
+	ws.send(JSON.stringify({ type: "prompt", text: "Record a start line in runs.txt, then wait." }));
+	const outcome = await until("the prompt to be accepted or refused", 30_000, () =>
+		/session not found/.test(lastError)
+			? "retry"
+			: runs() > 0 || journal().some((e) => e.sessionId === sessionId && e.pendingTurn)
+				? "ok"
+				: false,
+	);
+	if (outcome === "ok") break;
+	if (attempt >= 20) fail("the session never accepted the prompt");
+	await sleep(1_000);
+}
+await until("the command to start", 60_000, () => runs() === 1);
+const before = await until("the journal to record the running command", 10_000, () =>
+	journal().find(
+		(e) =>
+			e.sessionId === sessionId &&
+			e.inFlight?.some((c) => c.tool === "run_command") &&
+			e.pendingTurn,
+	),
+);
+console.log(
+	`journal written at ${journalPath}: in-flight ${before.inFlight?.map((c) => c.tool).join(",")}, turn pending`,
+);
+ws.close();
+
+// ----- 2. hard kill mid-command -----
+const t0 = Date.now();
+daemon.kill("SIGKILL");
+await until(
+	"the daemon to die",
+	15_000,
+	() => daemon?.exitCode !== null || daemon?.signalCode !== null,
+);
+console.log(`daemon hard-killed mid-command (${process.platform})`);
+
+// ----- 3. restart and require the work to come back and finish -----
+daemon = startDaemon(2);
+await healthy();
+const log2 = () => fs.readFileSync(path.join(root, "daemon-2.log"), "utf8");
+const restored = await until(
+	"resume-on-boot to restore the session",
+	30_000,
+	() =>
+		log2().match(/resume-on-boot: (\d+) session\(s\) restored from journal in (\d+)ms/) ??
+		undefined,
+);
+if (restored[1] !== "1") fail(`expected 1 restored session, got ${restored[1]}`);
+await until("the cut command to be reported as not replayed", 10_000, () =>
+	/1 call\(s\) not replayed/.test(log2()),
+);
+await until("the continuation to reach the model", 60_000, () => continuation);
+if (!continuation.includes("not replayed"))
+	fail("the continuation did not tell the model the command was not replayed");
+await until("the continued turn to finish", 60_000, () => {
+	const e = journal().find((x) => x.sessionId === sessionId);
+	return e && !e.pendingTurn && !(e.inFlight?.length ?? 0);
+});
+const count = runs();
+if (count !== 1) fail(`the command ran ${count} times, expected exactly 1`);
+console.log(
+	`PASS: session restored in ${restored[2]}ms (${Date.now() - t0}ms kill to finished), cut command not replayed, turn continued and finished, command ran once`,
+);
+cleanup();
+process.exit(0);
