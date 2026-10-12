@@ -13,18 +13,22 @@
 // Usage: bun scripts/ci/durable-kill-resume.ts <daemon command...>
 //   e.g. bun scripts/ci/durable-kill-resume.ts .\dist\bin\8gent-windows-x64.exe daemon run
 //        bun scripts/ci/durable-kill-resume.ts bun bin/8gent.ts daemon run
+// KILL_RESUME_DAEMON_PORT (default 18798) and STUB_PORT (default 8191) pick the ports.
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const daemonArgv = process.argv.slice(2);
+// The daemon runs in its own work dir, so existing relative paths (bin/8gent.ts)
+// are resolved here first.
+const daemonArgv = process.argv.slice(2).map((a) => (fs.existsSync(a) ? path.resolve(a) : a));
 if (daemonArgv.length === 0) {
 	console.error("usage: bun scripts/ci/durable-kill-resume.ts <daemon command...>");
 	process.exit(2);
 }
 const MODEL_PORT = Number(process.env.STUB_PORT ?? 8191);
-const DAEMON_PORT = Number(process.env.EIGHT_DAEMON_PORT ?? 18798);
+// Its own variable: an inherited EIGHT_DAEMON_PORT could point at a real daemon.
+const DAEMON_PORT = Number(process.env.KILL_RESUME_DAEMON_PORT ?? 18798);
 const root = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "kill-resume-"));
 const home = path.join(root, "home");
 const dataDir = path.join(home, ".8gent");
@@ -33,10 +37,15 @@ for (const d of [dataDir, work]) fs.mkdirSync(d, { recursive: true });
 const journalPath = path.join(dataDir, "sessions-journal.json");
 const runsFile = path.join(work, "runs.txt");
 // One command, because run_command refuses chaining: a script that records its
-// start, then outlives the kill. Git Bash runs it on windows-latest
-// (packages/core/shell.ts), sh elsewhere.
+// start, then outlives the kill. A hard kill orphans it, so it stops itself
+// when cleanup() creates work/stop, or after 120 s. Git Bash runs it on
+// windows-latest (packages/core/shell.ts), sh elsewhere.
 const COMMAND = "sh slow.sh";
-fs.writeFileSync(path.join(work, "slow.sh"), "echo start >> runs.txt\nsleep 60\n");
+const stopFile = path.join(work, "stop");
+fs.writeFileSync(
+	path.join(work, "slow.sh"),
+	"echo start >> runs.txt; i=0; while [ ! -f stop ] && [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done\n",
+);
 const RESUME_MARK = "[resume] continued-after-crash";
 
 const fail = (msg: string): never => {
@@ -104,6 +113,10 @@ const model = Bun.serve({
 });
 
 // ----- daemon -----
+// No credentials reach the daemon, so it cannot fail over to a rented model.
+const childEnv = Object.fromEntries(
+	Object.entries(process.env).filter(([k]) => !/_API_KEY$|_TOKEN$/.test(k)),
+);
 let daemon: ChildProcess | null = null;
 function startDaemon(n: number): ChildProcess {
 	const log = fs.openSync(path.join(root, `daemon-${n}.log`), "w");
@@ -111,7 +124,9 @@ function startDaemon(n: number): ChildProcess {
 		cwd: work,
 		stdio: ["ignore", log, log],
 		env: {
-			...process.env,
+			...childEnv,
+			// Loopback only, whatever the parent shell says (origin-guard.ts).
+			DAEMON_HOSTNAME: "127.0.0.1",
 			HOME: home,
 			USERPROFILE: home,
 			EIGHT_DATA_DIR: dataDir,
@@ -133,6 +148,9 @@ function cleanup() {
 	try {
 		daemon?.kill("SIGKILL");
 	} catch {}
+	try {
+		fs.writeFileSync(stopFile, "");
+	} catch {}
 	model.stop(true);
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -151,12 +169,15 @@ async function until<T>(
 	}
 	return fail(`timed out after ${ms / 1000}s waiting for ${what}`);
 }
+const health = async () => (await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`)).ok;
+// Only the daemon this script started counts: one that exited is a failure,
+// not a reason to keep polling a port something else may answer on.
 const healthy = () =>
-	until(
-		"daemon /health",
-		60_000,
-		async () => (await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`)).ok,
-	);
+	until("daemon /health", 60_000, () => {
+		if (daemon && (daemon.exitCode !== null || daemon.signalCode !== null))
+			fail(`the daemon exited early (code ${daemon.exitCode}, signal ${daemon.signalCode})`);
+		return health();
+	});
 type JournalEntry = {
 	sessionId: string;
 	inFlight?: Array<{ tool: string }>;
@@ -173,6 +194,8 @@ const runs = () =>
 		: 0;
 
 // ----- 1. start work, wait until the command is running -----
+if (await health().catch(() => false))
+	fail(`something already answers /health on port ${DAEMON_PORT}; set KILL_RESUME_DAEMON_PORT`);
 daemon = startDaemon(1);
 await healthy();
 const ws = new WebSocket(`ws://127.0.0.1:${DAEMON_PORT}`);
@@ -254,4 +277,10 @@ console.log(
 	`PASS: session restored in ${restored[2]}ms (${Date.now() - t0}ms kill to finished), cut command not replayed, turn continued and finished, command ran once`,
 );
 cleanup();
+// Windows keeps the work dir busy until the orphaned slow.sh sees the stop file.
+try {
+	fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+} catch (err) {
+	console.warn(`could not remove ${root}: ${String(err)}`);
+}
 process.exit(0);
