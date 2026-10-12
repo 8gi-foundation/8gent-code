@@ -318,16 +318,24 @@ function isEncodedCommandFlag(token: string, allowSlash: boolean): boolean {
 	return w.length >= 8 && ENCODED_ARGUMENTS.startsWith(w);
 }
 
+/** A token that reads as a parameter: starts with - or /, or an en dash, em dash or horizontal bar. */
+const FLAG_LIKE = /^[-/\u2013\u2014\u2015]/;
+/** Characters that expand, escape or vanish inside a PowerShell parameter name, so it cannot be read as written. */
+const FLAG_HIDING_CHARS = /[$%!^\\'"`]/;
+
 function refuseHiddenCommand(command: string, d: Dialect): ShellSanitizeResult | null {
 	const invokesPwsh = INVOKES_PWSH.test(command);
 	if (d === "pwsh" || invokesPwsh) {
-		const tokens = command.split(/\s+/).map((t) => t.replace(/^['"]+|['"]+$/g, ""));
+		const raw = command.split(/\s+/).filter((t) => t !== "");
+		// PowerShell drops quotes, ^ and \ inside a parameter name (-"enc", -e""nc, -^enc, -\enc), so strip them all.
+		const tokens = raw.map((t) => t.replace(/['"^\\]/g, ""));
 		// Inside the PowerShell host only the dash form is a parameter; powershell.exe also takes /.
-		if (tokens.some((t) => isEncodedCommandFlag(t, invokesPwsh))) {
+		const smuggled = raw.some((t) => FLAG_LIKE.test(t) && FLAG_HIDING_CHARS.test(t));
+		if (smuggled || tokens.some((t) => isEncodedCommandFlag(t, invokesPwsh))) {
 			return {
 				safe: false,
 				reason:
-					"PowerShell -EncodedCommand (and its abbreviations -e, -ec, -enc ...) hides the command from the check and is not allowed. Pass the command as plain text",
+					"PowerShell -EncodedCommand (and its abbreviations -e, -ec, -enc ...) hides the command from the check and is not allowed (a parameter name that holds quotes, ^, \\ or $ is refused too). Pass the command as plain text",
 			};
 		}
 	}

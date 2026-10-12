@@ -139,6 +139,23 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 		}
 	});
 
+	test("quote, caret, backslash and variable tricks inside the flag name are refused (Karen's bypass cases)", () => {
+		const cases = ['-"enc"', "-'e'nc", '-e""nc', "-\\enc", "-^enc", "-e^nc", "-e$Z"];
+		for (const c of cases) {
+			for (const prog of ["powershell", "pwsh"]) {
+				for (const kind of ["powershell", "posix", "cmd", "git-bash"] as const) {
+					const r = refused(`${prog} ${c} AAAA`, kind);
+					expect(r.safe).toBe(false);
+					expect(r.reason).toContain("EncodedCommand");
+				}
+			}
+		}
+		// any flag-like token with an expansion or escape character, even when it is not an encoded-command spelling
+		for (const c of ["-Fo%X%", "-Fo!X!", "/e$Z", "\u2014e`nc", "-Out`File"]) {
+			expect(isRefused(`powershell ${c} AAAA`, "posix")).toBe(true);
+		}
+	});
+
 	test("near misses stay allowed: -Encoding on Out-File, -ExecutionPolicy, -Command, robocopy /e", () => {
 		expect(isRefused("Get-Content a.txt | Out-File -Encoding utf8 b.txt", "powershell")).toBe(false);
 		expect(isRefused("Out-File -FilePath b.txt -Encoding utf8", "powershell")).toBe(false);
@@ -149,5 +166,6 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 		expect(isRefused("robocopy a b /e", "powershell")).toBe(false);
 		expect(isRefused("git log -e", "git-bash")).toBe(false);
 		expect(isRefused("echo -e hi", "posix")).toBe(false);
+		expect(isRefused("powershell -NoProfile -File C:\\tools\\run.ps1 -Name x", "posix")).toBe(false);
 	});
 });
