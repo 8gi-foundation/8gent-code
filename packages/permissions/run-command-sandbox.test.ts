@@ -574,3 +574,7 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		expect(fs.readFileSync(path.join(dot, "bin", "tool"), "utf8")).toBe("#!/bin/sh\necho real\n");
 	});
 });
+
+test("update-resume.json (the /update relaunch record) is a protected data file", () => {
+	expect(PROTECTED_DATA_FILES).toContain("update-resume.json");
+});

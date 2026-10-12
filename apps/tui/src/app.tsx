@@ -38,6 +38,7 @@ import {
 	isLlamaServerSelected,
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
+import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
 import {
@@ -1125,6 +1126,7 @@ export function App({
 	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
 	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
 	const historyPickDaemonRef = useRef(false);
+	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1154,7 +1156,7 @@ export function App({
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
 				);
 				if (process.env.EIGHT_UPDATE_NOTE) {
-					addSystemMessage(process.env.EIGHT_UPDATE_NOTE);
+					addSystemMessage(sanitizeForDisplay(process.env.EIGHT_UPDATE_NOTE));
 					delete process.env.EIGHT_UPDATE_NOTE;
 				}
 			} else {
@@ -3741,7 +3743,7 @@ export function App({
 					// Same update as `8gent update`; on success the session is saved and 8gent
 					// reopens on the new code with the same session (packages/eight/update-resume.ts).
 					void (async () => {
-						const [{ runTuiUpdate, launcherContext }, { runUpdateCommand }, resume, { spawn: spawnProc }] =
+						const [{ runTuiUpdate, launcherContext, makeTwoStepConfirm }, { runUpdateCommand }, resume, { spawn: spawnProc }] =
 							await Promise.all([
 								import("./lib/update-command.js"),
 								import("../../../packages/eight/cli-maintenance.js"),
@@ -3749,6 +3751,7 @@ export function App({
 								import("node:child_process"),
 							]);
 						const ctx = launcherContext();
+						if (!updateConfirmRef.current) updateConfirmRef.current = makeTwoStepConfirm(addSystemMessage);
 						const outcome = await runTuiUpdate({
 							saveSession: () => {
 								saveSessionNow();
@@ -3761,6 +3764,7 @@ export function App({
 									execPath: process.execPath,
 									log,
 									report,
+									confirm: updateConfirmRef.current ?? undefined,
 									// A person typed /update. npm runs without the terminal so Ink is not garbled.
 									interactive: true,
 									run: (cmd, cmdArgs, opts) =>

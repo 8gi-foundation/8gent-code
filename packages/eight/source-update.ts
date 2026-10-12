@@ -22,6 +22,7 @@ import { execFile } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import * as nodePath from "node:path";
+import { safeBunFlags } from "../core/bun-flags";
 import { sanitizeForDisplay } from "./changelog-view";
 
 export interface ExecResult {
@@ -34,12 +35,130 @@ export interface ExecResult {
 export type ExecFn = (
 	file: string,
 	args: string[],
-	opts: { cwd: string; timeoutMs: number },
+	opts: { cwd: string; timeoutMs: number; env?: Record<string, string> },
 ) => Promise<ExecResult>;
 
 const T_LOCAL = 30_000;
 const T_FETCH = 120_000;
 const T_INSTALL = 600_000;
+
+// ── scrubbed environment for install and build ───────────────────────
+
+/**
+ * Names (case-insensitive) that bun install / bun run build need to find the
+ * toolchain, cache and network. No API keys, tokens or cloud credentials.
+ */
+const ENV_KEEP = new Set(
+	[
+		"PATH",
+		"HOME",
+		"USERPROFILE",
+		"TMPDIR",
+		"TEMP",
+		"TMP",
+		"LANG",
+		"LC_ALL",
+		"LC_CTYPE",
+		"TERM",
+		"SYSTEMROOT",
+		"WINDIR",
+		"COMSPEC",
+		"PATHEXT",
+		"APPDATA",
+		"LOCALAPPDATA",
+		"PROGRAMDATA",
+		"PROGRAMFILES",
+		"PROGRAMFILES(X86)",
+		"HOMEDRIVE",
+		"HOMEPATH",
+		"USERNAME",
+		"BUN_INSTALL",
+		"BUN_INSTALL_CACHE_DIR",
+		"XDG_CACHE_HOME",
+		"XDG_CONFIG_HOME",
+		"XDG_DATA_HOME",
+		"SSL_CERT_FILE",
+		"SSL_CERT_DIR",
+		"NODE_EXTRA_CA_CERTS",
+	].map((k) => k.toUpperCase()),
+);
+
+/** The minimal env a lifecycle script of a freshly pulled checkout gets. */
+export function scrubbedEnv(base: Record<string, string | undefined>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(base)) {
+		if (typeof v === "string" && ENV_KEEP.has(k.toUpperCase())) out[k] = v;
+	}
+	return out;
+}
+
+// ── origin allowlist ─────────────────────────────────────────────────
+
+export interface ParsedOrigin {
+	host: string;
+	/** lowercased owner/repo without a .git suffix */
+	repoPath: string;
+	scheme: string;
+}
+
+/** https://h/o/r(.git), ssh://git@h[:p]/o/r, git@h:o/r(.git). Anything else is null. */
+export function parseOrigin(url: string): ParsedOrigin | null {
+	const u = url.trim();
+	const strip = (p: string) =>
+		p
+			.replace(/^\/+/, "")
+			.replace(/\.git$/i, "")
+			.replace(/\/+$/, "")
+			.toLowerCase();
+	const scp = /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):(?!\/\/)(?!\d+\/)([^\s]+)$/.exec(u);
+	if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u))
+		return { host: scp[1].toLowerCase(), repoPath: strip(scp[2]), scheme: "ssh" };
+	try {
+		const x = new URL(u);
+		if (!["https:", "http:", "ssh:"].includes(x.protocol)) return null;
+		const host = x.port ? `${x.hostname}:${x.port}` : x.hostname;
+		return {
+			host: host.toLowerCase(),
+			repoPath: strip(decodeURIComponent(x.pathname)),
+			scheme: x.protocol.slice(0, -1),
+		};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Is this origin one we expect for `repo` (8gent-code or 8gent-browser)?
+ * GitHub: only 8gi-foundation/<repo>, over https or ssh. Forge: any owner's <repo>
+ * on the host named by EIGHT_FORGE_HOST (host or host:port), https, http or ssh.
+ */
+export function originTrusted(url: string, repo: string, forgeHost?: string): boolean {
+	const o = parseOrigin(url);
+	if (!o) return false;
+	if (o.host === "github.com" && (o.scheme === "https" || o.scheme === "ssh"))
+		return o.repoPath === `8gi-foundation/${repo}`;
+	const fh = forgeHost
+		?.trim()
+		.toLowerCase()
+		.replace(/^[a-z]+:\/\//, "")
+		.replace(/\/+$/, "");
+	if (fh && o.host === fh)
+		return /^[^/]+\/[^/]+$/.test(o.repoPath) && o.repoPath.endsWith(`/${repo}`);
+	return false;
+}
+
+/** y/N on the terminal; anything but y/yes is no. No terminal means no. */
+export async function defaultConfirm(question: string): Promise<boolean> {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+	const { createInterface } = await import("node:readline");
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	try {
+		const ans: string = await new Promise((res) => rl.question(`${question} [y/N] `, res));
+		return /^y(es)?$/i.test(ans.trim());
+	} finally {
+		rl.close();
+	}
+}
 
 /** Default exec: execFile, no shell, timeout, no console window on Windows. */
 export const defaultExec: ExecFn = (file, args, opts) =>
@@ -54,7 +173,7 @@ export const defaultExec: ExecFn = (file, args, opts) =>
 				windowsHide: true,
 				shell: false,
 				// Never wait on a credential prompt; set the same on every OS.
-				env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+				env: (opts.env ?? { ...process.env, GIT_TERMINAL_PROMPT: "0" }) as NodeJS.ProcessEnv,
 			},
 			(err, stdout, stderr) => {
 				if (!err) return resolve({ code: 0, stdout: String(stdout), stderr: String(stderr) });
@@ -197,6 +316,12 @@ export interface CheckoutDeps {
 	/** Does <dir>/<file> exist? (lockfile test) */
 	fileExists: (path: string) => boolean;
 	now: () => Date;
+	/** Environment to scrub for bun install / bun run build. Default: process.env. */
+	baseEnv?: Record<string, string | undefined>;
+	/** y/N. `strict` = the origin is not on the allowlist, so --yes does not skip it. Default: no. */
+	confirm?: (question: string, o: { strict: boolean }) => Promise<boolean>;
+	/** EIGHT_FORGE_HOST: the forge's host (or host:port) whose <repo> origins are trusted. */
+	forgeHost?: string;
 }
 
 export type CheckoutStatus =
@@ -205,6 +330,7 @@ export type CheckoutStatus =
 	| "ahead-local"
 	| "available"
 	| "refused"
+	| "declined"
 	| "failed";
 
 export interface CheckoutReport {
@@ -225,6 +351,41 @@ export interface UpdateCheckoutOptions {
 	checkOnly: boolean;
 	/** Also run `bun run build` after install (8gent Browser). */
 	build: boolean;
+	/** Which repo this is: decides the origin allowlist. */
+	repo: "8gent-code" | "8gent-browser";
+	/** Skip the y/N for a trusted origin (never for an untrusted one). */
+	yes?: boolean;
+}
+
+/**
+ * bun install / bun run build run a freshly pulled checkout's own scripts, so
+ * they get no ambient secrets (scrubbed env) and no cwd bunfig.toml or .env
+ * (the same flags every other 8gent bun child gets).
+ */
+export function bunStep(d: CheckoutDeps, dir: string, args: string[]): Promise<ExecResult> {
+	const flags = safeBunFlags(d.platform as NodeJS.Platform);
+	return d.exec(d.bun, [...flags, ...args], {
+		cwd: dir,
+		timeoutMs: T_INSTALL,
+		env: scrubbedEnv(d.baseEnv ?? process.env),
+	});
+}
+
+/** Untracked paths that a checkout of `tree` (ls-tree names) would overwrite or collide with. */
+export function untrackedClashes(untrackedOut: string, treeOut: string): string[] {
+	const lines = (x: string) => x.split(/\r?\n/).filter(Boolean);
+	const files = new Set(lines(treeOut));
+	const dirs = new Set<string>();
+	for (const f of files) {
+		const parts = f.split("/");
+		for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
+	}
+	return lines(untrackedOut).filter((u) => {
+		if (files.has(u) || dirs.has(u)) return true;
+		const parts = u.split("/");
+		for (let i = 1; i < parts.length; i++) if (files.has(parts.slice(0, i).join("/"))) return true;
+		return false;
+	});
 }
 
 const short = (sha: string) => sha.trim().slice(0, 7);
@@ -275,6 +436,17 @@ export async function updateCheckout(
 	const dirty = await g(["status", "--porcelain", "--untracked-files=no"]);
 	if (dirty.code !== 0) return fail(`git status failed: ${lastLines(dirty.stderr, 2)}`);
 	const isDirty = dirty.stdout.trim().length > 0;
+	if (isDirty && o.force && !o.checkOnly) {
+		// A half-finished merge has no honest snapshot; never reset over it.
+		const unmerged = await g(["ls-files", "--unmerged"]);
+		if (unmerged.code !== 0 || unmerged.stdout.trim().length > 0)
+			return {
+				status: "refused",
+				from,
+				message:
+					"this checkout has unmerged paths (a merge or rebase is unfinished), so there is no safe snapshot to back up. Nothing was changed. Finish or abort it (git merge --abort / git rebase --abort), then run 8gent update again",
+			};
+	}
 	if (isDirty && !o.force && !o.checkOnly)
 		return {
 			status: "refused",
@@ -340,21 +512,77 @@ export async function updateCheckout(
 				"this checkout has commits that are not on origin/main (history diverged), so a fast-forward is not possible. Nothing was changed. To keep your commits on a backup branch and move to origin/main, run: 8gent update --force",
 		};
 
-	let backupBranch: string | undefined;
 	const needReset = isDirty || !canFastForward;
+
+	// What would come in, shown before anything moves or runs.
+	const incoming = await g(["log", "--format=%h %s", "-n", "30", `${from}..${to}`]);
+	const incomingLines =
+		incoming.code === 0
+			? sanitizeForDisplay(incoming.stdout)
+					.split("\n")
+					.map((l) => l.trim())
+					.filter(Boolean)
+			: [];
+	const originUrl = sanitizeForDisplay(remote.stdout.trim());
+	const trusted = originTrusted(originUrl, o.repo, d.forgeHost);
+	if (!trusted || !o.yes) {
+		const q =
+			`${trusted ? "" : `WARNING: origin ${originUrl} is not a known ${o.repo} source.\n`}` +
+			`Origin: ${originUrl}\nIncoming commits (${short(from)} -> ${short(to)}):\n` +
+			`${incomingLines.map((l) => `  ${l}`).join("\n") || "  (none listed)"}\n` +
+			`${o.build ? "This will run bun install and bun run build from that checkout." : "This will run bun install from that checkout."}\nApply?`;
+		const ok = d.confirm ? await d.confirm(q, { strict: !trusted }) : false;
+		if (!ok)
+			return {
+				status: "declined",
+				from,
+				to,
+				message: `not confirmed; nothing was changed${d.confirm ? "" : " (run 8gent update in a terminal, or add --yes for a known origin)"}`,
+			};
+	}
+
+	let backupBranch: string | undefined;
 	if (needReset) {
-		// --force: save everything first. `stash create` writes a commit of the tracked
-		// changes without touching the stash list or the work tree.
-		const snap = await g([
-			"-c",
-			"user.name=8gent update",
-			"-c",
-			"user.email=update@8gent.invalid",
-			"stash",
-			"create",
-			"8gent update backup",
+		// reset --hard overwrites untracked files that the new tree also has. Refuse rather than lose them.
+		const [untracked, tree] = await Promise.all([
+			g(["ls-files", "--others", "--exclude-standard"]),
+			g(["ls-tree", "-r", "--name-only", to]),
 		]);
-		const snapSha = snap.code === 0 ? snap.stdout.trim() : "";
+		if (untracked.code !== 0 || tree.code !== 0)
+			return fail("could not check untracked files before resetting; nothing was changed");
+		const clash = untrackedClashes(untracked.stdout, tree.stdout);
+		if (clash.length > 0)
+			return {
+				status: "refused",
+				from,
+				to,
+				message: `untracked files would be overwritten by origin/main:\n${clash
+					.slice(0, 10)
+					.map((c) => `  ${c}`)
+					.join(
+						"\n",
+					)}\nNothing was changed. Move or delete them, then run 8gent update --force again`,
+			};
+		// --force: save the tracked changes first. `stash create` writes a commit of them
+		// without touching the stash list or the work tree. Untracked files are never touched
+		// by a reset, so they stay where they are.
+		let snapSha = "";
+		if (isDirty) {
+			const snap = await g([
+				"-c",
+				"user.name=8gent update",
+				"-c",
+				"user.email=update@8gent.invalid",
+				"stash",
+				"create",
+				"8gent update backup",
+			]);
+			snapSha = snap.code === 0 ? snap.stdout.trim() : "";
+			if (!snapSha)
+				return fail(
+					"could not snapshot your local changes, so nothing was reset; nothing was changed",
+				);
+		}
 		const iso = d.now().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-");
 		backupBranch = `backup/8gent-update-${iso}-${short(from)}`;
 		const br = await g(["branch", backupBranch, snapSha || from]);
@@ -374,20 +602,10 @@ export async function updateCheckout(
 			message: `${needReset ? "reset" : "fast-forward"} failed: ${lastLines(move.stderr, 3)}`,
 		};
 
-	const log = await g(["log", "--format=%h %s", "-n", "30", `${from}..${to}`]);
-	const changes =
-		log.code === 0
-			? sanitizeForDisplay(log.stdout)
-					.split("\n")
-					.map((l) => l.trim())
-					.filter(Boolean)
-			: [];
+	const changes = incomingLines;
 
 	const lock = ["bun.lock", "bun.lockb"].some((f) => d.fileExists(lib(d.platform).join(o.dir, f)));
-	const install = await d.exec(d.bun, lock ? ["install", "--frozen-lockfile"] : ["install"], {
-		cwd: o.dir,
-		timeoutMs: T_INSTALL,
-	});
+	const install = await bunStep(d, o.dir, lock ? ["install", "--frozen-lockfile"] : ["install"]);
 	if (install.code !== 0)
 		return {
 			status: "failed",
@@ -398,7 +616,7 @@ export async function updateCheckout(
 			message: `updated to ${short(to)} but ${install.timedOut ? "bun install timed out" : "bun install failed"}:\n${lastLines(install.stderr || install.stdout)}`,
 		};
 	if (o.build) {
-		const build = await d.exec(d.bun, ["run", "build"], { cwd: o.dir, timeoutMs: T_INSTALL });
+		const build = await bunStep(d, o.dir, ["run", "build"]);
 		if (build.code !== 0)
 			return {
 				status: "failed",
@@ -425,6 +643,8 @@ export interface SourceUpdateDeps {
 	hasGit?: (dir: string) => boolean;
 	fileExists?: (p: string) => boolean;
 	now?: () => Date;
+	/** y/N prompt. Default: the terminal; no terminal means no. */
+	confirm?: CheckoutDeps["confirm"];
 }
 
 function describe(name: string, r: CheckoutReport): string[] {
@@ -450,6 +670,9 @@ function describe(name: string, r: CheckoutReport): string[] {
 			);
 			break;
 		case "refused":
+			out.push(`${name} not updated: ${r.message}`);
+			break;
+		case "declined":
 			out.push(`${name} not updated: ${r.message}`);
 			break;
 		case "failed":
@@ -480,7 +703,13 @@ export async function checkSourceAhead(
 		fileExists: () => false,
 		now: () => new Date(),
 	};
-	const r = await updateCheckout(d, { dir: root, force: false, checkOnly: true, build: false });
+	const r = await updateCheckout(d, {
+		dir: root,
+		force: false,
+		checkOnly: true,
+		build: false,
+		repo: "8gent-code",
+	});
 	return r.status === "available" && r.canFastForward && r.from && r.to
 		? { from: r.from, to: r.to }
 		: null;
@@ -489,7 +718,7 @@ export async function checkSourceAhead(
 /** Returns the exit code: 0 when every checkout is current or updated, 1 otherwise. */
 export async function runSourceUpdate(
 	deps: SourceUpdateDeps,
-	opts: { force: boolean; checkOnly: boolean },
+	opts: { force: boolean; checkOnly: boolean; yes?: boolean },
 	report?: (o: { updated: boolean; to?: string }) => void,
 ): Promise<number> {
 	const { log, platform, env } = deps;
@@ -516,6 +745,9 @@ export async function runSourceUpdate(
 		platform,
 		fileExists: deps.fileExists ?? ((f) => existsSync(f)),
 		now: deps.now ?? (() => new Date()),
+		baseEnv: env,
+		forgeHost: env.EIGHT_FORGE_HOST,
+		confirm: deps.confirm ?? ((q) => defaultConfirm(q)),
 	};
 
 	let bad = false;
@@ -524,9 +756,11 @@ export async function runSourceUpdate(
 		force: opts.force,
 		checkOnly: opts.checkOnly,
 		build: false,
+		repo: "8gent-code",
+		yes: opts.yes,
 	});
 	for (const l of describe("8gent", code)) log(l);
-	if (code.status === "failed" || code.status === "refused") bad = true;
+	if (["failed", "refused", "declined"].includes(code.status)) bad = true;
 	if (code.status === "updated") report?.({ updated: true, to: short(code.to ?? "") });
 
 	const found = findBrowserCheckout({
@@ -547,9 +781,11 @@ export async function runSourceUpdate(
 			force: opts.force,
 			checkOnly: opts.checkOnly,
 			build: true,
+			repo: "8gent-browser",
+			yes: opts.yes,
 		});
 		for (const l of describe(`8gent Browser (${found.dir})`, br)) log(l);
-		if (br.status === "failed" || br.status === "refused") bad = true;
+		if (["failed", "refused", "declined"].includes(br.status)) bad = true;
 	}
 	return bad ? 1 : 0;
 }

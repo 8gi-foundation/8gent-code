@@ -1,18 +1,23 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type CheckoutDeps,
 	type ExecFn,
+	bunStep,
 	defaultExec,
 	findBrowserCheckout,
 	findCheckoutRoot,
 	modulePathToFs,
+	originTrusted,
+	parseOrigin,
 	resolveExecutable,
 	runSourceUpdate,
 	samePath,
+	scrubbedEnv,
+	untrackedClashes,
 	updateCheckout,
 } from "./source-update";
 
@@ -41,11 +46,12 @@ function fake(
 	};
 }
 
+const baseHandlers = () => base();
 const base = (extra: Record<string, { code?: number; stdout?: string; stderr?: string }> = {}) => ({
 	"rev-parse --show-toplevel": { stdout: `${DIR}\n` },
 	"rev-parse HEAD": { stdout: `${A}\n` },
 	"symbolic-ref": { stdout: "main\n" },
-	"remote get-url": { stdout: "git@forge:x/y.git\n" },
+	"remote get-url": { stdout: "https://github.com/8gi-foundation/8gent-code.git\n" },
 	status: { stdout: "" },
 	fetch: {},
 	"rev-parse refs/remotes/origin/main": { stdout: `${B}\n` },
@@ -64,7 +70,15 @@ const mk = (calls: Call[], handlers = base(), lock = true): CheckoutDeps => ({
 	now: () => new Date("2026-10-12T10:20:30Z"),
 });
 
-const opts = { dir: DIR, force: false, checkOnly: false, build: false };
+const opts = {
+	dir: DIR,
+	force: false,
+	checkOnly: false,
+	build: false,
+	repo: "8gent-code" as const,
+	yes: true,
+};
+const BUN_FLAGS = ["--no-env-file", "--config=/dev/null"];
 const subs = (calls: Call[]) =>
 	calls.map((c) => c.args.filter((a, i) => a !== "-c" && c.args[i - 1] !== "-c").join(" "));
 
@@ -80,14 +94,14 @@ describe("updateCheckout (injected exec)", () => {
 		expect(s).toContain("merge --ff-only refs/remotes/origin/main");
 		expect(s.some((x) => x.startsWith("reset"))).toBe(false);
 		const install = calls.find((c) => c.file === "/usr/bin/bun");
-		expect(install?.args).toEqual(["install", "--frozen-lockfile"]);
+		expect(install?.args).toEqual([...BUN_FLAGS, "install", "--frozen-lockfile"]);
 		expect(install?.cwd).toBe(DIR);
 	});
 
 	test("no lockfile means a plain bun install", async () => {
 		const calls: Call[] = [];
 		await updateCheckout(mk(calls, base(), false), opts);
-		expect(calls.find((c) => c.file === "/usr/bin/bun")?.args).toEqual(["install"]);
+		expect(calls.find((c) => c.file === "/usr/bin/bun")?.args).toEqual([...BUN_FLAGS, "install"]);
 	});
 
 	test("a dirty tree is refused before any fetch, merge or reset", async () => {
@@ -227,8 +241,8 @@ describe("updateCheckout (injected exec)", () => {
 		expect(s).not.toMatch(/remote (add|set-url|remove|rename)/);
 		expect(s).not.toContain("pull");
 		expect(calls.filter((c) => c.file === "/usr/bin/bun").map((c) => c.args.join(" "))).toEqual([
-			"install --frozen-lockfile",
-			"run build",
+			`${BUN_FLAGS.join(" ")} install --frozen-lockfile`,
+			`${BUN_FLAGS.join(" ")} run build`,
 		]);
 		expect(calls.find((c) => c.args.includes("fetch"))?.args.slice(-2)).toEqual([
 			"origin",
@@ -238,7 +252,12 @@ describe("updateCheckout (injected exec)", () => {
 });
 
 describe("runSourceUpdate and the 8gent Browser checkout", () => {
-	const mkRun = (browserDir: string | null, log: string[], calls: Call[]) => {
+	const mkRun = (
+		browserDir: string | null,
+		log: string[],
+		calls: Call[],
+		origin = "git@github.com:8gi-foundation/8gent-browser.git",
+	) => {
 		const inner = fake(base(), calls);
 		return {
 			modulePath: `file://${DIR}/bin/8gent.ts`,
@@ -255,7 +274,9 @@ describe("runSourceUpdate and the 8gent Browser checkout", () => {
 					// the browser checkout reports its own toplevel
 					a.includes("--show-toplevel") && o.cwd === browserDir
 						? { ...r, stdout: `${browserDir}\n` }
-						: r,
+						: a.includes("get-url") && o.cwd === browserDir
+							? { ...r, stdout: `${origin}\n` }
+							: r,
 				)) as ExecFn,
 		};
 	};
@@ -266,6 +287,7 @@ describe("runSourceUpdate and the 8gent Browser checkout", () => {
 		const code = await runSourceUpdate(mkRun("/work/8gent-browser", log, calls), {
 			force: false,
 			checkOnly: false,
+			yes: true,
 		});
 		expect(code).toBe(0);
 		expect(log.some((l) => l.startsWith("8gent updated aaaaaaa -> bbbbbbb"))).toBe(true);
@@ -275,12 +297,19 @@ describe("runSourceUpdate and the 8gent Browser checkout", () => {
 		const browserBun = calls
 			.filter((c) => c.file === "/usr/bin/bun" && c.cwd === "/work/8gent-browser")
 			.map((c) => c.args.join(" "));
-		expect(browserBun).toEqual(["install --frozen-lockfile", "run build"]);
+		expect(browserBun).toEqual([
+			`${BUN_FLAGS.join(" ")} install --frozen-lockfile`,
+			`${BUN_FLAGS.join(" ")} run build`,
+		]);
 	});
 
 	test("browser not found: says where it looked and still succeeds", async () => {
 		const log: string[] = [];
-		const code = await runSourceUpdate(mkRun(null, log, []), { force: false, checkOnly: false });
+		const code = await runSourceUpdate(mkRun(null, log, []), {
+			force: false,
+			checkOnly: false,
+			yes: true,
+		});
 		expect(code).toBe(0);
 		expect(log.join("\n")).toContain("no source checkout found (looked in /home/u/8gent-browser)");
 	});
@@ -291,10 +320,8 @@ describe("runSourceUpdate and the 8gent Browser checkout", () => {
 		const deps = mkRun("/work/8gent-browser", log, calls);
 		const inner = deps.exec;
 		deps.exec = async (f, a, o) =>
-			a[0] === "run" && a[1] === "build"
-				? { code: 2, stdout: "", stderr: "tsc: error TS2304" }
-				: inner(f, a, o);
-		expect(await runSourceUpdate(deps, { force: false, checkOnly: false })).toBe(1);
+			a.includes("build") ? { code: 2, stdout: "", stderr: "tsc: error TS2304" } : inner(f, a, o);
+		expect(await runSourceUpdate(deps, { force: false, checkOnly: false, yes: true })).toBe(1);
 		expect(log.join("\n")).toContain("bun run build failed");
 		expect(log.join("\n")).toContain("tsc: error TS2304");
 	});
@@ -323,7 +350,7 @@ describe("runSourceUpdate and the 8gent Browser checkout", () => {
 	test("git or bun missing from an absolute PATH entry is a clear failure", async () => {
 		const log: string[] = [];
 		const deps = { ...mkRun(null, log, []), isFile: () => false };
-		expect(await runSourceUpdate(deps, { force: false, checkOnly: false })).toBe(1);
+		expect(await runSourceUpdate(deps, { force: false, checkOnly: false, yes: true })).toBe(1);
 		expect(log[0]).toContain("git was not found");
 	});
 });
@@ -410,6 +437,14 @@ describe("integration with a file:// origin", () => {
 			{ cwd, encoding: "utf8" },
 		).trim();
 	const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const fopts = (dir: string) => ({
+		dir,
+		force: false,
+		checkOnly: false,
+		build: false,
+		repo: "8gent-code" as const,
+		yes: true,
+	});
 
 	const realDeps = (bunCalls: string[][]): CheckoutDeps => ({
 		exec: (f, a, o) => {
@@ -422,6 +457,8 @@ describe("integration with a file:// origin", () => {
 		platform: process.platform,
 		fileExists: () => false,
 		now: () => new Date("2026-10-12T10:20:30Z"),
+		// file:// is not an allowlisted origin, so these tests exercise the confirm path.
+		confirm: async () => true,
 	});
 
 	function setup(name: string, shallow: boolean) {
@@ -448,54 +485,95 @@ describe("integration with a file:// origin", () => {
 			const { clone, seed } = setup(shallow ? "s" : "f", shallow);
 			const before = git(clone, "rev-parse", "HEAD");
 			const bunCalls: string[][] = [];
-			const r = await updateCheckout(realDeps(bunCalls), {
-				dir: clone,
-				force: false,
-				checkOnly: false,
-				build: false,
-			});
+			const r = await updateCheckout(realDeps(bunCalls), fopts(clone));
 			expect(r.status).toBe("updated");
 			expect(r.from).toBe(before);
 			expect(r.to).toBe(git(seed, "rev-parse", "HEAD"));
 			expect(git(clone, "rev-parse", "HEAD")).toBe(r.to as string);
 			expect(r.changes?.[0]).toContain("second: feat(update)");
-			expect(bunCalls).toEqual([["install"]]);
+			expect(bunCalls).toEqual([
+				[
+					"--no-env-file",
+					`--config=${process.platform === "win32" ? bunCalls[0][1].slice(9) : "/dev/null"}`,
+					"install",
+				],
+			]);
 			expect(git(clone, "remote")).toBe("origin");
 			// a second run is a no-op
-			expect(
-				(
-					await updateCheckout(realDeps([]), {
-						dir: clone,
-						force: false,
-						checkOnly: false,
-						build: false,
-					})
-				).status,
-			).toBe("current");
+			expect((await updateCheckout(realDeps([]), fopts(clone))).status).toBe("current");
 		});
 	}
 
 	test("real dirty tree is refused and the file keeps its edit; --force backs it up", async () => {
 		const { clone } = setup("d", false);
 		writeFileSync(join(clone, "a.txt"), "my edit\n");
-		const refused = await updateCheckout(realDeps([]), {
-			dir: clone,
-			force: false,
-			checkOnly: false,
-			build: false,
-		});
+		const refused = await updateCheckout(realDeps([]), fopts(clone));
 		expect(refused.status).toBe("refused");
 		expect(git(clone, "show", "HEAD:a.txt")).toBe("1");
-		const forced = await updateCheckout(realDeps([]), {
-			dir: clone,
-			force: true,
-			checkOnly: false,
-			build: false,
-		});
+		const forced = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
 		expect(forced.status).toBe("updated");
 		expect(git(clone, "show", `${forced.backupBranch}:a.txt`)).toBe("my edit");
 		expect(git(clone, "show", "HEAD:a.txt")).toBe("2");
 		expect(git(clone, "stash", "list")).toBe("");
+	});
+
+	test("--force keeps untracked files that do not clash, and backs up the tracked edit", async () => {
+		const { clone } = setup("u", false);
+		writeFileSync(join(clone, "a.txt"), "my edit\n");
+		writeFileSync(join(clone, "mine.txt"), "untracked work\n");
+		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
+		expect(r.status).toBe("updated");
+		expect(readFileSync(join(clone, "mine.txt"), "utf8")).toBe("untracked work\n");
+		expect(git(clone, "show", `${r.backupBranch}:a.txt`)).toBe("my edit");
+	});
+
+	test("--force refuses when an untracked file would be overwritten, and nothing changes", async () => {
+		const { clone, seed, bare } = setup("c", false);
+		writeFileSync(join(seed, "extra.txt"), "from origin\n");
+		git(seed, "add", ".");
+		git(seed, "commit", "-m", "adds extra");
+		git(seed, "push", "origin", "main");
+		writeFileSync(join(clone, "a.txt"), "my edit\n");
+		writeFileSync(join(clone, "extra.txt"), "my precious untracked\n");
+		const head = git(clone, "rev-parse", "HEAD");
+		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
+		expect(r.status).toBe("refused");
+		expect(r.message).toContain("extra.txt");
+		expect(readFileSync(join(clone, "extra.txt"), "utf8")).toBe("my precious untracked\n");
+		expect(readFileSync(join(clone, "a.txt"), "utf8")).toBe("my edit\n");
+		expect(git(clone, "rev-parse", "HEAD")).toBe(head);
+		expect(git(clone, "branch", "--list", "backup/*")).toBe("");
+		void bare;
+	});
+
+	test("--force with an unfinished merge (unmerged paths) aborts with the conflict intact", async () => {
+		const { clone } = setup("m", false);
+		git(clone, "checkout", "-b", "side");
+		writeFileSync(join(clone, "a.txt"), "side\n");
+		git(clone, "commit", "-am", "side change");
+		git(clone, "checkout", "main");
+		writeFileSync(join(clone, "a.txt"), "main\n");
+		git(clone, "commit", "-am", "main change");
+		try {
+			git(clone, "merge", "side");
+		} catch {}
+		const before = readFileSync(join(clone, "a.txt"), "utf8");
+		expect(before).toContain("<<<<<<<");
+		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
+		expect(r.status).toBe("refused");
+		expect(r.message).toContain("unmerged");
+		expect(readFileSync(join(clone, "a.txt"), "utf8")).toBe(before);
+		expect(git(clone, "branch", "--list", "backup/*")).toBe("");
+	});
+
+	test("a foreign origin that is declined is never applied", async () => {
+		const { clone } = setup("n", false);
+		const head = git(clone, "rev-parse", "HEAD");
+		const d = realDeps([]);
+		d.confirm = async () => false;
+		const r = await updateCheckout(d, fopts(clone));
+		expect(r.status).toBe("declined");
+		expect(git(clone, "rev-parse", "HEAD")).toBe(head);
 	});
 
 	test("real diverged history is refused", async () => {
@@ -504,14 +582,275 @@ describe("integration with a file:// origin", () => {
 		git(clone, "add", ".");
 		git(clone, "commit", "-m", "local only");
 		const head = git(clone, "rev-parse", "HEAD");
-		const r = await updateCheckout(realDeps([]), {
-			dir: clone,
-			force: false,
-			checkOnly: false,
-			build: false,
-		});
+		const r = await updateCheckout(realDeps([]), fopts(clone));
 		expect(r.status).toBe("refused");
 		expect(r.message).toContain("diverged");
 		expect(git(clone, "rev-parse", "HEAD")).toBe(head);
+	});
+});
+
+describe("origin allowlist", () => {
+	test("parseOrigin handles https, ssh:// and scp-like urls; junk and file:// are null", () => {
+		expect(parseOrigin("https://github.com/8gi-foundation/8gent-browser.git")).toMatchObject({
+			host: "github.com",
+			repoPath: "8gi-foundation/8gent-browser",
+		});
+		expect(parseOrigin("git@github.com:8gi-foundation/8gent-browser.git")).toMatchObject({
+			host: "github.com",
+			scheme: "ssh",
+		});
+		expect(parseOrigin("ssh://git@forge.example:2222/o/8gent-browser")).toMatchObject({
+			host: "forge.example:2222",
+			repoPath: "o/8gent-browser",
+		});
+		expect(parseOrigin("file:///tmp/x.git")).toBeNull();
+		expect(parseOrigin("ext::sh -c evil")).toBeNull();
+	});
+
+	test("GitHub: only 8gi-foundation/<repo> over https or ssh", () => {
+		for (const u of [
+			"https://github.com/8gi-foundation/8gent-browser.git",
+			"git@github.com:8gi-foundation/8gent-browser.git",
+			"ssh://git@github.com/8gi-foundation/8gent-browser",
+		])
+			expect(originTrusted(u, "8gent-browser")).toBe(true);
+		for (const u of [
+			"https://github.com/evil/8gent-browser.git",
+			"https://github.com.evil.example/8gi-foundation/8gent-browser.git",
+			"http://github.com/8gi-foundation/8gent-browser.git",
+			"https://github.com/8gi-foundation/8gent-code.git",
+			"https://evil.example/8gi-foundation/8gent-browser.git",
+		])
+			expect(originTrusted(u, "8gent-browser")).toBe(false);
+	});
+
+	test("forge: only the host named by EIGHT_FORGE_HOST, only a repo called 8gent-browser; no guess without the setting", () => {
+		const u = "http://forge.test:3000/8gi/8gent-browser.git";
+		expect(originTrusted(u, "8gent-browser")).toBe(false);
+		expect(originTrusted(u, "8gent-browser", "forge.test:3000")).toBe(true);
+		expect(originTrusted(u, "8gent-code", "forge.test:3000")).toBe(false);
+		expect(
+			originTrusted(
+				"http://other.test:3000/8gi/8gent-browser.git",
+				"8gent-browser",
+				"forge.test:3000",
+			),
+		).toBe(false);
+	});
+
+	test("a planted ~/8gent-browser with a foreign origin is declined by default and never installed or built", async () => {
+		const log: string[] = [];
+		const calls: Call[] = [];
+		const deps = (() => {
+			const base = (() => {
+				const inner = fake({ ...baseHandlers() }, calls);
+				return inner;
+			})();
+			return {
+				modulePath: `file://${DIR}/bin/8gent.ts`,
+				env: { PATH: "/usr/bin", EIGHT_BROWSER_SRC: "/home/u/8gent-browser" },
+				platform: "linux",
+				home: "/home/u",
+				log: (l: string) => log.push(l),
+				isFile: () => true,
+				hasGit: (d: string) => d === DIR || d === "/home/u/8gent-browser",
+				fileExists: () => true,
+				exec: ((f, a, o) =>
+					base(f, a, o).then((r) =>
+						a.includes("--show-toplevel") && o.cwd === "/home/u/8gent-browser"
+							? { ...r, stdout: "/home/u/8gent-browser\n" }
+							: a.includes("get-url") && o.cwd === "/home/u/8gent-browser"
+								? { ...r, stdout: "https://evil.example/x/8gent-browser.git\n" }
+								: r,
+					)) as ExecFn,
+			};
+		})();
+		// no confirm injected and no terminal: the default answer is no, even with --yes
+		const code = await runSourceUpdate(deps, { force: false, checkOnly: false, yes: true });
+		expect(code).toBe(1);
+		const browserCalls = calls.filter((c) => c.cwd === "/home/u/8gent-browser");
+		expect(browserCalls.some((c) => c.file === "/usr/bin/bun")).toBe(false);
+		expect(browserCalls.some((c) => c.args.includes("merge") || c.args.includes("reset"))).toBe(
+			false,
+		);
+		expect(log.join("\n")).toContain("not confirmed");
+	});
+
+	test("a foreign origin asks with the origin and the incoming commits; --yes does not skip it; answering yes proceeds", async () => {
+		const asked: { q: string; strict: boolean }[] = [];
+		const calls: Call[] = [];
+		const d = mk(
+			calls,
+			base({ "remote get-url": { stdout: "https://evil.example/o/8gent-browser.git\n" } }),
+		);
+		d.confirm = async (q, o) => (asked.push({ q, strict: o.strict }), true);
+		const r = await updateCheckout(d, { ...opts, repo: "8gent-browser", build: true, yes: true });
+		expect(r.status).toBe("updated");
+		expect(asked).toHaveLength(1);
+		expect(asked[0].strict).toBe(true);
+		expect(asked[0].q).toContain("https://evil.example/o/8gent-browser.git");
+		expect(asked[0].q).toContain("bbbbbbb feat: new thing");
+		expect(asked[0].q).toContain("WARNING");
+	});
+
+	test("a known origin with --yes does not ask; without --yes it asks (non-strict) and N stops everything", async () => {
+		const c1: Call[] = [];
+		const d1 = mk(c1);
+		let asked = 0;
+		d1.confirm = async () => (asked++, true);
+		await updateCheckout(d1, opts);
+		expect(asked).toBe(0);
+
+		const c2: Call[] = [];
+		const d2 = mk(c2);
+		const strictSeen: boolean[] = [];
+		d2.confirm = async (_q, o) => (strictSeen.push(o.strict), false);
+		const r = await updateCheckout(d2, { ...opts, yes: false });
+		expect(r.status).toBe("declined");
+		expect(strictSeen).toEqual([false]);
+		expect(
+			subs(c2).some(
+				(x) => x.startsWith("merge ") || x.startsWith("reset") || x.startsWith("branch"),
+			),
+		).toBe(false);
+		expect(c2.some((c) => c.file === "/usr/bin/bun")).toBe(false);
+	});
+});
+
+describe("--force never loses data", () => {
+	test("unmerged paths abort: no snapshot, no branch, no reset", async () => {
+		const calls: Call[] = [];
+		const r = await updateCheckout(
+			mk(
+				calls,
+				base({
+					status: { stdout: "UU a.ts\n" },
+					"ls-files --unmerged": { stdout: "100644 abc 1\ta.ts\n" },
+				}),
+			),
+			{ ...opts, force: true },
+		);
+		expect(r.status).toBe("refused");
+		expect(r.message).toContain("unmerged");
+		expect(
+			subs(calls).some(
+				(x) =>
+					x.startsWith("reset") ||
+					x.startsWith("branch") ||
+					x.startsWith("stash") ||
+					x.startsWith("fetch"),
+			),
+		).toBe(false);
+	});
+
+	test("an empty stash snapshot of a dirty tree aborts before any reset", async () => {
+		const calls: Call[] = [];
+		const r = await updateCheckout(
+			mk(calls, base({ status: { stdout: " M a.ts\n" }, "stash create": { stdout: "\n" } })),
+			{ ...opts, force: true },
+		);
+		expect(r.status).toBe("failed");
+		expect(r.message).toContain("could not snapshot");
+		expect(subs(calls).some((x) => x.startsWith("reset") || x.startsWith("branch"))).toBe(false);
+	});
+
+	test("untracked files that origin/main also has are refused, not overwritten", async () => {
+		const calls: Call[] = [];
+		const r = await updateCheckout(
+			mk(
+				calls,
+				base({
+					status: { stdout: " M a.ts\n" },
+					"ls-files --others": { stdout: "docs/new.md\nnotes.txt\n" },
+					"ls-tree": { stdout: "a.ts\ndocs/new.md\n" },
+				}),
+			),
+			{ ...opts, force: true },
+		);
+		expect(r.status).toBe("refused");
+		expect(r.message).toContain("docs/new.md");
+		expect(subs(calls).some((x) => x.startsWith("reset") || x.startsWith("branch"))).toBe(false);
+	});
+
+	test("untrackedClashes sees file/dir collisions both ways", () => {
+		expect(untrackedClashes("a/b\nz\n", "a\nq/r\n")).toEqual(["a/b"]);
+		expect(untrackedClashes("q\n", "q/r\n")).toEqual(["q"]);
+		expect(untrackedClashes("free.txt\n", "q/r\n")).toEqual([]);
+	});
+});
+
+describe("scrubbed install and build env", () => {
+	test("scrubbedEnv keeps PATH/HOME/TMPDIR/LANG-class names and drops keys and tokens (Windows names are case-insensitive)", () => {
+		const e = scrubbedEnv({
+			PATH: "/bin",
+			Path: "C:\\x",
+			HOME: "/h",
+			TMPDIR: "/t",
+			LANG: "en",
+			FAKE_API_KEY: "sk-1",
+			GITHUB_TOKEN: "t",
+			AWS_SECRET_ACCESS_KEY: "s",
+			SystemRoot: "C:\\Windows",
+		});
+		expect(Object.keys(e).sort()).toEqual(["HOME", "LANG", "PATH", "Path", "SystemRoot", "TMPDIR"]);
+	});
+
+	test("install and build get the scrubbed env and --no-env-file --config, never the ambient one", async () => {
+		const calls: (Call & { env?: Record<string, string> })[] = [];
+		const d = mk([]);
+		const inner = d.exec;
+		d.exec = (f, a, o) => {
+			calls.push({ file: f, args: a, cwd: o.cwd, timeoutMs: o.timeoutMs, env: o.env });
+			return inner(f, a, o);
+		};
+		d.baseEnv = { PATH: "/usr/bin", HOME: "/h", FAKE_API_KEY: "sk-secret", ANTHROPIC_API_KEY: "k" };
+		await updateCheckout(d, { ...opts, build: true });
+		const bunCalls = calls.filter((c) => c.file === "/usr/bin/bun");
+		expect(bunCalls).toHaveLength(2);
+		for (const c of bunCalls) {
+			expect(c.args.slice(0, 2)).toEqual(BUN_FLAGS);
+			expect(c.env).toEqual({ PATH: "/usr/bin", HOME: "/h" });
+		}
+	});
+
+	test("a real postinstall script cannot see FAKE_API_KEY", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "scrub-"));
+		try {
+			const out = join(dir, "env.json");
+			writeFileSync(
+				join(dir, "write-env.js"),
+				`require("fs").writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.env))`,
+			);
+			writeFileSync(
+				join(dir, "package.json"),
+				JSON.stringify({
+					name: "t",
+					version: "1.0.0",
+					scripts: { postinstall: "bun write-env.js" },
+				}),
+			);
+			const bun = execFileSync("which", ["bun"], { encoding: "utf8" }).trim();
+			process.env.FAKE_API_KEY = "sk-must-not-leak";
+			const r = await bunStep(
+				{
+					exec: defaultExec,
+					git: "git",
+					bun,
+					platform: process.platform,
+					fileExists: () => false,
+					now: () => new Date(),
+				},
+				dir,
+				["install"],
+			);
+			expect(r.code).toBe(0);
+			const seen = JSON.parse(readFileSync(out, "utf8")) as Record<string, string>;
+			expect(seen.FAKE_API_KEY).toBeUndefined();
+			expect(seen.PATH).toBeTruthy();
+		} finally {
+			process.env.FAKE_API_KEY = undefined;
+			delete process.env.FAKE_API_KEY;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

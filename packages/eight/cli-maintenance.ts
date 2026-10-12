@@ -89,6 +89,8 @@ export interface UpdateCliDeps {
 	sourceFileExists?: (p: string) => boolean;
 	/** Home directory used to find a sibling 8gent Browser checkout. */
 	homeDir?: string;
+	/** y/N prompt for a source update (default: the terminal). The TUI passes a two-step confirm. */
+	confirm?: (question: string, o: { strict: boolean }) => Promise<boolean>;
 	/** Called once with the outcome of a real update (the TUI uses it to resume the session). */
 	report?: (o: { updated: boolean; to?: string }) => void;
 }
@@ -96,12 +98,14 @@ export interface UpdateCliDeps {
 export interface UpdateArgs {
 	check: boolean;
 	force?: boolean;
+	yes?: boolean;
 	channel?: InstallChannel;
 	error?: string;
 }
 
 export const UPDATE_USAGE =
-	"Usage: 8gent update [--check [--channel binary|npm]] [--force]\n" +
+	"Usage: 8gent update [--check [--channel binary|npm]] [--force] [--yes]\n" +
+	"  --yes      source checkout only: skip the y/N for a known origin (an unknown origin always asks)\n" +
 	"  --check    report whether a newer version exists; installs nothing\n" +
 	"  --force    source checkout only: save local changes or commits to a backup branch, then move to origin/main\n" +
 	"  --channel  with --check only: look at that channel instead of the detected one";
@@ -112,14 +116,20 @@ export function parseUpdateArgs(args: string[]): UpdateArgs {
 		const a = args[i];
 		if (a === "--check" || a === "--dry-run") out.check = true;
 		else if (a === "--force") out.force = true;
+		else if (a === "--yes" || a === "-y") out.yes = true;
 		else if (a === "--channel" || a.startsWith("--channel=")) {
 			const v = a.includes("=") ? a.slice("--channel=".length) : args[++i];
-			if (v !== "binary" && v !== "npm") return { ...out, error: `--channel must be binary or npm, got "${v ?? ""}"` };
+			if (v !== "binary" && v !== "npm")
+				return { ...out, error: `--channel must be binary or npm, got "${v ?? ""}"` };
 			out.channel = v;
 		} else return { ...out, error: `unknown option for 8gent update: ${a}` };
 	}
 	if (out.channel && !out.check) {
-		return { ...out, error: "--channel only applies to --check: 8gent updates through the channel it was installed from" };
+		return {
+			...out,
+			error:
+				"--channel only applies to --check: 8gent updates through the channel it was installed from",
+		};
 	}
 	if (out.force && out.check) return { ...out, error: "--force cannot be combined with --check" };
 	return out;
@@ -158,9 +168,14 @@ export async function checkUpdate(o: {
 		} else {
 			const names = binaryAssetNames(o.platform, o.arch);
 			if (names.length === 0)
-				return { status: "failed", channel: ch, message: `no 8gent binary for ${o.platform}/${o.arch}` };
+				return {
+					status: "failed",
+					channel: ch,
+					message: `no 8gent binary for ${o.platform}/${o.arch}`,
+				};
 			const rel = await latestBinaryRelease(o.fetchImpl, names[0], o.releasesUrl);
-			if (!rel) return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
+			if (!rel)
+				return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
 			available = rel.version;
 		}
 		const d = decideUpdate(o.currentVersion, available);
@@ -169,7 +184,11 @@ export async function checkUpdate(o: {
 			return { status: "refused-downgrade", from: d.from, to: d.to, channel: ch };
 		return { status: "available", from: d.from, to: d.to, channel: ch };
 	} catch (err) {
-		return { status: "failed", channel: ch, message: err instanceof Error ? err.message : String(err) };
+		return {
+			status: "failed",
+			channel: ch,
+			message: err instanceof Error ? err.message : String(err),
+		};
 	}
 }
 
@@ -214,7 +233,8 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 
 	const platformEarly = platform;
 	if (channel === "source") {
-		if (a.force && !a.check) log("--force: local changes or commits will be saved to a backup branch first.");
+		if (a.force && !a.check)
+			log("--force: local changes or commits will be saved to a backup branch first.");
 		if (!a.check && !(deps.interactive ?? isInteractiveTerminal())) {
 			log(interactiveRefusal("8gent update"));
 			return 1;
@@ -231,8 +251,9 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 				isFile: deps.sourceIsFile,
 				hasGit: deps.sourceHasGit,
 				fileExists: deps.sourceFileExists,
+				confirm: deps.confirm,
 			},
-			{ force: Boolean(a.force), checkOnly: a.check },
+			{ force: Boolean(a.force), checkOnly: a.check, yes: a.yes },
 			(o) => {
 				updated = o.updated;
 				deps.report?.(o);
@@ -241,14 +262,22 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 		if (updated && code === 0) log(RESUME_HINT);
 		return code;
 	}
-	if (a.force) {
-		log("--force only applies to a source checkout.");
+	if (a.force || a.yes) {
+		log("--force and --yes only apply to a source checkout.");
 		return 2;
 	}
 
 	if (a.check) {
-		if (a.channel && a.channel !== detected) log(`Checking the ${a.channel} channel (--channel); nothing is installed with --check.`);
-		const r = await checkUpdate({ currentVersion: deps.currentVersion, channel, fetchImpl, platform, arch, releasesUrl });
+		if (a.channel && a.channel !== detected)
+			log(`Checking the ${a.channel} channel (--channel); nothing is installed with --check.`);
+		const r = await checkUpdate({
+			currentVersion: deps.currentVersion,
+			channel,
+			fetchImpl,
+			platform,
+			arch,
+			releasesUrl,
+		});
 		log(describeCheck(r));
 		return r.status === "failed" ? 1 : 0;
 	}
@@ -303,7 +332,10 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * flag install.ts needs for it; any other http registry is left for install.ts
  * to refuse, so the refusal has one wording.
  */
-export function registryFromEnv(env: Env = process.env): { registry?: string; allowLoopbackHttp?: boolean } {
+export function registryFromEnv(env: Env = process.env): {
+	registry?: string;
+	allowLoopbackHttp?: boolean;
+} {
 	const r = env.EIGHT_PACKAGE_REGISTRY;
 	if (!r) return {};
 	let loopback = false;
@@ -335,7 +367,10 @@ export function describeInstall(res: InstallResult): string[] {
 }
 
 /** `8gent install npm:<name>@<version>`. Returns the exit code. */
-export async function runInstallNpmCommand(spec: string, deps: PackagesCliDeps = {}): Promise<number> {
+export async function runInstallNpmCommand(
+	spec: string,
+	deps: PackagesCliDeps = {},
+): Promise<number> {
 	const log = deps.log ?? ((line: string) => console.log(line));
 	const env = deps.env ?? process.env;
 	if (!(deps.interactive ?? isInteractiveTerminal())) {

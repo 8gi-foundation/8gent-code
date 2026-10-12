@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { launcherContext, runTuiUpdate } from "./update-command";
+import { sanitizeForDisplay } from "../../../../packages/eight/changelog-view";
+import { launcherContext, makeTwoStepConfirm, runTuiUpdate } from "./update-command";
 
 function harness(opts: {
 	code?: number;
@@ -94,5 +95,29 @@ describe("/update in the TUI", () => {
 			embedded: true,
 		});
 		expect(launcherContext({}, "file:///here").modulePath).toBe("file:///here");
+	});
+});
+
+describe("TUI confirmation and note display", () => {
+	test("the first /update shows the question and stops; the same question confirmed on the second /update", async () => {
+		const said: string[] = [];
+		const confirm = makeTwoStepConfirm((l) => said.push(l));
+		expect(await confirm("Origin: x\nIncoming: a\nApply?")).toBe(false);
+		expect(said[0]).toContain("Type /update again to apply.");
+		expect(await confirm("Origin: x\nIncoming: a\nApply?")).toBe(true);
+		expect(await confirm("Origin: x\nIncoming: a\nApply?")).toBe(false);
+	});
+
+	test("a different question (new commits or another origin) starts over", async () => {
+		const confirm = makeTwoStepConfirm(() => {});
+		await confirm("one");
+		expect(await confirm("two")).toBe(false);
+		expect(await confirm("two")).toBe(true);
+	});
+
+	test("the update note is stripped of terminal control codes before display", () => {
+		expect(sanitizeForDisplay("Updated to \u001b[2Jdef456\u0007, resumed.")).toBe(
+			"Updated to def456, resumed.",
+		);
 	});
 });

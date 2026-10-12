@@ -64,3 +64,22 @@ export function launcherContext(
 		embedded: env.EIGHT_LAUNCHER_EMBEDDED === "1",
 	};
 }
+
+/**
+ * The TUI cannot read a y/N (Ink owns stdin), so confirmation is two typed
+ * steps: the first /update shows the origin and incoming commits and stops;
+ * a second /update for the SAME question applies it. A different question
+ * (new commits, another origin) starts over.
+ */
+export function makeTwoStepConfirm(say: (line: string) => void) {
+	let pending: string | null = null;
+	return async (question: string): Promise<boolean> => {
+		if (pending === question) {
+			pending = null;
+			return true;
+		}
+		pending = question;
+		say(`${question}\nNothing was changed. Type /update again to apply.`);
+		return false;
+	};
+}
