@@ -11,6 +11,10 @@ import { existsSync } from "node:fs";
 import type { Subprocess } from "bun";
 
 export async function forceKillFromSecondProcess(pid: number): Promise<void> {
+	// kill -KILL -1 kills every process this user owns; 0 kills the process group.
+	if (!Number.isSafeInteger(pid) || pid <= 0) {
+		throw new Error(`forceKillFromSecondProcess: refusing pid ${pid}, expected a positive integer`);
+	}
 	const cmd =
 		process.platform === "win32"
 			? [

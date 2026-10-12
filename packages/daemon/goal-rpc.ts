@@ -23,6 +23,7 @@ import {
 	GoalLoop,
 	GoalPersistence,
 	Ledger,
+	canonical,
 	type LedgerEntry,
 	type GoalEvent,
 	type GoalEventSink,
@@ -362,9 +363,10 @@ export class GoalManager {
 	 * If the run is not in memory but is present in the persistence layer,
 	 * verify the ledger chain (8GO: every resume must re-verify audit
 	 * integrity before exposing the run to RPC callers). Returns true only
-	 * if the chain is intact AND matches the persisted events entry for
-	 * entry. No key, a torn or missing file, or a short chain is a refusal
-	 * (#4113, conformance in goal-resume-conformance.test.ts).
+	 * if the chain is intact AND the persisted events match it in count and,
+	 * at every seq, in kind and payload. No key, a torn or missing file, a
+	 * short chain or a rewritten event row is a refusal (#4113, conformance
+	 * in goal-resume-conformance.test.ts).
 	 *
 	 * The scaffold does NOT re-attach a live GoalLoop; the daemon factory
 	 * owns executor + judge re-creation. This hook reports readiness; the
@@ -397,16 +399,25 @@ export class GoalManager {
 			return refuse("", err instanceof Error ? err.message : String(err));
 		}
 		// A chain that verifies can still be short: a truncated tail, or a
-		// deleted file that Ledger.open recreated empty, is a valid prefix. The
-		// ledger must match the persisted events entry for entry, or the offset
-		// the run resumes from is wrong.
+		// deleted file that Ledger.open recreated empty, is a valid prefix. And
+		// goal_events, the store the orchestrator replays, is not signed. So the
+		// two must agree in count, and at every seq in kind and payload: start()
+		// persists { ...payload, ts } and ledgers payload with that same ts.
 		const events = this.persistence.listEventsForRun(runId);
 		for (let i = 0; i < Math.max(entries.length, events.length); i++) {
-			if (entries[i]?.kind !== events[i]?.kind) {
+			const entry = entries[i];
+			const event = events[i];
+			if (!entry || !event) {
 				return refuse(
 					` at seq=${i + 1}`,
 					`ledger has ${entries.length} entries, persisted events ${events.length}`,
 				);
+			}
+			if (
+				entry.kind !== event.kind ||
+				canonical({ ...entry.payload, ts: entry.ts }) !== canonical(event.payload)
+			) {
+				return refuse(` at seq=${i + 1}`, "persisted event does not match the ledger entry");
 			}
 		}
 		return true;

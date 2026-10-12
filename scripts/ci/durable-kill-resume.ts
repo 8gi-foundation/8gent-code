@@ -319,9 +319,15 @@ await until("the continuation to reach the model", 60_000, () => continuation);
 if (!continuation.includes("not replayed"))
 	fail("the continuation did not tell the model the command was not replayed");
 // The re-run read completed: its result, with the file's content, reached the model.
-if (!/read_file .*: re-run \(read only, safe to replay\)\. Result:/.test(continuation))
-	fail("the continuation did not report the read as re-run");
-if (!continuation.includes(READ_TOKEN)) fail("the re-run read did not return the file's content");
+// The token must sit inside the read's own "Result:" block (before the next
+// "- " call line), so it cannot come from the earlier, pre-kill read.
+const tokenRe = READ_TOKEN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+if (
+	!new RegExp(
+		`read_file .*: re-run \\(read only, safe to replay\\)\\. Result:(?:(?!\\n- )[\\s\\S])*${tokenRe}`,
+	).test(continuation)
+)
+	fail("the continuation did not carry the re-run read's result with the file's content");
 await until("the continued turn to finish", 60_000, () => {
 	const e = journal().find((x) => x.sessionId === sessionId);
 	return e && !e.pendingTurn && !(e.inFlight?.length ?? 0);

@@ -20,7 +20,10 @@ on:
       - packages/daemon/**
       - packages/goal/**
       - packages/db/**
+      - packages/eight/**
+      - packages/ai/**
       - tests/force-kill.ts
+      - tests/rm-retry.ts
       - scripts/ci/durable-kill-resume.ts
   workflow_dispatch:
 

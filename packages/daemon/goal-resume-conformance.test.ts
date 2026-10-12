@@ -174,6 +174,7 @@ describe("intact ledger: resume reports the run ready at the right offset", () =
 		const last = events[events.length - 1];
 		expect(last.kind).toBe("turn.requested");
 		expect(last.payload.turn).toBe(KILL_TURN);
+		expect(entries[entries.length - 1].payload.turn).toBe(KILL_TURN);
 
 		const { ok, log } = resumeWithLog(m);
 		expect(log).toBe("");
@@ -261,5 +262,54 @@ describe("damaged ledger: resume refuses with a ledger verification failure", ()
 	test("an unknown run is not resumable", () => {
 		const { ok } = resumeWithLog(manager(), "g_never_started");
 		expect(ok).toBe(false);
+	});
+});
+
+/**
+ * goal_events is the store the orchestrator replays, and its rows are not
+ * signed. A row the ledger does not vouch for, field for field, is a refusal.
+ */
+describe("tampered goal_events, ledger intact: resume refuses", () => {
+	type Row = { run_id: string; seq: number; kind: string; payload: string; ts: number };
+	/** Run `damage` on the events table, then put every row back as it was. */
+	function withDamagedEvents(damage: (w: WorkspaceDb) => void): { ok: boolean; log: string } {
+		const w = new WorkspaceDb({ dbPath });
+		workspaces.push(w);
+		const rows = w.db
+			.query<Row, [string]>("SELECT * FROM goal_events WHERE run_id = ? ORDER BY seq")
+			.all(runId);
+		try {
+			damage(w);
+			return resumeWithLog(manager());
+		} finally {
+			w.db.prepare("DELETE FROM goal_events WHERE run_id = ?").run(runId);
+			const put = w.db.prepare(
+				"INSERT INTO goal_events (run_id, seq, kind, payload, ts) VALUES (?, ?, ?, ?, ?)",
+			);
+			for (const r of rows) put.run(r.run_id, r.seq, r.kind, r.payload, r.ts);
+		}
+	}
+
+	test("a goal_events payload rewritten, kind unchanged", () => {
+		const { ok, log } = withDamagedEvents((w) =>
+			w.db
+				.prepare("UPDATE goal_events SET payload = ? WHERE run_id = ? AND seq = 2")
+				.run(JSON.stringify({ turn: 99, injected: "evil" }), runId),
+		);
+		expect(ok).toBe(false);
+		expect(log).toContain(`[GoalManager] resume(${runId}): ledger verify failed at seq=2`);
+	});
+
+	test("goal_events truncated, ledger intact", () => {
+		const n = ledgerLines().length;
+		const { ok, log } = withDamagedEvents((w) =>
+			w.db.prepare("DELETE FROM goal_events WHERE run_id = ? AND seq = ?").run(runId, n),
+		);
+		expect(ok).toBe(false);
+		expect(log).toContain(`[GoalManager] resume(${runId}): ledger verify failed at seq=${n}`);
+	});
+
+	test("after both, the restored rows resume again (the damage was the cause)", () => {
+		expect(resumeWithLog(manager()).ok).toBe(true);
 	});
 });
