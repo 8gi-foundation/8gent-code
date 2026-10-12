@@ -2422,7 +2422,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Check for premature completion claims
 				if (event.text?.includes("🎯 COMPLETED") && event.finishReason === "stop") {
 					// The agent is claiming completion — this is fine, but log it for tracking
-					console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
+					console.log(`\n[Step ${event.stepNumber}] 8gent claims COMPLETED. Verify tests passed.`);
 				}
 
 				// ── Plan Parsing → Kanban Feed + Workflow Validation ─────────

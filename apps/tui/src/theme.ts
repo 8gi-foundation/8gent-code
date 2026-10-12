@@ -129,7 +129,7 @@ const dark = {
 	// #3238). 3.46:1 on bg, so an edge that means something clears 3:1.
 	frame:      "#6B655F",
 
-	// Section labels (WORKSPACE, AGENT ACTIVITY...): text-secondary, so
+	// Section labels (WORKSPACE, 8GENT ACTIVITY...): text-secondary, so
 	// orange stays for state and focus (the active tab, DONE, the input,
 	// the selection). 11.3:1 on bg.
 	heading:  "#C8C2BA",

@@ -3,7 +3,7 @@
 exports[`OrchestratorPane stable frame snapshot 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────╮
 │ ORCHESTRATOR                                                        1 active │
-│ AGENT        STATE         HARNESS       TOOL          TOKENS  ELAPSED       │
+│ 8GENT        STATE         HARNESS       TOOL          TOKENS  ELAPSED       │
 │ hx_a1         working      8gent-local   bash          900     950ms         │
 │ hx_e9         error        8gent-local   -             -       -             │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
