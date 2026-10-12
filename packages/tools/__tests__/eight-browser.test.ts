@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -16,7 +17,9 @@ import {
 	type BrowserLaunchSpec,
 	LOCAL_BROWSER_PROFILE,
 	LOCAL_SERVER_CURL_NOTE,
+	PROFILE_MIN_VERSION,
 	_setHostSandboxedForTest,
+	_setLaunchWaitForTest,
 	_setProfileHomeForTest,
 	_setResolverForTest,
 	_setSpawnForTest,
@@ -25,6 +28,7 @@ import {
 	browserProfileWarning,
 	browserWithheldNote,
 	createEightBrowser,
+	compareVersions,
 	launchLogTail,
 	localBrowserTools,
 	pngSize,
@@ -1840,6 +1844,156 @@ describeNotWin(
 		});
 	},
 );
+
+describeNotWin("a launch that cannot run the profile never stays running (#4103)", () => {
+	beforeEach(() => _setHostSandboxedForTest(false));
+	afterEach(() => {
+		_setHostSandboxedForTest(null);
+		_setProfileHomeForTest(null);
+		_setLaunchWaitForTest(null);
+		_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
+	});
+
+	const alive = (pid: number) => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	/** A real child that never publishes a port, started the way realSpawn starts the browser. */
+	function sleeper(script: string, onSpawn?: () => void) {
+		const pids: number[] = [];
+		_setSpawnForTest(() => {
+			onSpawn?.();
+			const child = spawn("/bin/sh", ["-c", script], { detached: true, stdio: "ignore" });
+			if (child.pid) pids.push(child.pid);
+			const exited = new Promise<string>((r) =>
+				child.once("exit", (code, sig) => r(`exited with ${sig ?? `code ${code}`}`)),
+			);
+			child.unref();
+			return { exited, pid: child.pid, detached: true };
+		});
+		return pids;
+	}
+
+	/** A fake macOS app bundle with the given version and app.asar content. */
+	function fakeBundle(version: string | null, asar: string | null): string {
+		const root = mkdtempSync(join(tmpdir(), "8b-bundle-"));
+		const contents = join(root, "8gent Browser.app", "Contents");
+		mkdirSync(join(contents, "MacOS"), { recursive: true });
+		mkdirSync(join(contents, "Resources"), { recursive: true });
+		const bin = join(contents, "MacOS", "8gent Browser");
+		writeFileSync(bin, "#!/bin/sh\nexit 0\n");
+		chmodSync(bin, 0o755);
+		if (version !== null)
+			writeFileSync(
+				join(contents, "Info.plist"),
+				`<?xml version="1.0"?><plist version="1.0"><dict>\n<key>CFBundleShortVersionString</key>\n<string>${version}</string>\n</dict></plist>`,
+			);
+		if (asar !== null) writeFileSync(join(contents, "Resources", "app.asar"), asar);
+		return bin;
+	}
+
+	test("timeout: the child is stopped and the error says so (curl hint kept)", async () => {
+		const pids = sleeper("exec sleep 60");
+		_setLaunchWaitForTest(300);
+		_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+			'8gent Browser could not start (profile "eightgent" published no port within 0.3 s; stopped the browser it started). For a local web app use run_command with curl instead.',
+		);
+		expect(pids.length).toBe(1);
+		expect(alive(pids[0])).toBe(false);
+	});
+
+	test("timeout: a child that ignores SIGTERM is killed, with its process group", async () => {
+		// The shell and its sleep both ignore TERM (inherited), as a wedged browser and a helper would.
+		const pids = sleeper("trap '' TERM; while :; do sleep 0.1; done");
+		_setLaunchWaitForTest(300);
+		_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+			/published no port within 0\.3 s; killed the browser it started \(SIGTERM was ignored\)/,
+		);
+		expect(alive(pids[0])).toBe(false);
+		let groupGone = false;
+		try {
+			process.kill(-pids[0], 0);
+		} catch {
+			groupGone = true;
+		}
+		expect(groupGone).toBe(true);
+	}, 10_000);
+
+	test("a child that writes the default token instead of the profile's is stopped at once, no curl hint", async () => {
+		const home = mkdtempSync(join(tmpdir(), "8b-launch-home-"));
+		// Stands in for desktop-v0.3.0: EIGHT_BROWSER_PROFILE ignored, the DEFAULT token written under HOME.
+		const pids = sleeper(
+			`mkdir -p '${home}/.8gent' && echo tok > '${home}/.8gent/browser-control.token' && exec sleep 60`,
+		);
+		_setProfileHomeForTest(home); // the full 20 s wait: this must not need it
+		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+		const t0 = Date.now();
+		let message = "";
+		await wsTransport({ env })("tabs.list").catch((e: Error) => (message = e.message));
+		expect(message).toBe(
+			"8gent Browser could not start (the 8gent Browser it started does not support named profiles: it wrote the default profile's token, not the profile's own; stopped the browser it started. Update it or set EIGHT_BROWSER_APP to a newer build).",
+		);
+		expect(Date.now() - t0).toBeLessThan(5_000);
+		expect(alive(pids[0])).toBe(false);
+	});
+
+	test("a pre-profile build (0.3.0, no marker in app.asar) is refused without spawning, naming both versions", async () => {
+		let spawns = 0;
+		_setSpawnForTest(() => {
+			spawns++;
+			return { exited: Promise.resolve("never") };
+		});
+		_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+		const bin = fakeBundle("0.3.0", "main bundle without profile support");
+		const env = { EIGHT_BROWSER_PROFILE: "eight-local", EIGHT_BROWSER_APP: bin };
+		let message = "";
+		await wsTransport({ env })("tabs.list").catch((e: Error) => (message = e.message));
+		expect(message).toBe(
+			`8gent Browser could not start (the installed 8gent Browser 0.3.0 does not support named profiles; it needs ${PROFILE_MIN_VERSION} or later. Update it or set EIGHT_BROWSER_APP to a newer build).`,
+		);
+		expect(message).not.toMatch(/curl/);
+		expect(spawns).toBe(0);
+	});
+
+	test("an older version with no app.asar is refused too; one at the minimum, or a 0.3.0 build carrying the marker, is launched", async () => {
+		const spawned: string[] = [];
+		_setSpawnForTest((spec) => {
+			spawned.push(spec.bin);
+			return { exited: Promise.resolve("exited with code 1") };
+		});
+		const run = async (bin: string, profile: string) => {
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			let message = "";
+			await wsTransport({ env: { EIGHT_BROWSER_PROFILE: profile, EIGHT_BROWSER_APP: bin } })("tabs.list").catch(
+				(e: Error) => (message = e.message),
+			);
+			return message;
+		};
+		expect(await run(fakeBundle("0.2.0", null), "pa")).toMatch(/8gent Browser 0\.2\.0 does not support named profiles/);
+		expect(spawned).toEqual([]);
+		const atMin = fakeBundle(PROFILE_MIN_VERSION, null);
+		expect(await run(atMin, "pb")).toMatch(/exited with code 1/);
+		const devBuild = fakeBundle("0.3.0", "...const raw = env.EIGHT_BROWSER_PROFILE...");
+		expect(await run(devBuild, "pc")).toMatch(/exited with code 1/);
+		expect(spawned).toEqual([atMin, devBuild]);
+	});
+
+	test("compareVersions", () => {
+		expect(compareVersions("0.3.0", "0.3.1")).toBeLessThan(0);
+		expect(compareVersions("0.4.0", "0.3.1")).toBeGreaterThan(0);
+		expect(compareVersions("0.3.1", "0.3.1")).toBe(0);
+		expect(compareVersions("1.0", "0.9.9")).toBeGreaterThan(0);
+	});
+});
 
 describe("the trusted port list is frozen at session start (8SO)", () => {
 	afterEach(() => {
