@@ -66,7 +66,7 @@ class AlwaysDangerous implements DecideBackend {
 const PILOT_RUN = "bash .tmp/serve.sh";
 /** The pilot's serve.sh rewritten to loopback: the one script the battery lets through. */
 const LOOPBACK_SERVE = (dir: string) =>
-	`#!/bin/sh\ncd ${dir}\nexec python3 -m http.server 8731 --bind 127.0.0.1\n`;
+	`#!/bin/sh\ncd ${dir}\nexec python3 -I -m http.server 8731 --bind 127.0.0.1\n`;
 /** The pilot's serve.sh as written (seq 24): http.server with no bind listens on every interface. */
 const PILOT_SERVE = (dir: string) => `#!/bin/sh\ncd ${dir}\nexec python3 -m http.server 8731\n`;
 
@@ -169,6 +169,26 @@ const BODY_PROBES: Array<[string, (ws: string) => string]> = [
 	["the server with no bind (the pilot's own script)", (w) => PILOT_SERVE(w)],
 	["the server bound to 0.0.0.0", () => "python3 -m http.server 8731 --bind 0.0.0.0\n"],
 	["the server bound to ::", () => "python3 -m http.server 8731 -b ::\n"],
+	// 8SO re-review: without -I the served directory is first on sys.path
+	["the loopback server without -I", () => "python3 -m http.server 8731 --bind 127.0.0.1\n"],
+	[
+		"the -I server with an extra flag",
+		() => "python3 -I -m http.server 8731 --bind 127.0.0.1 -d /\n",
+	],
+	["the -I server bound to 0.0.0.0", () => "python3 -I -m http.server 8731 --bind 0.0.0.0\n"],
+	// 8SO re-review: a cd that fails, or runs in a subshell, leaves the shell where it was
+	[
+		"cd to a missing directory, then cat through a symlink out",
+		() => "cd .tmp/nope\ncat escape/x\n",
+	],
+	[
+		"cd to a missing directory, then > through a symlink out",
+		() => "cd .tmp/nope\necho hi > escape/x\n",
+	],
+	[
+		"cd in a pipeline subshell, then > through a symlink out",
+		() => "mkdir .tmp/d | cd .tmp/d\necho hi > escape/x\n",
+	],
 	// expansion and escapes
 	["${X}", () => "X=a\necho ${X}\n"],
 	["$X", () => "X=a\necho $X\n"],
@@ -236,6 +256,14 @@ describe.skipIf(process.platform === "win32")(
 				expect(r.ok).toBe(true);
 				if (r.ok) expect(r.reason).toContain(".tmp/serve.sh");
 				expect(ok("sh .tmp/serve.sh")).toBe(true);
+			});
+			test("the -I server still passes with a local http package in the served directory (-I ignores it)", () => {
+				put("http/__init__.py", "print('shadowed')\n");
+				expect(ok(PILOT_RUN)).toBe(true);
+			});
+			test("a cd that lands inside, then relative paths that stay inside from both places", () => {
+				own(".tmp/cd.sh", "cd .tmp\nls\n");
+				expect(ok("bash .tmp/cd.sh")).toBe(true);
 			});
 			test("the rest of the command list, each used once, with in-workspace paths", () => {
 				own(
@@ -335,6 +363,16 @@ describe.skipIf(process.platform === "win32")(
 					expect(ok("bash .tmp/p.sh")).toBe(false);
 				});
 			}
+			test("the non -I server is refused while a local http package sits in the served directory", () => {
+				put("http/__init__.py", "print('shadowed')\n");
+				own(
+					".tmp/serve.sh",
+					`#!/bin/sh\ncd ${ws}\nexec python3 -m http.server 8731 --bind 127.0.0.1\n`,
+				);
+				const r = runOwnScript(PILOT_RUN, ws, rec);
+				expect(r.ok).toBe(false);
+				if (!r.ok) expect(r.hint).toContain("python3 -I -m http.server");
+			});
 			test("the pilot's own serve.sh is refused with a hint that names the fix", () => {
 				own(".tmp/serve.sh", PILOT_SERVE(ws));
 				const r = runOwnScript(PILOT_RUN, ws, rec);

@@ -34,19 +34,25 @@
  *     (so no quote, `$`, backtick, backslash, paren, brace, glob, `~`, `!` or
  *     non-ASCII), no here-doc, decideRules fires nothing on any line; every
  *     command (each part between `; & |`, an `exec ` prefix allowed) is one
- *     of SAFE_COMMANDS, or exactly `python3 -m http.server PORT --bind
- *     127.0.0.1` (the only listener, loopback only); `cd` takes one
- *     argument; and every argument and redirect target, resolved from the
- *     directory the script has cd'd to, stays inside the workspace by
- *     spelling and by real path (no `..`, no absolute path outside it, no
- *     symlink out). A flag word may not carry a path.
+ *     of SAFE_COMMANDS, or exactly `python3 -I -m http.server PORT --bind
+ *     127.0.0.1` (the only listener, loopback only; -I keeps the served
+ *     directory off sys.path, so a local `http/` package cannot shadow the
+ *     server, 8SO on #4123); `cd` takes one argument; and every argument
+ *     and redirect target stays inside the workspace by spelling and by
+ *     real path (no `..`, no absolute path outside it, no symlink out) from
+ *     EVERY directory the shell could be in. A `cd` may fail (a missing
+ *     directory) or run in a subshell (`a | cd b`), so each cd adds its
+ *     target to the set of possible directories and never drops one (8SO on
+ *     #4123). A flag word may not carry a path.
  *
  * When the command has the right shape but the script fails, the result
  * carries a hint for the block message saying what would pass.
  *
  * Known limits, on purpose: TOCTOU between this check and the spawn, as for
  * the sibling lanes. A long-running server still runs in the foreground of
- * run_command.
+ * run_command. The server does no Host-header check, so a browser page using
+ * DNS rebinding could read what it serves over loopback (8SO note on #4123);
+ * a follow-up candidate is refusing to serve the workspace root.
  *
  * Synchronous, never throws.
  */
@@ -67,14 +73,16 @@ const SCRIPT_CHARS = /^[A-Za-z0-9 \t\n._/:=,@+%#;&|<>-]*$/;
 /** Commands a script may run. Nothing here runs another program or reaches the network. */
 const SAFE_COMMANDS = new Set(["cd", "echo", "ls", "cat", "mkdir", "pwd", "sleep", "true"]);
 /** The one listener: python's static server on loopback. */
-const LOOPBACK_SERVER = /^python3 -m http\.server \d{1,5} (--bind|-b) 127\.0\.0\.1$/;
+const LOOPBACK_SERVER = /^python3 -I -m http\.server \d{1,5} (--bind|-b) 127\.0\.0\.1$/;
+/** At most this many possible working directories are tracked; more is refused. */
+const MAX_DIRS = 32;
 const MAX_BYTES = 64 * 1024;
 const NO: RunOwnScript = { ok: false };
 /** When this process started, in ns, less a second for coarse clocks. */
 const SINCE_NS = BigInt(Math.floor(performance.timeOrigin) - 1000) * 1_000_000n;
 
 const WHAT_PASSES =
-	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace: no quotes, `$`, backticks, `..` or here-docs.";
+	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace: no quotes, `$`, backticks, `..` or here-docs.";
 
 function hint(why: string): RunOwnScript {
 	return { ok: false, hint: `${why} ${WHAT_PASSES}` };
@@ -113,7 +121,8 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 		return "it uses a character outside plain words (a quote, `$`, backtick, backslash, paren, brace, glob, `~` or non-ASCII)";
 	if (promptControlText(src) !== null) return "it carries prompt-control text";
 	if (/<<|<>|>\|/.test(src)) return "it uses a here-doc or an unusual redirect";
-	let dir = cwd;
+	// Every directory the shell could be in at this point (see the header).
+	const dirs = new Set([cwd]);
 	for (const raw of src.split("\n")) {
 		const line = raw.replace(/(^|[ \t])#.*$/, "").trim();
 		if (line === "") continue;
@@ -129,7 +138,7 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 			if (LOOPBACK_SERVER.test(words.join(" "))) continue;
 			const cmd = words[0] as string;
 			if (cmd.startsWith("python3") && words.includes("http.server"))
-				return "`python3 -m http.server` must be exactly `python3 -m http.server PORT --bind 127.0.0.1`: anything else binds every interface or does more";
+				return "`python3 -m http.server` must be exactly `python3 -I -m http.server PORT --bind 127.0.0.1`: without -I a local `http` package in the served directory runs instead, and anything else binds every interface or does more";
 			if (!SAFE_COMMANDS.has(cmd)) return `it runs \`${cmd}\`, which is not on the list`;
 			const args = words.slice(1);
 			const targets: string[] = [];
@@ -154,11 +163,13 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 				targets.push(a);
 			}
 			for (const t of targets)
-				if (!staysInside(t, dir, cwd, root))
-					return `it names \`${t}\`, which is outside the workspace`;
+				for (const dir of dirs)
+					if (!staysInside(t, dir, cwd, root))
+						return `it names \`${t}\`, which is outside the workspace`;
 			if (cmd === "cd") {
 				if (targets.length !== 1 || args.length !== 1) return "`cd` must take exactly one path";
-				dir = path.resolve(dir, targets[0] as string);
+				for (const dir of [...dirs]) dirs.add(path.resolve(dir, targets[0] as string));
+				if (dirs.size > MAX_DIRS) return "it changes directory too many ways to follow";
 			}
 		}
 	}
