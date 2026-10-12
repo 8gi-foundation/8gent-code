@@ -418,9 +418,17 @@ export async function updateCheckout(
 		}
 	};
 	// Symlinked temp or home directories (macOS /tmp, /var) still count as the same directory.
+	// When the spellings still differ, ask git itself: --show-cdup is empty at the top of
+	// the work tree. On Windows git reports the long name of a directory the caller spelled
+	// with an 8.3 short name (C:\Users\RUNNER~1), and realpath keeps the short one.
+	const atTop = async () => {
+		const cdup = await g(["rev-parse", "--show-cdup"]);
+		return cdup.code === 0 && cdup.stdout.trim() === "";
+	};
 	const sameDir =
 		samePath(top.stdout.trim(), o.dir, d.platform) ||
-		samePath(real(top.stdout.trim()), real(o.dir), d.platform);
+		samePath(real(top.stdout.trim()), real(o.dir), d.platform) ||
+		(await atTop());
 	if (!sameDir)
 		return fail(`${o.dir} is inside another git work tree (${top.stdout.trim()}); not touching it`);
 
