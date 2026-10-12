@@ -93,17 +93,17 @@ class Rpc {
 			},
 		});
 		void this.read();
-		void (async () => {
-			// Drain stderr so the child never blocks on a full pipe.
-			for await (const _ of this.proc.stderr as ReadableStream) {
-			}
-		})();
+		// Drain stderr so the child never blocks on a full pipe.
+		void new Response(this.proc.stderr as ReadableStream).text();
 	}
 
 	private async read() {
 		const dec = new TextDecoder();
 		let buf = "";
-		for await (const chunk of this.proc.stdout as ReadableStream<Uint8Array>) {
+		const reader = (this.proc.stdout as ReadableStream<Uint8Array>).getReader();
+		for (;;) {
+			const { value: chunk, done } = await reader.read();
+			if (done || !chunk) break;
 			buf += dec.decode(chunk, { stream: true });
 			let nl = buf.indexOf("\n");
 			while (nl >= 0) {

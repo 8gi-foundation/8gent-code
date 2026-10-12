@@ -9,5 +9,4 @@ export const stateMatches: Same<Public.SessionState, Real.SessionState> = true;
 export const optionsMatch: Same<Public.SessionOptions, Real.SessionOptions> = true;
 export const listItemMatches: Same<Public.SessionListItem, Real.SessionListItem> = true;
 export const publicSession: Public.Session = null as unknown as Real.Session;
-export const realSession: Pick<Real.Session, keyof Public.Session> = null as unknown as Public.Session;
 export const factory: typeof Public.createSession = Real.createSession;
