@@ -84,10 +84,10 @@
 
 import * as readline from "node:readline";
 import { activeShellKind } from "../core/shell";
-import { posixRulesApply } from "./shell-tools";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
+import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -657,6 +657,27 @@ export async function systemOneGate(
 						backend: "allowlist",
 						model: "allowlist",
 						reason: c.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// The login-note recipe (#4072): `sed -n 's/^Label: */field=/w .tmp/NAME' FILE`,
+		// one line of a workspace file copied into .tmp/, printing nothing. Exact
+		// shape only; see s1-login-line.ts. Default mode only.
+		try {
+			const { loginLineToTmp } = await import("./s1-login-line");
+			const line = mode === "default" ? loginLineToTmp(command, cwd) : { ok: false as const };
+			if (line.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: line.reason,
 					},
 				};
 			}
