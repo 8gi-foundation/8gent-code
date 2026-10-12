@@ -7,7 +7,7 @@ on:
   # trigger before merge.
   push:
     branches: [feat/terminal-bench-adapter]
-    paths: [.github/workflows/terminal-bench.yml]
+    paths: [.github/workflows/terminal-bench.yml, benchmarks/terminal-bench/**, packages/eight/agent.ts]
   workflow_dispatch:
     inputs:
       model:
