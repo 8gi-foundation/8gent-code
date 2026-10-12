@@ -71,6 +71,13 @@ export interface PendingTurn {
 /** Longest user text kept on disk for a pending turn. */
 const TURN_TEXT_CHARS = 4000;
 
+/** Cap a pending turn's text. Applied on write and again on read (8SO review of #4082). */
+function capTurnText(text: string): string {
+	return text.length > TURN_TEXT_CHARS
+		? `${text.slice(0, TURN_TEXT_CHARS)}... (${text.length} chars)`
+		: text;
+}
+
 export interface InFlightToolCall {
 	id: string;
 	tool: string;
@@ -195,6 +202,10 @@ export class SessionJournal {
 					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight);
 					if (e.pendingTurn !== undefined && !isValidPendingTurn(e.pendingTurn)) {
 						delete e.pendingTurn;
+					} else if (e.pendingTurn && e.pendingTurn.text.length > TURN_TEXT_CHARS + 32) {
+						// Over the cap plus the "... (N chars)" suffix: a journal
+						// edited by hand or an older build. Capped, not trusted.
+						e.pendingTurn.text = capTurnText(e.pendingTurn.text);
 					}
 					valid.push(e);
 				} else
@@ -236,13 +247,9 @@ export class SessionJournal {
 	 * session not journaled.
 	 */
 	markTurnStart(sessionId: string, turn: { id: string; text: string }): void {
-		const clean = scrubSecrets(turn.text).scrubbed;
 		this.updateTurn(sessionId, () => ({
 			id: turn.id,
-			text:
-				clean.length > TURN_TEXT_CHARS
-					? `${clean.slice(0, TURN_TEXT_CHARS)}... (${clean.length} chars)`
-					: clean,
+			text: capTurnText(scrubSecrets(turn.text).scrubbed),
 			startedAt: Date.now(),
 			attempts: 0,
 		}));
@@ -565,10 +572,15 @@ export function continueInterruptedTurns(
 				const lead = unconfirmed
 					? "The daemon stopped during this task and has restarted from the checkpoint taken before the tool call(s) listed in the note above, which were not replayed. First check whether they took effect; never repeat a push, message, deploy or command without asking. Then continue the task."
 					: "The daemon stopped during this task and has restarted. Continue the task from the current state.";
+				// The original turn's approval context (a Telegram operator's chat)
+				// does not survive the restart: a gated command in this turn is
+				// denied, not asked about. Fail closed, and say so.
+				const approvals =
+					"Nobody can approve a gated command in this automatic continuation, so such a command is denied; leave it for the user and say what remains.";
 				pool
 					.chat(
 						entry.sessionId,
-						`[resume] continued-after-crash (automatic continuation ${attempts} of ${maxAttempts}). ${lead} The original request was:\n${turn.text}`,
+						`[resume] continued-after-crash (automatic continuation ${attempts} of ${maxAttempts}). ${lead} ${approvals} The original request was:\n${turn.text}`,
 						undefined,
 						{ continuation: true },
 					)

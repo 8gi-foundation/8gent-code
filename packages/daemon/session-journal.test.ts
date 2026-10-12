@@ -590,6 +590,8 @@ describe("durable turns (#4082)", () => {
 		return { pool, calls, notes };
 	}
 
+	const journal = (p: string) => new mod.SessionJournal(p);
+
 	test("EIGHT_AUTO_CONTINUE=1 enables, anything else does not", () => {
 		expect(mod.autoContinueEnabled({ EIGHT_AUTO_CONTINUE: "1" })).toBe(true);
 		expect(mod.autoContinueEnabled({})).toBe(false);
@@ -749,6 +751,37 @@ describe("durable turns (#4082)", () => {
 			attempts: 0,
 		});
 		expect(pool.getAgent("s_off")!.getMessageHistory().slice(1)).toEqual([]);
+	});
+
+	test("an oversized pending turn on disk is capped on read, an oversized id drops the turn", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		const entry = (sessionId: string, turn: Record<string, unknown>) => ({
+			sessionId,
+			channel: "api",
+			ttSessionId: `session_${sessionId}`,
+			createdAt: 1,
+			pendingTurn: turn,
+		});
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					entry("s_big_text", { id: "t_big", text: "x".repeat(50_000), startedAt: 1, attempts: 0 }),
+					entry("s_big_id", { id: "t".repeat(300), text: "ok", startedAt: 1, attempts: 0 }),
+				],
+			}),
+		);
+		const [bigText, bigId] = new mod.SessionJournal(journalPath).read();
+		expect(bigText.pendingTurn!.text.length).toBeLessThan(4050);
+		expect(bigText.pendingTurn!.text).toEndWith("... (50000 chars)");
+		expect(bigId.sessionId).toBe("s_big_id");
+		expect(bigId.pendingTurn).toBeUndefined();
+		// The capped text is what the continuation carries.
+		const f = fakePool();
+		mod.continueInterruptedTurns(journal(journalPath), f.pool, []);
+		expect(f.calls[0].text.length).toBeLessThan(5000);
+		expect(f.calls[0].text).toContain("gated command in this automatic continuation");
 	});
 
 	test("a malformed pending turn is dropped, the session entry is kept", () => {

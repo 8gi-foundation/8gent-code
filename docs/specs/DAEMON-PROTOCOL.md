@@ -468,8 +468,13 @@ and the replay settle. The attempt is journaled before the continuation runs,
 so a second crash during it abandons the turn instead of looping. When the
 interrupted call was a write or command, the session stays at the pre-tool
 checkpoint the restore put back and the continuation tells the model to verify
-what took effect before changing anything. `scripts/durable-continue-demo.ts`
-is the kill -9 demonstration.
+what took effect before changing anything. The pending turn's text is capped
+at 4000 characters on write and again on read, so a hand-edited journal cannot
+feed the model an oversized prompt. The original turn's approval context does
+not survive the restart: a continuation of a Telegram-started turn has no
+operator to ask, so a gated command in it is denied (fail closed) and the
+continuation note tells the model to leave such commands for the user.
+`scripts/durable-continue-demo.ts` is the kill -9 demonstration.
 
 ## Ability Access
 
