@@ -103,7 +103,8 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
-  update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
+  update [--check]            Update 8gent through the channel it was installed from (binary release
+                              or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
@@ -112,6 +113,9 @@ COMMANDS:
   install <preset>            Interactively install a /spawn preset CLI (claude, codex,
                               hermes, openclaw, pi, 8gent). Runs the install recipe with
                               full stdio so you can answer prompts + complete OAuth.
+  install npm:<name>@<ver>    Install an npm package into ~/.8gent/packages, pinned by the
+                              registry integrity. No scripts run, no dependencies installed.
+  packages [list|remove|verify]  Installed packages: list them, remove one, re-check one
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -588,7 +592,7 @@ async function main() {
 
 		case "update":
 		case "upgrade":
-			await updateCommand();
+			await updateCommand(restArgs);
 			break;
 
 		case "permissions":
@@ -605,6 +609,12 @@ async function main() {
 			await installCommand(restArgs);
 			break;
 
+		case "packages": {
+			const { runPackagesCommand } = await import("../packages/eight/cli-maintenance.ts");
+			process.exitCode = runPackagesCommand(restArgs);
+			break;
+		}
+
 		case "publish":
 			await publishCommand(restArgs);
 			break;
@@ -617,40 +627,17 @@ async function main() {
 }
 
 /**
- * `8gent update` — pull the latest 8gent from npm. Uses --force to
- * defeat the EEXIST collision on the `8` / `8gent` / `8gent-code`
- * bin symlinks that npm refuses to overwrite by default.
- *
- * No flags. No surprises. Just: tell user what's about to happen,
- * run npm install -g @latest --force, stream output, print restart
- * hint when done.
+ * `8gent update [--check]`: packages/eight/self-update.ts decides and installs.
+ * It updates through the channel this 8gent was installed from (a release
+ * binary, or npm) and never installs a lower version. `--check` reports only.
  */
-async function updateCommand(): Promise<void> {
-	const { spawn } = await import("node:child_process");
-	console.log(`Current: v${VERSION}`);
-	console.log(`Updating @8gi-foundation/8gent-code to latest from npm...`);
-	console.log(`(uses --force to overwrite stale bin symlinks)\n`);
-
-	const proc = spawn(
-		"npm",
-		["install", "-g", "@8gi-foundation/8gent-code@latest", "--force"],
-		{ stdio: "inherit" },
-	);
-
-	await new Promise<void>((resolve) => {
-		proc.on("exit", (code) => {
-			if (code === 0) {
-				console.log(`\nDone. Restart your terminal session, then run \`8gent\` to use the new version.`);
-			} else {
-				console.error(`\nUpdate failed (exit ${code}). Try manually:`);
-				console.error(`  npm install -g @8gi-foundation/8gent-code@latest --force`);
-			}
-			resolve();
-		});
-		proc.on("error", (err) => {
-			console.error(`\nCouldn't run npm: ${err.message}`);
-			resolve();
-		});
+async function updateCommand(args: string[]): Promise<void> {
+	const { runUpdateCommand } = await import("../packages/eight/cli-maintenance.ts");
+	process.exitCode = await runUpdateCommand(args, {
+		currentVersion: VERSION,
+		modulePath: import.meta.url,
+		embedded: MODULE_IS_EMBEDDED,
+		execPath: process.execPath,
 	});
 }
 
@@ -784,9 +771,16 @@ async function keysCommand(args: string[]): Promise<void> {
  * via isInstalled() and report success/failure with next steps.
  */
 async function installCommand(args: string[]): Promise<void> {
-	const presetId = (args[0] || "").toLowerCase().trim();
+	const spec = (args[0] || "").trim();
+	// `npm:<name>@<version>` is a package, pinned by integrity (packages/marketplace/install.ts).
+	if (spec.startsWith("npm:")) {
+		const { runInstallNpmCommand } = await import("../packages/eight/cli-maintenance.ts");
+		process.exitCode = await runInstallNpmCommand(spec);
+		return;
+	}
+	const presetId = spec.toLowerCase();
 	if (!presetId) {
-		console.error(`Usage: 8gent install <preset>`);
+		console.error(`Usage: 8gent install <preset> | npm:<name>@<version>`);
 		console.error(`Available presets: claude, codex, hermes, openclaw, pi, 8gent`);
 		process.exit(1);
 	}
