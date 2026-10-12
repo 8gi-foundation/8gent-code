@@ -89,4 +89,41 @@ describe("all release workflows", () => {
 		expect(wf.jobs.release.permissions?.["id-token"]).toBe("write");
 		expect(wf.jobs.alarm.permissions?.["id-token"]).toBeUndefined();
 	});
+
+	// #3658: the repository has no PACK_SMOKE_OWNER_IDENTITY secret, and the
+	// pack smoke scans every commit author without it. A release must never
+	// fail on that secret being absent; the smoke requires it only when set.
+	test("release.yml: PACK_SMOKE_OWNER_IDENTITY is optional", () => {
+		const wf = load("release.yml");
+		const steps = wf.jobs.release.steps ?? [];
+		const preflight = steps.find((s) => /Preflight/.test(String((s as { name?: string }).name)));
+		expect(preflight?.run).toBeDefined();
+		expect(preflight?.run).not.toMatch(/PACK_SMOKE_OWNER_IDENTITY[^\n]*\n[^\n]*\n\s*exit 1/);
+		const smoke = steps.find((s) => /pack-smoke\.ts/.test(s.run ?? ""));
+		const env = (smoke as { env?: Record<string, string> } | undefined)?.env ?? {};
+		expect(env.PACK_SMOKE_REQUIRE_OWNER_IDENTITY).not.toBe("1");
+		expect(env.PACK_SMOKE_REQUIRE_OWNER_IDENTITY).toContain(
+			"secrets.PACK_SMOKE_OWNER_IDENTITY != ''",
+		);
+	});
+
+	// #3658: npm latest sat at 0.17.0 for five months with no issue. A release
+	// whose npm channel was skipped or failed must reach the alarm job.
+	test("release.yml: the alarm job fires when the npm channel did not publish", () => {
+		const wf = load("release.yml");
+		const outputs = (wf.jobs.release as { outputs?: Record<string, string> }).outputs ?? {};
+		expect(outputs.npm).toContain("steps.npm.outputs.npm");
+		const steps = wf.jobs.release.steps ?? [];
+		const ids = steps.map((s) => (s as { id?: string }).id);
+		expect(ids).toContain("npm_publish");
+		expect(ids).toContain("npm_latest");
+		expect(ids).toContain("npm");
+		const alarm = wf.jobs.alarm as Job & { if?: string };
+		expect(alarm.needs).toBe("release");
+		expect(alarm.if).toContain("needs.release.result == 'failure'");
+		expect(alarm.if).toContain("needs.release.outputs.npm != 'published'");
+		expect(alarm.if).not.toMatch(/^\s*failure\(\)/);
+		const step = (alarm.steps ?? []).find((s) => /release-alarm\.sh/.test(s.run ?? ""));
+		expect(step?.run).toContain('"release.yml npm channel"');
+	});
 });
