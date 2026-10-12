@@ -370,6 +370,21 @@ describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)"
 		"fake <head> in a comment": (port, o) =>
 			`<!-- <head> --><script src="http://127.0.0.1:${port}/x.js"></script><html><head></head><body style="margin:0"><iframe src="${o}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
 	};
+	const OUTSIDE_BLOCK = '<div style="width:600px;height:300px;background:#000"></div>';
+	/** Share of near-black pixels inside `r` of a PNG. */
+	async function darkFraction(file: string, r: { x: number; y: number; w: number; h: number }): Promise<number> {
+		const { data, info } = await sharp(file).flatten({ background: "#ffffff" }).raw().toBuffer({ resolveWithObject: true });
+		let dark = 0;
+		let total = 0;
+		for (let y = r.y; y < Math.min(r.y + r.h, info.height); y++) {
+			for (let x = r.x; x < Math.min(r.x + r.w, info.width); x++) {
+				const i = (y * info.width + x) * info.channels;
+				total++;
+				if (data[i] < 64 && data[i + 1] < 64 && data[i + 2] < 64) dark++;
+			}
+		}
+		return total ? dark / total : 0;
+	}
 	for (const [name, build] of Object.entries(shapes)) {
 		test(`${name}: no connection to a local listener, no outside iframe`, async () => {
 			let connections = 0;
@@ -383,12 +398,13 @@ describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)"
 			await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 			const port = (server.address() as { port: number }).port;
 			const outside = tempDir("layout-compare-outside-");
-			fs.writeFileSync(path.join(outside, "big.html"), '<body style="margin:0"><div style="width:600px;height:300px;background:#000"></div></body>');
+			fs.writeFileSync(path.join(outside, "big.html"), `<body style="margin:0">${OUTSIDE_BLOCK}</body>`);
 			const dir = tempDir("layout-compare-real-");
 			const site = path.join(dir, "site");
 			fs.mkdirSync(site);
 			const file = path.join(site, "index.html");
-			fs.writeFileSync(file, build(port, `file://${path.join(outside, "big.html")}`));
+			const outsideUrl = `file://${path.join(outside, "big.html")}`;
+			fs.writeFileSync(file, build(port, outsideUrl));
 			const work = path.join(dir, "work");
 			fs.mkdirSync(work);
 			try {
@@ -404,7 +420,32 @@ describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)"
 				await renderSafe(chrome as string, file, path.join(work, "r.png"), 800, 600, work);
 				await new Promise((r) => setTimeout(r, 300));
 				expect(connections).toBe(0);
-				expect(await measureLayout(path.join(work, "r.png"))).toBeNull();
+				// Positive control: the same page with the outside iframe swapped for a box that holds
+				// the outside block inline. The detector must see it, so the checks below cannot pass
+				// vacuously, and it tells us where the block would land.
+				const iframeTag = `<iframe src="${outsideUrl}" style="border:0;width:700px;height:400px"></iframe>`;
+				const html = build(port, outsideUrl);
+				expect(html).toContain(iframeTag);
+				const controlFile = path.join(site, "control.html");
+				fs.writeFileSync(
+					controlFile,
+					html.split(iframeTag).join(`<div style="display:inline-block;width:700px;height:400px;padding:8px;box-sizing:border-box">${OUTSIDE_BLOCK}</div>`),
+				);
+				await renderSafe(chrome as string, controlFile, path.join(work, "control.png"), 800, 600, work);
+				const control = await measureLayout(path.join(work, "control.png"));
+				const block = control?.bands.find((b) => b.h >= 300 && b.spans.some((sp) => sp.w >= 600));
+				expect(block).toBeDefined();
+				const span = (block as Band).spans.find((sp) => sp.w >= 600) as { x: number; w: number };
+				const region = { x: span.x, y: (block as Band).y, w: span.w, h: (block as Band).h };
+				expect(await darkFraction(path.join(work, "control.png"), region)).toBeGreaterThan(0.9);
+				// The real render: only Chrome's own placeholders (blocked frame, broken image; at most
+				// 42 px) may show, and nothing dark where the outside block would have landed.
+				const got = await measureLayout(path.join(work, "r.png"));
+				for (const b of got?.bands ?? []) {
+					expect(b.h).toBeLessThanOrEqual(50);
+					for (const sp of b.spans) expect(sp.w).toBeLessThanOrEqual(50);
+				}
+				expect(await darkFraction(path.join(work, "r.png"), region)).toBeLessThan(0.02);
 			} finally {
 				server.close();
 			}
