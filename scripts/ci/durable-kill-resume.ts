@@ -214,7 +214,7 @@ type JournalEntry = {
 };
 const journal = (): JournalEntry[] =>
 	JSON.parse(fs.readFileSync(journalPath, "utf8")).sessions ?? [];
-// The daemon logs "  -> <tool>(" for each call the model makes (packages/eight/agent.ts).
+// The daemon logs "  -> <tool>(" for each call the model makes (text tool path in packages/eight).
 const readCallsLogged = (n: number) =>
 	(fs.readFileSync(path.join(root, `daemon-${n}.log`), "utf8").match(/-> read_file\(/g) ?? [])
 		.length;
