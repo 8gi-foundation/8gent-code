@@ -36,7 +36,7 @@ import {
 	wrapRunCommand,
 	wrapRunCommandArgv,
 } from "../permissions/run-command-sandbox";
-import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
@@ -65,6 +65,8 @@ export interface ToolContext {
 	permission?: PermissionModeHolder;
 	/** Files this agent created, shared with its ToolExecutor (#3177); undefined: none recorded. */
 	createdFiles?: CreatedFiles;
+	/** Edit scope of a scoped agent; the media write tools refuse outside it. */
+	allowedPaths?: string[];
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -923,6 +925,9 @@ const renderVideoDeckTool = tool({
 			const { resolveDeckOut } = await import("../eight/tools");
 			const wd = getToolContext().workingDirectory;
 			const target = resolveDeckOut(out, wd);
+			const ctx = getToolContext();
+			const scoped = editScopeViolation("render_video_deck", { out: out ?? "deck.mp4" }, wd, ctx.allowedPaths);
+			if (scoped) return scoped;
 			const blocked = gateWrite("render_video_deck", { path: target });
 			if (blocked) return blocked;
 			const { renderVideoDeck } = await import("../tools/video-deck");

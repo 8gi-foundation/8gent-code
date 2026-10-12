@@ -1,12 +1,15 @@
 /** render_video_deck: schema, deterministic render, cwd confinement, no network. */
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { ToolExecutor } from "../../eight/tools";
-import { DeckSpecSchema, buildFfmpegArgs, paintSlide, renderVideoDeck } from "../video-deck";
+import { editScopeViolation, scopedWriteTarget, SCOPED_WRITE_TOOLS } from "../../permissions/edit-guards";
+import { agentTools, setToolContext } from "../../ai/tools";
+import { ModeManager } from "../../eight/modes";
+import { MAX_IMAGE_BYTES, DeckSpecSchema, buildFfmpegArgs, imageDimensions, paintSlide, placeOutput, renderVideoDeck, resolveBinary } from "../video-deck";
 
 afterAll(cleanupTempDirs);
 
@@ -174,5 +177,178 @@ describe("no network", () => {
 		expect(calls).toBe(0);
 		const src = readFileSync(join(import.meta.dir, "..", "video-deck.ts"), "utf8");
 		expect(src).not.toMatch(/from "node:(http|https|net|dgram|tls)"|\bfetch\(|XMLHttpRequest|WebSocket/);
+	});
+});
+
+const which = (n: string) => spawnSync("which", [n]).stdout.toString().trim();
+
+describe("edit scope on every path (review)", () => {
+	test("render_video_deck is a scoped write tool with its target in out", () => {
+		expect(SCOPED_WRITE_TOOLS.has("render_video_deck")).toBe(true);
+		expect(scopedWriteTarget("render_video_deck", { out: "a.mp4", path: "z" })).toBe("a.mp4");
+		expect(scopedWriteTarget("speak", { out: "a.wav" })).toBe("a.wav");
+		expect(scopedWriteTarget("write_file", { path: "p" })).toBe("p");
+		expect(editScopeViolation("render_video_deck", { out: "other.mp4" }, "/w", ["allowed"])).toContain("SCOPE BLOCKED");
+		expect(editScopeViolation("render_video_deck", {}, "/w", ["allowed"])).toContain("SCOPE BLOCKED");
+		expect(editScopeViolation("render_video_deck", { out: "allowed/a.mp4" }, "/w", ["allowed"])).toBeNull();
+	});
+
+	test("native handler refuses outside the agent's scope and nothing is written", async () => {
+		const root = tempDir("vdeck-native-");
+		mkdirSync(join(root, "allowed"));
+		const run = (a: Record<string, unknown>, allowedPaths?: string[]) =>
+			{
+				setToolContext({ workingDirectory: root, allowedPaths });
+				return (agentTools.render_video_deck as unknown as { execute: (a: unknown, o: unknown) => Promise<string> }).execute(a, {
+					toolCallId: "t",
+					messages: [],
+				});
+			};
+		expect(await run({ spec: SPEC, out: "other.mp4" }, ["allowed"])).toContain("SCOPE BLOCKED");
+		expect(existsSync(join(root, "other.mp4"))).toBe(false);
+		if (hasFfmpeg) {
+			const ok = JSON.parse(await run({ spec: SPEC, out: "allowed/ok.mp4" }, ["allowed"]));
+			expect(existsSync(ok.path)).toBe(true);
+		}
+	});
+
+	test("architect and review modes deny the media write tools", () => {
+		for (const m of ["architect", "review"]) {
+			const denied = new ModeManager("/nonexistent/modes.yaml").getMode(m)?.deniedTools ?? [];
+			for (const t of ["speak", "make_pdf", "render_video_deck"]) expect(denied).toContain(t);
+		}
+	});
+});
+
+describe("final write is re-checked (TOCTOU)", () => {
+	// A stub ffmpeg that runs the real one, then swaps a link in before the tool copies the result out.
+	function swapper(root: string, swapCmd: string) {
+		const stub = join(root, "stub-bin", "ffmpeg");
+		mkdirSync(join(root, "stub-bin"));
+		writeFileSync(stub, `#!/usr/bin/env bash\n${which("ffmpeg")} "$@" || exit $?\n${swapCmd}\n`);
+		chmodSync(stub, 0o755);
+		return stub;
+	}
+
+	ffTest("deck.mp4 swapped for a symlink to an outside file: the outside file is untouched", async () => {
+		const base = tempDir("vdeck-toctou1-");
+		const work = join(base, "work");
+		const outside = join(base, "outside");
+		mkdirSync(work);
+		mkdirSync(outside);
+		writeFileSync(join(outside, "victim.mp4"), "keep");
+		const stub = swapper(base, `ln -sf ${join(outside, "victim.mp4")} ${join(work, "deck.mp4")}`);
+		await renderVideoDeck({ spec: SPEC, out: join(work, "deck.mp4"), cwd: work, ffmpeg: stub });
+		expect(readFileSync(join(outside, "victim.mp4"), "utf8")).toBe("keep");
+		// the link was replaced by a real file, not written through
+		expect(spawnSync("test", ["-L", join(work, "deck.mp4")]).status).not.toBe(0);
+		expect(readFileSync(join(work, "deck.mp4")).length).toBeGreaterThan(1000);
+	});
+
+	ffTest("parent directory swapped for a symlink outside cwd: refused, outside dir untouched", async () => {
+		const base = tempDir("vdeck-toctou2-");
+		const work = join(base, "work");
+		const outside = join(base, "outside");
+		mkdirSync(join(work, "sub"), { recursive: true });
+		mkdirSync(outside);
+		const stub = swapper(base, `rm -rf ${join(work, "sub")} && ln -s ${outside} ${join(work, "sub")}`);
+		await expect(renderVideoDeck({ spec: SPEC, out: join(work, "sub", "deck.mp4"), cwd: work, ffmpeg: stub })).rejects.toThrow(/traversal|outside|ENOENT/i);
+		expect(readdirSync(outside)).toEqual([]);
+	});
+
+	test("placeOutput refuses a parent that resolves outside and leaves no part file", () => {
+		const base = tempDir("vdeck-place-");
+		const work = join(base, "work");
+		const outside = join(base, "outside");
+		mkdirSync(work);
+		mkdirSync(outside);
+		symlinkSync(outside, join(work, "link"));
+		writeFileSync(join(base, "src.mp4"), "data");
+		expect(() => placeOutput(join(base, "src.mp4"), join(work, "link", "d.mp4"), work)).toThrow(/traversal/i);
+		expect(readdirSync(outside)).toEqual([]);
+	});
+
+	ffTest("a symlinked .tmp scratch root is refused", async () => {
+		const base = tempDir("vdeck-tmplink-");
+		const work = join(base, "work");
+		mkdirSync(work);
+		mkdirSync(join(base, "outside"));
+		symlinkSync(join(base, "outside"), join(work, ".tmp"));
+		await expect(renderVideoDeck({ spec: SPEC, out: join(work, "d.mp4"), cwd: work })).rejects.toThrow(/\.tmp/);
+		expect(readdirSync(join(base, "outside"))).toEqual([]);
+	});
+});
+
+describe("caps", () => {
+	const png = (w: number, h: number) => {
+		const b = Buffer.alloc(33);
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).copy(b);
+		b.write("IHDR", 12);
+		b.writeUInt32BE(w, 16);
+		b.writeUInt32BE(h, 20);
+		return b;
+	};
+
+	test("header parsing reads PNG and JPEG sizes", () => {
+		expect(imageDimensions(png(300, 200))).toEqual({ width: 300, height: 200 });
+		const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 100, 0, 150, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+		expect(imageDimensions(jpg)).toEqual({ width: 150, height: 100 });
+		expect(imageDimensions(Buffer.from("not an image"))).toBeNull();
+	});
+
+	test("an image over the pixel cap is refused from its header, before decoding", async () => {
+		const root = tempDir("vdeck-px-");
+		writeFileSync(join(root, "big.png"), png(20000, 20000));
+		await expect(renderVideoDeck({ spec: { slides: [{ title: "t", image: "big.png" }] }, out: join(root, "o.mp4"), cwd: root })).rejects.toThrow(/pixels/);
+	});
+
+	test("an image over the byte cap is refused", async () => {
+		const root = tempDir("vdeck-bytes-");
+		const b = Buffer.alloc(MAX_IMAGE_BYTES + 1);
+		png(10, 10).copy(b);
+		writeFileSync(join(root, "fat.png"), b);
+		await expect(renderVideoDeck({ spec: { slides: [{ title: "t", image: "fat.png" }] }, out: join(root, "o.mp4"), cwd: root })).rejects.toThrow(/bytes/);
+	});
+
+	test("total seconds over 600 are refused", async () => {
+		const root = tempDir("vdeck-secs-");
+		const slides = Array.from({ length: 11 }, () => ({ title: "t", seconds: 60 }));
+		await expect(renderVideoDeck({ spec: { slides }, out: join(root, "o.mp4"), cwd: root })).rejects.toThrow(/limit is 600/);
+		expect(existsSync(join(root, "o.mp4"))).toBe(false);
+	});
+
+	test("one deadline covers narration", async () => {
+		const root = tempDir("vdeck-deadline-");
+		const stub = join(root, "slow");
+		writeFileSync(stub, "#!/usr/bin/env bash\nsleep 5\n");
+		chmodSync(stub, 0o755);
+		process.env.EIGHT_SUPERTONIC_BIN = stub;
+		process.env.EIGHT_KITTEN_PY = "/nonexistent";
+		const t0 = Date.now();
+		await expect(
+			renderVideoDeck({ spec: { slides: [{ title: "t", narration: "hello" }] }, out: join(root, "o.mp4"), cwd: root, deadlineMs: 700 }),
+		).rejects.toThrow(/deadline/);
+		expect(Date.now() - t0).toBeLessThan(4000);
+	});
+
+	test("relative PATH entries never win and a binary inside the workspace is refused", () => {
+		const base = tempDir("vdeck-bin-");
+		const work = join(base, "work");
+		mkdirSync(join(work, "node_modules", ".bin"), { recursive: true });
+		const fake = join(work, "node_modules", ".bin", "ffmpeg");
+		writeFileSync(fake, "#!/bin/sh\n");
+		chmodSync(fake, 0o755);
+		// relative entry is skipped entirely
+		expect(() => resolveBinary("ffmpeg", work, undefined, "node_modules/.bin")).toThrow(/not found/);
+		expect(() => resolveBinary("ffmpeg", work, undefined, ".")).toThrow(/not found/);
+		// absolute entry inside the workspace is refused
+		expect(() => resolveBinary("ffmpeg", work, undefined, join(work, "node_modules", ".bin"))).toThrow(/inside the working directory/);
+		// symlink out of a clean dir into the workspace is refused too
+		mkdirSync(join(base, "clean"));
+		symlinkSync(fake, join(base, "clean", "ffmpeg"));
+		expect(() => resolveBinary("ffmpeg", work, undefined, join(base, "clean"))).toThrow(/inside the working directory/);
+		// an override must be absolute
+		expect(() => resolveBinary("ffmpeg", work, "ffmpeg")).toThrow(/absolute/);
+		if (hasFfmpeg) expect(resolveBinary("ffmpeg", work)).toMatch(/^\//);
 	});
 });

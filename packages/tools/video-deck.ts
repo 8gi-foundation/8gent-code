@@ -12,11 +12,16 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 
 export const FPS = 24;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_PIXELS = 25_000_000;
+export const MAX_TOTAL_SECONDS = 600;
+export const DEFAULT_DEADLINE_MS = 300_000;
 export const MAX_SLIDES = 40;
 const SIZES = { "1280x720": [1280, 720], "1920x1080": [1920, 1080] } as const;
 
@@ -60,6 +65,8 @@ export interface RenderDeckOptions {
 	/** Working directory: slide images are read from inside it only. */
 	cwd: string;
 	timeoutMs?: number;
+	/** One deadline for the whole render, narration included (default 300s). */
+	deadlineMs?: number;
 	/** Override for tests. Default: `ffmpeg` / `ffprobe` on PATH, or EIGHT_FFMPEG / EIGHT_FFPROBE. */
 	ffmpeg?: string;
 	ffprobe?: string;
@@ -115,7 +122,45 @@ function readInside(named: string, cwd: string): Buffer {
 		throw new Error(`Path traversal blocked: image "${named}" is outside the working directory`);
 	}
 	if (!/\.(png|jpe?g)$/i.test(real)) throw new Error(`image "${named}" must be a .png or .jpg`);
-	return fs.readFileSync(real);
+	const size = fs.statSync(real).size;
+	if (size > MAX_IMAGE_BYTES) throw new Error(`image "${named}" is ${size} bytes; the limit is ${MAX_IMAGE_BYTES}`);
+	const buf = fs.readFileSync(real);
+	const dim = imageDimensions(buf);
+	if (!dim) throw new Error(`image "${named}" has no readable PNG or JPEG header`);
+	if (dim.width * dim.height > MAX_IMAGE_PIXELS) {
+		throw new Error(`image "${named}" is ${dim.width}x${dim.height}; the limit is ${MAX_IMAGE_PIXELS} pixels`);
+	}
+	return buf;
+}
+
+/** Width and height from the PNG IHDR or the first JPEG SOF marker, before any decoding. */
+export function imageDimensions(b: Buffer): { width: number; height: number } | null {
+	if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47 && b.toString("ascii", 12, 16) === "IHDR") {
+		return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+	}
+	if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
+		let i = 2;
+		while (i + 9 < b.length) {
+			if (b[i] !== 0xff) {
+				i++;
+				continue;
+			}
+			const m = b[i + 1];
+			if (m === 0xff) {
+				i++;
+				continue;
+			}
+			if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+				return { height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+			}
+			if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+				i += 2;
+				continue;
+			}
+			i += 2 + b.readUInt16BE(i + 2);
+		}
+	}
+	return null;
 }
 
 /** Paint one slide to PNG bytes. Pure function of (slide, size, image bytes). */
@@ -282,6 +327,62 @@ export function buildFfmpegArgs(
 	return args;
 }
 
+const insideRoot = (real: string, root: string) => real === root || real.startsWith(root + path.sep);
+
+/**
+ * An absolute, executable path for a tool: a named absolute override, else the first ABSOLUTE
+ * PATH entry that has it. Relative PATH entries (node_modules/.bin, ".") are skipped, and a
+ * binary that resolves inside the workspace is refused, so a project cannot ship its own ffmpeg.
+ */
+export function resolveBinary(name: string, cwd: string, override?: string, pathEnv = process.env.PATH ?? ""): string {
+	const root = fs.realpathSync(cwd);
+	const check = (cand: string): string | null => {
+		try {
+			const real = fs.realpathSync(cand);
+			if (!fs.statSync(real).isFile()) return null;
+			fs.accessSync(real, fs.constants.X_OK);
+			if (insideRoot(real, root)) throw new Error(`${name} resolves inside the working directory (${real}); refusing to run it`);
+			return cand;
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code) return null;
+			throw e;
+		}
+	};
+	if (override) {
+		if (!path.isAbsolute(override)) throw new Error(`${name} override must be an absolute path ("${override}")`);
+		const ok = check(override);
+		if (!ok) throw new Error(`${name} not found at ${override}`);
+		return ok;
+	}
+	for (const dir of pathEnv.split(path.delimiter)) {
+		if (!dir || !path.isAbsolute(dir)) continue;
+		const ok = check(path.join(dir, name));
+		if (ok) return ok;
+	}
+	throw new Error(`${name} not found on an absolute PATH entry: render_video_deck needs ffmpeg installed locally`);
+}
+
+/** Write src to out so a link swapped in after the checks cannot carry the write outside cwd. */
+export function placeOutput(src: string, out: string, cwd: string): void {
+	const root = fs.realpathSync(cwd);
+	const parentOk = () => {
+		const real = fs.realpathSync(path.dirname(out));
+		if (!insideRoot(real, root)) throw new Error(`Path traversal blocked: output parent resolves outside the working directory`);
+		return real;
+	};
+	const parent = parentOk();
+	const part = path.join(parent, `.deck-${randomBytes(8).toString("hex")}.part`);
+	try {
+		fs.copyFileSync(src, part, fs.constants.COPYFILE_EXCL);
+		parentOk();
+		// rename replaces a symlink at `out` rather than following it.
+		fs.renameSync(part, path.join(parentOk(), path.basename(out)));
+	} catch (e) {
+		fs.rmSync(part, { force: true });
+		throw e;
+	}
+}
+
 export async function probeDuration(file: string, ffprobe: string, timeoutMs = 30000): Promise<number> {
 	const r = await run(
 		ffprobe,
@@ -300,17 +401,30 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		throw new Error(`invalid deck spec: ${msg}`);
 	}
 	const spec = parsed.data;
-	const ffmpeg = opts.ffmpeg ?? process.env.EIGHT_FFMPEG ?? "ffmpeg";
-	const ffprobe = opts.ffprobe ?? process.env.EIGHT_FFPROBE ?? "ffprobe";
-	const timeoutMs = opts.timeoutMs ?? 180000;
+	const ffmpeg = resolveBinary("ffmpeg", opts.cwd, opts.ffmpeg ?? process.env.EIGHT_FFMPEG);
+	const ffprobe = resolveBinary("ffprobe", opts.cwd, opts.ffprobe ?? process.env.EIGHT_FFPROBE);
+	const deadline = Date.now() + (opts.deadlineMs ?? DEFAULT_DEADLINE_MS);
+	const left = () => {
+		const ms = deadline - Date.now();
+		if (ms <= 0) throw new Error("render deadline exceeded");
+		return ms;
+	};
+	const declared = spec.slides.reduce((n, sl) => n + (sl.seconds ?? 4), 0);
+	if (declared > MAX_TOTAL_SECONDS) throw new Error(`deck is ${declared}s; the limit is ${MAX_TOTAL_SECONDS}s`);
 	const [W, H] = SIZES[spec.size];
 
 	fs.mkdirSync(path.dirname(opts.out), { recursive: true });
+	const root = fs.realpathSync(opts.cwd);
 	const scratchRoot = path.join(opts.cwd, ".tmp");
+	if (fs.lstatSync(scratchRoot, { throwIfNoEntry: false })?.isSymbolicLink()) {
+		throw new Error("refusing to use .tmp: it is a symlink");
+	}
 	fs.mkdirSync(scratchRoot, { recursive: true });
+	if (!insideRoot(fs.realpathSync(scratchRoot), root)) throw new Error("refusing to use .tmp: it resolves outside the working directory");
 	const work = fs.mkdtempSync(path.join(scratchRoot, "video-deck-"));
 	try {
 		const frames: { png: string; sec: number; wav?: string }[] = [];
+		let total = 0;
 		for (let i = 0; i < spec.slides.length; i++) {
 			const s = spec.slides[i];
 			const png = path.join(work, `slide-${String(i).padStart(3, "0")}.png`);
@@ -319,25 +433,34 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			let wav: string | undefined;
 			if (s.narration?.trim()) {
 				const { speak } = await import("./speak");
-				const r = await speak({
-					text: s.narration,
-					voice: s.voice ?? spec.voice,
-					out: path.join(work, `vo-${String(i).padStart(3, "0")}.wav`),
-				});
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				const r = await Promise.race([
+					speak({
+						text: s.narration,
+						voice: s.voice ?? spec.voice,
+						out: path.join(work, `vo-${String(i).padStart(3, "0")}.wav`),
+					}),
+					new Promise<never>((_, rej) => {
+						timer = setTimeout(() => rej(new Error("render deadline exceeded during narration")), left());
+					}),
+				]).finally(() => clearTimeout(timer));
 				wav = r.path;
 				sec = Math.max(sec, r.durationSec + 1);
 			}
 			// Whole frames only, so the same spec always lands on the same frame count.
-			frames.push({ png, sec: Math.ceil(sec * FPS) / FPS, wav });
+			const fixed = Math.ceil(sec * FPS) / FPS;
+			total += fixed;
+			if (total > MAX_TOTAL_SECONDS) throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
+			frames.push({ png, sec: fixed, wav });
 		}
 		const anyAudio = frames.some((f) => f.wav);
 		const tmpOut = path.join(work, "out.mp4");
-		const r = await run(ffmpeg, buildFfmpegArgs(frames, tmpOut, anyAudio), timeoutMs);
+		const r = await run(ffmpeg, buildFfmpegArgs(frames, tmpOut, anyAudio), Math.min(opts.timeoutMs ?? 180000, left()));
 		if (r.code !== 0 || !fs.existsSync(tmpOut)) throw new Error(`ffmpeg failed: ${r.err.trim().split("\n").pop() ?? r.code}`);
-		fs.copyFileSync(tmpOut, opts.out);
+		placeOutput(tmpOut, opts.out, opts.cwd);
 		return {
 			path: opts.out,
-			durationSec: await probeDuration(opts.out, ffprobe),
+			durationSec: await probeDuration(opts.out, ffprobe, Math.min(30000, left())),
 			slides: spec.slides.length,
 			width: W,
 			height: H,

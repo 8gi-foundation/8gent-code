@@ -2273,7 +2273,7 @@ export class ToolExecutor {
 				try {
 					const out = resolveDeckOut(args.out, this.workingDirectory);
 					// An edit-scoped sub-agent renders only into its scope (same check as write_file).
-					const scoped = editScopeViolation("write_file", { path: args.out ?? "deck.mp4" }, this.workingDirectory, this.allowedPaths);
+					const scoped = editScopeViolation("render_video_deck", { out: args.out ?? "deck.mp4" }, this.workingDirectory, this.allowedPaths);
 					if (scoped) return scoped;
 					const { renderVideoDeck } = await import("../tools/video-deck");
 					return JSON.stringify(
