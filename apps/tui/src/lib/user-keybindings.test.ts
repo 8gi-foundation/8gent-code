@@ -16,7 +16,7 @@ function homeWith(content?: string): NodeJS.ProcessEnv {
 		mkdirSync(join(h, ".8gent"));
 		writeFileSync(join(h, ".8gent", "keybindings.json"), content);
 	}
-	return { EIGHT_HOME: h } as NodeJS.ProcessEnv;
+	return { EIGHT_HOME: h } as unknown as NodeJS.ProcessEnv;
 }
 
 describe("normalizeChord", () => {

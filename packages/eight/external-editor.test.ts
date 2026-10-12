@@ -25,11 +25,11 @@ describe("splitCommand", () => {
 
 describe("resolveEditorCommand", () => {
 	test("VISUAL beats EDITOR, then platform fallback", () => {
-		expect(resolveEditorCommand({ VISUAL: "code --wait", EDITOR: "nano" } as NodeJS.ProcessEnv, "linux")).toEqual(["code", "--wait"]);
-		expect(resolveEditorCommand({ EDITOR: "nano" } as NodeJS.ProcessEnv, "linux")).toEqual(["nano"]);
-		expect(resolveEditorCommand({} as NodeJS.ProcessEnv, "linux")).toEqual(["vi"]);
-		expect(resolveEditorCommand({} as NodeJS.ProcessEnv, "win32")).toEqual(["notepad"]);
-		expect(resolveEditorCommand({ VISUAL: "  " } as NodeJS.ProcessEnv, "darwin")).toEqual(["vi"]);
+		expect(resolveEditorCommand({ VISUAL: "code --wait", EDITOR: "nano" } as unknown as NodeJS.ProcessEnv, "linux")).toEqual(["code", "--wait"]);
+		expect(resolveEditorCommand({ EDITOR: "nano" } as unknown as NodeJS.ProcessEnv, "linux")).toEqual(["nano"]);
+		expect(resolveEditorCommand({} as unknown as NodeJS.ProcessEnv, "linux")).toEqual(["vi"]);
+		expect(resolveEditorCommand({} as unknown as NodeJS.ProcessEnv, "win32")).toEqual(["notepad"]);
+		expect(resolveEditorCommand({ VISUAL: "  " } as unknown as NodeJS.ProcessEnv, "darwin")).toEqual(["vi"]);
 	});
 });
 
