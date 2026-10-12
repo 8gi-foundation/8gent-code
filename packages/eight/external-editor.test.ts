@@ -25,16 +25,16 @@ describe("splitCommand", () => {
 
 describe("resolveEditorCommand", () => {
 	test("VISUAL beats EDITOR, then platform fallback", () => {
-		expect(resolveEditorCommand({ VISUAL: "code --wait", EDITOR: "nano" }, "linux")).toEqual(["code", "--wait"]);
-		expect(resolveEditorCommand({ EDITOR: "nano" }, "linux")).toEqual(["nano"]);
-		expect(resolveEditorCommand({}, "linux")).toEqual(["vi"]);
-		expect(resolveEditorCommand({}, "win32")).toEqual(["notepad"]);
-		expect(resolveEditorCommand({ VISUAL: "  " }, "darwin")).toEqual(["vi"]);
+		expect(resolveEditorCommand({ VISUAL: "code --wait", EDITOR: "nano" } as NodeJS.ProcessEnv, "linux")).toEqual(["code", "--wait"]);
+		expect(resolveEditorCommand({ EDITOR: "nano" } as NodeJS.ProcessEnv, "linux")).toEqual(["nano"]);
+		expect(resolveEditorCommand({} as NodeJS.ProcessEnv, "linux")).toEqual(["vi"]);
+		expect(resolveEditorCommand({} as NodeJS.ProcessEnv, "win32")).toEqual(["notepad"]);
+		expect(resolveEditorCommand({ VISUAL: "  " } as NodeJS.ProcessEnv, "darwin")).toEqual(["vi"]);
 	});
 });
 
 describe("openInExternalEditor", () => {
-	test("returns the edited text, passes flags, and removes the temp file", () => {
+	test.skipIf(process.platform === "win32")("returns the edited text, passes flags, and removes the temp file", () => {
 		const before = tmpEdits().length;
 		const ed = fakeEditor("ed1", 'f="$2"; [ "$1" = "--wait" ] || exit 9; printf "%s EDITED\\n" "$(cat "$f")" > "$f"');
 		const out = openInExternalEditor("hello", { env: { ...process.env, VISUAL: `${ed} --wait` } });

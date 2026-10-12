@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
 export const GITHUB_REPO = "8gi-foundation/8gent-code";
@@ -552,8 +553,8 @@ export function bundledChangelogPath(fromDir: string): string | null {
 	if (typeof embedded === "string" && existsSync(embedded)) return embedded;
 	let dir = fromDir.replace(/^file:\/\//, "");
 	for (let i = 0; i < 6; i++) {
-		const candidate = `${dir}/CHANGELOG.md`;
-		if (existsSync(candidate) && existsSync(`${dir}/package.json`)) return candidate;
+		const candidate = join(dir, "CHANGELOG.md");
+		if (existsSync(candidate) && existsSync(join(dir, "package.json"))) return candidate;
 		const up = dir.replace(/[\\/][^\\/]*$/, "");
 		if (!up || up === dir) break;
 		dir = up;

@@ -23,7 +23,7 @@ function setup() {
 describe("createBugReport", () => {
 	test("writes a local folder with version, OS, session and log tail, secrets redacted", () => {
 		const { home, session } = setup();
-		const dir = createBugReport({ env: { EIGHT_HOME: home }, sessionFile: session, version: "9.9.9", logLines: 50, note: "it broke" });
+		const dir = createBugReport({ env: { EIGHT_HOME: home } as NodeJS.ProcessEnv, sessionFile: session, version: "9.9.9", logLines: 50, note: "it broke" });
 		expect(dir.startsWith(join(home, ".8gent", "bug-reports"))).toBe(true);
 		expect(readdirSync(dir).sort()).toEqual(["log-tail.txt", "report.json", "session.jsonl"]);
 		const rep = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
@@ -45,8 +45,8 @@ describe("createBugReport", () => {
 		const home = mkdtempSync(join(tmpdir(), "bug-"));
 		homes.push(home);
 		const now = new Date("2026-10-12T10:00:00Z");
-		const a = createBugReport({ env: { EIGHT_HOME: home }, cwd: home, now });
-		const b = createBugReport({ env: { EIGHT_HOME: home }, cwd: home, now });
+		const a = createBugReport({ env: { EIGHT_HOME: home } as NodeJS.ProcessEnv, cwd: home, now });
+		const b = createBugReport({ env: { EIGHT_HOME: home } as NodeJS.ProcessEnv, cwd: home, now });
 		expect(a).not.toBe(b);
 		expect(existsSync(join(a, "report.json"))).toBe(true);
 		expect(readdirSync(a)).toEqual(["report.json"]);
@@ -54,7 +54,7 @@ describe("createBugReport", () => {
 	test("picks the newest session for the cwd from the sessions dir", () => {
 		const home = mkdtempSync(join(tmpdir(), "bug-"));
 		homes.push(home);
-		const dir = createBugReport({ env: { EIGHT_HOME: home }, cwd: home });
+		const dir = createBugReport({ env: { EIGHT_HOME: home } as NodeJS.ProcessEnv, cwd: home });
 		expect(readdirSync(dir)).not.toContain("session.jsonl");
 	});
 });
