@@ -173,6 +173,7 @@ import {
 	logToolEnd,
 	logToolStart,
 } from "./lib/session-logger.js";
+import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { copyReply } from "./lib/copy-answer.js";
@@ -5812,7 +5813,9 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const expanded = await expandSkillSlashCommand(message);
+			// A skill first, then a prompt template (#3918 G4); a line neither
+			// knows passes through unchanged.
+			const expanded = expandPromptSlashCommand(await expandSkillSlashCommand(message));
 			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
 			const shellContext = shellContextRef.current.get(tabId);
 			shellContextRef.current.delete(tabId);
