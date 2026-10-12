@@ -42,7 +42,7 @@
  * Synchronous, never throws.
  */
 
-import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from "node:fs";
+import { constants, accessSync, closeSync, openSync, readSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
