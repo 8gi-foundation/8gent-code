@@ -528,7 +528,7 @@ test("the embedded release signing key matches scripts/release-signing.pub", () 
 	expect(RELEASE_SIGNING_KEY).toBe(pub);
 });
 
-test("source checkouts are told to git pull, nothing runs", async () => {
+test("source channel is handled by source-update, not the release engine", async () => {
 	const r = await runSelfUpdate({
 		currentVersion: "0.19.0",
 		channel: "source",
@@ -537,7 +537,7 @@ test("source checkouts are told to git pull, nothing runs", async () => {
 		log: () => {},
 	});
 	expect(r.status).toBe("source");
-	expect(describeResult(r)).toContain("git pull");
+	expect(describeResult(r)).toContain("8gent update");
 });
 
 test("sumFor reads both SHA256SUMS line styles", () => {

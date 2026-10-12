@@ -14,6 +14,7 @@ import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bu
 import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.18.0";
+const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
 // the compiled build:
@@ -1316,22 +1317,55 @@ async function tuiCommand(args: string[]) {
  */
 async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
+	// The TUI cannot tell which install it is from its own path (a compiled binary runs a cached
+	// bundle), so the launcher says: version, entry module and embedded-ness, for /update and the
+	// update notice (packages/eight/update-notice.ts).
+	const launcherEnv = {
+		EIGHT_RUNNING_VERSION: VERSION,
+		EIGHT_LAUNCHER_MODULE: import.meta.url,
+		EIGHT_LAUNCHER_EMBEDDED: MODULE_IS_EMBEDDED ? "1" : "0",
+	};
 	// A compiled binary may have no Bun on PATH, so it runs the bundle as its own
 	// Bun runtime (BUN_BE_BUN=1) with cwd config and .env files switched off
 	// (apps/tui/src/lib/embedded-bundle.ts, #3894).
 	let proc: ReturnType<typeof spawn>;
 	if (MODULE_IS_EMBEDDED) {
 		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
-		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: inv.env });
+		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: { ...inv.env, ...launcherEnv } });
 	} else {
 		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
-		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], { stdio: "inherit" });
+		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], {
+			stdio: "inherit",
+			env: { ...process.env, ...launcherEnv },
+		});
 	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);
 		process.exit(1);
 	});
-	proc.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+	proc.on("exit", async (code, signal) => {
+		// /update asked for a restart: start a fresh 8gent (the new code) on the same session.
+		if (code === RELAUNCH_EXIT_CODE) {
+			const { consumeResumeRequest, relaunchCommand } = await import("../packages/eight/update-resume.ts");
+			const req = consumeResumeRequest();
+			if (req) {
+				const cmd = relaunchCommand({
+					embedded: MODULE_IS_EMBEDDED,
+					execPath: process.execPath,
+					entryScript: process.argv[1],
+					req,
+				});
+				const next = spawn(cmd.command, cmd.args, { stdio: "inherit", env: cmd.env });
+				next.on("error", (err) => {
+					console.error(`Could not restart 8gent: ${err.message}. Run: 8gent --resume`);
+					process.exit(1);
+				});
+				next.on("exit", (c, sig) => process.exit(c ?? (sig ? 1 : 0)));
+				return;
+			}
+		}
+		process.exit(code ?? (signal ? 1 : 0));
+	});
 }
 
 /**

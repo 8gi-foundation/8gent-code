@@ -39,6 +39,7 @@ import {
 	latestFromNpm,
 	runSelfUpdate,
 } from "./self-update";
+import { type ExecFn, runSourceUpdate } from "./source-update";
 
 type Env = Record<string, string | undefined>;
 type Log = (line: string) => void;
@@ -81,17 +82,28 @@ export interface UpdateCliDeps {
 	interactive?: boolean;
 	/** Tests only: the self-update engine itself. */
 	selfUpdate?: (o: SelfUpdateOptions) => Promise<SelfUpdateResult>;
+	/** Tests only: exec/path hooks for the source-checkout update (git and bun). */
+	sourceExec?: ExecFn;
+	sourceIsFile?: (p: string) => boolean;
+	sourceHasGit?: (dir: string) => boolean;
+	sourceFileExists?: (p: string) => boolean;
+	/** Home directory used to find a sibling 8gent Browser checkout. */
+	homeDir?: string;
+	/** Called once with the outcome of a real update (the TUI uses it to resume the session). */
+	report?: (o: { updated: boolean; to?: string }) => void;
 }
 
 export interface UpdateArgs {
 	check: boolean;
+	force?: boolean;
 	channel?: InstallChannel;
 	error?: string;
 }
 
 export const UPDATE_USAGE =
-	"Usage: 8gent update [--check [--channel binary|npm]]\n" +
+	"Usage: 8gent update [--check [--channel binary|npm]] [--force]\n" +
 	"  --check    report whether a newer version exists; installs nothing\n" +
+	"  --force    source checkout only: save local changes or commits to a backup branch, then move to origin/main\n" +
 	"  --channel  with --check only: look at that channel instead of the detected one";
 
 export function parseUpdateArgs(args: string[]): UpdateArgs {
@@ -99,6 +111,7 @@ export function parseUpdateArgs(args: string[]): UpdateArgs {
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
 		if (a === "--check" || a === "--dry-run") out.check = true;
+		else if (a === "--force") out.force = true;
 		else if (a === "--channel" || a.startsWith("--channel=")) {
 			const v = a.includes("=") ? a.slice("--channel=".length) : args[++i];
 			if (v !== "binary" && v !== "npm") return { ...out, error: `--channel must be binary or npm, got "${v ?? ""}"` };
@@ -108,6 +121,7 @@ export function parseUpdateArgs(args: string[]): UpdateArgs {
 	if (out.channel && !out.check) {
 		return { ...out, error: "--channel only applies to --check: 8gent updates through the channel it was installed from" };
 	}
+	if (out.force && out.check) return { ...out, error: "--force cannot be combined with --check" };
 	return out;
 }
 
@@ -118,7 +132,8 @@ export type UpdateCheck =
 	| { status: "source"; message: string }
 	| { status: "failed"; message: string; channel: InstallChannel };
 
-const SOURCE_UPDATE_HINT = "This 8gent runs from a source checkout. Update it with: git pull && bun install";
+const SOURCE_UPDATE_HINT = "This 8gent runs from a source checkout. Update it with: 8gent update";
+const RESUME_HINT = "Run 8gent --resume to pick up where you left off.";
 
 /** The update decision for `--check`: same lookups and the same decideUpdate as a real update, no install. */
 export async function checkUpdate(o: {
@@ -190,12 +205,46 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 		return 2;
 	}
 	const detected = detectChannel({ modulePath: deps.modulePath, embedded: deps.embedded });
-	const channel = a.channel ?? detected;
+	const channel: InstallChannel = a.channel ?? detected;
 	const platform = deps.platform ?? process.platform;
 	const arch = deps.arch ?? process.arch;
 	const fetchImpl = deps.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
 	const releasesUrl = env.EIGHT_RELEASES_URL || undefined;
 	log(`8gent v${deps.currentVersion}, ${describeChannel(detected)}.`);
+
+	const platformEarly = platform;
+	if (channel === "source") {
+		if (a.force && !a.check) log("--force: local changes or commits will be saved to a backup branch first.");
+		if (!a.check && !(deps.interactive ?? isInteractiveTerminal())) {
+			log(interactiveRefusal("8gent update"));
+			return 1;
+		}
+		let updated = false;
+		const code = await runSourceUpdate(
+			{
+				modulePath: deps.modulePath,
+				env,
+				platform: platformEarly,
+				home: deps.homeDir,
+				log,
+				exec: deps.sourceExec,
+				isFile: deps.sourceIsFile,
+				hasGit: deps.sourceHasGit,
+				fileExists: deps.sourceFileExists,
+			},
+			{ force: Boolean(a.force), checkOnly: a.check },
+			(o) => {
+				updated = o.updated;
+				deps.report?.(o);
+			},
+		);
+		if (updated && code === 0) log(RESUME_HINT);
+		return code;
+	}
+	if (a.force) {
+		log("--force only applies to a source checkout.");
+		return 2;
+	}
 
 	if (a.check) {
 		if (a.channel && a.channel !== detected) log(`Checking the ${a.channel} channel (--channel); nothing is installed with --check.`);
@@ -207,8 +256,6 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 	// A real update downloads and replaces the running 8gent (or runs npm), so,
 	// like `ext enable`, it needs a person at a terminal. --check stays open.
 	if (!(deps.interactive ?? isInteractiveTerminal())) {
-		// A source checkout updates with git, not this command: say so even to a caller that cannot run it.
-		if (channel === "source") log(SOURCE_UPDATE_HINT);
 		log(interactiveRefusal("8gent update"));
 		return 1;
 	}
@@ -227,6 +274,8 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 	log(describeResult(result));
 	if (result.status === "updated") {
 		log(`Updated to v${result.to}. Run 8gent, then /changelog to see what changed.`);
+		log(RESUME_HINT);
+		deps.report?.({ updated: true, to: `v${result.to}` });
 	}
 	return result.status === "failed" ? 1 : 0;
 }

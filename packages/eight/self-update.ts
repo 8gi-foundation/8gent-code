@@ -488,7 +488,7 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 	if (ch === "source") {
 		return {
 			status: "source",
-			message: "This 8gent runs from a source checkout. Update it with: git pull && bun install",
+			message: "This 8gent runs from a source checkout. Update it with: 8gent update",
 		};
 	}
 
