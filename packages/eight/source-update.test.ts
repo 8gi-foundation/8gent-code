@@ -436,7 +436,10 @@ describe("integration with a file:// origin", () => {
 			["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a],
 			{ cwd, encoding: "utf8" },
 		).trim();
-	const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	// The absolute git the way the updater finds it. `which` would answer a POSIX
+	// path on Windows (Git Bash's /usr/bin/git), which spawn() cannot run.
+	const gitPath =
+		resolveExecutable("git", { env: process.env, platform: process.platform }) ?? "git";
 	const fopts = (dir: string) => ({
 		dir,
 		force: false,
@@ -865,7 +868,9 @@ describe("scrubbed install and build env", () => {
 					scripts: { postinstall: "bun write-env.js" },
 				}),
 			);
-			const bun = execFileSync("which", ["bun"], { encoding: "utf8" }).trim();
+			// The bun running this test: an absolute native path on every OS (`which`
+			// answers a POSIX path on Windows, which spawn() cannot run).
+			const bun = process.execPath;
 			process.env.FAKE_API_KEY = "sk-must-not-leak";
 			const r = await bunStep(
 				{

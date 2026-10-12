@@ -71,15 +71,18 @@ describe("validatePath: startup code is write-protected (#4009)", () => {
 	});
 
 	test("case does not slip past on macOS", () => {
-		const host = { platform: "darwin" as const, home: HOME };
-		expect(isStartupCodePath(path.join(HOME, ".8GENT", "Hooks.YAML"), host)).toBe(true);
-		expect(isStartupCodePath(path.join(HOME, ".8gent", "EXTENSIONS", "a.ts"), host)).toBe(true);
+		// A simulated macOS host judges POSIX paths: the real HOME here is a Windows
+		// path on windows-latest, which path.posix cannot resolve against.
+		const mac = { platform: "darwin" as const, home: "/Users/t" };
+		const under = (...rel: string[]) => path.posix.join(mac.home, ...rel);
+		expect(isStartupCodePath(under(".8GENT", "Hooks.YAML"), mac)).toBe(true);
+		expect(isStartupCodePath(under(".8gent", "EXTENSIONS", "a.ts"), mac)).toBe(true);
 		if (process.platform === "darwin")
 			expect(validatePath("~/.8GENT/HOOKS.yaml", PROJ).ok).toBe(false);
-		expect(commandWritesStartupCode("echo x > ~/.8GENT/HOOKS.yaml", PROJ, host)).toBe(true);
+		expect(commandWritesStartupCode("echo x > ~/.8GENT/HOOKS.yaml", PROJ, mac)).toBe(true);
 		// Linux file systems are case-sensitive: a different name is a different file.
 		expect(
-			isStartupCodePath(path.join(HOME, ".8gent", "HOOKS.yaml"), { platform: "linux", home: HOME }),
+			isStartupCodePath(under(".8gent", "HOOKS.yaml"), { platform: "linux", home: mac.home }),
 		).toBe(false);
 	});
 
@@ -225,7 +228,9 @@ describe("commandWritesStartupCode: 8SO review bypasses are refused (#4009)", ()
 			'import os\nopen(os.path.join(os.path.expanduser("~"), ".8gent", "prompts", "a.md"), "w")\n',
 		);
 		fs.writeFileSync(path.join(PROJ, "ok.py"), "print(1)\n");
-		expect(commandWritesStartupCode(`sh ${script}`, PROJ)).toBe(true);
+		// Spelled the way a shell takes it on every OS: forward slashes. On Windows the
+		// commands run in Git Bash, where an unquoted backslash is an escape, not a separator.
+		expect(commandWritesStartupCode(`sh ${script.split(path.sep).join("/")}`, PROJ)).toBe(true);
 		expect(commandWritesStartupCode("python3 step1.py", PROJ)).toBe(true);
 		expect(commandWritesStartupCode("bun run step1.py", PROJ)).toBe(true);
 		expect(commandWritesStartupCode("python3 ok.py", PROJ)).toBe(false);

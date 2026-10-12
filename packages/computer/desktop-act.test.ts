@@ -144,6 +144,9 @@ describe("desktop_act gate", () => {
 	let after: string;
 	const prevHeadless = process.env.EIGHT_HEADLESS;
 	beforeEach(async () => {
+		// The channel is a process singleton: a file that ran earlier in this bun
+		// process may have left a handler registered, and "headless" needs none.
+		_resetTuiApprovalChannel();
 		before = await png("before.png");
 		after = await png("after.png", (s) => s.replace("#1f6feb", "#d73a49"));
 	});

@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fakeExecutable } from "../../tests/fake-exe";
 import { getPermissionManager, resetPermissionManager } from "../permissions";
 import {
 	canApplySeatbelt,
@@ -32,15 +33,19 @@ const saved = {
 };
 
 // Each payload would create MARK through a shell. Through argv it is just text.
-const MARK = path.join(scratch, "PWNED");
+// Named relative to the repository the tools run in, so the payload is the same
+// text on every OS: an absolute temp path would carry Windows' 8.3 short names
+// (`RUNNER~1`), and the `~` reads as a home mention to the #4009 startup-code
+// check, which then refuses the $( ) and backtick forms before git ever runs.
+const MARK = path.join(scratch, "repo", "PWNED");
 const fakeHome = path.join(scratch, "home");
 const PAYLOADS = [
-	`x; touch ${MARK}`,
-	`x$(touch ${MARK})`,
-	`x\`touch ${MARK}\``,
-	`x | touch ${MARK}`,
-	`x\ntouch ${MARK}`,
-	`x && touch ${MARK}`,
+	"x; touch PWNED",
+	"x$(touch PWNED)",
+	"x`touch PWNED`",
+	"x | touch PWNED",
+	"x\ntouch PWNED",
+	"x && touch PWNED",
 ];
 
 let repo = "";
@@ -69,13 +74,14 @@ beforeAll(() => {
 	process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = "test@example.invalid";
 
 	// A stand-in gh that records each argv word on its own NUL-separated line.
+	// A real executable on every OS (a .exe on Windows), found through PATH like gh itself.
 	const bin = path.join(scratch, "bin");
 	fs.mkdirSync(bin);
 	ghLog = path.join(scratch, "gh-argv");
-	fs.writeFileSync(
-		path.join(bin, "gh"),
-		`#!/bin/sh\nfor a in "$@"; do printf '%s\\0' "$a"; done > "${ghLog}"\necho ok\n`,
-		{ mode: 0o755 },
+	fakeExecutable(
+		bin,
+		"gh",
+		`require("node:fs").writeFileSync(${JSON.stringify(ghLog)}, process.argv.slice(2).map((a) => a + "\\0").join(""));\nconsole.log("ok");\n`,
 	);
 	process.env.PATH = `${bin}${path.delimiter}${saved.PATH}`;
 
