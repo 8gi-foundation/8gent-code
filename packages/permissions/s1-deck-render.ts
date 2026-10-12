@@ -9,12 +9,22 @@
  * mode only.
  *
  * ok needs ALL of:
- *   - a working directory, absolute;
+ *   - a working directory, absolute; not win32 (the grammar below is POSIX);
  *   - the whole command is plain words (no quote, glob, `$`, backtick, `~`,
  *     redirect, pipe, `;`, `&`, `:`, `@`, newline), no prompt-control text, and
  *     decideRules fired no rule;
  *   - exactly `8gent deck render <spec> [out]`: no flags, no env prefix, no
  *     other binary name (`bun bin/8gent.ts` is not this lane);
+ *   - the `8gent` that will run is the installed one, not the workspace's
+ *     (8SO review of #4084): every PATH entry is absolute and resolves outside
+ *     the workspace; `8gent` is found on PATH as an executable regular file
+ *     whose real location is outside the workspace; when it is a script or a
+ *     shim (shebang, .js/.mjs/.cjs/.sh/.ts) its entry script resolves outside
+ *     the workspace too: the npm launcher's `../dist/cli.js`, and every
+ *     path-like token in the first 64 KB of the file, absolute or relative to
+ *     the file's directory; and the workspace holds no `8gent`, `bin/8gent.ts`,
+ *     `bin/8gent-run.js` or `dist/cli.js` of its own (a source checkout or a
+ *     planted binary is the judge's call);
  *   - the spec is a relative `.json` path with no `..`/`.`/`.git`/empty segment
  *     and no dot-leading segment other than a leading `.tmp`, names a regular
  *     file (not a symlink) whose real location is inside the workspace;
@@ -32,7 +42,7 @@
  * Synchronous, never throws.
  */
 
-import { realpathSync } from "node:fs";
+import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -46,6 +56,12 @@ import {
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,= -]+$/;
+/** Files whose presence makes the workspace look like an 8gent checkout or a planted binary. */
+const WORKSPACE_8GENT = ["8gent", "bin/8gent.ts", "bin/8gent-run.js", "dist/cli.js"];
+const SCRIPT_EXT = /\.(?:m?js|cjs|sh|ts)$/i;
+const SCAN_BYTES = 64 * 1024;
+/** Path-like tokens in a script: absolute, or relative to the script's directory. */
+const PATH_TOKEN = /(?:\/|\.{1,2}\/)[^\s"'`;)(,]+/g;
 
 export type DeckRender = { ok: true; reason: string } | { ok: false };
 
@@ -67,8 +83,84 @@ function symlinkOnTheWay(abs: string, root: string): boolean {
 	return false;
 }
 
-export function deckRenderInProject(command: string, cwd: string | undefined): DeckRender {
+/** The first SCAN_BYTES of a file as latin1 text, or null. */
+function head(file: string): string | null {
+	let fd: number | undefined;
 	try {
+		fd = openSync(file, "r");
+		const buf = Buffer.alloc(SCAN_BYTES);
+		const n = readSync(fd, buf, 0, SCAN_BYTES, 0);
+		return buf.toString("latin1", 0, n);
+	} catch {
+		return null;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+
+/** The real location of `p` when it exists, else the real location of its nearest existing ancestor. */
+function realOrAncestor(p: string): string {
+	let cur = p;
+	let rest = "";
+	for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
+		try {
+			return path.join(realpathSync(cur), rest);
+		} catch {
+			rest = path.join(path.basename(cur), rest);
+			cur = path.dirname(cur);
+		}
+	}
+	return p;
+}
+
+/**
+ * True only when `8gent` on an all-absolute PATH is an executable regular file
+ * outside the workspace and nothing it runs resolves inside the workspace.
+ */
+function installedOutside(root: string, pathEnv: string): boolean {
+	const entries = pathEnv.split(path.delimiter);
+	if (entries.length === 0) return false;
+	for (const dir of entries) {
+		if (!dir || !path.isAbsolute(dir)) return false;
+		if (inside(realOrAncestor(dir), root)) return false;
+	}
+	let bin: string | null = null;
+	for (const dir of entries) {
+		const cand = path.join(dir, "8gent");
+		const st = lstatOrNull(cand);
+		if (!st) continue;
+		try {
+			const real = realpathSync(cand);
+			accessSync(real, constants.X_OK);
+			const rst = lstatOrNull(real);
+			if (!rst?.isFile()) return false;
+			bin = real;
+		} catch {
+			return false;
+		}
+		break;
+	}
+	if (!bin || inside(bin, root)) return false;
+	const dir = path.dirname(bin);
+	const text = head(bin);
+	if (text === null) return false;
+	const script = text.startsWith("#!") || SCRIPT_EXT.test(bin);
+	if (!script) return true; // a compiled binary: nothing further to follow
+	const entries2 = [path.join(dir, "..", "dist", "cli.js")];
+	for (const m of text.match(PATH_TOKEN) ?? []) {
+		entries2.push(path.isAbsolute(m) ? m : path.resolve(dir, m));
+	}
+	for (const e of entries2) if (inside(realOrAncestor(e), root)) return false;
+	return true;
+}
+
+export function deckRenderInProject(
+	command: string,
+	cwd: string | undefined,
+	env: Record<string, string | undefined> = process.env,
+): DeckRender {
+	try {
+		if (process.platform === "win32") return NO;
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
 		const text = command.trim();
 		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
@@ -82,6 +174,10 @@ export function deckRenderInProject(command: string, cwd: string | undefined): D
 		if (!plainOperand(specArg, /\.json$/i)) return NO;
 
 		const root = realpathSync(cwd);
+		// The `8gent` that runs must be the installed one, not something in the workspace.
+		for (const rel of WORKSPACE_8GENT) if (lstatOrNull(path.join(root, rel))) return NO;
+		if (!installedOutside(root, env.PATH ?? process.env.PATH ?? "")) return NO;
+
 		const specAbs = path.resolve(root, specArg);
 		const st = lstatOrNull(specAbs);
 		if (!st || st.isSymbolicLink() || !st.isFile()) return NO;
