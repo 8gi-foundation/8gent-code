@@ -82,6 +82,7 @@ import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
 import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
+import { screenLocateOffered } from "../eyes/ground/screen-locate";
 
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -1820,6 +1821,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// 8gent Browser (#3622): only with a named EIGHT_BROWSER_PROFILE, the bot's own login-free
 			// instance. Without one a local model gets no browser, so it never reaches the person's profile.
 			...localBrowserTools(),
+			// screen_locate (#4048) turns "the Sign in button" into a point; only useful with a screenshot source.
+			...(screenLocateOffered({ browserTools: localBrowserTools().length, desktopTools: cuaConfigured })
+				? ["screen_locate"]
+				: []),
 		];
 		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))

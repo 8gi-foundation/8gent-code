@@ -1184,6 +1184,23 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "screen_locate",
+					description:
+						'[FILE] Point to click for a thing in a screenshot, named in words.',
+					parameters: {
+						type: "object",
+						properties: {
+							image: { type: "string", description: "Screenshot path" },
+							target: { type: "string", description: "e.g. the Sign in button" },
+							viewport: { type: "string", description: 'Optional "WxH" for cssX/cssY' },
+						},
+						required: ["image", "target"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "read_image",
 					description:
 						"[FILE] Reads an image file (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
@@ -1730,6 +1747,7 @@ export class ToolExecutor {
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
 		edit_file: "write_file",
@@ -2100,6 +2118,11 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "screen_locate": {
+				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
+				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
+				return screenLocate({ image, target: String(args.target ?? ""), viewport: args.viewport as string | undefined });
+			}
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
 
