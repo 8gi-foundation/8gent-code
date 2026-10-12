@@ -7,6 +7,7 @@ import { SkillManager } from "./index.js";
 let root: string;
 let project: string;
 let home: string;
+let savedDataDir: string | undefined;
 
 function writeSkill(dir: string, name: string, body: string) {
 	fs.mkdirSync(path.join(dir, name), { recursive: true });
@@ -23,8 +24,15 @@ beforeEach(() => {
 	home = path.join(root, "home");
 	fs.mkdirSync(project, { recursive: true });
 	fs.mkdirSync(home, { recursive: true });
+	// Keep the real ~/.8gent/skills-trust.json out of these tests (#4125).
+	savedDataDir = process.env.EIGHT_DATA_DIR;
+	process.env.EIGHT_DATA_DIR = path.join(root, "data");
 });
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+	if (savedDataDir === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+	else process.env.EIGHT_DATA_DIR = savedDataDir;
+	fs.rmSync(root, { recursive: true, force: true });
+});
 
 describe("skill discovery", () => {
 	test("finds project .agents/skills and ~/.agents/skills", async () => {
@@ -61,7 +69,10 @@ describe("skill discovery", () => {
 				if (t === 2) {
 					const d = path.join(home, ".8gent", "skills");
 					fs.mkdirSync(d, { recursive: true });
-					fs.writeFileSync(path.join(d, `${n}-flat.md`), `---\nname: ${n}\ndescription: x\n---\ntier2\n`);
+					fs.writeFileSync(
+						path.join(d, `${n}-flat.md`),
+						`---\nname: ${n}\ndescription: x\n---\ntier2\n`,
+					);
 				} else writeSkill(tiers[t], n, `tier${t}`);
 			}
 		});
@@ -78,7 +89,7 @@ describe("skill discovery", () => {
 		]);
 	});
 
-	test("project beats user and bundled; collision is reported", async () => {
+	test("project beats user; untrusted project cannot replace bundled; collisions reported", async () => {
 		writeSkill(path.join(project, ".agents", "skills"), "dup", "PROJECT");
 		writeSkill(path.join(home, ".agents", "skills"), "dup", "USER");
 		writeSkill(path.join(project, ".agents", "skills"), "retro", "OVERRIDES-BUNDLED");
@@ -86,8 +97,10 @@ describe("skill discovery", () => {
 		const m = mgr();
 		await m.loadSkills();
 		expect(m.getSkill("dup")?.prompt).toBe("PROJECT");
-		expect(m.getSkill("retro")?.prompt).toBe("OVERRIDES-BUNDLED");
-		const c = m.getCollisions();
+		// #4125: no sha256 pin in skills-trust.json, so the bundled retro is kept.
+		expect(m.getSkill("retro")?.prompt).not.toBe("OVERRIDES-BUNDLED");
+		expect(m.getCollisions().map((x) => x.name)).toEqual(["retro", "dup"]);
+		const c = m.getCollisions().filter((x) => x.name === "dup");
 		expect(c.length).toBe(1);
 		expect(c[0].name).toBe("dup");
 		expect(c[0].kept).toContain(path.join("proj", ".agents"));
@@ -95,7 +108,7 @@ describe("skill discovery", () => {
 		expect(warn.mock.calls.filter((a) => String(a[0]).includes('"dup"')).length).toBe(1);
 		// A reload reports the collision in getCollisions() but does not warn again.
 		await m.loadSkills();
-		expect(m.getCollisions().length).toBe(1);
+		expect(m.getCollisions().length).toBe(2);
 		expect(warn.mock.calls.filter((a) => String(a[0]).includes('"dup"')).length).toBe(1);
 		warn.mockRestore();
 	});

@@ -10,8 +10,13 @@
  * 3. Bundled: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
  * 4. Learned: ~/.8gent/learned-skills/*.md
  * Project beats user beats bundled. A collision between two project/user skills is reported
- * once per process (console.warn) and always available from getCollisions(). A project or
- * user skill shadowing a bundled or learned one is the expected override and is not reported.
+ * once per process (console.warn) and always available from getCollisions(). A user skill
+ * shadowing a bundled or learned one is the expected override and is not reported.
+ *
+ * Exception (#4125): a project skill (from whatever repo is the cwd) may not replace a bundled
+ * skill unless the project file's sha256 is pinned in <data dir>/skills-trust.json as
+ * { "<name>": "<sha256>" }. Otherwise the project file is skipped and the refusal is reported
+ * like any other collision. Editing a pinned file changes its hash, so it is refused again.
  *
  * Skill format:
  * ---
@@ -25,18 +30,17 @@
  * 3. Create commit message
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
+import { getDataDir } from "../daemon/data-dir.js";
 import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
 import type { PolicyDecision } from "../permissions/types.js";
 import { enforceSkillScope } from "./capability-scope.js";
 import { validateSkillManifest } from "./manifest.js";
-
-// Skill compounding: learned-skills directory
-const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");
 
 // ============================================
 // Types
@@ -297,11 +301,39 @@ export interface SkillCollision {
 }
 
 const warnedCollisions = new Set<string>();
-function warnCollisionOnce(c: SkillCollision): void {
+function warnCollisionOnce(c: SkillCollision, message?: string): void {
 	const key = `${c.name}\0${c.kept}\0${c.ignored}`;
 	if (warnedCollisions.has(key)) return;
 	warnedCollisions.add(key);
-	console.warn(`[skills] Skill "${c.name}" defined twice: using ${c.kept}, ignoring ${c.ignored}`);
+	console.warn(
+		message ?? `[skills] Skill "${c.name}" defined twice: using ${c.kept}, ignoring ${c.ignored}`,
+	);
+}
+
+/** name -> sha256 pins from <data dir>/skills-trust.json. Missing or unreadable means no trust. */
+function readSkillTrust(file: string): Record<string, string> {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf-8"));
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? (parsed as Record<string, string>)
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+/** Bundled skill name -> file, so a project skill can be checked before the bundled tier loads. */
+function bundledSkillNames(): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const filePath of discoverBundledSkillMdFiles()) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			if (!out.has(frontmatter.name)) out.set(frontmatter.name, filePath);
+		} catch {
+			// Unparseable bundled files are reported when the bundled tier loads.
+		}
+	}
+	return out;
 }
 
 export class SkillManager {
@@ -321,6 +353,9 @@ export class SkillManager {
 	/** Where each loaded skill came from, for collision reports. */
 	private skillOrigin: Map<string, { filePath: string; tier: SkillTier }> = new Map();
 	private collisions: SkillCollision[] = [];
+	/** Bundled names and trust pins for the current loadSkills() pass (#4125). */
+	private bundledByName: Map<string, string> = new Map();
+	private trust: Record<string, string> | undefined;
 
 	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
 		this.projectDir = options.projectDir;
@@ -347,6 +382,8 @@ export class SkillManager {
 		this.aliasToCanonical.clear();
 		this.skillOrigin.clear();
 		this.collisions = [];
+		this.bundledByName = bundledSkillNames();
+		this.trust = undefined;
 
 		const home = this.homeDir ?? os.homedir();
 		const project = this.projectDir ?? process.cwd();
@@ -383,10 +420,11 @@ export class SkillManager {
 		}
 
 		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
-		if (fs.existsSync(LEARNED_DIR)) {
-			const learnedFiles = fs.readdirSync(LEARNED_DIR).filter((f) => f.endsWith(".md"));
+		const learnedDir = path.join(home, ".8gent", "learned-skills");
+		if (fs.existsSync(learnedDir)) {
+			const learnedFiles = fs.readdirSync(learnedDir).filter((f) => f.endsWith(".md"));
 			for (const file of learnedFiles) {
-				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), "learned");
+				this.tryIngestSkillFile(path.join(learnedDir, file), "learned");
 			}
 		}
 
@@ -450,8 +488,28 @@ export class SkillManager {
 
 	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
 		try {
-			const content = fs.readFileSync(filePath, "utf-8");
-			const { frontmatter, body } = parseFrontmatter(content);
+			const bytes = fs.readFileSync(filePath);
+			const { frontmatter, body } = parseFrontmatter(bytes.toString("utf-8"));
+			const bundledFile = this.bundledByName.get(frontmatter.name);
+			if (tier === "project" && bundledFile && !this.skillOrigin.has(frontmatter.name)) {
+				const trustFile = path.join(getDataDir(), "skills-trust.json");
+				this.trust ??= readSkillTrust(trustFile);
+				const hash = createHash("sha256").update(bytes).digest("hex");
+				if (this.trust[frontmatter.name] !== hash) {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: bundledFile,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					warnCollisionOnce(
+						c,
+						`[skills] Project skill "${c.name}" would replace the bundled one; kept bundled. ` +
+							`To trust ${filePath}, add "${c.name}": "${hash}" to ${trustFile}`,
+					);
+					return;
+				}
+			}
 			const winner = this.skillOrigin.get(frontmatter.name);
 			if (winner) {
 				// Shadowing a bundled/learned skill is the expected override; two
