@@ -15,7 +15,7 @@
  *     subset: unquoted words use plain characters only (no `$`, backtick, `\`,
  *     `~`, `*`, `?`, `&`, `;`, `|`, `<`, `>`, `(`, `{`, `#`, `!`, `[`, no
  *     leading `=`), single quotes hold anything printable but `'`, double
- *     quotes anything printable but `"`, `$`, backtick, `\` and `!`. No
+ *     quotes anything printable but `"`, `$`, backtick and `!`, with `\` only before a letter or digit (literal there, e.g. -w "%{http_code}\n"). No
  *     pipes, redirects, substitution or env assignments. decideRules fires
  *     nothing and there is no prompt-control text;
  *   - every option is on the allowlist below and written exactly (no `--x=y`
@@ -160,7 +160,10 @@ function splitWords(text: string): Word[] | null {
 			const end = text.indexOf(c, i + 1);
 			if (end === -1) return null;
 			const body = text.slice(i + 1, end);
-			if (c === '"' && /[$`\\!]/.test(body)) return null;
+			// Inside double quotes a backslash before a letter or digit is literal in POSIX sh, bash and zsh
+			// (curl's own -w "...\n" escapes, pilot 12 Oct). Any other backslash, including a trailing one
+			// that would escape the closing quote, is refused.
+			if (c === '"' && (/[$`!]/.test(body) || /\\(?![A-Za-z0-9])/.test(body))) return null;
 			cur += body;
 			has = true;
 			i = end + 1;

@@ -562,3 +562,17 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });
+
+describe("backslash inside double quotes (pilot 12 Oct, -w with \\n)", () => {
+	test("a backslash before a letter or digit is literal and allowed", () => {
+		expect(ok('curl -s -o .tmp/r.html -w "HTTP_STATUS:%{http_code}\\n" http://127.0.0.1:55376/')).toBe(true);
+		expect(ok('curl -s -w "a\\tb\\r\\n" http://127.0.0.1:55376/')).toBe(true);
+	});
+	test("any other backslash is refused, including one that would escape the closing quote", () => {
+		expect(ok('curl -s -w "x\\" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "x\\\\n" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "x\\$HOME" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -H "a\\ b" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "\\`id\\`" http://127.0.0.1:55376/')).toBe(false);
+	});
+});
