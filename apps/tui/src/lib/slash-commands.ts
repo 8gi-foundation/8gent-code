@@ -508,7 +508,7 @@ export function formatSlashHelp(all: boolean): string {
 	const lines = rows.map((c) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`);
 	const hidden = BUILT_IN_SLASH_COMMANDS.length - rows.length;
 	const tail = all
-		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt"
+		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
 		: `  /help all - Show ${hidden} more commands`;
 	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
 }
