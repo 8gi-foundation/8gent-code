@@ -27,17 +27,8 @@ import {
 	LOCATE_INDEX_WAIT_MS,
 	locate as astLocate,
 } from "../ast-index/locate";
-import {
-	POST_MESSAGE_TOOL_DEF,
-	postMessage,
-	postMessageAvailable,
-	postMessageDeps,
-} from "../ai/post-message";
-import {
-	IMAGE_ATTACHMENT_TOOL,
-	hasImageAttachmentLine,
-	imageAttachmentResult,
-} from "../ai/text-tool-loop";
+import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
+import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { withImagesWritten } from "../ai/image-shape";
 import { layoutMeasureLine } from "./layout-measure";
@@ -121,12 +112,7 @@ import {
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { validatePath as guardPath, type PathAccess } from "../permissions/path-guard.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
-import {
-	CreatedFiles,
-	pathAbsent,
-	watchRedirects,
-	watchWrite,
-} from "../permissions/s1-created-files";
+import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { filterToolOutput } from "../permissions/output-filter";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
@@ -316,8 +302,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 			`Path escapes workspace via symlink: "${userPath}" points outside ${base}. ` +
 				"Files can only be read or written inside the workspace.",
 		);
-	const inside = (real: string, realBase: string) =>
-		real === realBase || real.startsWith(realBase + path.sep);
+	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
 
 	let realBase: string;
 	try {
@@ -331,9 +316,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
-			throw new Error(
-				`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`,
-			);
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
 		}
 		throw err;
 	}
@@ -344,9 +327,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException).code;
 			if (code === "ELOOP") {
-				throw new Error(
-					`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`,
-				);
+				throw new Error(`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`);
 			}
 			// Dangling: say where it points. Inside the workspace the agent can write that path directly.
 			let dest = "";
@@ -377,9 +358,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		realAncestor = fs.realpathSync(ancestor);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
-			throw new Error(
-				`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`,
-			);
+			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
 		}
 		throw escape();
 	}
@@ -403,13 +382,10 @@ export function resolveSpeakOut(out: unknown, workingDirectory: string): string 
 	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
 	const real = fs.realpathSync(ancestor);
 	if (real !== root && !real.startsWith(root + path.sep)) {
-		throw new Error(
-			`Path traversal blocked: "${named}" resolves through a link outside the working directory`,
-		);
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
 	}
 	try {
-		if (fs.lstatSync(target).isSymbolicLink())
-			throw new Error(`refusing to write through a symlink: "${named}"`);
+		if (fs.lstatSync(target).isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 	}
@@ -423,9 +399,7 @@ function assertRealInside(target: string, named: string, workingDirectory: strin
 	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
 	const real = fs.realpathSync(ancestor);
 	if (real !== root && !real.startsWith(root + path.sep)) {
-		throw new Error(
-			`Path traversal blocked: "${named}" resolves through a link outside the working directory`,
-		);
+		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
 	}
 }
 
@@ -581,10 +555,7 @@ const MCP_LEAN_TOOL_DEFS = [
 			parameters: {
 				type: "object",
 				properties: {
-					query: {
-						type: "string",
-						description: "Words describing the job, e.g. 'weather forecast'",
-					},
+					query: { type: "string", description: "Words describing the job, e.g. 'weather forecast'" },
 					tool: { type: "string", description: "Exact tool name whose input schema you need" },
 					server: { type: "string", description: "Limit to this MCP server" },
 				},
@@ -1198,7 +1169,8 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "screen_locate",
-					description: "[FILE] Point to click for a thing in a screenshot, named in words.",
+					description:
+						'[FILE] Point to click for a thing in a screenshot, named in words.',
 					parameters: {
 						type: "object",
 						properties: {
@@ -1460,42 +1432,17 @@ export class ToolExecutor {
 						type: "object",
 						properties: {
 							action: { type: "string", description: "list | plan | bed | mix" },
-							preset: {
-								type: "string",
-								description: "Film preset name from action=list (default lotus-night)",
-							},
-							grade_from: {
-								type: "string",
-								description:
-									"Optional: take grade, camera and cuts from this preset, titles from preset",
-							},
-							slides: {
-								type: "array",
-								description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order",
-								items: { type: "object" },
-							},
-							out_dir: {
-								type: "string",
-								description: "plan: folder for film.sh, frames and the mp4 (default video)",
-							},
-							out: {
-								type: "string",
-								description:
-									"plan: output mp4 file name in out_dir (default film.mp4); bed: wav path",
-							},
+							preset: { type: "string", description: "Film preset name from action=list (default lotus-night)" },
+							grade_from: { type: "string", description: "Optional: take grade, camera and cuts from this preset, titles from preset" },
+							slides: { type: "array", description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order", items: { type: "object" } },
+							out_dir: { type: "string", description: "plan: folder for film.sh, frames and the mp4 (default video)" },
+							out: { type: "string", description: "plan: output mp4 file name in out_dir (default film.mp4); bed: wav path" },
 							width: { type: "number", description: "plan: width (default 1280)" },
 							height: { type: "number", description: "plan: height (default 720)" },
-							narration: {
-								type: "string",
-								description: "plan: narration audio file; the bed ducks under it",
-							},
+							narration: { type: "string", description: "plan: narration audio file; the bed ducks under it" },
 							bed: { type: "string", description: "plan: music bed wav from action=bed" },
 							seconds: { type: "number", description: "bed: length in seconds" },
-							hits: {
-								type: "array",
-								items: { type: "number" },
-								description: "bed: cut times in seconds (risers and booms land on them)",
-							},
+							hits: { type: "array", items: { type: "number" }, description: "bed: cut times in seconds (risers and booms land on them)" },
 						},
 						required: ["action"],
 					},
@@ -1689,8 +1636,7 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description:
-									"Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
+								description: "Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
 							},
 						},
 						required: ["url"],
@@ -1730,8 +1676,7 @@ export class ToolExecutor {
 							},
 							task: {
 								type: "string",
-								description:
-									"Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
+								description: "Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
 							},
 							browser: {
 								type: "string",
@@ -1936,8 +1881,7 @@ export class ToolExecutor {
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
 					: undefined);
-		const policyAction =
-			toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
+		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
@@ -2135,7 +2079,9 @@ export class ToolExecutor {
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
-				return target && sanitizeShellCommand(command).safe ? this.gatedCommit(run, target) : run();
+				return target && sanitizeShellCommand(command).safe
+					? this.gatedCommit(run, target)
+					: run();
 			}
 
 			// Multi-agent orchestration
@@ -2159,11 +2105,7 @@ export class ToolExecutor {
 			case "screen_locate": {
 				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
 				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
-				return screenLocate({
-					image,
-					target: String(args.target ?? ""),
-					viewport: args.viewport as string | undefined,
-				});
+				return screenLocate({ image, target: String(args.target ?? ""), viewport: args.viewport as string | undefined });
 			}
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
@@ -2173,11 +2115,7 @@ export class ToolExecutor {
 					const out = resolveSpeakOut(args.out, this.workingDirectory);
 					const { speak } = await import("../tools/speak");
 					return JSON.stringify(
-						await speak({
-							text: args.text as string,
-							voice: args.voice as string | undefined,
-							out,
-						}),
+						await speak({ text: args.text as string, voice: args.voice as string | undefined, out }),
 					);
 				} catch (err) {
 					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -2847,7 +2785,10 @@ export class ToolExecutor {
 	// ============================================
 
 	/** Commit only past the test-suite gate (#3402); its note, if any, leads the result. */
-	private async gatedCommit(commit: () => Promise<string>, target?: CommitTarget): Promise<string> {
+	private async gatedCommit(
+		commit: () => Promise<string>,
+		target?: CommitTarget,
+	): Promise<string> {
 		const gate = await this.commitGate.check(target);
 		if (!gate.commit) return gate.message;
 		const out = await commit();
@@ -2917,8 +2858,7 @@ export class ToolExecutor {
 
 			if (!allowed) {
 				return (
-					channelDenialMessage(command) ??
-					`[PERMISSION DENIED] User declined to execute: ${command}`
+					channelDenialMessage(command) ?? `[PERMISSION DENIED] User declined to execute: ${command}`
 				);
 			}
 		}
@@ -2941,11 +2881,7 @@ export class ToolExecutor {
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
-			const recordRedirects = watchRedirects(
-				finalCommand,
-				this.workingDirectory,
-				this.createdFiles,
-			);
+			const recordRedirects = watchRedirects(finalCommand, this.workingDirectory, this.createdFiles);
 			let resolved = false;
 			const safeResolve = (value: string) => {
 				if (resolved) return;
@@ -2958,10 +2894,7 @@ export class ToolExecutor {
 				cwd: this.workingDirectory,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
-				env: {
-					...((env as NodeJS.ProcessEnv | undefined) ?? process.env),
-					...SPAWN_NON_INTERACTIVE_ENV,
-				},
+				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
 			let stdout = "";
@@ -3008,9 +2941,7 @@ export class ToolExecutor {
 
 				const output = formatCommandOutput(code, stdout, stderr);
 				// Report images the command drew, and any cut off at an edge (#3580).
-				withImagesWritten(output, this.workingDirectory, startTime).then(safeResolve, () =>
-					safeResolve(output),
-				);
+				withImagesWritten(output, this.workingDirectory, startTime).then(safeResolve, () => safeResolve(output));
 			});
 
 			proc.on("error", (err) => {
@@ -3270,11 +3201,8 @@ export class ToolExecutor {
 	/** Notebook paths: absolute or workspace-relative, but refused by the path guard for this access. */
 	private guardedNotebookPath(notebookPath: string, access: PathAccess): string {
 		const guard = guardPath(notebookPath, this.workingDirectory, {}, access);
-		if (!guard.ok)
-			throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
-		return path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
+		if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
+		return path.isAbsolute(notebookPath) ? notebookPath : path.join(this.workingDirectory, notebookPath);
 	}
 
 	private async handleReadNotebook(notebookPath: string): Promise<string> {
@@ -3363,15 +3291,7 @@ export class ToolExecutor {
 		allowedPaths?: string[],
 		permissionMode?: unknown,
 	): Promise<string> {
-		return spawnAgentTool(
-			this.workingDirectory,
-			task,
-			runtime,
-			model,
-			timeout,
-			allowedPaths,
-			permissionMode,
-		);
+		return spawnAgentTool(this.workingDirectory, task, runtime, model, timeout, allowedPaths, permissionMode);
 	}
 
 	private handleCheckAgent(agentId: string): Promise<string> {
@@ -3584,10 +3504,7 @@ export class ToolExecutor {
 			if (action === "mix" && (!args.palette || !args.type)) {
 				return "deck_theme mix needs palette and type";
 			}
-			const deck = dt.resolveDeckPath(
-				safePath(String(args.deck), this.workingDirectory, "write"),
-				this.workingDirectory,
-			);
+			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory, "write"), this.workingDirectory);
 			const themeName =
 				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
 			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
@@ -4112,18 +4029,11 @@ export class ToolExecutor {
 		try {
 			if (!useBrowserUse()) {
 				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
-				if (!Array.isArray(actions))
-					return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
+				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
 				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
-				const where = isolatedBrowser()
-					? "the bot's own browser profile"
-					: "your logged-in browser";
+				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
 				const approve = async (what: string) =>
-					(await this.askDesktopApproval(
-						"browser_task",
-						{ click: what },
-						`This click looks sensitive in ${where}.`,
-					)) === null;
+					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
 				return await getEightBrowser().run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
@@ -4137,15 +4047,11 @@ export class ToolExecutor {
 			if (!useBrowserUse()) {
 				let out: string | undefined;
 				if (filePath) {
-					if (!filePath.toLowerCase().endsWith(".png"))
-						return "browser_screenshot failed: path must end in .png";
+					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
 					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
-					out =
-						abs.startsWith(shots + path.sep) && !isolatedBrowser()
-							? abs
-							: safePath(filePath, this.workingDirectory, "write");
+					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory, "write");
 				} else if (isolatedBrowser()) {
 					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
