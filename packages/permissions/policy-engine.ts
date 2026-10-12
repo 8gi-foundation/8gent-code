@@ -700,6 +700,8 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
 	"mcp_call",
 	// A paired device can change the physical world (8DK, #3362).
 	"device_use",
+	// An extension tool runs whatever code its file holds (G1).
+	"extension_call",
 ]);
 
 /**

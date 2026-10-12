@@ -689,7 +689,7 @@ const runCommand = tool({
 	}),
 	execute: async ({ command }) => {
 		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
-		const backstop = preSpawnRefusal(command);
+		const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
 		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
@@ -1345,7 +1345,9 @@ const backgroundOutput = tool({
 async function commandRefusal(command: string): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
-	const backstop = preSpawnRefusal(command);
+	// Judged in the tool's working directory, so relative paths and `cd` resolve as
+	// the command will (#4009 startup-code check), not against process.cwd().
+	const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
 	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const ctx = getToolContext();
