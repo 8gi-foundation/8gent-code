@@ -177,4 +177,22 @@ describe("authorship guard", () => {
 		expect(r.code).toBe(0);
 		expect(r.out).toContain("authorship clean");
 	});
+
+	test("an unresolvable HEAD_SHA exits 2, never clean", () => {
+		const d = repo();
+		const base = pr(d);
+		commit(d, "feat: x");
+		const r = sh(d, `bash ${SCRIPT}`, { BASE_SHA: base, HEAD_SHA: "deadbeef" });
+		expect(r.code).toBe(2);
+		expect(r.out).not.toContain("authorship clean");
+	});
+
+	test("a root-commit push checks that commit", () => {
+		const bad = repo();
+		commit(bad, "root", VENDOR);
+		expect(sh(bad, `bash ${SCRIPT}`).code).toBe(1);
+		const ok = repo();
+		commit(ok, "root");
+		expect(sh(ok, `bash ${SCRIPT}`).code).toBe(0);
+	});
 });

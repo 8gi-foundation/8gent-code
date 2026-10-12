@@ -47,10 +47,24 @@ if [ -n "${BASE_SHA:-}" ] && [ "$BASE_SHA" != "$ZERO" ]; then
   fi
 elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "$ZERO" ] && have "$BEFORE_SHA"; then
   RANGE="${BEFORE_SHA}..${HEAD_REF}"
-else
+elif git rev-parse --verify -q "${HEAD_REF}~1" >/dev/null 2>&1; then
   RANGE="${HEAD_REF}~1..${HEAD_REF}"
+else
+  # Root commit (or unresolvable HEAD): check just that one commit. A bad
+  # HEAD_SHA still fails below because rev-list exits non-zero.
+  RANGE="${HEAD_REF}"
+  ROOT_ONLY=1
 fi
 
+# Fail closed: an unlistable range must never read as "clean".
+if [ "${ROOT_ONLY:-0}" = 1 ]; then
+  COMMITS="$(git rev-list -n 1 "$HEAD_REF")" || { echo "::error::cannot list ${RANGE}"; exit 2; }
+else
+  COMMITS="$(git rev-list "$RANGE")" || { echo "::error::cannot list ${RANGE}"; exit 2; }
+fi
+
+# Known tradeoff (same as governance): a human whose name or email contains one
+# of these words (e.g. someone named Claude) fails too. Keep the list narrow.
 VENDOR='claude|anthropic|openai|chatgpt|copilot|codex|gemini'
 BAD=0
 
@@ -74,7 +88,7 @@ while IFS= read -r sha; do
     git show -s --format='  author:    %an <%ae>%n  committer: %cn <%ce>%n  subject:   %s' "$sha"
     BAD=1
   fi
-done < <(git rev-list "$RANGE" 2>/dev/null)
+done <<< "$COMMITS"
 
 if [ "$BAD" -ne 0 ]; then
   echo ""
