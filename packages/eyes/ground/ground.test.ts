@@ -2,8 +2,13 @@ import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 import { parseBox, toImageSpace } from "./backends/qwen-vl.js";
 import { prepareImage, scaleBack, smartResize } from "./image.js";
-import { backendFromEnv, ground, shapeConfidence } from "./index.js";
-import { NonLoopbackEndpointError, assertLoopback } from "./loopback.js";
+import { GROUND_PRESETS, backendFromEnv, ground, shapeConfidence } from "./index.js";
+import {
+	CloudModelError,
+	NonLoopbackEndpointError,
+	assertLocalModel,
+	assertLoopback,
+} from "./loopback.js";
 import type { GroundBackend, PreparedImage } from "./types.js";
 
 describe("assertLoopback", () => {
@@ -110,5 +115,54 @@ describe("shapeConfidence", () => {
 	});
 	test("a box outside the model image is penalised", () => {
 		expect(shapeConfidence([10, 10, 50, 50], 100, 100, [10, 10, 500, 500], 100, 100)).toBe(0.7);
+	});
+});
+
+describe("cloud models are refused even on a loopback endpoint", () => {
+	test.each([
+		"gpt-oss:120b-cloud",
+		"qwen3-coder:480b-cloud",
+		"glm-4.6:cloud",
+		"GLM-4.6:CLOUD",
+		"some-vlm-cloud",
+		"hf.co/org/model:q4-cloud",
+	])("refuses %s", (m) => {
+		expect(() => assertLocalModel(m)).toThrow(CloudModelError);
+	});
+	test.each([
+		"qwen2.5vl:7b",
+		"qwen3.5:9b",
+		"muse-glimmer:30b-mlx",
+		"ui-tars-1.5-7b",
+		"soundcloud-vl:7b",
+	])("allows %s", (m) => {
+		expect(() => assertLocalModel(m)).not.toThrow();
+	});
+	test("EIGHT_GROUND_MODEL with a cloud tag fails closed at selection", () => {
+		expect(() => backendFromEnv({ EIGHT_GROUND_MODEL: "qwen3-vl:235b-cloud" })).toThrow(
+			CloudModelError,
+		);
+	});
+	test("every shipped preset names a local model", () => {
+		for (const p of Object.values(GROUND_PRESETS))
+			expect(() => assertLocalModel(p.model)).not.toThrow();
+	});
+	test("ground() refuses an injected cloud backend without calling it", async () => {
+		let called = false;
+		const cloud: GroundBackend = {
+			id: "x",
+			model: "gpt-oss:120b-cloud",
+			endpoint: "http://127.0.0.1:11434",
+			async locate() {
+				called = true;
+				return { bbox: [0, 0, 1, 1], raw: "" };
+			},
+		};
+		const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#fff" } })
+			.png()
+			.toBuffer();
+		const out = await ground({ image: png, instruction: "a button" }, { backend: cloud });
+		expect(out.ok).toBe(false);
+		expect(called).toBe(false);
 	});
 });
