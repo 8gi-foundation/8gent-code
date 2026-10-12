@@ -43,6 +43,24 @@ import {
 type Env = Record<string, string | undefined>;
 type Log = (line: string) => void;
 
+// ── interactive gate ──────────────────────────────────────────────────
+
+/**
+ * Is a person at a terminal? True only when stdin AND stdout are both TTYs, so
+ * a pipe or redirect on either side is not a person. Same rule as
+ * `8gent ext enable` (packages/extensions/ext-cli.ts on the pi-l5 branch):
+ * no env var or flag overrides it; only tests inject a value, through
+ * `deps.interactive`.
+ */
+export function isInteractiveTerminal(): boolean {
+	return Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+}
+
+/** The refusal line for a command that installs or removes code without a person at a terminal. */
+export function interactiveRefusal(command: string): string {
+	return `Refused: ${command} needs a person at an interactive terminal. Run it yourself in a terminal: ${command}`;
+}
+
 // ── update ────────────────────────────────────────────────────────────
 
 export interface UpdateCliDeps {
@@ -59,6 +77,8 @@ export interface UpdateCliDeps {
 	fetchImpl?: FetchLike;
 	/** Runs a command (npm), resolves to its exit code. */
 	run?: SelfUpdateOptions["run"];
+	/** Is a person at a terminal? Default: stdin and stdout are both TTYs. A real update requires it. */
+	interactive?: boolean;
 	/** Tests only: the self-update engine itself. */
 	selfUpdate?: (o: SelfUpdateOptions) => Promise<SelfUpdateResult>;
 }
@@ -182,6 +202,13 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 		return r.status === "failed" ? 1 : 0;
 	}
 
+	// A real update downloads and replaces the running 8gent (or runs npm), so,
+	// like `ext enable`, it needs a person at a terminal. --check stays open.
+	if (!(deps.interactive ?? isInteractiveTerminal())) {
+		log(interactiveRefusal("8gent update"));
+		return 1;
+	}
+
 	const result = await (deps.selfUpdate ?? runSelfUpdate)({
 		currentVersion: deps.currentVersion,
 		channel,
@@ -207,6 +234,8 @@ export interface PackagesCliDeps {
 	log?: Log;
 	fetch?: typeof fetch;
 	now?: Date;
+	/** Is a person at a terminal? Default: stdin and stdout are both TTYs. Install and remove require it. */
+	interactive?: boolean;
 }
 
 /** <home>/.8gent/packages, with home from packages/core/home.ts (EIGHT_HOME first). */
@@ -256,6 +285,10 @@ export function describeInstall(res: InstallResult): string[] {
 export async function runInstallNpmCommand(spec: string, deps: PackagesCliDeps = {}): Promise<number> {
 	const log = deps.log ?? ((line: string) => console.log(line));
 	const env = deps.env ?? process.env;
+	if (!(deps.interactive ?? isInteractiveTerminal())) {
+		log(interactiveRefusal(`8gent install ${spec}`));
+		return 1;
+	}
 	try {
 		const res = await installPackage(spec, {
 			root: packagesRoot(env),
@@ -296,6 +329,10 @@ export function runPackagesCommand(args: string[], deps: PackagesCliDeps = {}): 
 			if (!name) {
 				log(PACKAGES_USAGE);
 				return 2;
+			}
+			if (!(deps.interactive ?? isInteractiveTerminal())) {
+				log(interactiveRefusal(`8gent packages remove ${name}`));
+				return 1;
 			}
 			if (!removePackage(name, { root })) {
 				log(`${name} is not installed.`);

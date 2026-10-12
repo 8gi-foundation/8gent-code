@@ -13,6 +13,8 @@ import {
 	checkUpdate,
 	packagesRoot,
 	parseUpdateArgs,
+	interactiveRefusal,
+	isInteractiveTerminal,
 	registryFromEnv,
 	runInstallNpmCommand,
 	runPackagesCommand,
@@ -72,6 +74,7 @@ function binaryDeps(fetchImpl: FetchLike, extra: Record<string, unknown> = {}) {
 			arch: "x64",
 			fetchImpl,
 			env: { EIGHT_RELEASES_URL: RELEASES },
+			interactive: true,
 			log: (l: string) => lines.push(l),
 			run: async (cmd: string, args: string[]) => {
 				ran.push([cmd, ...args]);
@@ -235,7 +238,7 @@ describe("8gent install npm: and 8gent packages", () => {
 		const log = (l: string) => lines.push(l);
 
 		expect(packagesRoot(env)).toBe(join(home, ".8gent", "packages"));
-		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch })).toBe(0);
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch, interactive: true })).toBe(0);
 		const dir = join(home, ".8gent", "packages", "demo-ext@1.0.0");
 		expect(lines[0]).toBe(`Installed demo-ext@1.0.0 into ${dir}`);
 		expect(lines.join("\n")).toContain("Pinned by registry integrity: sha512-");
@@ -256,15 +259,15 @@ describe("8gent install npm: and 8gent packages", () => {
 		// The same pin again downloads nothing.
 		const before = reg.calls.length;
 		lines.length = 0;
-		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch })).toBe(0);
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch, interactive: true })).toBe(0);
 		expect(lines[0]).toContain("already installed and verified");
 		expect(reg.calls.slice(before).some((u) => u.endsWith(".tgz"))).toBe(false);
 
 		lines.length = 0;
-		expect(runPackagesCommand(["remove", "demo-ext"], { env, log })).toBe(0);
+		expect(runPackagesCommand(["remove", "demo-ext"], { env, log, interactive: true })).toBe(0);
 		expect(lines[0]).toBe("Removed demo-ext.");
 		expect(existsSync(dir)).toBe(false);
-		expect(runPackagesCommand(["remove", "demo-ext"], { env, log })).toBe(1);
+		expect(runPackagesCommand(["remove", "demo-ext"], { env, log, interactive: true })).toBe(1);
 		lines.length = 0;
 		expect(runPackagesCommand([], { env, log })).toBe(0);
 		expect(lines[0]).toContain("No packages installed under");
@@ -275,16 +278,16 @@ describe("8gent install npm: and 8gent packages", () => {
 		const reg = fakeRegistry();
 		const lines: string[] = [];
 		const log = (l: string) => lines.push(l);
-		expect(await runInstallNpmCommand("npm:demo-ext@^1", { env, log, fetch: reg.fetch })).toBe(1);
+		expect(await runInstallNpmCommand("npm:demo-ext@^1", { env, log, fetch: reg.fetch, interactive: true })).toBe(1);
 		expect(lines[0]).toContain("Install refused:");
 		expect(lines[0]).toContain("pin one, e.g. npm:demo-ext@1.0.0");
 		lines.length = 0;
-		expect(await runInstallNpmCommand("npm:nope@1.0.0", { env, log, fetch: reg.fetch })).toBe(1);
+		expect(await runInstallNpmCommand("npm:nope@1.0.0", { env, log, fetch: reg.fetch, interactive: true })).toBe(1);
 		expect(lines[0]).toContain("answered 404");
 		lines.length = 0;
 		expect(runPackagesCommand(["dance"], { env, log })).toBe(2);
 		expect(lines[0]).toContain("Usage: 8gent packages");
-		expect(runPackagesCommand(["remove"], { env, log })).toBe(2);
+		expect(runPackagesCommand(["remove"], { env, log, interactive: true })).toBe(2);
 	});
 
 	test("EIGHT_PACKAGE_REGISTRY: https or loopback http only", async () => {
@@ -296,12 +299,98 @@ describe("8gent install npm: and 8gent packages", () => {
 		const lines: string[] = [];
 		const log = (l: string) => lines.push(l);
 		const reg = fakeRegistry("http://evil.test");
-		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env: { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: "http://evil.test" }, log, fetch: reg.fetch })).toBe(1);
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env: { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: "http://evil.test" }, log, fetch: reg.fetch, interactive: true })).toBe(1);
 		expect(lines[0]).toContain("registry must be https");
 		expect(reg.calls).toEqual([]);
 
 		const loop = fakeRegistry("http://127.0.0.1:4873");
-		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env: { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: "http://127.0.0.1:4873" }, log, fetch: loop.fetch })).toBe(0);
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env: { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: "http://127.0.0.1:4873" }, log, fetch: loop.fetch, interactive: true })).toBe(0);
 		expect(loop.calls[0]).toBe("http://127.0.0.1:4873/demo-ext");
+	});
+});
+
+// ── interactive gate (stdin AND stdout must be TTYs) ────────────────────
+
+describe("interactive gate", () => {
+	test("install: refused when not interactive, reaches the installer when it is", async () => {
+		const home = tempHome();
+		const env = { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: REG };
+		const reg = fakeRegistry();
+		const lines: string[] = [];
+		const log = (l: string) => lines.push(l);
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch, interactive: false })).toBe(1);
+		expect(lines).toEqual([interactiveRefusal("8gent install npm:demo-ext@1.0.0")]);
+		expect(lines[0]).toContain("needs a person at an interactive terminal");
+		expect(reg.calls).toEqual([]);
+		expect(existsSync(join(home, ".8gent", "packages", "demo-ext@1.0.0"))).toBe(false);
+
+		lines.length = 0;
+		expect(await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch, interactive: true })).toBe(0);
+		expect(reg.calls.length).toBeGreaterThan(0);
+		expect(lines[0]).toContain("Installed demo-ext@1.0.0");
+	});
+
+	test("remove: refused when not interactive and the package stays; list and verify stay open", async () => {
+		const home = tempHome();
+		const env = { EIGHT_HOME: home, EIGHT_PACKAGE_REGISTRY: REG };
+		const reg = fakeRegistry();
+		const lines: string[] = [];
+		const log = (l: string) => lines.push(l);
+		await runInstallNpmCommand("npm:demo-ext@1.0.0", { env, log, fetch: reg.fetch, interactive: true });
+		const dir = join(home, ".8gent", "packages", "demo-ext@1.0.0");
+
+		lines.length = 0;
+		expect(runPackagesCommand(["remove", "demo-ext"], { env, log, interactive: false })).toBe(1);
+		expect(lines).toEqual([interactiveRefusal("8gent packages remove demo-ext")]);
+		expect(existsSync(dir)).toBe(true);
+
+		expect(runPackagesCommand(["list"], { env, log, interactive: false })).toBe(0);
+		expect(runPackagesCommand(["verify", "demo-ext"], { env, log, interactive: false })).toBe(0);
+
+		expect(runPackagesCommand(["remove", "demo-ext"], { env, log, interactive: true })).toBe(0);
+		expect(existsSync(dir)).toBe(false);
+	});
+
+	test("update: a real update is refused when not interactive and never reaches the engine; --check is not gated", async () => {
+		const f = fakeFetch(releases("0.19.0"));
+		let engineCalls = 0;
+		const selfUpdate = async () => {
+			engineCalls++;
+			return { status: "updated", from: "0.18.0", to: "0.19.0", channel: "binary" } as never;
+		};
+		const refused = binaryDeps(f, { interactive: false, selfUpdate });
+		expect(await runUpdateCommand([], refused.deps)).toBe(1);
+		expect(refused.lines.at(-1)).toBe(interactiveRefusal("8gent update"));
+		expect(engineCalls).toBe(0);
+		expect(refused.ran).toEqual([]);
+
+		const check = binaryDeps(f, { interactive: false, selfUpdate });
+		expect(await runUpdateCommand(["--check"], check.deps)).toBe(0);
+		expect(check.lines.at(-1)).toContain("v0.19.0 is available");
+
+		const allowed = binaryDeps(f, { interactive: true, selfUpdate });
+		await runUpdateCommand([], allowed.deps);
+		expect(engineCalls).toBe(1);
+	});
+
+	test("isInteractiveTerminal needs stdin AND stdout to be TTYs (properties restored afterwards)", () => {
+		const inD = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+		const outD = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+		const set = (s: object, v: boolean) => Object.defineProperty(s, "isTTY", { value: v, configurable: true, writable: true });
+		try {
+			set(process.stdin, true);
+			set(process.stdout, true);
+			expect(isInteractiveTerminal()).toBe(true);
+			set(process.stdin, false);
+			expect(isInteractiveTerminal()).toBe(false);
+			set(process.stdin, true);
+			set(process.stdout, false);
+			expect(isInteractiveTerminal()).toBe(false);
+		} finally {
+			for (const [s, d] of [[process.stdin, inD], [process.stdout, outD]] as const) {
+				if (d) Object.defineProperty(s, "isTTY", d);
+				else delete (s as { isTTY?: boolean }).isTTY;
+			}
+		}
 	});
 });
