@@ -13,7 +13,7 @@ import { ToolExecutor } from "../../eight/tools";
 import type { Band, LayoutMeasure } from "../../eight/layout-measure";
 import * as http from "node:http";
 import * as os from "node:os";
-import { MAX_HTML_BYTES, RENDER_CSP, compareLayout, describeDiff, findChrome, pairBands, prepareSafeCopy, renderSafe } from "../layout-compare";
+import { MAX_HTML_BYTES, RENDER_CSP, chromeArgs, compareLayout, describeDiff, findChrome, pairBands, prepareSafeCopy, renderSafe } from "../layout-compare";
 import { measureLayout } from "../../eight/layout-measure";
 
 afterAll(cleanupTempDirs);
@@ -227,6 +227,30 @@ describe("findChrome refuses what the model could have planted (#4081)", () => {
 	});
 });
 
+describe("chromeArgs lock-down flags (#4081)", () => {
+	test("every offline and no-script flag is in argv", () => {
+		const argv = chromeArgs("/p/page.html", "/o.png", 800, 600, "/prof", {});
+		for (const f of [
+			"--blink-settings=scriptEnabled=false",
+			"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+			"--disable-background-networking",
+			"--disable-component-update",
+			"--disable-sync",
+			"--no-first-run",
+			"--disable-default-apps",
+			"--disable-domain-reliability",
+			"--dns-prefetch-disable",
+			"--host-resolver-rules=MAP * ~NOTFOUND",
+			"--proxy-server=http://127.0.0.1:9",
+			"--proxy-bypass-list=<-loopback>",
+		])
+			expect(argv).toContain(f);
+		expect(argv).not.toContain("--no-sandbox");
+		expect(argv.some((a) => a.includes("EXCLUDE"))).toBe(false);
+		expect(chromeArgs("/p", "/o", 1, 1, "/x", { EIGHT_CHROME_NO_SANDBOX: "1" })).toContain("--no-sandbox");
+	});
+});
+
 describe("prepareSafeCopy (#4081)", () => {
 	function page(html: string, files: Record<string, string> = {}): { dir: string; file: string; out: string } {
 		const dir = tempDir("layout-compare-page-");
@@ -269,6 +293,23 @@ describe("prepareSafeCopy (#4081)", () => {
 		expect(copy).toContain("http://127.0.0.1:1/p.png"); // left alone, the CSP blocks it
 	});
 
+	test("the CSP is the first thing in the document, whatever the page does before <head>", () => {
+		const shapes = [
+			'<script src="file:///etc/x.js"></script><html><head></head><body></body></html>',
+			'<!-- <head> --><script>1</script><html><head></head></html>',
+			'<!DOCTYPE html><script>1</script><head></head>',
+			"\uFEFF<!doctype html><script>1</script>",
+		];
+		for (const shape of shapes) {
+			const p = page(shape);
+			const copy = fs.readFileSync(prepareSafeCopy(p.file, p.out), "utf8");
+			const meta = copy.indexOf("Content-Security-Policy");
+			expect(meta).toBeGreaterThan(-1);
+			expect(copy.slice(0, meta).replace(/^\uFEFF/, "").replace(/<!doctype[^>]*>/i, "")).toBe("<meta http-equiv=\"");
+			expect(copy.slice(0, meta)).not.toMatch(/script|<!--/i);
+		}
+	});
+
 	test("a page over the size cap is refused", () => {
 		const p = page("x".repeat(MAX_HTML_BYTES + 1));
 		expect(() => prepareSafeCopy(p.file, p.out)).toThrow(/limit/);
@@ -276,47 +317,59 @@ describe("prepareSafeCopy (#4081)", () => {
 });
 
 const chrome = findChrome();
+const requireChrome = process.env.EIGHT_REQUIRE_CHROME === "1";
+if (requireChrome) {
+	test("CI has a Chrome that can start (EIGHT_REQUIRE_CHROME=1)", () => {
+		expect(chrome).not.toBeNull();
+	});
+}
 describe.skipIf(!chrome)("real Chrome stays offline and inside the page (#4081)", () => {
-	test("a page that fetches a local listener never connects; an iframe to a file outside the page renders nothing", async () => {
-		let connections = 0;
-		const server = http.createServer((_req, res) => {
-			connections++;
-			res.end("x");
-		});
-		server.on("connection", () => {
-			connections++;
-		});
-		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-		const port = (server.address() as { port: number }).port;
-		const outside = tempDir("layout-compare-outside-");
-		fs.writeFileSync(path.join(outside, "big.html"), '<body style="margin:0"><div style="width:600px;height:300px;background:#000"></div></body>');
-		const dir = tempDir("layout-compare-real-");
-		const site = path.join(dir, "site");
-		fs.mkdirSync(site);
-		const file = path.join(site, "index.html");
-		fs.writeFileSync(
-			file,
-			`<html><body style="margin:0"><img src="http://127.0.0.1:${port}/a.png"><script>fetch("http://127.0.0.1:${port}/f")</script>` +
-				`<iframe src="file://${path.join(outside, "big.html")}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
-		);
-		const work = path.join(dir, "work");
-		fs.mkdirSync(work);
-		try {
-			// A sandbox that stops Chrome starting (no socket bind) cannot run this test; CI can.
-			const probe = path.join(site, "probe.html");
-			fs.writeFileSync(probe, "<body>probe</body>");
+	const shapes: Record<string, (port: number, outsideUrl: string) => string> = {
+		"plain page": (port, o) =>
+			`<html><body style="margin:0"><img src="http://127.0.0.1:${port}/a.png"><script>fetch("http://127.0.0.1:${port}/f")</script><iframe src="${o}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
+		"script before <head>": (port, o) =>
+			`<script>fetch("http://127.0.0.1:${port}/s");document.write('<iframe src="${o}" style="width:700px;height:400px">')</script><html><head></head><body style="margin:0"><iframe src="${o}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
+		"fake <head> in a comment": (port, o) =>
+			`<!-- <head> --><script src="http://127.0.0.1:${port}/x.js"></script><html><head></head><body style="margin:0"><iframe src="${o}" style="border:0;width:700px;height:400px"></iframe></body></html>`,
+	};
+	for (const [name, build] of Object.entries(shapes)) {
+		test(`${name}: no connection to a local listener, no outside iframe`, async () => {
+			let connections = 0;
+			const server = http.createServer((_req, res) => {
+				connections++;
+				res.end("x");
+			});
+			server.on("connection", () => {
+				connections++;
+			});
+			await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+			const port = (server.address() as { port: number }).port;
+			const outside = tempDir("layout-compare-outside-");
+			fs.writeFileSync(path.join(outside, "big.html"), '<body style="margin:0"><div style="width:600px;height:300px;background:#000"></div></body>');
+			const dir = tempDir("layout-compare-real-");
+			const site = path.join(dir, "site");
+			fs.mkdirSync(site);
+			const file = path.join(site, "index.html");
+			fs.writeFileSync(file, build(port, `file://${path.join(outside, "big.html")}`));
+			const work = path.join(dir, "work");
+			fs.mkdirSync(work);
 			try {
-				await renderSafe(chrome as string, probe, path.join(work, "probe.png"), 200, 100, work);
-			} catch {
-				console.warn("Chrome cannot start here; skipping the live offline test");
-				return;
+				const probe = path.join(site, "probe.html");
+				fs.writeFileSync(probe, "<body>probe</body>");
+				try {
+					await renderSafe(chrome as string, probe, path.join(work, "probe.png"), 200, 100, work);
+				} catch (e) {
+					if (requireChrome) throw e;
+					console.warn("Chrome cannot start here; skipping the live offline test");
+					return;
+				}
+				await renderSafe(chrome as string, file, path.join(work, "r.png"), 800, 600, work);
+				await new Promise((r) => setTimeout(r, 300));
+				expect(connections).toBe(0);
+				expect(await measureLayout(path.join(work, "r.png"))).toBeNull();
+			} finally {
+				server.close();
 			}
-			await renderSafe(chrome as string, file, path.join(work, "r.png"), 800, 600, work);
-			await new Promise((r) => setTimeout(r, 300));
-			expect(connections).toBe(0);
-			expect(await measureLayout(path.join(work, "r.png"))).toBeNull();
-		} finally {
-			server.close();
-		}
-	}, 60_000);
+		}, 60_000);
+	}
 });

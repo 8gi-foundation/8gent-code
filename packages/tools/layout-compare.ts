@@ -136,14 +136,53 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 			return d ? `url(${q}${d}${q})` : m;
 		});
 	const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
-	const withMeta = /<head\b[^>]*>/i.test(html)
-		? html.replace(/<head\b[^>]*>/i, (h) => `${h}${meta}`)
-		: /<html\b[^>]*>/i.test(html)
-			? html.replace(/<html\b[^>]*>/i, (h) => `${h}<head>${meta}</head>`)
-			: `${meta}${html}`;
+	// First thing in the document, never after a text match: a script before <head>,
+	// or a fake <head> inside a comment, must not run ahead of the policy. A meta
+	// before <html> is parsed into the implicit head. Keep a leading BOM and doctype first.
+	const lead = /^\uFEFF?\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? (html.startsWith("\uFEFF") ? "\uFEFF" : "");
+	const withMeta = `${lead}${meta}${html.slice(lead.length)}`;
 	const out = path.join(dir, "page.html");
 	fs.writeFileSync(out, withMeta);
 	return out;
+}
+
+/** Chrome's argv for one offline render. Exported so a test can assert the lock-down flags. */
+export function chromeArgs(
+	htmlPath: string,
+	out: string,
+	width: number,
+	height: number,
+	profileDir: string,
+	env: Record<string, string | undefined> = process.env,
+): string[] {
+	return [
+		"--headless=new",
+		"--disable-gpu",
+		"--hide-scrollbars",
+		"--force-device-scale-factor=1",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-extensions",
+		"--disable-default-apps",
+		"--disable-sync",
+		"--disable-background-networking",
+		"--disable-component-update",
+		"--disable-domain-reliability",
+		"--dns-prefetch-disable",
+		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+		// A layout render needs no JavaScript; the CSP is the second lock, this the first.
+		"--blink-settings=scriptEnabled=false",
+		"--host-resolver-rules=MAP * ~NOTFOUND",
+		"--proxy-server=http://127.0.0.1:9",
+		"--proxy-bypass-list=<-loopback>",
+		"--virtual-time-budget=2000",
+		// Only for a CI runner whose kernel forbids Chrome's own sandbox; never set by default.
+		...(env.EIGHT_CHROME_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
+		`--user-data-dir=${profileDir}`,
+		`--window-size=${width},${height}`,
+		`--screenshot=${out}`,
+		pathToFileURL(htmlPath).href,
+	];
 }
 
 /**
@@ -161,23 +200,7 @@ export function renderHtml(
 	profileDir: string,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const args = [
-			"--headless=new",
-			"--disable-gpu",
-			"--hide-scrollbars",
-			"--force-device-scale-factor=1",
-			"--no-first-run",
-			"--no-default-browser-check",
-			"--disable-extensions",
-			"--host-resolver-rules=MAP * ~NOTFOUND",
-			"--proxy-server=http://127.0.0.1:9",
-			"--proxy-bypass-list=<-loopback>",
-			"--virtual-time-budget=2000",
-			`--user-data-dir=${profileDir}`,
-			`--window-size=${width},${height}`,
-			`--screenshot=${out}`,
-			pathToFileURL(htmlPath).href,
-		];
+		const args = chromeArgs(htmlPath, out, width, height, profileDir);
 		const useGroup = process.platform !== "win32";
 		const child = spawn(chrome, args, { stdio: "ignore", detached: useGroup });
 		const killGroup = () => {
