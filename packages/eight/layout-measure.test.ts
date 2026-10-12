@@ -79,3 +79,18 @@ describe("measureLayout (#3770)", () => {
 		expect(out).toContain("width 800px");
 	});
 });
+
+describe("layout from an attached image's bytes (#3823)", () => {
+	test("measureLayout and layoutMeasureLine accept the attached image as a Buffer", async () => {
+		const file = await mockup([
+			{ x: 240, y: 40, w: 800, h: 30 },
+			{ x: 240, y: 440, w: 800, h: 50 },
+		]);
+		const bytes = fs.readFileSync(file);
+		const m = await measureLayout(bytes);
+		expect(m?.column).toEqual({ left: 240, right: 1040, width: 800 });
+		const line = await layoutMeasureLine(bytes);
+		expect(line).toContain("Measured layout of the full-size image");
+		expect(line).toBe(await layoutMeasureLine(file));
+	});
+});

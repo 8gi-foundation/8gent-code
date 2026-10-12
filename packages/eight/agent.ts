@@ -137,6 +137,7 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
+import { layoutMeasureLine } from "./layout-measure";
 import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
 import {
 	ObservationPacker,
@@ -1543,6 +1544,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
 				finishReason: "other",
 			});
+			// #3823: a model that sees the attachment never called read_image in 2 of 5
+			// design-mockup-practice runs (incl. the latest), so the measured layout
+			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
+			// over on the attach path too. Bounded, model-free, empty on any failure.
+			try {
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				if (measured) {
+					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+					// read_image on the same file this turn must not repeat the block.
+					this.executor.markLayoutSent(measured);
+				}
+			} catch {
+				// layout hints are best-effort; the image itself is already attached
+			}
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
