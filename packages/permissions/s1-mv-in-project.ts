@@ -116,7 +116,7 @@ const AUTO_EXEC_NAME =
  * `.tmp` directory or a final generated-data file name.
  */
 function badDot(rel: string): boolean {
-	const segs = rel.split("/");
+	const segs = relSegments(rel);
 	return segs.some((seg, i) => {
 		if (!seg.startsWith(".")) return false;
 		if (seg === ".tmp" && i === 0) return false;

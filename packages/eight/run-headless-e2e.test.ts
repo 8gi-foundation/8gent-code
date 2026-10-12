@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeTree } from "../../tests/db-files";
+import { removeDir } from "../../tests/temp-dirs";
 import { validateRunEvent } from "./run-events";
 
 type Body = { messages: Array<{ role: string; content: unknown }> };
@@ -64,9 +65,10 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
-	// Windows holds a just-used folder for a moment (#3814): bounded retry, not a flake.
-	removeTree(home);
-	removeTree(work);
+	// The run keeps an in-process SQLite handle under home that Windows will not release until the
+	// process ends; removeDir retries, then leaves it to the run-end sweep on win32 only.
+	removeDir(home);
+	removeDir(work);
 });
 
 async function headless(

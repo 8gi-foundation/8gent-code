@@ -11,6 +11,7 @@ import { bootApp, tick, waitFor } from "./app-driver.js";
 async function main() {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-at-refresh-"));
 	fs.writeFileSync(path.join(dir, "alpha-first.ts"), "");
+	const back = process.cwd();
 	process.chdir(dir);
 	try {
 		const app = await bootApp(160, 50);
@@ -25,7 +26,16 @@ async function main() {
 		await waitFor(() => app.since(m).includes("beta-later.ts"), "file made later listed");
 		app.emit({ phase: "refresh", ok: true });
 	} finally {
-		fs.rmSync(dir, { recursive: true, force: true });
+		// Windows will not delete a folder that is some process's working directory (EBUSY).
+		process.chdir(back);
+		try {
+			fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+		} catch (e) {
+			// The app's file watcher can hold the folder open until exit on Windows; it is under the
+			// run's temp dir, which the test sweep removes. Elsewhere any failure still throws.
+			const code = (e as NodeJS.ErrnoException).code;
+			if (!(process.platform === "win32" && (code === "EBUSY" || code === "EPERM"))) throw e;
+		}
 	}
 	process.exit(0);
 }
