@@ -14,6 +14,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getPermissionManager, resetPermissionManager } from "../permissions";
+import {
+	canApplySeatbelt,
+	onRunCommandUnsandboxed,
+	refreshSecurityEnvForTests,
+	runCommandSandboxStatus,
+} from "../permissions/run-command-sandbox";
 import { ModelValue, agentTools, argvDisplay, optionRefusal, setToolContext } from "./tools";
 
 const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "native-git-argv-")));
@@ -21,6 +27,8 @@ const saved = {
 	PATH: process.env.PATH,
 	EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR,
 	EIGHT_SYSTEM_ONE: process.env.EIGHT_SYSTEM_ONE,
+	EIGHT_SEATBELT: process.env.EIGHT_SEATBELT,
+	EIGHT_FAKE_HOME: process.env.EIGHT_FAKE_HOME,
 };
 
 // Each payload would create MARK through a shell. Through argv it is just text.
@@ -50,6 +58,9 @@ function git(...args: string[]): string {
 beforeAll(() => {
 	process.env.EIGHT_DATA_DIR = path.join(scratch, "data");
 	process.env.EIGHT_SYSTEM_ONE = "0";
+	// The run_command sandbox protects (and audits under) this fake home, never the real ~/.8gent.
+	process.env.EIGHT_FAKE_HOME = scratch;
+	refreshSecurityEnvForTests();
 	process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = "Test";
 	process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = "test@example.invalid";
 
@@ -85,6 +96,7 @@ afterAll(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
+	refreshSecurityEnvForTests();
 	fs.rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -279,4 +291,80 @@ describe("protected ~/.8gent files are refused through the argv runner", () => {
 			expect(fs.readFileSync(path.join(repo, file), "utf8")).toBe(before);
 		});
 	}
+});
+
+// 8SO on #4001 after #4013: the argv runner spawned git and gh directly, so they
+// ran outside the run_command OS sandbox and ignored EIGHT_SEATBELT=require. Git
+// runs repository config (fsmonitor, hooks, aliases, sshCommand), so it is code.
+describe("the argv runner gets the run_command OS sandbox (#4009, #3612)", () => {
+	function withSeatbelt(value: string | undefined, fn: () => Promise<void>): Promise<void> {
+		const prev = process.env.EIGHT_SEATBELT;
+		if (value === undefined) delete process.env.EIGHT_SEATBELT;
+		else process.env.EIGHT_SEATBELT = value;
+		refreshSecurityEnvForTests();
+		return fn().finally(() => {
+			if (prev === undefined) delete process.env.EIGHT_SEATBELT;
+			else process.env.EIGHT_SEATBELT = prev;
+			refreshSecurityEnvForTests();
+		});
+	}
+
+	test("an unsandboxed git tool run is reported, not silent", () =>
+		withSeatbelt("0", async () => {
+			const seen: string[] = [];
+			const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
+			try {
+				expect(await call("git_status")).toContain("On branch");
+			} finally {
+				off();
+			}
+			expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
+		}));
+
+	test("EIGHT_SEATBELT=require refuses a git tool run when no boundary applies, before spawn", () =>
+		withSeatbelt("require", async () => {
+			// A post-checkout hook would leave a mark if git ran.
+			const mark = path.join(scratch, "HOOK-RAN");
+			const hook = path.join(repo, ".git", "hooks", "post-checkout");
+			fs.writeFileSync(hook, `#!/bin/sh\ntouch "${mark}"\n`, { mode: 0o755 });
+			try {
+				const out = await call("git_create_branch", { branch: "require-probe" });
+				if (runCommandSandboxStatus().applied) {
+					expect(out).not.toContain("EIGHT_SEATBELT=require");
+					git("checkout", "-q", "main");
+					git("branch", "-q", "-D", "require-probe");
+					return;
+				}
+				expect(out).toStartWith("[PERMISSION DENIED] EIGHT_SEATBELT=require");
+				expect(fs.existsSync(mark)).toBe(false);
+				expect(git("branch", "--list", "require-probe")).toBe("");
+			} finally {
+				fs.rmSync(hook, { force: true });
+				fs.rmSync(mark, { force: true });
+			}
+		}));
+
+	test.if(process.platform === "darwin" && process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())(
+		"live: repo config code run by a git tool cannot write ~/.8gent startup code",
+		() =>
+			withSeatbelt(undefined, async () => {
+				const hooks = path.join(scratch, ".8gent", "hooks.yaml");
+				const ran = path.join(scratch, "FSMONITOR-RAN");
+				fs.mkdirSync(path.dirname(hooks), { recursive: true });
+				fs.writeFileSync(hooks, "- event: never\n");
+				const script = path.join(scratch, "fsmonitor.sh");
+				fs.writeFileSync(script, `#!/bin/sh\ntouch "${ran}"\necho evil > "${hooks}"\nexit 1\n`, {
+					mode: 0o755,
+				});
+				git("config", "core.fsmonitor", script);
+				try {
+					await call("git_status");
+					// Positive control: the config code did run, inside the sandbox.
+					expect(fs.existsSync(ran)).toBe(true);
+					expect(fs.readFileSync(hooks, "utf8")).toBe("- event: never\n");
+				} finally {
+					git("config", "--unset", "core.fsmonitor");
+				}
+			}),
+	);
 });

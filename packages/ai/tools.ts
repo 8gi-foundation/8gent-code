@@ -30,7 +30,12 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
+import {
+	RunCommandSandboxRequired,
+	runCommandSandboxRefusal,
+	wrapRunCommand,
+	wrapRunCommandArgv,
+} from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
 import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
 import {
@@ -1594,6 +1599,18 @@ async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 	const args = words.map(argvText);
 	const refusal = await commandRefusal(display);
 	if (refusal !== null) return refusal;
+	// The kernel boundary applies to argv too (#4009, #3612): git runs repository
+	// config (fsmonitor, hooks, aliases, sshCommand), so it is no safer than a shell.
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+	let spawnArgv: string[];
+	try {
+		spawnArgv = wrapRunCommandArgv(bin, args);
+	} catch (err) {
+		if (err instanceof RunCommandSandboxRequired) return err.message;
+		throw err;
+	}
+	const [file, ...fileArgs] = spawnArgv as [string, ...string[]];
 
 	const { getHookManager } = await import("../hooks");
 	const hookManager = getHookManager();
@@ -1602,7 +1619,7 @@ async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 
 	const { spawn } = await import("node:child_process");
 	return new Promise((resolve) => {
-		const proc = spawn(bin, args, {
+		const proc = spawn(file, fileArgs, {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
