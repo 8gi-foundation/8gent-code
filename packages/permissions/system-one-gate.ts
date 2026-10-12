@@ -632,7 +632,8 @@ export async function systemOneGate(
 		// confinement). Default mode only.
 		try {
 			const { deckRenderInProject } = await import("./s1-deck-render");
-			const deck = mode === "default" ? deckRenderInProject(command, cwd, env) : { ok: false as const };
+			const deck =
+				mode === "default" ? deckRenderInProject(command, cwd, env) : { ok: false as const };
 			if (deck.ok) {
 				return {
 					run: true,
