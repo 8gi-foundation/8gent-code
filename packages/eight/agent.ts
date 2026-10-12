@@ -89,6 +89,7 @@ import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orches
 import {
 	NARRATION_NOTE,
 	SCRATCH_DIR_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
 	SLIDES_TO_VIDEO_NOTE,
 	buildToolCatalogSegment,
 } from "./prompts/system-prompt";
@@ -210,7 +211,7 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  */
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
-const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
+const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE, LOCAL_SERVER_CURL_SHORT].join("\n");
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -557,7 +558,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// one-shot run, so the remember nudge goes too.
 		const compactLocalPrompt = config.headless
 			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
-			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}\n${LOCAL_SERVER_CURL_SHORT}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
