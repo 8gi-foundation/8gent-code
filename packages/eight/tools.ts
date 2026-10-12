@@ -133,7 +133,7 @@ import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
-import { systemOneGate } from "../permissions/system-one-gate";
+import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionHolder,
@@ -198,6 +198,30 @@ import { isNoToolScope } from "./agent-scopes";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
+
+/**
+ * A chained command the sanitizer refuses comes back as its pieces, so a piece
+ * System One's loopback lane will refuse on its own is named in the same
+ * refusal (#4072). The browser-op pilot sent `curl -sL ...; cat ...`, was told
+ * only to split it, resent the curl with -L and was blocked a second time.
+ * Only the lane's deterministic refusal is used, only in the mode where the
+ * lane runs (system-one-gate), so this never says more than System One would.
+ * A piece that is not a loopback curl, or a split that lands inside quotes,
+ * gives no hint rather than a wrong one.
+ */
+export async function chainedPieceRefusal(
+	command: string,
+	cwd: string,
+	env: Record<string, string | undefined> = process.env,
+): Promise<string | undefined> {
+	if (systemOneMode(env) !== "default") return undefined;
+	const { curlToLoopback } = await import("../permissions/s1-curl-loopback");
+	for (const piece of command.split(/;|&&|\|\|/)) {
+		const c = curlToLoopback(piece.trim(), cwd);
+		if (!c.ok && c.refuse) return c.refuse;
+	}
+	return undefined;
+}
 
 /**
  * Replay class per tool (#3653), used when a crashed session resumes with a
@@ -2992,7 +3016,11 @@ export class ToolExecutor {
 		// person approves it and then sees it blocked anyway (#3055).
 		const validation = sanitizeShellCommand(command, process.platform, activeShellKind(windowsShell));
 		if (!validation.safe) {
-			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+			// A piece of the chain System One would refuse on its own is named now,
+			// so the pieces are not resent as they are and blocked again (#4072).
+			const piece = await chainedPieceRefusal(command, this.workingDirectory, systemOneEnvFor(mode));
+			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
+			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
