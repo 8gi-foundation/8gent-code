@@ -23,6 +23,7 @@ import {
 	GoalLoop,
 	GoalPersistence,
 	Ledger,
+	type LedgerEntry,
 	type GoalEvent,
 	type GoalEventSink,
 } from "../goal";
@@ -360,8 +361,10 @@ export class GoalManager {
 	 *
 	 * If the run is not in memory but is present in the persistence layer,
 	 * verify the ledger chain (8GO: every resume must re-verify audit
-	 * integrity before exposing the run to RPC callers). Returns true if
-	 * the run was hydrated and the chain is intact.
+	 * integrity before exposing the run to RPC callers). Returns true only
+	 * if the chain is intact AND matches the persisted events entry for
+	 * entry. No key, a torn or missing file, or a short chain is a refusal
+	 * (#4113, conformance in goal-resume-conformance.test.ts).
 	 *
 	 * The scaffold does NOT re-attach a live GoalLoop; the daemon factory
 	 * owns executor + judge re-creation. This hook reports readiness; the
@@ -374,25 +377,36 @@ export class GoalManager {
 		if (!this.persistence) return false;
 		const row = this.persistence.getRun(runId);
 		if (!row) return false;
-		if (this.ledgerKey) {
-			let ledger: Ledger;
-			try {
-				ledger = Ledger.open({
-					runId,
-					baseDir: this.ledgerBaseDir,
-					key: this.ledgerKey,
-				});
-			} catch {
-				return false;
-			}
+		// Fail closed (#4113): every path that cannot prove the chain is a "no",
+		// and every "no" says why.
+		const refuse = (where: string, why: string): false => {
+			// eslint-disable-next-line no-console
+			console.warn(`[GoalManager] resume(${runId}): ledger verify failed${where} - ${why}`);
+			return false;
+		};
+		if (!this.ledgerKey) return refuse("", "no ledger key, the chain cannot be verified");
+		let entries: LedgerEntry[];
+		try {
+			const ledger = Ledger.open({ runId, baseDir: this.ledgerBaseDir, key: this.ledgerKey });
 			const verdict = ledger.verify();
+			entries = verdict.ok ? ledger.readAll() : [];
 			ledger.close();
-			if (!verdict.ok) {
-				// eslint-disable-next-line no-console
-				console.warn(
-					`[GoalManager] resume(${runId}): ledger verify failed at seq=${verdict.atSeq} - ${verdict.reason}`,
+			if (!verdict.ok) return refuse(` at seq=${verdict.atSeq}`, verdict.reason ?? "chain broken");
+		} catch (err) {
+			// A torn last line (killed mid-append) or an unreadable file.
+			return refuse("", err instanceof Error ? err.message : String(err));
+		}
+		// A chain that verifies can still be short: a truncated tail, or a
+		// deleted file that Ledger.open recreated empty, is a valid prefix. The
+		// ledger must match the persisted events entry for entry, or the offset
+		// the run resumes from is wrong.
+		const events = this.persistence.listEventsForRun(runId);
+		for (let i = 0; i < Math.max(entries.length, events.length); i++) {
+			if (entries[i]?.kind !== events[i]?.kind) {
+				return refuse(
+					` at seq=${i + 1}`,
+					`ledger has ${entries.length} entries, persisted events ${events.length}`,
 				);
-				return false;
 			}
 		}
 		return true;

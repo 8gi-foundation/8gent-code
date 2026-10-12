@@ -8,7 +8,7 @@
  *     and removed when it ends,
  *   - a boot reload that recreates each journaled session and restores its
  *     newest time-travel checkpoint, without running any tool call again,
- *   - the real path: a process that is SIGKILLed mid-task (no shutdown hook
+ *   - the real path: a process hard-killed mid-task by a second process (no shutdown hook
  *     runs) and a fresh pool that brings the session back.
  *
  * Uses a REAL AgentPool and a REAL TimeTravelStore on temp dirs. No model is
@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { forceKillFromSecondProcess, isAlive, waitForFile } from "../../tests/force-kill";
 import { rmRetry } from "../../tests/rm-retry";
 
 const saved: Record<string, string | undefined> = {};
@@ -305,12 +306,17 @@ describe("resumeJournaledSessions", () => {
 	});
 });
 
-describe("SIGKILL mid-task", () => {
-	// POSIX only: asserts the child died of SIGKILL; Windows processes have no signals.
-	test.skipIf(process.platform === "win32")(
+describe("hard kill mid-task", () => {
+	// Every platform: a second process force-kills the child after its journal
+	// and checkpoint are on disk. POSIX uses kill -KILL; Windows has no signals,
+	// so it is Stop-Process -Force (TerminateProcess), as the Scheduled Task does (#4113).
+	test(
 		"a killed process's open session comes back with its last checkpoint",
 		async () => {
-			const script = path.join(path.dirname(journalPath), "crash.ts");
+			const dir = path.dirname(journalPath);
+			const script = path.join(dir, "crash.ts");
+			const ready = path.join(dir, "crash.ready");
+			const survived = path.join(dir, "crash.survived");
 			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
 			const journalMod = path.join(import.meta.dir, "session-journal.ts");
 			const storeMod = path.join(
@@ -322,7 +328,8 @@ describe("SIGKILL mid-task", () => {
 			);
 			fs.writeFileSync(
 				script,
-				`import { AgentPool } from ${JSON.stringify(poolPath)};
+				`import { writeFileSync } from "node:fs";
+import { AgentPool } from ${JSON.stringify(poolPath)};
 import { SessionJournal } from ${JSON.stringify(journalMod)};
 import { TimeTravelStore } from ${JSON.stringify(storeMod)};
 const journal = new SessionJournal(${JSON.stringify(journalPath)});
@@ -335,17 +342,27 @@ store.save(agent.getTimeTravelSessionId(), [
   { role: "user", content: "deploy the site" },
   { role: "assistant", content: "step 3 of 5" },
 ], { reason: "interval", toolCallCount: 8 });
-process.kill(process.pid, "SIGKILL");
+writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+// Still mid-task: only a kill from outside stops this before the marker below.
+setTimeout(() => { writeFileSync(${JSON.stringify(survived)}, "1"); process.exit(0); }, 30_000);
 `,
 			);
 			const proc = Bun.spawn([process.execPath, script], {
 				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
 				stdout: "ignore",
-				stderr: "ignore",
+				stderr: "pipe",
 			});
+			await waitForFile(ready, proc);
+			await forceKillFromSecondProcess(proc.pid);
 			await proc.exited;
-			expect(proc.signalCode).toBe("SIGKILL");
 
+			// The child died from outside, not by finishing its work.
+			expect(proc.exitCode).not.toBe(0);
+			if (process.platform !== "win32") expect(proc.signalCode).toBe("SIGKILL");
+			expect(isAlive(proc.pid)).toBe(false);
+			expect(fs.existsSync(survived)).toBe(false);
+
+			// The journal survived the kill and brings the session back.
 			const journal = new mod.SessionJournal(journalPath);
 			expect(journal.read().map((e) => e.sessionId)).toEqual(["s_crash"]);
 			const pool = newPool(journal);
