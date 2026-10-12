@@ -112,15 +112,20 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 	}
 	if (logParts.length) put("log-tail.txt", logParts.join("\n\n") + "\n");
 
-	put(
-		"report.json",
+	// The report is our own JSON, so it is not run through the scrubber: the name-based rule (#4018) reads
+	// the key "redactedSecrets" as a secret name and would blank its value. The only free text in it, the
+	// note, is scrubbed on its own and counted.
+	const note = opts.note === undefined ? null : redact(opts.note, home);
+	if (note) redacted += note.redacted;
+	fs.writeFileSync(
+		path.join(dir, "report.json"),
 		JSON.stringify(
 			{
 				createdAt: now.toISOString(),
 				version: opts.version ?? packageVersion(),
 				os: { platform: process.platform, release: os.release(), arch: process.arch },
 				runtime: { bun: process.versions.bun ?? null, node: process.versions.node },
-				note: opts.note ?? null,
+				note: note ? note.text : null,
 				files: files.filter((f) => f !== "report.json"),
 				redactedSecrets: redacted,
 				uploaded: false,
@@ -129,6 +134,7 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 			null,
 			2,
 		) + "\n",
+		{ mode: 0o600 },
 	);
 	return dir;
 }
