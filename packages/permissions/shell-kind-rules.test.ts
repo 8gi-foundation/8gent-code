@@ -70,3 +70,84 @@ describe("S4: one list of shell tools", () => {
 		}
 	});
 });
+
+describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refused in the sanitizer", () => {
+	type K = "git-bash" | "cmd" | "powershell" | "posix";
+	const refused = (c: string, kind: K) => sanitizeShellCommand(c, "win32", kind);
+	const isRefused = (c: string, kind: K) => refused(c, kind).safe === false;
+
+	test("cmd.exe %VAR:~n,m% substring expansion", () => {
+		for (const c of ["echo %COMSPEC:~0,1%", "echo %PATH:~-3%", "echo %A:~1%%B:~2,1%", 'echo "%COMSPEC:~0,1%"', "echo %COMS^PEC:~0,1%"]) {
+			const r = refused(c, "cmd");
+			expect(r.safe).toBe(false);
+			expect(r.reason).toContain("%VAR:~n,m%");
+		}
+	});
+
+	test("cmd.exe %VAR:a=b% replace expansion, including wildcard", () => {
+		for (const c of ["echo %PATH:a=b%", "echo %X:*a=%", 'echo "%X:ab=cd%"']) expect(isRefused(c, "cmd")).toBe(true);
+	});
+
+	test("cmd.exe delayed expansion !VAR! forms", () => {
+		for (const c of ["echo !COMSPEC!", "echo !COMSPEC:~0,1!", 'echo "!X:a=b!"', "echo ^!X^!"]) {
+			const r = refused(c, "cmd");
+			expect(r.safe).toBe(false);
+			expect(r.reason).toContain("delayed expansion");
+		}
+	});
+
+	test("a line that runs cmd from another shell kind is checked as cmd", () => {
+		expect(isRefused('cmd /c "echo %COMSPEC:~0,1%"', "powershell")).toBe(true);
+		expect(isRefused("cmd.exe /v:on /c echo !X!", "git-bash")).toBe(true);
+		expect(isRefused('cmd /c "echo %X:a=b%"', "posix")).toBe(true);
+	});
+
+	test("near misses stay allowed: plain %VAR%, literal % and ! in text", () => {
+		expect(isRefused("echo %PATH%", "cmd")).toBe(false);
+		expect(isRefused('echo "100% sure"', "cmd")).toBe(false);
+		expect(isRefused('echo "50%: done"', "cmd")).toBe(false);
+		expect(isRefused("echo hello!", "cmd")).toBe(false);
+		expect(isRefused('echo "wow! really!"', "cmd")).toBe(false);
+		expect(isRefused("git commit -m 'bump 100% : fixed!'", "git-bash")).toBe(false);
+		expect(isRefused("echo %PATH:x", "powershell")).toBe(false);
+	});
+
+	const ENC = ["e", "ec", "en", "enc", "enco", "encod", "encode", "encoded", "encodedc", "encodedco", "encodedcom", "encodedcomm", "encodedcomma", "encodedcomman", "encodedcommand"];
+
+	test("PowerShell kind: -EncodedCommand and every prefix, any case, refused", () => {
+		for (const p of ENC) {
+			for (const flag of [`-${p}`, `-${p.toUpperCase()}`, `-${p[0].toUpperCase()}${p.slice(1)}`]) {
+				const r = refused(`pwsh ${flag} SQBFAFgA`, "powershell");
+				expect(r.safe).toBe(false);
+				expect(r.reason).toContain("EncodedCommand");
+			}
+		}
+		expect(isRefused("-enc SQBFAFgA", "powershell")).toBe(true);
+		expect(isRefused("-enc:SQBFAFgA", "powershell")).toBe(true);
+		expect(isRefused("-EncodedArguments abc", "powershell")).toBe(true);
+	});
+
+	test("powershell or pwsh invoked from any shell kind: dash and slash forms refused", () => {
+		for (const kind of ["git-bash", "cmd", "powershell", "posix"] as const) {
+			for (const p of ENC) {
+				expect(isRefused(`powershell -${p} SQBFAFgA`, kind)).toBe(true);
+				expect(isRefused(`pwsh.exe /${p.toUpperCase()} SQBFAFgA`, kind)).toBe(true);
+			}
+			expect(isRefused("powershell -NoProfile -NonInteractive -EncodedCommand SQBFAFgA", kind)).toBe(true);
+			expect(isRefused('"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -ec SQBFAFgA', kind)).toBe(true);
+			expect(isRefused("powershell \u2013enc SQBFAFgA", kind)).toBe(true);
+		}
+	});
+
+	test("near misses stay allowed: -Encoding on Out-File, -ExecutionPolicy, -Command, robocopy /e", () => {
+		expect(isRefused("Get-Content a.txt | Out-File -Encoding utf8 b.txt", "powershell")).toBe(false);
+		expect(isRefused("Out-File -FilePath b.txt -Encoding utf8", "powershell")).toBe(false);
+		expect(isRefused("Set-Content -Encoding UTF8 -Path b.txt -Value hi", "powershell")).toBe(false);
+		expect(isRefused("pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1", "cmd")).toBe(false);
+		expect(isRefused("pwsh -NoProfile -Command Get-Date", "git-bash")).toBe(false);
+		expect(isRefused("powershell -NoProfile -Command Get-Date | Out-File -Encoding utf8 d.txt", "posix")).toBe(false);
+		expect(isRefused("robocopy a b /e", "powershell")).toBe(false);
+		expect(isRefused("git log -e", "git-bash")).toBe(false);
+		expect(isRefused("echo -e hi", "posix")).toBe(false);
+	});
+});

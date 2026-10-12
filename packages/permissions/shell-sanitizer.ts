@@ -290,7 +290,67 @@ export function sanitizeShellCommand(
 	kind?: ShellKind | "posix",
 ): ShellSanitizeResult {
 	const d = dialectFor(platform, kind);
+	// Encoded and expansion-trick forms hide the real command from every later check (8SO).
+	const hidden = refuseHiddenCommand(command, d);
+	if (hidden) return hidden;
 	return d === "posix" ? sanitizePosix(command, platform, kind) : sanitizeStrict(command, d, platform, kind);
+}
+
+const ENCODED_COMMAND = "encodedcommand";
+const ENCODED_ARGUMENTS = "encodedarguments";
+/** powershell / pwsh as a program word (also a path ending in powershell.exe), not a longer name. */
+const INVOKES_PWSH = /(^|[^A-Za-z0-9_.-])(powershell|pwsh)(\.exe)?(?![A-Za-z0-9_-])/i;
+const INVOKES_CMD = /(^|[^A-Za-z0-9_.-])cmd(\.exe)?(?![A-Za-z0-9_-])/i;
+
+/**
+ * True when `token` (quotes already stripped) is PowerShell's -EncodedCommand
+ * or any prefix PowerShell accepts for it: -e, -ec, -en, -enc, -enco ... up to
+ * the full name, case-insensitive, dash or (for powershell.exe) slash, with an
+ * optional `:value`. `-Encoding` is not a prefix of it, so Out-File -Encoding
+ * is untouched. -EncodedArguments (the sibling) is refused from -encodeda on.
+ */
+function isEncodedCommandFlag(token: string, allowSlash: boolean): boolean {
+	const m = /^([-\u2013\u2014\u2015]|\/)([A-Za-z]+)(?:[:=].*)?$/.exec(token);
+	if (!m) return false;
+	if (m[1] === "/" && !allowSlash) return false;
+	const w = m[2].toLowerCase();
+	if (w === "ec" || ENCODED_COMMAND.startsWith(w)) return true; // -ec is PowerShell's own alias, not a prefix
+	return w.length >= 8 && ENCODED_ARGUMENTS.startsWith(w);
+}
+
+function refuseHiddenCommand(command: string, d: Dialect): ShellSanitizeResult | null {
+	const invokesPwsh = INVOKES_PWSH.test(command);
+	if (d === "pwsh" || invokesPwsh) {
+		const tokens = command.split(/\s+/).map((t) => t.replace(/^['"]+|['"]+$/g, ""));
+		// Inside the PowerShell host only the dash form is a parameter; powershell.exe also takes /.
+		if (tokens.some((t) => isEncodedCommandFlag(t, invokesPwsh))) {
+			return {
+				safe: false,
+				reason:
+					"PowerShell -EncodedCommand (and its abbreviations -e, -ec, -enc ...) hides the command from the check and is not allowed. Pass the command as plain text",
+			};
+		}
+	}
+	if (d === "cmd" || INVOKES_CMD.test(command)) {
+		// cmd.exe expands % and ! inside double quotes too, and drops ^ before it parses, so scan both forms.
+		for (const text of [command, command.replace(/\^/g, "")]) {
+			if (/%[^%:\s"]+:[^%\r\n]*%/.test(text)) {
+				return {
+					safe: false,
+					reason:
+						"cmd.exe %VAR:~n,m% and %VAR:a=b% expansion builds text the check cannot read and is not allowed. Write the value out",
+				};
+			}
+			if (/![^!\s"]+!/.test(text)) {
+				return {
+					safe: false,
+					reason:
+						"cmd.exe delayed expansion !VAR! may be on and builds text the check cannot read, so it is not allowed. Write the value out",
+				};
+			}
+		}
+	}
+	return null;
 }
 
 function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellKind | "posix"): ShellSanitizeResult {
