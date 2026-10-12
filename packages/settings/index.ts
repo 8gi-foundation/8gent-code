@@ -28,6 +28,7 @@ export type {
 	AgentsSettings,
 	AgentNames,
 	MusicSettings,
+	RetrySettings,
 } from "./schema.js";
 
 export { getVoiceForRole } from "./voice.js";
@@ -36,8 +37,15 @@ export type { AgentRoleKey } from "./agents.js";
 
 export { DEFAULT_SETTINGS } from "./defaults.js";
 
+export { resolveRetrySettings, RETRY_LIMITS } from "./retry.js";
+export type { ResolvedRetrySettings } from "./retry.js";
+export { PROJECT_SETTINGS_ALLOWLIST, filterProjectSettings } from "./project.js";
+export type { IgnoredSetting } from "./project.js";
+
 export {
 	loadSettings,
+	loadGlobalSettings,
+	loadSettingsReport,
 	saveSettings,
 	getSetting,
 	setSetting,

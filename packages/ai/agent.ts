@@ -11,6 +11,8 @@
 
 import { ToolLoopAgent, stepCountIs } from "ai";
 import type { GenerateTextResult, LanguageModel, ModelMessage, ToolSet } from "ai";
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
 import { type ProviderConfig, createModel } from "./providers";
 import { type AgentTools, type RuntimeParams, type ToolContext, agentTools, getRuntimeParams } from "./tools";
 
@@ -233,9 +235,14 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	// the position it was inserted at. Reset when a run starts again (step 0).
 	const steerLog: SteerEntry[] = [];
 
+	// Retries per request: only when the user set settings.retry.maxRetries; otherwise the
+	// AI SDK's own default stays (C4).
+	const configuredRetries = resolveRetrySettings(loadSettings().retry).maxRetries;
+
 	const agent = new ToolLoopAgent<never, AgentTools>({
 		model,
 		instructions: config.instructions,
+		...(configuredRetries !== undefined ? { maxRetries: configuredRetries } : {}),
 		// Cap response size for local providers to keep within their context window
 		...(config.maxOutputTokens
 			? { maxOutputTokens: config.maxOutputTokens }

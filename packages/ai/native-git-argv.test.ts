@@ -33,6 +33,7 @@ const saved = {
 
 // Each payload would create MARK through a shell. Through argv it is just text.
 const MARK = path.join(scratch, "PWNED");
+const fakeHome = path.join(scratch, "home");
 const PAYLOADS = [
 	`x; touch ${MARK}`,
 	`x$(touch ${MARK})`,
@@ -59,7 +60,10 @@ beforeAll(() => {
 	process.env.EIGHT_DATA_DIR = path.join(scratch, "data");
 	process.env.EIGHT_SYSTEM_ONE = "0";
 	// The run_command sandbox protects (and audits under) this fake home, never the real ~/.8gent.
-	process.env.EIGHT_FAKE_HOME = scratch;
+	// A subdirectory, so MARK and the payloads are not under home: a $( ) or backtick
+	// that names home is refused by the startup-code check (#4009) before git runs.
+	fs.mkdirSync(fakeHome, { recursive: true });
+	process.env.EIGHT_FAKE_HOME = fakeHome;
 	refreshSecurityEnvForTests();
 	process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = "Test";
 	process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = "test@example.invalid";
@@ -348,7 +352,7 @@ describe("the argv runner gets the run_command OS sandbox (#4009, #3612)", () =>
 		"live: repo config code run by a git tool cannot write ~/.8gent startup code",
 		() =>
 			withSeatbelt(undefined, async () => {
-				const hooks = path.join(scratch, ".8gent", "hooks.yaml");
+				const hooks = path.join(fakeHome, ".8gent", "hooks.yaml");
 				const ran = path.join(scratch, "FSMONITOR-RAN");
 				fs.mkdirSync(path.dirname(hooks), { recursive: true });
 				fs.writeFileSync(hooks, "- event: never\n");
