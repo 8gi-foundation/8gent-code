@@ -13,6 +13,7 @@ import {
 	REVIEW_FOCUS_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	TOOL_CATALOG_SEGMENT,
+	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
@@ -137,5 +138,17 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 		expect(LOCAL_SERVER_CURL_SHORT).not.toContain("\u2014");
 		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Do not pass -L", "Location header"])
 			expect(LOCAL_SERVER_CURL_SHORT).toContain(rule);
+	});
+
+	it("the login note (#4072) is short, names the redaction marker and the one-line sed, and sits with the curl rules", () => {
+		expect(LOCAL_LOGIN_NOTE.length).toBeLessThanOrEqual(300);
+		expect(LOCAL_LOGIN_NOTE).not.toContain("—");
+		for (const rule of ["[REDACTED:", "sed -n 's/^Password: *//p' FILE", "exactly as printed", "never retype"])
+			expect(LOCAL_LOGIN_NOTE).toContain(rule);
+		// Generic: no fixture file name, no loopback address.
+		expect(LOCAL_LOGIN_NOTE).not.toMatch(/TASK\.txt|127\.0\.0\.1|localhost/);
+		const local = TOOL_PATTERNS_SEGMENT.indexOf("### Local servers");
+		const next = TOOL_PATTERNS_SEGMENT.indexOf("### ", local + 1);
+		expect(TOOL_PATTERNS_SEGMENT.slice(local, next)).toContain(LOCAL_LOGIN_NOTE);
 	});
 });

@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
+import { LOCAL_LOGIN_NOTE, LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
 import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
@@ -173,6 +173,8 @@ describe("headless prompt diet", () => {
 			expect(sys).toContain(".tmp/");
 			expect(sys).toContain("never /tmp");
 			expect(sys).toContain("Location header");
+			// The login note (#4072) travels with the curl rules on both paths.
+			expect(sys).toContain(LOCAL_LOGIN_NOTE);
 			expect(sys).not.toContain("\u2014");
 		}
 	}, 60_000);

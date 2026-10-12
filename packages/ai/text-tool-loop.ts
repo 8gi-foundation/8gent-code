@@ -198,6 +198,23 @@ const SHELL_WRITE_NOTE =
 	"was written unless you call write_file and see its success result.";
 
 /**
+ * A run_command refused for `;`, `&&` or `||` chaining (permissions/shell-sanitizer.ts
+ * wording). Structural: the sanitizer's own [BLOCKED] prefix and reason, never prose.
+ */
+export function isChainRefusal(result: string): boolean {
+	return /^\s*\[BLOCKED\][^\n]*\bcommand chaining\b[^\n]*\bis not allowed\b/i.test(result);
+}
+
+/**
+ * Appended to the second and later chaining refusals in one turn (#4072, run
+ * 2026-10-12_155723: three `;` chains refused, each costing a 27B round). The refusal
+ * already says to split the command; this adds the count, which the model cannot see.
+ */
+export function chainRefusalNote(count: number): string {
+	return `\n\nNote: ${count} chained commands refused this turn. Send each piece as its own run_command call, in order; a chained one is refused every time.`;
+}
+
+/**
  * The message fed back when a reply ended inside an unclosed tool_call block.
  * Structural, not a guess at wording: the parser saw a `tool_call` fence whose
  * JSON object never closed.
@@ -620,6 +637,8 @@ export async function runTextToolAgent(
 	let prevRoundHadSuccess = false;
 	// Did the previous round run tools that ALL failed or were refused?
 	let prevRoundAllRefused = false;
+	// run_command calls refused for command chaining this turn (chainRefusalNote).
+	let chainRefusals = 0;
 	// Gate block reasons from the previous round, and since the last round
 	// that ran a tool successfully (deduped, in order).
 	let prevRoundBlockReasons: string[] = [];
@@ -948,10 +967,14 @@ export async function runTextToolAgent(
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
 			// this result so the next round is steered back to the right tool.
-			const note =
+			let note =
 				tc.name === "run_command" && isShellFileWrite(tc.arguments?.command)
 					? SHELL_WRITE_NOTE
 					: "";
+			// A repeated chaining refusal gets its count: the refusal text alone was
+			// ignored three times in one turn (#4072).
+			if (tc.name === "run_command" && isChainRefusal(result) && ++chainRefusals > 1)
+				note += chainRefusalNote(chainRefusals);
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 
