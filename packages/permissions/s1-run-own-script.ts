@@ -1,5 +1,5 @@
 /**
- * System One: running a script this session wrote in the workspace's .tmp (#4121).
+ * System One: running a shell script this session wrote in the workspace's .tmp (#4121).
  *
  * Pilot design-mockup-practice (main 00f7e8ae, run 2026-10-12_224020): the
  * layout check tool could not render the page, so the model wrote
@@ -10,45 +10,48 @@
  * "no opinion" and goes to the judge as before. The gate calls this only in
  * System One's default mode, after every earlier layer allowed the command.
  *
+ * After the 8SO hold on #4123: bash and sh only (no python3, no bun), and the
+ * script is read with an allowlist, not a deny-list.
+ *
  * `runOwnScript` answers ok only when ALL hold:
  *   - POSIX (never on win32), an absolute working directory, a session record;
- *   - the whole command is `INTERP PATH`: exactly two words of
- *     [A-Za-z0-9._/+,=@:-], so no flag, `--`, env prefix, quote, glob, `$`,
- *     redirect, pipe, `;`, `&`, newline or extra argument; INTERP is bash or
- *     sh (PATH ends in .sh or has no extension), python3 (.py) or bun (.ts,
- *     .mts, .js, .mjs); decideRules fires nothing, no prompt-control text;
- *   - PATH is `.tmp/NAME...` relative to the working directory with no `.`,
- *     `..` or empty segment; no component from the workspace root down to it
- *     is a symlink; its real path is inside the workspace's real .tmp;
+ *   - the command is exactly `bash .tmp/FILE` or `sh .tmp/FILE`, one space,
+ *     no leading or trailing whitespace: no flag, `--`, env prefix, quote,
+ *     glob, `$`, redirect, pipe, `;`, `&`, newline or second argument; FILE
+ *     ends in .sh or has no extension; decideRules fires nothing, no
+ *     prompt-control text;
+ *   - the path has no `.`, `..` or empty segment; no component from the
+ *     workspace root down to it is a symlink; its real path is inside the
+ *     workspace's real .tmp;
  *   - the file is a regular file with nlink 1, owned by this process's user,
  *     born no earlier than this process started (and the file system reports
  *     a birth time), and the session's record (s1-created-files.ts) says this
  *     session created it and it is still that file (device, inode, change and
- *     birth time, size): a pre-existing, renamed-in or replaced file fails;
- *   - for bun, no bunfig.toml and no .env* in the working directory (bun
- *     would preload or load them);
- *   - its text (at most 64 KB, ASCII only) passes `scriptProblem` below: no
- *     listener on anything but loopback (and a server that binds every
- *     interface by default must name loopback), no URL to a non-loopback
- *     host, no absolute path outside the workspace, no sudo, no recursive
- *     delete, no home directory, no spawn, eval or encoded text, no package
- *     install. A shell script must also be literal: no `$`, backtick or
- *     backslash, and decideRules fires nothing on any line.
+ *     birth time, size): a pre-existing, renamed-in, hard-linked or rewritten
+ *     file fails;
+ *   - its text passes `scriptProblem`: at most 64 KB, made only of
+ *     [A-Za-z0-9 ._/:=,@+%-], tabs, newlines and the operators `; & | < > #`
+ *     (so no quote, `$`, backtick, backslash, paren, brace, glob, `~`, `!` or
+ *     non-ASCII), no here-doc, decideRules fires nothing on any line; every
+ *     command (each part between `; & |`, an `exec ` prefix allowed) is one
+ *     of SAFE_COMMANDS, or exactly `python3 -m http.server PORT --bind
+ *     127.0.0.1` (the only listener, loopback only); `cd` takes one
+ *     argument; and every argument and redirect target, resolved from the
+ *     directory the script has cd'd to, stays inside the workspace by
+ *     spelling and by real path (no `..`, no absolute path outside it, no
+ *     symlink out). A flag word may not carry a path.
  *
  * When the command has the right shape but the script fails, the result
  * carries a hint for the block message saying what would pass.
  *
- * Known limits, on purpose: the text scan is a deny-list over python and
- * JavaScript, which cannot be complete (a string built at run time is not
- * seen); the shell case is literal-only for that reason. The record, not the
- * scan, is the main guard: the file must be one this session wrote. TOCTOU
- * between this check and the spawn, as for the sibling lanes. A long-running
- * server still runs in the foreground of run_command.
+ * Known limits, on purpose: TOCTOU between this check and the spawn, as for
+ * the sibling lanes. A long-running server still runs in the foreground of
+ * run_command.
  *
  * Synchronous, never throws.
  */
 
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -57,159 +60,115 @@ import { inside } from "./s1-rm-nothing";
 
 export type RunOwnScript = { ok: true; reason: string } | { ok: false; hint?: string };
 
-const WORD = /^[A-Za-z0-9._/+,=@:-]+$/;
-const INTERP: Record<string, RegExp> = {
-	bash: /(^|\/)[^./]+(\.sh)?$/,
-	sh: /(^|\/)[^./]+(\.sh)?$/,
-	python3: /\.py$/,
-	bun: /\.(ts|mts|js|mjs)$/,
-};
+const COMMAND = /^(bash|sh) (\.tmp\/[A-Za-z0-9._/+,=@:-]+)$/;
+const SHELL_FILE = /(^|\/)[^./]+(\.sh)?$/;
+const SHEBANG = /^#!(\/bin\/(ba)?sh|\/usr\/bin\/env (ba)?sh)[ \t]*$/;
+const SCRIPT_CHARS = /^[A-Za-z0-9 \t\n._/:=,@+%#;&|<>-]*$/;
+/** Commands a script may run. Nothing here runs another program or reaches the network. */
+const SAFE_COMMANDS = new Set(["cd", "echo", "ls", "cat", "mkdir", "pwd", "sleep", "true"]);
+/** The one listener: python's static server on loopback. */
+const LOOPBACK_SERVER = /^python3 -m http\.server \d{1,5} (--bind|-b) 127\.0\.0\.1$/;
 const MAX_BYTES = 64 * 1024;
 const NO: RunOwnScript = { ok: false };
 /** When this process started, in ns, less a second for coarse clocks. */
 const SINCE_NS = BigInt(Math.floor(performance.timeOrigin) - 1000) * 1_000_000n;
 
 const WHAT_PASSES =
-	"A script runs without review only as `bash|sh|python3|bun .tmp/FILE` with no other words, where FILE is one this session wrote with write_file, binds nothing but 127.0.0.1 (for example `python3 -m http.server 8731 --bind 127.0.0.1`), fetches only loopback URLs, and names no path outside the workspace. Shell scripts must be literal commands, with no `$` or backtick.";
+	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace: no quotes, `$`, backticks, `..` or here-docs.";
 
 function hint(why: string): RunOwnScript {
 	return { ok: false, hint: `${why} ${WHAT_PASSES}` };
 }
 
-const LOOPBACK = /^(127(\.\d{1,3}){3}|::1|\[::1\]|localhost)$/i;
-const isLoopback = (h: string) => LOOPBACK.test(h);
-
-/** Patterns refused anywhere in a script, with the reason given. */
-const DENY: Array<[RegExp, string]> = [
-	[/\b(sudo|doas|pkexec)\b|\bsu\s+-/, "it uses sudo"],
-	[
-		/\brm\s+(-[A-Za-z]*[rR]|--recursive)|\brmtree\b|recursive\s*[:=]\s*(true|True)/,
-		"it deletes recursively",
-	],
-	[
-		/\bHOME\b|expanduser|homedir|Path\.home|(^|[^\w.~-])~(?=[/\s"']|$)/m,
-		"it names the home directory",
-	],
-	[
-		/\b(eval|exec|compile|getattr|globals|__import__|Function|require|import)\s*\(|\bbase64\b|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|importlib|\bctypes\b|\bpty\b/,
-		"it evaluates built or encoded code",
-	],
-	[
-		/\bsubprocess\b|\bos\.(system|popen|exec\w*|spawn\w*|fork)\b|child_process|Bun\.(spawn\w*|\$)|\bspawn(Sync)?\s*\(/,
-		"it starts other programs",
-	],
-	[/\b(npx|bunx|pip3?|npm|pnpm|yarn)\b|\bbun\s+(add|install|x)\b/, "it installs packages"],
-	[/\b(nc|ncat|netcat|socat)\b/, "it opens a raw network listener"],
-	[/(^|[\s;&|])(eval|source)\b|(^|[\s;&|])\.\s+\S/m, "it runs text it did not spell out"],
-];
-
-/** The host of each `scheme://host` in `text`; empty when no literal host follows. */
-function urlHosts(text: string): string[] {
-	const out: string[] = [];
-	for (const m of text.matchAll(/:\/\/(\[[^\]]*\]|[^/\s"'`:?#)]*)/g)) out.push(m[1] ?? "");
-	return out;
-}
-
-/** Null when the listener parts of `text` stay on loopback, else why not. */
-function bindProblem(text: string): string | null {
-	for (const m of text.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g))
-		if (!isLoopback(m[0])) return `it names the address ${m[0]}, which is not loopback`;
-	for (const m of text.matchAll(/["']\s*([0-9a-fA-F:]*::[0-9a-fA-F:]*|\[[0-9a-fA-F:]*\])\s*["']/g))
-		if (!isLoopback(m[1] ?? "")) return `it names the address ${m[1]}, which is not loopback`;
-	for (const m of text.matchAll(
-		/(--bind|--host|(?<![\w-])-b|\bhost(?:name)?\s*[=:]|\bHOST\s*=|\blisten\b)\s*["']?([^\s"',)}]*)/g,
-	)) {
-		const v = m[2] ?? "";
-		if (!isLoopback(v))
-			return `it binds \`${v || "(nothing)"}\` with ${m[1]?.trim()}, which is not loopback`;
-	}
-	if (/\(\s*\(\s*(""|'')/.test(text)) return "it binds an empty host, which means every interface";
-	for (const line of text.split("\n")) {
-		if (
-			/http\.server|SimpleHTTPServer/.test(line) &&
-			/-m\s+http\.server|SimpleHTTPServer/.test(line)
-		) {
-			if (!/(--bind|(?<![\w-])-b)\s+(127(\.\d{1,3}){3}|localhost|::1)\b/.test(line))
-				return "`python3 -m http.server` binds every interface unless it is given `--bind 127.0.0.1`";
-		}
-	}
-	if (
-		/Bun\.serve/.test(text) &&
-		!/hostname\s*:\s*["'](127(\.\d{1,3}){3}|localhost|::1)["']/.test(text)
-	)
-		return '`Bun.serve` binds every interface unless it is given `hostname: "127.0.0.1"`';
-	if (/\.listen\(\s*[^,()]+\)/.test(text))
-		return "`.listen(port)` with no host binds every interface";
-	return null;
-}
-
 /**
- * Null when every absolute path in `text` is in the workspace (or /dev/null
- * and friends), else why not. Outside shell, a lone `/` after a space is
- * division, not the root directory.
+ * True when `p`, resolved from `dir`, stays inside the workspace by spelling
+ * (as `cwd` or as its real path `root`) and by real path.
  */
-function pathProblem(text: string, root: string, cwd: string, shell: boolean): string | null {
-	const noUrls = text.replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, " ");
-	for (const m of noUrls.matchAll(/(?:^|[\s"'=(,:[\]{}<>|;&])(\/[A-Za-z0-9._/@+-]*)/gm)) {
-		const p = m[1] ?? "/";
-		if (/^\/dev\/(null|stdout|stderr)$/.test(p)) continue;
-		if (!shell && p === "/" && /^\s/.test(m[0])) continue;
-		const lexical = path.resolve(p);
-		let real = lexical;
+function staysInside(p: string, dir: string, cwd: string, root: string): boolean {
+	if (p.split("/").includes("..")) return false;
+	const abs = path.resolve(dir, p);
+	if (!inside(abs, root) && !inside(abs, cwd)) return false;
+	let probe = abs;
+	for (;;) {
 		try {
-			real = realpathSync(lexical);
+			return inside(realpathSync(probe), root);
 		} catch {
-			// Not there yet: judge it by its spelling.
+			const up = path.dirname(probe);
+			if (up === probe) return false;
+			probe = up;
 		}
-		const inWs = (q: string) => inside(q, root) || inside(q, cwd);
-		if (!inWs(lexical) || !inWs(real)) return `it names \`${p}\`, which is outside the workspace`;
+	}
+}
+
+/** Null when the script text is acceptable (see the header), else why not. */
+export function scriptProblem(src: string, cwd: string, root: string): string | null {
+	if (src.length > MAX_BYTES) return "it is larger than 64 KB";
+	if (src.startsWith("#!")) {
+		const nl = src.indexOf("\n");
+		const first = nl < 0 ? src : src.slice(0, nl);
+		if (!SHEBANG.test(first)) return "its #! line names something other than sh or bash";
+		src = nl < 0 ? "" : src.slice(nl + 1);
+	}
+	if (!SCRIPT_CHARS.test(src))
+		return "it uses a character outside plain words (a quote, `$`, backtick, backslash, paren, brace, glob, `~` or non-ASCII)";
+	if (promptControlText(src) !== null) return "it carries prompt-control text";
+	if (/<<|<>|>\|/.test(src)) return "it uses a here-doc or an unusual redirect";
+	let dir = cwd;
+	for (const raw of src.split("\n")) {
+		const line = raw.replace(/(^|[ \t])#.*$/, "").trim();
+		if (line === "") continue;
+		const fired = decideRules(line).rules;
+		if (fired.length > 0) return `its line \`${line}\` fires rule ${fired.join(", ")}`;
+		for (const part of line.split(/[;&|]+/)) {
+			const words = part
+				.trim()
+				.split(/[ \t]+/)
+				.filter(Boolean);
+			if (words[0] === "exec") words.shift();
+			if (words.length === 0) continue;
+			if (LOOPBACK_SERVER.test(words.join(" "))) continue;
+			const cmd = words[0] as string;
+			if (cmd.startsWith("python3") && words.includes("http.server"))
+				return "`python3 -m http.server` must be exactly `python3 -m http.server PORT --bind 127.0.0.1`: anything else binds every interface or does more";
+			if (!SAFE_COMMANDS.has(cmd)) return `it runs \`${cmd}\`, which is not on the list`;
+			const args = words.slice(1);
+			const targets: string[] = [];
+			for (let i = 0; i < args.length; i++) {
+				const a = args[i] as string;
+				// `2>&1` never gets here: `&` splits it, and the parts fail.
+				if (/^\d?(>>?|<)$/.test(a)) {
+					const t = args[++i];
+					if (!t) return "it has a redirect with no target";
+					targets.push(t);
+					continue;
+				}
+				const glued = /^\d?(?:>>?|<)(.+)$/.exec(a);
+				if (glued) {
+					targets.push(glued[1] as string);
+					continue;
+				}
+				if (a.startsWith("-")) {
+					if (a.includes("/")) return `the flag \`${a}\` carries a path`;
+					continue;
+				}
+				targets.push(a);
+			}
+			for (const t of targets)
+				if (!staysInside(t, dir, cwd, root))
+					return `it names \`${t}\`, which is outside the workspace`;
+			if (cmd === "cd") {
+				if (targets.length !== 1 || args.length !== 1) return "`cd` must take exactly one path";
+				dir = path.resolve(dir, targets[0] as string);
+			}
+		}
 	}
 	return null;
 }
 
-/** Null when the script text is acceptable for `interp` (see the header), else why not. */
-export function scriptProblem(
-	src: string,
-	interp: string,
-	root: string,
-	cwd: string,
-): string | null {
-	if (src.length > MAX_BYTES) return "it is larger than 64 KB";
-	if (/[^\t\n\r\x20-\x7e]/.test(src)) return "it has non-ASCII or control characters";
-	if (promptControlText(src) !== null) return "it carries prompt-control text";
-	const lines = src.split("\n");
-	if (lines[0]?.startsWith("#!")) {
-		if (
-			!/^#!(\/usr\/bin\/env (ba)?sh|\/usr\/bin\/env python3|\/usr\/bin\/env bun|\/bin\/(ba)?sh|\/usr\/bin\/(ba)?sh|\/usr\/bin\/python3)\s*$/.test(
-				lines[0],
-			)
-		)
-			return "its #! line names an unexpected interpreter";
-		lines.shift();
-	}
-	const comment = interp === "bun" ? /^\s*\/\// : /^\s*#/;
-	const code = lines.filter((l) => !comment.test(l)).join("\n");
-	const shell = interp === "bash" || interp === "sh";
-	if (shell) {
-		if (/[$`\\]/.test(code))
-			return "a shell script here must be literal: it uses `$`, a backtick or a backslash";
-		for (const line of code.split("\n")) {
-			const fired = decideRules(line).rules;
-			if (fired.length > 0) return `its line \`${line.trim()}\` fires rule ${fired.join(", ")}`;
-		}
-	}
-	for (const [re, why] of DENY) if (re.test(code)) return why;
-	for (const h of urlHosts(code))
-		if (!isLoopback(h)) return `it fetches \`${h || "a URL it builds"}\`, which is not loopback`;
-	if (/\b(curl|wget)\b/.test(code) && urlHosts(code).length === 0)
-		return "it runs curl or wget without a literal loopback URL";
-	return bindProblem(code) ?? pathProblem(code, root, cwd, shell);
-}
-
 /**
- * ok when `command` runs, with no other words, a script this session wrote
- * under the workspace's .tmp whose text stays on loopback and in the
- * workspace; see the header.
+ * ok when `command` runs, with no other words, a shell script this session
+ * wrote under the workspace's .tmp whose text is on the allowlist; see the
+ * header.
  */
 export function runOwnScript(
 	command: string,
@@ -218,21 +177,13 @@ export function runOwnScript(
 ): RunOwnScript {
 	try {
 		if (process.platform === "win32" || !cwd || !path.isAbsolute(cwd) || !created) return NO;
-		const text = command.trim();
-		const words = text.split(" ");
-		if (words.length !== 2 || !words.every((w) => WORD.test(w))) return NO;
-		const [interp, rel] = words as [string, string];
-		const ext = INTERP[interp];
-		if (!ext) return NO;
-		if (promptControlText(text) !== null || decideRules(text).rules.length > 0) return NO;
+		const m = COMMAND.exec(command);
+		if (!m) return NO;
+		const [, interp, rel] = m as unknown as [string, string, string];
+		if (promptControlText(command) !== null || decideRules(command).rules.length > 0) return NO;
 		const segs = rel.split("/");
-		if (
-			segs[0] !== ".tmp" ||
-			segs.length < 2 ||
-			segs.some((s) => s === "" || s === "." || s === "..")
-		)
-			return NO;
-		if (!ext.test(rel)) return hint(`\`${interp}\` does not match the file type of \`${rel}\`.`);
+		if (segs.some((s) => s === "" || s === "." || s === "..")) return NO;
+		if (!SHELL_FILE.test(rel)) return hint(`\`${rel}\` is not a shell script name.`);
 		const root = realpathSync(cwd);
 		let cur = root;
 		for (const s of segs) {
@@ -253,18 +204,11 @@ export function runOwnScript(
 			return hint(`\`${rel}\` was not created during this session.`);
 		if (!created.createdBySession(cur))
 			return hint(`\`${rel}\` is not a file this session wrote (or it changed since).`);
-		if (interp === "bun") {
-			if (
-				existsSync(path.join(cwd, "bunfig.toml")) ||
-				readdirSync(cwd).some((n) => n.startsWith(".env"))
-			)
-				return hint("bun would load the bunfig.toml or .env file in the working directory.");
-		}
-		const why = scriptProblem(readFileSync(cur, "utf8"), interp, root, cwd);
+		const why = scriptProblem(readFileSync(cur, "utf8"), cwd, root);
 		if (why) return hint(`\`${rel}\`: ${why}.`);
 		return {
 			ok: true,
-			reason: `${interp} of ${rel}, a script this session wrote: loopback only, workspace paths only`,
+			reason: `${interp} of ${rel}, a script this session wrote: allowlisted literal commands, loopback only, workspace paths only`,
 		};
 	} catch {
 		return NO;

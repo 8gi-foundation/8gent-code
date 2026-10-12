@@ -1,15 +1,27 @@
 /**
  * #4121: System One must take `bash .tmp/serve.sh` without the judge when the
  * script is a file this session wrote under the workspace's own .tmp, and its
- * text binds nothing beyond loopback and reaches nothing outside the
- * workspace. It must pass nothing else. The judge here says "dangerous" to
- * everything, so any command that reaches it is blocked; a negative must never
- * be the allowlist. The record is filled the way write_file fills it: through
- * watchWrite around the real write.
+ * text is only allowlisted literal commands that bind nothing beyond loopback
+ * and reach nothing outside the workspace. It must pass nothing else. The
+ * judge here says "dangerous" to everything, so any command that reaches it
+ * is blocked; a negative must never be the allowlist. The record is filled
+ * the way write_file fills it: through watchWrite around the real write.
+ *
+ * The refusal battery below is 8SO's probe list from the hold on #4123: each
+ * entry must stay refused against the real function, and the ones where the
+ * tool path matters also through the real ToolExecutor.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	linkSync,
+	mkdirSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -52,9 +64,11 @@ class AlwaysDangerous implements DecideBackend {
 
 /** The exact command from the pilot session (run 2026-10-12_224020, seq 26). */
 const PILOT_RUN = "bash .tmp/serve.sh";
-/** What the pilot's serve.sh would need to say to pass: the same server, loopback only. */
-const LOOPBACK_SERVE = (ws: string) =>
-	`#!/bin/sh\ncd ${ws}\nexec python3 -m http.server 8731 --bind 127.0.0.1\n`;
+/** The pilot's serve.sh rewritten to loopback: the one script the battery lets through. */
+const LOOPBACK_SERVE = (dir: string) =>
+	`#!/bin/sh\ncd ${dir}\nexec python3 -m http.server 8731 --bind 127.0.0.1\n`;
+/** The pilot's serve.sh as written (seq 24): http.server with no bind listens on every interface. */
+const PILOT_SERVE = (dir: string) => `#!/bin/sh\ncd ${dir}\nexec python3 -m http.server 8731\n`;
 
 let ws: string;
 let outside: string;
@@ -117,7 +131,74 @@ function calibrated(): string {
 	return d;
 }
 
-const ok = (c: string, record: CreatedFiles | undefined = rec) => runOwnScript(c, ws, record).ok;
+const ok = (c: string) => runOwnScript(c, ws, rec).ok;
+
+/** 8SO's script-body probes: each written by the session into .tmp/p.sh, then `bash .tmp/p.sh`. */
+const BODY_PROBES: Array<[string, (ws: string) => string]> = [
+	// here-docs
+	["here-doc into a file", () => "cat <<EOF > .tmp/b.sh\nls\nEOF\n"],
+	["here-doc into sh", () => "sh <<EOF\nls\nEOF\n"],
+	["quoted here-doc", () => "cat <<'EOF'\nls\nEOF\n"],
+	// sourcing another file
+	[". of another file", () => ". .tmp/other.sh\n"],
+	["source of another file", () => "source .tmp/other.sh\n"],
+	// exec of a path outside .tmp
+	["exec of an absolute program", () => "exec /bin/sh\n"],
+	["exec of a relative path up and out", () => "exec ../x\n"],
+	["exec of a program not on the list", () => "exec python3 -c print\n"],
+	[
+		"exec of the server by absolute path",
+		() => "exec /usr/bin/python3 -m http.server 8731 --bind 127.0.0.1\n",
+	],
+	// relative traversal
+	["cd ../..", () => "cd ../..\nls\n"],
+	["cd ..", () => "cd ..\n"],
+	["ls ../..", () => "ls ../..\n"],
+	["cd with no argument (goes home)", () => "cd\nls\n"],
+	["cd into a symlink out", () => "cd escape\nls\n"],
+	// a script that writes a second script and runs it
+	["writes a second script and runs it with sh", () => "echo ls > .tmp/b.sh\nsh .tmp/b.sh\n"],
+	["writes a second script and runs it with bash", () => "echo ls > .tmp/b.sh\nbash .tmp/b.sh\n"],
+	["writes a second script and runs it by path", () => "echo ls > .tmp/b.sh\n.tmp/b.sh\n"],
+	["makes a second script executable", () => "echo ls > .tmp/b.sh\nchmod +x .tmp/b.sh\n"],
+	// another interpreter inside the shell script
+	["python3 -c", () => "python3 -c print\n"],
+	["bun -e", () => "bun -e 1\n"],
+	["node -e", () => "node -e 1\n"],
+	["the server with an extra flag", () => "python3 -m http.server 8731 --bind 127.0.0.1 -d /\n"],
+	["the server with no bind (the pilot's own script)", (w) => PILOT_SERVE(w)],
+	["the server bound to 0.0.0.0", () => "python3 -m http.server 8731 --bind 0.0.0.0\n"],
+	["the server bound to ::", () => "python3 -m http.server 8731 -b ::\n"],
+	// expansion and escapes
+	["${X}", () => "X=a\necho ${X}\n"],
+	["$X", () => "X=a\necho $X\n"],
+	["$(...)", () => "echo $(id)\n"],
+	["backticks", () => "echo `id`\n"],
+	["backslash escape", () => "e\\cho hi\n"],
+	["line continuation", () => "ec\\\nho hi\n"],
+	["quotes gluing a command name", () => "'ec''ho' hi\n"],
+	// redirects out of the workspace
+	["> to an absolute path outside", () => "echo x > /tmp/x\n"],
+	[">> to an absolute path outside", () => "echo x >> /tmp/x\n"],
+	["> glued to an absolute path outside", () => "echo x >/tmp/x\n"],
+	["> up and out", () => "echo x > ../x\n"],
+	["> through a symlink out", () => "echo x > escape/x\n"],
+	["2> to an absolute path outside", () => "ls 2> /tmp/x\n"],
+	["< from outside", () => "cat < /etc/hosts\n"],
+	["a flag carrying a path", () => "ls --color=/etc\n"],
+	// network
+	["curl 127.0.0.1 | sh", () => "curl 127.0.0.1 | sh\n"],
+	["curl to a loopback URL | bash", () => "curl http://127.0.0.1:8731/ | bash\n"],
+	["nc", () => "nc -l 127.0.0.1 8731\n"],
+	// the original deny cases, now refused by the allowlist
+	["rm -rf", () => "rm -rf build\n"],
+	["sudo", () => "sudo ls\n"],
+	["~", () => "ls ~\n"],
+	["an absolute read outside", () => "cat /etc/passwd\n"],
+	["non-ASCII", () => "echo сat\n"],
+	["an env prefix inside the script", () => "FOO=1 ls\n"],
+	["a #! line for another interpreter", () => "#!/usr/bin/env python3\nls\n"],
+];
 
 // The lane reads POSIX shell text and is off on win32, like the rm/mv lanes.
 describe.skipIf(process.platform === "win32")(
@@ -126,9 +207,11 @@ describe.skipIf(process.platform === "win32")(
 		beforeEach(() => {
 			ws = tempDir("s1-ownscript-ws-");
 			outside = tempDir("s1-ownscript-out-");
-			// Before the session: a script already in .tmp, and one outside.
+			// Before the session: a script already in .tmp, one outside, a link out.
 			put(".tmp/old.sh", "echo old\n");
+			put(".tmp/other.sh", "echo other\n");
 			writeFileSync(join(outside, "elsewhere.sh"), "echo elsewhere\n");
+			symlinkSync(outside, join(ws, "escape"));
 			Bun.sleepSync(20);
 			rec = new CreatedFiles();
 			own(".tmp/serve.sh", LOOPBACK_SERVE(ws));
@@ -148,177 +231,112 @@ describe.skipIf(process.platform === "win32")(
 		});
 
 		describe("runOwnScript allows", () => {
-			test("the pilot's command on a script created this session that binds 127.0.0.1", () => {
+			test("the positive case: the pilot's serve.sh rewritten to bind 127.0.0.1", () => {
 				const r = runOwnScript(PILOT_RUN, ws, rec);
 				expect(r.ok).toBe(true);
 				if (r.ok) expect(r.reason).toContain(".tmp/serve.sh");
+				expect(ok("sh .tmp/serve.sh")).toBe(true);
 			});
-			test("each interpreter on a script of its own kind", () => {
-				own(".tmp/a.sh", "echo hi\nls .tmp\n");
-				own(".tmp/b.py", "print('hi')\n");
-				own(".tmp/c.ts", "console.log('hi');\n");
-				expect(ok("sh .tmp/a.sh")).toBe(true);
-				expect(ok("bash .tmp/a.sh")).toBe(true);
-				expect(ok("python3 .tmp/b.py")).toBe(true);
-				expect(ok("bun .tmp/c.ts")).toBe(true);
-			});
-			test("division in python and JavaScript is not the root directory", () => {
-				own(".tmp/d.py", "x = [1, 2, 3]\nprint(x[::-1], 10 / 2)\n");
-				own(".tmp/d.ts", "// half\nconsole.log(4 / 2);\n");
-				expect(ok("python3 .tmp/d.py")).toBe(true);
-				expect(ok("bun .tmp/d.ts")).toBe(true);
-			});
-			test("a script the session rewrote after creating it", () => {
-				own(".tmp/serve.sh", `${LOOPBACK_SERVE(ws)}# again\n`);
-				expect(ok(PILOT_RUN)).toBe(true);
-			});
-			test("a python server bound to localhost, and a loopback curl", () => {
+			test("the rest of the command list, each used once, with in-workspace paths", () => {
 				own(
-					".tmp/s.py",
-					"from http.server import HTTPServer\nHTTPServer(('127.0.0.1', 8731), None)\n",
+					".tmp/list.sh",
+					"mkdir .tmp/out\necho hi > .tmp/out/a.txt\ncat .tmp/out/a.txt\nls .tmp\npwd\nsleep 0\ntrue\n",
 				);
-				own(".tmp/c.sh", "curl -s http://127.0.0.1:8731/index.html -o .tmp/page.html\n");
-				expect(ok("python3 .tmp/s.py")).toBe(true);
-				expect(ok("bash .tmp/c.sh")).toBe(true);
+				expect(ok("bash .tmp/list.sh")).toBe(true);
 			});
 		});
 
-		describe("runOwnScript refuses", () => {
+		describe("refuses: what the command names", () => {
+			const shapes: Array<[string, string]> = [
+				["`.tmp/../x`", "bash .tmp/../x.sh"],
+				["`.tmp/../.tmp/serve.sh`", "bash .tmp/../.tmp/serve.sh"],
+				["a trailing space", "bash .tmp/serve.sh "],
+				["a trailing newline", "bash .tmp/serve.sh\n"],
+				["a leading space", " bash .tmp/serve.sh"],
+				["two spaces", "bash  .tmp/serve.sh"],
+				["a `--` prefix", "bash -- .tmp/serve.sh"],
+				["an interpreter flag", "bash -x .tmp/serve.sh"],
+				["the env-prefix form", "FOO=1 bash .tmp/serve.sh"],
+				["env as the program", "env bash .tmp/serve.sh"],
+				["a second argument", "bash .tmp/serve.sh 8080"],
+				["chained with ;", "bash .tmp/serve.sh; ls"],
+				["chained with &&", "bash .tmp/serve.sh && ls"],
+				["chained with a newline", "bash .tmp/serve.sh\nls"],
+				["piped", "bash .tmp/serve.sh | cat"],
+				["redirected", "bash .tmp/serve.sh > out.txt"],
+				["backgrounded", "bash .tmp/serve.sh &"],
+				["./ prefix", "bash ./.tmp/serve.sh"],
+				["an absolute path", `bash ${ws}/.tmp/serve.sh`],
+				["a quoted path", 'bash ".tmp/serve.sh"'],
+				["a glob", "bash .tmp/serve.*"],
+				["a variable", "bash $D/serve.sh"],
+				["python3 (cut from the lane)", "python3 .tmp/serve.py"],
+				["bun (cut from the lane)", "bun .tmp/serve.ts"],
+				["zsh", "zsh .tmp/serve.sh"],
+				["no interpreter", ".tmp/serve.sh"],
+			];
+			for (const [why, cmd] of shapes) test(why, () => expect(ok(cmd)).toBe(false));
+			test("python3 and bun on files the session wrote", () => {
+				own(".tmp/s.py", "print(1)\n");
+				own(".tmp/s.ts", "console.log(1);\n");
+				expect(ok("python3 .tmp/s.py")).toBe(false);
+				expect(ok("bun .tmp/s.ts")).toBe(false);
+			});
+			test("a session-written script outside .tmp", () => {
+				own("serve.sh", "echo hi\n");
+				expect(ok("bash serve.sh")).toBe(false);
+			});
+			test("another session's record, or none; no cwd or a relative one", () => {
+				expect(runOwnScript(PILOT_RUN, ws, new CreatedFiles()).ok).toBe(false);
+				expect(runOwnScript(PILOT_RUN, ws, undefined).ok).toBe(false);
+				expect(runOwnScript(PILOT_RUN, undefined, rec).ok).toBe(false);
+				expect(runOwnScript(PILOT_RUN, ".", rec).ok).toBe(false);
+			});
+		});
+
+		describe("refuses: which file it is", () => {
 			test("a script that existed before the session", () => {
 				expect(ok("bash .tmp/old.sh")).toBe(false);
 			});
-			test("an older file renamed onto the session's script (birth time and inode move)", () => {
+			test("rename-in of an older file onto the session's script", () => {
 				renameSync(join(outside, "elsewhere.sh"), join(ws, ".tmp/serve.sh"));
 				expect(ok(PILOT_RUN)).toBe(false);
 			});
-			test("a symlink, even one pointing at the session's own script", () => {
+			test("a hard link to an older file", () => {
+				linkSync(join(outside, "elsewhere.sh"), join(ws, ".tmp/linked.sh"));
+				expect(ok("bash .tmp/linked.sh")).toBe(false);
+			});
+			test("a hard link out of the session's own script (nlink 2)", () => {
+				linkSync(join(ws, ".tmp/serve.sh"), join(outside, "twin.sh"));
+				expect(ok(PILOT_RUN)).toBe(false);
+			});
+			test("truncate-and-rewrite after the record, same text", () => {
+				Bun.sleepSync(20);
+				writeFileSync(join(ws, ".tmp/serve.sh"), "");
+				writeFileSync(join(ws, ".tmp/serve.sh"), LOOPBACK_SERVE(ws));
+				expect(ok(PILOT_RUN)).toBe(false);
+			});
+			test("a symlink, even to the session's own script", () => {
 				symlinkSync(join(ws, ".tmp/serve.sh"), join(ws, ".tmp/link.sh"));
 				expect(ok("bash .tmp/link.sh")).toBe(false);
 			});
-			test("a .tmp that is itself a symlink out of the workspace", () => {
+			test(".tmp itself a symlink out of the workspace", () => {
 				rmSync(join(ws, ".tmp"), { recursive: true, force: true });
 				symlinkSync(outside, join(ws, ".tmp"));
 				own(".tmp/x.sh", "echo hi\n");
 				expect(ok("bash .tmp/x.sh")).toBe(false);
 			});
-			test("a hard link (nlink 2)", () => {
-				linkSync(join(ws, ".tmp/serve.sh"), join(outside, "twin.sh"));
-				expect(ok(PILOT_RUN)).toBe(false);
-			});
-			test("a session-created script outside .tmp", () => {
-				own("serve.sh", "echo hi\n");
-				expect(ok("bash serve.sh")).toBe(false);
-			});
-			test("another session's record, or none", () => {
-				expect(runOwnScript(PILOT_RUN, ws, new CreatedFiles()).ok).toBe(false);
-				expect(runOwnScript(PILOT_RUN, ws, undefined).ok).toBe(false);
-			});
-			test("no cwd, or a relative one", () => {
-				expect(runOwnScript(PILOT_RUN, undefined, rec).ok).toBe(false);
-				expect(runOwnScript(PILOT_RUN, ".", rec).ok).toBe(false);
-			});
-			const shapes: Array<[string, string]> = [
-				["extra args", "bash .tmp/serve.sh 8080"],
-				["chained with &&", "bash .tmp/serve.sh && ls"],
-				["chained with ;", "bash .tmp/serve.sh; ls"],
-				["piped", "bash .tmp/serve.sh | cat"],
-				["redirected", "bash .tmp/serve.sh > out.txt"],
-				["backgrounded", "bash .tmp/serve.sh &"],
-				["a -- separator", "bash -- .tmp/serve.sh"],
-				["an interpreter flag", "bash -x .tmp/serve.sh"],
-				["an env prefix", "FOO=1 bash .tmp/serve.sh"],
-				["env as the program", "env bash .tmp/serve.sh"],
-				["a .. segment", "bash .tmp/../x.sh"],
-				["a .. that leads back in", "bash .tmp/../.tmp/serve.sh"],
-				["a ./ prefix", "bash ./.tmp/serve.sh"],
-				["an absolute path", `bash ${ws}/.tmp/serve.sh`],
-				["a quoted path", 'bash ".tmp/serve.sh"'],
-				["a glob", "bash .tmp/serve.*"],
-				["a variable", "bash $D/serve.sh"],
-				["another interpreter", "zsh .tmp/serve.sh"],
-				["a script with no interpreter", ".tmp/serve.sh"],
-				["the wrong interpreter for the file", "python3 .tmp/serve.sh"],
-				["a line break", "bash .tmp/serve.sh\nls"],
-			];
-			for (const [why, cmd] of shapes) test(why, () => expect(ok(cmd)).toBe(false));
+		});
 
-			const bodies: Array<[string, string, string]> = [
-				[
-					"the pilot's own serve.sh: http.server binds every interface",
-					"s.sh",
-					"#!/bin/sh\nexec python3 -m http.server 8731\n",
-				],
-				["binding 0.0.0.0", "s.sh", "python3 -m http.server 8731 --bind 0.0.0.0\n"],
-				[
-					"binding ::",
-					"s.py",
-					"import socket\ns = socket.socket(socket.AF_INET6)\ns.bind(('::', 8731))\n",
-				],
-				["binding a LAN address", "s.sh", "python3 -m http.server 8731 -b 192.168.1.5\n"],
-				[
-					"binding all with an empty host",
-					"s.py",
-					"from http.server import HTTPServer\nHTTPServer(('', 8731), None)\n",
-				],
-				[
-					"Bun.serve with no hostname",
-					"s.ts",
-					"Bun.serve({ port: 8731, fetch() { return new Response('x'); } });\n",
-				],
-				[
-					"listen with only a port",
-					"s.ts",
-					"import http from 'node:http';\nhttp.createServer().listen(8731);\n",
-				],
-				["a netcat listener", "s.sh", "nc -l 127.0.0.1 8731\n"],
-				["rm -rf", "s.sh", "rm -rf build\n"],
-				["rmtree", "s.py", "import shutil\nshutil.rmtree('build')\n"],
-				["sudo", "s.sh", "sudo ls\n"],
-				["curl to the internet", "s.sh", "curl -s https://example.com/x -o .tmp/x\n"],
-				["wget with a built URL", "s.sh", "wget -q -O .tmp/x\n"],
-				[
-					"python fetching the internet",
-					"s.py",
-					"import urllib.request\nurllib.request.urlopen('https://example.com')\n",
-				],
-				["an absolute path outside the workspace", "s.sh", "cat /etc/passwd\n"],
-				["the root directory", "s.py", "import os\nos.listdir('/')\n"],
-				["a /tmp path", "s.sh", "ls /tmp\n"],
-				["$HOME", "s.sh", "echo x > $HOME/.profile\n"],
-				["~", "s.sh", "echo x > ~/.profile\n"],
-				["expanduser", "s.py", "import os\nopen(os.path.expanduser('~/x'), 'w')\n"],
-				["a shell variable (lines must be literal)", "s.sh", "R=rm\n$R -r build\n"],
-				["command substitution", "s.sh", "echo `id`\n"],
-				["a line continuation", "s.sh", "r\\\nm -r build\n"],
-				["eval", "s.sh", "eval ls\n"],
-				["base64", "s.sh", "echo cm0= | base64 -d\n"],
-				["subprocess", "s.py", "import subprocess\nsubprocess.run(['ls'])\n"],
-				[
-					"child_process",
-					"s.ts",
-					"import { execSync } from 'node:child_process';\nexecSync('ls');\n",
-				],
-				["dynamic import", "s.ts", "await import('node:' + 'child_process');\n"],
-				["a package install", "s.sh", "npx serve .\n"],
-				["non-ASCII text", "s.sh", "echo сat\n"],
-			];
-			for (const [why, file, body] of bodies) {
+		describe("refuses: what the script says", () => {
+			for (const [why, body] of BODY_PROBES) {
 				test(why, () => {
-					own(`.tmp/${file}`, body);
-					const interp = file.endsWith(".py") ? "python3" : file.endsWith(".ts") ? "bun" : "bash";
-					expect(ok(`${interp} .tmp/${file}`)).toBe(false);
+					own(".tmp/p.sh", body(ws));
+					expect(ok("bash .tmp/p.sh")).toBe(false);
 				});
 			}
-			test("bun with a bunfig.toml or .env in the working directory", () => {
-				own(".tmp/c.ts", "console.log('hi');\n");
-				put("bunfig.toml", "preload = ['./evil.ts']\n");
-				expect(ok("bun .tmp/c.ts")).toBe(false);
-				rmSync(join(ws, "bunfig.toml"));
-				put(".env", "X=1\n");
-				expect(ok("bun .tmp/c.ts")).toBe(false);
-			});
 			test("the pilot's own serve.sh is refused with a hint that names the fix", () => {
-				own(".tmp/serve.sh", `#!/bin/sh\ncd ${ws}\nexec python3 -m http.server 8731\n`);
+				own(".tmp/serve.sh", PILOT_SERVE(ws));
 				const r = runOwnScript(PILOT_RUN, ws, rec);
 				expect(r.ok).toBe(false);
 				if (!r.ok) expect(r.hint).toContain("--bind 127.0.0.1");
@@ -326,15 +344,15 @@ describe.skipIf(process.platform === "win32")(
 		});
 
 		describe("systemOneGate with the lane", () => {
-			test("runs the pilot's command without asking the judge", async () => {
+			test("runs the positive case without asking the judge", async () => {
 				const r = await systemOneGate(PILOT_RUN, process.env, ws, rec);
 				expect(r.run).toBe(true);
 				expect(r.guard?.backend).toBe("allowlist");
 				expect(r.guard?.reason).toContain(".tmp/serve.sh");
 				expect(judge.asks).toBe(0);
 			});
-			test("a script that binds every interface goes to the judge, and the block says what would pass", async () => {
-				own(".tmp/serve.sh", "#!/bin/sh\nexec python3 -m http.server 8731\n");
+			test("the pilot's own script goes to the judge, and the block says what would pass", async () => {
+				own(".tmp/serve.sh", PILOT_SERVE(ws));
 				const r = await systemOneGate(PILOT_RUN, process.env, ws, rec);
 				expect(r.run).toBe(false);
 				expect(r.guard?.backend).not.toBe("allowlist");
@@ -364,12 +382,13 @@ describe.skipIf(process.platform === "win32")(
 		});
 
 		/**
-		 * Ordering: System One only sees a command every earlier layer allowed. A
-		 * run the earlier layers refuse (here semicolon chaining, the pilot's own
-		 * second refusal) never reaches the lane, through the real tool entry point.
+		 * The real tool entry point: write_file records the script, run_command
+		 * goes through every earlier layer and then System One. Each refused probe
+		 * would leave .tmp/pwned.txt if it ran; it must not exist afterwards.
 		 */
 		describe("ToolExecutor: write_file .tmp/x.sh, then run_command", () => {
-			test("the session's own loopback script runs without the judge", async () => {
+			const PWNED = ".tmp/pwned.txt";
+			test("an allowlisted script runs without the judge", async () => {
 				const ex = new ToolExecutor(ws, "ownscript");
 				await ex.execute("write_file", {
 					path: ".tmp/hello.sh",
@@ -380,16 +399,41 @@ describe.skipIf(process.platform === "win32")(
 				expect(out).toContain("hello-from-own-script");
 				expect(judge.asks).toBe(0);
 			});
-			test("an earlier layer still refuses a chained run first; the lane never overrides it", async () => {
-				const ex = new ToolExecutor(ws, "ownscript2");
-				await ex.execute("write_file", { path: ".tmp/hello.sh", content: "echo hello\n" });
-				const out = await ex.execute("run_command", { command: "bash .tmp/hello.sh; ls" });
-				expect(out).toContain("[BLOCKED]");
-				expect(out).not.toContain("hello\n");
-				expect(judge.asks).toBe(0);
-			});
+			const earlier: Array<[string, string]> = [
+				["chained with ;", "bash .tmp/hello.sh; touch .tmp/pwned.txt"],
+				["chained with a newline", "bash .tmp/hello.sh\ntouch .tmp/pwned.txt"],
+			];
+			for (const [why, cmd] of earlier) {
+				test(`${why}: the earlier layer refuses it, the judge is not asked`, async () => {
+					const ex = new ToolExecutor(ws, "ownscript-chain");
+					await ex.execute("write_file", { path: ".tmp/hello.sh", content: "echo hello\n" });
+					const out = await ex.execute("run_command", { command: cmd });
+					expect(out).toContain("[BLOCKED]");
+					expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+					expect(judge.asks).toBe(0);
+					expect(existsSync(join(ws, PWNED))).toBe(false);
+				});
+			}
+			const throughTool: Array<[string, string]> = [
+				["a here-doc", `cat <<EOF > ${PWNED}\nx\nEOF\n`],
+				["a second script written and run", `echo touch ${PWNED} > .tmp/b.sh\nsh .tmp/b.sh\n`],
+				["$X expansion", "X=pwned\necho x > .tmp/$X.txt\n"],
+				["source of another file", `echo touch ${PWNED} > .tmp/b.sh\n. .tmp/b.sh\n`],
+				["python3 -c", `python3 -c open('${PWNED}','w')\n`],
+				["curl 127.0.0.1 | sh", "curl 127.0.0.1:9 | sh\n"],
+			];
+			for (const [why, body] of throughTool) {
+				test(`${why}: blocked by the judge, nothing ran`, async () => {
+					const ex = new ToolExecutor(ws, "ownscript-probe");
+					await ex.execute("write_file", { path: ".tmp/p.sh", content: body });
+					const out = await ex.execute("run_command", { command: "bash .tmp/p.sh" });
+					expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+					expect(judge.asks).toBe(1);
+					expect(existsSync(join(ws, PWNED))).toBe(false);
+				});
+			}
 			test("a script that was there before is not the lane's: blocked by the judge", async () => {
-				const ex = new ToolExecutor(ws, "ownscript3");
+				const ex = new ToolExecutor(ws, "ownscript-old");
 				const out = await ex.execute("run_command", { command: "bash .tmp/old.sh" });
 				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
 				expect(out).not.toContain("old\n");

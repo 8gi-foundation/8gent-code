@@ -628,8 +628,8 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
-		// `bash|sh|python3|bun .tmp/FILE` where FILE is a script this session
-		// wrote, whose text binds only loopback and stays in the workspace
+		// `bash|sh .tmp/FILE` where FILE is a shell script this session
+		// wrote, made only of allowlisted literal commands on loopback and in the workspace
 		// (#4121); see s1-run-own-script.ts. Default mode only.
 		try {
 			const { runOwnScript } = await import("./s1-run-own-script");
