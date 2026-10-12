@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
-import { curlToLoopback } from "./s1-curl-loopback";
+import { CURL_L_REFUSAL, curlToLoopback } from "./s1-curl-loopback";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_FLAG,
@@ -516,7 +516,7 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 	});
 
 	for (const cmd of [
-		ISSUE_CMD,
+		"curl -sL http://example.com/",
 		"curl -s -c .tmp/cookies.txt -b .tmp/cookies.txt -D .tmp/headers.txt http://example.com/login",
 		"curl -s https://api.github.com/",
 		"curl -s -K x.cfg http://127.0.0.1:8080/",
@@ -529,6 +529,16 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 		});
 	}
 
+	test("never allowed, by the deterministic refusal: the issue's -L command", async () => {
+		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		expect(r.run).toBe(false);
+		expect(r.guard?.verdict).toBe("block");
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(r.message).toContain(CURL_L_REFUSAL);
+		expect((curlToLoopback(ISSUE_CMD, ws) as { refuse?: string }).refuse).toBe(CURL_L_REFUSAL);
+		expect(judge.asks).toBe(0);
+	});
+
 	test("strict mode (Guarded) never skips the judge", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
 		const r = await systemOneGate(ISSUE_NO_L, process.env, ws);
@@ -539,6 +549,71 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 	test("EIGHT_S1_ALLOWLIST=0 turns the lane off with the rest of the allowlist", async () => {
 		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
 		const r = await systemOneGate(ISSUE_NO_L, process.env, ws);
+		expect(r.guard?.backend).not.toBe("allowlist");
+	});
+});
+
+describe("-L to loopback is a deterministic refusal naming the way forward (#3967, 8SO)", () => {
+	const URL = "http://127.0.0.1:41873/login";
+	test("every spelling of -L to loopback refuses with the Location hint", () => {
+		for (const c of [
+			ISSUE_CMD,
+			`curl -sL ${URL}`,
+			`curl -s -L ${URL}`,
+			`curl -s --location ${URL}`,
+			`curl -sL -b .tmp/c.txt -c .tmp/c.txt ${URL}`,
+			`curl -sL -d x=1 ${URL}`,
+			`curl -s -L --max-redirs 1 ${URL}`,
+		]) {
+			const r = curlToLoopback(c, ws);
+			expect(r.ok, c).toBe(false);
+			expect((r as { refuse?: string }).refuse, c).toBe(CURL_L_REFUSAL);
+		}
+	});
+	test("-L to a non-loopback URL has no refuse text", () => {
+		for (const c of [
+			"curl -sL http://example.com/",
+			`curl -sL ${URL} http://example.com/`,
+			"curl -sL http://169.254.169.254/",
+		]) {
+			const r = curlToLoopback(c, ws);
+			expect(r.ok, c).toBe(false);
+			expect((r as { refuse?: string }).refuse, c).toBeUndefined();
+		}
+	});
+	test("the second request the refusal asks for passes", () => {
+		expect(ok(ISSUE_NO_L)).toBe(true);
+	});
+});
+
+describe("backslash inside double quotes (pilot 12 Oct, -w with \\n)", () => {
+	test("a backslash before a letter or digit is literal and allowed", () => {
+		expect(
+			ok('curl -s -o .tmp/r.html -w "HTTP_STATUS:%{http_code}\\n" http://127.0.0.1:55376/'),
+		).toBe(true);
+		expect(ok('curl -s -w "a\\tb\\r\\n" http://127.0.0.1:55376/')).toBe(true);
+	});
+	test("any other backslash is refused, including one that would escape the closing quote", () => {
+		expect(ok('curl -s -w "x\\" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "x\\\\n" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "x\\$HOME" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -H "a\\ b" http://127.0.0.1:55376/')).toBe(false);
+		expect(ok('curl -s -w "\\`id\\`" http://127.0.0.1:55376/')).toBe(false);
+	});
+});
+
+describe("systemOneGate with -L to loopback: refused without a judge call", () => {
+	test("-L to loopback: blocked with the Location hint, judge never asked", async () => {
+		const r = await systemOneGate(ISSUE_CMD, process.env, ws);
+		expect(r.run).toBe(false);
+		expect(r.message).toContain("Location");
+		expect(r.message).toContain("Drop -L");
+		expect(r.guard?.verdict).toBe("block");
+		expect(judge.asks).toBe(0);
+	});
+	test("-L to a non-loopback URL still goes to the judge", async () => {
+		const r = await systemOneGate("curl -sL http://example.com/", process.env, ws);
+		expect(r.message ?? "").not.toContain("Drop -L");
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

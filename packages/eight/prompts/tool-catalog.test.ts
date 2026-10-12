@@ -135,7 +135,7 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 	it("the compact short form is under 300 chars, has no em dash, and keeps the core rules", () => {
 		expect(LOCAL_SERVER_CURL_SHORT.length).toBeLessThanOrEqual(300);
 		expect(LOCAL_SERVER_CURL_SHORT).not.toContain("\u2014");
-		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Location header"])
+		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Do not pass -L", "Location header"])
 			expect(LOCAL_SERVER_CURL_SHORT).toContain(rule);
 	});
 });

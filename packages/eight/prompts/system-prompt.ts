@@ -337,7 +337,7 @@ export const REVIEW_FOCUS_NOTE =
  * short for the headless prompt budget (headless-prompt.test.ts, 60% rule).
  */
 export const LOCAL_SERVER_CURL_SHORT =
-	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. On a 302 read the Location header and make a second curl.";
+	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. Do not pass -L: on a 302 read the Location header and make a second curl.";
 
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";

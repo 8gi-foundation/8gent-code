@@ -631,7 +631,23 @@ export async function systemOneGate(
 		// every file stays inside the workspace (#3941). Default mode only.
 		try {
 			const { curlToLoopback } = await import("./s1-curl-loopback");
-			const c = mode === "default" ? curlToLoopback(command, cwd) : { ok: false as const };
+			const c: { ok: boolean; reason?: string; refuse?: string } =
+				mode === "default" ? curlToLoopback(command, cwd) : { ok: false };
+			if (!c.ok && c.refuse) {
+				// Deterministic refusal (#3967): tell the model what to do, no judge call.
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: c.refuse,
+				};
+				return {
+					run: false,
+					guard,
+					message: blockMessage(guard, "unknown", c.refuse, command),
+				};
+			}
 			if (c.ok) {
 				return {
 					run: true,
