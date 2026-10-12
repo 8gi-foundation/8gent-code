@@ -38,8 +38,8 @@ export function sanitizeThemeText(s: string): string {
 }
 
 /** Palette keys that must stay legible, with their WCAG minimum against bg. */
-const TEXT_KEYS = ["textPrimary", "textSecondary", "cream", "prose"] as const;
-const ALERT_KEYS = ["red", "orange"] as const; // danger/error, and the warning/permission accent
+const TEXT_KEYS = ["textPrimary", "textSecondary", "textTertiary", "cream", "prose", "muted", "heading"] as const;
+const ALERT_KEYS = ["red", "orange", "frame"] as const; // danger/error, and the warning/permission accent
 
 export type UserThemeBase = "dark" | "light";
 

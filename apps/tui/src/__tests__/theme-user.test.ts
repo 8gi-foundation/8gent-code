@@ -156,6 +156,15 @@ describe("user theme hardening", () => {
 		expect(themeChoices().some((r) => r.value === "user:nored2")).toBeFalse();
 	});
 
+	test("muted or frame equal to bg is rejected", () => {
+		put("nomuted.json", { base: "dark", muted: "#0A0908" });
+		put("noframe.json", { base: "dark", frame: "#0A0908" });
+		reloadUserThemes();
+		expect(userThemeProblems().find((p) => p.file === "nomuted.json")?.reason).toContain('"muted"');
+		expect(userThemeProblems().find((p) => p.file === "noframe.json")?.reason).toContain('"frame"');
+		expect(themeChoices().some((r) => r.value === "user:nomuted")).toBeFalse();
+	});
+
 	test("a normal theme passes", () => {
 		put("fine.json", { base: "dark", orange: "#FF8800", bg: "#140C06" });
 		reloadUserThemes();
