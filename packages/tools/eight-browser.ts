@@ -588,8 +588,10 @@ const realSpawn: BrowserSpawnFn = (spec) => ({
 	exited: new Promise((done) => {
 		let log: number | null = null;
 		try {
-			mkdirSync(dirname(spec.logFile), { recursive: true });
-			log = openSync(spec.logFile, "w");
+			// The dir and the log exist before the browser does, so they get the modes the browser would
+			// give them (8gent-browser control-server.ts makes the profile dir 0o700): nothing looser.
+			mkdirSync(dirname(spec.logFile), { recursive: true, mode: 0o700 });
+			log = openSync(spec.logFile, "w", 0o600);
 		} catch {
 			log = null;
 		}
@@ -646,16 +648,18 @@ function freePort(): Promise<number> {
 const LAUNCH_WAIT_MS = 20_000;
 const launches = new Map<string, Promise<void>>();
 
-/** The actionable error for a launch that did not produce a running profile. */
-const launchError = (reason: string) =>
+/** The actionable error for a launch that did not produce a running profile. The curl alternative is
+ *  for a browser that is missing or broken; under a host sandbox it is left out (#4099), since it only
+ *  steers the model into a curl sign-in the judge then blocks. */
+const launchError = (reason: string, curlHint = true) =>
 	new Error(
-		`8gent Browser could not start (${reason}). For a local web app use run_command with curl instead.`,
+		`8gent Browser could not start (${reason}).${curlHint ? " For a local web app use run_command with curl instead." : ""}`,
 	);
 
 async function launchOnce(profile: BrowserProfile, home: string, env: Env): Promise<void> {
 	const bin = browserBinary(env, home);
 	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
-	if (hostSandboxBlocksBrowser()) throw launchError(HOST_SANDBOX_REASON);
+	if (hostSandboxBlocksBrowser()) throw launchError(HOST_SANDBOX_REASON, false);
 	const port = await freePort();
 	const ports = [...allowedLoopbackPorts(env, home)];
 	// Built fresh: only what the browser needs to run and find its profile. Never the parent env.

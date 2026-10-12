@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -1772,9 +1772,12 @@ describeNotWin(
 			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
 			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
 			const call = wsTransport({ env });
-			await expect(call("tabs.list")).rejects.toThrow(
-				/could not start \(this process runs inside a macOS sandbox, where 8gent Browser cannot register its Mach port with launchd; start the profile from outside the sandbox .*\)\. For a local web app use run_command with curl instead\./,
+			let message = "";
+			await call("tabs.list").catch((e: Error) => (message = e.message));
+			expect(message).toMatch(
+				/^8gent Browser could not start \(this process runs inside a macOS sandbox, where 8gent Browser cannot register its Mach port with launchd; start the profile from outside the sandbox .*\)\.$/,
 			);
+			expect(message).not.toMatch(/curl/); // no curl sign-in detour for a sandboxed host (Karen, #4100)
 			await expect(call("tabs.list")).rejects.toThrow(/inside a macOS sandbox/);
 			expect(spawns).toBe(0);
 		});
@@ -1800,6 +1803,9 @@ describeNotWin(
 			);
 			const log = join(home, ".8gent", "browser-profiles", "eightgent", "browser-launch.log");
 			expect(readFileSync(log, "utf8")).toContain("Permission denied (1100)");
+			// Made before the browser runs, so no looser than the browser makes them: dir 0o700, log 0o600.
+			expect(statSync(join(log, "..")).mode & 0o777).toBe(0o700);
+			expect(statSync(log).mode & 0o777).toBe(0o600);
 			rmSync(home, { recursive: true, force: true });
 		});
 
