@@ -318,11 +318,13 @@ export function environmentNote(input: EnvironmentNoteInput = {}): string {
 	const shell = input.shell ?? currentWindowsShell();
 	const how =
 		shell.kind === "git-bash"
-			? "Git Bash (POSIX syntax: ls, grep, &&, pipes and $VAR work; write paths with /)"
+			? "Git Bash (POSIX syntax: ls, grep, pipes, $VAR; write paths with /)"
 			: shell.kind === "powershell"
 				? "PowerShell (use PowerShell syntax: Get-ChildItem, $env:VAR; no && in Windows PowerShell 5.1)"
 				: "cmd.exe (use dir, type, %VAR%, backslash paths; ls and grep are not installed)";
-	return `**Environment: ${os}, run_command uses ${how}, path separator \\${cwd}.**`;
+	// Git Bash already says "write paths with /", so the separator clause is for the others only.
+	const sep = shell.kind === "git-bash" ? "" : ", path separator \\";
+	return `**Environment: ${os}, run_command uses ${how}${sep}${cwd}.**`;
 }
 
 /** Review focus (#3920): a review that cites every line it read buries the defect. */

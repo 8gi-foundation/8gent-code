@@ -218,7 +218,7 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
 const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
-const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote({ cwd: process.cwd() })}`;
+const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote()}`;
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text

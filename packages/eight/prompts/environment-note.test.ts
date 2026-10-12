@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { buildToolCatalogSegment, environmentNote } from "./system-prompt";
 
 describe("environmentNote", () => {
-	test("Git Bash on Windows says POSIX syntax and the backslash separator", () => {
+	test("Git Bash on Windows says POSIX syntax and paths with /", () => {
 		const note = environmentNote({ platform: "win32", shell: { kind: "git-bash", file: "bash.exe" }, cwd: "C:\\work" });
 		expect(note).toContain("Windows");
 		expect(note).toContain("Git Bash");
-		expect(note).toContain("&&");
-		expect(note).toContain("separator \\");
+		expect(note).toContain("paths with /");
 		expect(note).toContain("cwd C:\\work");
 	});
 
