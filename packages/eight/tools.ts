@@ -69,6 +69,7 @@ import {
 	validateDesktopActArgs,
 } from "../computer/desktop-act";
 import {
+	askOnTerminal,
 	desktopApprovalCard,
 	desktopApprovalDetails,
 	redactDesktopArgs,
@@ -4216,20 +4217,3 @@ function timeSince(date: Date): string {
 	return `${days}d`;
 }
 
-/**
- * A desktop card on a plain terminal: printed to stderr, answered on stdin,
- * default NO, and nothing remembered. PermissionManager.requestPermission is
- * not used for desktop acts because it defaults to yes and caches approvals,
- * and a desktop act must be asked every time (8SO, #4057).
- */
-async function askOnTerminal(card: string): Promise<boolean> {
-	const readline = await import("node:readline");
-	process.stderr.write(`\n\x1b[33m[DESKTOP CONTROL]\x1b[0m\n${card}\nAllow? [y/N]: `);
-	const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: false });
-	try {
-		const answer: string = await new Promise((resolve) => rl.once("line", resolve));
-		return /^\s*y(es)?\s*$/i.test(answer);
-	} finally {
-		rl.close();
-	}
-}

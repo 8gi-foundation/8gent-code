@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import sharp from "sharp";
 import type { GroundOutcome } from "../eyes/ground";
 import { evaluatePolicy } from "../permissions/policy-engine";
@@ -28,7 +29,12 @@ import {
 	renderCrop,
 	validateDesktopActArgs,
 } from "./desktop-act";
-import { desktopApprovalCard, desktopApprovalDetails } from "./desktop-approval";
+import {
+	askOnTerminal,
+	desktopApprovalCard,
+	desktopApprovalDetails,
+	loggableToolArgs,
+} from "./desktop-approval";
 import { desktopPolicyContext } from "./desktop-policy";
 import { isDangerousCombo, normalizeKeys } from "./keys";
 import {
@@ -615,5 +621,108 @@ describe("8SO review of #4057", () => {
 			expect(calls.pressed.length).toBe(0);
 		}
 		expect(asked).toBe(0);
+	});
+	test("6. the card cannot be rewritten by what it shows: escapes, controls and bidi are inert", async () => {
+		const seen: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			seen.push(req.command ?? "");
+			return "deny";
+		});
+		const calls = fresh();
+		// Cursor up + erase line (7-bit), C1 CSI, an OSC title set, a bidi override and a line separator.
+		const hostile = "OK button\x1b[1A\x1b[2K\x9b2K\x1b]0;pwned\x07\u202e\u2028x";
+		await desktopAct(
+			{ target: hostile, action: "type", text: "a\x1b[2Kb\x9b1A\u202ec\u2028d" },
+			deps({ before, after }, calls),
+			new DesktopActSession(),
+		);
+		expect(seen.length).toBe(1);
+		const card = seen[0];
+		const lines = card.split("\n");
+		expect(lines[0]).toBe("type OK buttonx");
+		expect(lines).toContain('will type exactly: "a\\u001b[2Kb\\u009b1A\\u202ec\\u2028d"');
+		// Outside the crop (which is ours), nothing a terminal would act on.
+		const head = lines.slice(0, 4).join("\n");
+		expect(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\u2028\u2029]/.test(head)).toBe(
+			false,
+		);
+		expect(calls.typed.length).toBe(0);
+	});
+
+	test("6b. keys and a policy reason are cleaned the same way", () => {
+		const req: DesktopActApproval = {
+			action: "press",
+			target: "editor",
+			point: { x: 1, y: 2 },
+			confidence: 0.9,
+			attempt: 1,
+			keys: "cmd+s\x1b[2K\u202e",
+		} as DesktopActApproval;
+		const card = desktopApprovalCard(req, "Rule says ask.\x1b[1A\x9b2K");
+		expect(card.split("\n")).toEqual([
+			"press editor",
+			"at screen point (1, 2), grounder confidence 0.9",
+			"keys: cmd+s",
+			"Rule says ask.",
+		]);
+	});
+
+	test("7. the policy gate (and so its audit) is never given the typed text", async () => {
+		const ctxs: unknown[] = [];
+		registerTuiApprovalHandler(async () => "approve");
+		const calls = fresh();
+		await desktopAct(
+			{ target: "the search field", action: "type", text: "hunter2 secret" },
+			deps(
+				{
+					before,
+					after,
+					policy: (ctx) => {
+						ctxs.push(ctx);
+						return evaluatePolicy("desktop_use", ctx);
+					},
+				},
+				calls,
+			),
+			new DesktopActSession(),
+		);
+		expect(ctxs.length).toBeGreaterThan(0);
+		expect(JSON.stringify(ctxs)).not.toContain("hunter2");
+		expect(calls.typed).toEqual(["hunter2 secret"]);
+	});
+
+	test("8. hooks, events and the session file get the length; other tools pass through", () => {
+		expect(
+			loggableToolArgs("desktop_act", { target: "x", action: "type", text: "hunter2" }),
+		).toEqual({
+			target: "x",
+			action: "type",
+			textLength: 7,
+		});
+		expect(loggableToolArgs("desktop_type", { text: "hunter2" })).toEqual({ textLength: 7 });
+		const other = { path: "a", text: "kept" };
+		expect(loggableToolArgs("write_file", other)).toBe(other);
+	});
+
+	test("9. a plain terminal answers NO when stdin closes, and only y/yes is a yes", async () => {
+		const sink = new PassThrough();
+		const ended = new PassThrough();
+		ended.end();
+		expect(await askOnTerminal("card", ended, sink)).toBe(false);
+
+		const closed = new PassThrough();
+		const pending = askOnTerminal("card", closed, sink);
+		closed.end("");
+		expect(await pending).toBe(false);
+
+		const yes = new PassThrough();
+		const p2 = askOnTerminal("card", yes, sink);
+		yes.write("y\n");
+		expect(await p2).toBe(true);
+
+		const other = new PassThrough();
+		const p3 = askOnTerminal("card", other, sink);
+		other.end("sure\n");
+		expect(await p3).toBe(false);
 	});
 });

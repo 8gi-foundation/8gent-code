@@ -22,6 +22,7 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { redactTypedTextInMessage } from "../computer/desktop-approval";
 
 export const SESSION_FORMAT_VERSION = 1;
 
@@ -373,6 +374,8 @@ export class SessionStore {
 
 	/** Append a message under the leaf and make it the new leaf. Returns its id. */
 	append(message: StoredMessage): string {
+		// Typed desktop text never reaches the file (8SO, #4057).
+		message = redactTypedTextInMessage(message);
 		const entry: MessageEntry = {
 			type: "message",
 			id: this.freshEntryId(),
@@ -585,6 +588,8 @@ export class SessionStore {
 	 * into the tree without ever destroying history.
 	 */
 	syncTranscript(messages: StoredMessage[]): { appended: number; branched: boolean } {
+		// Compared in the stored (redacted) form, so a redacted turn still matches.
+		messages = messages.map(redactTypedTextInMessage);
 		const stored = this.transcriptEntries();
 		const key = (m: StoredMessage) => `${m.role}\u0000${JSON.stringify(m.content)}`;
 		let p = 0;

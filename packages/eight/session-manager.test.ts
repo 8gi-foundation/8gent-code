@@ -144,3 +144,56 @@ describe("review fixes (#3986)", () => {
 		expect(mgr.list()[0].messageCount).toBe(2);
 	});
 });
+
+describe("typed desktop text never reaches the session file (8SO, #4057)", () => {
+	// A local model writes its tool calls into the reply, in three shapes.
+	const fenced = [
+		"Typing it now.",
+		"```tool_call",
+		JSON.stringify({
+			name: "desktop_act",
+			arguments: { target: "field", action: "type", text: 'hunter2 "x"' },
+		}),
+		"```",
+	].join("\n");
+	const stringArgs = JSON.stringify({
+		name: "desktop_type",
+		arguments: JSON.stringify({ text: 'hunter2 "x"' }),
+	});
+	const xml =
+		"<tool_call><function=desktop_type><parameter=text>hunter2 x</parameter></function></tool_call>";
+
+	test("save, save again, --continue: the length is stored, the text never is, nothing branches", () => {
+		const s = mgr.create({ name: "desk", cwd: "/work/d" });
+		const turn1 = [m("user", "type my password"), m("assistant", fenced)];
+		mgr.update(s.id, turn1);
+		mgr.update(s.id, [
+			...turn1,
+			m("user", "again"),
+			m("assistant", stringArgs),
+			m("assistant", xml),
+		]);
+
+		const file = fs.readFileSync(path.join(dir, "tree", `${s.id}.jsonl`), "utf-8");
+		expect(file).not.toContain("hunter2");
+		expect(file).not.toContain('"type":"branch');
+
+		const r = mgr.resume(s.id);
+		const replay = (r?.messages ?? []).map((x) => String(x.content));
+		expect(replay).toHaveLength(5);
+		expect(replay.join("\n")).not.toContain("hunter2");
+		expect(replay[1]).toContain('"textLength":11');
+		expect(replay[1]).toContain('"target":"field"');
+		expect(replay[3]).toContain('\\"textLength\\":11');
+		expect(replay[4]).toContain("<parameter=textLength>9</parameter>");
+		const store = SessionStore.open(s.id, dir);
+		expect(store?.leaves()).toHaveLength(1);
+	});
+
+	test("a reply that names no desktop tool is stored as written", () => {
+		const s = mgr.create({ name: "plain", cwd: "/work/p" });
+		const body = 'Use {"text": "hello"} as the payload.';
+		mgr.update(s.id, [m("user", "q"), m("assistant", body)]);
+		expect(mgr.resume(s.id)?.messages?.[1]).toEqual(m("assistant", body));
+	});
+});
