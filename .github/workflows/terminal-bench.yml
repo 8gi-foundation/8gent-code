@@ -30,7 +30,8 @@ jobs:
       TB_HOME: ${{ github.workspace }}/tb-home
       HARBOR_TELEMETRY: "0"
       MODEL: ${{ inputs.model || 'qwen3.5:9b' }}
-      TASKS: ${{ inputs.tasks }}
+      # push runs (temporary trigger) do one short task; dispatch runs default to the 4 easy tasks.
+      TASKS: ${{ inputs.tasks || (github.event_name == 'push' && 'fix-git' || '') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,21 +63,31 @@ jobs:
           "$TB_HOME/venv/bin/harbor" --version
 
       - name: Install Ollama and pull the model
+        env:
+          OLLAMA_VERSION: v0.40.3
+          # sha256 of ollama-linux-amd64.tar.zst for the release above, from the release asset digest.
+          OLLAMA_SHA256: ce6f8b671a699bf1ebafb28d60dbbabf4f37b30b499145fa308a8ba72de021d6
         run: |
-          curl -fsSL -o ollama-install.sh https://ollama.com/install.sh
-          sh ollama-install.sh
-          sudo systemctl stop ollama || true
-          # Listen on all interfaces so task containers can reach the runner. The 8gent system
-          # prompt plus tools is about 5k tokens; Ollama defaults to 4k and would cut the task off.
-          OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_HOST=0.0.0.0:11434 nohup ollama serve > ollama.log 2>&1 &
-          for i in $(seq 1 30); do curl -fs localhost:11434/api/tags >/dev/null && break; sleep 2; done
-          ollama pull "$MODEL"
-          ollama list
+          curl -fsSL -o ollama.tar.zst \
+            "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
+          echo "${OLLAMA_SHA256}  ollama.tar.zst" | sha256sum -c -
+          sudo tar -C /usr/local --zstd -xf ollama.tar.zst
+          rm ollama.tar.zst
+          ollama --version
+          # Bind to the docker bridge address only, not 0.0.0.0: task containers reach the
+          # runner there and nothing else on the network can. The 8gent system prompt plus
+          # tools is about 5k tokens; Ollama defaults to 4k and would cut the task off.
+          BRIDGE_IP="$(ip -4 -o addr show docker0 | awk '{print $4}' | cut -d/ -f1)"
+          test -n "$BRIDGE_IP"
+          echo "BRIDGE_IP=$BRIDGE_IP" >> "$GITHUB_ENV"
+          OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_HOST="${BRIDGE_IP}:11434" nohup ollama serve > ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs "http://${BRIDGE_IP}:11434/api/tags" >/dev/null && break; sleep 2; done
+          OLLAMA_HOST="${BRIDGE_IP}:11434" ollama pull "$MODEL"
+          OLLAMA_HOST="${BRIDGE_IP}:11434" ollama list
 
       - name: Run the slice
         run: |
-          HOST_IP="$(hostname -I | awk '{print $1}')"
-          export EIGHTGENT_TB_BASE_URL="http://${HOST_IP}:11434"
+          export EIGHTGENT_TB_BASE_URL="http://${BRIDGE_IP}:11434"
           export HARBOR_EXTRA_ARGS="--agent-timeout-multiplier 3"
           # shellcheck disable=SC2086
           bash benchmarks/terminal-bench/run-easy-slice.sh "ollama/$MODEL" $TASKS
