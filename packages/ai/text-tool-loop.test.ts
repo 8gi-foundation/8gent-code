@@ -14,6 +14,8 @@ import {
 	blockedCheckMessage,
 	blockedStopNote,
 	blockReason,
+	chainRefusalNote,
+	isChainRefusal,
 	emptyReplyNote,
 	emptyReplyStall,
 	overCapCallResult,
@@ -1761,6 +1763,73 @@ describe("blockReason", () => {
 		expect(blockReason("Error: no such file")).toBeNull();
 		expect(blockReason("Exit code 1: nope")).toBeNull();
 		expect(blockReason("ok")).toBeNull();
+	});
+});
+
+describe("isChainRefusal", () => {
+	test("matches the sanitizer's ;, && and || refusals and nothing else", () => {
+		expect(isChainRefusal(RUN_014230_CHAIN_RESULT)).toBe(true);
+		expect(isChainRefusal("[BLOCKED] Command chaining with && is not allowed. Use separate run_command calls instead. Command: a && b")).toBe(true);
+		expect(isChainRefusal("[BLOCKED] Command chaining with || is not allowed. Use separate run_command calls instead. Command: a || b")).toBe(true);
+		expect(isChainRefusal(RUN_014230_DEVNULL_RESULT)).toBe(false);
+		expect(isChainRefusal("[BLOCKED] Command substitution $(...) is not allowed. Command: echo $(id)")).toBe(false);
+		expect(isChainRefusal("Error: command chaining is not allowed here, said the README")).toBe(false);
+		expect(isChainRefusal("ok")).toBe(false);
+	});
+});
+
+describe("runTextToolAgent - repeated chaining refusals carry their count (#4072)", () => {
+	test("run 155723 shape: the first refusal is bare, the second and third name the count, a plain call is untouched", async () => {
+		const ws = gatedWorkspace();
+		const chained = (n: number) => `curl -s http://127.0.0.1:50738/ -o .tmp/p${n}.html; cat .tmp/p${n}.html`;
+		const model = scriptedModel([
+			tc("run_command", { command: chained(1) }),
+			tc("run_command", { command: chained(2) }),
+			tc("run_command", { command: chained(3) }),
+			tc("run_command", { command: "which ffmpeg" }),
+			// The first prose after tool work gets the completion check; answer it the same way.
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Fetch the page." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		const results = model.seen.slice(1, 5).map(lastUserMessage);
+		expect(results[0]).toContain("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(results[0]).not.toContain("chained commands refused this turn");
+		expect(results[1]).toContain(chainRefusalNote(2));
+		expect(results[2]).toContain(chainRefusalNote(3));
+		expect(results[3]).toContain("Tool run_command returned:\n/opt/homebrew/bin/ffmpeg");
+		expect(results[3]).not.toContain("chained commands refused this turn");
+		expect(ws.commands).toEqual(["which ffmpeg"]);
+		expect(result.content).toBe("ffmpeg is at /opt/homebrew/bin/ffmpeg.");
+	});
+
+	test("a non-chaining block does not count toward the chaining note", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			tc("run_command", { command: RUN_014230_DEVNULL_CMD }),
+			tc("run_command", { command: RUN_014230_CHAIN_CMD }),
+			tc("run_command", { command: "which ffmpeg" }),
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"UNREACHED",
+		]);
+		await runTextToolAgent({
+			messages: [{ role: "user", content: "Check which video tools are installed." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		const results = model.seen.slice(1).map(lastUserMessage);
+		expect(results[0]).toContain("[TOOLG8 BLOCKED]");
+		expect(results[1]).toContain(CHAIN_REASON);
+		expect(results.join("\n")).not.toContain("chained commands refused this turn");
 	});
 });
 
