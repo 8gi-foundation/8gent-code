@@ -69,6 +69,7 @@ export const PROTECTED_DATA_FILES = [
 /** Directories whose whole tree is protected, relative to a data dir. */
 export const PROTECTED_DATA_DIRS = [
 	"extensions",
+	"themes",
 	"prompts",
 	"packages",
 	"browser-profiles",
