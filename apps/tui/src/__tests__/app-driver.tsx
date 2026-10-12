@@ -133,6 +133,12 @@ export function harnessEnv(
 	}
 	Object.assign(env, {
 		HOME: home,
+		// The test process pins these to ONE shared temp dir for the whole run
+		// (tests/preload-temp-home.ts), and the store prefers EIGHT_DATA_DIR over
+		// HOME. Inherited, every harness would write its sessions into that shared
+		// dir and a later one would list the earlier ones. Each harness owns its home.
+		EIGHT_HOME: home,
+		EIGHT_DATA_DIR: path.join(home, ".8gent"),
 		OLLAMA_BASE_URL: base,
 		OLLAMA_HOST: base,
 		"8GENT_NO_INTRO": "1",
