@@ -10,19 +10,26 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../../permissions/tui-approval-channel";
+import { _resetLoopbackAllowlistForTest } from "../../permissions/loopback-allowlist";
 import {
 	type BrowserCall,
+	type BrowserLaunchSpec,
+	LOCAL_BROWSER_PROFILE,
 	LOCAL_SERVER_CURL_NOTE,
 	_setProfileHomeForTest,
 	_setResolverForTest,
+	_setSpawnForTest,
 	blockedForProfile,
 	browserProfile,
 	browserProfileWarning,
-	createEightBrowser,
-	secretsPathInHome,
-	localBrowserTools,
-	touchesBrowserSecrets,
 	browserWithheldNote,
+	createEightBrowser,
+	localBrowserTools,
+	pngSize,
+	secretsPathInHome,
+	setDefaultLocalProfile,
+	touchesBrowserSecrets,
+	usingDefaultLocalProfile,
 	validateBrowserAction,
 	wsTransport,
 } from "../eight-browser";
@@ -146,7 +153,7 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 			case "page.screenshot":
 				return {
 					ok: true,
-					dataUrl: `data:image/png;base64,${Buffer.from("PNGBYTES").toString("base64")}`,
+					dataUrl: `data:image/png;base64,${pngHeader(640, 480).toString("base64")}`,
 					savedTo: null,
 				};
 			case "page.waitFor":
@@ -160,6 +167,19 @@ function fakeSite(opts: { dropTyping?: boolean; prefilledPassword?: string } = {
 
 // Destination checks resolve names; keep every test off the real network.
 _setResolverForTest(async () => [{ address: "93.184.216.34", family: 4 }]);
+// A profile that is not running is launched on demand (#3785); no test may start the real app.
+_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
+
+/** A PNG header (signature + IHDR) for a w x h image: enough for pngSize, as 8gent Browser's shots are. */
+function pngHeader(w: number, h: number): Buffer {
+	const b = Buffer.alloc(33);
+	Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+	b.writeUInt32BE(13, 8);
+	b.write("IHDR", 12, "latin1");
+	b.writeUInt32BE(w, 16);
+	b.writeUInt32BE(h, 20);
+	return b;
+}
 
 describe("validateBrowserAction (CUA action spec)", () => {
 	test("accepts the closed vocabulary and rejects the rest", () => {
@@ -310,13 +330,28 @@ describe("8gent Browser driver", () => {
 		expect(res.steps[0]).toMatchObject({ verified: true, attempts: 1 });
 	});
 
-	test("screenshot writes the tab's PNG to the requested path", async () => {
+	test("screenshot writes the tab's PNG to the requested path and reports '<path> WxH' (#3785)", async () => {
 		const b = createEightBrowser(fakeSite().call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const out = join(mkdtempSync(join(tmpdir(), "8b-shot-")), "s.png");
-		expect(await b.screenshot(out)).toBe(out);
-		expect(readFileSync(out, "utf8")).toBe("PNGBYTES");
+		expect(await b.screenshot(out)).toBe(`${out} 640x480`);
+		expect(readFileSync(out).equals(pngHeader(640, 480))).toBe(true);
 		expect(await b.screenshot(out, "not-mine")).toMatch(/not opened by 8gent/);
+	});
+	test("screenshot: the size comes from the IHDR, else the reported viewport, else nothing is appended", () => {
+		expect(pngSize(pngHeader(1280, 800))).toEqual({ w: 1280, h: 800 });
+		expect(pngSize(Buffer.from("PNG"))).toBeNull();
+		expect(pngSize(Buffer.from("not a png at all, but long enough to read"))).toBeNull();
+	});
+	test("screenshot without a path: the browser's own file, sized by its reported viewport", async () => {
+		const site = fakeSite();
+		const call: BrowserCall = async (cmd, args) =>
+			cmd === "page.screenshot"
+				? { ok: true, savedTo: "/tmp/8b/shot.png", viewport: { width: 1024, height: 768 } }
+				: site.call(cmd, args);
+		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		expect(await b.screenshot()).toBe("/tmp/8b/shot.png 1024x768");
 	});
 });
 
@@ -328,7 +363,7 @@ describe("state rendering", () => {
 		});
 		const out = await b.open("http://127.0.0.1:5/");
 		expect(out).not.toContain("autofilled-pw");
-		expect(JSON.parse(out).elements[1]).toBe("[1] input (password field)");
+		expect(JSON.parse(out).elements[1]).toBe("[1] textbox (password field)");
 	});
 
 	test("typed values are never echoed back through the element list", async () => {
@@ -340,12 +375,12 @@ describe("state rendering", () => {
 		]);
 		expect(out).not.toContain("s3cret-pass");
 		expect(await b.state()).not.toContain("s3cret-pass");
-		expect(JSON.parse(await b.state()).elements[1]).toBe("[1] input (password field)");
+		expect(JSON.parse(await b.state()).elements[1]).toBe("[1] textbox (password field)");
 		const out2 = await b.run([
 			{ action: "type", selector: "input[name=username]", text: "rishi-user" },
 		]);
 		expect(out2).not.toContain("rishi-user");
-		expect(JSON.parse(await b.state()).elements[0]).toBe("[0] input (typed, 10 chars)");
+		expect(JSON.parse(await b.state()).elements[0]).toBe("[0] textbox (typed, 10 chars)");
 	});
 
 	test("hides invisible elements (a hidden csrf value never reaches the model) and keeps indices stable", async () => {
@@ -383,7 +418,7 @@ describe("state rendering", () => {
 			allowLoopback: ["127.0.0.1:5"],
 		}).open("http://127.0.0.1:5/");
 		expect(out).not.toContain("csrf-secret-value");
-		expect(JSON.parse(out).elements).toEqual(["[0] input", "[2] button Sign in"]);
+		expect(JSON.parse(out).elements).toEqual(['[0] textbox ""', '[2] button "Sign in"']);
 		const b2 = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b2.open("http://127.0.0.1:5/");
 		expect(JSON.parse(await b2.run([{ action: "left_click", index: 1 }])).error).toMatch(/hidden/);
@@ -719,11 +754,15 @@ describeNotWin("wsTransport with a named profile", () => {
 		}
 	});
 
-	test("fails closed, without connecting, when the profile is not running", async () => {
+	// Rule since #3785: a profile with no port file is started on demand, once per process. When that
+	// start fails (here: the spawn seam refuses), the call fails closed with the launch reason and the
+	// curl alternative, never by connecting to the default browser. A port file with no token file is
+	// still "not running": nothing is launched over a half-published profile.
+	test("fails closed, without connecting, when the profile is not running and cannot be started", async () => {
 		const env = { EIGHT_BROWSER_PROFILE: "eightgent" };
 		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
 		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
-			/profile "eightgent" is not running/,
+			/8gent Browser could not start \(test spawn refused\).*run_command with curl/,
 		);
 		_setProfileHomeForTest(profileHome("eightgent", { port: 7981 }));
 		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
@@ -1061,7 +1100,7 @@ describe("ToolExecutor, review round", () => {
 			cmd === "page.screenshot"
 				? {
 						ok: true,
-						dataUrl: `data:image/png;base64,${Buffer.from("PNG").toString("base64")}`,
+						dataUrl: `data:image/png;base64,${pngHeader(320, 200).toString("base64")}`,
 						savedTo: "/x/.8gent/browser-profiles/eightgent/browser-shots/a.png",
 					}
 				: site.call(cmd, args);
@@ -1075,7 +1114,8 @@ describe("ToolExecutor, review round", () => {
 			const out = await exec.execute("browser_screenshot", {});
 			expect(out.startsWith(dir)).toBe(true);
 			expect(out).not.toContain("browser-profiles");
-			expect(readFileSync(out, "utf8")).toBe("PNG");
+			expect(out.endsWith(" 320x200")).toBe(true);
+			expect(readFileSync(out.slice(0, -" 320x200".length)).equals(pngHeader(320, 200))).toBe(true);
 		} finally {
 			server.stop(true);
 		}
@@ -1409,5 +1449,530 @@ describe("secret placeholders: the model never holds the value (#3604)", () => {
 		await b.run(typeStep("alice {{not-a-secret}}"));
 		expect(sent(site.calls)).toEqual(["alice {{not-a-secret}}"]);
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+// ── Local sessions get the browser by default (#3785) ───────────────────────
+
+describe("default local profile: a local session's own isolated browser (#3785)", () => {
+	const HOME = "/Users/someone";
+	beforeEach(() => setDefaultLocalProfile(LOCAL_BROWSER_PROFILE));
+	afterEach(() => setDefaultLocalProfile(null));
+
+	test("with EIGHT_BROWSER_PROFILE unset the default applies: a named profile under ~/.8gent/browser-profiles", () => {
+		const p = browserProfile({}, HOME);
+		expect(p?.name).toBe("eight-local");
+		expect(p?.tokenFile).toBe(
+			join(HOME, ".8gent", "browser-profiles", "eight-local", "browser-control.token"),
+		);
+		expect(p?.tokenFile).not.toBe(join(HOME, ".8gent", "browser-control.token"));
+		expect(usingDefaultLocalProfile({})).toBe(true);
+		expect(localBrowserTools({})).toEqual([
+			"browser_open",
+			"browser_state",
+			"browser_task",
+			"browser_screenshot",
+		]);
+		expect(browserWithheldNote({})).toBeNull();
+	});
+	test("an explicit profile wins over the default; an explicit 'default' still means no isolated browser", () => {
+		expect(browserProfile({ EIGHT_BROWSER_PROFILE: "eightgent" }, HOME)?.name).toBe("eightgent");
+		expect(usingDefaultLocalProfile({ EIGHT_BROWSER_PROFILE: "eightgent" })).toBe(false);
+		expect(browserProfile({ EIGHT_BROWSER_PROFILE: "default" }, HOME)).toBeNull();
+		expect(localBrowserTools({ EIGHT_BROWSER_PROFILE: "default" })).toEqual([]);
+		expect(() => browserProfile({ EIGHT_BROWSER_PROFILE: "../x" }, HOME)).toThrow(
+			/EIGHT_BROWSER_PROFILE/,
+		);
+	});
+	test("EIGHT_BROWSER_LOCAL=0 opts out: no browser tools, and the note says why", () => {
+		const env = { EIGHT_BROWSER_LOCAL: "0" };
+		expect(browserProfile(env, HOME)).toBeNull();
+		expect(localBrowserTools(env)).toEqual([]);
+		expect(usingDefaultLocalProfile(env)).toBe(false);
+		const note = browserWithheldNote(env) ?? "";
+		expect(note).toMatch(/EIGHT_BROWSER_LOCAL=0/);
+		expect(note).toContain(LOCAL_SERVER_CURL_NOTE);
+		expect(note).not.toContain("\u2014");
+	});
+	test("the browser-use backend never gets the default profile", () => {
+		expect(browserProfile({ EIGHT_BROWSER_BACKEND: "browser-use" }, HOME)).toBeNull();
+		expect(localBrowserTools({ EIGHT_BROWSER_BACKEND: "browser-use" })).toEqual([]);
+	});
+	test("the default is validated like any name: never the default profile, never a path", () => {
+		for (const bad of ["default", "../x", "Eight", ""])
+			expect(() => setDefaultLocalProfile(bad)).toThrow(/slug/);
+		setDefaultLocalProfile(null);
+		expect(browserProfile({}, HOME)).toBeNull();
+		expect(localBrowserTools({})).toEqual([]);
+		expect(browserWithheldNote({})).toMatch(/not offered/);
+	});
+	test("the default local profile never reads a secrets file for {{secret:NAME}}", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "8b-local-secrets-"));
+		const file = join(dir, "secrets.json");
+		writeFileSync(file, JSON.stringify({ PW: { value: "hunter2", hosts: ["example.com"] } }));
+		chmodSync(file, 0o600);
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			secretsFile: file,
+			env: {},
+		});
+		await b.open("https://example.com/");
+		const out = JSON.parse(
+			await b.run([{ action: "type", selector: "input[name=q]", text: "{{secret:PW}}" }]),
+		);
+		expect(out.ok).toBe(false);
+		expect(out.error).toMatch(/no secrets file is configured/);
+		expect(site.calls).not.toContain("page.type");
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describeNotWin(
+	"start on demand: a profile with no port file is launched once, with a minimal env (#3785)",
+	() => {
+		afterEach(() => {
+			_setProfileHomeForTest(null);
+			_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
+			_resetLoopbackAllowlistForTest();
+		});
+
+		/** A fake 8gent Browser: publishes the token and the fake server's port, then "runs" until stopped. */
+		function fakeApp(serverPort: number, token: string) {
+			const specs: BrowserLaunchSpec[] = [];
+			let stop: (reason: string) => void = () => {};
+			_setSpawnForTest((spec) => {
+				specs.push(spec);
+				mkdirSync(join(spec.portFile, ".."), { recursive: true });
+				writeFileSync(spec.tokenFile, `${token}\n`);
+				writeFileSync(spec.portFile, String(serverPort));
+				return { exited: new Promise<string>((r) => (stop = r)) };
+			});
+			return { specs, stop: (why: string) => stop(why) };
+		}
+
+		test("the launched profile is used: the transport connects to the port it published", async () => {
+			const { server, tokens } = serveCall(nextSite().call, "fresh-tok");
+			const workspace = mkdtempSync(join(tmpdir(), "8b-ws-"));
+			mkdirSync(join(workspace, ".8gent"));
+			writeFileSync(
+				join(workspace, ".8gent", "allow-loopback.json"),
+				JSON.stringify({ allow: ["127.0.0.1:5173", "localhost:7980"] }),
+			);
+			const app = fakeApp(Number(server.port), "fresh-tok");
+			try {
+				_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+				const env = {
+					EIGHT_BROWSER_PROFILE: "eightgent",
+					EIGHT_BROWSER_APP: "/fake/8gent Browser",
+					EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:3000",
+					OPENROUTER_API_KEY: "sk-never",
+					ANTHROPIC_API_KEY: "sk-never",
+					PATH: "/usr/bin:/bin",
+					HOME: "/not/the/profile/home",
+				};
+				const call = wsTransport({ env, workspace });
+				expect(await call("tab.open", { url: "https://example.com/" })).toEqual({ id: "t9" });
+				await call("tab.open", { url: "https://example.com/" });
+				expect(tokens).toEqual(["fresh-tok", "fresh-tok"]);
+				expect(app.specs.length).toBe(1); // one launch per profile per process
+				const spec = app.specs[0];
+				expect(spec.bin).toBe("/fake/8gent Browser");
+				expect(spec.profile).toBe("eightgent");
+				expect(Object.keys(spec.env).sort()).toEqual(
+					[
+						"EIGHT_BROWSER_ALLOW_LOOPBACK",
+						"EIGHT_BROWSER_CONTROL_PORT",
+						"EIGHT_BROWSER_PROFILE",
+						"HOME",
+						"PATH",
+					].sort(),
+				);
+				expect(spec.env.HOME).not.toBe("/not/the/profile/home"); // the home the port file is read from
+				expect(spec.env.EIGHT_BROWSER_PROFILE).toBe("eightgent");
+				expect(Number(spec.env.EIGHT_BROWSER_CONTROL_PORT)).toBe(spec.port);
+				expect(spec.port).not.toBe(7980);
+				expect([7980, 18789, 18790, 11434, 1234, 21434]).not.toContain(spec.port);
+				// The run's own ports only: env list plus workspace file; the reserved 7980 entry dropped.
+				expect(spec.env.EIGHT_BROWSER_ALLOW_LOOPBACK.split(",").sort()).toEqual([
+					"127.0.0.1:3000",
+					"127.0.0.1:5173",
+				]);
+				expect(JSON.stringify(spec.env)).not.toMatch(/sk-never|OPENROUTER|ANTHROPIC/);
+			} finally {
+				app.stop("stopped");
+				server.stop(true);
+				rmSync(workspace, { recursive: true, force: true });
+			}
+		});
+
+		test("a child that exits at once fails fast with the reason and the curl alternative; not retried", async () => {
+			let spawns = 0;
+			_setSpawnForTest(() => {
+				spawns++;
+				return { exited: Promise.resolve("exited with code 1") };
+			});
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+			const t0 = Date.now();
+			const call = wsTransport({ env });
+			await expect(call("tabs.list")).rejects.toThrow(
+				"8gent Browser could not start (exited with code 1). For a local web app use run_command with curl instead.",
+			);
+			await expect(call("tabs.list")).rejects.toThrow(/could not start/);
+			expect(Date.now() - t0).toBeLessThan(5_000);
+			expect(spawns).toBe(1);
+		});
+
+		test("no app to launch is a short error too, and names the setting", async () => {
+			const spawned: BrowserLaunchSpec[] = [];
+			_setSpawnForTest((spec) => {
+				spawned.push(spec);
+				return { exited: Promise.resolve("never") };
+			});
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "" };
+			if (process.platform === "darwin") return; // the real app may be installed here; the fake above covers the rest
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+				/could not start \(no 8gent Browser app found; set EIGHT_BROWSER_APP/,
+			);
+			expect(spawned).toEqual([]);
+		});
+	},
+);
+
+describe("isolated profile: loopback only on the run's own listed ports (#3785)", () => {
+	afterEach(() => _resetLoopbackAllowlistForTest());
+	const at = (scheme: string, rest: string) => `${scheme}:/` + `/${rest}`;
+	const publicDns = async () => [{ address: "93.184.216.34", family: 4 as const }];
+	const workspace = () => mkdtempSync(join(tmpdir(), "8b-loopback-ws-"));
+
+	test("with no list, 127.0.0.1:5173 is refused like any private host", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			workspace: workspace(),
+			env: {},
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5173/"))).toMatch(/browser_open failed: .*private/);
+		expect(site.calls).not.toContain("tab.open");
+	});
+	test("EIGHT_BROWSER_ALLOW_LOOPBACK=127.0.0.1:5173 opens that port and nothing else", async () => {
+		const env = { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5173,127.0.0.1:7980" };
+		const inner = nextSite();
+		const call: BrowserCall = async (cmd, args) => {
+			if (cmd !== "nav.go") return inner.call(cmd, args);
+			inner.calls.push(cmd);
+			return { navigating: args?.url };
+		};
+		const site = { calls: inner.calls, call };
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			workspace: workspace(),
+			env,
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5173/"))).not.toMatch(/failed/);
+		expect(await b.open(at("http", "localhost:5173/app"))).not.toMatch(/failed/);
+		expect(site.calls.filter((c) => c === "tab.open").length).toBe(2);
+		for (const u of [
+			at("http", "127.0.0.1:5174/"),
+			at("http", "127.0.0.1:7980/"),
+			at("http", "127.0.0.1/"),
+			at("http", "10.0.0.1:5173/"),
+			at("http", "169.254.169.254/latest/meta-data/"),
+			at("http", "user:pw@127.0.0.1:5173/"),
+		]) {
+			expect(await b.open(u)).toMatch(/browser_open failed/);
+		}
+		expect(site.calls.filter((c) => c === "tab.open").length).toBe(2);
+		// An open step inside browser_task follows the same rule.
+		const out = JSON.parse(await b.run([{ action: "open", url: at("http", "127.0.0.1:5174/") }]));
+		expect(out.ok).toBe(false);
+		expect(site.calls).not.toContain("nav.go");
+		const ok = JSON.parse(
+			await b.run([{ action: "open", url: at("http", "127.0.0.1:5173/next") }]),
+		);
+		expect(ok.ok).toBe(true);
+	});
+	test("the workspace file lists ports too; the list is read once per workspace", async () => {
+		const ws = workspace();
+		mkdirSync(join(ws, ".8gent"));
+		writeFileSync(
+			join(ws, ".8gent", "allow-loopback.json"),
+			JSON.stringify({ allow: ["127.0.0.1:4321"] }),
+		);
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			workspace: ws,
+			env: {},
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:4321/"))).not.toMatch(/failed/);
+		writeFileSync(
+			join(ws, ".8gent", "allow-loopback.json"),
+			JSON.stringify({ allow: ["127.0.0.1:4321", "127.0.0.1:4322"] }),
+		);
+		expect(await b.open(at("http", "127.0.0.1:4322/"))).toMatch(/failed/); // frozen at first read
+	});
+	test("without a workspace an isolated profile allows no loopback at all, whatever the env says", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			env: { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5173" },
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5173/"))).toMatch(/failed/);
+	});
+	test("the non-isolated path is unchanged: its own allowLoopback list, no workspace needed", async () => {
+		const site = nextSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			allowLoopback: ["127.0.0.1:5"],
+			resolve: publicDns,
+		});
+		expect(await b.open(at("http", "127.0.0.1:5/"))).not.toMatch(/failed/);
+		expect(await b.open(at("http", "127.0.0.1:6/"))).toMatch(/Refused/);
+	});
+});
+
+describe("isolated profile: a password field is typed into only on an allowed loopback tab (#3785)", () => {
+	afterEach(() => _resetLoopbackAllowlistForTest());
+	const ws = () => mkdtempSync(join(tmpdir(), "8b-pw-ws-"));
+	/** fakeSite's login form lives at http://127.0.0.1:5/; answer the secret-field probes for it. */
+	function loginSite() {
+		const site = fakeSite();
+		const call: BrowserCall = async (cmd, args = {}) => {
+			const sel = typeof args.selector === "string" ? args.selector : "";
+			if (cmd === "page.query" && sel.startsWith("input[type=password],"))
+				return site.call("page.query", { ...args, selector: "input[type=password]" });
+			if (cmd === "page.type" && typeof args.index === "number") {
+				const selector = args.index === 1 ? "input[type=password]" : "input[name=username]";
+				return site.call("page.type", { ...args, selector });
+			}
+			return withSecretFields(site.call)(cmd, args);
+		};
+		return { call, calls: site.calls };
+	}
+
+	test("allowed loopback tab: the password is typed (by selector and by index), still logged as length only", async () => {
+		const site = loginSite();
+		const b = createEightBrowser(site.call, {
+			settleMs: 0,
+			isolated: true,
+			workspace: ws(),
+			env: { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5" },
+		});
+		expect(await b.open("http://127.0.0.1:5/")).not.toMatch(/failed/);
+		const out = JSON.parse(
+			await b.run([
+				{ action: "type", selector: "input[type=password]", text: "hunter2" },
+				{ action: "type", index: 1, text: "hunter3" },
+			]),
+		);
+		expect(out.ok).toBe(true);
+		expect(out.steps.map((s: { ok: boolean; verified: boolean }) => [s.ok, s.verified])).toEqual([
+			[true, true],
+			[true, true],
+		]);
+		expect(out.steps[1].index).toBe(1);
+		expect(out.steps[1].text_len).toBe(7);
+		expect(JSON.stringify(out)).not.toMatch(/hunter/);
+		expect(site.calls.filter((c) => c.cmd === "page.type").length).toBe(2);
+	});
+	test("any other page: refused by selector and by index, nothing typed", async () => {
+		for (const env of [{}, { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:6" }]) {
+			const site = fakeSite();
+			// The tab is at https://example.com/ as far as the driver can tell.
+			const call: BrowserCall = async (cmd, args = {}) => {
+				if (cmd === "page.read")
+					return { snapshot: { url: "https://example.com/login", title: "x", text: "" } };
+				const sel = typeof args.selector === "string" ? args.selector : "";
+				if (cmd === "page.query" && sel.startsWith("input[type=password],"))
+					return site.call("page.query", { ...args, selector: "input[type=password]" });
+				return withSecretFields(site.call)(cmd, args);
+			};
+			const b = createEightBrowser(call, { settleMs: 0, isolated: true, workspace: ws(), env });
+			await b.open("https://example.com/login");
+			for (const step of [
+				{ action: "type", selector: "input[type=password]", text: "hunter2" },
+				{ action: "type", index: 1, text: "hunter2" },
+			]) {
+				const out = JSON.parse(await b.run([step]));
+				expect(out.ok).toBe(false);
+				expect(out.error).toMatch(/password or payment field/);
+			}
+			expect(site.calls.some((c) => c.cmd === "page.type")).toBe(false);
+			_resetLoopbackAllowlistForTest();
+		}
+	});
+	test("a plan that moves from an allowed loopback page to another page is refused at the live check", async () => {
+		const site = loginSite();
+		let url = "http://127.0.0.1:5/";
+		const call: BrowserCall = async (cmd, args = {}) => {
+			if (cmd === "nav.go") url = String(args.url);
+			if (cmd === "page.read") return { snapshot: { url, title: "x", text: "" } };
+			return site.call(cmd, args);
+		};
+		const b = createEightBrowser(call, {
+			settleMs: 0,
+			isolated: true,
+			workspace: ws(),
+			env: { EIGHT_BROWSER_ALLOW_LOOPBACK: "127.0.0.1:5" },
+		});
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(
+			await b.run([
+				{ action: "open", url: "https://example.com/login" },
+				{ action: "type", selector: "input[type=password]", text: "hunter2" },
+			]),
+		);
+		expect(out.ok).toBe(false);
+		expect(out.error).toMatch(/step 1: .*password or payment field/);
+		expect(site.calls.some((c) => c.cmd === "page.type")).toBe(false);
+	});
+});
+
+describe('element lines read `[n] role "name"`; type accepts an index (#4043)', () => {
+	test("roles come from the tag, an input type or the ARIA role; the name is quoted and clipped as before", async () => {
+		const els = [
+			{ index: 0, tag: "a", text: "Docs", rect: { x: 0, y: 0, w: 9, h: 9 } },
+			{ index: 1, tag: "button", text: "Save", rect: { x: 0, y: 10, w: 9, h: 9 } },
+			{ index: 2, tag: "input", text: "", rect: { x: 0, y: 20, w: 9, h: 9 } },
+			{ index: 3, tag: "input", text: "Weekly", rect: { x: 0, y: 30, w: 9, h: 9 } },
+			{ index: 4, tag: "div", role: "button", text: "Go", rect: { x: 0, y: 40, w: 9, h: 9 } },
+			{ index: 5, tag: "select", text: "Plan", rect: { x: 0, y: 50, w: 9, h: 9 } },
+			{ index: 6, tag: "input", text: "Search", rect: { x: 0, y: 60, w: 9, h: 9 } },
+		];
+		const call: BrowserCall = async (cmd, args = {}) => {
+			if (cmd === "tab.open") return { id: "t1" };
+			if (cmd === "page.waitFor") return { ok: true, found: true };
+			if (cmd === "page.read")
+				return { snapshot: { url: "https://example.com/", title: "x", text: "" } };
+			if (cmd === "page.query") {
+				const sel = String(args.selector ?? "");
+				if (sel === ":checked") return { ok: true, elements: [els[3]] };
+				if (sel.startsWith("input[type=checkbox]")) return { ok: true, elements: [els[3]] };
+				if (sel.startsWith("input[type=submit]")) return { ok: true, elements: [els[6]] };
+				if (sel) return { ok: true, elements: [] };
+				return { ok: true, elements: els };
+			}
+			throw new Error(`unexpected ${cmd}`);
+		};
+		const out = JSON.parse(
+			await createEightBrowser(call, { settleMs: 0 }).open("https://example.com/"),
+		);
+		expect(out.elements).toEqual([
+			'[0] link "Docs"',
+			'[1] button "Save"',
+			'[2] textbox ""',
+			'[3] checkbox "Weekly" (checked)',
+			'[4] button "Go"',
+			'[5] combobox "Plan"',
+			'[6] button "Search"',
+		]);
+	});
+	test("type by index lands and is verified against the element list; a bad index is refused in the dry run", async () => {
+		const site = fakeSite();
+		const call: BrowserCall = async (cmd, args = {}) =>
+			cmd === "page.type" && typeof args.index === "number"
+				? site.call("page.type", {
+						...args,
+						selector: args.index === 1 ? "input[type=password]" : "input[name=username]",
+					})
+				: site.call(cmd, args);
+		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 0, text: "rishi" }]));
+		expect(out.ok).toBe(true);
+		expect(out.steps[0]).toMatchObject({ action: "type", index: 0, text_len: 5, verified: true });
+		expect(out.page.elements[0]).toBe("[0] textbox (typed, 5 chars)");
+		const bad = JSON.parse(await b.run([{ action: "type", index: 9, text: "x" }]));
+		expect(bad.ok).toBe(false);
+		expect(bad.error).toMatch(/dry run: step 0: index 9 out of range/);
+		expect(validateBrowserAction({ action: "type", text: "x" }).ok).toBe(false);
+		expect(validateBrowserAction({ action: "type", index: -1, text: "x" }).ok).toBe(false);
+		expect(validateBrowserAction({ action: "type", index: 2, text: "x" })).toEqual({
+			ok: true,
+			action: { action: "type", index: 2, text: "x" },
+		});
+	});
+	test("type by index: a verify that never lands stops the plan, as with a selector", async () => {
+		const site = fakeSite({ dropTyping: true });
+		const call: BrowserCall = async (cmd, args = {}) =>
+			cmd === "page.type" && typeof args.index === "number"
+				? site.call("page.type", { ...args, selector: "input[name=username]" })
+				: site.call(cmd, args);
+		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(
+			await b.run([
+				{ action: "type", index: 0, text: "rishi" },
+				{ action: "left_click", index: 2 },
+			]),
+		);
+		expect(out.ok).toBe(false);
+		expect(out.steps[0]).toMatchObject({ attempts: 2, verified: false });
+		expect(site.calls.some((c) => c.cmd === "page.click")).toBe(false);
+	});
+});
+
+describeNotWin("ToolExecutor on the default local profile (#3785)", () => {
+	const dir = mkdtempSync(join(tmpdir(), "browser-local-default-"));
+	const saved = {
+		profile: process.env.EIGHT_BROWSER_PROFILE,
+		headless: process.env.EIGHT_HEADLESS,
+	};
+	const restore = (k: string, v: string | undefined) =>
+		v === undefined ? Reflect.deleteProperty(process.env, k) : (process.env[k] = v);
+	afterEach(() => {
+		restore("EIGHT_BROWSER_PROFILE", saved.profile);
+		restore("EIGHT_HEADLESS", saved.headless);
+		setDefaultLocalProfile(null);
+		_setProfileHomeForTest(null);
+		_resetTuiApprovalChannel();
+	});
+
+	test("browser_open and browser_screenshot work with no EIGHT_BROWSER_PROFILE, through the eight-local profile", async () => {
+		const site = nextSite();
+		const shot: BrowserCall = async (cmd, args) =>
+			cmd === "page.screenshot"
+				? {
+						ok: true,
+						dataUrl: `data:image/png;base64,${pngHeader(800, 600).toString("base64")}`,
+						savedTo: null,
+					}
+				: site.call(cmd, args);
+		const { server, tokens } = serveCall(shot, "local-tok");
+		try {
+			Reflect.deleteProperty(process.env, "EIGHT_BROWSER_PROFILE");
+			process.env.EIGHT_HEADLESS = "1";
+			setDefaultLocalProfile(LOCAL_BROWSER_PROFILE);
+			_setProfileHomeForTest(profileHome("eight-local", { token: "local-tok", port: server.port }));
+			const exec = new ToolExecutor(dir, "browser-local");
+			const opened = await exec.execute("browser_open", { url: "https://example.com/" });
+			expect(opened).not.toMatch(/failed/);
+			expect(tokens.length).toBeGreaterThan(0); // one authenticated round trip per command
+			expect(new Set(tokens)).toEqual(new Set(["local-tok"]));
+			const out = await exec.execute("browser_screenshot", {});
+			expect(out.startsWith(dir)).toBe(true);
+			expect(out.endsWith(" 800x600")).toBe(true);
+			// Still an isolated profile: loopback off the list is refused before the browser is asked.
+			const before = site.calls.length;
+			expect(await exec.execute("browser_open", { url: "http://127.0.0.1:5173/" })).toMatch(
+				/browser_open failed/,
+			);
+			expect(site.calls.length).toBe(before);
+		} finally {
+			server.stop(true);
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

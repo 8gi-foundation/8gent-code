@@ -78,7 +78,13 @@ import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completi
 import { verifyNudgeFor } from "./verify-gate";
 import { projectInstructionsSection } from "./instruction-loader";
 import { isLocalProvider } from "./registry";
-import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
+import {
+	LOCAL_BROWSER_PROFILE,
+	browserProfileWarning,
+	browserWithheldNote,
+	localBrowserTools,
+	setDefaultLocalProfile,
+} from "../tools/eight-browser";
 
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -1760,6 +1766,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Deferred registry only loads `core` upfront — make sure local providers
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
+		// A local provider with no EIGHT_BROWSER_PROFILE gets its own isolated 8gent Browser profile,
+		// started on demand (#3785); a native tool-caller keeps today's rules (declared default cleared).
+		setDefaultLocalProfile(isLocalProvider ? LOCAL_BROWSER_PROFILE : null);
 		if (isLocalProvider) {
 			// A bad EIGHT_BROWSER_PROFILE leaves the session without browser tools; say so once (#3622).
 			const browserWarning = browserProfileWarning();
@@ -1812,8 +1821,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...(postMessageAvailable() ? ["post_message"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
-			// 8gent Browser (#3622): only with a named EIGHT_BROWSER_PROFILE, the bot's own login-free
-			// instance. Without one a local model gets no browser, so it never reaches the person's profile.
+			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
+			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
 			...localBrowserTools(),
 		];
 		const providerTools = isLocalProvider

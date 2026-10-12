@@ -585,11 +585,17 @@ const MCP_LEAN_TOOL_DEFS = [
 /** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
 const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
-const getEightBrowser = () => {
+/** The workspace of the executor that last used the browser: the source of its loopback allowlist. */
+let browserWorkspace: string | undefined;
+const getEightBrowser = (workspace: string) => {
+	browserWorkspace = workspace;
 	if (!eightBrowser) {
-		// A named profile (#3622) is the bot's own login-free browser: it never types into password or
-		// payment fields and never opens loopback or private hosts.
-		eightBrowser = createEightBrowser(undefined, { isolated: () => isolatedBrowser() });
+		// A named profile (#3622) is the bot's own login-free browser: it never opens private hosts, and
+		// reaches loopback, or types into a password field, only on the run's own listed ports (#3785).
+		eightBrowser = createEightBrowser(undefined, {
+			isolated: () => isolatedBrowser(),
+			workspace: () => browserWorkspace,
+		});
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -1608,7 +1614,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a new 8gent Browser tab and return its state: tab id, URL, title, numbered actionable elements, page text. Use for web interaction, form filling, scraping dynamic pages. Then act with browser_task actions.",
+						"Open a URL in a new 8gent Browser tab and return its tab id, title, numbered elements and page text.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1631,7 +1637,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_state",
 					description:
-						"Get the current browser page state: URL, title, and all clickable/interactive elements with their indices. Use after browser_open to see what you can interact with.",
+						"Re-read the current tab: URL, title and the numbered elements ([n] role \"name\") that browser_task acts on.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1648,7 +1654,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=email]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Sensitive clicks (sign in, buy, delete, send...) ask the person first.",
+						"Run verified steps in the tab: type{index|selector,text}, left_click{index|selector}, wait_for{selector}, open{url}, scroll{dy}.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1679,7 +1685,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_screenshot",
 					description:
-						"Take a screenshot of an 8gent Browser tab opened with browser_open. Returns the file path where the screenshot was saved.",
+						"Screenshot the current tab to a .png and return '<path> <W>x<H>'.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -3981,7 +3987,7 @@ export class ToolExecutor {
 		session?: string,
 	): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().open(url);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).open(url);
 			return browserOpen(url, { browser, session });
 		} catch (err) {
 			return `browser_open failed: ${err}`;
@@ -3990,7 +3996,7 @@ export class ToolExecutor {
 
 	private async handleBrowserState(session?: string): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().state(session);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).state(session);
 			return browserState(session);
 		} catch (err) {
 			return `browser_state failed: ${err}`;
@@ -4011,7 +4017,7 @@ export class ToolExecutor {
 				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
 				const approve = async (what: string) =>
 					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
-				return await getEightBrowser().run(actions, session, approve);
+				return await getEightBrowser(this.workingDirectory).run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
@@ -4032,7 +4038,7 @@ export class ToolExecutor {
 				} else if (isolatedBrowser()) {
 					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
-				return await getEightBrowser().screenshot(out, session);
+				return await getEightBrowser(this.workingDirectory).screenshot(out, session);
 			}
 			return browserScreenshot(filePath, session);
 		} catch (err) {
