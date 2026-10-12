@@ -5,8 +5,10 @@
 #     reports the run ready at the offset both stores agree on, or refuses with
 #     "ledger verify failed" (tampered, truncated, torn, missing, wrong key, no key).
 #   - session-journal.test.ts: the journal survives the kill and the session comes back.
-# ci.yml and platforms.yml cover Linux and Windows but not macOS; this is the
-# one place all three run it. No model is contacted.
+# Linux and macOS also run scripts/ci/durable-kill-resume.ts from source (each
+# interrupted call handled by its replay class); Windows runs it against the
+# compiled exe in windows-smoke.yml. ci.yml and platforms.yml do not cover
+# macOS; this is the one place all three run. No model is contacted.
 
 name: Resume conformance
 
@@ -19,6 +21,7 @@ on:
       - packages/goal/**
       - packages/db/**
       - tests/force-kill.ts
+      - scripts/ci/durable-kill-resume.ts
   workflow_dispatch:
 
 permissions:
@@ -61,3 +64,7 @@ jobs:
           rc=${PIPESTATUS[0]}
           if grep -Eq '^ *[1-9][0-9]* skip' conformance.log; then echo "::error::a conformance case was skipped on $RUNNER_OS"; exit 1; fi
           exit $rc
+      # Windows runs this proof against the compiled exe in windows-smoke.yml.
+      - name: Daemon kill-and-resume proof from source (replay classes)
+        if: runner.os != 'Windows'
+        run: bun scripts/ci/durable-kill-resume.ts bun "$PWD/bin/8gent.ts" daemon run
