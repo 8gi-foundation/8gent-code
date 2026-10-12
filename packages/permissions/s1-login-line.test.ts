@@ -83,6 +83,8 @@ beforeEach(() => {
 	outside = tempDir("s1-login-out-");
 	put("TASK.txt", TASK);
 	put("notes/creds.txt", "Token: abc\n");
+	put("prod.env", "Password: p\n");
+	put("notes/x.ENV", "Password: p\n");
 	put(".tmp/seed.txt");
 	put(".git/config", "[core]");
 	put(".env", "SECRET=1");
@@ -163,6 +165,14 @@ describe("loginLineToTmp refuses", () => {
 		["output is a config name", "sed -n 's/^Password: */password=/w .tmp/package.json' TASK.txt"],
 		["output is a secret name", "sed -n 's/^Password: */password=/w .tmp/credentials' TASK.txt"],
 		["input is a secret file", "sed -n 's/^SECRET=*/secret=/w .tmp/login' .env"],
+		[
+			"input is prod.env (a dotenv under another name, 8SO)",
+			"sed -n 's/^Password: */password=/w .tmp/login' prod.env",
+		],
+		[
+			"input is x.ENV in a subdirectory",
+			"sed -n 's/^Password: */password=/w .tmp/login' notes/x.ENV",
+		],
 		["input in a dot directory", "sed -n 's/^Password: */password=/w .tmp/login' .git/config"],
 		["input under .tmp", "sed -n 's/^Password: */password=/w .tmp/login' .tmp/seed.txt"],
 		["input with ..", "sed -n 's/^Password: */password=/w .tmp/login' ../TASK.txt"],
@@ -247,10 +257,11 @@ describe("systemOneGate with the lane", () => {
 		expect(r.guard?.backend).not.toBe("allowlist");
 		expect(r.guard?.reason ?? "").not.toContain("printing nothing");
 	};
-	test("a deviation is not the lane's: the rules and the judge decide as before", async () => {
+	test("a deviation is not the lane's: the rules and the judge decide as before (prod.env included)", async () => {
 		for (const cmd of [
 			"sed -n 's/^Password: *//p' TASK.txt",
 			"sed -n 's/^Password: */password=/w .tmp/login' link.txt",
+			"sed -n 's/^Password: */password=/w .tmp/login' prod.env",
 		]) {
 			notTheLane(await systemOneGate(cmd, process.env, ws));
 		}

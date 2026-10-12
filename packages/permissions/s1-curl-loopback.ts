@@ -91,9 +91,11 @@ export const CURL_L_REFUSAL =
  * `curl -s http://127.0.0.1:PORT/app.js -o .tmp/app.js` fell to the judge, pYes 0.45, blocked, while
  * styles.css and index.html passed this lane). A script, template or config name under .tmp/ is
  * refused here (WRITE_BAD_NAME) and stays refused: the way forward is a plain data name.
+ * The refusal fires at the option, before the URLs are read, so its text assumes nothing
+ * about the host: a non-loopback URL renamed that way still goes to the judge.
  */
 export const CURL_OUT_NAME_REFUSAL =
-	"Refused: curl may save under .tmp/ only with a plain data name (not .js, .ts, .sh, .py, .yml, .toml or a config name). Use -o .tmp/<name>.txt and read that file.";
+	"Refused: a curl output under .tmp/ may not have a script, template or config name (.js, .ts, .sh, .py, .yml, .toml, package.json ...). Save it as .tmp/<name>.txt and read that file; every other rule for the command still applies.";
 
 const MAX_WORDS = 60;
 const MAX_URLS = 6;

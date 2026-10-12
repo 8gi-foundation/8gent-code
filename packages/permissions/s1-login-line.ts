@@ -24,8 +24,9 @@
  *     than the one pair, no `$`, backtick, `;`, `&`, `|`, `>`, `<`;
  *   - decideRules fires nothing and there is no prompt-control text;
  *   - FILE, after realpath of its nearest existing part, is a regular file
- *     inside the workspace: not a secret name, not a protected path, no dot
- *     directory, no symlink anywhere below the workspace root;
+ *     inside the workspace: not a secret name (a basename ending in .env
+ *     included, 8SO), not a protected path, no dot directory, no symlink
+ *     anywhere below the workspace root;
  *   - .tmp/NAME is under the workspace's real `.tmp/` directory (absent is
  *     fine), NAME is not a script, template or config name (WRITE_BAD_NAME),
  *     not a secret name, and no component under .tmp is a symlink.
@@ -53,6 +54,9 @@ import { inside } from "./s1-rm-nothing";
 import { SECRET, WRITE_BAD_NAME, canon, realpathSync, symlinkBelow } from "./s1-run-in-project";
 
 export type LoginLine = { ok: true; reason: string } | { ok: false };
+
+/** Any file whose name ends in .env is a dotenv, whatever precedes the dot. */
+const DOTENV_NAME = /\.env$/i;
 const NO: LoginLine = { ok: false };
 
 /** The one shape. Groups: label, field, output under .tmp/, input file. */
@@ -89,6 +93,8 @@ export function loginLineToTmp(command: string, cwd: string | undefined): LoginL
 		const src = relInside(file, root);
 		if (!src) return NO;
 		if (relSegments(src.rel).some((s) => s.startsWith("."))) return NO;
+		// A dotenv under another name (prod.env, x.env): SECRET matches only a leading ".env" (8SO, #4096).
+		if (DOTENV_NAME.test(path.basename(src.rel))) return NO;
 		if (symlinkBelow(root, src.lexical)) return NO;
 		const st = lstatSync(src.abs, { throwIfNoEntry: false });
 		if (!st || !st.isFile()) return NO;
