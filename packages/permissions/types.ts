@@ -40,7 +40,9 @@ export type PolicyActionType =
 	/** Any call to a tool on an MCP server (#3230). Asks by default. */
 	| "mcp_call"
 	/** A call to a paired device's granted capability (8DK, #3362). */
-	| "device_use";
+	| "device_use"
+	/** A call to a tool a one-file extension registered (G1); context.tool names it. */
+	| "extension_call";
 
 /** What the policy engine decides */
 export type PolicyDecision =

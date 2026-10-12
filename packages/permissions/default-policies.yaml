@@ -109,6 +109,14 @@ policies:
     decision: require_approval
     message: "Quitting an application requires user confirmation."
 
+  # ── One-file extensions (G1) ─────────────────────────────────────────────────
+
+  - name: "extension-call-unattended-require-approval"
+    action: extension_call
+    condition: "attended equals false"
+    decision: require_approval
+    message: "An extension tool needs a person at the keyboard: this session is unattended (daemon, channel, Table or a headless run without a terminal), so it was not run."
+
   # ── File access ───────────────────────────────────────────────────────────────
 
   - name: "no-delete-config"
