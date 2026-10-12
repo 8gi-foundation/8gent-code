@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,17 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cli = join(__dirname, "..", "dist", "cli.js");
 
-function hasBun() {
-	try {
-		execFileSync("bun", ["--version"], { stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-if (!hasBun()) {
-	console.error(`
+const NO_BUN = `
   8gent requires Bun to run. Install it with one command:
 
   Mac / Linux:
@@ -27,9 +17,7 @@ if (!hasBun()) {
     powershell -c "irm bun.sh/install.ps1 | iex"
 
   Then restart your terminal and run: 8gent
-`);
-	process.exit(1);
-}
+`;
 
 if (!existsSync(cli)) {
 	console.error(`
@@ -43,5 +31,11 @@ const result = spawnSync("bun", [cli, ...process.argv.slice(2)], {
 	stdio: "inherit",
 	env: process.env,
 });
+
+// One spawn: a missing Bun shows up as ENOENT here, so no separate probe runs first (A4).
+if (result.error && result.error.code === "ENOENT") {
+	console.error(NO_BUN);
+	process.exit(1);
+}
 
 process.exit(result.status ?? 0);
