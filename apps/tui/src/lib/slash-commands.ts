@@ -360,7 +360,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "agent",
 		aliases: ["agents", "ag"],
-		description: "Manage sub-8gents (list, spawn, kill, auto, settings)",
+		description: "Manage child 8gents (list, spawn, kill, auto, settings)",
 		usage: "/agent [list|spawn|kill|auto|settings]",
 	},
 	{

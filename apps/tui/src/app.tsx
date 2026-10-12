@@ -4102,7 +4102,7 @@ export function App({
 					if (agentSub === "list") {
 						if (orchestration.agents.length === 0) {
 							addSystemMessage(
-								"No active sub-8gents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
+								"No active child 8gents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
 							);
 						} else {
 							const lines = orchestration.agents.map(
@@ -4143,7 +4143,7 @@ export function App({
 					} else if (agentSub === "auto") {
 						orchestration.toggleAutoSpawn();
 						addSystemMessage(
-							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-8gents without asking." : "Eight will ask before spawning sub-8gents."}`,
+							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn child 8gents without asking." : "Eight will ask before spawning child 8gents."}`,
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
@@ -4424,7 +4424,7 @@ export function App({
 					const subCommand = (args[1] || "").toLowerCase().trim();
 					if (!presetId) {
 						addSystemMessage(
-							`Usage: /spawn <8gent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
+							`Usage: /spawn <name> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
 						);
 						break;
 					}

@@ -1318,9 +1318,9 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			const subAgent = subAgentMgr.getStatus(agentId);
 
 			if (!subAgent) {
-				console.log(`\x1b[31mSub-8gent not found: ${agentId}\x1b[0m`);
+				console.log(`\x1b[31mChild 8gent not found: ${agentId}\x1b[0m`);
 			} else {
-				console.log("\n\x1b[36mSub-8gent Details:\x1b[0m");
+				console.log("\n\x1b[36mChild 8gent Details:\x1b[0m");
 				console.log(`  ${formatSubAgentStatus(subAgent)}`);
 				console.log(`\n  Task: ${subAgent.task}`);
 				console.log(`  Status: ${subAgent.status}`);
@@ -1363,7 +1363,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 
 			if (totalEvidence.length === 0) {
 				console.log("  No evidence collected yet.");
-				console.log("  Evidence is collected when sub-8gents execute tasks.");
+				console.log("  Evidence is collected when child 8gents execute tasks.");
 			} else {
 				const summary = summarizeEvidence(totalEvidence);
 				console.log(
