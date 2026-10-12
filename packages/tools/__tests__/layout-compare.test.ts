@@ -478,7 +478,8 @@ describe.skipIf(!chrome)("real Chrome runs no page script: the CSP alone stops i
 	const shapes: Record<string, (sibling: string) => string> = {
 		"script before <head>": () => `<script>${PAINT}</script><html><head></head><body style="margin:0"></body></html>`,
 		"script in the body": () => `<html><head></head><body style="margin:0"><script>${PAINT}</script></body></html>`,
-		"img onerror": () => `<html><body style="margin:0"><img src="x" onerror="${PAINT}"></body></html>`,
+		// Padded so the broken-image icon is not the top-left pixel measureLayout reads as background.
+		"img onerror": () => `<html><body style="margin:0;padding:60px"><img src="x" onerror="${PAINT}"></body></html>`,
 		"svg script": () => `<html><body style="margin:0"><svg width="10" height="10"><script>${PAINT}</script></svg></body></html>`,
 		"iframe srcdoc script": () => `<html><body style="margin:0"><iframe ${FRAME} srcdoc="<script>${PAINT}</script>"></iframe></body></html>`,
 		"iframe javascript: src": () =>
