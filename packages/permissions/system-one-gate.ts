@@ -627,6 +627,27 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// `8gent deck render <spec.json> [out.mp4]` with both paths inside the
+		// workspace: the shell door to render_video_deck (same renderer, same
+		// confinement). Default mode only.
+		try {
+			const { deckRenderInProject } = await import("./s1-deck-render");
+			const deck = mode === "default" ? deckRenderInProject(command, cwd) : { ok: false as const };
+			if (deck.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: deck.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain curl whose every URL is a loopback http(s) server and whose
 		// every file stays inside the workspace (#3941). Default mode only.
 		try {

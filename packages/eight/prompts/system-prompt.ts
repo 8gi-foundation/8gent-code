@@ -288,10 +288,10 @@ export interface ToolCatalogOptions {
 /** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
 /** Short notes shared by the concise catalog and the headless prompt (#3865). */
 export const CONCISE_WEB_NOTE =
-	"**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**";
-export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**";
+	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
+export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
 export const SCRATCH_DIR_NOTE =
-	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
+	"**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
 
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
@@ -329,7 +329,7 @@ export function environmentNote(input: EnvironmentNoteInput = {}): string {
 
 /** Review focus (#3920): a review that cites every line it read buries the defect. */
 export const REVIEW_FOCUS_NOTE =
-	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
+	"**Reviews: cite only lines that must change and security-relevant edits.**";
 
 /**
  * Short form of LOCAL_SERVER_CURL_NOTE (tools/eight-browser.ts, the full prompt's copy) for the
@@ -339,8 +339,13 @@ export const REVIEW_FOCUS_NOTE =
 export const LOCAL_SERVER_CURL_SHORT =
 	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. Do not pass -L: on a 302 read the Location header and make a second curl.";
 
+/**
+ * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
+ * local model composing the video with raw ffmpeg in run_command instead of calling
+ * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
+ */
 export const SLIDES_TO_VIDEO_NOTE =
-	"**Slides to video: use `render_video_deck` (JSON spec), not ffmpeg. By hand, segment count equals slide count; never loop over a file lacking a trailing newline.**";
+	'**Slides to video: write deck.json {"slides":[{"title":"..","bullets":[".."],"narration":".."}]}, then run `8gent deck render deck.json out.mp4`, not ffmpeg by hand. By hand: segment count equals slide count; never loop over a file lacking a trailing newline.**';
 
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
@@ -360,12 +365,11 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			"Core tools (file, shell, code exploration) are already loaded.",
 			"To use a tool from another category, call `discover_tools` first with the category name.",
 		);
-	} else {
+	} else if (!concise) {
+		// The concise catalog (local TUI, every turn) skips this line: the header says it.
 		lines.push(
 			"",
-			concise
-				? "Call these tools directly."
-				: "These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
+			"These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
 		);
 	}
 	lines.push("");

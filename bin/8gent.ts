@@ -104,6 +104,8 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
+  deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
+                              renderer as the render_video_deck tool, paths inside the current directory
   update [--check]            Update 8gent through the channel it was installed from (binary release
                               or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
@@ -270,7 +272,7 @@ Learn more: https://github.com/8gi-foundation/8gent-code
  * TUI launch, so a command carrying them is not exempt either.
  */
 const DEPTH_EXEMPT_FLAGS = ["-h", "--help", "-v", "--version"];
-const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor"]);
+const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor", "deck"]);
 
 function depthExempt(args: string[]): boolean {
 	if (args.includes("--rpc") || args.includes("--cli")) return false;
@@ -590,6 +592,14 @@ async function main() {
 		case "doctor":
 			await doctorCommand();
 			break;
+
+		case "deck": {
+			// `8gent deck render <spec.json> [out.mp4]`: the shell door to render_video_deck.
+			// Never starts a model loop (depth-exempt above).
+			const { runDeckCommand } = await import("../packages/eight/deck-cli.ts");
+			process.exitCode = await runDeckCommand(restArgs);
+			break;
+		}
 
 		case "update":
 		case "upgrade":
