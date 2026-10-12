@@ -38,6 +38,7 @@ import {
 	isLlamaServerSelected,
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
+import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
 import {
@@ -1099,10 +1100,33 @@ export function App({
 
 	// Named session management
 	const sessionMgr = React.useMemo(() => new SessionManager(), []);
+	// "Update available" notice: one background check per 24 h, silent on any error, off with
+	// EIGHT_NO_UPDATE_CHECK=1 (packages/eight/update-notice.ts). It never blocks startup.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const [{ maybeUpdateNotice, realNoticeDeps }, { launcherContext }, { getSettingsFilePath }] =
+					await Promise.all([
+						import("../../../packages/eight/update-notice.js"),
+						import("./lib/update-command.js"),
+						import("../../../packages/settings/store.js"),
+					]);
+				const line = await maybeUpdateNotice(
+					realNoticeDeps({ ...launcherContext(), settingsFile: getSettingsFilePath() }),
+				);
+				if (line && !cancelled) addSystemMessage(line);
+			} catch {}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
 	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
 	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
 	const historyPickDaemonRef = useRef(false);
+	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1131,6 +1155,10 @@ export function App({
 				addSystemMessage(
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
 				);
+				if (process.env.EIGHT_UPDATE_NOTE) {
+					addSystemMessage(sanitizeForDisplay(process.env.EIGHT_UPDATE_NOTE));
+					delete process.env.EIGHT_UPDATE_NOTE;
+				}
 			} else {
 				addSystemMessage(`Session "${sessionResume}" not found.`);
 			}
@@ -3711,6 +3739,55 @@ export function App({
 					}
 					break;
 
+				case "update": {
+					// Same update as `8gent update`; on success the session is saved and 8gent
+					// reopens on the new code with the same session (packages/eight/update-resume.ts).
+					void (async () => {
+						const [{ runTuiUpdate, launcherContext, makeTwoStepConfirm }, { runUpdateCommand }, resume, { spawn: spawnProc }] =
+							await Promise.all([
+								import("./lib/update-command.js"),
+								import("../../../packages/eight/cli-maintenance.js"),
+								import("../../../packages/eight/update-resume.js"),
+								import("node:child_process"),
+							]);
+						const ctx = launcherContext();
+						if (!updateConfirmRef.current) updateConfirmRef.current = makeTwoStepConfirm(addSystemMessage);
+						const outcome = await runTuiUpdate({
+							saveSession: () => {
+								saveSessionNow();
+								return activeSessionId;
+							},
+							say: addSystemMessage,
+							runUpdate: (log, report) =>
+								runUpdateCommand(args, {
+									...ctx,
+									execPath: process.execPath,
+									log,
+									report,
+									confirm: updateConfirmRef.current ?? undefined,
+									// A person typed /update. npm runs without the terminal so Ink is not garbled.
+									interactive: true,
+									run: (cmd, cmdArgs, opts) =>
+										new Promise<number>((resolve) => {
+											const p = spawnProc(cmd, cmdArgs, { stdio: "ignore", shell: opts.shell });
+											p.on("exit", (c) => resolve(c ?? 1));
+											p.on("error", () => resolve(127));
+										}),
+								}),
+							relaunch: (req) => {
+								resume.writeResumeRequest(req);
+								flushSession();
+								stopBangRuns();
+								if (agent) agent.cleanup().catch(() => {});
+								process.exitCode = resume.RELAUNCH_EXIT_CODE;
+								exit();
+							},
+						});
+						if (outcome === "unchanged") addSystemMessage("Nothing to update.");
+					})();
+					break;
+				}
+
 				case "session": {
 					const sub = args[0]?.toLowerCase();
 					if (sub === "name" && args[1]) {
@@ -5716,6 +5793,7 @@ export function App({
 			toggleBodyPart,
 			resolveSetupChecks,
 			addSetupQuestion,
+			saveSessionNow,
 			activeSessionId,
 			activeTabId,
 			linkDaemonSession,

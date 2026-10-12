@@ -19,6 +19,7 @@ import {
 	runInstallNpmCommand,
 	runPackagesCommand,
 	runUpdateCommand,
+	type UpdateCliDeps,
 } from "./cli-maintenance";
 import type { FetchLike } from "./self-update";
 
@@ -121,19 +122,36 @@ describe("8gent update", () => {
 		expect(b.lines.join("\n")).toContain("newest npm version is v0.17.0, lower than this v0.18.0");
 	});
 
-	test("a source checkout is told to git pull; the network is never touched", async () => {
+	test("--check on a source checkout compares with origin through git; the network is never touched", async () => {
 		const f = fakeFetch({});
 		const dir = mkdtempSync(join(tmpdir(), "src-co-"));
 		made.push(dir);
 		Bun.write(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
 		await Bun.sleep(5);
-		const { deps, lines } = binaryDeps(f, { modulePath: `file://${dir}/bin/8gent.ts`, embedded: false });
-		expect(await runUpdateCommand([], deps)).toBe(0);
-		expect(lines.join("\n")).toContain("git pull && bun install");
+		const { deps: d0, lines } = binaryDeps(f, { modulePath: `file://${dir}/bin/8gent.ts`, embedded: false });
+		const deps = d0 as unknown as UpdateCliDeps;
+		deps.sourceHasGit = (d) => d === dir;
+		deps.homeDir = dir;
+		deps.sourceIsFile = () => true;
+		deps.env = { PATH: "/usr/bin" };
+		deps.platform = "linux";
+		deps.sourceExec = async (_f, a) => {
+			const j = a.join(" ");
+			if (j.includes("show-toplevel")) return { code: 0, stdout: dir, stderr: "" };
+			if (j.includes("rev-parse HEAD")) return { code: 0, stdout: "a".repeat(40), stderr: "" };
+			if (j.includes("symbolic-ref")) return { code: 0, stdout: "main\n", stderr: "" };
+			if (j.includes("remote get-url")) return { code: 0, stdout: "x", stderr: "" };
+			if (j.includes("status")) return { code: 0, stdout: "", stderr: "" };
+			if (j.includes("fetch")) return { code: 0, stdout: "", stderr: "" };
+			if (j.includes("refs/remotes/origin/main") && j.includes("rev-parse")) return { code: 0, stdout: "a".repeat(40), stderr: "" };
+			return { code: 1, stdout: "", stderr: "" };
+		};
+		expect(await runUpdateCommand(["--check"], deps)).toBe(0);
+		expect(lines.join("\n")).toContain("up to date");
 		expect(f.calls).toEqual([]);
 	});
 
-	test("a plain update on a source checkout prints the git pull hint before the interactive refusal", async () => {
+	test("a plain update on a source checkout needs a person at a terminal", async () => {
 		const f = fakeFetch({});
 		const dir = mkdtempSync(join(tmpdir(), "src-co-"));
 		made.push(dir);
@@ -141,10 +159,7 @@ describe("8gent update", () => {
 		await Bun.sleep(5);
 		const { deps, lines, ran } = binaryDeps(f, { modulePath: `file://${dir}/bin/8gent.ts`, embedded: false, interactive: false });
 		expect(await runUpdateCommand([], deps)).toBe(1);
-		const hint = lines.findIndex((l) => l.includes("git pull && bun install"));
-		const refusal = lines.indexOf(interactiveRefusal("8gent update"));
-		expect(hint).toBeGreaterThanOrEqual(0);
-		expect(refusal).toBeGreaterThan(hint);
+		expect(lines).toContain(interactiveRefusal("8gent update"));
 		expect(f.calls).toEqual([]);
 		expect(ran).toEqual([]);
 	});
@@ -183,7 +198,7 @@ describe("8gent update", () => {
 		expect(bad.ran).toEqual([]);
 
 		expect(parseUpdateArgs(["--channel=source"]).error).toContain("must be binary or npm");
-		expect(parseUpdateArgs(["--force"]).error).toContain("unknown option");
+		expect(parseUpdateArgs(["--bogus"]).error).toContain("unknown option");
 	});
 
 	test("checkUpdate: no binary for the platform, no release carrying it", async () => {
