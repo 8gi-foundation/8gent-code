@@ -536,6 +536,38 @@ export async function systemOneGate(
 	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
 	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
 	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
+		// The tg-notify send recipe as a two-line script to a loopback Bot API (#4101), and a
+		// deterministic refusal, in every mode, for a bot token written into a curl command or
+		// that script. First, so no later lane (a loopback GET) can admit a token in argv.
+		try {
+			const { redactBotToken, tgSendFromEnv } = await import("./s1-tg-send");
+			const tg = tgSendFromEnv(command, cwd, env);
+			if (!tg.ok && tg.refuse) {
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: tg.refuse,
+				};
+				const shown = redactBotToken(command, env);
+				return { run: false, guard, message: blockMessage(guard, "unknown", tg.refuse, shown) };
+			}
+			if (tg.ok && mode === "default") {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: tg.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through.
+		}
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
