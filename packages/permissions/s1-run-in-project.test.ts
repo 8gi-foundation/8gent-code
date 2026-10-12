@@ -10,7 +10,8 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -110,6 +111,10 @@ export function markDone(todos: Todo[], id: number): boolean {
 }
 `;
 
+// Windows has no /tmp: the writable temp root there is the machine's temp directory, as forward
+// slashes and with the 8.3 short name resolved (the command grammar takes neither backslashes nor "~").
+const TMP = process.platform === "win32" ? realpathSync(tmpdir()).replaceAll("\\", "/") : "/tmp";
+const wsF = () => ws.replaceAll("\\", "/");
 let ws: string;
 let outside: string;
 let judge: AlwaysDangerous;
@@ -176,14 +181,14 @@ afterEach(() => {
 describe("runInProject allows the pilot's real CLI", () => {
 	test("done 1 / 99 / abc with the pilot's env prefix", () => {
 		for (const arg of ["1", "99", "abc"])
-			expect(runInProject(`TODO_FILE=/tmp/todo-test.json bun ${ws}/src/cli.ts done ${arg}`, ws).ok, arg).toBe(true);
+			expect(runInProject(`TODO_FILE=${TMP}/todo-test.json bun ${wsF()}/src/cli.ts done ${arg}`, ws).ok, arg).toBe(true);
 	});
 	test("other shapes of the same CLI", () => {
 		for (const cmd of [
-			"TODO_FILE=/private/tmp/t.json bun src/cli.ts done 1",
+			...(process.platform === "win32" ? [] : ["TODO_FILE=/private/tmp/t.json bun src/cli.ts done 1"]), // macOS-only directory
 			"TODO_FILE=todo-test.json node src/cli.ts done 1",
-			`TODO_FILE=${ws}/t.json bun ./src/cli.ts list`,
-			"TODO_FILE=/tmp/t.json bun src/cli.ts add buy-milk",
+			`TODO_FILE=${wsF()}/t.json bun ./src/cli.ts list`,
+			`TODO_FILE=${TMP}/t.json bun src/cli.ts add buy-milk`,
 		])
 			expect(runInProject(cmd, ws).ok, cmd).toBe(true);
 	});
@@ -202,7 +207,7 @@ describe("runInProject write targets that are symlinks (8SO)", () => {
 });
 
 describe("runInProject refuses", () => {
-	const base = "TODO_FILE=/tmp/todo-test.json";
+	const base = `TODO_FILE=${TMP}/todo-test.json`;
 	test("command shapes", () => {
 		const bad: Array<[string, string]> = [
 			["rm -rf", "rm -rf .tmp"],
@@ -213,16 +218,16 @@ describe("runInProject refuses", () => {
 			["DYLD", `DYLD_INSERT_LIBRARIES=/tmp/x ${base} bun src/cli.ts done 1`],
 			["NODE_OPTIONS", `NODE_OPTIONS=--require=/tmp/x.js ${base} node src/cli.ts done 1`],
 			["BUN_ var", `BUN_CONFIG_REGISTRY=http://evil ${base} bun src/cli.ts done 1`],
-			["OPENSSL_CONF", `OPENSSL_CONF=${ws}/o.cnf ${base} node src/cli.ts done 1`],
+			["OPENSSL_CONF", `OPENSSL_CONF=${wsF()}/o.cnf ${base} node src/cli.ts done 1`],
 			["SSL_CERT_FILE", `SSL_CERT_FILE=/tmp/x ${base} node src/cli.ts done 1`],
 			["HOME", `HOME=/tmp ${base} bun src/cli.ts done 1`],
 			["env the script never reads", `FOO=bar ${base} bun src/cli.ts done 1`],
 			["env at a secret", "TODO_FILE=/tmp/.env bun src/cli.ts done 1"],
 			["env out of tmp", "TODO_FILE=/etc/passwd bun src/cli.ts done 1"],
 			["env with ..", "TODO_FILE=/tmp/../etc/x bun src/cli.ts done 1"],
-			["env through a symlink", `TODO_FILE=${ws}/linked.json bun src/cli.ts done 1`],
-			["env at source (write target)", `TODO_FILE=${ws}/src/cli.ts bun src/cli.ts done 1`],
-			["env at package.json (write target)", `TODO_FILE=${ws}/package.json bun src/cli.ts done 1`],
+			["env through a symlink", `TODO_FILE=${wsF()}/linked.json bun src/cli.ts done 1`],
+			["env at source (write target)", `TODO_FILE=${wsF()}/src/cli.ts bun src/cli.ts done 1`],
+			["env at package.json (write target)", `TODO_FILE=${wsF()}/package.json bun src/cli.ts done 1`],
 			["env at a dot name (write target)", "TODO_FILE=.bashrc bun src/cli.ts done 1"],
 			["env at tool.py (write target)", "TODO_FILE=tool.py bun src/cli.ts done 1"],
 			["env at tool.rb (write target)", "TODO_FILE=tool.rb bun src/cli.ts done 1"],
@@ -238,7 +243,7 @@ describe("runInProject refuses", () => {
 			["env at AGENTS.md (write target)", "TODO_FILE=AGENTS.md bun src/cli.ts done 1"],
 			["env at node_modules/x.json (write target)", "TODO_FILE=node_modules/x.json bun src/cli.ts done 1"],
 			["cli with ..", `${base} bun ../cli.ts done 1`],
-			["cli with .. inside", `${base} bun ${ws}/src/../../cli.ts done 1`],
+			["cli with .. inside", `${base} bun ${wsF()}/src/../../cli.ts done 1`],
 			["cli outside", `${base} bun ${outside}/ext.ts`],
 			["cli symlink", `${base} bun src/link.ts`],
 			["cli through symlinked dir", `${base} bun escape/ext.ts`],
@@ -445,7 +450,7 @@ describe("tokenize", () => {
 describe("systemOneGate end to end (default mode) with a judge that says dangerous", () => {
 	test("the pilot commands run without asking the judge", async () => {
 		for (const arg of ["1", "99", "abc"]) {
-			const r = await systemOneGate(`TODO_FILE=/tmp/todo-test.json bun ${ws}/src/cli.ts done ${arg}`, process.env, ws);
+			const r = await systemOneGate(`TODO_FILE=${TMP}/todo-test.json bun ${wsF()}/src/cli.ts done ${arg}`, process.env, ws);
 			expect(r.run, arg).toBe(true);
 			expect(r.guard?.backend).toBe("allowlist");
 		}
@@ -468,14 +473,14 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 
 	test("strict mode (Guarded) never skips the judge", async () => {
 		process.env[SYSTEM_ONE_FLAG] = "1";
-		const r = await systemOneGate(`TODO_FILE=/tmp/todo-test.json bun ${ws}/src/cli.ts done 1`, process.env, ws);
+		const r = await systemOneGate(`TODO_FILE=${TMP}/todo-test.json bun ${wsF()}/src/cli.ts done 1`, process.env, ws);
 		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 
 	test("EIGHT_S1_ALLOWLIST=0 turns the lane off with the rest of the allowlist", async () => {
 		process.env[SYSTEM_ONE_ALLOWLIST_FLAG] = "0";
-		const r = await systemOneGate("TODO_FILE=/tmp/t.json bun src/cli.ts done 1", process.env, ws);
+		const r = await systemOneGate(`TODO_FILE=${TMP}/t.json bun src/cli.ts done 1`, process.env, ws);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

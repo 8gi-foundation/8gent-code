@@ -62,11 +62,11 @@
  */
 
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
-import { hasDotSegment, protectedRel } from "./s1-mv-in-project";
+import { hasDotSegment, protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
@@ -76,7 +76,15 @@ const ENV_DENY =
 const AMBIENT_ENV_OK = new Set(["NODE_ENV", "DEBUG", "CI", "NO_COLOR", "FORCE_COLOR"]);
 const MAX_ENV = 4;
 const SCRIPT_EXT = /\.(?:ts|mts|js|mjs)$/;
-const TEMP_ROOTS = ["/tmp", "/private/tmp"];
+/**
+ * Where a workspace-external write may land. POSIX has /tmp (and macOS's /private/tmp); Windows has
+ * neither, so there the machine's own temp directory (resolved, so the 8.3 RUNNER~1 form matches).
+ */
+let tempRoots: string[] | null = null;
+function TEMP_ROOTS(): string[] {
+	tempRoots ??= process.platform === "win32" ? [canon(tmpdir())] : ["/tmp", "/private/tmp"];
+	return tempRoots;
+}
 export const SECRET =
 	/(^|\/)\.env(\.[\w.-]+)?$|(^|\/)\.env\b|id_rsa|id_ed25519|id_ecdsa|(^|\/)\.ssh(\/|$)|\.aws\/|credentials|\.netrc|\.npmrc|\.git-credentials|keychain|\.pem$|\.key$|\.p12$/;
 const BAD_FLAG =
@@ -388,7 +396,7 @@ export function canon(p: string): string {
 /** True when any existing component of `abs` below `root` is a symlink (a dangling final one included). */
 export function symlinkBelow(root: string, abs: string): boolean {
 	let cur = root;
-	for (const seg of path.relative(root, abs).split("/")) {
+	for (const seg of relSegments(path.relative(root, abs))) {
 		if (seg === "") continue;
 		cur = path.join(cur, seg);
 		const st = lstatOrNull(cur);
@@ -405,7 +413,7 @@ function writeTargetOk(p: string, root: string): boolean {
 	if (!inside(abs, root)) return underTemp(abs);
 	const rel = path.relative(root, abs);
 	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
-	if (rel.split("/").includes("node_modules")) return false;
+	if (relSegments(rel).includes("node_modules")) return false;
 	// canon() falls back to the nearest existing parent, so a dangling symlink as
 	// the final part, or one in the middle, would pass; refuse any symlink.
 	if (p.split("/").includes("..")) return false;
@@ -625,7 +633,7 @@ function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
 }
 
 function underTemp(p: string): boolean {
-	return TEMP_ROOTS.some((r) => p === r || p.startsWith(`${r}/`));
+	return TEMP_ROOTS().some((r) => inside(p, r));
 }
 
 function pathOk(token: string, root: string): boolean {

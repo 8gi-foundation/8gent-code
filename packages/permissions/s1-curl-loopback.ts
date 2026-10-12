@@ -59,7 +59,7 @@ import * as path from "node:path";
 import { curlEnvRefusal } from "../decide/allowlist";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
-import { protectedRel } from "./s1-mv-in-project";
+import { protectedRel, relSegments } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, WRITE_BAD_NAME, canon, symlinkBelow } from "./s1-run-in-project";
 
@@ -177,7 +177,7 @@ function fileOk(p: string, st: St, write: boolean): boolean {
 	if (!inside(abs, st.root)) return false;
 	const rel = path.relative(st.root, abs);
 	if (rel === "" || SECRET.test(rel) || protectedRel(rel)) return false;
-	const segs = rel.split("/");
+	const segs = relSegments(rel);
 	if (segs.some((s) => s.startsWith(".") && s !== ".tmp")) return false;
 	if (write) {
 		// Outputs only under the workspace's .tmp/ directory.
