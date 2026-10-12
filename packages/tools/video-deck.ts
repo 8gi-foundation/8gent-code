@@ -434,14 +434,22 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			if (s.narration?.trim()) {
 				const { speak } = await import("./speak");
 				let timer: ReturnType<typeof setTimeout> | undefined;
+				const ctl = new AbortController();
+				const spoken = speak({
+					text: s.narration,
+					voice: s.voice ?? spec.voice,
+					out: path.join(work, `vo-${String(i).padStart(3, "0")}.wav`),
+					signal: ctl.signal,
+				});
+				spoken.catch(() => undefined);
 				const r = await Promise.race([
-					speak({
-						text: s.narration,
-						voice: s.voice ?? spec.voice,
-						out: path.join(work, `vo-${String(i).padStart(3, "0")}.wav`),
-					}),
+					spoken,
 					new Promise<never>((_, rej) => {
-						timer = setTimeout(() => rej(new Error("render deadline exceeded during narration")), left());
+						// On the deadline the engine is killed (TERM, then KILL), not left running.
+						timer = setTimeout(() => {
+							ctl.abort();
+							rej(new Error("render deadline exceeded during narration"));
+						}, left());
 					}),
 				]).finally(() => clearTimeout(timer));
 				wav = r.path;

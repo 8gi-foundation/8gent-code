@@ -331,6 +331,30 @@ describe("caps", () => {
 		expect(Date.now() - t0).toBeLessThan(4000);
 	});
 
+	test("the deadline kills the narration engine (TERM, then KILL for one that ignores TERM)", async () => {
+		const root = tempDir("vdeck-kill-");
+		const pidfile = join(root, "pid");
+		const stub = join(root, "stubborn");
+		writeFileSync(stub, `#!/usr/bin/env bash\necho $$ > ${pidfile}\ntrap '' TERM\nwhile true; do sleep 0.2; done\n`);
+		chmodSync(stub, 0o755);
+		process.env.EIGHT_SUPERTONIC_BIN = stub;
+		process.env.EIGHT_KITTEN_PY = "/nonexistent";
+		await expect(
+			renderVideoDeck({ spec: { slides: [{ title: "t", narration: "hello" }] }, out: join(root, "o.mp4"), cwd: root, deadlineMs: 700 }),
+		).rejects.toThrow(/deadline/);
+		const pid = Number.parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+		const alive = () => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
+		expect(alive()).toBe(false);
+	});
+
 	test("relative PATH entries never win and a binary inside the workspace is refused", () => {
 		const base = tempDir("vdeck-bin-");
 		const work = join(base, "work");
