@@ -1088,6 +1088,18 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 	const b64 = (t: string) => Buffer.from(t).toString("base64");
 	const hex = (t: string) => Buffer.from(t).toString("hex");
 	const refused = [
+		"cat ~/.8gent/browser-shots/last.png",
+		"cat /Users/x/.8gent/browser-shots/last.png",
+		"cat ~/.8gent/browser-history.json",
+		"cat ~/.8gent/./browser-history.json",
+		"cat ~/.8gent/x/../browser-shots/last.png",
+		"echo .8gent; cat ~/.8gent/browser-history.json",
+		"cd ~/.8gent && cat ./browser-history.json",
+		"cd ~/.8gent/rishi-pilot && cat ../browser-history.json",
+		"ln -s ~/.8gent l && cat l/browser-history.json",
+		"cat ~/.8gent/rishi-pilot/runs/x/browser-op-practice/../../../../browser-history.json",
+		"cat ~/.8gent//browser-shots/a",
+		"cat ~/.8gent/%62rowser-history.json",
 		"cat ~/.8gent/browser-control.token",
 		"cat $HOME/.8gent/browser-control.token",
 		"cat /Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
@@ -1155,6 +1167,8 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		// #3589: pulling a csrf token out of a login page is not a glob over the token file
 		"grep -o 'name=csrf value=[a-f0-9]*' page.html",
 		"curl -s -c jar.txt http://127.0.0.1:8080/ | grep -o 'value=[a-f0-9]*'",
+		// pilot run dir lives under ~/.8gent and is named after the scenario
+		"curl -s -m 10 -c /Users/x/.8gent/rishi-pilot/runs/2026-10-11_194806/browser-op-practice/work/cookie.txt -o /Users/x/.8gent/rishi-pilot/runs/2026-10-11_194806/browser-op-practice/work/login.html http://127.0.0.1:57420/",
 	];
 	for (const cmd of allowed)
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));

@@ -590,6 +590,9 @@ function globRe(seg: string): RegExp {
  *  String.fromCharCode / chr() lists decoded. */
 function decodedViews(command: string): string[] {
 	const views = [command];
+	// %xx (URL-style) escapes, so %62rowser-history cannot hide a name.
+	if (/%[0-9a-f]{2}/i.test(command))
+		views.push(command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))));
 	views.push(
 		command
 			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
@@ -631,6 +634,25 @@ function blankSearchPattern(seg: string): string {
 	return seg;
 }
 
+/**
+ * Per-token check for "browser" under .8gent. Every token holding .8gent is posix-normalised (so ./, //,
+ * and x/.. cannot hide a browser-* name) and judged from its last .8gent on; a token that normalises
+ * .8gent away fails closed. Any token without .8gent that names browser is refused too (cd ~/.8gent &&
+ * cat ./browser-history.json, ../browser-shots, a symlink alias). Only a browser-named directory deeper
+ * inside an .8gent path (the pilot run dir .../browser-op-practice/) is allowed.
+ */
+function browserUnder8gent(lower: string): boolean {
+	for (const tok of lower.split(/[\s;|&()<>=]+/)) {
+		if (tok.includes(".8gent")) {
+			const n = pathPosix.normalize(tok.replace(/\\/g, "/"));
+			const at = n.lastIndexOf(".8gent");
+			if (at < 0) return true;
+			if (/^browser/.test(n.slice(at).replace(/^\.8gent[^/]*\/*/, ""))) return true;
+		} else if (tok.includes("browser")) return true;
+	}
+	return false;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
 	const lists = /readdir|listdir|scandir|os\.walk|glob|\bls\b|\bfind\b|\brg\b|\bgrep\b[^;|&]*(?:\s-[a-z]*r|\s--(?:dereference-)?recursive|\s-d\s*recurse|\s--directories[= ]\s*recurse)/i.test(command);
@@ -638,10 +660,10 @@ export function touchesBrowserSecrets(command: string): boolean {
 		// Strip quoting, escapes and JS/Python concatenation: ~/".8"gent, 'browser'-'control', '.8'+'gent'.
 		const flat = view.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "");
 		const lower = flat.toLowerCase();
-		if (/browser-(control|profiles|[*?[{$])/.test(lower)) return true;
+		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|browser|token|control|profile/.test(lower.slice(at))) return true;
+			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower)) return true;
 			if (lists) return true;
 		}
 		// A quoted PATTERN given to grep/rg is a regex, not a shell glob: grep 'value=[a-f0-9]*' must not read
