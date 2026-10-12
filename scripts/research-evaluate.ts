@@ -336,7 +336,9 @@ if (!dryRun && results.length > 0) {
 	console.log("\nRunning bun test...");
 	const { execSync } = await import("node:child_process");
 	try {
-		execSync("bun test packages/tools/__tests__/", {
+		// The repo's own suite needs the repo's own bunfig [test] preloads: named by absolute
+		// path, never picked up from a cwd, and no .env autoload (#4013).
+		execSync(`bun --no-env-file ${JSON.stringify(`--config=${join(REPO_ROOT, "bunfig.toml")}`)} test packages/tools/__tests__/`, {
 			cwd: REPO_ROOT,
 			stdio: "inherit",
 			timeout: 60_000,

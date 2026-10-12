@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
  * 8gent Code - Main CLI Entry Point
  *
@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
+import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.18.0";
 
@@ -68,7 +69,9 @@ function repoRoot(): string | null {
 // same install: the compiled binary alone, or the runtime plus this module
 // (bin/8gent.ts from a checkout, dist/cli.js from npm).
 function daemonProgram(): string[] {
-	const self = MODULE_IS_EMBEDDED ? [] : [fileURLToPath(import.meta.url)];
+	// The service starts in $HOME: Bun must not read a bunfig.toml or .env there (#4013).
+	// A compiled binary is built with config autoload off (scripts/build-binaries.ts).
+	const self = MODULE_IS_EMBEDDED ? [] : [...safeBunFlags(), fileURLToPath(import.meta.url)];
 	return [process.execPath, ...self, "daemon", "run"];
 }
 
@@ -1074,7 +1077,8 @@ async function benchmarkCommand(args: string[]) {
 	}
 	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", benchmarkPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1091,7 +1095,8 @@ async function demoCommand(args: string[]) {
 	}
 	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", demoPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", demoPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1325,7 +1330,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
 		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: inv.env });
 	} else {
-		proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
+		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], { stdio: "inherit" });
 	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);

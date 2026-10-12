@@ -63,6 +63,13 @@ describe("keybindings table (#3918 D8)", () => {
 		expect(KEYBINDINGS.filter((b) => b.keys === "Ctrl+L")).toHaveLength(1);
 	});
 
+	test("/hotkeys has a Prompt group for @, ! and !!", () => {
+		const text = formatHotkeys();
+		expect(text).toContain("Prompt:");
+		const prompt = KEYBINDINGS.filter((b) => b.group === "prompt").map((b) => b.keys);
+		expect(prompt).toEqual(["@", "!cmd", "!!cmd"]);
+	});
+
 	test("/hotkeys prints every binding once", () => {
 		const text = formatHotkeys();
 		for (const b of KEYBINDINGS) expect(text).toContain(b.action);

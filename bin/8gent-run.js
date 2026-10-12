@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cli = join(__dirname, "..", "dist", "cli.js");
+// Never let the user's cwd steer the runtime: a workspace bunfig.toml `preload`
+// or .env would run or set things before 8gent snapshots its security env
+// (#4013). Use the package's own empty bunfig and no env file.
+const bunfig = join(__dirname, "bunfig.empty.toml");
+const SAFE_BUN = ["--no-env-file", `--config=${bunfig}`];
 
 const NO_BUN = `
   8gent requires Bun to run. Install it with one command:
@@ -27,7 +32,7 @@ if (!existsSync(cli)) {
 	process.exit(1);
 }
 
-const result = spawnSync("bun", [cli, ...process.argv.slice(2)], {
+const result = spawnSync("bun", [...SAFE_BUN, cli, ...process.argv.slice(2)], {
 	stdio: "inherit",
 	env: process.env,
 });

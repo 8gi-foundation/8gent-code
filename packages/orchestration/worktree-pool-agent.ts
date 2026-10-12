@@ -9,6 +9,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WorktreeResult, WorktreeTask, WorktreeTaskStatus } from "./worktree-pool-types";
+import { safeBunFlags } from "../core/bun-flags";
 
 export class WorktreePoolAgent {
 	private proc: ChildProcess | null = null;
@@ -36,7 +37,8 @@ export class WorktreePoolAgent {
 			...(this.task.model ? { EIGHGENT_MODEL: this.task.model } : {}),
 		};
 
-		this.proc = spawn("bun", ["run", "packages/eight/index.ts", this.task.prompt], {
+		// The worktree is a workspace: its bunfig.toml or .env must not reach the harness (#4013).
+		this.proc = spawn("bun", [...safeBunFlags(), "run", "packages/eight/index.ts", this.task.prompt], {
 			cwd: this.task.worktreePath,
 			stdio: ["pipe", "pipe", "pipe"],
 			env,

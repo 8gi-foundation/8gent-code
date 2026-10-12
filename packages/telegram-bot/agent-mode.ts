@@ -5,6 +5,7 @@
  * Receives natural language messages, detects intent, and executes actions.
  */
 
+import { safeBunFlags } from "../core/bun-flags";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -271,7 +272,7 @@ export class TelegramAgentMode {
 		}
 
 		try {
-			const proc = Bun.spawn(["bun", "run", scriptPath], {
+			const proc = Bun.spawn(["bun", ...safeBunFlags(), "run", scriptPath], {
 				cwd: join(HOME, "8gent-code"),
 				stdout: "ignore",
 				stderr: "ignore",
@@ -479,7 +480,7 @@ export class TelegramAgentMode {
 		try {
 			const { writeFileSync, mkdirSync } = await import("node:fs");
 
-			const proc = Bun.spawn(["bun", "run", scriptPath], {
+			const proc = Bun.spawn(["bun", ...safeBunFlags(), "run", scriptPath], {
 				cwd: join(HOME, "8gent-code"),
 				stdout: "ignore",
 				stderr: "ignore",
