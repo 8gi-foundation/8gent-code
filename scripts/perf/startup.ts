@@ -103,6 +103,13 @@ async function runTimed(
 	return { firstByte, exit, code, stdout: all };
 }
 
+/** Best-effort temp removal: Windows can hold a just-exited child's directory briefly. */
+function cleanup(dir: string) {
+	try {
+		fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+	} catch {}
+}
+
 function cleanEnv(extra: Record<string, string>): Record<string, string> {
 	const env: Record<string, string> = {};
 	for (const [k, v] of Object.entries(process.env)) {
@@ -148,7 +155,7 @@ async function measureVersion() {
 	for (let i = 0; i < RUNS; i++) {
 		const home = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-perf-"));
 		const r = await runTimed([process.execPath, ENTRY, "--version"], cleanEnv({ HOME: home, USERPROFILE: home }), ROOT);
-		fs.rmSync(home, { recursive: true, force: true });
+		cleanup(home);
 		if (r.code !== 0) throw new Error(`--version exited ${r.code}`);
 		ms.push(r.exit);
 	}
@@ -179,15 +186,15 @@ async function measureHeadless(port: number, form: "run" | "-p") {
 				? [process.execPath, ENTRY, "run", ...common, "Create hello.txt"]
 				: [process.execPath, ENTRY, "-p", "Create hello.txt", ...common];
 		let modelAt = Number.NaN;
-		const r = await runTimed(cmd, env, work, (line, at) => {
+		const r = await runTimed(cmd, env, ROOT, (line, at) => {
 			if (!Number.isNaN(modelAt) || !line.startsWith("{")) return;
 			try {
 				const t = JSON.parse(line).type;
 				if (t === "assistant" || t === "tool_use") modelAt = at;
 			} catch {}
 		});
-		fs.rmSync(home, { recursive: true, force: true });
-		fs.rmSync(work, { recursive: true, force: true });
+		cleanup(home);
+		cleanup(work);
 		if (r.code !== 0) throw new Error(`headless ${form} exited ${r.code}: ${r.stdout.slice(-400)}`);
 		if (Number.isNaN(modelAt)) throw new Error(`headless ${form}: no assistant/tool_use event seen`);
 		firstByte.push(r.firstByte);
@@ -225,7 +232,7 @@ async function measureTui() {
 			imp.push(ev.import_ms);
 		} finally {
 			server.stop(true);
-			fs.rmSync(home, { recursive: true, force: true });
+			cleanup(home);
 		}
 	}
 	return {
