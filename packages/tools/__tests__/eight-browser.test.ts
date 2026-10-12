@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -16,6 +16,7 @@ import {
 	type BrowserLaunchSpec,
 	LOCAL_BROWSER_PROFILE,
 	LOCAL_SERVER_CURL_NOTE,
+	_setHostSandboxedForTest,
 	_setProfileHomeForTest,
 	_setResolverForTest,
 	_setSpawnForTest,
@@ -24,6 +25,7 @@ import {
 	browserProfileWarning,
 	browserWithheldNote,
 	createEightBrowser,
+	launchLogTail,
 	localBrowserTools,
 	pngSize,
 	secretsPathInHome,
@@ -796,17 +798,23 @@ describeNotWin("wsTransport with a named profile", () => {
 	test("fails closed, without connecting, when the profile is not running and cannot be started", async () => {
 		// Other files in one bun process reset the module-level spawn seam; pin it here (the full CI run saw it unset).
 		_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
-		// A binary path must resolve or the launch fails earlier with "no app found" (always on Linux, where no
-		// app bundle is searched); the spawn seam never runs it.
-		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
-		_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
-		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
-			/8gent Browser could not start \(test spawn refused\).*run_command with curl/,
-		);
-		_setProfileHomeForTest(profileHome("eightgent", { port: 7981 }));
-		await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
-			/profile "eightgent" is not running/,
-		);
+		// The spawn seam must be reached: on a sandboxed dev Mac the #4099 pre-flight would answer first.
+		_setHostSandboxedForTest(false);
+		try {
+			// A binary path must resolve or the launch fails earlier with "no app found" (always on Linux, where no
+			// app bundle is searched); the spawn seam never runs it.
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+			_setProfileHomeForTest(profileHome("eightgent", { token: "bot-tok" }));
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+				/8gent Browser could not start \(test spawn refused\).*run_command with curl/,
+			);
+			_setProfileHomeForTest(profileHome("eightgent", { port: 7981 }));
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+				/profile "eightgent" is not running/,
+			);
+		} finally {
+			_setHostSandboxedForTest(null);
+		}
 	});
 
 	test("refuses a port file that points at the default profile's port 7980, or junk", async () => {
@@ -1650,7 +1658,10 @@ describe("default local profile: a local session's own isolated browser (#3785)"
 describeNotWin(
 	"start on demand: a profile with no port file is launched once, with a minimal env (#3785)",
 	() => {
+		// These tests run on sandboxed hosts too; the pre-flight has its own tests below.
+		beforeEach(() => _setHostSandboxedForTest(false));
 		afterEach(() => {
+			_setHostSandboxedForTest(null);
 			_setProfileHomeForTest(null);
 			_setSpawnForTest(() => ({ exited: Promise.resolve("test spawn refused") }));
 			_resetLoopbackAllowlistForTest();
@@ -1749,6 +1760,66 @@ describeNotWin(
 			await expect(call("tabs.list")).rejects.toThrow(/could not start/);
 			expect(Date.now() - t0).toBeLessThan(5_000);
 			expect(spawns).toBe(1);
+		});
+
+		test("under a host sandbox nothing is spawned: one clear error, no crash report (#4099)", async () => {
+			let spawns = 0;
+			_setSpawnForTest(() => {
+				spawns++;
+				return { exited: Promise.resolve("exited with SIGTRAP") };
+			});
+			_setHostSandboxedForTest(true);
+			_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
+			const call = wsTransport({ env });
+			let message = "";
+			await call("tabs.list").catch((e: Error) => (message = e.message));
+			expect(message).toMatch(
+				/^8gent Browser could not start \(this process runs inside a macOS sandbox, where 8gent Browser cannot register its Mach port with launchd; start the profile from outside the sandbox .*\)\.$/,
+			);
+			expect(message).not.toMatch(/curl/); // no curl sign-in detour for a sandboxed host (Karen, #4100)
+			await expect(call("tabs.list")).rejects.toThrow(/inside a macOS sandbox/);
+			expect(spawns).toBe(0);
+		});
+
+		test("a child that crashes leaves its last stderr line in the reason and a launch log by the port file (#4099)", async () => {
+			const home = mkdtempSync(join(tmpdir(), "8b-launch-home-"));
+			const app = join(home, "fake-browser.sh");
+			// Stands in for 8gent Browser trapping under a seatbelt: Chromium's FATAL line, then SIGTRAP.
+			writeFileSync(
+				app,
+				[
+					"#!/bin/sh",
+					'echo "[4242:1012/183428.614481:FATAL:base/apple/mach_port_rendezvous_mac.cc(159)] Check failed: kr == KERN_SUCCESS. bootstrap_check_in test: Permission denied (1100)" >&2',
+					"kill -TRAP $$",
+				].join("\n"),
+			);
+			chmodSync(app, 0o755);
+			_setSpawnForTest(null); // the real spawner, on a shell script, never the app
+			_setProfileHomeForTest(home);
+			const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: app, PATH: process.env.PATH };
+			await expect(wsTransport({ env })("tabs.list")).rejects.toThrow(
+				/could not start \(exited with SIGTRAP: FATAL:base\/apple\/mach_port_rendezvous_mac\.cc\(159\)\] Check failed: kr == KERN_SUCCESS\. bootstrap_check_in test: Permission denied \(1100\)\)/,
+			);
+			const log = join(home, ".8gent", "browser-profiles", "eightgent", "browser-launch.log");
+			expect(readFileSync(log, "utf8")).toContain("Permission denied (1100)");
+			// Made before the browser runs, so no looser than the browser makes them: dir 0o700, log 0o600.
+			expect(statSync(join(log, "..")).mode & 0o777).toBe(0o700);
+			expect(statSync(log).mode & 0o777).toBe(0o600);
+			rmSync(home, { recursive: true, force: true });
+		});
+
+		test("launchLogTail prefers the FATAL line, strips the pid prefix and caps the length", () => {
+			const dir = mkdtempSync(join(tmpdir(), "8b-log-"));
+			const f = join(dir, "browser-launch.log");
+			expect(launchLogTail(f)).toBeNull();
+			writeFileSync(f, "");
+			expect(launchLogTail(f)).toBeNull();
+			writeFileSync(f, "[1:0101/000000.000000:WARNING:a.cc(1)] first\n[1:0101/000000.000001:FATAL:b.cc(2)] Check failed: x\nlast plain line\n");
+			expect(launchLogTail(f)).toBe("FATAL:b.cc(2)] Check failed: x");
+			writeFileSync(f, `${"y".repeat(500)}\n`);
+			expect(launchLogTail(f)?.length).toBe(240);
+			rmSync(dir, { recursive: true, force: true });
 		});
 
 		test("no app to launch is a short error too, and names the setting", async () => {

@@ -25,16 +25,32 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { join, posix as pathPosix, resolve as resolvePath, win32 as pathWin32 } from "node:path";
+import {
+	dirname,
+	join,
+	posix as pathPosix,
+	resolve as resolvePath,
+	win32 as pathWin32,
+} from "node:path";
 import {
 	RESERVED_LOOPBACK_PORTS,
 	allowedLoopbackPorts,
 	ignoredWorkspaceAllowlist,
 	isAllowedLoopbackUrl,
 } from "../permissions/loopback-allowlist";
+import { canApplySeatbelt } from "../permissions/run-command-sandbox";
 import {
 	BlockedDestinationError,
 	type Resolver,
@@ -513,6 +529,8 @@ export type BrowserLaunchSpec = {
 	env: Record<string, string>;
 	portFile: string;
 	tokenFile: string;
+	/** Where the child's stderr goes (next to the port file), so a crash leaves its own last line behind. */
+	logFile: string;
 };
 /** Resolves when the child has exited (or could not be started), with a short reason. */
 export type BrowserSpawnFn = (spec: BrowserLaunchSpec) => { exited: Promise<string> };
@@ -524,22 +542,76 @@ export function _setSpawnForTest(fn: BrowserSpawnFn | null): void {
 	launches.clear();
 }
 
+// ── Host sandbox pre-flight (#4099) ──────────────────────────────────────────
+// Chromium's browser process registers a Mach rendezvous port with launchd (bootstrap_check_in) the
+// first time it launches a child. A seatbelt sandbox around this process denies that, so under a host
+// sandbox 8gent Browser traps about 150 ms after spawn (SIGTRAP, "mach_port_rendezvous_mac.cc: Check
+// failed: kr == KERN_SUCCESS ... Permission denied (1100)", one macOS crash report per attempt) before it
+// can publish a port. Checked before anything is spawned, with the probe run_command already uses to
+// learn that sandbox-exec cannot nest; a positive answer is the same error every time, with no crash.
+let hostSandboxOverride: boolean | null = null;
+/** Test seam: pretend the host sandbox is present (true) or absent (false). Never set outside tests. */
+export function _setHostSandboxedForTest(v: boolean | null): void {
+	hostSandboxOverride = v;
+	launches.clear();
+}
+/** True when this process sits inside a macOS sandbox that 8gent Browser cannot start under. */
+export function hostSandboxBlocksBrowser(): boolean {
+	if (hostSandboxOverride !== null) return hostSandboxOverride;
+	return (
+		process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec") && !canApplySeatbelt()
+	);
+}
+export const HOST_SANDBOX_REASON =
+	"this process runs inside a macOS sandbox, where 8gent Browser cannot register its Mach port with launchd; start the profile from outside the sandbox (same HOME and EIGHT_BROWSER_PROFILE) and the session connects to it";
+
+/** The line worth keeping from a dead child's stderr: the last FATAL or "Check failed" line, else the
+ *  last non-empty one, without Chromium's "[pid:mmdd/hhmmss.us:" prefix and cut to 240 chars. */
+export function launchLogTail(file: string): string | null {
+	let text: string;
+	try {
+		text = readFileSync(file, "utf8");
+	} catch {
+		return null;
+	}
+	const lines = text
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter(Boolean);
+	if (lines.length === 0) return null;
+	const fatal = [...lines].reverse().find((l) => /FATAL|Check failed/.test(l));
+	const pick = fatal ?? lines[lines.length - 1];
+	return pick.replace(/^\[\d+:\d+\/[\d.]+:/, "").slice(0, 240);
+}
+
 const realSpawn: BrowserSpawnFn = (spec) => ({
 	exited: new Promise((done) => {
+		let log: number | null = null;
+		try {
+			// The dir and the log exist before the browser does, so they get the modes the browser would
+			// give them (8gent-browser control-server.ts makes the profile dir 0o700): nothing looser.
+			mkdirSync(dirname(spec.logFile), { recursive: true, mode: 0o700 });
+			log = openSync(spec.logFile, "w", 0o600);
+		} catch {
+			log = null;
+		}
 		try {
 			const child = spawn(spec.bin, [], {
 				env: spec.env as NodeJS.ProcessEnv,
 				detached: true,
-				stdio: "ignore",
+				stdio: ["ignore", "ignore", log ?? "ignore"],
 				windowsHide: true,
 			});
 			child.once("error", (e: Error) => done(`spawn failed: ${e.message}`));
-			child.once("exit", (code: number | null, signal: string | null) =>
-				done(`exited with ${signal ?? `code ${code}`}`),
-			);
+			child.once("exit", (code: number | null, signal: string | null) => {
+				const tail = launchLogTail(spec.logFile);
+				done(`exited with ${signal ?? `code ${code}`}${tail ? `: ${tail}` : ""}`);
+			});
 			child.unref();
 		} catch (e) {
 			done(`spawn failed: ${(e as Error).message}`);
+		} finally {
+			if (log !== null) closeSync(log);
 		}
 	}),
 });
@@ -576,15 +648,18 @@ function freePort(): Promise<number> {
 const LAUNCH_WAIT_MS = 20_000;
 const launches = new Map<string, Promise<void>>();
 
-/** The actionable error for a launch that did not produce a running profile. */
-const launchError = (reason: string) =>
+/** The actionable error for a launch that did not produce a running profile. The curl alternative is
+ *  for a browser that is missing or broken; under a host sandbox it is left out (#4099), since it only
+ *  steers the model into a curl sign-in the judge then blocks. */
+const launchError = (reason: string, curlHint = true) =>
 	new Error(
-		`8gent Browser could not start (${reason}). For a local web app use run_command with curl instead.`,
+		`8gent Browser could not start (${reason}).${curlHint ? " For a local web app use run_command with curl instead." : ""}`,
 	);
 
 async function launchOnce(profile: BrowserProfile, home: string, env: Env): Promise<void> {
 	const bin = browserBinary(env, home);
 	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
+	if (hostSandboxBlocksBrowser()) throw launchError(HOST_SANDBOX_REASON, false);
 	const port = await freePort();
 	const ports = [...allowedLoopbackPorts(env, home)];
 	// Built fresh: only what the browser needs to run and find its profile. Never the parent env.
@@ -603,6 +678,7 @@ async function launchOnce(profile: BrowserProfile, home: string, env: Env): Prom
 		env: childEnv,
 		portFile: profile.portFile,
 		tokenFile: profile.tokenFile,
+		logFile: join(dirname(profile.portFile), "browser-launch.log"),
 	};
 	const { exited } = (spawnOverride ?? realSpawn)(spec);
 	const exit = exited.then((reason) => ({ reason }));
