@@ -31,6 +31,7 @@ import {
 	parseGoCommand,
 } from "../lib/goal-client.js";
 import { t } from "../theme.js";
+import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { FigureEight } from "./figure-eight-spinner.js";
 import { Blink } from "./fade-transition.js";
@@ -87,6 +88,8 @@ interface CommandInputProps {
 	/** An approval card is pending: the status line says the turn waits on the
 	 *  person and stops spinning, and the placeholder points at the card (#3118). */
 	approvalPending?: boolean;
+	/** Project folder the `@` file list comes from. Defaults to process.cwd(). */
+	cwd?: string;
 }
 
 /** The status line while an approval card waits on the person (#3118). */
@@ -153,6 +156,7 @@ export function CommandInput({
 	transformInputValue,
 	allowEmptySubmit = false,
 	approvalPending = false,
+	cwd = process.cwd(),
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
@@ -207,14 +211,43 @@ export function CommandInput({
 		};
 	}, []);
 
+	// `@` file mention (#3918 D2): the files matching the @token at the end
+	// of the input. Each time a mention opens, the list reloads in the
+	// background from the project folder (the old list shows meanwhile), so
+	// new files appear and typing never waits on git.
+	const mention = useMemo(() => mentionAtEnd(value), [value]);
+	const mentionActive = mention !== null;
+	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
+	const [mentionIndex, setMentionIndex] = useState(0);
+	useEffect(() => {
+		if (!mentionActive) return;
+		let cancelled = false;
+		void listProjectFiles(cwd).then((files) => {
+			if (!cancelled) setProjectFiles({ cwd, files });
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [mentionActive, cwd]);
+	const mentionMatches = useMemo(
+		() => (mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : []),
+		[mention, projectFiles],
+	);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new query starts at the best match
+	useEffect(() => setMentionIndex(0), [mention?.query]);
+	const mentionOpen = mention !== null && mentionMatches.length > 0;
+
 	// Ghost suggestion hook
-	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+	const { suggestion, accept, dismiss, isVisible: ghostShown } = useGhostSuggestion(value, {
 		isGitRepo,
 		currentBranch,
 		planNextStep,
 		recentCommands,
 		extraContextSuggestions: extraSlashContext,
 	});
+	// Never offer a shell line: Tab would complete a command nobody typed
+	// (#3918 D5, 8SO).
+	const isVisible = ghostShown && !isShellSuggestion(value, suggestion?.text);
 
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
@@ -225,6 +258,23 @@ export function CommandInput({
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
+			// An open @ file list takes Tab, Up and Down before anything else.
+			if (mentionOpen && mention) {
+				if (key.tab && !key.shift) {
+					const file = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+					if (file) setValue(applyMention(value, mention.start, file));
+					return;
+				}
+				if (key.upArrow) {
+					setMentionIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setMentionIndex((i) => Math.min(mentionMatches.length - 1, i + 1));
+					return;
+				}
+			}
+
 			// Tab to accept ghost suggestion. Not Shift+Tab: Ink sets key.tab for
 			// it too, and Shift+Tab switches the permission mode (#3170).
 			if (key.tab && !key.shift && isVisible && suggestion) {
@@ -429,6 +479,11 @@ export function CommandInput({
 						description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`}
 					/>
 				</Box>
+			)}
+
+			{/* @ file mention list */}
+			{!isProcessing && mentionOpen && (
+				<FileMentionList files={mentionMatches} selected={mentionIndex} />
 			)}
 
 			{/* Slash command help */}
@@ -644,6 +699,25 @@ function SlashCommandHelp({
 	);
 }
 
+const MENTION_ROWS = 8;
+
+// The @ file list: matching files, the picked one marked, Tab to insert.
+function FileMentionList({ files, selected }: { files: string[]; selected: number }) {
+	return (
+		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
+			<Text color={t.heading} bold>
+				FILES <Text color={t.textTertiary}>Up/Down to pick, Tab to insert</Text>
+			</Text>
+			{files.map((file, i) => (
+				<Text key={file} color={i === selected ? t.textPrimary : t.textTertiary}>
+					{i === selected ? "> " : "  "}
+					{file}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
 // ============================================
 // Minimal Command Input
 // ============================================
@@ -838,4 +912,9 @@ function parseSlashCommand(input: string): { command: SlashCommand; args: string
 	if (!cmd) return null;
 
 	return { command: cmd.name, args };
+}
+
+/** True when accepting the ghost text would leave a `!` shell line in the input. */
+export function isShellSuggestion(value: string, ghost: string | undefined): boolean {
+	return `${value}${ghost ?? ""}`.trimStart().startsWith("!");
 }

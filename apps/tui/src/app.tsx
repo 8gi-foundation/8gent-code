@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import { Box, type DOMElement, useApp, useInput } from "ink";
+import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
 import {
 	applyDesignSystem,
 	t,
@@ -175,6 +175,7 @@ import {
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
+import { copyReply } from "./lib/copy-answer.js";
 import {
 	type SlashCommand,
 	builtInCommandsCoreFirst,
@@ -210,6 +211,21 @@ import {
 import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import {
+	BANG_ID_PREFIX,
+	BANG_USAGE,
+	type BangRun,
+	bangChatLine,
+	bangContextBlock,
+	bangRunningLine,
+	killBangsOnExit,
+	parseBang,
+	planModeRefusal,
+	sendRefusal,
+	startBang,
+	withShellContext,
+	withoutBangLines,
+} from "./lib/bang-command.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
@@ -821,6 +837,8 @@ export function App({
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
+	// Raw stdout, for terminal sequences such as /copy's OSC 52.
+	const { stdout: inkStdout } = useStdout();
 
 	// Personality greetings (inline for independence)
 	const GREETINGS = [
@@ -1424,7 +1442,7 @@ export function App({
 			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1790,6 +1808,27 @@ export function App({
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
 	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Output of `!cmd` lines waiting to go to the model with the tab's next
+	// message, keyed by tab id (#3918 D5).
+	const shellContextRef = useRef<Map<string, string[]>>(new Map());
+	// Running `!cmd` processes per tab, so Esc, tab close and exit can stop them.
+	const bangRunsRef = useRef<Map<string, Set<BangRun>>>(new Map());
+	const bangSeq = useRef(0);
+	const stopBangRuns = useCallback((tabId?: string) => {
+		for (const [id, runs] of bangRunsRef.current) {
+			if (tabId !== undefined && id !== tabId) continue;
+			for (const run of runs) run.cancel();
+			runs.clear();
+		}
+	}, []);
+	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
+	useEffect(() => {
+		const uninstall = killBangsOnExit(() => stopBangRuns());
+		return () => {
+			uninstall();
+			stopBangRuns();
+		};
+	}, [stopBangRuns]);
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -2038,7 +2077,7 @@ export function App({
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
 			if (activeSessionId && messages.length > 0) {
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -2048,6 +2087,7 @@ export function App({
 				});
 			}
 			flushSession();
+			stopBangRuns();
 			if (agent) agent.cleanup().catch(() => {});
 			exit();
 		}
@@ -2160,6 +2200,8 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				shellContextRef.current.delete(closingId);
+				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
@@ -2196,6 +2238,11 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			const bangs = bangRunsRef.current.get(activeTabId);
+			if (bangs && bangs.size > 0) {
+				stopBangRuns(activeTabId);
+				return;
+			}
 			if (isProcessing) {
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
@@ -2421,6 +2468,15 @@ export function App({
 		},
 		[activeTabId],
 	);
+
+	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
+		const swap = (list: Message[]) =>
+			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
+		const cur = tabMessagesRef.current.get(tabId);
+		if (cur) tabMessagesRef.current.set(tabId, swap(cur));
+		setMessagesRaw((prev) => (prev.some((m) => m.id === id) ? swap(prev) : prev));
+	}, []);
 
 	/**
 	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
@@ -3112,6 +3168,10 @@ export function App({
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
 					break;
 
+				case "copy":
+					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
+					break;
+
 				case "predict":
 					if (predictedSteps.length === 0) {
 						addSystemMessage(PLAN_EMPTY_LINE);
@@ -3431,7 +3491,7 @@ export function App({
 
 				case "quit":
 					if (activeSessionId && messages.length > 0) {
-						const serializable = messages.map((m) => ({
+						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
 						}));
@@ -3441,6 +3501,7 @@ export function App({
 						});
 					}
 					flushSession();
+					stopBangRuns();
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
@@ -5477,6 +5538,8 @@ export function App({
 			activeTabId,
 			linkDaemonSession,
 			unlinkDaemon,
+			messages,
+			inkStdout,
 		],
 	);
 
@@ -5638,6 +5701,40 @@ export function App({
 			return;
 		}
 
+		// `!cmd` runs a shell command here; its output goes with the next
+		// message. `!!cmd` runs it without sending (#3918 D5).
+		const bang = attached ? null : parseBang(input);
+		if (bang) {
+			const bangLine = (content: string): Message => ({
+				id: `${BANG_ID_PREFIX}${Date.now()}-${bangSeq.current++}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+			const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+			if (!bang.command || refused) {
+				appendToTab(tabId, bangLine(refused ?? BANG_USAGE));
+				return;
+			}
+			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
+			const running = bangLine(bangRunningLine(bang));
+			appendToTab(tabId, running);
+			const run = startBang(bang.command, projectCwd);
+			const runs = bangRunsRef.current.get(tabId) ?? new Set();
+			runs.add(run);
+			bangRunsRef.current.set(tabId, runs);
+			const result = await run.done;
+			runs.delete(run);
+			const withheld = bang.send ? sendRefusal(bang.command) : null;
+			if (bang.send && !withheld && !result.cancelled) {
+				const pending = shellContextRef.current.get(tabId) ?? [];
+				pending.push(bangContextBlock(bang, result));
+				shellContextRef.current.set(tabId, pending);
+			}
+			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
+			return;
+		}
+
 		// Linked to a shared session (#3929): the shared 8gent answers, and every
 		// surface on the session sees the message.
 		const daemonLink = daemonLinkRef.current;
@@ -5650,7 +5747,10 @@ export function App({
 			});
 			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
 			try {
-				daemonLink.client.prompt(input);
+				// Output from `!cmd` goes in front here too, once (#3918 D5).
+				const shellContext = shellContextRef.current.get(tabId);
+				shellContextRef.current.delete(tabId);
+				daemonLink.client.prompt(withShellContext(shellContext, input));
 			} catch (err) {
 				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -5725,8 +5825,12 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const messageForAgent = await expandSkillSlashCommand(message);
-			const routeHint = messageForAgent.trim() || "User attached an image.";
+			const expanded = await expandSkillSlashCommand(message);
+			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
+			const shellContext = shellContextRef.current.get(tabId);
+			shellContextRef.current.delete(tabId);
+			const messageForAgent = withShellContext(shellContext, expanded);
+			const routeHint = expanded.trim() || "User attached an image.";
 
 			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
@@ -6749,6 +6853,7 @@ export function App({
 							display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
 						>
 							<CommandInput
+								cwd={projectCwd}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={

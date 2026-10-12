@@ -206,3 +206,25 @@ jobs:
           gh workflow run release.yml --repo "$REPO" --ref "v${VERSION}"
           gh workflow run release-binaries.yml --repo "$REPO" --ref "v${VERSION}"
           echo "started release.yml and release-binaries.yml on v${VERSION}"
+
+  # A failed release pipeline used to be invisible for a week (#3658). Any
+  # failure above opens (or comments on) one P0 issue, so it lands where people look.
+  alarm:
+    name: Open an issue when the release PR workflow fails
+    needs: [decide, propose, tag]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Open or update the release-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/release-alarm.sh "release-pr.yml" "$REF" "$RUN_URL"

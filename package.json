@@ -19,6 +19,7 @@
     "bin/bunfig.empty.toml",
     "scripts/postinstall.js",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
