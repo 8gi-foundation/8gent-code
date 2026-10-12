@@ -451,6 +451,26 @@ On graceful shutdown (SIGTERM/SIGINT), the daemon writes active session metadata
 
 Cron jobs persist to `~/.8gent/cron.json` and survive restarts. Missed jobs are caught up on startup (if gap exceeds 2x the interval).
 
+### Resume on boot and durable turns
+
+With `EIGHT_RESUME_ON_BOOT=1`, every open session is journaled to
+`~/.8gent/sessions-journal.json` (atomic write, owner-only) and recreated on
+the next start from its newest time-travel checkpoint. A tool call that was
+running at the crash is re-run only if it is a read; anything else is reported
+to the model as not replayed. The journal also holds the turn that was running
+(`pendingTurn`: the user text, scrubbed and capped, plus an attempt count),
+written before the daemon shows anything for that turn and dropped when the
+turn ends.
+
+With `EIGHT_AUTO_CONTINUE=1` as well (default off), a session whose last turn
+started and never finished is continued once, automatically, after the restore
+and the replay settle. The attempt is journaled before the continuation runs,
+so a second crash during it abandons the turn instead of looping. When the
+interrupted call was a write or command, the session stays at the pre-tool
+checkpoint the restore put back and the continuation tells the model to verify
+what took effect before changing anything. `scripts/durable-continue-demo.ts`
+is the kill -9 demonstration.
+
 ## Ability Access
 
 The 8 core abilities are accessible through the daemon indirectly via prompt-based interaction. The agent has full access to all abilities (memory, worktrees, policy, evolution, healing, entrepreneurship, AST, browser) when processing prompts.

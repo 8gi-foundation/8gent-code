@@ -16,7 +16,17 @@
  *
  * Restore only puts the message history back. Whatever happened after the
  * last checkpoint (up to EIGHT_CHECKPOINT_EVERY tool calls) is lost, and the
- * session waits for the user's next message.
+ * session waits for the user's next message, unless EIGHT_AUTO_CONTINUE=1.
+ *
+ * Durable turns (#4082, concept from Durable Pi, found by Artale): the pool
+ * journals a turn as it starts (pendingTurn, written before anything is
+ * shown) and drops it when the turn ends. With EIGHT_AUTO_CONTINUE=1 on top of
+ * EIGHT_RESUME_ON_BOOT=1, continueInterruptedTurns re-runs a turn that was
+ * still pending at the crash exactly once: the attempt is journaled before
+ * the run, so a second crash during the continuation abandons the turn
+ * instead of looping. A turn whose interrupted call was a write or command is
+ * not resumed as it was: the session stays at the pre-tool checkpoint the
+ * restore put back and the model is told to verify before changing anything.
  *
  * Tool calls that were running when the daemon died (#3653) are journaled as
  * they start and dropped as they end. On boot, settleInterruptedToolCalls
@@ -44,7 +54,22 @@ export interface JournalEntry {
 	overrides?: SessionOverrides;
 	/** Tool calls started and not yet ended (#3653). */
 	inFlight?: InFlightToolCall[];
+	/** The turn started and not yet finished (#4082). */
+	pendingTurn?: PendingTurn;
 }
+
+export interface PendingTurn {
+	/** The user message's turn id. */
+	id: string;
+	/** The user's text, secrets scrubbed, capped at TURN_TEXT_CHARS. */
+	text: string;
+	startedAt: number;
+	/** Automatic continuations already journaled for this turn. */
+	attempts: number;
+}
+
+/** Longest user text kept on disk for a pending turn. */
+const TURN_TEXT_CHARS = 4000;
 
 export interface InFlightToolCall {
 	id: string;
@@ -111,6 +136,18 @@ function isValidInFlight(v: unknown): v is InFlightToolCall {
 	);
 }
 
+function isValidPendingTurn(v: unknown): v is PendingTurn {
+	return (
+		isPlainObject(v) &&
+		isPlainKey(v.id) &&
+		typeof v.text === "string" &&
+		typeof v.startedAt === "number" &&
+		typeof v.attempts === "number" &&
+		Number.isInteger(v.attempts) &&
+		v.attempts >= 0
+	);
+}
+
 /** True when `v` has the JournalEntry shape and safe ids. */
 export function isValidJournalEntry(v: unknown): v is JournalEntry {
 	if (!isPlainObject(v)) return false;
@@ -131,6 +168,13 @@ export function resumeOnBootEnabled(
 	return env.EIGHT_RESUME_ON_BOOT === "1";
 }
 
+/** EIGHT_AUTO_CONTINUE=1 (#4082). Only read when resume-on-boot is on. */
+export function autoContinueEnabled(
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return env.EIGHT_AUTO_CONTINUE === "1";
+}
+
 export class SessionJournal {
 	constructor(readonly filePath: string) {}
 
@@ -147,8 +191,11 @@ export class SessionJournal {
 			const valid: JournalEntry[] = [];
 			for (const e of parsed.sessions as unknown[]) {
 				if (isValidJournalEntry(e)) {
-					// A malformed call is dropped; the session entry is kept.
+					// A malformed call or turn is dropped; the session entry is kept.
 					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight);
+					if (e.pendingTurn !== undefined && !isValidPendingTurn(e.pendingTurn)) {
+						delete e.pendingTurn;
+					}
 					valid.push(e);
 				} else
 					console.error(`[session-journal] dropping malformed journal entry in ${this.filePath}`);
@@ -181,6 +228,42 @@ export class SessionJournal {
 
 	clearInFlight(sessionId: string): void {
 		this.updateInFlight(sessionId, () => []);
+	}
+
+	/**
+	 * Record a turn as running (#4082), written before the turn runs or
+	 * anything is shown. Replaces any earlier pending turn. No-op for a
+	 * session not journaled.
+	 */
+	markTurnStart(sessionId: string, turn: { id: string; text: string }): void {
+		const clean = scrubSecrets(turn.text).scrubbed;
+		this.updateTurn(sessionId, () => ({
+			id: turn.id,
+			text:
+				clean.length > TURN_TEXT_CHARS
+					? `${clean.slice(0, TURN_TEXT_CHARS)}... (${clean.length} chars)`
+					: clean,
+			startedAt: Date.now(),
+			attempts: 0,
+		}));
+	}
+
+	markTurnEnd(sessionId: string): void {
+		this.updateTurn(sessionId, () => undefined);
+	}
+
+	private updateTurn(
+		sessionId: string,
+		fn: (turn: PendingTurn | undefined) => PendingTurn | undefined,
+	): void {
+		const sessions = this.read();
+		const entry = sessions.find((e) => e.sessionId === sessionId);
+		if (!entry) return;
+		const after = fn(entry.pendingTurn);
+		if (entry.pendingTurn === undefined && after === undefined) return;
+		if (after) entry.pendingTurn = after;
+		else delete entry.pendingTurn;
+		this.write(sessions);
 	}
 
 	private updateInFlight(
@@ -402,6 +485,105 @@ export async function settleInterruptedToolCalls(
 		}
 		console.log(
 			`[resume] ${entry.sessionId}: ${result.replayed.length} interrupted read(s) re-run, ${result.notReplayed.length} call(s) not replayed, model told to confirm`,
+		);
+		results.push(result);
+	}
+	return results;
+}
+
+/** The slice of AgentPool continuing interrupted turns needs. */
+export interface ContinuePool {
+	chat(
+		sessionId: string,
+		text: string,
+		turn: undefined,
+		options: { continuation: true },
+	): Promise<string>;
+	getAgent(sessionId: string): { addHarnessNote(body: string): void } | null;
+}
+
+export interface ContinueResult {
+	sessionId: string;
+	turnId: string;
+	/** Continuations journaled for this turn, this one included. */
+	attempts: number;
+	/**
+	 * "continued": the turn is re-run from the restored state.
+	 * "continued-from-checkpoint": a write or command was in flight and never
+	 * confirmed; the session stays at the pre-tool checkpoint the restore put
+	 * back and is told to verify before changing anything.
+	 * "abandoned": the attempt cap was already spent (a crash during the
+	 * continuation), so nothing runs and the turn is dropped.
+	 */
+	outcome: "continued" | "continued-from-checkpoint" | "abandoned";
+}
+
+/**
+ * Run after settleInterruptedToolCalls, only with EIGHT_AUTO_CONTINUE=1
+ * (#4082). For each resumed session whose last journaled turn started and
+ * never finished: journal the attempt, then send one continuation carrying
+ * the original request. The attempt is on disk before the run, so a second
+ * crash during the continuation does not loop: the turn is abandoned and the
+ * model told so. The continuation turns are not awaited.
+ */
+export function continueInterruptedTurns(
+	journal: SessionJournal,
+	pool: ContinuePool,
+	settled: SettleResult[],
+	options: { maxAttempts?: number } = {},
+): ContinueResult[] {
+	const maxAttempts = options.maxAttempts ?? 1;
+	const results: ContinueResult[] = [];
+	for (const entry of journal.read()) {
+		const turn = entry.pendingTurn;
+		if (!turn) continue;
+		const agent = pool.getAgent(entry.sessionId);
+		if (!agent) continue;
+		const attempts = turn.attempts + 1;
+		const unconfirmed =
+			(settled.find((s) => s.sessionId === entry.sessionId)?.notReplayed.length ?? 0) > 0;
+		const result: ContinueResult = {
+			sessionId: entry.sessionId,
+			turnId: turn.id,
+			attempts,
+			outcome:
+				attempts > maxAttempts
+					? "abandoned"
+					: unconfirmed
+						? "continued-from-checkpoint"
+						: "continued",
+		};
+		try {
+			if (result.outcome === "abandoned") {
+				journal.markTurnEnd(entry.sessionId);
+				agent.addHarnessNote(
+					`[resume] The daemon crashed again while continuing this task after a crash (${turn.attempts} automatic continuation(s) spent). It was not continued again. Wait for the user.`,
+				);
+			} else {
+				// On disk before the run: the cap holds even if this run crashes.
+				journal.upsert({ ...entry, pendingTurn: { ...turn, attempts } });
+				const lead = unconfirmed
+					? "The daemon stopped during this task and has restarted from the checkpoint taken before the tool call(s) listed in the note above, which were not replayed. First check whether they took effect; never repeat a push, message, deploy or command without asking. Then continue the task."
+					: "The daemon stopped during this task and has restarted. Continue the task from the current state.";
+				pool
+					.chat(
+						entry.sessionId,
+						`[resume] continued-after-crash (automatic continuation ${attempts} of ${maxAttempts}). ${lead} The original request was:\n${turn.text}`,
+						undefined,
+						{ continuation: true },
+					)
+					.catch((err) =>
+						console.error(`[resume] ${entry.sessionId}: continuation failed: ${String(err)}`),
+					);
+			}
+		} catch (err) {
+			console.error(
+				`[resume] ${entry.sessionId}: could not continue turn ${turn.id}: ${String(err)}`,
+			);
+			continue;
+		}
+		console.log(
+			`[resume] ${entry.sessionId}: turn ${turn.id} ${result.outcome} (attempt ${attempts} of ${maxAttempts})`,
 		);
 		results.push(result);
 	}
