@@ -12,7 +12,7 @@ import path from "node:path";
 import { getRetryConfig } from "../ai/providers.js";
 import { resolveStreamIdleMs } from "../eight/turn-timeout.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
-import { PROJECT_SETTINGS_ALLOWLIST, filterProjectSettings } from "./project.js";
+import { PROJECT_SETTINGS_ALLOWLIST, filterProjectSettings, isLoopbackBaseURL } from "./project.js";
 import { resolveRetrySettings } from "./retry.js";
 import { getSettingsFilePath, loadSettings, loadSettingsReport, saveSettings, setSetting } from "./store.js";
 
@@ -72,13 +72,91 @@ describe("project settings over global (N2)", () => {
 		expect(s.performance.introBanner).toBe("off");
 	});
 
-	test("a project model choice applies only for a provider the user already configured", () => {
+	test("a project file cannot pick a hosted provider (openrouter) for a tab", () => {
 		writeProject({ models: { tabs: { engineer: { provider: "openrouter", model: "some/model" } } } });
-		expect(loadSettings(proj).models.tabs.engineer).toEqual({ provider: "openrouter", model: "some/model" });
+		const r = loadSettingsReport(proj);
+		expect(r.settings.models.tabs.engineer.provider).toBe(DEFAULT_SETTINGS.models.tabs.engineer.provider);
+		expect(r.ignored.map((i) => i.path)).toContain("models.tabs.engineer.provider");
+		// the model alone is a plain local-looking id, so it still applies to the local provider
+		expect(r.settings.models.tabs.engineer.model).toBe("some/model");
+	});
+
+	test("a provider the user never configured is refused", () => {
 		writeProject({ models: { tabs: { engineer: { provider: "evil-cloud", model: "x" } } } });
 		const r = loadSettingsReport(proj);
 		expect(r.settings.models.tabs.engineer.provider).toBe(DEFAULT_SETTINGS.models.tabs.engineer.provider);
 		expect(r.ignored.map((i) => i.path)).toContain("models.tabs.engineer.provider");
+	});
+
+	test("a project file may pick a loopback provider (ollama, lmstudio, apfel)", () => {
+		writeProject({
+			models: {
+				tabs: {
+					orchestrator: { provider: "lmstudio", model: "local-a" },
+					engineer: { provider: "ollama", model: "local-b" },
+					qa: { provider: "ollama", model: "local-c" },
+				},
+			},
+		});
+		const r = loadSettingsReport(proj);
+		expect(r.ignored).toEqual([]);
+		expect(r.settings.models.tabs.orchestrator).toEqual({ provider: "lmstudio", model: "local-a" });
+		expect(r.settings.models.tabs.engineer).toEqual({ provider: "ollama", model: "local-b" });
+		expect(r.settings.models.tabs.qa).toEqual({ provider: "ollama", model: "local-c" });
+	});
+
+	test("the tab's current global provider is allowed even when hosted", () => {
+		writeGlobal({ models: { tabs: { engineer: { provider: "openrouter", model: "g/model" } } } });
+		writeProject({ models: { tabs: { engineer: { provider: "openrouter", model: "other/model" } } } });
+		const r = loadSettingsReport(proj);
+		expect(r.ignored).toEqual([]);
+		expect(r.settings.models.tabs.engineer).toEqual({ provider: "openrouter", model: "other/model" });
+		// ...but only for that tab: another tab still cannot move to openrouter
+		writeProject({ models: { tabs: { qa: { provider: "openrouter", model: "x/y" } } } });
+		const r2 = loadSettingsReport(proj);
+		expect(r2.settings.models.tabs.qa.provider).toBe(DEFAULT_SETTINGS.models.tabs.qa.provider);
+	});
+
+	test("a global provider the user pointed at a remote host is refused", () => {
+		writeGlobal({ providers: { ollama: { baseURL: "https://gpu.example.com/v1" } } });
+		writeProject({ models: { tabs: { engineer: { provider: "ollama", model: "m" } } } });
+		const r = loadSettingsReport(proj);
+		expect(r.settings.models.tabs.engineer.provider).toBe(DEFAULT_SETTINGS.models.tabs.engineer.provider);
+		expect(r.ignored.map((i) => i.path)).toContain("models.tabs.engineer.provider");
+	});
+
+	test("hosted provider routed by model id alone (auto:free, :free ids) is refused for a local tab", () => {
+		for (const model of ["auto:free", " AUTO:FREE ", "meta-llama/llama-3.3-70b-instruct:free"]) {
+			writeProject({ models: { tabs: { engineer: { model } } } });
+			const r = loadSettingsReport(proj);
+			expect(r.settings.models.tabs.engineer.model).toBe(DEFAULT_SETTINGS.models.tabs.engineer.model);
+			expect(r.ignored.map((i) => i.path)).toContain("models.tabs.engineer.model");
+		}
+	});
+
+	test("a :free model id is allowed for a tab the user already runs on a hosted provider", () => {
+		writeGlobal({ models: { tabs: { engineer: { provider: "openrouter", model: "g/model" } } } });
+		writeProject({ models: { tabs: { engineer: { model: "auto:free" } } } });
+		const r = loadSettingsReport(proj);
+		expect(r.ignored).toEqual([]);
+		expect(r.settings.models.tabs.engineer.model).toBe("auto:free");
+	});
+
+	test("isLoopbackBaseURL: loopback hosts only, no lookalikes", () => {
+		for (const u of ["http://127.0.0.1:11435/v1", "http://localhost:1234/v1", "http://[::1]:8080/v1", "HTTP://LOCALHOST/v1"])
+			expect(isLoopbackBaseURL(u)).toBe(true);
+		for (const u of [
+			"https://openrouter.ai/api/v1",
+			"http://localhost.evil.com/v1",
+			"http://localhost@evil.com/v1",
+			"http://127.0.0.1.evil.com/v1",
+			"http://0.0.0.0:1234/v1",
+			"ftp://localhost/v1",
+			"not a url",
+			"",
+			undefined,
+		])
+			expect(isLoopbackBaseURL(u)).toBe(false);
 	});
 
 	const FORBIDDEN: Array<[string, unknown]> = [

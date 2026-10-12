@@ -8,7 +8,7 @@
  * repo can put one in front of a user who runs 8gent there. So a project file
  * is not a second settings file with the same powers. It may set ONLY the leaf
  * keys in PROJECT_SETTINGS_ALLOWLIST (look and feel, which model a tab uses
- * among the providers the user already configured, and retry limits), each
+ * among local providers (or the one the tab already uses), and retry limits), each
  * checked by a validator. Everything else is dropped and reported, whatever
  * its name: permissions, shell paths, provider base URLs or keys, tools,
  * hooks, anything that runs code or sends data somewhere new. A new settings
@@ -42,9 +42,55 @@ const shortText =
 	(max: number): Validator =>
 	(v) =>
 		typeof v === "string" && v.length > 0 && v.length <= max && !/[\u0000-\u001f\u007f]/.test(v);
-/** A provider the user already configured in the global file. Never a new one. */
-const configuredProvider: Validator = (v, g) =>
-	typeof v === "string" && Object.prototype.hasOwnProperty.call(g.providers, v);
+/** True when a base URL points at this machine: http(s) to 127.0.0.1, ::1 or localhost. */
+export function isLoopbackBaseURL(raw: unknown): boolean {
+	if (typeof raw !== "string") return false;
+	try {
+		const u = new URL(raw.trim());
+		if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+		const host = u.hostname.toLowerCase();
+		return host === "127.0.0.1" || host === "::1" || host === "[::1]" || host === "localhost";
+	} catch {
+		return false;
+	}
+}
+
+const baseURLOf = (g: Settings, provider: string | undefined): string | undefined =>
+	provider ? (g.providers as unknown as Record<string, { baseURL?: string } | undefined>)[provider]?.baseURL : undefined;
+
+/**
+ * A provider a project file may pick for a tab. A repo must not be able to send
+ * the user's code to a hosted provider (openrouter is always present in the
+ * global providers block, so "already configured" proves nothing). So it is
+ * allowed only when that provider's effective GLOBAL base URL is loopback, or
+ * when it is the provider that tab already uses globally (nothing new leaves
+ * the machine). A provider the user pointed at a remote host is refused.
+ */
+const pickableProvider =
+	(tab: (typeof TABS)[number]): Validator =>
+	(v, g) => {
+		if (typeof v !== "string" || !Object.prototype.hasOwnProperty.call(g.providers, v)) return false;
+		if (g.models?.tabs?.[tab]?.provider === v) return true;
+		return isLoopbackBaseURL(baseURLOf(g, v));
+	};
+
+/**
+ * Model ids that route to a hosted provider whatever the provider key says:
+ * "auto:free" is resolved to OpenRouter by resolveModel, and ":free" ids are
+ * OpenRouter's free tier. A project may name one only when that tab's global
+ * provider is already non-loopback (the user already sends that tab off-machine).
+ */
+export function impliesHostedProvider(model: string): boolean {
+	const m = model.trim().toLowerCase();
+	return m === "auto:free" || m.endsWith(":free");
+}
+const projectModel =
+	(tab: (typeof TABS)[number]): Validator =>
+	(v, g) => {
+		if (!shortText(200)(v, g)) return false;
+		if (!impliesHostedProvider(v as string)) return true;
+		return !isLoopbackBaseURL(baseURLOf(g, g.models?.tabs?.[tab]?.provider));
+	};
 
 const TABS = ["orchestrator", "engineer", "qa"] as const;
 
@@ -56,11 +102,11 @@ export const PROJECT_SETTINGS_ALLOWLIST: Readonly<Record<string, Validator>> = O
 	"ui.thinkingVisualiser.operatorRotationMs": isNum(100, 600_000),
 	"ui.thinkingVisualiser.boredomThresholdMs": isNum(100, 600_000),
 	"performance.introBanner": oneOf("auto", "on", "off"),
-	// Model choice, among providers already configured globally
+	// Model choice: local providers or the tab's current provider only (never a new hosted one)
 	...Object.fromEntries(
 		TABS.flatMap((t) => [
-			[`models.tabs.${t}.provider`, configuredProvider],
-			[`models.tabs.${t}.model`, shortText(200)],
+			[`models.tabs.${t}.provider`, pickableProvider(t)],
+			[`models.tabs.${t}.model`, projectModel(t)],
 		]),
 	),
 	// Retry limits (bounded, so a repo cannot turn retries into a flood or a stall)
