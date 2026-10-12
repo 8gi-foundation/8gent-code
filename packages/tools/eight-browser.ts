@@ -482,8 +482,8 @@ export function browserWithheldNote(env: Env = process.env): string | null {
 	const tools =
 		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: ";
 	if (env.EIGHT_BROWSER_LOCAL === "0" && (env.EIGHT_BROWSER_PROFILE ?? "") === "")
-		return `${tools}EIGHT_BROWSER_LOCAL=0 turned off the session's own isolated browser profile. Unset it to get them back.\n${LOCAL_SERVER_CURL_NOTE}`;
-	return `${tools}no isolated browser profile is configured. To get them, leave EIGHT_BROWSER_PROFILE unset (the session starts its own isolated profile) or set it to a running 8gent Browser profile. Even then they open loopback only on ports listed in EIGHT_BROWSER_ALLOW_LOOPBACK and never open other private addresses.\n${LOCAL_SERVER_CURL_NOTE}`;
+		return `${tools}EIGHT_BROWSER_LOCAL=0 turned off the session's own isolated browser profile. Unset it to get them back. For a local web app, follow the local-server curl rules in your instructions.`;
+	return `${tools}no isolated browser profile is configured. To get them, leave EIGHT_BROWSER_PROFILE unset (the session starts its own isolated profile) or set it to a running 8gent Browser profile. Even then they open loopback only on ports listed in EIGHT_BROWSER_ALLOW_LOOPBACK and never open other private addresses. For a local web app, follow the local-server curl rules in your instructions.`;
 }
 
 // ── Start on demand (#3785) ──────────────────────────────────────────────────
