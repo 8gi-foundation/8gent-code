@@ -76,6 +76,7 @@ describe("validatePath: startup code is write-protected (#4009)", () => {
 		expect(isStartupCodePath(path.join(HOME, ".8gent", "EXTENSIONS", "a.ts"), host)).toBe(true);
 		if (process.platform === "darwin")
 			expect(validatePath("~/.8GENT/HOOKS.yaml", PROJ).ok).toBe(false);
+		expect(commandWritesStartupCode("echo x > ~/.8GENT/HOOKS.yaml", PROJ, host)).toBe(true);
 		// Linux file systems are case-sensitive: a different name is a different file.
 		expect(
 			isStartupCodePath(path.join(HOME, ".8gent", "HOOKS.yaml"), { platform: "linux", home: HOME }),
@@ -154,7 +155,6 @@ describe("commandWritesStartupCode: shell writes are refused (#4009)", () => {
 		"D=~/.8gent; echo x > $D/hooks.yaml",
 		"export D=$HOME/.8gent/prompts && cp a.md $D/",
 		'echo x > "$HOME"/".8gent"/hooks.yaml',
-		"echo x > ~/.8GENT/HOOKS.yaml",
 		"echo x > ~/.8g*/hooks.yaml",
 		"cp evil ~/.8gent/ext*/evil.ts",
 		"python3 -c \"open('/x/.8gent/hooks.yaml','w')\"",
