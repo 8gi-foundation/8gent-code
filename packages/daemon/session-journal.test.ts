@@ -49,7 +49,9 @@ beforeAll(async () => {
 	}
 	mod = await import("./session-journal");
 	({ AgentPool } = await import("./agent-pool"));
-});
+	// A cold import of agent-pool takes over 5 s on windows-latest when this
+	// file runs on its own (resume-conformance.yml, #4113).
+}, 60_000);
 
 afterAll(() => {
 	for (const [k, v] of Object.entries(saved)) {
