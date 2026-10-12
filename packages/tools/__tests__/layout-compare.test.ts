@@ -14,7 +14,7 @@ import { ToolExecutor } from "../../eight/tools";
 import type { Band, LayoutMeasure } from "../../eight/layout-measure";
 import * as http from "node:http";
 import * as os from "node:os";
-import { MAX_HTML_BYTES, RENDER_CSP, chromeArgs, compareLayout, describeDiff, findChrome, pairBands, prepareSafeCopy, renderSafe } from "../layout-compare";
+import { MAX_HTML_BYTES, RENDER_CSP, chromeArgs, compareLayout, describeDiff, findChrome, noScreenshotMessage, pairBands, prepareSafeCopy, renderHtml, renderSafe } from "../layout-compare";
 import { measureLayout } from "../../eight/layout-measure";
 
 afterAll(cleanupTempDirs);
@@ -128,6 +128,32 @@ describe("compareLayout with a stub browser", () => {
 			if (prev === undefined) delete process.env.EIGHT_CHROME_BIN;
 			else process.env.EIGHT_CHROME_BIN = prev;
 		}
+	});
+
+	test("a browser that exits without a screenshot says its exit code and what it printed", async () => {
+		const dir = tempDir("layout-compare-");
+		fs.writeFileSync(path.join(dir, "index.html"), "<html></html>");
+		const bin = fakeExecutable(
+			dir,
+			"fake-chrome-dies",
+			'process.stderr.write("noise line\\nERROR: Failed to create a ProcessSingleton\\n"); process.exit(21);',
+		);
+		const err = await renderHtml(bin, path.join(dir, "index.html"), path.join(dir, "out.png"), 200, 100, path.join(dir, "profile")).then(
+			() => null,
+			(e: Error) => e,
+		);
+		expect(err?.message).toContain("the browser produced no screenshot (exit code 21)");
+		expect(err?.message).toContain("ERROR: Failed to create a ProcessSingleton");
+	});
+
+	test("the no-screenshot message keeps only the last stderr lines, and says when there were none", () => {
+		const many = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+		const msg = noScreenshotMessage(1, null, many);
+		expect(msg).toContain("line 39");
+		expect(msg).not.toContain("line 27\n");
+		expect(noScreenshotMessage(null, "SIGKILL", "")).toBe(
+			"the browser produced no screenshot (signal SIGKILL); Chrome wrote nothing to stderr",
+		);
 	});
 
 	test("a missing page or image is a sentence, not a throw", async () => {

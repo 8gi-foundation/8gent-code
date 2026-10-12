@@ -202,7 +202,12 @@ export function renderHtml(
 	return new Promise((resolve, reject) => {
 		const args = chromeArgs(htmlPath, out, width, height, profileDir);
 		const useGroup = process.platform !== "win32";
-		const child = spawn(chrome, args, { stdio: "ignore", detached: useGroup });
+		// stderr is kept (last few KB) so a failed render says why Chrome stopped.
+		const child = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe"], detached: useGroup });
+		let stderr = "";
+		child.stderr?.on("data", (d) => {
+			stderr = (stderr + String(d)).slice(-STDERR_KEEP_BYTES);
+		});
 		const killGroup = () => {
 			try {
 				if (useGroup && child.pid) process.kill(-child.pid, "SIGKILL");
@@ -220,12 +225,24 @@ export function renderHtml(
 			killGroup();
 			reject(e);
 		});
-		child.on("exit", () => {
+		child.on("exit", (code, signal) => {
 			clearTimeout(timer);
 			killGroup();
-			fs.existsSync(out) ? resolve() : reject(new Error("the browser produced no screenshot"));
+			if (fs.existsSync(out)) return resolve();
+			// Give the pipe a moment to drain what Chrome wrote just before it exited.
+			setTimeout(() => reject(new Error(noScreenshotMessage(code, signal, stderr))), 50);
 		});
 	});
+}
+
+const STDERR_KEEP_BYTES = 4096;
+const STDERR_SHOW_LINES = 12;
+
+/** "the browser produced no screenshot", plus Chrome's exit status and its last stderr lines. */
+export function noScreenshotMessage(code: number | null, signal: NodeJS.Signals | null, stderr: string): string {
+	const status = signal ? `signal ${signal}` : `exit code ${code}`;
+	const tail = stderr.trim().split(/\r?\n/).slice(-STDERR_SHOW_LINES).join("\n");
+	return `the browser produced no screenshot (${status})${tail ? `; Chrome said:\n${tail}` : "; Chrome wrote nothing to stderr"}`;
 }
 
 /** Sanitise `htmlPath` (see prepareSafeCopy) and render the copy. */
