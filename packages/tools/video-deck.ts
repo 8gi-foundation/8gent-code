@@ -401,8 +401,6 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		throw new Error(`invalid deck spec: ${msg}`);
 	}
 	const spec = parsed.data;
-	const ffmpeg = resolveBinary("ffmpeg", opts.cwd, opts.ffmpeg ?? process.env.EIGHT_FFMPEG);
-	const ffprobe = resolveBinary("ffprobe", opts.cwd, opts.ffprobe ?? process.env.EIGHT_FFPROBE);
 	const deadline = Date.now() + (opts.deadlineMs ?? DEFAULT_DEADLINE_MS);
 	const left = () => {
 		const ms = deadline - Date.now();
@@ -461,6 +459,9 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			if (total > MAX_TOTAL_SECONDS) throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
 			frames.push({ png, sec: fixed, wav });
 		}
+		// Caps, images and narration are all settled above; only now are the binaries looked up.
+		const ffmpeg = resolveBinary("ffmpeg", opts.cwd, opts.ffmpeg ?? process.env.EIGHT_FFMPEG);
+		const ffprobe = resolveBinary("ffprobe", opts.cwd, opts.ffprobe ?? process.env.EIGHT_FFPROBE);
 		const anyAudio = frames.some((f) => f.wav);
 		const tmpOut = path.join(work, "out.mp4");
 		const r = await run(ffmpeg, buildFfmpegArgs(frames, tmpOut, anyAudio), Math.min(opts.timeoutMs ?? 180000, left()));
