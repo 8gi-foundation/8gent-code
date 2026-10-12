@@ -41,11 +41,16 @@ export function groundingPrompt(instruction: string): string {
  */
 export function parseBox(raw: string): BBox | null {
 	const text = raw.replace(/```(?:json)?/g, "");
-	const nums = (s: string) => s.split(/[\s,]+/).filter(Boolean).map(Number);
+	const nums = (s: string) =>
+		s
+			.split(/[\s,]+/)
+			.filter(Boolean)
+			.map(Number);
 	const m = /"?bbox_2d"?\s*:\s*\[([^\]]+)\]/.exec(text);
 	if (m) {
 		const n = nums(m[1]);
-		if (n.length >= 4 && n.slice(0, 4).every(Number.isFinite)) return order([n[0], n[1], n[2], n[3]]);
+		if (n.length >= 4 && n.slice(0, 4).every(Number.isFinite))
+			return order([n[0], n[1], n[2], n[3]]);
 	}
 	const p = /"?point_2d"?\s*:\s*\[([^\]]+)\]/.exec(text);
 	if (p) {
@@ -53,9 +58,10 @@ export function parseBox(raw: string): BBox | null {
 		if (n.length >= 2 && Number.isFinite(n[0]) && Number.isFinite(n[1]))
 			return [n[0] - 5, n[1] - 5, n[0] + 5, n[1] + 5];
 	}
-	const bare = /\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]/.exec(
-		text,
-	);
+	const bare =
+		/\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]/.exec(
+			text,
+		);
 	if (bare) return order([Number(bare[1]), Number(bare[2]), Number(bare[3]), Number(bare[4])]);
 	return null;
 }
@@ -67,7 +73,12 @@ function order(b: BBox): BBox {
 /** Convert a model box into prepared-image pixels. */
 export function toImageSpace(b: BBox, coords: CoordSpace, img: PreparedImage): BBox {
 	if (coords === "absolute") return b;
-	return [(b[0] / 1000) * img.width, (b[1] / 1000) * img.height, (b[2] / 1000) * img.width, (b[3] / 1000) * img.height];
+	return [
+		(b[0] / 1000) * img.width,
+		(b[1] / 1000) * img.height,
+		(b[2] / 1000) * img.width,
+		(b[3] / 1000) * img.height,
+	];
 }
 
 export class QwenVlBackend implements GroundBackend {
@@ -127,7 +138,8 @@ export class QwenVlBackend implements GroundBackend {
 						],
 					}),
 				});
-				if (!res.ok) return { error: `openai-compatible ${res.status}: ${(await res.text()).slice(0, 200)}` };
+				if (!res.ok)
+					return { error: `openai-compatible ${res.status}: ${(await res.text()).slice(0, 200)}` };
 				const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
 				raw = j.choices?.[0]?.message?.content ?? "";
 			}
