@@ -25,6 +25,9 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      # skipped | published | failed; read by the alarm job below.
+      npm: ${{ steps.npm.outputs.npm }}
 
     steps:
       - name: Checkout
@@ -61,11 +64,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
         run: |
-          # The pack smoke below requires this secret (#3283); say so before
-          # the build, not twenty minutes in.
+          # PACK_SMOKE_OWNER_IDENTITY (#3283) adds identities to the pack smoke's
+          # scan. It is optional: the scan always covers every commit author in
+          # the full-depth checkout, which is where the v0.18.0 leak came from.
+          # The repository has no such secret today, and a hard failure here
+          # would stop the GitHub Release and the installers for nothing (#3658).
           if [ -z "${PACK_SMOKE_OWNER_IDENTITY}" ]; then
-            echo "::error::the PACK_SMOKE_OWNER_IDENTITY secret is not set for this repository (Settings, Secrets and variables, Actions). The release pack smoke refuses to run without it."
-            exit 1
+            echo "::warning::PACK_SMOKE_OWNER_IDENTITY is not set (Settings, Secrets and variables, Actions). The pack smoke scans the bundle for commit authors only; set the secret to add more names or emails."
           fi
           if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::release.yml publishes from a vX.Y.Z tag only, not ${GITHUB_REF}"
@@ -115,10 +120,11 @@ jobs:
       - name: npm pack-and-install smoke
         run: bun scripts/pack-smoke.ts --skip-build
         env:
-          # Comma-separated owner names/emails the bundle must never contain.
-          # Held in a repository secret, never in the repo.
+          # Comma-separated owner names/emails the bundle must never contain,
+          # on top of every commit author. Held in a repository secret, never
+          # in the repo; required by the smoke only when it is set.
           PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
-          PACK_SMOKE_REQUIRE_OWNER_IDENTITY: "1"
+          PACK_SMOKE_REQUIRE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY != '' && '1' || '0' }}
 
       - name: Extract version from tag
         id: version
@@ -177,6 +183,7 @@ jobs:
           fi
 
       - name: Publish to npm (optional channel)
+        id: npm_publish
         if: steps.preflight.outputs.npm == '1'
         # npm is a choice, not a requirement: a failure here is reported but
         # never holds back the GitHub Release or the installers.
@@ -197,6 +204,7 @@ jobs:
 
       # When npm was published, confirm its latest tag moved to this release.
       - name: npm latest is this version (optional channel)
+        id: npm_latest
         if: steps.preflight.outputs.npm == '1'
         continue-on-error: true
         env:
@@ -211,6 +219,27 @@ jobs:
           echo "::warning::npm dist-tag latest is '${LATEST}', not ${VERSION}"
           exit 1
 
+      # The npm channel's result, for the alarm job: `8gent update` on the npm
+      # channel only ever sees dist-tag latest, so a skipped or failed publish
+      # leaves every npm user on the previous version. That must open an issue,
+      # not sit as a notice in a green run (#3658: silent for a week).
+      - name: npm channel outcome
+        id: npm
+        env:
+          PREFLIGHT: ${{ steps.preflight.outputs.npm }}
+          PUBLISH: ${{ steps.npm_publish.outcome }}
+          LATEST: ${{ steps.npm_latest.outcome }}
+        run: |
+          if [ "$PREFLIGHT" != "1" ]; then
+            RESULT=skipped
+          elif [ "$PUBLISH" = "success" ] && [ "$LATEST" = "success" ]; then
+            RESULT=published
+          else
+            RESULT=failed
+          fi
+          echo "npm=${RESULT}" >> "$GITHUB_OUTPUT"
+          echo "npm channel: ${RESULT}"
+
       # #3803: this job no longer publishes the release. v0.18.1 and v0.19.0
       # went public with only an npm tarball and no Windows .exe because
       # publishing here did not wait for release-binaries.yml. The release
@@ -222,10 +251,17 @@ jobs:
 
   # A failed release used to be invisible for a week (#3658). Any failure
   # above opens (or comments on) one P0 issue, so it lands where people look.
+  # The same goes for the npm channel: npm latest sat at 0.17.0 from May to
+  # October while the GitHub side moved on, and `8gent update` on npm never
+  # saw a newer version. A release that ships without npm is a green run with
+  # an issue, never a green run and silence.
   alarm:
     name: Open an issue when the release fails
     needs: release
-    if: failure() && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+      (needs.release.result == 'failure' ||
+       (needs.release.result == 'success' && needs.release.outputs.npm != 'published'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -240,4 +276,12 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash scripts/release-alarm.sh "release.yml" "$REF" "$RUN_URL"
+          RELEASE_RESULT: ${{ needs.release.result }}
+          NPM: ${{ needs.release.outputs.npm }}
+        run: |
+          if [ "$RELEASE_RESULT" = "failure" ]; then
+            bash scripts/release-alarm.sh "release.yml" "$REF" "$RUN_URL"
+          else
+            bash scripts/release-alarm.sh "release.yml npm channel" "$REF" "$RUN_URL" \
+              "The GitHub Release and the installers shipped, but the npm publish was ${NPM}: npm dist-tag latest did not move to ${REF}, so \`npm install -g @8gi-foundation/8gent-code\` and \`8gent update\` on the npm channel keep serving the previous version. Fix the npm channel (a trusted publisher for release.yml on npmjs.com, or a working NPM_TOKEN secret) so the next release publishes; to publish ${REF} itself, download its .tgz asset from the GitHub Release and run \`npm publish <tgz> --access public\` as an npm maintainer, so npm carries the same bytes as the release."
+          fi

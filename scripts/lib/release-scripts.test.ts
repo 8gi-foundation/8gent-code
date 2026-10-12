@@ -144,4 +144,16 @@ describe("release-alarm.sh", () => {
 		expect(log("gh")).toContain("issue comment 12");
 		expect(log("gh")).not.toContain("issue create");
 	});
+	test("a detail argument replaces the default consequence line (npm channel)", () => {
+		const gh = fake("gh", "exit 0");
+		const r = run(
+			script,
+			["release.yml npm channel", "v1.2.3", "https://x/run", "npm latest did not move to v1.2.3"],
+			{ GH: gh, REPO: "o/r" },
+		);
+		expect(r.code).toBe(0);
+		expect(log("gh")).toContain("--title Release failed: release.yml npm channel on v1.2.3");
+		expect(log("gh")).toContain("npm latest did not move to v1.2.3");
+		expect(log("gh")).not.toContain("installers keep serving");
+	});
 });
