@@ -118,6 +118,8 @@ export type UpdateCheck =
 	| { status: "source"; message: string }
 	| { status: "failed"; message: string; channel: InstallChannel };
 
+const SOURCE_UPDATE_HINT = "This 8gent runs from a source checkout. Update it with: git pull && bun install";
+
 /** The update decision for `--check`: same lookups and the same decideUpdate as a real update, no install. */
 export async function checkUpdate(o: {
 	currentVersion: string;
@@ -131,7 +133,7 @@ export async function checkUpdate(o: {
 	if (ch === "source") {
 		return {
 			status: "source",
-			message: "This 8gent runs from a source checkout. Update it with: git pull && bun install",
+			message: SOURCE_UPDATE_HINT,
 		};
 	}
 	try {
@@ -205,6 +207,8 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 	// A real update downloads and replaces the running 8gent (or runs npm), so,
 	// like `ext enable`, it needs a person at a terminal. --check stays open.
 	if (!(deps.interactive ?? isInteractiveTerminal())) {
+		// A source checkout updates with git, not this command: say so even to a caller that cannot run it.
+		if (channel === "source") log(SOURCE_UPDATE_HINT);
 		log(interactiveRefusal("8gent update"));
 		return 1;
 	}

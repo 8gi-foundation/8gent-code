@@ -133,6 +133,22 @@ describe("8gent update", () => {
 		expect(f.calls).toEqual([]);
 	});
 
+	test("a plain update on a source checkout prints the git pull hint before the interactive refusal", async () => {
+		const f = fakeFetch({});
+		const dir = mkdtempSync(join(tmpdir(), "src-co-"));
+		made.push(dir);
+		Bun.write(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+		await Bun.sleep(5);
+		const { deps, lines, ran } = binaryDeps(f, { modulePath: `file://${dir}/bin/8gent.ts`, embedded: false, interactive: false });
+		expect(await runUpdateCommand([], deps)).toBe(1);
+		const hint = lines.findIndex((l) => l.includes("git pull && bun install"));
+		const refusal = lines.indexOf(interactiveRefusal("8gent update"));
+		expect(hint).toBeGreaterThanOrEqual(0);
+		expect(refusal).toBeGreaterThan(hint);
+		expect(f.calls).toEqual([]);
+		expect(ran).toEqual([]);
+	});
+
 	test("a failed update exits 1 and says why", async () => {
 		const f = fakeFetch({ [RELEASES]: { status: 503, body: "down" } });
 		const { deps, lines } = binaryDeps(f);
