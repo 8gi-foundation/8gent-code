@@ -161,7 +161,7 @@ describe("desktop_act through the executor", () => {
 		});
 		const r = JSON.parse(out);
 		expect(r.ok).toBe(false);
-		expect(r.reason).toContain("Blocked by policy");
+		expect(r.reason).toContain("Blocked");
 	});
 
 	test("desktop_act with bad args never reaches the screen", async () => {

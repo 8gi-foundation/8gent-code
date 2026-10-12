@@ -14,6 +14,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { redactDesktopArgs } from "../../computer/desktop-approval";
 import { desktopPreflight } from "../../computer/preflight";
 import { ToolExecutor } from "../tools";
 
@@ -34,7 +35,7 @@ const exec = new ToolExecutor(mkdtempSync(join(tmpdir(), "desktop-act-dry-")), "
 const args: Record<string, unknown> = { target, action };
 if (action === "type") args.text = extra;
 if (action === "press") args.keys = extra;
-console.log(`desktop_act ${JSON.stringify(args)}`);
+console.log(`desktop_act ${JSON.stringify(redactDesktopArgs(args))}`);
 const out = await exec.execute("desktop_act", args);
 console.log(out);
 process.exit(0);

@@ -68,6 +68,11 @@ import {
 	detectScreenScale,
 	validateDesktopActArgs,
 } from "../computer/desktop-act";
+import {
+	desktopApprovalCard,
+	desktopApprovalDetails,
+	redactDesktopArgs,
+} from "../computer/desktop-approval";
 import { desktopPreflight } from "../computer/preflight";
 import {
 	detectDesignNeed,
@@ -3910,12 +3915,13 @@ export class ToolExecutor {
 				},
 				ground: (image, instruction) => ground({ image, instruction }),
 				policy: (ctx) => this.toolG8.gate(this.agentId, DESKTOP_POLICY_ACTION as PolicyActionType, ctx),
+				// Every act reaches the person; the card carries the exact text and
+				// the crop, the log carries neither (desktop-approval.ts).
 				approve: (req, reason) =>
-					this.askDesktopApproval(
-						"desktop_act",
-						{ action: req.action, target: req.target, point: req.point, keys: req.keys, textLength: req.textLength },
-						reason,
-					),
+					this.askDesktopApproval("desktop_act", {}, reason, {
+						card: desktopApprovalCard(req, reason),
+						details: desktopApprovalDetails(req, reason),
+					}),
 				click: (point, button, count) => computerClick({ point, button, count }),
 				type: (text) => computerType({ text }),
 				press: (keys) => computerPress({ keys }),
@@ -3936,20 +3942,31 @@ export class ToolExecutor {
 		toolName: string,
 		args: Record<string, unknown>,
 		reason: string | undefined,
+		card?: { card: string; details: string },
 	): Promise<string | null> {
 		const browser = toolName.startsWith("browser_");
 		// Infinite lifts the browser card only. Desktop control reaches every
 		// app the person has open, so it asks in every mode, Infinite included.
 		if (browser && this.permissionManager.isInfiniteMode()) return null;
-		const request = {
-			action: browser ? "Browser control" : "Desktop control",
-			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
-		};
+		const why = reason ?? "This desktop action needs your approval.";
+		// What may be logged: never typed text (8SO). The card is separate.
+		const details =
+			card?.details ??
+			`${why} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : redactDesktopArgs(args))}`;
+		const shown = card?.card ?? `${toolName}: ${details}`;
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
-			approved = (await requestTuiApproval(request)) === true;
+			// `full`: the card is laid out whole or answered "unfit", never cut.
+			approved =
+				(await requestTuiApproval(
+					browser
+						? { action: "Browser control", details }
+						: { action: "Desktop control", details, command: shown, full: true },
+				)) === true;
 		} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
-			approved = await this.permissionManager.requestPermission(request.action, request.details);
+			approved = browser
+				? await this.permissionManager.requestPermission("Browser control", details)
+				: await askOnTerminal(shown);
 		} else {
 			return `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
 		}
@@ -4197,4 +4214,22 @@ function timeSince(date: Date): string {
 	if (hours < 24) return `${hours}h`;
 	const days = Math.floor(hours / 24);
 	return `${days}d`;
+}
+
+/**
+ * A desktop card on a plain terminal: printed to stderr, answered on stdin,
+ * default NO, and nothing remembered. PermissionManager.requestPermission is
+ * not used for desktop acts because it defaults to yes and caches approvals,
+ * and a desktop act must be asked every time (8SO, #4057).
+ */
+async function askOnTerminal(card: string): Promise<boolean> {
+	const readline = await import("node:readline");
+	process.stderr.write(`\n\x1b[33m[DESKTOP CONTROL]\x1b[0m\n${card}\nAllow? [y/N]: `);
+	const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: false });
+	try {
+		const answer: string = await new Promise((resolve) => rl.once("line", resolve));
+		return /^\s*y(es)?\s*$/i.test(answer);
+	} finally {
+		rl.close();
+	}
 }

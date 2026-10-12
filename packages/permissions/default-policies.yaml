@@ -93,9 +93,9 @@ policies:
 
   - name: "desktop-block-dangerous-keys"
     action: desktop_use
-    condition: "keys contains cmd+q or keys contains alt+f4 or keys contains ctrl+alt+delete or keys contains cmd+shift+q"
+    condition: "keys contains cmd+q or keys contains alt+f4 or keys contains ctrl+alt+delete or keys contains cmd+shift+q or keys contains cmd+alt+esc"
     decision: block
-    message: "Dangerous key combination blocked (would quit/logout)."
+    message: "Dangerous key combination blocked (would quit, log out or force quit)."
 
   - name: "desktop-allow-screenshot"
     action: desktop_use

@@ -22,11 +22,15 @@ import {
 	type DesktopActApproval,
 	type DesktopActDeps,
 	DesktopActSession,
+	REGROUND_TOLERANCE_PT,
 	desktopAct,
 	frameChange,
+	renderCrop,
 	validateDesktopActArgs,
 } from "./desktop-act";
+import { desktopApprovalCard, desktopApprovalDetails } from "./desktop-approval";
 import { desktopPolicyContext } from "./desktop-policy";
+import { isDangerousCombo, normalizeKeys } from "./keys";
 import {
 	_resetPreflightCache,
 	desktopPreflight,
@@ -55,7 +59,9 @@ async function approveLikeTheExecutor(
 	}
 	const ok = await requestTuiApproval({
 		action: "Desktop control",
-		details: `${reason} ${req.action} "${req.target}" at (${req.point.x}, ${req.point.y})`,
+		details: desktopApprovalDetails(req, reason),
+		command: desktopApprovalCard(req, reason),
+		full: true,
 	});
 	return ok ? null : "[PERMISSION DENIED] The person declined desktop_act. Nothing was done.";
 }
@@ -84,7 +90,8 @@ function deps(
 	over: Partial<DesktopActDeps> & { before: string; after?: string },
 	calls: Calls,
 ): DesktopActDeps {
-	const frames = [over.before, over.after ?? over.before];
+	// First look, the look after approval (re-ground), then the frame after the act.
+	const frames = [over.before, over.before, over.after ?? over.before];
 	return {
 		preflight: () => ({ ok: true }),
 		screenshot: () => {
@@ -157,7 +164,7 @@ describe("desktop_act gate", () => {
 	test("TUI approve: the click runs, shows target and point on the card, and is verified on the changed frame", async () => {
 		const cards: string[] = [];
 		registerTuiApprovalHandler(async (req) => {
-			cards.push(req.details);
+			cards.push(req.command ?? "");
 			return "approve";
 		});
 		const calls = fresh();
@@ -167,12 +174,13 @@ describe("desktop_act gate", () => {
 			new DesktopActSession(),
 		);
 		expect(cards.length).toBe(1);
-		expect(cards[0]).toContain('click "the blue button" at (200, 140)');
+		expect(cards[0]).toContain("click the blue button");
+		expect(cards[0]).toContain("at screen point (200, 140)");
 		expect(calls.clicks).toEqual([{ x: 200, y: 140, button: "left", count: 1 }]);
 		expect(r.ok).toBe(true);
 		expect(r.verified).toBe(true);
 		expect(r.change).toBe("near point");
-		expect(calls.shots).toBe(2);
+		expect(calls.shots).toBe(3);
 	});
 
 	test("TUI deny: nothing runs", async () => {
@@ -202,7 +210,7 @@ describe("desktop_act gate", () => {
 			new DesktopActSession(),
 		);
 		expect(r.ok).toBe(false);
-		expect(r.reason).toContain("Blocked by policy");
+		expect(r.reason).toContain("Blocked");
 		expect(asked).toBe(0);
 		expect(calls.shots).toBe(0);
 		expect(calls.pressed.length).toBe(0);
@@ -395,7 +403,10 @@ describe("preflight", () => {
 		expect(resolveHostApp({}, () => null)).toBe("the app running 8gent");
 		// herdr/tmux rewrite TERM_PROGRAM; the Launch Services bundle id still names the app.
 		expect(
-			resolveHostApp({ TERM_PROGRAM: "herdr", __CFBundleIdentifier: "com.apple.Terminal" }, () => null),
+			resolveHostApp(
+				{ TERM_PROGRAM: "herdr", __CFBundleIdentifier: "com.apple.Terminal" },
+				() => null,
+			),
 		).toBe("Terminal");
 	});
 
@@ -411,5 +422,198 @@ describe("preflight", () => {
 		expect(desktopPreflight(() => report(true, true)).ok).toBe(true);
 		expect(desktopPreflight(failing).ok).toBe(true);
 		expect(probes).toBe(2);
+	});
+});
+
+describe("8SO review of #4057", () => {
+	let before: string;
+	let after: string;
+	beforeEach(async () => {
+		before = await png("8so-before.png");
+		after = await png("8so-after.png", (s) => s.replace("#1f6feb", "#d73a49"));
+	});
+	afterEach(() => _resetTuiApprovalChannel());
+
+	test("1. type: the exact text is on the card, never in the logged details or the result", async () => {
+		const seen: { command?: string; details: string }[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			seen.push({ command: req.command, details: req.details });
+			return "approve";
+		});
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the search field", action: "type", text: "hunter2 secret" },
+			deps({ before, after }, calls),
+			new DesktopActSession(),
+		);
+		expect(seen.length).toBe(1);
+		expect(seen[0].command).toContain('will type exactly: "hunter2 secret"');
+		expect(seen[0].details).not.toContain("hunter2");
+		expect(seen[0].details).toContain('"textLength":14');
+		expect(JSON.stringify(r)).not.toContain("hunter2");
+		expect(calls.typed).toEqual(["hunter2 secret"]);
+	});
+
+	test("2. approval is unconditional: a policy allow and an earlier yes do not skip the card", async () => {
+		let asked = 0;
+		registerTuiApprovalHandler(async () => {
+			asked++;
+			return asked === 1 ? "approve" : "deny";
+		});
+		const calls = fresh();
+		const session = new DesktopActSession();
+		const allowAll = () => ({ allowed: true });
+		const r1 = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, after, policy: allowAll }, calls),
+			session,
+		);
+		expect(r1.ok).toBe(true);
+		const r2 = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, after, policy: allowAll }, fresh()),
+			session,
+		);
+		expect(asked).toBe(2);
+		expect(r2.ok).toBe(false);
+		expect(r2.reason).toContain("[PERMISSION DENIED]");
+	});
+
+	test("2b. with no one to ask, a policy allow still does nothing", async () => {
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "double_click" },
+			deps({ before, policy: () => ({ allowed: true }) }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toStartWith("[BLOCKED]");
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("3. target moved after approval: asked again with the new point, act lands there", async () => {
+		const cards: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			cards.push(req.command ?? "");
+			return "approve";
+		});
+		const points = [found(200, 140), found(260, 140), found(260, 141)];
+		let g = 0;
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, after, ground: async () => points[Math.min(g++, points.length - 1)] }, calls),
+			new DesktopActSession(),
+		);
+		expect(cards.length).toBe(2);
+		expect(cards[1]).toContain("AGAIN, target moved");
+		expect(cards[1]).toContain("(260, 140)");
+		expect(calls.clicks).toEqual([{ x: 260, y: 140, button: "left", count: 1 }]);
+		expect(r.ok).toBe(true);
+	});
+
+	test("3b. target keeps moving: aborted after the second card, nothing clicked", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const points = [found(200, 140), found(260, 140), found(320, 140)];
+		let g = 0;
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, ground: async () => points[Math.min(g++, points.length - 1)] }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("Aborted: the target moved");
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("3c. confidence falls below the floor after approval: aborted, nothing clicked", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const points = [found(200, 140, 1), found(200, 140, 0.2)];
+		let g = 0;
+		const calls = fresh();
+		const r = await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, ground: async () => points[Math.min(g++, points.length - 1)] }, calls),
+			new DesktopActSession(),
+		);
+		expect(r.ok).toBe(false);
+		expect(r.reason).toContain("could not be found again");
+		expect(calls.clicks.length).toBe(0);
+	});
+
+	test("3d. a move within tolerance acts at the approved point", async () => {
+		registerTuiApprovalHandler(async () => "approve");
+		const points = [found(200, 140), found(200 + REGROUND_TOLERANCE_PT - 2, 140)];
+		let g = 0;
+		const calls = fresh();
+		await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before, after, ground: async () => points[Math.min(g++, points.length - 1)] }, calls),
+			new DesktopActSession(),
+		);
+		expect(calls.clicks).toEqual([{ x: 200, y: 140, button: "left", count: 1 }]);
+	});
+
+	test("4. the card carries a crop of the screen around the point, marked", async () => {
+		const art = await renderCrop(before, { x: 200, y: 140 });
+		expect(art).toContain("\u2580");
+		expect(art).toContain("38;2;255;0;0"); // the red point marker
+		expect(art).toContain("31;111;235"); // the blue button's own pixels
+		const cards: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			cards.push(req.command ?? "");
+			return "deny";
+		});
+		await desktopAct(
+			{ target: "the blue button", action: "click" },
+			deps({ before }, fresh()),
+			new DesktopActSession(),
+		);
+		expect(cards[0]).toContain("\u2580");
+	});
+
+	test("5. keys are normalised: case, aliases, order and extra modifiers cannot walk around the block", () => {
+		expect(normalizeKeys("Shift+Command+Q")).toBe("cmd+shift+q");
+		expect(normalizeKeys("option+cmd+Escape")).toBe("cmd+alt+esc");
+		for (const k of [
+			"shift+cmd+q",
+			"command+q",
+			"cmd+opt+esc",
+			"Command+Option+Escape",
+			"CMD+Q",
+			"q+cmd",
+			"cmd+alt+q",
+			"control+option+delete",
+			"ctrl+alt+backspace",
+		]) {
+			expect(isDangerousCombo(k)).not.toBeNull();
+			const d = evaluatePolicy("desktop_use", desktopPolicyContext("desktop_press", { keys: k }));
+			if (["cmd+alt+q", "ctrl+alt+backspace", "q+cmd"].includes(k)) continue; // code-level block covers these
+			expect(d.allowed).toBe(false);
+		}
+		for (const k of ["cmd+s", "cmd+shift+s", "esc", "enter", "cmd+a"])
+			expect(isDangerousCombo(k)).toBeNull();
+	});
+
+	test("5b. desktop_act refuses shift+cmd+q, command+q and cmd+opt+esc before any screen or card", async () => {
+		let asked = 0;
+		registerTuiApprovalHandler(async () => {
+			asked++;
+			return "approve";
+		});
+		for (const keys of ["shift+cmd+q", "command+q", "cmd+opt+esc"]) {
+			const calls = fresh();
+			const r = await desktopAct(
+				{ target: "the window", action: "press", keys },
+				deps({ before }, calls),
+				new DesktopActSession(),
+			);
+			expect(r.ok).toBe(false);
+			expect(r.reason).toContain("Blocked");
+			expect(calls.shots).toBe(0);
+			expect(calls.pressed.length).toBe(0);
+		}
+		expect(asked).toBe(0);
 	});
 });
