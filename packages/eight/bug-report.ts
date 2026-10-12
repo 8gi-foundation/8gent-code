@@ -117,12 +117,15 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 	// note, is scrubbed on its own and counted.
 	const note = opts.note === undefined ? null : redact(opts.note, home);
 	if (note) redacted += note.redacted;
+	// version is free text when passed in, so it goes through the same scrubber as the note.
+	const version = redact(opts.version ?? packageVersion(), home);
+	redacted += version.redacted;
 	fs.writeFileSync(
 		path.join(dir, "report.json"),
 		JSON.stringify(
 			{
 				createdAt: now.toISOString(),
-				version: opts.version ?? packageVersion(),
+				version: version.text,
 				os: { platform: process.platform, release: os.release(), arch: process.arch },
 				runtime: { bun: process.versions.bun ?? null, node: process.versions.node },
 				note: note ? note.text : null,

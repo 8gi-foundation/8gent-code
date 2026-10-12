@@ -42,6 +42,17 @@ describe("createBugReport", () => {
 		expect(log).toContain("line 299");
 		expect(log).not.toContain("line 100 ");
 	});
+	test("a secret-shaped note and a secret-shaped version never reach report.json", () => {
+		const home = mkdtempSync(join(tmpdir(), "bug-"));
+		homes.push(home);
+		const dir = createBugReport({ env: { EIGHT_HOME: home } as unknown as NodeJS.ProcessEnv, cwd: home, note: `token ${KEY}`, version: `1.0.0 ${KEY}` });
+		const raw = readFileSync(join(dir, "report.json"), "utf8");
+		expect(raw).not.toContain(KEY);
+		expect(raw).not.toContain("a".repeat(40));
+		const rep = JSON.parse(raw);
+		expect(rep.redactedSecrets).toBeGreaterThanOrEqual(2);
+		expect(rep.version).toContain("1.0.0");
+	});
 	test("works with no session and no logs, and never reuses a folder", () => {
 		const home = mkdtempSync(join(tmpdir(), "bug-"));
 		homes.push(home);
