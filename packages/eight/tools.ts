@@ -152,8 +152,8 @@ import {
 	WRITE_CONTENT_TOOLS,
 	applyAt,
 	editRefusal,
-	locateEdit,
 	logEditRefusal,
+	resolveEdit,
 	blockedToolMessage,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
@@ -2732,15 +2732,13 @@ export class ToolExecutor {
 		// gate checked (String.replace would expand `$&` etc. in newText).
 		// A duplicate oldText is refused, never silently applied to the first
 		// copy (#3898); the refusal is logged so it can be counted.
-		const located = locateEdit(content, oldText, startLine);
-		const refusal = editRefusal(located, filePath);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
 		if (refusal) {
-			logEditRefusal(located, filePath, oldText.length);
+			logEditRefusal(resolved, filePath, oldText.length);
 			return refusal;
 		}
-		const newContent =
-			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
-		if (newContent === null) {
+		if (resolved.kind !== "ok") {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the
 			// bytes written must be the bytes the policy gate checked.
@@ -2749,11 +2747,15 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
+		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, newContent);
 		recordEdit();
 
+		if (resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
 
