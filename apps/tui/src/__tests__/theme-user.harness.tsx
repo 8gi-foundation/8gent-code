@@ -46,6 +46,33 @@ async function main() {
 		description: screen.includes("My warm theme"),
 		brokenListed: screen.includes("broken"),
 	});
+	// Select it: the cursor is on the last row once the list stopped scrolling.
+	m = app.mark();
+	app.feed("\r");
+	await waitFor(() => /Theme set to|Could not save/.test(app.since(m)), "picker result");
+	await tick(300);
+	const picked = app.since(m);
+	const cfgFile = path.join(resolveHome(), ".8gent", "config.json");
+	const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf-8"));
+	app.emit({ phase: "picked", applied: picked.includes("Theme set to Ember Night"), error: picked.includes("Could not save"), userTheme: cfg.userTheme ?? null, designSystem: cfg.designSystem ?? null });
+
+	// The text path, then /reload.
+	m = app.mark();
+	await app.submit("/theme default");
+	await waitFor(() => app.since(m).includes("Theme set to 8gent"), "default");
+	m = app.mark();
+	await app.submit("/theme user:ember");
+	await waitFor(() => /Theme set to|Could not|Unknown/.test(app.since(m)), "text path result");
+	await tick(300);
+	const text = app.since(m);
+	const cfg2 = JSON.parse(fs.readFileSync(cfgFile, "utf-8"));
+	app.emit({ phase: "text", applied: text.includes("Theme set to Ember Night"), userTheme: cfg2.userTheme ?? null });
+
+	m = app.mark();
+	await app.submit("/reload");
+	await waitFor(() => app.since(m).includes("Reloaded themes"), "reload");
+	await tick(200);
+	app.emit({ phase: "reload", mentionsBroken: app.since(m).includes("broken.json") });
 	if (castPath) {
 		const header = { version: 2, width: 120, height: 40, timestamp: Math.floor(t0 / 1000), title: "8gent /theme picker with a user theme (fake TTY capture)" };
 		fs.writeFileSync(castPath, [JSON.stringify(header), ...frames.map(([t, f]) => JSON.stringify([t, "o", f]))].join("\n") + "\n");

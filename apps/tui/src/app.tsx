@@ -16,12 +16,16 @@
 import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
 import {
 	applyDesignSystem,
+	reloadUserThemes,
+	saveThemeChoice,
 	t,
 	type ThemeChoice,
 	themeChoices,
 	themeStatus,
+	userThemeProblems,
 } from "./theme.js";
-import { findDesignSystem, saveDesignSystemChoice } from "./theme/design-systems.js";
+import { isUserThemeId } from "./lib/user-themes.js";
+import { findDesignSystem } from "./theme/design-systems.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -4955,6 +4959,14 @@ export function App({
 					break;
 				}
 
+				case "reload": {
+					reloadUserThemes();
+					const lines = ["Reloaded themes from ~/.8gent/themes."];
+					for (const p of userThemeProblems()) lines.push(`  skipped ${p.file}: ${p.reason}`);
+					addSystemMessage(lines.join("\n"));
+					break;
+				}
+
 				case "theme": {
 					// /theme           -> picker: the 8gent theme or an indexed design system (#3754)
 					// /theme <id>      -> use that design system (saved to ~/.8gent/config.json)
@@ -4979,12 +4991,17 @@ export function App({
 						);
 						break;
 					}
-					if (choice === "default" || choice === "8gent" || findDesignSystem(choice)) {
+					if (choice === "default" || choice === "8gent" || findDesignSystem(choice) || isUserThemeId(choice)) {
 						const id = choice === "default" || choice === "8gent" ? null : choice;
 						try {
-							saveDesignSystemChoice(id, cfgPath);
+							saveThemeChoice(id, cfgPath);
 							applyDesignSystem(id);
-							addSystemMessage(`Theme set to ${id ? findDesignSystem(id)?.label : "8gent"}.`);
+							const label = isUserThemeId(id)
+								? (themeChoices().find((r) => r.value === id)?.label ?? id)
+								: id
+									? findDesignSystem(id)?.label
+									: "8gent";
+							addSystemMessage(`Theme set to ${label}.`);
 						} catch (err) {
 							addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
 						}
@@ -6558,7 +6575,7 @@ export function App({
 				const current = themeStatus().designSystem ?? "default";
 				return (
 					<SelectInput
-						title={`Theme (${themeRows.length - 1} design systems)`}
+						title={`Theme (${themeRows.length - 1} themes)`}
 						options={themeRows.map((r) => ({
 							label: r.label,
 							value: r.value,
@@ -6573,7 +6590,7 @@ export function App({
 						onSelect={(value) => {
 							const id = value === "default" ? null : value;
 							try {
-								saveDesignSystemChoice(id);
+								saveThemeChoice(id);
 								applyDesignSystem(id);
 								addSystemMessage(
 									`Theme set to ${themeRows.find((r) => r.value === value)?.label ?? value}.`,
