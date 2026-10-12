@@ -1856,6 +1856,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
 			"describe_image",
+			"compare_layout",
 			// A spawned sub-agent has one task and no plan to report (#3583).
 			...localPlanTools(this.agentDepth),
 			"git_status",

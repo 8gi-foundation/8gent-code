@@ -1238,6 +1238,22 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "compare_layout",
+					description:
+						"[FILE] Renders an HTML page with the local browser at the size of a reference image (a design mock-up) and compares it band by band, returning each block's offset in pixels and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
+					parameters: {
+						type: "object",
+						properties: {
+							html: { type: "string", description: "Path to the HTML file you wrote" },
+							reference: { type: "string", description: "Path to the mock-up image (png, jpg)" },
+						},
+						required: ["html", "reference"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "screen_locate",
 					description:
 						'[FILE] Point to click for a thing in a screenshot, named in words.',
@@ -1824,6 +1840,7 @@ export class ToolExecutor {
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		compare_layout: "read_file",
 		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
@@ -2220,6 +2237,12 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "compare_layout": {
+				const html = safePath(String(args.html ?? ""), this.workingDirectory, "read");
+				const reference = safePath(String(args.reference ?? ""), this.workingDirectory, "read");
+				const { compareLayout } = await import("../tools/layout-compare");
+				return compareLayout(html, reference);
+			}
 			case "screen_locate": {
 				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
 				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
